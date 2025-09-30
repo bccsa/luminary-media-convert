@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { ConvertService } from './convert.service.js';
+import { ConvertService } from './convert.service';
+import { ConvertDto } from 'src/dto/convertDto';
 
 @Controller('api')
 export class ConvertController {
@@ -7,16 +8,16 @@ export class ConvertController {
 
     // POST /api/convert - create a new conversion
     @Post('/convert/:dispatchId')
-    async scheduleConversion(
+    async queueConversion(
         @Param('dispatchId') dispatchId: string,
-        @Body('meta-data') schema: any
+        @Body() body: Array<ConvertDto>
     ) {
-        return dispatchId;
+        return await this.convert.queueConversion(dispatchId, body);
     }
 
     // GET /api/convert/:dispatchId - health check endpoint
     @Get('/convert/:dispatchId')
-    getConverted(@Param('dispatchId') dispatchId: string) {
-        return { status: 'ok', dispatchId };
+    getConverted(@Param('dispatchId') dispatchId: string): Array<ConvertDto> {
+        return [] as unknown as Array<ConvertDto>;
     }
 }
