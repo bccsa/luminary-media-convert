@@ -10,9 +10,9 @@ export class ConvertController {
     @Post('/convert/:dispatchId')
     async queueConversion(
         @Param('dispatchId') dispatchId: string,
-        @Body() body: Array<ConvertDto>
+        @Body() file: ConvertDto
     ) {
-        return await this.convert.queueConversion(dispatchId, body);
+        return await this.convert.queueConversion(dispatchId, file);
     }
 
     // GET /api/convert/:dispatchId - health check endpoint

@@ -6,8 +6,8 @@ import { queue } from 'src/utils/schedular';
 export class ConvertService {
     async queueConversion(
         dispatchId: string,
-        files: Array<ConvertDto>
-    ): Promise<Array<ConvertResponseDto>> {
-        return await queue(dispatchId, files);
+        file: ConvertDto
+    ): Promise<ConvertResponseDto> {
+        return await queue(dispatchId, file);
     }
 }

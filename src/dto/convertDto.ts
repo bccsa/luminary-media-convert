@@ -9,11 +9,6 @@ export class ConvertDto {
     @IsNotEmpty()
     @Expose()
     metadata: MetadataDto;
-
-    @IsString()
-    @IsOptional()
-    @Expose()
-    id: string;
 }
 
 export class ConvertResponseDto {
