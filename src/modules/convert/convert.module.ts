@@ -3,8 +3,8 @@ import { ConvertController } from './convert.controller.js';
 import { ConvertService } from './convert.service.js';
 
 @Module({
-  controllers: [ConvertController],
-  providers: [ConvertService],
-  exports: [ConvertService],
+    controllers: [ConvertController],
+    providers: [ConvertService],
+    exports: [ConvertService],
 })
 export class ConvertModule {}

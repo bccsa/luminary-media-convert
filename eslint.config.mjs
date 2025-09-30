@@ -36,16 +36,19 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-return': 'off',
       '@typescript-eslint/no-unused-vars': 'off',
       '@typescript-eslint/require-await': 'off',
-      
+
       // Prettier rules - use consistent style
-      'prettier/prettier': ['error', {
-        singleQuote: true,
-        trailingComma: 'es5',
-        tabWidth: 2,
-        semi: true,
-        printWidth: 80,
-        endOfLine: 'lf',
-      }],
+      'prettier/prettier': [
+        'error',
+        {
+          singleQuote: true,
+          trailingComma: 'es5',
+          tabWidth: 4,
+          semi: true,
+          printWidth: 80,
+          endOfLine: 'lf',
+        },
+      ],
     },
-  },
+  }
 );
