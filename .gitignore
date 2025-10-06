@@ -3,3 +3,8 @@ dist
 files
 processed
 temp
+.env
+.DS_Store
+.vscode
+dispatchQueue.json
+jobQueue.json
