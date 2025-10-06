@@ -1,15 +1,13 @@
-import { IsNotEmpty, IsOptional, IsString, IsNumber } from 'class-validator';
-import { Expose } from 'class-transformer';
-
-export class ConvertDto {
-    @IsNotEmpty()
-    @Expose()
-    file: Buffer;
-
-    @IsNotEmpty()
-    @Expose()
-    metadata: MetadataDto;
-}
+import {
+    IsNotEmpty,
+    IsOptional,
+    IsString,
+    IsNumber,
+    ValidateNested,
+    IsNotEmptyObject,
+    IsInstance,
+} from 'class-validator';
+import { Expose, Type } from 'class-transformer';
 
 export class ConvertResponseDto {
     @IsString()
@@ -26,18 +24,23 @@ export class ConvertResponseDto {
     @IsNotEmpty()
     @Expose()
     status: 'pending' | 'processing' | 'completed' | 'failed' | 'invalid';
+
+    @IsString()
+    @IsOptional()
+    @Expose()
+    error?: string;
 }
 
 export class MetadataDto {
     @IsString()
-    @IsNotEmpty()
+    @IsOptional()
     @Expose()
-    originalName: string;
+    originalName?: string;
 
     @IsString()
-    @IsNotEmpty()
+    @IsOptional()
     @Expose()
-    title: string;
+    title?: string;
 
     @IsString()
     @IsOptional()
@@ -55,9 +58,9 @@ export class MetadataDto {
     copyright?: string;
 
     @IsString()
-    @IsNotEmpty()
     @Expose()
-    format:
+    @IsNotEmpty()
+    convertedFormat:
         | 'mp4'
         | 'mov'
         | 'avi'
@@ -68,10 +71,25 @@ export class MetadataDto {
         | 'mp3'
         | 'wav'
         | 'aac'
-        | 'ogg';
+        | 'ogg'
+        | 'opus';
 
     @IsNumber()
     @IsOptional()
     @Expose()
     bitrate?: number;
+}
+
+export class ConvertDto {
+    @IsNotEmpty()
+    @Expose()
+    @IsInstance(File) // Using Object to allow both Buffer and File types
+    file: File;
+
+    @IsNotEmpty()
+    @IsNotEmptyObject()
+    @ValidateNested()
+    @Type(() => MetadataDto)
+    @Expose()
+    metadata: MetadataDto;
 }

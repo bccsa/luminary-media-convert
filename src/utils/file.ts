@@ -1,4 +1,4 @@
-import { QueueItemDto } from 'src/dto/queueDto';
+import { QueueItemDto } from '../dto/queueDto';
 import {
     readFileSync,
     existsSync,
@@ -7,6 +7,7 @@ import {
     mkdirSync,
     lstatSync,
 } from 'fs';
+import { dirname } from 'path';
 
 export function getFile(filePath: string): File {
     if (!existsSync(filePath)) {
@@ -19,14 +20,41 @@ export function getFile(filePath: string): File {
 
 export async function saveFile(
     filePath: string,
-    file: Buffer
+    file:
+        | File
+        | Buffer
+        | { buffer?: Buffer; arrayBuffer?: () => Promise<ArrayBuffer> }
 ): Promise<string> {
-    writeFileSync(filePath, file);
+    const dir = dirname(filePath);
+    if (!directoryExists(dir)) {
+        createDirectory(dir);
+    }
+
+    try {
+        let data: Buffer;
+        const anyFile = file as any;
+        if (anyFile && typeof anyFile.arrayBuffer === 'function') {
+            data = Buffer.from(await anyFile.arrayBuffer());
+        } else if (anyFile && Buffer.isBuffer(anyFile.buffer)) {
+            data = anyFile.buffer as Buffer; // Multer file
+        } else if (Buffer.isBuffer(file)) {
+            data = file as Buffer;
+        } else {
+            throw new Error('Unsupported file type');
+        }
+        writeFileSync(filePath, data);
+    } catch (err) {
+        throw new Error('Failed to save file: ' + (err as Error).message);
+    }
     return filePath;
 }
 
 export function saveQueueFile(filePath: string, queue: Array<QueueItemDto>) {
-    writeFileSync(filePath, JSON.stringify(queue, null, 2));
+    try {
+        writeFileSync(filePath, JSON.stringify(queue, null, 2));
+    } catch (err) {
+        throw new Error('Failed to save queue file: ' + (err as Error).message);
+    }
 }
 
 export function getQueueFile(filePath: string): Array<QueueItemDto> {
@@ -56,4 +84,17 @@ export function createDirectory(dirPath: string) {
 
 export function directoryExists(dirPath: string): boolean {
     return existsSync(dirPath) && lstatSync(dirPath).isDirectory();
+}
+
+export function copyFile(srcPath: string, destPath: string) {
+    if (!existsSync(srcPath)) {
+        throw new Error('Source file does not exist');
+    }
+    const destDir = dirname(destPath);
+    if (!directoryExists(destDir)) {
+        createDirectory(destDir);
+    }
+    const data = readFileSync(srcPath);
+    writeFileSync(destPath, data);
+    return destPath;
 }

@@ -1,12 +1,14 @@
-import { ConvertDto, ConvertResponseDto } from 'src/dto/convertDto';
+import { ConvertDto, ConvertResponseDto } from '../dto/convertDto';
 import { getQueueFile, saveQueueFile, saveFile } from './file';
-import { QueueItemDto } from 'src/dto/queueDto';
+import { appendDispatch } from './dispatcher';
+import { processFile } from './process';
+import { QueueItemDto } from '../dto/queueDto';
 import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const jobQueue: Array<QueueItemDto> = [];
-const queueFilePath = process.env.QUEUE_FILE_PATH || 'queue.json';
+export const jobQueue: Array<QueueItemDto> = [];
+const queueFilePath = process.env.QUEUE_FILE_PATH || 'jobQueue.json';
 
 export async function initScheduler() {
     const _q: Array<QueueItemDto> = await getQueueFile(queueFilePath);
@@ -24,6 +26,7 @@ export async function queue(
             id: queueId,
             status: 'invalid',
             fileName: 'Unknown Name',
+            error: 'No file object provided',
         };
     }
     if (!file.file) {
@@ -31,6 +34,7 @@ export async function queue(
             id: queueId,
             status: 'invalid',
             fileName: file.metadata?.originalName || 'Unknown Name',
+            error: 'File content is empty',
         };
     }
 
@@ -43,7 +47,7 @@ export async function queue(
     };
 
     queueItem.filePath = await saveFile(
-        `files/${queueItem.id}-${queueItem.metadata.originalName}`,
+        `files/${queueId}-${queueItem.metadata.originalName}`,
         file.file
     );
 
@@ -53,12 +57,34 @@ export async function queue(
     return {
         id: queueId,
         status: queueItem.status,
-        fileName: file.metadata.originalName,
+        fileName: file.metadata.originalName || 'Unknown Name',
     };
 }
 
-export let isProcessing = false;
-function processQueue() {
+let isProcessing = false;
+async function processQueue() {
     if (isProcessing) return;
     isProcessing = true;
+    try {
+        const job = jobQueue[0];
+        if (!job) return;
+
+        // Mark as processing if it was pending
+        if (job.status === 'pending') {
+            job.status = 'processing';
+            await saveQueueFile(queueFilePath, jobQueue);
+        }
+
+        // Process (processFile should return an updated QueueItemDto)
+        const processedItem = await processFile(job);
+
+        jobQueue.shift(); // Remove the processed item from the queue
+        appendDispatch(processedItem);
+
+        await saveQueueFile(queueFilePath, jobQueue);
+    } catch (err) {
+        console.error('Error processing queue:', err);
+    } finally {
+        isProcessing = false;
+    }
 }

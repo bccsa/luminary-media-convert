@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { ConvertDto, ConvertResponseDto } from 'src/dto/convertDto';
-import { queue } from 'src/utils/schedular';
+import { ConvertDto, ConvertResponseDto } from '../../dto/convertDto';
+import { queue } from '../../utils/schedular';
 
 @Injectable()
 export class ConvertService {
