@@ -8,11 +8,18 @@ import {
     UploadedFile,
     UseInterceptors,
     BadRequestException,
+    StreamableFile,
+    Res,
+    NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ConvertService } from './convert.service';
 import { ConvertDto, MetadataDto } from '../../dto/convertDto';
-import { getDispatch } from '../../utils/dispatcher';
+import {
+    getDispatch,
+    getFileForDispatch,
+    getFilenameForDispatch,
+} from '../../utils/dispatcher';
 import { QueueItemDto } from '../../dto/queueDto';
 import { ParseMetadataPipe } from '../../pipes/parse-metadata.pipe';
 
@@ -66,5 +73,31 @@ export class ConvertController {
         @Query('status') status: string
     ): Array<QueueItemDto & { file?: File | Buffer }> {
         return getDispatch(dispatchId, (status as any) || 'all');
+    }
+
+    // GET /api/convert/:dispatchId/:fileId - get specific converted file
+    @Get('/convert/:dispatchId/:fileId')
+    getConvertedFile(
+        @Param('dispatchId') dispatchId: string,
+        @Param('fileId') fileId: string,
+        @Res({ passthrough: true }) res: any
+    ): StreamableFile {
+        // Get the filename first because fetching the file removes it from the queue
+        const downloadName =
+            getFilenameForDispatch(dispatchId, fileId) || `${fileId}`;
+
+        const fileBuffer = getFileForDispatch(dispatchId, fileId);
+        if (!fileBuffer) {
+            throw new NotFoundException('File not found');
+        }
+
+        // Force download with a meaningful filename
+        res.setHeader(
+            'Content-Disposition',
+            `attachment; filename="${downloadName}"`
+        );
+        res.setHeader('Content-Type', 'application/octet-stream');
+
+        return new StreamableFile(fileBuffer);
     }
 }

@@ -1,5 +1,6 @@
 import { QueueItemDto } from '../dto/queueDto';
 import { getQueueFile, saveQueueFile, getFile, deleteFile } from './file';
+import { basename } from 'path';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -49,50 +50,53 @@ export function getDispatch(
         return itemsForDispatch;
     }
 
-    if (status === 'completed') {
-        const completed = itemsForDispatch.filter(
-            (item) => item.status === 'completed'
-        );
-
-        // Load file contents, then schedule removal
-        const enriched: Array<QueueItemDto & { file?: File | Buffer }> = [];
-        for (const item of completed) {
-            try {
-                if (item.filePath) {
-                    const file = getFile(item.filePath) as unknown as Buffer;
-                    enriched.push({ ...item, file });
-                    // Delete file from disk
-                    deleteFile(item.filePath);
-                } else {
-                    enriched.push({ ...item });
-                }
-            } catch (err) {
-                // If file retrieval fails, still return meta without file
-                enriched.push({ ...item });
-            }
-        }
-
-        // Remove completed items from queue (those for this dispatchId & completed)
-        if (completed.length) {
-            let changed = false;
-            for (let i = dispatchQueue.length - 1; i >= 0; i--) {
-                const qItem = dispatchQueue[i];
-                if (
-                    qItem.dispatchId === dispatchId &&
-                    qItem.status === 'completed'
-                ) {
-                    dispatchQueue.splice(i, 1);
-                    changed = true;
-                }
-            }
-            if (changed) {
-                saveDispatchQueue();
-            }
-        }
-
-        return enriched;
-    }
-
     // Other statuses (pending, processing, failed, invalid)
     return itemsForDispatch.filter((item) => item.status === status);
+}
+
+export function getFileForDispatch(
+    dispatchId: string,
+    fileId: string
+): Buffer | null {
+    const idx = dispatchQueue.findIndex(
+        (q) => q.dispatchId === dispatchId && q.id === fileId
+    );
+    const item = idx >= 0 ? dispatchQueue[idx] : undefined;
+    if (!item) {
+        return null;
+    }
+    let fileContent: Buffer | null = null;
+    try {
+        fileContent = getFile(item.filePath);
+    } catch {
+        // If file cannot be read, do not mutate queue; report as not found
+        return null;
+    }
+
+    // After successful read, delete file and remove from queue, then persist
+    try {
+        deleteFile(item.filePath);
+    } catch {
+        // ignore delete errors
+    }
+    try {
+        dispatchQueue.splice(idx, 1);
+        // Persist the modified queue; fire-and-forget is acceptable here
+        void saveDispatchQueue();
+    } catch {
+        // ignore persistence errors; file content already acquired
+    }
+
+    return fileContent;
+}
+
+export function getFilenameForDispatch(
+    dispatchId: string,
+    fileId: string
+): string | null {
+    const item = dispatchQueue.find(
+        (q) => q.dispatchId === dispatchId && q.id === fileId
+    );
+    if (!item) return null;
+    return basename(item.filePath);
 }

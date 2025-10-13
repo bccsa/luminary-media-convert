@@ -6,6 +6,7 @@ import {
     ValidateNested,
     IsNotEmptyObject,
     IsInstance,
+    IsIn,
 } from 'class-validator';
 import { Expose, Type } from 'class-transformer';
 
@@ -60,6 +61,20 @@ export class MetadataDto {
     @IsString()
     @Expose()
     @IsNotEmpty()
+    @IsIn([
+        'mp4',
+        'mov',
+        'avi',
+        'mkv',
+        'flv',
+        'wmv',
+        'webm',
+        'mp3',
+        'wav',
+        'aac',
+        'ogg',
+        'opus',
+    ])
     convertedFormat:
         | 'mp4'
         | 'mov'

@@ -9,13 +9,13 @@ import {
 } from 'fs';
 import { dirname } from 'path';
 
-export function getFile(filePath: string): File {
+export function getFile(filePath: string): Buffer {
     if (!existsSync(filePath)) {
         throw new Error('File does not exist');
     }
 
     const data = readFileSync(filePath); // returns Buffer
-    return data as unknown as File;
+    return data;
 }
 
 export async function saveFile(
