@@ -3,6 +3,7 @@ dist
 files
 processed
 temp
+work
 .env
 .DS_Store
 .vscode

@@ -1,0 +1,108 @@
+---
+description: Project context for luminary-media-convert — a NestJS HLS/ABR encoding service
+alwaysApply: true
+---
+
+# Luminary Media Convert — Project Context
+
+## Overview
+
+A NestJS-based REST API service that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via webhooks.
+
+## Tech Stack
+
+- **Runtime**: Node.js with TypeScript (ES2023 target, `nodenext` modules)
+- **Framework**: NestJS 11 (Express platform)
+- **Media processing**: FFmpeg via child_process (NVIDIA NVENC when GPU detected, CPU fallback)
+- **S3 storage**: MinIO JS client (universal S3 compatibility: MinIO, R2, AWS S3, B2, etc.)
+- **Validation**: `class-validator` + `class-transformer` with a global `ValidationPipe`
+- **API docs**: `@nestjs/swagger` (OpenAPI at `/api/docs`)
+- **Testing**: Jest 30, Supertest (unit: `*.spec.ts` in `src/`, e2e: `test/`)
+- **Code style**: Prettier (single quotes, 4-space indent), ESLint with TypeScript ESLint
+
+## Project Structure
+
+```
+src/
+├── main.ts                              # Entry point: bootstraps NestJS, Swagger setup
+├── app.module.ts                        # Root module, imports EncodeModule
+└── encode/
+    ├── encode.module.ts                 # Feature module
+    ├── encode.controller.ts             # REST endpoints under /api/sessions
+    ├── dto/
+    │   ├── create-session.dto.ts        # Session creation request
+    │   ├── rendition.dto.ts             # ABR rendition config
+    │   ├── s3-config.dto.ts             # S3 storage credentials
+    │   ├── webhook-config.dto.ts        # Webhook URL + session token
+    │   ├── session-response.dto.ts      # Response DTOs (create, upload, status)
+    │   └── webhook-payload.dto.ts       # Webhook callback payload
+    ├── guards/
+    │   ├── basic-auth.guard.ts          # Basic auth for session create/status
+    │   └── session-auth.guard.ts        # Bearer token auth for file upload
+    └── services/
+        ├── session.service.ts           # In-memory session store + token management
+        ├── queue.service.ts             # FIFO encoding queue (one-at-a-time)
+        ├── ffmpeg.service.ts            # FFmpeg process management + GPU detection
+        ├── s3.service.ts                # S3 upload via MinIO client
+        ├── webhook.service.ts           # Webhook POST delivery
+        └── encode.service.ts            # Orchestrates encoding pipeline
+```
+
+## Architecture
+
+### Session-based async encoding pipeline
+
+1. **POST** `/api/sessions` — Client sends encoding config (renditions, S3 creds, webhook URL) with Basic auth
+2. Service returns `{ sessionId, uploadUrl, uploadToken }`
+3. **POST** `/api/sessions/:id/upload` — Client uploads source file with Bearer token
+4. Session enters FIFO queue; webhook sent with `queued` status + queue position
+5. When session reaches front of queue, FFmpeg encodes to HLS with ABR variants
+6. Progress webhooks sent during encoding (~every 5%)
+7. Output files uploaded to client-specified S3 bucket via MinIO client
+8. Final webhook sent with `completed` status + list of S3 object keys + master playlist
+
+### FIFO queue
+
+- One encoding job runs at a time
+- Sessions processed in first-come-first-served order
+- Queue position updates sent via webhook when positions shift
+
+## API Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/sessions` | Basic | Create encoding session |
+| POST | `/api/sessions/:sessionId/upload` | Bearer | Upload source media file |
+| GET | `/api/sessions/:sessionId` | Basic | Poll session status |
+
+## Session Lifecycle
+
+```
+created -> queued -> encoding -> uploading_to_s3 -> completed
+                             \-> failed
+```
+
+## Key Conventions
+
+- DTOs use `class-validator` decorators and are validated via NestJS `ValidationPipe` (whitelist + forbidNonWhitelisted)
+- FFmpeg args are built dynamically based on GPU availability and rendition config
+- File uploads use `FileInterceptor` from `@nestjs/platform-express` (10GB limit)
+- Environment config via `dotenv`: `PORT`, `AUTH_USERNAME`, `AUTH_PASSWORD`, `WORK_DIR`, `FFMPEG_TIMEOUT_MS`
+- Swagger decorators on all DTOs and endpoints for auto-generated API docs
+
+## GPU Detection
+
+At startup, `FfmpegService.onModuleInit()` checks:
+1. `nvidia-smi` is available
+2. `ffmpeg -hwaccels` includes `cuda`
+
+When GPU is available: `h264_nvenc` encoder, `scale_cuda` filter, `-hwaccel cuda`
+When not: `libx264` encoder, standard `scale` filter
+
+## Scripts
+
+- `npm run start:dev` — dev server with watch mode
+- `npm run build` — compile to `dist/`
+- `npm run start:prod` — run compiled output
+- `npm test` — unit tests
+- `npm run test:e2e` — end-to-end tests

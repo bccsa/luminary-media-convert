@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { ConvertModule } from './modules/convert/convert.module.js';
+import { EncodeModule } from './encode/encode.module.js';
 
 @Module({
-    imports: [ConvertModule],
+    imports: [EncodeModule],
 })
 export class AppModule {}
