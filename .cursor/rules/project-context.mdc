@@ -7,7 +7,13 @@ alwaysApply: true
 
 ## Overview
 
-A NestJS-based REST API service that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via webhooks.
+A folder-based npm workspaces monorepo. The `api/` workspace contains a NestJS REST API service that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via webhooks.
+
+## Monorepo Structure
+
+- Root `package.json` declares npm workspaces (`"workspaces": ["api"]`)
+- Dependencies are hoisted to the root `node_modules/`
+- Run workspace scripts from root: `npm -w api run <script>`
 
 ## Tech Stack
 
@@ -17,35 +23,42 @@ A NestJS-based REST API service that encodes media files into HLS/ABR format usi
 - **S3 storage**: MinIO JS client (universal S3 compatibility: MinIO, R2, AWS S3, B2, etc.)
 - **Validation**: `class-validator` + `class-transformer` with a global `ValidationPipe`
 - **API docs**: `@nestjs/swagger` (OpenAPI at `/api/docs`)
-- **Testing**: Jest 30, Supertest (unit: `*.spec.ts` in `src/`, e2e: `test/`)
+- **Testing**: Jest 30, Supertest (unit: `*.spec.ts` in `api/src/`, e2e: `api/test/`)
 - **Code style**: Prettier (single quotes, 4-space indent), ESLint with TypeScript ESLint
 
 ## Project Structure
 
 ```
-src/
-├── main.ts                              # Entry point: bootstraps NestJS, Swagger setup
-├── app.module.ts                        # Root module, imports EncodeModule
-└── encode/
-    ├── encode.module.ts                 # Feature module
-    ├── encode.controller.ts             # REST endpoints under /api/sessions
-    ├── dto/
-    │   ├── create-session.dto.ts        # Session creation request
-    │   ├── rendition.dto.ts             # ABR rendition config
-    │   ├── s3-config.dto.ts             # S3 storage credentials
-    │   ├── webhook-config.dto.ts        # Webhook URL + session token
-    │   ├── session-response.dto.ts      # Response DTOs (create, upload, status)
-    │   └── webhook-payload.dto.ts       # Webhook callback payload
-    ├── guards/
-    │   ├── basic-auth.guard.ts          # Basic auth for session create/status
-    │   └── session-auth.guard.ts        # Bearer token auth for file upload
-    └── services/
-        ├── session.service.ts           # In-memory session store + token management
-        ├── queue.service.ts             # FIFO encoding queue (one-at-a-time)
-        ├── ffmpeg.service.ts            # FFmpeg process management + GPU detection
-        ├── s3.service.ts                # S3 upload via MinIO client
-        ├── webhook.service.ts           # Webhook POST delivery
-        └── encode.service.ts            # Orchestrates encoding pipeline
+api/
+├── src/
+│   ├── main.ts                          # Entry point: bootstraps NestJS, Swagger setup
+│   ├── app.module.ts                    # Root module, imports EncodeModule
+│   └── encode/
+│       ├── encode.module.ts             # Feature module
+│       ├── encode.controller.ts         # REST endpoints under /api/sessions
+│       ├── dto/
+│       │   ├── create-session.dto.ts    # Session creation request
+│       │   ├── rendition.dto.ts         # ABR rendition config
+│       │   ├── s3-config.dto.ts         # S3 storage credentials
+│       │   ├── webhook-config.dto.ts    # Webhook URL + session token
+│       │   ├── session-response.dto.ts  # Response DTOs (create, upload, status)
+│       │   └── webhook-payload.dto.ts   # Webhook callback payload
+│       ├── guards/
+│       │   ├── basic-auth.guard.ts      # Basic auth for session create/status
+│       │   └── session-auth.guard.ts    # Bearer token auth for file upload
+│       └── services/
+│           ├── session.service.ts       # In-memory session store + token management
+│           ├── queue.service.ts         # FIFO encoding queue (one-at-a-time)
+│           ├── ffmpeg.service.ts        # FFmpeg process management + GPU detection
+│           ├── s3.service.ts            # S3 upload via MinIO client
+│           ├── webhook.service.ts       # Webhook POST delivery
+│           └── encode.service.ts        # Orchestrates encoding pipeline
+├── test/
+├── package.json
+├── tsconfig.json
+├── tsconfig.build.json
+├── nest-cli.json
+└── eslint.config.mjs
 ```
 
 ## Architecture
@@ -101,8 +114,10 @@ When not: `libx264` encoder, standard `scale` filter
 
 ## Scripts
 
-- `npm run start:dev` — dev server with watch mode
-- `npm run build` — compile to `dist/`
-- `npm run start:prod` — run compiled output
-- `npm test` — unit tests
-- `npm run test:e2e` — end-to-end tests
+From the repo root, use the `-w api` flag:
+
+- `npm -w api run start:dev` — dev server with watch mode
+- `npm -w api run build` — compile to `api/dist/`
+- `npm -w api run start:prod` — run compiled output
+- `npm -w api test` — unit tests
+- `npm -w api run test:e2e` — end-to-end tests
