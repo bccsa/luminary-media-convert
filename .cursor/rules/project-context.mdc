@@ -1,5 +1,5 @@
 ---
-description: Project context for luminary-media-convert — a NestJS HLS/ABR encoding service
+description: Project context for luminary-media-convert — a NestJS HLS/ABR encoding service with a Vue 3 web client
 alwaysApply: true
 ---
 
@@ -7,15 +7,21 @@ alwaysApply: true
 
 ## Overview
 
-A folder-based npm workspaces monorepo. The `api/` workspace contains a NestJS REST API service that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via webhooks.
+A folder-based npm workspaces monorepo containing:
+
+- **`api/`** — NestJS REST API service that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via webhooks or polling.
+- **`app/`** — Vue 3 single-page web client for uploading files and monitoring encoding sessions.
 
 ## Monorepo Structure
 
-- Root `package.json` declares npm workspaces (`"workspaces": ["api"]`)
+- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app"]`)
 - Dependencies are hoisted to the root `node_modules/`
-- Run workspace scripts from root: `npm -w api run <script>`
+- Run workspace scripts from root: `npm -w api run <script>` or `npm -w app run <script>`
+- Root `npm run dev` starts both workspaces concurrently (via `concurrently`)
 
 ## Tech Stack
+
+### API (`api/`)
 
 - **Runtime**: Node.js with TypeScript (ES2023 target, `nodenext` modules)
 - **Framework**: NestJS 11 (Express platform)
@@ -23,15 +29,25 @@ A folder-based npm workspaces monorepo. The `api/` workspace contains a NestJS R
 - **S3 storage**: MinIO JS client (universal S3 compatibility: MinIO, R2, AWS S3, B2, etc.)
 - **Validation**: `class-validator` + `class-transformer` with a global `ValidationPipe`
 - **API docs**: `@nestjs/swagger` (OpenAPI at `/api/docs`)
+- **CORS**: Enabled via `CORS_ORIGIN` env var (defaults to `http://localhost:5173`)
 - **Testing**: Jest 30, Supertest (unit: `*.spec.ts` in `api/src/`, e2e: `api/test/`)
 - **Code style**: Prettier (single quotes, 4-space indent), ESLint with TypeScript ESLint
+
+### Web Client (`app/`)
+
+- **Framework**: Vue 3 (Composition API, `<script setup>`)
+- **Build**: Vite 6
+- **Styling**: Tailwind CSS v4
+- **Language**: TypeScript
+- **Media playback**: Video.js 8 with a custom HLS quality selector plugin (`videojs-quality-selector.ts`)
+- **API communication**: Fetch-based client (`api.ts`), no proxy — connects directly to the API via CORS
 
 ## Project Structure
 
 ```
 api/
 ├── src/
-│   ├── main.ts                          # Entry point: bootstraps NestJS, Swagger setup
+│   ├── main.ts                          # Entry point: bootstraps NestJS, Swagger, CORS
 │   ├── app.module.ts                    # Root module, imports EncodeModule
 │   └── encode/
 │       ├── encode.module.ts             # Feature module
@@ -59,20 +75,51 @@ api/
 ├── tsconfig.build.json
 ├── nest-cli.json
 └── eslint.config.mjs
+
+app/
+├── src/
+│   ├── main.ts                          # Vue app entry point
+│   ├── App.vue                          # Root component (config → submit → progress flow)
+│   ├── api.ts                           # Fetch-based API client (create session, upload, poll)
+│   ├── types.ts                         # Shared TypeScript interfaces
+│   ├── style.css                        # Global styles (Tailwind import)
+│   ├── videojs-quality-selector.ts      # Custom Video.js HLS quality selector plugin (native ES6)
+│   ├── components/
+│   │   ├── SessionConfigForm.vue        # Encoding config form (renditions, S3, webhook)
+│   │   ├── FileDropZone.vue             # Drag-and-drop file upload area
+│   │   └── SessionProgress.vue          # Progress display, Video.js player, copy URL button
+│   └── composables/
+│       └── useSessionPoller.ts          # Polling composable (2s interval, auto-stops on terminal status)
+├── index.html
+├── package.json
+├── tsconfig.json
+├── tsconfig.app.json
+├── vite.config.ts
+└── env.d.ts
 ```
 
 ## Architecture
 
 ### Session-based async encoding pipeline
 
-1. **POST** `/api/sessions` — Client sends encoding config (renditions, S3 creds, webhook URL) with Basic auth
+1. **POST** `/api/sessions` — Client sends encoding config (renditions, S3 creds, optional webhook URL) with Basic auth
 2. Service returns `{ sessionId, uploadUrl, uploadToken }`
 3. **POST** `/api/sessions/:id/upload` — Client uploads source file with Bearer token
-4. Session enters FIFO queue; webhook sent with `queued` status + queue position
+4. Session enters FIFO queue; webhook sent (if configured) with `queued` status + queue position
 5. When session reaches front of queue, FFmpeg encodes to HLS with ABR variants
-6. Progress webhooks sent during encoding (~every 5%)
+6. Progress webhooks sent during encoding (~every 5%), or client polls `GET /api/sessions/:id`
 7. Output files uploaded to client-specified S3 bucket via MinIO client
 8. Final webhook sent with `completed` status + list of S3 object keys + master playlist
+
+### Web client flow
+
+1. User fills in encoding config (type, renditions, S3, optional webhook) in `SessionConfigForm`
+2. Selects a file via `FileDropZone` (drag-and-drop or browse)
+3. On submit, `App.vue` calls `createSession` then `uploadFile` via `api.ts`
+4. `App.vue` computes the S3 public base URL from the S3 config and stores the encoding type
+5. Transitions to progress view; `useSessionPoller` polls the API every 2s
+6. Polling auto-stops when session reaches a terminal status (`completed` or `failed`)
+7. On completion, a Video.js player loads the HLS master playlist from S3 (public URL), with an ABR quality selector and a copy-to-clipboard button for the playlist URL
 
 ### FIFO queue
 
@@ -98,10 +145,14 @@ created -> queued -> encoding -> uploading_to_s3 -> completed
 ## Key Conventions
 
 - DTOs use `class-validator` decorators and are validated via NestJS `ValidationPipe` (whitelist + forbidNonWhitelisted)
+- Webhook configuration is optional in `CreateSessionDto` — when omitted, no webhooks are sent; clients can poll instead
 - FFmpeg args are built dynamically based on GPU availability and rendition config
 - File uploads use `FileInterceptor` from `@nestjs/platform-express` (10GB limit)
-- Environment config via `dotenv`: `PORT`, `AUTH_USERNAME`, `AUTH_PASSWORD`, `WORK_DIR`, `FFMPEG_TIMEOUT_MS`
+- Environment config via `dotenv`: `PORT`, `AUTH_USERNAME`, `AUTH_PASSWORD`, `WORK_DIR`, `FFMPEG_TIMEOUT_MS`, `CORS_ORIGIN`
 - Swagger decorators on all DTOs and endpoints for auto-generated API docs
+- Web client stores S3 config in localStorage between sessions for convenience
+- Video.js quality selector is a custom plugin (`videojs-quality-selector.ts`) using native ES6 classes — the `videojs-hls-quality-selector` npm package is incompatible with Video.js 8 (Babel `_inheritsLoose` cannot extend native ES6 classes)
+- Vite config uses `resolve.dedupe: ['video.js']` to ensure a single Video.js instance across all modules
 
 ## GPU Detection
 
@@ -114,10 +165,13 @@ When not: `libx264` encoder, standard `scale` filter
 
 ## Scripts
 
-From the repo root, use the `-w api` flag:
+From the repo root:
 
-- `npm -w api run start:dev` — dev server with watch mode
-- `npm -w api run build` — compile to `api/dist/`
-- `npm -w api run start:prod` — run compiled output
+- `npm run dev` — start both API and web client in dev mode (via `concurrently`)
+- `npm -w api run start:dev` — API dev server with watch mode
+- `npm -w api run build` — compile API to `api/dist/`
+- `npm -w api run start:prod` — run compiled API output
 - `npm -w api test` — unit tests
 - `npm -w api run test:e2e` — end-to-end tests
+- `npm -w app run dev` — web client dev server (Vite, port 5173)
+- `npm -w app run build` — production build of the web client

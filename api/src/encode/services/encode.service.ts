@@ -130,6 +130,7 @@ export class EncodeService {
         session: Session,
         payload: WebhookPayloadDto
     ): Promise<void> {
+        if (!session.config.webhook) return;
         try {
             await this.webhookService.send(
                 session.config.webhook.url,

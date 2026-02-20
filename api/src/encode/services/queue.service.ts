@@ -47,7 +47,7 @@ export class QueueService implements OnModuleDestroy {
 
         // Send webhook asynchronously
         const session = this.sessionService.get(sessionId);
-        if (session) {
+        if (session?.config.webhook) {
             this.webhookService
                 .send(
                     session.config.webhook.url,
@@ -125,7 +125,7 @@ export class QueueService implements OnModuleDestroy {
     private notifyQueuePositions(): void {
         this.queue.forEach((sessionId, idx) => {
             const session = this.sessionService.get(sessionId);
-            if (session) {
+            if (session?.config.webhook) {
                 this.webhookService
                     .send(
                         session.config.webhook.url,

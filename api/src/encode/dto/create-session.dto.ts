@@ -57,12 +57,14 @@ export class CreateSessionDto {
     @Expose()
     s3: S3ConfigDto;
 
-    @ApiProperty({
-        description: 'Webhook configuration for status callbacks.',
+    @ApiPropertyOptional({
+        description:
+            'Webhook configuration for status callbacks. If omitted, no webhooks are sent — use the polling endpoint instead.',
         type: WebhookConfigDto,
     })
+    @IsOptional()
     @ValidateNested()
     @Type(() => WebhookConfigDto)
     @Expose()
-    webhook: WebhookConfigDto;
+    webhook?: WebhookConfigDto;
 }

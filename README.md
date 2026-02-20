@@ -1,6 +1,11 @@
 # Luminary Media Convert
 
-HLS/ABR media encoding service built with NestJS. Accepts encoding requests via REST API, processes media files with FFmpeg (GPU-accelerated when NVIDIA hardware is available), uploads HLS output to any S3-compatible storage, and delivers status updates via webhooks.
+HLS/ABR media encoding service built with NestJS. Accepts encoding requests via REST API, processes media files with FFmpeg (GPU-accelerated when NVIDIA hardware is available), uploads HLS output to any S3-compatible storage, and delivers status updates via webhooks or polling.
+
+The repository is an npm workspaces monorepo containing:
+
+- **`api/`** — NestJS encoding service (REST API, FFmpeg, S3 upload, webhooks)
+- **`app/`** — Vue 3 web client for uploading and monitoring encoding sessions
 
 ## Table of Contents
 
@@ -8,10 +13,11 @@ HLS/ABR media encoding service built with NestJS. Accepts encoding requests via 
 - [Prerequisites](#prerequisites)
 - [Environment Variables](#environment-variables)
 - [Getting Started](#getting-started)
+- [Web Client](#web-client)
 - [API Documentation](#api-documentation)
   - [1. Create an Encoding Session](#1-create-an-encoding-session)
   - [2. Upload the Source File](#2-upload-the-source-file)
-  - [3. Poll Session Status (optional)](#3-poll-session-status-optional)
+  - [3. Poll Session Status](#3-poll-session-status)
 - [Webhook Callbacks](#webhook-callbacks)
 - [Encoding Workflow](#encoding-workflow)
 - [GPU Acceleration](#gpu-acceleration)
@@ -91,6 +97,7 @@ sudo apt update && sudo apt install -y ffmpeg
 | `AUTH_PASSWORD` | **Yes** | — | Basic auth password for API access |
 | `WORK_DIR` | No | `./work` | Directory for temporary files during encoding |
 | `FFMPEG_TIMEOUT_MS` | No | `0` (none) | Max time for FFmpeg process before forced kill |
+| `CORS_ORIGIN` | No | `http://localhost:5173` | Allowed CORS origin for the web client |
 
 Example `.env` file:
 
@@ -98,27 +105,58 @@ Example `.env` file:
 PORT=3000
 AUTH_USERNAME=admin
 AUTH_PASSWORD=your-secure-password
+CORS_ORIGIN=http://localhost:5173
 ```
 
 ## Getting Started
 
 ```bash
-# Install dependencies
+# Install all dependencies (hoisted to root via npm workspaces)
 npm install
 
-# Development (watch mode)
-npm run start:dev
-
-# Production build
-npm run build
-npm run start:prod
+# Start both the API and web client in development mode
+npm run dev
 ```
 
-Once running, interactive API documentation is available at:
+This runs the NestJS API on `http://localhost:3000` and the Vue web client on `http://localhost:5173`.
+
+To start workspaces individually:
+
+```bash
+# API only (watch mode)
+npm -w api run start:dev
+
+# Web client only
+npm -w app run dev
+
+# API production build
+npm -w api run build
+npm -w api run start:prod
+```
+
+Once the API is running, interactive API documentation is available at:
 
 ```
 http://localhost:3000/api/docs
 ```
+
+---
+
+## Web Client
+
+The `app/` directory contains a Vue 3 single-page application for interacting with the encoding API. It provides:
+
+- Drag-and-drop file upload with a browse fallback
+- Configurable encoding settings (video/audio type, renditions, segment duration)
+- S3 storage configuration (persisted to localStorage between sessions)
+- Optional webhook configuration
+- Real-time session progress via polling with status badges and a progress bar
+- **HLS media preview** — on completion, a Video.js player loads the master playlist directly from S3 (assumes public bucket access), with an ABR quality selector for switching between renditions
+- **Copy playlist URL** — one-click copy of the public m3u8 URL to clipboard
+
+**Tech stack:** Vite, Vue 3, Tailwind CSS v4, Video.js 8, TypeScript.
+
+The web client communicates directly with the API (no proxy). CORS is configured on the API via the `CORS_ORIGIN` environment variable (defaults to `http://localhost:5173`).
 
 ---
 
@@ -179,6 +217,8 @@ Content-Type: application/json
   }
 }
 ```
+
+The `webhook` field is optional. When omitted, no webhook callbacks are sent — use the [polling endpoint](#3-poll-session-status) to track progress instead.
 
 **Response (201):**
 
@@ -265,9 +305,9 @@ curl -X POST http://localhost:3000/api/sessions/SESSION_ID/upload \
 
 ---
 
-### 3. Poll Session Status (optional)
+### 3. Poll Session Status
 
-The primary status delivery mechanism is webhooks. This endpoint is an optional convenience for polling.
+Poll the current status of an encoding session. This is the primary status mechanism when webhooks are not configured.
 
 ```
 GET /api/sessions/:sessionId
@@ -299,7 +339,7 @@ Possible `status` values:
 
 ## Webhook Callbacks
 
-The service sends HTTP POST requests to your webhook URL throughout the encoding lifecycle. Each request includes:
+Webhooks are optional. When a `webhook` configuration is provided in the session creation request, the service sends HTTP POST requests to your webhook URL throughout the encoding lifecycle. Each request includes:
 
 - **Header**: `X-Session-Token: <your-session-token>` — verify this matches the token you provided to authenticate the callback.
 - **Header**: `Content-Type: application/json`
@@ -355,7 +395,7 @@ The service sends HTTP POST requests to your webhook URL throughout the encoding
 
 ## Encoding Workflow
 
-1. **Session creation** — Client sends encoding configuration (renditions, S3 creds, webhook URL). Service returns upload URL + token.
+1. **Session creation** — Client sends encoding configuration (renditions, S3 creds, optional webhook URL). Service returns upload URL + token.
 2. **File upload** — Client uploads the source media file using the token. File is saved and session enters the FIFO queue.
 3. **Queue processing** — Sessions are processed one at a time in first-come-first-served order. Only one FFmpeg process runs at a time.
 4. **Encoding** — FFmpeg produces HLS segments and playlists for each rendition, plus a master playlist. Progress is reported via webhooks.
