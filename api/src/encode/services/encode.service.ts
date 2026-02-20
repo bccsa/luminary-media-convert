@@ -17,27 +17,29 @@ export class EncodeService {
         private readonly sessionService: SessionService,
         private readonly ffmpegService: FfmpegService,
         private readonly s3Service: S3Service,
-        private readonly webhookService: WebhookService
+        private readonly webhookService: WebhookService,
     ) {}
 
-    /**
-     * Execute the full encoding pipeline for a session.
-     * Called by the QueueService when the session reaches the front of the queue.
-     * All errors are caught -- this method never throws.
-     */
     async processSession(sessionId: string): Promise<void> {
         const session = this.sessionService.get(sessionId);
         if (!session) {
             this.logger.error(
-                `Session ${sessionId} not found, skipping`
+                `Session ${sessionId} not found, skipping`,
             );
+            return;
+        }
+
+        if (!session.encodeConfig) {
+            this.logger.error(
+                `Session ${sessionId} has no encode config, skipping`,
+            );
+            this.sessionService.setFailed(sessionId, 'No encoding configuration provided');
             return;
         }
 
         const outputDir = join(this.workDir, sessionId, 'output');
 
         try {
-            // --- ENCODING PHASE ---
             this.sessionService.updateStatus(sessionId, 'encoding');
             this.sessionService.setOutputDir(sessionId, outputDir);
             await this.sendWebhook(session, {
@@ -51,15 +53,12 @@ export class EncodeService {
                 sessionId,
                 inputPath: session.filePath!,
                 outputDir,
-                type: session.config.type,
-                renditions: session.config.renditions,
-                segmentDuration: session.config.segmentDuration ?? 6,
+                encodeConfig: session.encodeConfig,
                 onProgress: (percent) => {
                     this.sessionService.updateProgress(
                         sessionId,
-                        percent
+                        percent,
                     );
-                    // Send webhook on every 5% increment or at specific milestones
                     if (
                         percent % 5 < 1 ||
                         percent >= 99
@@ -74,10 +73,9 @@ export class EncodeService {
                 },
             });
 
-            // --- S3 UPLOAD PHASE ---
             this.sessionService.updateStatus(
                 sessionId,
-                'uploading_to_s3'
+                'uploading_to_s3',
             );
             await this.sendWebhook(session, {
                 sessionId,
@@ -89,14 +87,13 @@ export class EncodeService {
             const uploadResult = await this.s3Service.uploadDirectory(
                 session.config.s3,
                 outputDir,
-                encodeResult.masterPlaylist
+                encodeResult.masterPlaylist,
             );
 
-            // --- COMPLETED ---
             this.sessionService.setCompleted(
                 sessionId,
                 uploadResult.keys,
-                uploadResult.masterPlaylistKey
+                uploadResult.masterPlaylistKey,
             );
             await this.sendWebhook(session, {
                 sessionId,
@@ -111,7 +108,7 @@ export class EncodeService {
         } catch (err) {
             const errorMsg = (err as Error).message || 'Unknown error';
             this.logger.error(
-                `Session ${sessionId} failed: ${errorMsg}`
+                `Session ${sessionId} failed: ${errorMsg}`,
             );
             this.sessionService.setFailed(sessionId, errorMsg);
             await this.sendWebhook(session, {
@@ -121,21 +118,20 @@ export class EncodeService {
                 message: 'Encoding failed',
             });
         } finally {
-            // Cleanup temp files
             this.cleanupSessionFiles(sessionId, session);
         }
     }
 
     private async sendWebhook(
         session: Session,
-        payload: WebhookPayloadDto
+        payload: WebhookPayloadDto,
     ): Promise<void> {
         if (!session.config.webhook) return;
         try {
             await this.webhookService.send(
                 session.config.webhook.url,
                 session.config.webhook.sessionToken,
-                payload
+                payload,
             );
         } catch {
             // Webhook errors are already logged inside WebhookService
@@ -144,17 +140,17 @@ export class EncodeService {
 
     private cleanupSessionFiles(
         sessionId: string,
-        session: Session
+        session: Session,
     ): void {
         try {
             const sessionDir = join(this.workDir, sessionId);
             rmSync(sessionDir, { recursive: true, force: true });
             this.logger.debug(
-                `Cleaned up work directory for session ${sessionId}`
+                `Cleaned up work directory for session ${sessionId}`,
             );
         } catch (err) {
             this.logger.warn(
-                `Failed to clean up session ${sessionId}: ${(err as Error).message}`
+                `Failed to clean up session ${sessionId}: ${(err as Error).message}`,
             );
         }
     }

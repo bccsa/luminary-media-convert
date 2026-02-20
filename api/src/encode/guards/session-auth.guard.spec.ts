@@ -5,10 +5,6 @@ import type { CreateSessionDto } from '../dto/create-session.dto.js';
 
 function makeConfig(): CreateSessionDto {
     return {
-        type: 'video',
-        renditions: [
-            { width: 1280, height: 720, videoBitrateKbps: 2500, audioBitrateKbps: 128 },
-        ],
         s3: {
             endPoint: 's3.example.com',
             bucket: 'test',
@@ -24,7 +20,7 @@ function makeConfig(): CreateSessionDto {
 
 function createMockContext(
     authHeader: string | undefined,
-    sessionId: string
+    sessionId: string,
 ): any {
     const request = {
         headers: { authorization: authHeader },
@@ -50,7 +46,7 @@ describe('SessionAuthGuard', () => {
         const session = sessionService.create(makeConfig());
         const ctx = createMockContext(
             `Bearer ${session.uploadToken}`,
-            session.id
+            session.id,
         );
 
         expect(guard.canActivate(ctx)).toBe(true);
@@ -60,7 +56,7 @@ describe('SessionAuthGuard', () => {
         const session = sessionService.create(makeConfig());
         const ctx = createMockContext(
             `Bearer ${session.uploadToken}`,
-            session.id
+            session.id,
         );
 
         guard.canActivate(ctx);
@@ -103,7 +99,7 @@ describe('SessionAuthGuard', () => {
         const session = sessionService.create(makeConfig());
         const ctx = createMockContext(
             `Bearer ${session.uploadToken}`,
-            'different-session-id'
+            'different-session-id',
         );
 
         expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);
@@ -115,7 +111,7 @@ describe('SessionAuthGuard', () => {
 
         const ctx = createMockContext(
             `Bearer ${session.uploadToken}`,
-            session.id
+            session.id,
         );
 
         expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException);

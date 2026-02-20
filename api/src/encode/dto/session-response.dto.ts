@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Expose } from 'class-transformer';
+import { Expose, Type } from 'class-transformer';
+import { ProbeResultDto } from './probe-result.dto.js';
 
 export class SessionResponseDto {
     @ApiProperty({
@@ -37,6 +38,36 @@ export class UploadResponseDto {
 
     @ApiProperty({
         description: 'Current session status.',
+        example: 'uploaded',
+    })
+    @Expose()
+    status: string;
+
+    @ApiPropertyOptional({
+        description: 'Probe results from the uploaded file.',
+        type: ProbeResultDto,
+    })
+    @Type(() => ProbeResultDto)
+    @Expose()
+    probeResult?: ProbeResultDto;
+
+    @ApiPropertyOptional({
+        description: 'Suggested encoding configuration based on the probe results.',
+    })
+    @Expose()
+    suggestedConfig?: any;
+}
+
+export class EncodeStartResponseDto {
+    @ApiProperty({
+        description: 'Session identifier.',
+        example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    })
+    @Expose()
+    sessionId: string;
+
+    @ApiProperty({
+        description: 'Current session status.',
         example: 'queued',
     })
     @Expose()
@@ -62,6 +93,7 @@ export class SessionStatusDto {
         description: 'Current session status.',
         enum: [
             'created',
+            'uploaded',
             'uploading',
             'queued',
             'encoding',
@@ -89,6 +121,20 @@ export class SessionStatusDto {
     })
     @Expose()
     queuePosition?: number;
+
+    @ApiPropertyOptional({
+        description: 'Probe results from the uploaded file. Present when status is "uploaded".',
+        type: ProbeResultDto,
+    })
+    @Type(() => ProbeResultDto)
+    @Expose()
+    probeResult?: ProbeResultDto;
+
+    @ApiPropertyOptional({
+        description: 'Suggested encoding configuration. Present when status is "uploaded".',
+    })
+    @Expose()
+    suggestedConfig?: any;
 
     @ApiPropertyOptional({
         description:

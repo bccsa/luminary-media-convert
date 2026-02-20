@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { CreateSessionDto } from '../dto/create-session.dto.js';
 import type { SessionStatus } from '../dto/webhook-payload.dto.js';
+import type { ProbeResult, SuggestedConfig } from './probe.service.js';
+import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 
 export interface Session {
     id: string;
@@ -9,6 +11,9 @@ export interface Session {
     status: SessionStatus;
     progress: number;
     config: CreateSessionDto;
+    probeResult?: ProbeResult;
+    suggestedConfig?: SuggestedConfig;
+    encodeConfig?: EncodeConfigDto;
     filePath?: string;
     outputDir?: string;
     files?: string[];
@@ -71,6 +76,21 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.filePath = filePath;
+        }
+    }
+
+    setProbeResult(id: string, probeResult: ProbeResult, suggestedConfig: SuggestedConfig): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.probeResult = probeResult;
+            session.suggestedConfig = suggestedConfig;
+        }
+    }
+
+    setEncodeConfig(id: string, encodeConfig: EncodeConfigDto): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.encodeConfig = encodeConfig;
         }
     }
 

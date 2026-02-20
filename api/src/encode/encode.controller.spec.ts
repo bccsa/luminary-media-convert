@@ -5,14 +5,12 @@ import { tmpdir } from 'os';
 import { EncodeController } from './encode.controller.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
+import { ProbeService } from './services/probe.service.js';
 import type { CreateSessionDto } from './dto/create-session.dto.js';
+import type { EncodeConfigDto } from './dto/encode-config.dto.js';
 
 function makeConfig(): CreateSessionDto {
     return {
-        type: 'video',
-        renditions: [
-            { width: 1280, height: 720, videoBitrateKbps: 2500, audioBitrateKbps: 128 },
-        ],
         s3: {
             endPoint: 's3.example.com',
             bucket: 'test',
@@ -23,6 +21,19 @@ function makeConfig(): CreateSessionDto {
             url: 'https://example.com/webhook',
             sessionToken: 'tok',
         },
+    };
+}
+
+function makeEncodeConfig(): EncodeConfigDto {
+    return {
+        type: 'video',
+        segmentDuration: 6,
+        videoRenditions: [
+            { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+        ],
+        audioGroups: [
+            { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+        ],
     };
 }
 
@@ -41,10 +52,10 @@ describe('EncodeController', () => {
     let controller: EncodeController;
     let sessionService: SessionService;
     let queueService: jest.Mocked<QueueService>;
+    let probeService: jest.Mocked<ProbeService>;
     let testWorkDir: string;
 
     beforeEach(() => {
-        // Use a temp directory so tests don't pollute the project root
         testWorkDir = mkdtempSync(join(tmpdir(), 'luminary-test-'));
         process.env.WORK_DIR = testWorkDir;
 
@@ -57,11 +68,28 @@ describe('EncodeController', () => {
             isProcessing: false,
         } as any;
 
-        controller = new EncodeController(sessionService, queueService);
+        probeService = {
+            probe: jest.fn().mockReturnValue({
+                format: { duration: 120, bitrateKbps: 5000, formatName: 'mov,mp4' },
+                videoTracks: [{ index: 0, codec: 'h264', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
+                audioTracks: [{ index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 44100 }],
+            }),
+            suggest: jest.fn().mockReturnValue({
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, audioGroupId: 'hd', label: '1080p' },
+                ],
+                audioGroups: [
+                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            }),
+        } as any;
+
+        controller = new EncodeController(sessionService, queueService, probeService);
     });
 
     afterEach(() => {
-        // Clean up the temp work directory
         try {
             rmSync(testWorkDir, { recursive: true, force: true });
         } catch {
@@ -94,26 +122,8 @@ describe('EncodeController', () => {
             const result = controller.createSession(dto, req);
 
             expect(result.uploadUrl).toMatch(
-                /^https:\/\/api\.example\.com\/api\/sessions\/.+\/upload$/
+                /^https:\/\/api\.example\.com\/api\/sessions\/.+\/upload$/,
             );
-        });
-
-        it('should reject video renditions without required fields', () => {
-            const dto = makeConfig();
-            dto.renditions = [{ audioBitrateKbps: 128 } as any];
-
-            expect(() =>
-                controller.createSession(dto, makeRequest())
-            ).toThrow(BadRequestException);
-        });
-
-        it('should accept audio renditions without video fields', () => {
-            const dto = makeConfig();
-            dto.type = 'audio';
-            dto.renditions = [{ audioBitrateKbps: 128 }];
-
-            const result = controller.createSession(dto, makeRequest());
-            expect(result.sessionId).toBeDefined();
         });
     });
 
@@ -125,6 +135,21 @@ describe('EncodeController', () => {
 
             expect(result.sessionId).toBe(session.id);
             expect(result.status).toBe('created');
+        });
+
+        it('should include probeResult and suggestedConfig when uploaded', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+            sessionService.setProbeResult(session.id, {
+                format: { duration: 60, bitrateKbps: 3000, formatName: 'mp4' },
+                videoTracks: [],
+                audioTracks: [],
+            }, { type: 'audio', segmentDuration: 6, audioRenditions: [] });
+
+            const result = controller.getStatus(session.id);
+
+            expect(result.probeResult).toBeDefined();
+            expect(result.suggestedConfig).toBeDefined();
         });
 
         it('should include queuePosition when session is queued', () => {
@@ -152,7 +177,7 @@ describe('EncodeController', () => {
             sessionService.setCompleted(
                 session.id,
                 ['master.m3u8', 'v0/playlist.m3u8'],
-                'master.m3u8'
+                'master.m3u8',
             );
 
             const result = controller.getStatus(session.id);
@@ -175,31 +200,31 @@ describe('EncodeController', () => {
 
         it('should throw NotFoundException for unknown session', () => {
             expect(() => controller.getStatus('nonexistent')).toThrow(
-                NotFoundException
+                NotFoundException,
             );
         });
     });
 
     describe('uploadFile', () => {
-        it('should reject when no file is provided', async () => {
-            await expect(
-                controller.uploadFile('sess-1', null, makeRequest())
-            ).rejects.toThrow(BadRequestException);
+        it('should reject when no file is provided', () => {
+            expect(() =>
+                controller.uploadFile('sess-1', null),
+            ).toThrow(BadRequestException);
         });
 
-        it('should reject when file buffer is empty', async () => {
+        it('should reject when file buffer is empty', () => {
             const uploaded = {
                 buffer: Buffer.alloc(0),
                 size: 0,
                 originalname: 'test.mp4',
             };
 
-            await expect(
-                controller.uploadFile('sess-1', uploaded, makeRequest())
-            ).rejects.toThrow(BadRequestException);
+            expect(() =>
+                controller.uploadFile('sess-1', uploaded),
+            ).toThrow(BadRequestException);
         });
 
-        it('should enqueue session and return queued status', async () => {
+        it('should probe file and return uploaded status', () => {
             const session = sessionService.create(makeConfig());
             const uploaded = {
                 buffer: Buffer.from('fake-video-data'),
@@ -207,19 +232,17 @@ describe('EncodeController', () => {
                 originalname: 'test.mp4',
             };
 
-            const result = await controller.uploadFile(
-                session.id,
-                uploaded,
-                makeRequest()
-            );
+            const result = controller.uploadFile(session.id, uploaded);
 
             expect(result.sessionId).toBe(session.id);
-            expect(result.status).toBe('queued');
-            expect(result.queuePosition).toBe(1);
-            expect(queueService.enqueue).toHaveBeenCalledWith(session.id);
+            expect(result.status).toBe('uploaded');
+            expect(result.probeResult).toBeDefined();
+            expect(result.suggestedConfig).toBeDefined();
+            expect(probeService.probe).toHaveBeenCalled();
+            expect(probeService.suggest).toHaveBeenCalled();
         });
 
-        it('should set file path on the session', async () => {
+        it('should set file path on the session', () => {
             const session = sessionService.create(makeConfig());
             const uploaded = {
                 buffer: Buffer.from('data'),
@@ -227,10 +250,92 @@ describe('EncodeController', () => {
                 originalname: 'video.mp4',
             };
 
-            await controller.uploadFile(session.id, uploaded, makeRequest());
+            controller.uploadFile(session.id, uploaded);
 
             const updated = sessionService.get(session.id)!;
             expect(updated.filePath).toContain('video.mp4');
+        });
+    });
+
+    describe('startEncode', () => {
+        it('should reject when session is not in uploaded state', () => {
+            const session = sessionService.create(makeConfig());
+
+            expect(() =>
+                controller.startEncode(session.id, makeEncodeConfig()),
+            ).toThrow(BadRequestException);
+        });
+
+        it('should reject when session not found', () => {
+            expect(() =>
+                controller.startEncode('nonexistent', makeEncodeConfig()),
+            ).toThrow(NotFoundException);
+        });
+
+        it('should enqueue session and return queued status', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            const result = controller.startEncode(session.id, makeEncodeConfig());
+
+            expect(result.sessionId).toBe(session.id);
+            expect(result.status).toBe('queued');
+            expect(result.queuePosition).toBe(1);
+            expect(queueService.enqueue).toHaveBeenCalledWith(session.id);
+        });
+
+        it('should reject video config without videoRenditions', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            const config: EncodeConfigDto = {
+                type: 'video',
+                audioGroups: [{ id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 }],
+            };
+
+            expect(() =>
+                controller.startEncode(session.id, config),
+            ).toThrow(BadRequestException);
+        });
+
+        it('should reject video config without audioGroups', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            const config: EncodeConfigDto = {
+                type: 'video',
+                videoRenditions: [{ width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd' }],
+            };
+
+            expect(() =>
+                controller.startEncode(session.id, config),
+            ).toThrow(BadRequestException);
+        });
+
+        it('should reject audio config without audioRenditions', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            const config: EncodeConfigDto = { type: 'audio' };
+
+            expect(() =>
+                controller.startEncode(session.id, config),
+            ).toThrow(BadRequestException);
+        });
+
+        it('should reject unknown audioGroupId in video rendition', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            const config: EncodeConfigDto = {
+                type: 'video',
+                videoRenditions: [{ width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'nonexistent' }],
+                audioGroups: [{ id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 }],
+            };
+
+            expect(() =>
+                controller.startEncode(session.id, config),
+            ).toThrow(BadRequestException);
         });
     });
 });

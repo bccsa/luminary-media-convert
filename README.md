@@ -11,6 +11,7 @@ The repository is an npm workspaces monorepo containing:
 
 - [Architecture Overview](#architecture-overview)
 - [Prerequisites](#prerequisites)
+- [Auth0 Setup](#auth0-setup)
 - [Environment Variables](#environment-variables)
 - [Getting Started](#getting-started)
 - [Web Client](#web-client)
@@ -30,38 +31,40 @@ The repository is an npm workspaces monorepo containing:
 ## Architecture Overview
 
 ```
-Client                    Luminary Service                     External
-──────                    ────────────────                     ────────
-  │                              │                                │
-  │  1. POST /api/sessions       │                                │
-  │  (auth + encoding config) ──>│                                │
-  │<── { sessionId,              │                                │
-  │      uploadUrl,              │                                │
-  │      uploadToken }           │                                │
-  │                              │                                │
-  │  2. POST uploadUrl           │                                │
-  │  (Bearer token + file) ────>│                                │
-  │<── 202 { queued }           │                                │
-  │                              │                                │
-  │                              │── webhook: { status: queued } ──>│ Webhook
-  │                              │                                │  Endpoint
-  │                              │── FFmpeg encode ──┐            │
-  │                              │<── progress ──────┘            │
-  │                              │── webhook: { encoding, 45% } ─>│
-  │                              │                                │
-  │                              │── upload to S3 ───────────────>│ S3
-  │                              │── webhook: { completed,       ──>│ Storage
-  │                              │    files: [...],               │
-  │                              │    masterPlaylist: "..." }     │
-  │                              │                                │
-  │  3. GET /api/sessions/:id    │                                │
-  │  (optional polling) ───────>│                                │
-  │<── { status, progress, ... }│                                │
+Client           Auth0          Luminary Service                External
+──────           ─────          ────────────────                ────────
+  │                │                   │                           │
+  │  Login ──────>│                   │                           │
+  │<── JWT token  │                   │                           │
+  │                                   │                           │
+  │  1. POST /api/sessions            │                           │
+  │  (Bearer JWT + config) ─────────>│                           │
+  │                                   │── validate JWT via JWKS   │
+  │<── { sessionId,                   │                           │
+  │      uploadUrl,                   │                           │
+  │      uploadToken }                │                           │
+  │                                   │                           │
+  │  2. POST uploadUrl               │                           │
+  │  (Bearer uploadToken + file) ──>│                           │
+  │<── 202 { queued }               │                           │
+  │                                   │                           │
+  │                                   │── webhook: { queued } ──>│ Webhook
+  │                                   │── FFmpeg encode ──┐      │ Endpoint
+  │                                   │<── progress ──────┘      │
+  │                                   │── webhook: { 45% } ────>│
+  │                                   │                           │
+  │                                   │── upload to S3 ────────>│ S3
+  │                                   │── webhook: { completed } >│ Storage
+  │                                   │                           │
+  │  3. GET /api/sessions/:id         │                           │
+  │  (Bearer JWT, polling) ─────────>│                           │
+  │<── { status, progress, ... }     │                           │
 ```
 
 ## Prerequisites
 
 - **Node.js** >= 18
+- **Auth0 account** with an API and a Single Page Application configured (see [Auth0 Setup](#auth0-setup))
 - **FFmpeg** with the following encoders/filters:
   - CPU: `libx264`, `aac`, `libmp3lame`
   - GPU (optional): `h264_nvenc`, `scale_cuda` (requires NVIDIA GPU + CUDA drivers)
@@ -88,24 +91,61 @@ sudo apt update && sudo apt install -y ffmpeg
 # See: https://docs.nvidia.com/video-technologies/video-codec-sdk/
 ```
 
+## Auth0 Setup
+
+Authentication is handled by [Auth0](https://auth0.com). You need to create two resources in the Auth0 dashboard:
+
+### 1. Create an API
+
+1. Go to **Applications > APIs** and click **Create API**.
+2. Set a **Name** (e.g. `Luminary Media Convert`) and an **Identifier** (e.g. `https://luminary-media-convert/api`). The identifier becomes your `AUTH0_AUDIENCE`.
+3. Leave **Signing Algorithm** as `RS256`.
+
+### 2. Create a Single Page Application
+
+1. Go to **Applications > Applications** and click **Create Application**.
+2. Choose **Single Page Web Applications**.
+3. In the application **Settings**, note the **Domain** and **Client ID** — these become `VITE_AUTH0_DOMAIN` and `VITE_AUTH0_CLIENT_ID`.
+4. Under **Allowed Callback URLs**, **Allowed Logout URLs**, and **Allowed Web Origins**, add your web client URL (e.g. `http://localhost:5173` for development).
+
 ## Environment Variables
+
+### API (`api/.env`)
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `PORT` | No | `3000` | HTTP server port |
-| `AUTH_USERNAME` | **Yes** | — | Basic auth username for API access |
-| `AUTH_PASSWORD` | **Yes** | — | Basic auth password for API access |
+| `AUTH0_DOMAIN` | **Yes** | — | Auth0 tenant domain (e.g. `your-tenant.auth0.com`) |
+| `AUTH0_AUDIENCE` | **Yes** | — | Auth0 API identifier / audience |
 | `WORK_DIR` | No | `./work` | Directory for temporary files during encoding |
 | `FFMPEG_TIMEOUT_MS` | No | `0` (none) | Max time for FFmpeg process before forced kill |
 | `CORS_ORIGIN` | No | `http://localhost:5173` | Allowed CORS origin for the web client |
 
-Example `.env` file:
+Example `api/.env`:
 
 ```bash
 PORT=3000
-AUTH_USERNAME=admin
-AUTH_PASSWORD=your-secure-password
+AUTH0_DOMAIN=your-tenant.auth0.com
+AUTH0_AUDIENCE=https://luminary-media-convert/api
 CORS_ORIGIN=http://localhost:5173
+```
+
+### Web Client (`app/.env`)
+
+| Variable | Required | Description |
+|---|---|---|
+| `VITE_AUTH0_DOMAIN` | **Yes** | Auth0 tenant domain (same as API) |
+| `VITE_AUTH0_CLIENT_ID` | **Yes** | Auth0 SPA application Client ID |
+| `VITE_AUTH0_AUDIENCE` | **Yes** | Auth0 API identifier (same as API) |
+| `VITE_API_BASE_URL` | **Yes** | API base URL (e.g. `http://localhost:3000`) |
+
+Example `app/.env`:
+
+```bash
+VITE_AUTH0_DOMAIN=your-tenant.auth0.com
+VITE_AUTH0_CLIENT_ID=your-spa-client-id
+VITE_AUTH0_AUDIENCE=https://luminary-media-convert/api
+VITE_API_BASE_URL=http://localhost:3000
 ```
 
 ## Getting Started
@@ -146,6 +186,7 @@ http://localhost:3000/api/docs
 
 The `app/` directory contains a Vue 3 single-page application for interacting with the encoding API. It provides:
 
+- **Auth0 login** — users sign in via Auth0's Universal Login; access tokens are obtained automatically for API calls
 - Drag-and-drop file upload with a browse fallback
 - Configurable encoding settings (video/audio type, renditions, segment duration)
 - S3 storage configuration (persisted to localStorage between sessions)
@@ -154,21 +195,21 @@ The `app/` directory contains a Vue 3 single-page application for interacting wi
 - **HLS media preview** — on completion, a Video.js player loads the master playlist directly from S3 (assumes public bucket access), with an ABR quality selector for switching between renditions
 - **Copy playlist URL** — one-click copy of the public m3u8 URL to clipboard
 
-**Tech stack:** Vite, Vue 3, Tailwind CSS v4, Video.js 8, TypeScript.
+**Tech stack:** Vite, Vue 3, Tailwind CSS v4, Video.js 8, Auth0 Vue SDK, TypeScript.
 
-The web client communicates directly with the API (no proxy). CORS is configured on the API via the `CORS_ORIGIN` environment variable (defaults to `http://localhost:5173`).
+The web client communicates directly with the API (no proxy). CORS is configured on the API via the `CORS_ORIGIN` environment variable (defaults to `http://localhost:5173`). Authentication is handled via Auth0 — the web client requires `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and `VITE_AUTH0_AUDIENCE` environment variables.
 
 ---
 
 ## API Documentation
 
-All endpoints under `/api/sessions` require authentication. Session creation and status polling use **Basic Auth**. File upload uses a **Bearer token** returned from session creation.
+All endpoints under `/api/sessions` require authentication. Session creation and status polling use a **Bearer JWT** (Auth0 access token). File upload uses a separate **Bearer token** returned from session creation.
 
 ### 1. Create an Encoding Session
 
 ```
 POST /api/sessions
-Authorization: Basic base64(username:password)
+Authorization: Bearer <auth0_access_token>
 Content-Type: application/json
 ```
 
@@ -233,8 +274,11 @@ The `webhook` field is optional. When omitted, no webhook callbacks are sent —
 **curl example:**
 
 ```bash
+# Obtain an Auth0 access token first (e.g. via client credentials or test token from Auth0 dashboard)
+TOKEN="your-auth0-access-token"
+
 curl -X POST http://localhost:3000/api/sessions \
-  -u admin:your-secure-password \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "type": "video",
@@ -311,7 +355,7 @@ Poll the current status of an encoding session. This is the primary status mecha
 
 ```
 GET /api/sessions/:sessionId
-Authorization: Basic base64(username:password)
+Authorization: Bearer <auth0_access_token>
 ```
 
 **Response (200):**

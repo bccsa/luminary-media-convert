@@ -8,6 +8,7 @@
         "noEmit": true,
         "isolatedModules": true,
         "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
         "jsx": "preserve",
         "paths": {
             "@/*": ["./src/*"]

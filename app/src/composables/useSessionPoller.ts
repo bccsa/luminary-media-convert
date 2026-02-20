@@ -1,6 +1,6 @@
 import { ref, readonly, onUnmounted } from 'vue';
 import { getSessionStatus } from '../api';
-import type { Credentials, SessionStatus, SessionStatusResponse } from '../types';
+import type { SessionStatus, SessionStatusResponse } from '../types';
 
 const POLL_INTERVAL_MS = 2000;
 const TERMINAL_STATUSES: SessionStatus[] = ['completed', 'failed'];
@@ -33,9 +33,10 @@ export function useSessionPoller() {
         polling.value = false;
     }
 
-    async function poll(baseUrl: string, sessionId: string, credentials: Credentials) {
+    async function poll(sessionId: string, getToken: () => Promise<string>) {
         try {
-            const data = await getSessionStatus(baseUrl, sessionId, credentials);
+            const token = await getToken();
+            const data = await getSessionStatus(sessionId, token);
             applyUpdate(data);
 
             if (TERMINAL_STATUSES.includes(data.status)) {
@@ -47,11 +48,11 @@ export function useSessionPoller() {
         }
     }
 
-    function start(baseUrl: string, sessionId: string, credentials: Credentials) {
+    function start(sessionId: string, getToken: () => Promise<string>) {
         stop();
         polling.value = true;
-        poll(baseUrl, sessionId, credentials);
-        timer = setInterval(() => poll(baseUrl, sessionId, credentials), POLL_INTERVAL_MS);
+        poll(sessionId, getToken);
+        timer = setInterval(() => poll(sessionId, getToken), POLL_INTERVAL_MS);
     }
 
     onUnmounted(stop);

@@ -7,13 +7,10 @@ import { FfmpegService } from './ffmpeg.service.js';
 import { S3Service } from './s3.service.js';
 import { WebhookService } from './webhook.service.js';
 import type { CreateSessionDto } from '../dto/create-session.dto.js';
+import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 
 function makeConfig(): CreateSessionDto {
     return {
-        type: 'video',
-        renditions: [
-            { width: 1280, height: 720, videoBitrateKbps: 2500, audioBitrateKbps: 128 },
-        ],
         s3: {
             endPoint: 's3.example.com',
             bucket: 'test',
@@ -24,6 +21,19 @@ function makeConfig(): CreateSessionDto {
             url: 'https://example.com/webhook',
             sessionToken: 'tok',
         },
+    };
+}
+
+function makeEncodeConfig(): EncodeConfigDto {
+    return {
+        type: 'video',
+        segmentDuration: 6,
+        videoRenditions: [
+            { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+        ],
+        audioGroups: [
+            { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+        ],
     };
 }
 
@@ -63,7 +73,7 @@ describe('EncodeService', () => {
             sessionService,
             ffmpegService,
             s3Service,
-            webhookService
+            webhookService,
         );
     });
 
@@ -83,26 +93,35 @@ describe('EncodeService', () => {
         expect(s3Service.uploadDirectory).not.toHaveBeenCalled();
     });
 
-    it('should run full pipeline: encode -> s3 -> completed', async () => {
+    it('should fail when session has no encode config', async () => {
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
 
         await service.processSession(session.id);
 
-        // FFmpeg was called
+        const updated = sessionService.get(session.id)!;
+        expect(updated.status).toBe('failed');
+        expect(updated.error).toBe('No encoding configuration provided');
+    });
+
+    it('should run full pipeline: encode -> s3 -> completed', async () => {
+        const session = sessionService.create(makeConfig());
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        await service.processSession(session.id);
+
         expect(ffmpegService.encode).toHaveBeenCalledTimes(1);
         expect(ffmpegService.encode).toHaveBeenCalledWith(
             expect.objectContaining({
                 sessionId: session.id,
                 inputPath: '/tmp/input.mp4',
-                type: 'video',
-            })
+                encodeConfig: expect.objectContaining({ type: 'video' }),
+            }),
         );
 
-        // S3 upload was called
         expect(s3Service.uploadDirectory).toHaveBeenCalledTimes(1);
 
-        // Session marked as completed
         const updated = sessionService.get(session.id)!;
         expect(updated.status).toBe('completed');
         expect(updated.files).toEqual([
@@ -116,6 +135,7 @@ describe('EncodeService', () => {
     it('should send encoding started webhook', async () => {
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
 
         await service.processSession(session.id);
 
@@ -126,13 +146,14 @@ describe('EncodeService', () => {
                 sessionId: session.id,
                 status: 'encoding',
                 progress: 0,
-            })
+            }),
         );
     });
 
     it('should send completed webhook with files', async () => {
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
 
         await service.processSession(session.id);
 
@@ -143,17 +164,18 @@ describe('EncodeService', () => {
                 status: 'completed',
                 files: ['master.m3u8', 'v0/playlist.m3u8', 'v0/segment_000.ts'],
                 masterPlaylist: 'master.m3u8',
-            })
+            }),
         );
     });
 
     it('should mark session as failed when FFmpeg errors', async () => {
         ffmpegService.encode.mockRejectedValue(
-            new Error('FFmpeg exited with code 1')
+            new Error('FFmpeg exited with code 1'),
         );
 
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
 
         await service.processSession(session.id);
 
@@ -164,11 +186,12 @@ describe('EncodeService', () => {
 
     it('should send failure webhook when FFmpeg errors', async () => {
         ffmpegService.encode.mockRejectedValue(
-            new Error('FFmpeg crashed')
+            new Error('FFmpeg crashed'),
         );
 
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
 
         await service.processSession(session.id);
 
@@ -178,17 +201,18 @@ describe('EncodeService', () => {
             expect.objectContaining({
                 status: 'failed',
                 error: 'FFmpeg crashed',
-            })
+            }),
         );
     });
 
     it('should mark session as failed when S3 upload errors', async () => {
         s3Service.uploadDirectory.mockRejectedValue(
-            new Error('S3 connection refused')
+            new Error('S3 connection refused'),
         );
 
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
 
         await service.processSession(session.id);
 
@@ -204,11 +228,12 @@ describe('EncodeService', () => {
             (id, status) => {
                 statuses.push(status);
                 origUpdateStatus(id, status);
-            }
+            },
         );
 
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
 
         await service.processSession(session.id);
 
@@ -222,9 +247,10 @@ describe('EncodeService', () => {
 
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
 
         await expect(
-            service.processSession(session.id)
+            service.processSession(session.id),
         ).resolves.toBeUndefined();
     });
 });

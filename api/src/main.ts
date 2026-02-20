@@ -29,18 +29,24 @@ async function bootstrap() {
             'and receive webhook callbacks with progress updates and S3 output locations.'
         )
         .setVersion('2.0.0')
-        .addBasicAuth({
-            type: 'http',
-            scheme: 'basic',
-            description:
-                'Basic authentication with username and password configured on the server.',
-        })
-        .addBearerAuth({
-            type: 'http',
-            scheme: 'bearer',
-            description:
-                'Upload token returned from the session creation endpoint.',
-        })
+        .addBearerAuth(
+            {
+                type: 'http',
+                scheme: 'bearer',
+                bearerFormat: 'JWT',
+                description:
+                    'Auth0 access token (JWT). Obtain via Auth0 login flow.',
+            },
+            'auth0',
+        )
+        .addBearerAuth(
+            {
+                type: 'http',
+                scheme: 'bearer',
+                description:
+                    'Upload token returned from the session creation endpoint.',
+            },
+        )
         .build();
 
     const document = SwaggerModule.createDocument(app, config);

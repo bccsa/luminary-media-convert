@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export type SessionStatus =
     | 'created'
+    | 'uploaded'
     | 'uploading'
     | 'queued'
     | 'encoding'

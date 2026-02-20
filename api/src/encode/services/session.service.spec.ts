@@ -3,15 +3,6 @@ import type { CreateSessionDto } from '../dto/create-session.dto.js';
 
 function makeConfig(overrides: Partial<CreateSessionDto> = {}): CreateSessionDto {
     return {
-        type: 'video',
-        renditions: [
-            {
-                width: 1280,
-                height: 720,
-                videoBitrateKbps: 2500,
-                audioBitrateKbps: 128,
-            },
-        ],
         s3: {
             endPoint: 's3.example.com',
             bucket: 'test-bucket',
@@ -41,7 +32,7 @@ describe('SessionService', () => {
             expect(session.uploadToken).toMatch(/^tok_/);
             expect(session.status).toBe('created');
             expect(session.progress).toBe(0);
-            expect(session.config.type).toBe('video');
+            expect(session.config.s3.endPoint).toBe('s3.example.com');
             expect(session.createdAt).toBeLessThanOrEqual(Date.now());
         });
 
@@ -122,6 +113,37 @@ describe('SessionService', () => {
         });
     });
 
+    describe('setProbeResult', () => {
+        it('should store probe result and suggested config', () => {
+            const session = service.create(makeConfig());
+            const probeResult = {
+                format: { duration: 60, bitrateKbps: 3000, formatName: 'mp4' },
+                videoTracks: [],
+                audioTracks: [],
+            };
+            const suggestedConfig = { type: 'audio' as const, segmentDuration: 6, audioRenditions: [] };
+            service.setProbeResult(session.id, probeResult, suggestedConfig);
+
+            const updated = service.get(session.id)!;
+            expect(updated.probeResult).toEqual(probeResult);
+            expect(updated.suggestedConfig).toEqual(suggestedConfig);
+        });
+    });
+
+    describe('setEncodeConfig', () => {
+        it('should store encode config', () => {
+            const session = service.create(makeConfig());
+            const encodeConfig = {
+                type: 'video' as const,
+                videoRenditions: [{ width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd' }],
+                audioGroups: [{ id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac' as const, sourceTrackIndex: 0 }],
+            };
+            service.setEncodeConfig(session.id, encodeConfig);
+
+            expect(service.get(session.id)!.encodeConfig).toEqual(encodeConfig);
+        });
+    });
+
     describe('setCompleted', () => {
         it('should mark session as completed with files and playlist', () => {
             const session = service.create(makeConfig());
@@ -153,18 +175,15 @@ describe('SessionService', () => {
             const s2 = service.create(makeConfig());
             const s3 = service.create(makeConfig());
 
-            // s1: completed and old
             service.setCompleted(s1.id, [], '');
             (service.get(s1.id) as any).createdAt = Date.now() - 2 * 86400000;
 
-            // s2: failed and old
             service.setFailed(s2.id, 'err');
             (service.get(s2.id) as any).createdAt = Date.now() - 2 * 86400000;
 
-            // s3: still created (should not be removed)
             (service.get(s3.id) as any).createdAt = Date.now() - 2 * 86400000;
 
-            const removed = service.cleanup(86400000); // 1 day
+            const removed = service.cleanup(86400000);
             expect(removed).toBe(2);
             expect(service.get(s1.id)).toBeUndefined();
             expect(service.get(s2.id)).toBeUndefined();

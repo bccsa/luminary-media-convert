@@ -6,10 +6,6 @@ import type { CreateSessionDto } from '../dto/create-session.dto.js';
 
 function makeConfig(): CreateSessionDto {
     return {
-        type: 'video',
-        renditions: [
-            { width: 1280, height: 720, videoBitrateKbps: 2500, audioBitrateKbps: 128 },
-        ],
         s3: {
             endPoint: 's3.example.com',
             bucket: 'test',
@@ -43,7 +39,7 @@ describe('QueueService', () => {
         queueService = new QueueService(
             sessionService,
             encodeService,
-            webhookService
+            webhookService,
         );
     });
 
@@ -56,11 +52,8 @@ describe('QueueService', () => {
         });
 
         it('should return incrementing positions for items behind the first', () => {
-            // drain() synchronously shifts the first item and awaits processSession.
-            // So the first enqueue returns 1, but the item is immediately shifted for processing.
-            // Subsequent enqueues pile up behind the in-flight job.
             encodeService.processSession.mockReturnValue(
-                new Promise(() => {}) // never resolves, keeps first item processing
+                new Promise(() => {}),
             );
 
             const s1 = sessionService.create(makeConfig());
@@ -68,14 +61,13 @@ describe('QueueService', () => {
             const s3 = sessionService.create(makeConfig());
 
             const p1 = queueService.enqueue(s1.id);
-            // s1 is now being processed (shifted off queue). Queue has 0 items.
             expect(p1).toBe(1);
 
             const p2 = queueService.enqueue(s2.id);
-            expect(p2).toBe(1); // first in the waiting queue
+            expect(p2).toBe(1);
 
             const p3 = queueService.enqueue(s3.id);
-            expect(p3).toBe(2); // second in the waiting queue
+            expect(p3).toBe(2);
         });
 
         it('should update session status to queued', () => {
@@ -96,7 +88,7 @@ describe('QueueService', () => {
                     sessionId: session.id,
                     status: 'queued',
                     queuePosition: 1,
-                })
+                }),
             );
         });
 
@@ -112,7 +104,7 @@ describe('QueueService', () => {
     describe('getPosition', () => {
         it('should return 1-based position', () => {
             encodeService.processSession.mockReturnValue(
-                new Promise(() => {})
+                new Promise(() => {}),
             );
 
             const s1 = sessionService.create(makeConfig());
@@ -121,7 +113,6 @@ describe('QueueService', () => {
             queueService.enqueue(s1.id);
             queueService.enqueue(s2.id);
 
-            // s1 is being processed (shifted from queue), s2 is at position 1
             expect(queueService.getPosition(s2.id)).toBe(1);
         });
 
@@ -136,7 +127,7 @@ describe('QueueService', () => {
             encodeService.processSession.mockImplementation(
                 async (id: string) => {
                     order.push(id);
-                }
+                },
             );
 
             const s1 = sessionService.create(makeConfig());
@@ -147,7 +138,6 @@ describe('QueueService', () => {
             queueService.enqueue(s2.id);
             queueService.enqueue(s3.id);
 
-            // Wait for drain to complete
             await new Promise((r) => setTimeout(r, 50));
 
             expect(order).toEqual([s1.id, s2.id, s3.id]);
@@ -163,7 +153,7 @@ describe('QueueService', () => {
                         throw new Error('Simulated failure');
                     }
                     processed.push(id);
-                }
+                },
             );
 
             const s1 = sessionService.create(makeConfig());

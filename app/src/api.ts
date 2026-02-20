@@ -1,25 +1,23 @@
 import type {
-    Credentials,
     CreateSessionRequest,
     SessionResponse,
     UploadResponse,
+    EncodeConfig,
+    EncodeStartResponse,
     SessionStatusResponse,
 } from './types';
 
-function basicAuthHeader(creds: Credentials): string {
-    return 'Basic ' + btoa(`${creds.username}:${creds.password}`);
-}
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
 export async function createSession(
-    baseUrl: string,
     config: CreateSessionRequest,
-    credentials: Credentials,
+    accessToken: string,
 ): Promise<SessionResponse> {
-    const res = await fetch(`${baseUrl}/api/sessions`, {
+    const res = await fetch(`${BASE_URL}/api/sessions`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            Authorization: basicAuthHeader(credentials),
+            Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify(config),
     });
@@ -33,7 +31,6 @@ export async function createSession(
 }
 
 export async function uploadFile(
-    baseUrl: string,
     sessionId: string,
     uploadToken: string,
     file: File,
@@ -41,7 +38,7 @@ export async function uploadFile(
     const form = new FormData();
     form.append('file', file);
 
-    const res = await fetch(`${baseUrl}/api/sessions/${sessionId}/upload`, {
+    const res = await fetch(`${BASE_URL}/api/sessions/${sessionId}/upload`, {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${uploadToken}`,
@@ -57,14 +54,35 @@ export async function uploadFile(
     return res.json();
 }
 
-export async function getSessionStatus(
-    baseUrl: string,
+export async function startEncode(
     sessionId: string,
-    credentials: Credentials,
-): Promise<SessionStatusResponse> {
-    const res = await fetch(`${baseUrl}/api/sessions/${sessionId}`, {
+    encodeConfig: EncodeConfig,
+    accessToken: string,
+): Promise<EncodeStartResponse> {
+    const res = await fetch(`${BASE_URL}/api/sessions/${sessionId}/encode`, {
+        method: 'POST',
         headers: {
-            Authorization: basicAuthHeader(credentials),
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(encodeConfig),
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Encode start failed (${res.status})`);
+    }
+
+    return res.json();
+}
+
+export async function getSessionStatus(
+    sessionId: string,
+    accessToken: string,
+): Promise<SessionStatusResponse> {
+    const res = await fetch(`${BASE_URL}/api/sessions/${sessionId}`, {
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
         },
     });
 

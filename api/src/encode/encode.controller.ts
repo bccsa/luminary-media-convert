@@ -14,9 +14,9 @@ import {
     BadRequestException,
     Logger,
 } from '@nestjs/common';
+
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
-    ApiBasicAuth,
     ApiBearerAuth,
     ApiBody,
     ApiConsumes,
@@ -28,14 +28,17 @@ import {
 import type { Request } from 'express';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
-import { BasicAuthGuard } from './guards/basic-auth.guard.js';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { SessionAuthGuard } from './guards/session-auth.guard.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
+import { ProbeService } from './services/probe.service.js';
 import { CreateSessionDto } from './dto/create-session.dto.js';
+import { EncodeConfigDto } from './dto/encode-config.dto.js';
 import {
     SessionResponseDto,
     UploadResponseDto,
+    EncodeStartResponseDto,
     SessionStatusDto,
 } from './dto/session-response.dto.js';
 
@@ -48,12 +51,13 @@ export class EncodeController {
 
     constructor(
         private readonly sessionService: SessionService,
-        private readonly queueService: QueueService
+        private readonly queueService: QueueService,
+        private readonly probeService: ProbeService,
     ) {}
 
     @Post()
-    @UseGuards(BasicAuthGuard)
-    @ApiBasicAuth()
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth('auth0')
     @ApiOperation({
         summary: 'Create an encoding session',
         description:
@@ -67,22 +71,11 @@ export class EncodeController {
         type: SessionResponseDto,
     })
     @ApiResponse({ status: 400, description: 'Invalid request body.' })
-    @ApiResponse({ status: 401, description: 'Invalid credentials.' })
+    @ApiResponse({ status: 401, description: 'Unauthorized — invalid or missing Auth0 token.' })
     createSession(
         @Body() dto: CreateSessionDto,
-        @Req() req: Request
+        @Req() req: Request,
     ): SessionResponseDto {
-        // Validate renditions match the encoding type
-        if (dto.type === 'video') {
-            for (const r of dto.renditions) {
-                if (!r.width || !r.height || !r.videoBitrateKbps) {
-                    throw new BadRequestException(
-                        'Video renditions must include width, height, and videoBitrateKbps'
-                    );
-                }
-            }
-        }
-
         const session = this.sessionService.create(dto);
 
         const protocol = req.protocol;
@@ -97,12 +90,12 @@ export class EncodeController {
     }
 
     @Post(':sessionId/upload')
-    @HttpCode(HttpStatus.ACCEPTED)
+    @HttpCode(HttpStatus.OK)
     @UseGuards(SessionAuthGuard)
     @UseInterceptors(
         FileInterceptor('file', {
-            limits: { fileSize: 1024 * 1024 * 1024 * 10 }, // 10GB limit
-        })
+            limits: { fileSize: 1024 * 1024 * 1024 * 10 },
+        }),
     )
     @ApiBearerAuth()
     @ApiConsumes('multipart/form-data')
@@ -110,8 +103,8 @@ export class EncodeController {
         summary: 'Upload source media file',
         description:
             'Upload the source media file for an encoding session. ' +
-            'The file is accepted and the session is queued for encoding. ' +
-            'Use the Bearer token returned from the session creation endpoint.',
+            'The file is saved and probed using ffprobe. Returns probe results and ' +
+            'a suggested encoding configuration. Use POST /api/sessions/:id/encode to start encoding.',
     })
     @ApiParam({
         name: 'sessionId',
@@ -132,39 +125,118 @@ export class EncodeController {
         },
     })
     @ApiResponse({
-        status: 202,
-        description: 'File accepted and queued for encoding.',
+        status: 200,
+        description: 'File uploaded and probed. Review the probe results and suggested config, then POST to /encode.',
         type: UploadResponseDto,
     })
     @ApiResponse({ status: 400, description: 'No file provided.' })
     @ApiResponse({ status: 401, description: 'Invalid or expired upload token.' })
-    async uploadFile(
+    uploadFile(
         @Param('sessionId') sessionId: string,
         @UploadedFile() uploaded: any,
-        @Req() req: Request
-    ): Promise<UploadResponseDto> {
+    ): UploadResponseDto {
         if (!uploaded || !uploaded.buffer || uploaded.size === 0) {
             throw new BadRequestException('A non-empty file is required');
         }
 
-        // Save the uploaded file to the work directory
         const sessionDir = join(this.workDir, sessionId);
         if (!existsSync(sessionDir)) {
             mkdirSync(sessionDir, { recursive: true });
         }
 
-        const originalName =
-            uploaded.originalname || 'input';
+        const originalName = uploaded.originalname || 'input';
         const inputPath = join(sessionDir, originalName);
         writeFileSync(inputPath, uploaded.buffer);
 
         this.sessionService.setFilePath(sessionId, inputPath);
 
-        // Enqueue for processing
+        const probeResult = this.probeService.probe(inputPath);
+        const suggestedConfig = this.probeService.suggest(probeResult);
+
+        this.sessionService.setProbeResult(sessionId, probeResult, suggestedConfig);
+        this.sessionService.updateStatus(sessionId, 'uploaded');
+
+        this.logger.log(
+            `File uploaded and probed for session ${sessionId}: ` +
+            `${probeResult.videoTracks.length} video, ${probeResult.audioTracks.length} audio track(s)`,
+        );
+
+        return {
+            sessionId,
+            status: 'uploaded',
+            probeResult,
+            suggestedConfig,
+        };
+    }
+
+    @Post(':sessionId/encode')
+    @HttpCode(HttpStatus.ACCEPTED)
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth('auth0')
+    @ApiOperation({
+        summary: 'Start encoding with the given configuration',
+        description:
+            'Submit the encoding configuration for a previously uploaded file. ' +
+            'The session must be in "uploaded" status. The session is queued for encoding.',
+    })
+    @ApiParam({
+        name: 'sessionId',
+        description: 'Session ID returned from POST /api/sessions',
+    })
+    @ApiResponse({
+        status: 202,
+        description: 'Encoding config accepted and session queued.',
+        type: EncodeStartResponseDto,
+    })
+    @ApiResponse({ status: 400, description: 'Invalid config or session not in uploaded state.' })
+    @ApiResponse({ status: 401, description: 'Unauthorized — invalid or missing Auth0 token.' })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    startEncode(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: EncodeConfigDto,
+    ): EncodeStartResponseDto {
+        const session = this.sessionService.get(sessionId);
+        if (!session) {
+            throw new NotFoundException(`Session ${sessionId} not found`);
+        }
+
+        if (session.status !== 'uploaded') {
+            throw new BadRequestException(
+                `Session must be in "uploaded" status to start encoding (current: "${session.status}")`,
+            );
+        }
+
+        if (dto.type === 'video') {
+            if (!dto.videoRenditions?.length) {
+                throw new BadRequestException('Video type requires at least one videoRendition');
+            }
+            if (!dto.audioGroups?.length) {
+                throw new BadRequestException('Video type requires at least one audioGroup');
+            }
+            const groupIds = new Set(dto.audioGroups.map(g => g.id));
+            for (const vr of dto.videoRenditions) {
+                if (!groupIds.has(vr.audioGroupId)) {
+                    throw new BadRequestException(
+                        `Video rendition references unknown audioGroupId "${vr.audioGroupId}"`,
+                    );
+                }
+                if (vr.copyStream && vr.sourceTrackIndex == null) {
+                    throw new BadRequestException(
+                        'copyStream renditions require a sourceTrackIndex',
+                    );
+                }
+            }
+        } else {
+            if (!dto.audioRenditions?.length) {
+                throw new BadRequestException('Audio type requires at least one audioRendition');
+            }
+        }
+
+        this.sessionService.setEncodeConfig(sessionId, dto);
         const position = this.queueService.enqueue(sessionId);
 
         this.logger.log(
-            `File uploaded for session ${sessionId}, queued at position ${position}`
+            `Encoding started for session ${sessionId}, queued at position ${position}`,
         );
 
         return {
@@ -175,14 +247,15 @@ export class EncodeController {
     }
 
     @Get(':sessionId')
-    @UseGuards(BasicAuthGuard)
-    @ApiBasicAuth()
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth('auth0')
     @ApiOperation({
         summary: 'Get session status',
         description:
             'Poll the current status of an encoding session. ' +
-            'Includes progress percentage when encoding, queue position when queued, ' +
-            'and file listing when completed.',
+            'When status is "uploaded", includes probe results and suggested config. ' +
+            'When status is "encoding", includes progress percentage. ' +
+            'When "completed", includes file listing.',
     })
     @ApiParam({
         name: 'sessionId',
@@ -193,13 +266,13 @@ export class EncodeController {
         description: 'Current session status.',
         type: SessionStatusDto,
     })
-    @ApiResponse({ status: 401, description: 'Invalid credentials.' })
+    @ApiResponse({ status: 401, description: 'Unauthorized — invalid or missing Auth0 token.' })
     @ApiResponse({ status: 404, description: 'Session not found.' })
     getStatus(@Param('sessionId') sessionId: string): SessionStatusDto {
         const session = this.sessionService.get(sessionId);
         if (!session) {
             throw new NotFoundException(
-                `Session ${sessionId} not found`
+                `Session ${sessionId} not found`,
             );
         }
 
@@ -207,6 +280,11 @@ export class EncodeController {
             sessionId: session.id,
             status: session.status,
         };
+
+        if (session.status === 'uploaded') {
+            result.probeResult = session.probeResult as any;
+            result.suggestedConfig = session.suggestedConfig;
+        }
 
         if (session.status === 'queued') {
             result.queuePosition =

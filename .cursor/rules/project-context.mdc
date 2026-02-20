@@ -25,7 +25,8 @@ A folder-based npm workspaces monorepo containing:
 
 - **Runtime**: Node.js with TypeScript (ES2023 target, `nodenext` modules)
 - **Framework**: NestJS 11 (Express platform)
-- **Media processing**: FFmpeg via child_process (NVIDIA NVENC when GPU detected, CPU fallback)
+- **Authentication**: Auth0 JWT validation via `@nestjs/passport` + `passport-jwt` + `jwks-rsa`
+- **Media processing**: FFmpeg via child_process (NVIDIA NVENC when GPU detected, CPU fallback), ffprobe for media analysis
 - **S3 storage**: MinIO JS client (universal S3 compatibility: MinIO, R2, AWS S3, B2, etc.)
 - **Validation**: `class-validator` + `class-transformer` with a global `ValidationPipe`
 - **API docs**: `@nestjs/swagger` (OpenAPI at `/api/docs`)
@@ -39,6 +40,7 @@ A folder-based npm workspaces monorepo containing:
 - **Build**: Vite 6
 - **Styling**: Tailwind CSS v4
 - **Language**: TypeScript
+- **Authentication**: Auth0 via `@auth0/auth0-vue` SDK (Universal Login, automatic token management)
 - **Media playback**: Video.js 8 with a custom HLS quality selector plugin (`videojs-quality-selector.ts`)
 - **API communication**: Fetch-based client (`api.ts`), no proxy — connects directly to the API via CORS
 
@@ -48,22 +50,27 @@ A folder-based npm workspaces monorepo containing:
 api/
 ├── src/
 │   ├── main.ts                          # Entry point: bootstraps NestJS, Swagger, CORS
-│   ├── app.module.ts                    # Root module, imports EncodeModule
+│   ├── app.module.ts                    # Root module, imports AuthModule + EncodeModule
+│   ├── auth/
+│   │   ├── auth.module.ts              # Auth module (Passport + JWT strategy)
+│   │   ├── jwt.strategy.ts            # Auth0 JWT validation strategy (JWKS, RS256)
+│   │   └── jwt-auth.guard.ts          # NestJS guard wrapping Passport JWT
 │   └── encode/
 │       ├── encode.module.ts             # Feature module
 │       ├── encode.controller.ts         # REST endpoints under /api/sessions
 │       ├── dto/
-│       │   ├── create-session.dto.ts    # Session creation request
-│       │   ├── rendition.dto.ts         # ABR rendition config
+│       │   ├── create-session.dto.ts    # Session creation request (S3 + webhook config)
+│       │   ├── encode-config.dto.ts     # Encoding configuration (video renditions, audio groups, audio renditions)
+│       │   ├── probe-result.dto.ts      # Probe result DTOs for Swagger docs
 │       │   ├── s3-config.dto.ts         # S3 storage credentials
 │       │   ├── webhook-config.dto.ts    # Webhook URL + session token
-│       │   ├── session-response.dto.ts  # Response DTOs (create, upload, status)
-│       │   └── webhook-payload.dto.ts   # Webhook callback payload
+│       │   ├── session-response.dto.ts  # Response DTOs (create, upload, encode, status)
+│       │   └── webhook-payload.dto.ts   # Webhook callback payload + SessionStatus type
 │       ├── guards/
-│       │   ├── basic-auth.guard.ts      # Basic auth for session create/status
 │       │   └── session-auth.guard.ts    # Bearer token auth for file upload
 │       └── services/
 │           ├── session.service.ts       # In-memory session store + token management
+│           ├── probe.service.ts         # ffprobe wrapper: media analysis + suggested encoding config
 │           ├── queue.service.ts         # FIFO encoding queue (one-at-a-time)
 │           ├── ffmpeg.service.ts        # FFmpeg process management + GPU detection
 │           ├── s3.service.ts            # S3 upload via MinIO client
@@ -79,13 +86,14 @@ api/
 app/
 ├── src/
 │   ├── main.ts                          # Vue app entry point
-│   ├── App.vue                          # Root component (config → submit → progress flow)
-│   ├── api.ts                           # Fetch-based API client (create session, upload, poll)
-│   ├── types.ts                         # Shared TypeScript interfaces
+│   ├── App.vue                          # Root component (config → upload → configure → progress flow)
+│   ├── api.ts                           # Fetch-based API client (create session, upload, start encode, poll)
+│   ├── types.ts                         # Shared TypeScript interfaces (probe, encode config, etc.)
 │   ├── style.css                        # Global styles (Tailwind import)
 │   ├── videojs-quality-selector.ts      # Custom Video.js HLS quality selector plugin (native ES6)
 │   ├── components/
-│   │   ├── SessionConfigForm.vue        # Encoding config form (renditions, S3, webhook)
+│   │   ├── SessionConfigForm.vue        # S3 config + file selection form
+│   │   ├── EncodeConfigForm.vue         # Probe results display + encoding config (renditions, audio groups)
 │   │   ├── FileDropZone.vue             # Drag-and-drop file upload area
 │   │   └── SessionProgress.vue          # Progress display, Video.js player, copy URL button
 │   └── composables/
@@ -100,26 +108,49 @@ app/
 
 ## Architecture
 
-### Session-based async encoding pipeline
+### Two-phase encoding pipeline
 
-1. **POST** `/api/sessions` — Client sends encoding config (renditions, S3 creds, optional webhook URL) with Basic auth
+1. **POST** `/api/sessions` — Client sends S3 config + optional webhook URL with Auth0 JWT
 2. Service returns `{ sessionId, uploadUrl, uploadToken }`
-3. **POST** `/api/sessions/:id/upload` — Client uploads source file with Bearer token
-4. Session enters FIFO queue; webhook sent (if configured) with `queued` status + queue position
-5. When session reaches front of queue, FFmpeg encodes to HLS with ABR variants
-6. Progress webhooks sent during encoding (~every 5%), or client polls `GET /api/sessions/:id`
-7. Output files uploaded to client-specified S3 bucket via MinIO client
-8. Final webhook sent with `completed` status + list of S3 object keys + master playlist
+3. **POST** `/api/sessions/:id/upload` — Client uploads source file with Bearer token; API auto-probes with ffprobe
+4. Service returns `{ probeResult, suggestedConfig }` — detected tracks and a suggested encoding configuration
+5. Client reviews probe results, modifies encoding config (renditions, audio groups, copy/reencode toggles)
+6. **POST** `/api/sessions/:id/encode` — Client submits final encoding config with Auth0 JWT
+7. Session enters FIFO queue; webhook sent (if configured) with `queued` status + queue position
+8. When session reaches front of queue, FFmpeg encodes to HLS with ABR variants
+9. Progress webhooks sent during encoding (~every 5%), or client polls `GET /api/sessions/:id`
+10. Output files uploaded to client-specified S3 bucket via MinIO client
+11. Final webhook sent with `completed` status + list of S3 object keys + master playlist
+
+### Media analysis (ProbeService)
+
+- Wraps `ffprobe -v quiet -print_format json -show_format -show_streams`
+- Detects video tracks (codec, resolution, bitrate, frame rate, profile, language, title)
+- Detects audio tracks (codec, bitrate, channels, sample rate, language, title)
+- Generates suggested encoding config based on input:
+  - **Single video**: Standard ABR ladder with audio groups (HD/mid/low quality mapped to video resolutions)
+  - **Multiple video tracks** (pre-encoded): Suggests copy mode (no re-encoding), just HLS chunking
+  - **Audio-only**: Suggests 2-3 audio quality tiers (256/128/64 kbps)
+
+### Encoding features
+
+- **Copy mode** (`-c:v copy` / `-c:a copy`): Pass-through for pre-encoded streams, avoiding re-encoding
+- **Audio groups**: Different audio quality tiers mapped to video renditions via HLS `#EXT-X-MEDIA` GROUP-ID
+- **Multi-track audio**: Supports multiple audio tracks (e.g., different languages) with metadata preservation
+- **Metadata**: Language and name attributes in `-var_stream_map` for HLS `#EXT-X-MEDIA` and `#EXT-X-STREAM-INF` tags
+- **Channel control**: Mono/stereo/5.1/7.1 per audio group via `-ac`
 
 ### Web client flow
 
-1. User fills in encoding config (type, renditions, S3, optional webhook) in `SessionConfigForm`
-2. Selects a file via `FileDropZone` (drag-and-drop or browse)
-3. On submit, `App.vue` calls `createSession` then `uploadFile` via `api.ts`
-4. `App.vue` computes the S3 public base URL from the S3 config and stores the encoding type
-5. Transitions to progress view; `useSessionPoller` polls the API every 2s
-6. Polling auto-stops when session reaches a terminal status (`completed` or `failed`)
-7. On completion, a Video.js player loads the HLS master playlist from S3 (public URL), with an ABR quality selector and a copy-to-clipboard button for the playlist URL
+1. User signs in via Auth0 Universal Login (redirect flow)
+2. User fills in S3 config and selects a file in `SessionConfigForm`
+3. On submit, `App.vue` creates a session and uploads the file
+4. API probes the file and returns detected tracks + suggested encoding config
+5. User reviews probe results and configures encoding in `EncodeConfigForm` (renditions, audio groups, copy toggles)
+6. User clicks "Start Encoding" — `App.vue` submits the encode config
+7. Transitions to progress view; `useSessionPoller` polls the API every 2s
+8. Polling auto-stops when session reaches a terminal status (`completed` or `failed`)
+9. On completion, a Video.js player loads the HLS master playlist from S3
 
 ### FIFO queue
 
@@ -131,24 +162,25 @@ app/
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/sessions` | Basic | Create encoding session |
-| POST | `/api/sessions/:sessionId/upload` | Bearer | Upload source media file |
-| GET | `/api/sessions/:sessionId` | Basic | Poll session status |
+| POST | `/api/sessions` | Auth0 JWT | Create encoding session (S3 + webhook config) |
+| POST | `/api/sessions/:sessionId/upload` | Bearer (upload token) | Upload source media file, auto-probe, return suggestions |
+| POST | `/api/sessions/:sessionId/encode` | Auth0 JWT | Submit encoding config, enqueue for processing |
+| GET | `/api/sessions/:sessionId` | Auth0 JWT | Poll session status |
 
 ## Session Lifecycle
 
 ```
-created -> queued -> encoding -> uploading_to_s3 -> completed
-                             \-> failed
+created -> uploaded -> queued -> encoding -> uploading_to_s3 -> completed
+                                          \-> failed
 ```
 
 ## Key Conventions
 
 - DTOs use `class-validator` decorators and are validated via NestJS `ValidationPipe` (whitelist + forbidNonWhitelisted)
 - Webhook configuration is optional in `CreateSessionDto` — when omitted, no webhooks are sent; clients can poll instead
-- FFmpeg args are built dynamically based on GPU availability and rendition config
+- FFmpeg args are built dynamically based on GPU availability, encode config (audio groups, copy mode, metadata)
 - File uploads use `FileInterceptor` from `@nestjs/platform-express` (10GB limit)
-- Environment config via `dotenv`: `PORT`, `AUTH_USERNAME`, `AUTH_PASSWORD`, `WORK_DIR`, `FFMPEG_TIMEOUT_MS`, `CORS_ORIGIN`
+- Environment config via `dotenv`: `PORT`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `WORK_DIR`, `FFMPEG_TIMEOUT_MS`, `CORS_ORIGIN`
 - Swagger decorators on all DTOs and endpoints for auto-generated API docs
 - Web client stores S3 config in localStorage between sessions for convenience
 - Video.js quality selector is a custom plugin (`videojs-quality-selector.ts`) using native ES6 classes — the `videojs-hls-quality-selector` npm package is incompatible with Video.js 8 (Babel `_inheritsLoose` cannot extend native ES6 classes)
