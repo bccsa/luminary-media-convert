@@ -123,6 +123,16 @@ export class SessionService {
         }
     }
 
+    remove(id: string): Session | undefined {
+        const session = this.sessions.get(id);
+        if (!session) return undefined;
+
+        this.tokenIndex.delete(session.uploadToken);
+        this.sessions.delete(id);
+        this.logger.log(`Session removed: ${id}`);
+        return session;
+    }
+
     /**
      * Remove sessions older than the given max age (in ms).
      * Useful for periodic cleanup of completed/failed sessions.

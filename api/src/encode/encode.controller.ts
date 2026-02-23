@@ -1,6 +1,7 @@
 import {
     Body,
     Controller,
+    Delete,
     Get,
     HttpCode,
     HttpStatus,
@@ -26,9 +27,11 @@ import {
     ApiTags,
 } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
+import { diskStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { UploadCleanupInterceptor } from './interceptors/upload-cleanup.interceptor.js';
 import { SessionAuthGuard } from './guards/session-auth.guard.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
@@ -46,8 +49,6 @@ import {
 @Controller('api/sessions')
 export class EncodeController {
     private readonly logger = new Logger(EncodeController.name);
-    private readonly workDir =
-        process.env.WORK_DIR || join(process.cwd(), 'work');
 
     constructor(
         private readonly sessionService: SessionService,
@@ -93,7 +94,21 @@ export class EncodeController {
     @HttpCode(HttpStatus.OK)
     @UseGuards(SessionAuthGuard)
     @UseInterceptors(
+        UploadCleanupInterceptor,
         FileInterceptor('file', {
+            storage: diskStorage({
+                destination: (req, _file, cb) => {
+                    const workDir =
+                        process.env.WORK_DIR || join(process.cwd(), 'work');
+                    const sessionId = req.params.sessionId;
+                    const dir = join(workDir, sessionId);
+                    mkdirSync(dir, { recursive: true });
+                    cb(null, dir);
+                },
+                filename: (_req, file, cb) => {
+                    cb(null, file.originalname || 'input');
+                },
+            }),
             limits: { fileSize: 1024 * 1024 * 1024 * 10 },
         }),
     )
@@ -135,19 +150,11 @@ export class EncodeController {
         @Param('sessionId') sessionId: string,
         @UploadedFile() uploaded: any,
     ): UploadResponseDto {
-        if (!uploaded || !uploaded.buffer || uploaded.size === 0) {
+        if (!uploaded || !uploaded.path || uploaded.size === 0) {
             throw new BadRequestException('A non-empty file is required');
         }
 
-        const sessionDir = join(this.workDir, sessionId);
-        if (!existsSync(sessionDir)) {
-            mkdirSync(sessionDir, { recursive: true });
-        }
-
-        const originalName = uploaded.originalname || 'input';
-        const inputPath = join(sessionDir, originalName);
-        writeFileSync(inputPath, uploaded.buffer);
-
+        const inputPath = uploaded.path;
         this.sessionService.setFilePath(sessionId, inputPath);
 
         const probeResult = this.probeService.probe(inputPath);
@@ -306,5 +313,51 @@ export class EncodeController {
         }
 
         return result;
+    }
+
+    @Delete(':sessionId')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth('auth0')
+    @ApiOperation({
+        summary: 'Cancel and delete an encoding session',
+        description:
+            'Deletes a session and its uploaded file from disk. ' +
+            'Only sessions in "created" or "uploaded" status can be deleted. ' +
+            'Sessions that are queued, encoding, or completed cannot be cancelled.',
+    })
+    @ApiParam({
+        name: 'sessionId',
+        description: 'Session ID returned from POST /api/sessions',
+    })
+    @ApiResponse({ status: 204, description: 'Session deleted.' })
+    @ApiResponse({ status: 400, description: 'Session cannot be deleted in its current state.' })
+    @ApiResponse({ status: 401, description: 'Unauthorized — invalid or missing Auth0 token.' })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    deleteSession(@Param('sessionId') sessionId: string): void {
+        const session = this.sessionService.get(sessionId);
+        if (!session) {
+            throw new NotFoundException(`Session ${sessionId} not found`);
+        }
+
+        if (session.status !== 'created' && session.status !== 'uploaded') {
+            throw new BadRequestException(
+                `Cannot delete session in "${session.status}" status`,
+            );
+        }
+
+        const workDir =
+            process.env.WORK_DIR || join(process.cwd(), 'work');
+        const sessionDir = join(workDir, sessionId);
+        try {
+            rmSync(sessionDir, { recursive: true, force: true });
+        } catch (err) {
+            this.logger.warn(
+                `Failed to clean up directory for session ${sessionId}: ${(err as Error).message}`,
+            );
+        }
+
+        this.sessionService.remove(sessionId);
+        this.logger.log(`Session ${sessionId} deleted by client`);
     }
 }

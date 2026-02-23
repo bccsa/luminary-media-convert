@@ -4,7 +4,7 @@ import { useAuth0 } from '@auth0/auth0-vue';
 import SessionConfigForm from './components/SessionConfigForm.vue';
 import EncodeConfigForm from './components/EncodeConfigForm.vue';
 import SessionProgress from './components/SessionProgress.vue';
-import { createSession, uploadFile, startEncode } from './api';
+import { createSession, uploadFile, startEncode, deleteSession } from './api';
 import { useSessionPoller } from './composables/useSessionPoller';
 import type { CreateSessionRequest, S3Config, ProbeResult, SuggestedConfig, EncodeConfig } from './types';
 
@@ -16,6 +16,7 @@ const returnTo = window.location.origin;
 const view = ref<View>('config');
 const sessionId = ref('');
 const submissionError = ref<string | null>(null);
+const uploadProgress = ref(0);
 const s3PublicBaseUrl = ref('');
 const encodingType = ref<'video' | 'audio'>('video');
 const probeResult = ref<ProbeResult | null>(null);
@@ -36,6 +37,7 @@ async function onUploadSubmit(payload: {
 }) {
     view.value = 'uploading';
     submissionError.value = null;
+    uploadProgress.value = 0;
 
     try {
         const accessToken = await getAccessTokenSilently();
@@ -45,7 +47,12 @@ async function onUploadSubmit(payload: {
         const session = await createSession(payload.config, accessToken);
         sessionId.value = session.sessionId;
 
-        const uploadResult = await uploadFile(session.sessionId, session.uploadToken, payload.file);
+        const uploadResult = await uploadFile(
+            session.sessionId,
+            session.uploadToken,
+            payload.file,
+            (percent) => { uploadProgress.value = percent; },
+        );
 
         probeResult.value = uploadResult.probeResult ?? null;
         suggestedConfig.value = uploadResult.suggestedConfig ?? null;
@@ -76,7 +83,15 @@ async function onEncodeSubmit(config: EncodeConfig) {
     }
 }
 
-function onEncodeBack() {
+async function onEncodeBack() {
+    if (sessionId.value) {
+        try {
+            const accessToken = await getAccessTokenSilently();
+            await deleteSession(sessionId.value, accessToken);
+        } catch {
+            // Best-effort cleanup — server will eventually garbage-collect
+        }
+    }
     view.value = 'config';
     sessionId.value = '';
     probeResult.value = null;
@@ -88,6 +103,7 @@ function reset() {
     view.value = 'config';
     sessionId.value = '';
     submissionError.value = null;
+    uploadProgress.value = 0;
     s3PublicBaseUrl.value = '';
     encodingType.value = 'video';
     probeResult.value = null;
@@ -150,13 +166,20 @@ function reset() {
                     @submit="onUploadSubmit"
                 />
 
-                <!-- Uploading spinner -->
+                <!-- Upload progress -->
                 <div v-else-if="view === 'uploading'" class="flex flex-col items-center gap-4 py-16">
-                    <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    <p class="text-sm text-zinc-400">Uploading and analyzing file...</p>
+                    <div class="w-full max-w-xs">
+                        <div class="mb-2 flex items-center justify-between text-sm text-zinc-400">
+                            <span>{{ uploadProgress >= 100 ? 'Analyzing...' : 'Uploading...' }}</span>
+                            <span>{{ uploadProgress }}%</span>
+                        </div>
+                        <div class="h-2 w-full overflow-hidden rounded-full bg-zinc-800">
+                            <div
+                                class="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                                :style="{ width: `${uploadProgress}%` }"
+                            />
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Step 2: Review probe results + configure encoding -->

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, computed } from 'vue';
+import { reactive, computed, ref } from 'vue';
 import type {
     ProbeResult,
     SuggestedConfig,
@@ -18,6 +18,8 @@ const emit = defineEmits<{
     submit: [config: EncodeConfig];
     back: [];
 }>();
+
+const showBackConfirm = ref(false);
 
 const encodingType = reactive<{ value: 'video' | 'audio' }>({
     value: props.suggestedConfig.type,
@@ -470,11 +472,37 @@ function onSubmit() {
             </fieldset>
         </template>
 
+        <!-- Back confirmation banner -->
+        <div
+            v-if="showBackConfirm"
+            class="rounded-lg border border-amber-800/50 bg-amber-950/40 p-4"
+        >
+            <p class="mb-3 text-sm text-amber-300">
+                Going back will delete the uploaded file from the server. Are you sure?
+            </p>
+            <div class="flex gap-3">
+                <button
+                    type="button"
+                    @click="showBackConfirm = false"
+                    class="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer"
+                >
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    @click="emit('back')"
+                    class="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-500 cursor-pointer"
+                >
+                    Delete &amp; Go Back
+                </button>
+            </div>
+        </div>
+
         <!-- Actions -->
-        <div class="flex gap-3">
+        <div v-else class="flex gap-3">
             <button
                 type="button"
-                @click="emit('back')"
+                @click="showBackConfirm = true"
                 class="rounded-lg border border-zinc-700 px-6 py-3 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer"
             >
                 Back

@@ -212,9 +212,9 @@ describe('EncodeController', () => {
             ).toThrow(BadRequestException);
         });
 
-        it('should reject when file buffer is empty', () => {
+        it('should reject when file has no path (empty upload)', () => {
             const uploaded = {
-                buffer: Buffer.alloc(0),
+                path: '',
                 size: 0,
                 originalname: 'test.mp4',
             };
@@ -226,8 +226,9 @@ describe('EncodeController', () => {
 
         it('should probe file and return uploaded status', () => {
             const session = sessionService.create(makeConfig());
+            const filePath = join(testWorkDir, 'test.mp4');
             const uploaded = {
-                buffer: Buffer.from('fake-video-data'),
+                path: filePath,
                 size: 15,
                 originalname: 'test.mp4',
             };
@@ -238,14 +239,15 @@ describe('EncodeController', () => {
             expect(result.status).toBe('uploaded');
             expect(result.probeResult).toBeDefined();
             expect(result.suggestedConfig).toBeDefined();
-            expect(probeService.probe).toHaveBeenCalled();
+            expect(probeService.probe).toHaveBeenCalledWith(filePath);
             expect(probeService.suggest).toHaveBeenCalled();
         });
 
         it('should set file path on the session', () => {
             const session = sessionService.create(makeConfig());
+            const filePath = join(testWorkDir, 'video.mp4');
             const uploaded = {
-                buffer: Buffer.from('data'),
+                path: filePath,
                 size: 4,
                 originalname: 'video.mp4',
             };
@@ -253,7 +255,7 @@ describe('EncodeController', () => {
             controller.uploadFile(session.id, uploaded);
 
             const updated = sessionService.get(session.id)!;
-            expect(updated.filePath).toContain('video.mp4');
+            expect(updated.filePath).toBe(filePath);
         });
     });
 
