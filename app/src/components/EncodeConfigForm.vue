@@ -7,6 +7,7 @@ import type {
     VideoRendition,
     AudioGroup,
     AudioRendition,
+    AudioTrackInfo,
 } from '../types';
 
 const props = defineProps<{
@@ -40,6 +41,71 @@ const audioGroups = reactive<AudioGroup[]>(
 const audioRenditions = reactive<AudioRendition[]>(
     props.suggestedConfig.audioRenditions?.map(r => ({ ...r })) ?? [],
 );
+
+const editableAudioTracks = reactive<AudioTrackInfo[]>(
+    props.probeResult.audioTracks.map(t => ({ ...t })),
+);
+
+function reanalyzeAudio() {
+    const langMap = new Map<string, AudioTrackInfo[]>();
+    for (const track of editableAudioTracks) {
+        const lang = track.language || 'und';
+        if (!langMap.has(lang)) langMap.set(lang, []);
+        langMap.get(lang)!.push(track);
+    }
+
+    for (const tracks of langMap.values()) {
+        tracks.sort((a, b) => (b.bitrateKbps || 0) - (a.bitrateKbps || 0));
+    }
+
+    const languages = Array.from(langMap.keys());
+    const maxTracksPerLang = Math.max(...Array.from(langMap.values()).map(t => t.length));
+    const numTiers = Math.min(videoRenditions.length, maxTracksPerLang);
+
+    const newGroups: AudioGroup[] = [];
+    for (let tier = 0; tier < numTiers; tier++) {
+        const tierId = `tier_${tier}`;
+        for (const lang of languages) {
+            const tracks = langMap.get(lang)!;
+            const track = tracks[tier] ?? tracks[tracks.length - 1];
+            newGroups.push({
+                id: tierId,
+                label: `${lang.toUpperCase()} ${track.bitrateKbps || '?'}kbps`,
+                audioBitrateKbps: track.bitrateKbps || 128,
+                channels: track.channels,
+                audioCodec: (track.codec === 'mp3' ? 'mp3' : 'aac') as 'aac' | 'mp3',
+                sourceTrackIndex: track.index,
+                language: lang === 'und' ? undefined : lang,
+                copyStream: true,
+            });
+        }
+    }
+
+    audioGroups.splice(0, audioGroups.length, ...newGroups);
+
+    const sortedRenditions = [...videoRenditions].sort(
+        (a, b) => (b.height * b.width) - (a.height * a.width),
+    );
+    for (let i = 0; i < sortedRenditions.length; i++) {
+        sortedRenditions[i].audioGroupId = i < numTiers ? `tier_${i}` : `tier_${numTiers - 1}`;
+    }
+}
+
+const uniqueAudioGroupOptions = computed(() => {
+    const seen = new Set<string>();
+    const result: { id: string; label: string }[] = [];
+    for (const g of audioGroups) {
+        if (!seen.has(g.id)) {
+            seen.add(g.id);
+            const groupEntries = audioGroups.filter(e => e.id === g.id);
+            const langs = groupEntries
+                .map(e => e.language ?? e.label ?? e.id)
+                .join(', ');
+            result.push({ id: g.id, label: `${g.id} (${langs})` });
+        }
+    }
+    return result;
+});
 
 function addVideoRendition() {
     const defaultGroupId = audioGroups[0]?.id ?? 'hd';
@@ -205,8 +271,8 @@ function onSubmit() {
             </div>
 
             <!-- Audio Tracks -->
-            <div v-if="probeResult.audioTracks.length > 0">
-                <h4 class="mb-1 text-xs font-medium text-zinc-500">Audio Tracks ({{ probeResult.audioTracks.length }})</h4>
+            <div v-if="editableAudioTracks.length > 0">
+                <h4 class="mb-1 text-xs font-medium text-zinc-500">Audio Tracks ({{ editableAudioTracks.length }})</h4>
                 <div class="overflow-x-auto">
                     <table class="w-full text-xs text-left">
                         <thead class="text-zinc-500 border-b border-zinc-800">
@@ -221,17 +287,33 @@ function onSubmit() {
                             </tr>
                         </thead>
                         <tbody class="text-zinc-300">
-                            <tr v-for="t in probeResult.audioTracks" :key="t.index" class="border-b border-zinc-800/50">
+                            <tr v-for="t in editableAudioTracks" :key="t.index" class="border-b border-zinc-800/50">
                                 <td class="px-2 py-1">{{ t.index }}</td>
                                 <td class="px-2 py-1">{{ t.codec }}</td>
                                 <td class="px-2 py-1">{{ t.bitrateKbps ? `${t.bitrateKbps} kbps` : '—' }}</td>
                                 <td class="px-2 py-1">{{ channelLabel(t.channels) }}</td>
                                 <td class="px-2 py-1">{{ t.sampleRate }} Hz</td>
-                                <td class="px-2 py-1">{{ t.language ?? '—' }}</td>
+                                <td class="px-2 py-1">
+                                    <input
+                                        v-model="t.language"
+                                        type="text"
+                                        class="input w-16 text-xs text-center"
+                                        placeholder="und"
+                                    />
+                                </td>
                                 <td class="px-2 py-1">{{ t.title ?? '—' }}</td>
                             </tr>
                         </tbody>
                     </table>
+                </div>
+                <div v-if="encodingType.value === 'video'" class="mt-2">
+                    <button
+                        type="button"
+                        @click="reanalyzeAudio"
+                        class="rounded border border-indigo-700 px-3 py-1.5 text-xs font-medium text-indigo-300 transition-colors hover:bg-indigo-900/40 cursor-pointer"
+                    >
+                        Re-analyze Audio Mapping
+                    </button>
                 </div>
             </div>
         </fieldset>
@@ -283,8 +365,8 @@ function onSubmit() {
                         </div>
                         <div>
                             <label class="mb-1 block text-xs text-zinc-500">Audio Group</label>
-                            <select v-model="r.audioGroupId" class="input w-32">
-                                <option v-for="g in audioGroups" :key="g.id" :value="g.id">{{ g.label || g.id }}</option>
+                            <select v-model="r.audioGroupId" class="input w-40">
+                                <option v-for="opt in uniqueAudioGroupOptions" :key="opt.id" :value="opt.id">{{ opt.label }}</option>
                             </select>
                         </div>
                         <div>
@@ -372,7 +454,7 @@ function onSubmit() {
                         <div>
                             <label class="mb-1 block text-xs text-zinc-500">Source Track</label>
                             <select v-model.number="g.sourceTrackIndex" class="input w-40 text-xs">
-                                <option v-for="t in probeResult.audioTracks" :key="t.index" :value="t.index">
+                                <option v-for="t in editableAudioTracks" :key="t.index" :value="t.index">
                                     #{{ t.index }}: {{ t.codec }} {{ t.bitrateKbps ? `${t.bitrateKbps}kbps` : '' }} {{ channelLabel(t.channels) }}{{ t.language ? ` [${t.language}]` : '' }}
                                 </option>
                             </select>
@@ -438,7 +520,7 @@ function onSubmit() {
                         <div>
                             <label class="mb-1 block text-xs text-zinc-500">Source Track</label>
                             <select v-model.number="r.sourceTrackIndex" class="input w-40 text-xs">
-                                <option v-for="t in probeResult.audioTracks" :key="t.index" :value="t.index">
+                                <option v-for="t in editableAudioTracks" :key="t.index" :value="t.index">
                                     #{{ t.index }}: {{ t.codec }} {{ t.bitrateKbps ? `${t.bitrateKbps}kbps` : '' }} {{ channelLabel(t.channels) }}{{ t.language ? ` [${t.language}]` : '' }}
                                 </option>
                             </select>

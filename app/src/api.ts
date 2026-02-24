@@ -1,7 +1,7 @@
+import * as tus from 'tus-js-client';
 import type {
     CreateSessionRequest,
     SessionResponse,
-    UploadResponse,
     EncodeConfig,
     EncodeStartResponse,
     SessionStatusResponse,
@@ -31,46 +31,43 @@ export async function createSession(
 }
 
 export function uploadFile(
+    tusEndpoint: string,
     sessionId: string,
     uploadToken: string,
     file: File,
     onProgress?: (percent: number) => void,
-): Promise<UploadResponse> {
-    return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', `${BASE_URL}/api/sessions/${sessionId}/upload`);
-        xhr.setRequestHeader('Authorization', `Bearer ${uploadToken}`);
+): { promise: Promise<void>; abort: () => void } {
+    let abortFn: () => void = () => {};
 
-        if (onProgress) {
-            xhr.upload.onprogress = (e) => {
-                if (e.lengthComputable) {
-                    onProgress(Math.round((e.loaded / e.total) * 100));
-                }
-            };
-        }
+    const promise = new Promise<void>((resolve, reject) => {
+        const upload = new tus.Upload(file, {
+            endpoint: tusEndpoint,
+            retryDelays: [0, 1000, 3000, 5000],
+            metadata: {
+                sessionId,
+                filename: file.name,
+                filetype: file.type,
+            },
+            headers: {
+                Authorization: `Bearer ${uploadToken}`,
+            },
+            chunkSize: 50 * 1024 * 1024,
+            onProgress(bytesUploaded, bytesTotal) {
+                onProgress?.(Math.round((bytesUploaded / bytesTotal) * 100));
+            },
+            onSuccess() {
+                resolve();
+            },
+            onError(error) {
+                reject(error);
+            },
+        });
 
-        xhr.onload = () => {
-            let body: any;
-            try {
-                body = JSON.parse(xhr.responseText);
-            } catch {
-                body = {};
-            }
-
-            if (xhr.status >= 200 && xhr.status < 300) {
-                resolve(body as UploadResponse);
-            } else {
-                reject(new Error(body.message || `File upload failed (${xhr.status})`));
-            }
-        };
-
-        xhr.onerror = () => reject(new Error('Network error during file upload'));
-        xhr.ontimeout = () => reject(new Error('File upload timed out'));
-
-        const form = new FormData();
-        form.append('file', file);
-        xhr.send(form);
+        abortFn = () => upload.abort(true);
+        upload.start();
     });
+
+    return { promise, abort: abortFn };
 }
 
 export async function startEncode(

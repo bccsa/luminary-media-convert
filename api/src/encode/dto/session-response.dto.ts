@@ -12,50 +12,27 @@ export class SessionResponseDto {
 
     @ApiProperty({
         description:
-            'URL to upload the media file to. POST the file as multipart/form-data with field name "file".',
-        example:
-            'http://localhost:3000/api/sessions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/upload',
+            'TUS upload endpoint. Create a tus upload to this URL, passing the sessionId as upload metadata.',
+        example: 'http://localhost:3000/api/tus',
     })
     @Expose()
-    uploadUrl: string;
+    tusEndpoint: string;
 
     @ApiProperty({
         description:
-            'Bearer token to authenticate the upload request. Send as "Authorization: Bearer <token>".',
+            'Bearer token to authenticate tus upload requests. Send as "Authorization: Bearer <token>".',
         example: 'tok_f8e7d6c5b4a3291087654321',
     })
     @Expose()
     uploadToken: string;
-}
-
-export class UploadResponseDto {
-    @ApiProperty({
-        description: 'Session identifier.',
-        example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-    })
-    @Expose()
-    sessionId: string;
 
     @ApiProperty({
-        description: 'Current session status.',
-        example: 'uploaded',
+        description:
+            'Maximum allowed upload file size in bytes.',
+        example: 10737418240,
     })
     @Expose()
-    status: string;
-
-    @ApiPropertyOptional({
-        description: 'Probe results from the uploaded file.',
-        type: ProbeResultDto,
-    })
-    @Type(() => ProbeResultDto)
-    @Expose()
-    probeResult?: ProbeResultDto;
-
-    @ApiPropertyOptional({
-        description: 'Suggested encoding configuration based on the probe results.',
-    })
-    @Expose()
-    suggestedConfig?: any;
+    maxUploadSize: number;
 }
 
 export class EncodeStartResponseDto {

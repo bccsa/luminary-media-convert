@@ -105,15 +105,9 @@ export interface CreateSessionRequest {
 
 export interface SessionResponse {
     sessionId: string;
-    uploadUrl: string;
+    tusEndpoint: string;
     uploadToken: string;
-}
-
-export interface UploadResponse {
-    sessionId: string;
-    status: string;
-    probeResult?: ProbeResult;
-    suggestedConfig?: SuggestedConfig;
+    maxUploadSize: number;
 }
 
 export interface EncodeStartResponse {

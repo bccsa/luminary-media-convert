@@ -42,7 +42,7 @@ A folder-based npm workspaces monorepo containing:
 - **Language**: TypeScript
 - **Authentication**: Auth0 via `@auth0/auth0-vue` SDK (Universal Login, automatic token management)
 - **Media playback**: Video.js 8 with a custom HLS quality selector plugin (`videojs-quality-selector.ts`)
-- **API communication**: Fetch-based client (`api.ts`), no proxy — connects directly to the API via CORS
+- **API communication**: Fetch-based client (`api.ts`) with `VITE_API_BASE_URL`, no proxy — connects directly to the API via CORS
 
 ## Project Structure
 
@@ -62,12 +62,17 @@ api/
 │       │   ├── create-session.dto.ts    # Session creation request (S3 + webhook config)
 │       │   ├── encode-config.dto.ts     # Encoding configuration (video renditions, audio groups, audio renditions)
 │       │   ├── probe-result.dto.ts      # Probe result DTOs for Swagger docs
+│       │   ├── rendition.dto.ts         # Rendition DTO (width, height, bitrates, audio codec)
 │       │   ├── s3-config.dto.ts         # S3 storage credentials
 │       │   ├── webhook-config.dto.ts    # Webhook URL + session token
 │       │   ├── session-response.dto.ts  # Response DTOs (create, upload, encode, status)
 │       │   └── webhook-payload.dto.ts   # Webhook callback payload + SessionStatus type
 │       ├── guards/
 │       │   └── session-auth.guard.ts    # Bearer token auth for file upload
+│       ├── interceptors/
+│       │   └── upload-cleanup.interceptor.ts  # Cleans up partial uploads on error/disconnect
+│       ├── middleware/
+│       │   └── upload-timeout.middleware.ts    # 10-minute upload timeout
 │       └── services/
 │           ├── session.service.ts       # In-memory session store + token management
 │           ├── probe.service.ts         # ffprobe wrapper: media analysis + suggested encoding config
@@ -87,7 +92,7 @@ app/
 ├── src/
 │   ├── main.ts                          # Vue app entry point
 │   ├── App.vue                          # Root component (config → upload → configure → progress flow)
-│   ├── api.ts                           # Fetch-based API client (create session, upload, start encode, poll)
+│   ├── api.ts                           # Fetch-based API client (create session, upload, start encode, delete, poll)
 │   ├── types.ts                         # Shared TypeScript interfaces (probe, encode config, etc.)
 │   ├── style.css                        # Global styles (Tailwind import)
 │   ├── videojs-quality-selector.ts      # Custom Video.js HLS quality selector plugin (native ES6)
@@ -140,6 +145,11 @@ app/
 - **Metadata**: Language and name attributes in `-var_stream_map` for HLS `#EXT-X-MEDIA` and `#EXT-X-STREAM-INF` tags
 - **Channel control**: Mono/stereo/5.1/7.1 per audio group via `-ac`
 
+### Upload resilience
+
+- **Upload cleanup interceptor**: `UploadCleanupInterceptor` wraps the upload pipeline (outer to `FileInterceptor`) and removes partially-written files when an error occurs or the client disconnects mid-upload
+- **Upload timeout middleware**: `UploadTimeoutMiddleware` applies a 10-minute hard timeout to upload requests, returning HTTP 408 on expiry
+
 ### Web client flow
 
 1. User signs in via Auth0 Universal Login (redirect flow)
@@ -166,6 +176,7 @@ app/
 | POST | `/api/sessions/:sessionId/upload` | Bearer (upload token) | Upload source media file, auto-probe, return suggestions |
 | POST | `/api/sessions/:sessionId/encode` | Auth0 JWT | Submit encoding config, enqueue for processing |
 | GET | `/api/sessions/:sessionId` | Auth0 JWT | Poll session status |
+| DELETE | `/api/sessions/:sessionId` | Auth0 JWT | Cancel and delete session (only `created` or `uploaded` status) |
 
 ## Session Lifecycle
 
@@ -179,8 +190,9 @@ created -> uploaded -> queued -> encoding -> uploading_to_s3 -> completed
 - DTOs use `class-validator` decorators and are validated via NestJS `ValidationPipe` (whitelist + forbidNonWhitelisted)
 - Webhook configuration is optional in `CreateSessionDto` — when omitted, no webhooks are sent; clients can poll instead
 - FFmpeg args are built dynamically based on GPU availability, encode config (audio groups, copy mode, metadata)
-- File uploads use `FileInterceptor` from `@nestjs/platform-express` (10GB limit)
-- Environment config via `dotenv`: `PORT`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `WORK_DIR`, `FFMPEG_TIMEOUT_MS`, `CORS_ORIGIN`
+- File uploads use `FileInterceptor` from `@nestjs/platform-express` (10GB limit), wrapped by `UploadCleanupInterceptor` and `UploadTimeoutMiddleware`
+- Graceful shutdown enabled (`app.enableShutdownHooks()`); `QueueService` and `FfmpegService` implement `OnModuleDestroy` to clean up active processes
+- Environment config via `dotenv`: `PORT`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `WORK_DIR`, `FFMPEG_TIMEOUT_MS`, `CORS_ORIGIN` (API); `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`, `VITE_API_BASE_URL` (app)
 - Swagger decorators on all DTOs and endpoints for auto-generated API docs
 - Web client stores S3 config in localStorage between sessions for convenience
 - Video.js quality selector is a custom plugin (`videojs-quality-selector.ts`) using native ES6 classes — the `videojs-hls-quality-selector` npm package is incompatible with Video.js 8 (Babel `_inheritsLoose` cannot extend native ES6 classes)

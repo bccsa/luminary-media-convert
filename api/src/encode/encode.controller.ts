@@ -9,41 +9,33 @@ import {
     Param,
     Post,
     Req,
-    UploadedFile,
     UseGuards,
-    UseInterceptors,
     BadRequestException,
     Logger,
 } from '@nestjs/common';
 
-import { FileInterceptor } from '@nestjs/platform-express';
 import {
     ApiBearerAuth,
-    ApiBody,
-    ApiConsumes,
     ApiOperation,
     ApiParam,
     ApiResponse,
     ApiTags,
 } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { mkdirSync, rmSync } from 'fs';
+import { rmSync } from 'fs';
 import { join } from 'path';
-import { diskStorage } from 'multer';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
-import { UploadCleanupInterceptor } from './interceptors/upload-cleanup.interceptor.js';
-import { SessionAuthGuard } from './guards/session-auth.guard.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
-import { ProbeService } from './services/probe.service.js';
 import { CreateSessionDto } from './dto/create-session.dto.js';
 import { EncodeConfigDto } from './dto/encode-config.dto.js';
 import {
     SessionResponseDto,
-    UploadResponseDto,
     EncodeStartResponseDto,
     SessionStatusDto,
 } from './dto/session-response.dto.js';
+
+const DEFAULT_MAX_UPLOAD_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 
 @ApiTags('Encoding Sessions')
 @Controller('api/sessions')
@@ -53,7 +45,6 @@ export class EncodeController {
     constructor(
         private readonly sessionService: SessionService,
         private readonly queueService: QueueService,
-        private readonly probeService: ProbeService,
     ) {}
 
     @Post()
@@ -62,17 +53,21 @@ export class EncodeController {
     @ApiOperation({
         summary: 'Create an encoding session',
         description:
-            'Creates a new encoding session and returns an upload URL and token. ' +
-            'The client should then upload the source media file to the provided URL ' +
-            'using the Bearer token for authentication.',
+            'Creates a new encoding session and returns a tus upload endpoint ' +
+            'and upload token. The client should create a tus upload ' +
+            'to the provided endpoint using the Bearer token for authentication.',
     })
     @ApiResponse({
         status: 201,
-        description: 'Session created. Use the returned uploadUrl and uploadToken to upload your file.',
+        description:
+            'Session created. Use the returned tusEndpoint and uploadToken to upload your file via the tus protocol.',
         type: SessionResponseDto,
     })
     @ApiResponse({ status: 400, description: 'Invalid request body.' })
-    @ApiResponse({ status: 401, description: 'Unauthorized — invalid or missing Auth0 token.' })
+    @ApiResponse({
+        status: 401,
+        description: 'Unauthorized — invalid or missing Auth0 token.',
+    })
     createSession(
         @Body() dto: CreateSessionDto,
         @Req() req: Request,
@@ -81,98 +76,17 @@ export class EncodeController {
 
         const protocol = req.protocol;
         const host = req.get('host');
-        const uploadUrl = `${protocol}://${host}/api/sessions/${session.id}/upload`;
+        const tusEndpoint = `${protocol}://${host}/api/tus`;
+
+        const maxUploadSize =
+            parseInt(process.env.MAX_UPLOAD_SIZE || '0', 10) ||
+            DEFAULT_MAX_UPLOAD_SIZE;
 
         return {
             sessionId: session.id,
-            uploadUrl,
+            tusEndpoint,
             uploadToken: session.uploadToken,
-        };
-    }
-
-    @Post(':sessionId/upload')
-    @HttpCode(HttpStatus.OK)
-    @UseGuards(SessionAuthGuard)
-    @UseInterceptors(
-        UploadCleanupInterceptor,
-        FileInterceptor('file', {
-            storage: diskStorage({
-                destination: (req, _file, cb) => {
-                    const workDir =
-                        process.env.WORK_DIR || join(process.cwd(), 'work');
-                    const sessionId = req.params.sessionId;
-                    const dir = join(workDir, sessionId);
-                    mkdirSync(dir, { recursive: true });
-                    cb(null, dir);
-                },
-                filename: (_req, file, cb) => {
-                    cb(null, file.originalname || 'input');
-                },
-            }),
-            limits: { fileSize: 1024 * 1024 * 1024 * 10 },
-        }),
-    )
-    @ApiBearerAuth()
-    @ApiConsumes('multipart/form-data')
-    @ApiOperation({
-        summary: 'Upload source media file',
-        description:
-            'Upload the source media file for an encoding session. ' +
-            'The file is saved and probed using ffprobe. Returns probe results and ' +
-            'a suggested encoding configuration. Use POST /api/sessions/:id/encode to start encoding.',
-    })
-    @ApiParam({
-        name: 'sessionId',
-        description: 'Session ID returned from POST /api/sessions',
-    })
-    @ApiBody({
-        description: 'Multipart form data with a single "file" field containing the media file.',
-        schema: {
-            type: 'object',
-            properties: {
-                file: {
-                    type: 'string',
-                    format: 'binary',
-                    description: 'Source media file (video or audio)',
-                },
-            },
-            required: ['file'],
-        },
-    })
-    @ApiResponse({
-        status: 200,
-        description: 'File uploaded and probed. Review the probe results and suggested config, then POST to /encode.',
-        type: UploadResponseDto,
-    })
-    @ApiResponse({ status: 400, description: 'No file provided.' })
-    @ApiResponse({ status: 401, description: 'Invalid or expired upload token.' })
-    uploadFile(
-        @Param('sessionId') sessionId: string,
-        @UploadedFile() uploaded: any,
-    ): UploadResponseDto {
-        if (!uploaded || !uploaded.path || uploaded.size === 0) {
-            throw new BadRequestException('A non-empty file is required');
-        }
-
-        const inputPath = uploaded.path;
-        this.sessionService.setFilePath(sessionId, inputPath);
-
-        const probeResult = this.probeService.probe(inputPath);
-        const suggestedConfig = this.probeService.suggest(probeResult);
-
-        this.sessionService.setProbeResult(sessionId, probeResult, suggestedConfig);
-        this.sessionService.updateStatus(sessionId, 'uploaded');
-
-        this.logger.log(
-            `File uploaded and probed for session ${sessionId}: ` +
-            `${probeResult.videoTracks.length} video, ${probeResult.audioTracks.length} audio track(s)`,
-        );
-
-        return {
-            sessionId,
-            status: 'uploaded',
-            probeResult,
-            suggestedConfig,
+            maxUploadSize,
         };
     }
 
@@ -195,8 +109,14 @@ export class EncodeController {
         description: 'Encoding config accepted and session queued.',
         type: EncodeStartResponseDto,
     })
-    @ApiResponse({ status: 400, description: 'Invalid config or session not in uploaded state.' })
-    @ApiResponse({ status: 401, description: 'Unauthorized — invalid or missing Auth0 token.' })
+    @ApiResponse({
+        status: 400,
+        description: 'Invalid config or session not in uploaded state.',
+    })
+    @ApiResponse({
+        status: 401,
+        description: 'Unauthorized — invalid or missing Auth0 token.',
+    })
     @ApiResponse({ status: 404, description: 'Session not found.' })
     startEncode(
         @Param('sessionId') sessionId: string,
@@ -215,12 +135,16 @@ export class EncodeController {
 
         if (dto.type === 'video') {
             if (!dto.videoRenditions?.length) {
-                throw new BadRequestException('Video type requires at least one videoRendition');
+                throw new BadRequestException(
+                    'Video type requires at least one videoRendition',
+                );
             }
             if (!dto.audioGroups?.length) {
-                throw new BadRequestException('Video type requires at least one audioGroup');
+                throw new BadRequestException(
+                    'Video type requires at least one audioGroup',
+                );
             }
-            const groupIds = new Set(dto.audioGroups.map(g => g.id));
+            const groupIds = new Set(dto.audioGroups.map((g) => g.id));
             for (const vr of dto.videoRenditions) {
                 if (!groupIds.has(vr.audioGroupId)) {
                     throw new BadRequestException(
@@ -235,7 +159,9 @@ export class EncodeController {
             }
         } else {
             if (!dto.audioRenditions?.length) {
-                throw new BadRequestException('Audio type requires at least one audioRendition');
+                throw new BadRequestException(
+                    'Audio type requires at least one audioRendition',
+                );
             }
         }
 
@@ -273,14 +199,15 @@ export class EncodeController {
         description: 'Current session status.',
         type: SessionStatusDto,
     })
-    @ApiResponse({ status: 401, description: 'Unauthorized — invalid or missing Auth0 token.' })
+    @ApiResponse({
+        status: 401,
+        description: 'Unauthorized — invalid or missing Auth0 token.',
+    })
     @ApiResponse({ status: 404, description: 'Session not found.' })
     getStatus(@Param('sessionId') sessionId: string): SessionStatusDto {
         const session = this.sessionService.get(sessionId);
         if (!session) {
-            throw new NotFoundException(
-                `Session ${sessionId} not found`,
-            );
+            throw new NotFoundException(`Session ${sessionId} not found`);
         }
 
         const result: SessionStatusDto = {
@@ -323,7 +250,7 @@ export class EncodeController {
         summary: 'Cancel and delete an encoding session',
         description:
             'Deletes a session and its uploaded file from disk. ' +
-            'Only sessions in "created" or "uploaded" status can be deleted. ' +
+            'Only sessions in "created", "uploading", or "uploaded" status can be deleted. ' +
             'Sessions that are queued, encoding, or completed cannot be cancelled.',
     })
     @ApiParam({
@@ -331,8 +258,14 @@ export class EncodeController {
         description: 'Session ID returned from POST /api/sessions',
     })
     @ApiResponse({ status: 204, description: 'Session deleted.' })
-    @ApiResponse({ status: 400, description: 'Session cannot be deleted in its current state.' })
-    @ApiResponse({ status: 401, description: 'Unauthorized — invalid or missing Auth0 token.' })
+    @ApiResponse({
+        status: 400,
+        description: 'Session cannot be deleted in its current state.',
+    })
+    @ApiResponse({
+        status: 401,
+        description: 'Unauthorized — invalid or missing Auth0 token.',
+    })
     @ApiResponse({ status: 404, description: 'Session not found.' })
     deleteSession(@Param('sessionId') sessionId: string): void {
         const session = this.sessionService.get(sessionId);
@@ -340,7 +273,11 @@ export class EncodeController {
             throw new NotFoundException(`Session ${sessionId} not found`);
         }
 
-        if (session.status !== 'created' && session.status !== 'uploaded') {
+        if (
+            session.status !== 'created' &&
+            session.status !== 'uploading' &&
+            session.status !== 'uploaded'
+        ) {
             throw new BadRequestException(
                 `Cannot delete session in "${session.status}" status`,
             );

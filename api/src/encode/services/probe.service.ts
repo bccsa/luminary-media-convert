@@ -217,14 +217,91 @@ export class ProbeService {
     }
 
     private suggestMultiVideoTrack(probe: ProbeResult): SuggestedConfig {
-        const videoRenditions: SuggestedVideoRendition[] = [];
-        const audioGroupSet = new Map<string, SuggestedAudioGroup>();
-
-        const sortedTracks = [...probe.videoTracks].sort(
+        const sortedVideoTracks = [...probe.videoTracks].sort(
             (a, b) => (b.height * b.width) - (a.height * a.width),
         );
 
-        for (const track of sortedTracks) {
+        const langMap = new Map<string, AudioTrackInfo[]>();
+        for (const track of probe.audioTracks) {
+            const lang = track.language || 'und';
+            if (!langMap.has(lang)) langMap.set(lang, []);
+            langMap.get(lang)!.push(track);
+        }
+        for (const tracks of langMap.values()) {
+            tracks.sort((a, b) => (b.bitrateKbps || 0) - (a.bitrateKbps || 0));
+        }
+
+        const languages = Array.from(langMap.keys());
+        const isMultiLang = languages.length > 1
+            || (languages.length === 1 && (langMap.get(languages[0])?.length ?? 0) > 1);
+
+        if (isMultiLang) {
+            return this.suggestMultiVideoMultiLangAudio(
+                sortedVideoTracks, langMap, languages,
+            );
+        }
+
+        return this.suggestMultiVideoSingleAudio(sortedVideoTracks, probe);
+    }
+
+    private suggestMultiVideoMultiLangAudio(
+        sortedVideoTracks: VideoTrackInfo[],
+        langMap: Map<string, AudioTrackInfo[]>,
+        languages: string[],
+    ): SuggestedConfig {
+        const maxTracksPerLang = Math.max(
+            ...Array.from(langMap.values()).map(t => t.length),
+        );
+        const numTiers = Math.min(sortedVideoTracks.length, maxTracksPerLang);
+
+        const audioGroups: SuggestedAudioGroup[] = [];
+        for (let tier = 0; tier < numTiers; tier++) {
+            const tierId = `tier_${tier}`;
+            for (const lang of languages) {
+                const tracks = langMap.get(lang)!;
+                const track = tracks[tier] ?? tracks[tracks.length - 1];
+                const codec: 'aac' | 'mp3' = track.codec === 'mp3' ? 'mp3' : 'aac';
+                audioGroups.push({
+                    id: tierId,
+                    label: `${lang.toUpperCase()} ${track.bitrateKbps || '?'}kbps`,
+                    audioBitrateKbps: track.bitrateKbps || 128,
+                    channels: track.channels,
+                    audioCodec: codec,
+                    sourceTrackIndex: track.index,
+                    language: lang === 'und' ? undefined : lang,
+                    copyStream: true,
+                });
+            }
+        }
+
+        const videoRenditions: SuggestedVideoRendition[] = sortedVideoTracks.map(
+            (track, i) => ({
+                width: track.width,
+                height: track.height,
+                videoBitrateKbps: track.bitrateKbps || this.estimateBitrateForHeight(track.height),
+                copyStream: true,
+                sourceTrackIndex: track.index,
+                audioGroupId: i < numTiers ? `tier_${i}` : `tier_${numTiers - 1}`,
+                label: track.title ?? `${track.height}p`,
+            }),
+        );
+
+        return {
+            type: 'video',
+            segmentDuration: 6,
+            videoRenditions,
+            audioGroups,
+        };
+    }
+
+    private suggestMultiVideoSingleAudio(
+        sortedVideoTracks: VideoTrackInfo[],
+        probe: ProbeResult,
+    ): SuggestedConfig {
+        const videoRenditions: SuggestedVideoRendition[] = [];
+        const audioGroupSet = new Map<string, SuggestedAudioGroup>();
+
+        for (const track of sortedVideoTracks) {
             const tier = this.getAudioTierForHeight(track.height);
             videoRenditions.push({
                 width: track.width,

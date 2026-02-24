@@ -1,4 +1,5 @@
-import { type MiddlewareConsumer, Module, type NestModule, RequestMethod } from '@nestjs/common';
+import { Module, type OnModuleInit } from '@nestjs/common';
+import { HttpAdapterHost } from '@nestjs/core';
 import { EncodeController } from './encode.controller.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
@@ -7,8 +8,7 @@ import { S3Service } from './services/s3.service.js';
 import { WebhookService } from './services/webhook.service.js';
 import { EncodeService } from './services/encode.service.js';
 import { ProbeService } from './services/probe.service.js';
-import { SessionAuthGuard } from './guards/session-auth.guard.js';
-import { UploadTimeoutMiddleware } from './middleware/upload-timeout.middleware.js';
+import { TusUploadService } from './services/tus-upload.service.js';
 
 @Module({
     controllers: [EncodeController],
@@ -20,17 +20,21 @@ import { UploadTimeoutMiddleware } from './middleware/upload-timeout.middleware.
         WebhookService,
         EncodeService,
         ProbeService,
-        SessionAuthGuard,
+        TusUploadService,
     ],
     exports: [SessionService],
 })
-export class EncodeModule implements NestModule {
-    configure(consumer: MiddlewareConsumer): void {
-        consumer
-            .apply(UploadTimeoutMiddleware)
-            .forRoutes({
-                path: 'api/sessions/:sessionId/upload',
-                method: RequestMethod.POST,
-            });
+export class EncodeModule implements OnModuleInit {
+    constructor(
+        private readonly httpAdapterHost: HttpAdapterHost,
+        private readonly tusService: TusUploadService,
+    ) {}
+
+    onModuleInit(): void {
+        const app = this.httpAdapterHost.httpAdapter.getInstance();
+        const handler = (req: any, res: any) =>
+            this.tusService.handle(req, res);
+        app.all('/api/tus', handler);
+        app.all('/api/tus/{*tusPath}', handler);
     }
 }

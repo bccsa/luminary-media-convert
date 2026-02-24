@@ -5,7 +5,6 @@ import { tmpdir } from 'os';
 import { EncodeController } from './encode.controller.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
-import { ProbeService } from './services/probe.service.js';
 import type { CreateSessionDto } from './dto/create-session.dto.js';
 import type { EncodeConfigDto } from './dto/encode-config.dto.js';
 
@@ -52,7 +51,6 @@ describe('EncodeController', () => {
     let controller: EncodeController;
     let sessionService: SessionService;
     let queueService: jest.Mocked<QueueService>;
-    let probeService: jest.Mocked<ProbeService>;
     let testWorkDir: string;
 
     beforeEach(() => {
@@ -68,25 +66,7 @@ describe('EncodeController', () => {
             isProcessing: false,
         } as any;
 
-        probeService = {
-            probe: jest.fn().mockReturnValue({
-                format: { duration: 120, bitrateKbps: 5000, formatName: 'mov,mp4' },
-                videoTracks: [{ index: 0, codec: 'h264', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
-                audioTracks: [{ index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 44100 }],
-            }),
-            suggest: jest.fn().mockReturnValue({
-                type: 'video',
-                segmentDuration: 6,
-                videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, audioGroupId: 'hd', label: '1080p' },
-                ],
-                audioGroups: [
-                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
-                ],
-            }),
-        } as any;
-
-        controller = new EncodeController(sessionService, queueService, probeService);
+        controller = new EncodeController(sessionService, queueService);
     });
 
     afterEach(() => {
@@ -96,22 +76,23 @@ describe('EncodeController', () => {
             // ignore cleanup errors
         }
         delete process.env.WORK_DIR;
+        delete process.env.MAX_UPLOAD_SIZE;
     });
 
     describe('createSession', () => {
-        it('should create a session and return upload details', () => {
+        it('should create a session and return tus endpoint', () => {
             const dto = makeConfig();
             const req = makeRequest();
 
             const result = controller.createSession(dto, req);
 
             expect(result.sessionId).toBeDefined();
-            expect(result.uploadUrl).toContain('/api/sessions/');
-            expect(result.uploadUrl).toContain('/upload');
+            expect(result.tusEndpoint).toBe('http://localhost:3000/api/tus');
             expect(result.uploadToken).toMatch(/^tok_/);
+            expect(result.maxUploadSize).toBeGreaterThan(0);
         });
 
-        it('should build uploadUrl from request protocol and host', () => {
+        it('should build tusEndpoint from request protocol and host', () => {
             const dto = makeConfig();
             const req = makeRequest({
                 protocol: 'https',
@@ -121,10 +102,22 @@ describe('EncodeController', () => {
 
             const result = controller.createSession(dto, req);
 
-            expect(result.uploadUrl).toMatch(
-                /^https:\/\/api\.example\.com\/api\/sessions\/.+\/upload$/,
-            );
+            expect(result.tusEndpoint).toBe('https://api.example.com/api/tus');
         });
+
+        it('should use MAX_UPLOAD_SIZE from env when set', () => {
+            process.env.MAX_UPLOAD_SIZE = '5368709120';
+            const result = controller.createSession(makeConfig(), makeRequest());
+
+            expect(result.maxUploadSize).toBe(5368709120);
+        });
+
+        it('should default maxUploadSize to 10 GB', () => {
+            const result = controller.createSession(makeConfig(), makeRequest());
+
+            expect(result.maxUploadSize).toBe(10 * 1024 * 1024 * 1024);
+        });
+
     });
 
     describe('getStatus', () => {
@@ -202,60 +195,6 @@ describe('EncodeController', () => {
             expect(() => controller.getStatus('nonexistent')).toThrow(
                 NotFoundException,
             );
-        });
-    });
-
-    describe('uploadFile', () => {
-        it('should reject when no file is provided', () => {
-            expect(() =>
-                controller.uploadFile('sess-1', null),
-            ).toThrow(BadRequestException);
-        });
-
-        it('should reject when file has no path (empty upload)', () => {
-            const uploaded = {
-                path: '',
-                size: 0,
-                originalname: 'test.mp4',
-            };
-
-            expect(() =>
-                controller.uploadFile('sess-1', uploaded),
-            ).toThrow(BadRequestException);
-        });
-
-        it('should probe file and return uploaded status', () => {
-            const session = sessionService.create(makeConfig());
-            const filePath = join(testWorkDir, 'test.mp4');
-            const uploaded = {
-                path: filePath,
-                size: 15,
-                originalname: 'test.mp4',
-            };
-
-            const result = controller.uploadFile(session.id, uploaded);
-
-            expect(result.sessionId).toBe(session.id);
-            expect(result.status).toBe('uploaded');
-            expect(result.probeResult).toBeDefined();
-            expect(result.suggestedConfig).toBeDefined();
-            expect(probeService.probe).toHaveBeenCalledWith(filePath);
-            expect(probeService.suggest).toHaveBeenCalled();
-        });
-
-        it('should set file path on the session', () => {
-            const session = sessionService.create(makeConfig());
-            const filePath = join(testWorkDir, 'video.mp4');
-            const uploaded = {
-                path: filePath,
-                size: 4,
-                originalname: 'video.mp4',
-            };
-
-            controller.uploadFile(session.id, uploaded);
-
-            const updated = sessionService.get(session.id)!;
-            expect(updated.filePath).toBe(filePath);
         });
     });
 
@@ -338,6 +277,49 @@ describe('EncodeController', () => {
             expect(() =>
                 controller.startEncode(session.id, config),
             ).toThrow(BadRequestException);
+        });
+    });
+
+    describe('deleteSession', () => {
+        it('should delete a session in created status', () => {
+            const session = sessionService.create(makeConfig());
+
+            controller.deleteSession(session.id);
+
+            expect(sessionService.get(session.id)).toBeUndefined();
+        });
+
+        it('should delete a session in uploaded status', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            controller.deleteSession(session.id);
+
+            expect(sessionService.get(session.id)).toBeUndefined();
+        });
+
+        it('should delete a session in uploading status', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+
+            controller.deleteSession(session.id);
+
+            expect(sessionService.get(session.id)).toBeUndefined();
+        });
+
+        it('should reject deletion of a queued session', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'queued');
+
+            expect(() =>
+                controller.deleteSession(session.id),
+            ).toThrow(BadRequestException);
+        });
+
+        it('should throw NotFoundException for unknown session', () => {
+            expect(() =>
+                controller.deleteSession('nonexistent'),
+            ).toThrow(NotFoundException);
         });
     });
 });

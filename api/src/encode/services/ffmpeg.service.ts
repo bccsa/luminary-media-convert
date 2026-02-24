@@ -235,13 +235,16 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
 
         // Audio entries with group, name, and language
+        const defaultedGroups = new Set<string>();
         for (const { group, outputIndex } of audioOutputs) {
             const name = (group.label ?? `${group.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
             let part = `a:${outputIndex},agroup:${group.id},name:${name}`;
             if (group.language) {
                 part += `,language:${group.language}`;
             }
-            part += `,default:${outputIndex === 0 ? 'yes' : 'no'}`;
+            const isDefault = !defaultedGroups.has(group.id);
+            if (isDefault) defaultedGroups.add(group.id);
+            part += `,default:${isDefault ? 'yes' : 'no'}`;
             varParts.push(part);
         }
 
@@ -495,21 +498,11 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const audioGroups = config.audioGroups ?? [];
         if (audioGroups.length === 0) return;
 
-        const trackNameBySource = new Map<number, string>();
+        const nameByUri = new Map<string, string>();
         for (const group of audioGroups) {
-            if (!trackNameBySource.has(group.sourceTrackIndex)) {
-                trackNameBySource.set(
-                    group.sourceTrackIndex,
-                    group.language ?? 'Audio',
-                );
-            }
-        }
-
-        const nameByGroupId = new Map<string, string>();
-        for (const group of audioGroups) {
-            const trackName = trackNameBySource.get(group.sourceTrackIndex)!;
-            nameByGroupId.set(group.id, trackName);
-            nameByGroupId.set(`group_${group.id}`, trackName);
+            const streamName = (group.label ?? `${group.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
+            const uri = `stream_${streamName}/playlist.m3u8`;
+            nameByUri.set(uri, group.language ?? group.label ?? 'Audio');
         }
 
         const content = readFileSync(masterPath, 'utf-8');
@@ -520,10 +513,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             ) {
                 return line;
             }
-            const groupIdMatch = line.match(/GROUP-ID="([^"]+)"/);
-            if (!groupIdMatch) return line;
+            const uriMatch = line.match(/URI="([^"]+)"/);
+            if (!uriMatch) return line;
 
-            const name = nameByGroupId.get(groupIdMatch[1]);
+            const name = nameByUri.get(uriMatch[1]);
             if (!name) return line;
             return line.replace(/NAME="[^"]*"/, `NAME="${name}"`);
         });

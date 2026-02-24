@@ -4,9 +4,15 @@ import { useAuth0 } from '@auth0/auth0-vue';
 import SessionConfigForm from './components/SessionConfigForm.vue';
 import EncodeConfigForm from './components/EncodeConfigForm.vue';
 import SessionProgress from './components/SessionProgress.vue';
-import { createSession, uploadFile, startEncode, deleteSession } from './api';
+import { createSession, uploadFile, getSessionStatus, startEncode, deleteSession } from './api';
 import { useSessionPoller } from './composables/useSessionPoller';
 import type { CreateSessionRequest, S3Config, ProbeResult, SuggestedConfig, EncodeConfig } from './types';
+
+function formatBytes(bytes: number): string {
+    if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / 1024).toFixed(1)} KB`;
+}
 
 type View = 'config' | 'uploading' | 'configure' | 'submitting' | 'progress';
 
@@ -31,6 +37,8 @@ function buildS3PublicBaseUrl(s3: S3Config): string {
 
 const poller = useSessionPoller();
 
+let abortUpload: (() => void) | null = null;
+
 async function onUploadSubmit(payload: {
     config: CreateSessionRequest;
     file: File;
@@ -47,19 +55,32 @@ async function onUploadSubmit(payload: {
         const session = await createSession(payload.config, accessToken);
         sessionId.value = session.sessionId;
 
-        const uploadResult = await uploadFile(
+        if (payload.file.size > session.maxUploadSize) {
+            throw new Error(
+                `File size (${formatBytes(payload.file.size)}) exceeds the maximum allowed upload size (${formatBytes(session.maxUploadSize)})`,
+            );
+        }
+
+        const { promise, abort } = uploadFile(
+            session.tusEndpoint,
             session.sessionId,
             session.uploadToken,
             payload.file,
             (percent) => { uploadProgress.value = percent; },
         );
+        abortUpload = abort;
 
-        probeResult.value = uploadResult.probeResult ?? null;
-        suggestedConfig.value = uploadResult.suggestedConfig ?? null;
+        await promise;
+        abortUpload = null;
+
+        const status = await getSessionStatus(session.sessionId, accessToken);
+        probeResult.value = status.probeResult ?? null;
+        suggestedConfig.value = status.suggestedConfig ?? null;
         encodingType.value = suggestedConfig.value?.type ?? 'video';
 
         view.value = 'configure';
     } catch (e) {
+        abortUpload = null;
         submissionError.value = e instanceof Error ? e.message : String(e);
         view.value = 'config';
     }
