@@ -8,7 +8,9 @@ import type {
     AudioGroup,
     AudioRendition,
     AudioTrackInfo,
+    VideoTrackInfo,
 } from '../types';
+import { computeLayoutKey, getStoredConfig } from '../utils/layoutStorage';
 
 const props = defineProps<{
     probeResult: ProbeResult;
@@ -42,52 +44,151 @@ const audioRenditions = reactive<AudioRendition[]>(
     props.suggestedConfig.audioRenditions?.map(r => ({ ...r })) ?? [],
 );
 
+const editableVideoTracks = reactive<VideoTrackInfo[]>(
+    props.probeResult.videoTracks.map(t => ({ ...t })),
+);
+
 const editableAudioTracks = reactive<AudioTrackInfo[]>(
     props.probeResult.audioTracks.map(t => ({ ...t })),
 );
 
-function reanalyzeAudio() {
-    const langMap = new Map<string, AudioTrackInfo[]>();
-    for (const track of editableAudioTracks) {
-        const lang = track.language || 'und';
-        if (!langMap.has(lang)) langMap.set(lang, []);
-        langMap.get(lang)!.push(track);
-    }
+const ABR_LADDER = [
+    { height: 2160, width: 3840, bitrateKbps: 15000, label: '4K' },
+    { height: 1440, width: 2560, bitrateKbps: 8000, label: '1440p' },
+    { height: 1080, width: 1920, bitrateKbps: 5000, label: '1080p' },
+    { height: 720, width: 1280, bitrateKbps: 2500, label: '720p' },
+    { height: 480, width: 854, bitrateKbps: 1000, label: '480p' },
+    { height: 360, width: 640, bitrateKbps: 600, label: '360p' },
+    { height: 240, width: 426, bitrateKbps: 300, label: '240p' },
+    { height: 144, width: 256, bitrateKbps: 150, label: '144p' },
+];
 
-    for (const tracks of langMap.values()) {
-        tracks.sort((a, b) => (b.bitrateKbps || 0) - (a.bitrateKbps || 0));
-    }
+const AUDIO_GROUP_TIERS = [
+    { minHeight: 720, groupId: 'hd', label: 'HD Audio', bitrateKbps: 192, channels: 2 },
+    { minHeight: 360, groupId: 'mid', label: 'Standard Audio', bitrateKbps: 128, channels: 2 },
+    { minHeight: 0, groupId: 'low', label: 'Low Audio', bitrateKbps: 64, channels: 1 },
+];
 
-    const languages = Array.from(langMap.keys());
-    const maxTracksPerLang = Math.max(...Array.from(langMap.values()).map(t => t.length));
-    const numTiers = Math.min(videoRenditions.length, maxTracksPerLang);
+function getAudioTierForHeight(height: number) {
+    for (const tier of AUDIO_GROUP_TIERS) {
+        if (height >= tier.minHeight) return tier;
+    }
+    return AUDIO_GROUP_TIERS[AUDIO_GROUP_TIERS.length - 1];
+}
+
+function mapTierToGroupId(standardGroupId: string, tierIds: string[]): string {
+    if (tierIds.includes(standardGroupId)) return standardGroupId;
+    const tierIndex = standardGroupId === 'hd' ? 0 : standardGroupId === 'mid' ? 1 : 2;
+    return tierIds[Math.min(tierIndex, tierIds.length - 1)] ?? tierIds[0] ?? 'tier_0';
+}
+
+function reanalyze() {
+    const sortedVideoTracks = [...editableVideoTracks].sort(
+        (a, b) => (b.height * b.width) - (a.height * a.width),
+    );
 
     const newGroups: AudioGroup[] = [];
-    for (let tier = 0; tier < numTiers; tier++) {
-        const tierId = `tier_${tier}`;
-        for (const lang of languages) {
-            const tracks = langMap.get(lang)!;
-            const track = tracks[tier] ?? tracks[tracks.length - 1];
-            newGroups.push({
-                id: tierId,
-                label: `${lang.toUpperCase()} ${track.bitrateKbps || '?'}kbps`,
-                audioBitrateKbps: track.bitrateKbps || 128,
-                channels: track.channels,
-                audioCodec: (track.codec === 'mp3' ? 'mp3' : 'aac') as 'aac' | 'mp3',
-                sourceTrackIndex: track.index,
-                language: lang === 'und' ? undefined : lang,
-                copyStream: true,
-            });
+    const tierIds: string[] = [];
+
+    if (editableAudioTracks.length > 0) {
+        const langMap = new Map<string, AudioTrackInfo[]>();
+        for (const track of editableAudioTracks) {
+            const lang = track.language || 'und';
+            if (!langMap.has(lang)) langMap.set(lang, []);
+            langMap.get(lang)!.push(track);
+        }
+        for (const tracks of langMap.values()) {
+            tracks.sort((a, b) => (b.bitrateKbps || 0) - (a.bitrateKbps || 0));
+        }
+
+        const languages = Array.from(langMap.keys());
+        const isMultiLang = languages.length > 1
+            || (languages.length === 1 && (langMap.get(languages[0])?.length ?? 0) > 1);
+
+        if (isMultiLang) {
+            const maxTracksPerLang = Math.max(
+                ...Array.from(langMap.values()).map(t => t.length),
+            );
+            const numTiers = Math.max(
+                Math.min(sortedVideoTracks.length || 1, maxTracksPerLang),
+                3,
+            );
+            for (let tier = 0; tier < numTiers; tier++) {
+                const tierId = `tier_${tier}`;
+                tierIds.push(tierId);
+                for (const lang of languages) {
+                    const tracks = langMap.get(lang)!;
+                    const track = tracks[tier] ?? tracks[tracks.length - 1];
+                    newGroups.push({
+                        id: tierId,
+                        label: track.name ?? `${lang.toUpperCase()} ${track.bitrateKbps || '?'}kbps`,
+                        audioBitrateKbps: track.bitrateKbps || 128,
+                        channels: track.channels,
+                        audioCodec: (track.codec === 'mp3' ? 'mp3' : 'aac') as 'aac' | 'mp3',
+                        sourceTrackIndex: track.index,
+                        language: lang === 'und' ? undefined : lang,
+                        copyStream: true,
+                    });
+                }
+            }
+        } else {
+            const sourceAudio = editableAudioTracks[0];
+            for (const tier of AUDIO_GROUP_TIERS) {
+                tierIds.push(tier.groupId);
+                newGroups.push({
+                    id: tier.groupId,
+                    label: tier.label,
+                    audioBitrateKbps: tier.bitrateKbps,
+                    channels: tier.channels,
+                    audioCodec: 'aac',
+                    sourceTrackIndex: sourceAudio.index,
+                    language: sourceAudio.language,
+                });
+            }
         }
     }
 
     audioGroups.splice(0, audioGroups.length, ...newGroups);
 
-    const sortedRenditions = [...videoRenditions].sort(
-        (a, b) => (b.height * b.width) - (a.height * a.width),
-    );
-    for (let i = 0; i < sortedRenditions.length; i++) {
-        sortedRenditions[i].audioGroupId = i < numTiers ? `tier_${i}` : `tier_${numTiers - 1}`;
+    if (sortedVideoTracks.length > 1) {
+        const newRenditions: VideoRendition[] = sortedVideoTracks.map(track => {
+            const tier = getAudioTierForHeight(track.height);
+            const audioGroupId = mapTierToGroupId(tier.groupId, tierIds);
+            return {
+                width: track.width,
+                height: track.height,
+                videoBitrateKbps: track.bitrateKbps || 1000,
+                copyStream: true,
+                sourceTrackIndex: track.index,
+                audioGroupId,
+                label: track.name ?? `Track ${track.index}`,
+            };
+        });
+        videoRenditions.splice(0, videoRenditions.length, ...newRenditions);
+    } else if (sortedVideoTracks.length === 1) {
+        const track = sortedVideoTracks[0];
+        const ladder = ABR_LADDER.filter(r => r.height <= track.height);
+        if (ladder.length === 0) {
+            ladder.push({
+                height: track.height,
+                width: track.width,
+                bitrateKbps: track.bitrateKbps || 1000,
+                label: `${track.height}p`,
+            });
+        }
+        const newRenditions: VideoRendition[] = ladder.map(rung => {
+            const tier = getAudioTierForHeight(rung.height);
+            const audioGroupId = mapTierToGroupId(tier.groupId, tierIds);
+            return {
+                width: rung.width,
+                height: rung.height,
+                videoBitrateKbps: rung.bitrateKbps,
+                copyStream: false,
+                audioGroupId,
+                label: rung.label,
+            };
+        });
+        videoRenditions.splice(0, videoRenditions.length, ...newRenditions);
     }
 }
 
@@ -106,6 +207,38 @@ const uniqueAudioGroupOptions = computed(() => {
     }
     return result;
 });
+
+const layoutKey = computed(() =>
+    computeLayoutKey(props.probeResult, encodingType.value),
+);
+
+const hasPreviousConfig = computed(() => getStoredConfig(layoutKey.value) != null);
+
+function loadPreviousTrackLabels() {
+    const config = getStoredConfig(layoutKey.value);
+    if (!config) return;
+
+    if (config.videoTrackNames) {
+        const nameMap = new Map(config.videoTrackNames.map(t => [t.index, t.name]));
+        for (const t of editableVideoTracks) {
+            const saved = nameMap.get(t.index);
+            if (saved != null) t.name = saved;
+        }
+    }
+
+    if (config.audioTrackMetadata) {
+        const audioMetaMap = new Map(
+            config.audioTrackMetadata.map(m => [m.index, { name: m.name, language: m.language }]),
+        );
+        for (const t of editableAudioTracks) {
+            const saved = audioMetaMap.get(t.index);
+            if (saved) {
+                if (saved.name !== undefined) t.name = saved.name;
+                if (saved.language !== undefined) t.language = saved.language;
+            }
+        }
+    }
+}
 
 function addVideoRendition() {
     const defaultGroupId = audioGroups[0]?.id ?? 'hd';
@@ -154,8 +287,8 @@ function removeAudioRendition(index: number) {
 }
 
 function onCopyToggle(rendition: VideoRendition) {
-    if (rendition.copyStream && props.probeResult.videoTracks.length > 0) {
-        const track = props.probeResult.videoTracks[rendition.sourceTrackIndex ?? 0];
+    if (rendition.copyStream && editableVideoTracks.length > 0) {
+        const track = editableVideoTracks[rendition.sourceTrackIndex ?? 0];
         if (track) {
             rendition.width = track.width;
             rendition.height = track.height;
@@ -166,12 +299,12 @@ function onCopyToggle(rendition: VideoRendition) {
 
 function onCopySourceChange(rendition: VideoRendition) {
     if (rendition.copyStream && rendition.sourceTrackIndex != null) {
-        const track = props.probeResult.videoTracks[rendition.sourceTrackIndex];
+        const track = editableVideoTracks[rendition.sourceTrackIndex];
         if (track) {
             rendition.width = track.width;
             rendition.height = track.height;
             rendition.videoBitrateKbps = track.bitrateKbps || rendition.videoBitrateKbps;
-            rendition.label = track.title ?? `${track.height}p`;
+            rendition.label = track.name ?? `${track.height}p`;
         }
     }
 }
@@ -183,6 +316,48 @@ function formatDuration(seconds: number): string {
     if (h > 0) return `${h}h ${m}m ${s}s`;
     if (m > 0) return `${m}m ${s}s`;
     return `${s}s`;
+}
+
+function onTrackInputKeydown(e: KeyboardEvent) {
+    const target = e.target as HTMLInputElement;
+    if (!target?.hasAttribute?.('data-track-field')) return;
+    const row = parseInt(target.getAttribute('data-row') ?? '-1', 10);
+    const col = parseInt(target.getAttribute('data-col') ?? '-1', 10);
+    if (row < 0 || col < 0) return;
+
+    const fieldset = target.closest('fieldset');
+    if (!fieldset) return;
+    const inputs = Array.from(
+        fieldset.querySelectorAll<HTMLInputElement>('input[data-track-field][data-row][data-col]'),
+    );
+    const rows = Math.max(...inputs.map(el => parseInt(el.getAttribute('data-row') ?? '0', 10)), 0) + 1;
+    const cols = Math.max(...inputs.map(el => parseInt(el.getAttribute('data-col') ?? '0', 10)), 0) + 1;
+
+    let nextRow = row;
+    let nextCol = col;
+    if (e.key === 'ArrowDown') {
+        nextRow = Math.min(row + 1, rows - 1);
+    } else if (e.key === 'ArrowUp') {
+        nextRow = Math.max(row - 1, 0);
+    } else if (e.key === 'ArrowRight') {
+        nextCol = Math.min(col + 1, cols - 1);
+    } else if (e.key === 'ArrowLeft') {
+        nextCol = Math.max(col - 1, 0);
+    } else {
+        return;
+    }
+    if (nextRow === row && nextCol === col) return;
+
+    e.preventDefault();
+    const next = inputs.find(
+        el =>
+            parseInt(el.getAttribute('data-row') ?? '-1', 10) === nextRow &&
+            parseInt(el.getAttribute('data-col') ?? '-1', 10) === nextCol,
+    );
+    if (next) {
+        next.focus();
+        next.select();
+    }
 }
 
 function channelLabel(ch: number): string {
@@ -217,8 +392,22 @@ function onSubmit() {
     if (encodingType.value === 'video') {
         config.videoRenditions = videoRenditions.map(r => ({ ...r }));
         config.audioGroups = audioGroups.map(g => ({ ...g }));
+        config.videoTrackNames = editableVideoTracks.map(t => ({
+            index: t.index,
+            name: ((t.name || `Angle ${t.index}`).trim() || `Angle ${t.index}`) as string,
+        }));
+        config.audioTrackMetadata = editableAudioTracks.map(t => ({
+            index: t.index,
+            name: t.name,
+            language: t.language,
+        }));
     } else {
         config.audioRenditions = audioRenditions.map(r => ({ ...r }));
+        config.audioTrackMetadata = editableAudioTracks.map(t => ({
+            index: t.index,
+            name: t.name,
+            language: t.language,
+        }));
     }
 
     emit('submit', config);
@@ -229,7 +418,17 @@ function onSubmit() {
     <div class="space-y-6">
         <!-- Probe Results -->
         <fieldset class="space-y-3">
-            <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Detected Media</legend>
+            <div class="flex items-center justify-between">
+                <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Detected Media</legend>
+                <button
+                    v-if="hasPreviousConfig"
+                    type="button"
+                    @click="loadPreviousTrackLabels"
+                    class="rounded border border-indigo-700 px-3 py-1.5 text-xs font-medium text-indigo-300 transition-colors hover:bg-indigo-900/40 cursor-pointer"
+                >
+                    Load saved track labels
+                </button>
+            </div>
 
             <div class="rounded-md bg-zinc-900/60 p-3 text-sm">
                 <div class="flex flex-wrap gap-x-6 gap-y-1 text-zinc-300">
@@ -240,8 +439,8 @@ function onSubmit() {
             </div>
 
             <!-- Video Tracks -->
-            <div v-if="probeResult.videoTracks.length > 0">
-                <h4 class="mb-1 text-xs font-medium text-zinc-500">Video Tracks ({{ probeResult.videoTracks.length }})</h4>
+            <div v-if="editableVideoTracks.length > 0">
+                <h4 class="mb-1 text-xs font-medium text-zinc-500">Video Tracks ({{ editableVideoTracks.length }})</h4>
                 <div class="overflow-x-auto">
                     <table class="w-full text-xs text-left">
                         <thead class="text-zinc-500 border-b border-zinc-800">
@@ -251,19 +450,29 @@ function onSubmit() {
                                 <th class="px-2 py-1">Resolution</th>
                                 <th class="px-2 py-1">Bitrate</th>
                                 <th class="px-2 py-1">FPS</th>
-                                <th class="px-2 py-1">Language</th>
-                                <th class="px-2 py-1">Title</th>
+                                <th class="px-2 py-1">Name</th>
                             </tr>
                         </thead>
                         <tbody class="text-zinc-300">
-                            <tr v-for="t in probeResult.videoTracks" :key="t.index" class="border-b border-zinc-800/50">
+                            <tr v-for="t in editableVideoTracks" :key="t.index" class="border-b border-zinc-800/50">
                                 <td class="px-2 py-1">{{ t.index }}</td>
                                 <td class="px-2 py-1">{{ t.codec }}{{ t.profile ? ` (${t.profile})` : '' }}</td>
                                 <td class="px-2 py-1">{{ t.width }}&times;{{ t.height }}</td>
                                 <td class="px-2 py-1">{{ t.bitrateKbps ? `${t.bitrateKbps} kbps` : '—' }}</td>
                                 <td class="px-2 py-1">{{ t.frameRate }}</td>
-                                <td class="px-2 py-1">{{ t.language ?? '—' }}</td>
-                                <td class="px-2 py-1">{{ t.title ?? '—' }}</td>
+                                <td class="px-2 py-1">
+                                    <input
+                                        v-model="t.name"
+                                        type="text"
+                                        class="input w-24 text-xs"
+                                        placeholder="e.g. Main angle"
+                                        data-track-field="video-name"
+                                        :data-track-index="t.index"
+                                        :data-row="t.index"
+                                        data-col="0"
+                                        @keydown="onTrackInputKeydown"
+                                    />
+                                </td>
                             </tr>
                         </tbody>
                     </table>
@@ -283,11 +492,11 @@ function onSubmit() {
                                 <th class="px-2 py-1">Channels</th>
                                 <th class="px-2 py-1">Sample Rate</th>
                                 <th class="px-2 py-1">Language</th>
-                                <th class="px-2 py-1">Title</th>
+                                <th class="px-2 py-1">Name</th>
                             </tr>
                         </thead>
                         <tbody class="text-zinc-300">
-                            <tr v-for="t in editableAudioTracks" :key="t.index" class="border-b border-zinc-800/50">
+                            <tr v-for="(t, audioIdx) in editableAudioTracks" :key="t.index" class="border-b border-zinc-800/50">
                                 <td class="px-2 py-1">{{ t.index }}</td>
                                 <td class="px-2 py-1">{{ t.codec }}</td>
                                 <td class="px-2 py-1">{{ t.bitrateKbps ? `${t.bitrateKbps} kbps` : '—' }}</td>
@@ -299,22 +508,39 @@ function onSubmit() {
                                         type="text"
                                         class="input w-16 text-xs text-center"
                                         placeholder="und"
+                                        data-track-field="audio-language"
+                                        :data-track-index="t.index"
+                                        :data-row="editableVideoTracks.length + audioIdx"
+                                        data-col="0"
+                                        @keydown="onTrackInputKeydown"
                                     />
                                 </td>
-                                <td class="px-2 py-1">{{ t.title ?? '—' }}</td>
+                                <td class="px-2 py-1">
+                                    <input
+                                        v-model="t.name"
+                                        type="text"
+                                        class="input w-24 text-xs"
+                                        placeholder="e.g. Commentary"
+                                        data-track-field="audio-name"
+                                        :data-track-index="t.index"
+                                        :data-row="editableVideoTracks.length + audioIdx"
+                                        data-col="1"
+                                        @keydown="onTrackInputKeydown"
+                                    />
+                                </td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
-                <div v-if="encodingType.value === 'video'" class="mt-2">
-                    <button
-                        type="button"
-                        @click="reanalyzeAudio"
-                        class="rounded border border-indigo-700 px-3 py-1.5 text-xs font-medium text-indigo-300 transition-colors hover:bg-indigo-900/40 cursor-pointer"
-                    >
-                        Re-analyze Audio Mapping
-                    </button>
-                </div>
+            </div>
+            <div v-if="encodingType.value === 'video' && (editableVideoTracks.length > 0 || editableAudioTracks.length > 0)" class="mt-2">
+                <button
+                    type="button"
+                    @click="reanalyze"
+                    class="rounded border border-indigo-700 px-3 py-1.5 text-xs font-medium text-indigo-300 transition-colors hover:bg-indigo-900/40 cursor-pointer"
+                >
+                    Re-analyze Mapping
+                </button>
             </div>
         </fieldset>
 
@@ -323,7 +549,7 @@ function onSubmit() {
             <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Encoding</legend>
             <div class="flex items-center gap-4">
                 <label class="flex items-center gap-2 text-sm">
-                    <input type="radio" v-model="encodingType.value" value="video" class="accent-indigo-500" :disabled="probeResult.videoTracks.length === 0" />
+                            <input type="radio" v-model="encodingType.value" value="video" class="accent-indigo-500" :disabled="editableVideoTracks.length === 0" />
                     Video
                 </label>
                 <label class="flex items-center gap-2 text-sm">
@@ -390,20 +616,20 @@ function onSubmit() {
                                 type="checkbox"
                                 v-model="r.copyStream"
                                 class="accent-indigo-500"
-                                :disabled="probeResult.videoTracks.length === 0"
+                                :disabled="editableVideoTracks.length === 0"
                                 @change="onCopyToggle(r)"
                             />
                             <span class="text-xs text-zinc-400">Copy stream (no re-encode)</span>
                         </label>
-                        <template v-if="r.copyStream && probeResult.videoTracks.length > 0">
+                        <template v-if="r.copyStream && editableVideoTracks.length > 0">
                             <label class="text-xs text-zinc-500">Source track:</label>
                             <select
                                 v-model.number="r.sourceTrackIndex"
                                 class="input w-48 text-xs"
                                 @change="onCopySourceChange(r)"
                             >
-                                <option v-for="t in probeResult.videoTracks" :key="t.index" :value="t.index">
-                                    #{{ t.index }}: {{ t.width }}&times;{{ t.height }} {{ t.codec }} {{ t.bitrateKbps ? `${t.bitrateKbps}kbps` : '' }}
+                                <option v-for="t in editableVideoTracks" :key="t.index" :value="t.index">
+                                    #{{ t.index }}: {{ t.width }}&times;{{ t.height }} {{ t.codec }}{{ t.name ? ` ${t.name}` : '' }} {{ t.bitrateKbps ? `${t.bitrateKbps}kbps` : '' }}
                                 </option>
                             </select>
                         </template>

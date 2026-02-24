@@ -6,6 +6,7 @@ import EncodeConfigForm from './components/EncodeConfigForm.vue';
 import SessionProgress from './components/SessionProgress.vue';
 import { createSession, uploadFile, getSessionStatus, startEncode, deleteSession } from './api';
 import { useSessionPoller } from './composables/useSessionPoller';
+import { computeLayoutKey, saveConfig } from './utils/layoutStorage';
 import type { CreateSessionRequest, S3Config, ProbeResult, SuggestedConfig, EncodeConfig } from './types';
 
 function formatBytes(bytes: number): string {
@@ -94,7 +95,13 @@ async function onEncodeSubmit(config: EncodeConfig) {
         const accessToken = await getAccessTokenSilently();
         encodingType.value = config.type;
 
-        await startEncode(sessionId.value, config, accessToken);
+        const { audioTrackMetadata: _, ...apiConfig } = config;
+        await startEncode(sessionId.value, apiConfig, accessToken);
+
+        if (probeResult.value) {
+            const layoutKey = computeLayoutKey(probeResult.value, config.type);
+            saveConfig(layoutKey, config);
+        }
 
         view.value = 'progress';
         poller.start(sessionId.value, () => getAccessTokenSilently());
@@ -230,6 +237,7 @@ function reset() {
                     :queue-position="poller.queuePosition.value"
                     :files="poller.files.value"
                     :master-playlist="poller.masterPlaylist.value"
+                    :angle-playlists="poller.anglePlaylists.value"
                     :error="poller.error.value"
                     :s3-public-base-url="s3PublicBaseUrl"
                     :encoding-type="encodingType"

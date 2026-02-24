@@ -50,14 +50,17 @@ export class S3Service {
     /**
      * Upload all files from the output directory to S3.
      * Returns the list of uploaded object keys and the master playlist key.
+     * Optionally reports progress as each file completes (0-100%).
      */
     async uploadDirectory(
         config: S3ConfigDto,
         outputDir: string,
-        masterPlaylistFilename: string
+        masterPlaylistFilename: string,
+        options?: { onProgress?: (percent: number) => void }
     ): Promise<S3UploadResult> {
         const client = this.createClient(config);
         const files = this.walkDir(outputDir);
+        const totalFiles = files.length;
         const keys: string[] = [];
         let masterPlaylistKey = '';
 
@@ -86,6 +89,12 @@ export class S3Service {
                 if (relativePath === masterPlaylistFilename) {
                     masterPlaylistKey = objectKey;
                 }
+
+                const percent =
+                    totalFiles > 0
+                        ? Math.round((keys.length / totalFiles) * 100)
+                        : 100;
+                options?.onProgress?.(Math.min(percent, 100));
 
                 this.logger.debug(`Uploaded: ${objectKey}`);
             } catch (err) {

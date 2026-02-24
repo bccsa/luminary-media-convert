@@ -70,4 +70,14 @@ export class WebhookPayloadDto {
         example: 'videos/project-1/master.m3u8',
     })
     masterPlaylist?: string;
+
+    @ApiPropertyOptional({
+        description:
+            'Per-angle playlists for angle switching. Present on "completed" when video was encoded.',
+        example: [
+            { name: 'Main angle', key: 'videos/project-1/master.m3u8' },
+            { name: 'Side angle', key: 'videos/project-1/side_angle.m3u8' },
+        ],
+    })
+    anglePlaylists?: { name: string; key: string }[];
 }

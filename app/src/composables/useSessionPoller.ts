@@ -11,6 +11,7 @@ export function useSessionPoller() {
     const queuePosition = ref<number | undefined>();
     const files = ref<string[] | undefined>();
     const masterPlaylist = ref<string | undefined>();
+    const anglePlaylists = ref<{ name: string; key: string }[] | undefined>();
     const error = ref<string | undefined>();
     const polling = ref(false);
 
@@ -22,6 +23,7 @@ export function useSessionPoller() {
         queuePosition.value = data.queuePosition;
         files.value = data.files;
         masterPlaylist.value = data.masterPlaylist;
+        anglePlaylists.value = data.anglePlaylists;
         error.value = data.error;
     }
 
@@ -63,6 +65,7 @@ export function useSessionPoller() {
         queuePosition: readonly(queuePosition),
         files: readonly(files),
         masterPlaylist: readonly(masterPlaylist),
+        anglePlaylists: readonly(anglePlaylists),
         error: readonly(error),
         polling: readonly(polling),
         start,

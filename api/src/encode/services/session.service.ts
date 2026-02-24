@@ -5,6 +5,11 @@ import type { SessionStatus } from '../dto/webhook-payload.dto.js';
 import type { ProbeResult, SuggestedConfig } from './probe.service.js';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 
+export interface AnglePlaylistInfo {
+    name: string;
+    key: string;
+}
+
 export interface Session {
     id: string;
     uploadToken: string;
@@ -18,6 +23,7 @@ export interface Session {
     outputDir?: string;
     files?: string[];
     masterPlaylist?: string;
+    anglePlaylists?: AnglePlaylistInfo[];
     error?: string;
     createdAt: number;
 }
@@ -104,7 +110,8 @@ export class SessionService {
     setCompleted(
         id: string,
         files: string[],
-        masterPlaylist: string
+        masterPlaylist: string,
+        anglePlaylists?: AnglePlaylistInfo[],
     ): void {
         const session = this.sessions.get(id);
         if (session) {
@@ -112,6 +119,7 @@ export class SessionService {
             session.progress = 100;
             session.files = files;
             session.masterPlaylist = masterPlaylist;
+            session.anglePlaylists = anglePlaylists;
         }
     }
 

@@ -55,6 +55,7 @@ describe('EncodeService', () => {
             encode: jest.fn().mockResolvedValue({
                 outputDir: '/tmp/output',
                 masterPlaylist: 'master.m3u8',
+                anglePlaylists: [{ name: 'Default', filename: 'master.m3u8' }],
             }),
         } as any;
 

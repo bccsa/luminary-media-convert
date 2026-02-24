@@ -77,10 +77,11 @@ export class EncodeService {
                 sessionId,
                 'uploading_to_s3',
             );
+            this.sessionService.updateProgress(sessionId, 0);
             await this.sendWebhook(session, {
                 sessionId,
                 status: 'uploading_to_s3',
-                progress: 100,
+                progress: 0,
                 message: 'Uploading encoded files to S3',
             });
 
@@ -88,12 +89,47 @@ export class EncodeService {
                 session.config.s3,
                 outputDir,
                 encodeResult.masterPlaylist,
+                {
+                    onProgress: (percent) => {
+                        this.sessionService.updateProgress(
+                            sessionId,
+                            percent,
+                        );
+                        if (
+                            percent % 5 < 1 ||
+                            percent >= 99
+                        ) {
+                            this.sendWebhook(session, {
+                                sessionId,
+                                status: 'uploading_to_s3',
+                                progress: percent,
+                                message: `Uploading to S3: ${percent}%`,
+                            }).catch(() => {});
+                        }
+                    },
+                },
             );
+
+            const anglePlaylistsWithKeys = encodeResult.anglePlaylists.map(
+                (ap) => {
+                    const key =
+                        uploadResult.keys.find(
+                            (k) => k.split('/').pop() === ap.filename,
+                        ) ?? uploadResult.masterPlaylistKey;
+                    return { name: ap.name, key };
+                },
+            );
+
+            const effectiveMasterPlaylist =
+                anglePlaylistsWithKeys.length > 0
+                    ? anglePlaylistsWithKeys[0].key
+                    : uploadResult.masterPlaylistKey;
 
             this.sessionService.setCompleted(
                 sessionId,
                 uploadResult.keys,
-                uploadResult.masterPlaylistKey,
+                effectiveMasterPlaylist,
+                anglePlaylistsWithKeys.length > 0 ? anglePlaylistsWithKeys : undefined,
             );
             await this.sendWebhook(session, {
                 sessionId,
@@ -101,7 +137,11 @@ export class EncodeService {
                 progress: 100,
                 message: 'Encoding and upload complete',
                 files: uploadResult.keys,
-                masterPlaylist: uploadResult.masterPlaylistKey,
+                masterPlaylist: effectiveMasterPlaylist,
+                anglePlaylists:
+                    anglePlaylistsWithKeys.length > 0
+                        ? anglePlaylistsWithKeys
+                        : undefined,
             });
 
             this.logger.log(`Session ${sessionId} completed successfully`);

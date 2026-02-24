@@ -189,4 +189,15 @@ export class EncodeConfigDto {
     @ValidateIf(o => o.type === 'audio')
     @Expose()
     audioRenditions?: AudioRenditionDto[];
+
+    @ApiPropertyOptional({
+        description:
+            'Video track display names for angle playlist naming (used when type is video).',
+        example: [{ index: 0, name: 'Main angle' }, { index: 1, name: 'Side angle' }],
+    })
+    @IsArray()
+    @IsOptional()
+    @ValidateIf(o => o.type === 'video')
+    @Expose()
+    videoTrackNames?: { index: number; name: string }[];
 }

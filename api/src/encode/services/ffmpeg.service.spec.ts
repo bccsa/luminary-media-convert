@@ -296,6 +296,29 @@ describe('FfmpegService', () => {
             expect(vsmVal).toContain('language:eng');
         });
 
+        it('should include -threads with default value', () => {
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const args = buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            const threadsIdx = args.indexOf('-threads');
+            expect(threadsIdx).toBeGreaterThan(-1);
+            expect(args[threadsIdx + 1]).toBe('8');
+        });
+
         it('should use -ac:a:N to target audio streams correctly', () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'video',
@@ -324,9 +347,9 @@ describe('FfmpegService', () => {
 
     });
 
-    describe('fixMasterPlaylistAudioNames (private, tested via reflection)', () => {
-        const fixMasterPlaylistAudioNames = (outputDir: string, config: EncodeConfigDto): void => {
-            return (service as any).fixMasterPlaylistAudioNames(outputDir, config);
+    describe('fixMasterPlaylist (private, tested via reflection)', () => {
+        const fixMasterPlaylist = (outputDir: string, config: EncodeConfigDto): void => {
+            return (service as any).fixMasterPlaylist(outputDir, config);
         };
 
         let tmpDir: string;
@@ -339,7 +362,7 @@ describe('FfmpegService', () => {
             rmSync(tmpDir, { recursive: true, force: true });
         });
 
-        it('should handle FFmpeg group_ prefix on GROUP-IDs', () => {
+        it('should use label for NAME (not language code) when available', () => {
             const masterContent = [
                 '#EXTM3U',
                 '#EXT-X-VERSION:6',
@@ -349,18 +372,18 @@ describe('FfmpegService', () => {
             ].join('\n');
             writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
 
-            fixMasterPlaylistAudioNames(tmpDir, {
+            fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'mid', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'low', audioBitrateKbps: 64, channels: 1, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    { id: 'mid', label: 'Standard Audio', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    { id: 'low', label: 'Low Audio', audioBitrateKbps: 64, channels: 1, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
                 ],
             });
 
             const result = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
             const nameMatches = result.match(/NAME="([^"]+)"/g);
-            expect(nameMatches).toEqual(['NAME="eng"', 'NAME="eng"', 'NAME="eng"']);
+            expect(nameMatches).toEqual(['NAME="HD Audio"', 'NAME="Standard Audio"', 'NAME="Low Audio"']);
         });
 
         it('should also work with GROUP-IDs without the group_ prefix', () => {
@@ -370,46 +393,46 @@ describe('FfmpegService', () => {
             ].join('\n');
             writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
 
-            fixMasterPlaylistAudioNames(tmpDir, {
+            fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
                 ],
             });
 
             const result = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
-            expect(result).toContain('NAME="eng"');
+            expect(result).toContain('NAME="HD Audio"');
         });
 
         it('should set different NAMEs for audio groups from different source tracks', () => {
             const masterContent = [
                 '#EXTM3U',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_eng",NAME="audio_2",DEFAULT=YES,LANGUAGE="eng",URI="stream_eng/playlist.m3u8"',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_spa",NAME="audio_3",DEFAULT=NO,LANGUAGE="spa",URI="stream_spa/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_eng",NAME="audio_2",DEFAULT=YES,LANGUAGE="eng",URI="stream_English/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_spa",NAME="audio_3",DEFAULT=NO,LANGUAGE="spa",URI="stream_Spanish/playlist.m3u8"',
             ].join('\n');
             writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
 
-            fixMasterPlaylistAudioNames(tmpDir, {
+            fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 audioGroups: [
-                    { id: 'eng', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'spa', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'spa' },
+                    { id: 'eng', label: 'English', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    { id: 'spa', label: 'Spanish', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'spa' },
                 ],
             });
 
             const result = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
-            expect(result).toContain('NAME="eng"');
-            expect(result).toContain('NAME="spa"');
+            expect(result).toContain('NAME="English"');
+            expect(result).toContain('NAME="Spanish"');
         });
 
-        it('should fall back to "Audio" when no language is set', () => {
+        it('should fall back to "Audio" when no label or language is set', () => {
             const masterContent = [
                 '#EXTM3U',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="audio_2",DEFAULT=YES,URI="stream_hd/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="audio_2",DEFAULT=YES,URI="stream_192kbps/playlist.m3u8"',
             ].join('\n');
             writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
 
-            fixMasterPlaylistAudioNames(tmpDir, {
+            fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 audioGroups: [
                     { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
@@ -424,20 +447,51 @@ describe('FfmpegService', () => {
             const masterContent = [
                 '#EXTM3U',
                 '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",DEFAULT=YES',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="audio_2",DEFAULT=YES,URI="stream_hd/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="audio_2",DEFAULT=YES,URI="stream_HD_Audio/playlist.m3u8"',
             ].join('\n');
             writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
 
-            fixMasterPlaylistAudioNames(tmpDir, {
+            fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
                 ],
             });
 
             const result = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
             expect(result).toContain('TYPE=SUBTITLES,GROUP-ID="subs",NAME="English"');
-            expect(result).toContain('TYPE=AUDIO,GROUP-ID="group_hd",NAME="eng"');
+            expect(result).toContain('TYPE=AUDIO,GROUP-ID="group_hd",NAME="HD Audio"');
+        });
+
+        it('should add VIDEO groups and VIDEO attribute for multi-angle streams', () => {
+            const masterContent = [
+                '#EXTM3U',
+                '#EXT-X-VERSION:6',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_tier_0",NAME="eng",URI="stream_English/playlist.m3u8"',
+                '#EXT-X-STREAM-INF:BANDWIDTH=4177777,AVERAGE-BANDWIDTH=3822202,RESOLUTION=1280x720,CODECS="avc1.640028,mp4a.40.2",AUDIO="group_tier_0"',
+                'stream_main_1280x720/playlist.m3u8',
+                '',
+                '#EXT-X-STREAM-INF:BANDWIDTH=1868063,AVERAGE-BANDWIDTH=1724450,RESOLUTION=854x480,CODECS="avc1.4d401f,mp4a.40.2",AUDIO="group_tier_0"',
+                'stream_pulpit_854x480/playlist.m3u8',
+            ].join('\n');
+            writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
+
+            fixMasterPlaylist(tmpDir, {
+                type: 'video',
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'tier_0', label: 'main' },
+                    { width: 854, height: 480, videoBitrateKbps: 1000, copyStream: false, audioGroupId: 'tier_0', label: 'pulpit' },
+                ],
+                audioGroups: [
+                    { id: 'tier_0', label: 'English', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                ],
+            });
+
+            const result = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
+            expect(result).toContain('#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="main",NAME="main",DEFAULT=YES');
+            expect(result).toContain('#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="pulpit",NAME="pulpit",DEFAULT=NO');
+            expect(result).toContain('VIDEO="main",AUDIO="group_tier_0"');
+            expect(result).toContain('VIDEO="pulpit",AUDIO="group_tier_0"');
         });
     });
 
@@ -509,6 +563,26 @@ describe('FfmpegService', () => {
             });
 
             expect(args).toContain('libmp3lame');
+        });
+
+        it('should include -threads with default value', () => {
+            const encodeConfig: EncodeConfigDto = {
+                type: 'audio',
+                segmentDuration: 6,
+                audioRenditions: [
+                    { audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const args = buildAudioArgs({
+                inputPath: '/tmp/audio.mp3',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            const threadsIdx = args.indexOf('-threads');
+            expect(threadsIdx).toBeGreaterThan(-1);
+            expect(args[threadsIdx + 1]).toBe('8');
         });
 
         it('should use copy codec for copyStream audio renditions', () => {

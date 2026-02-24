@@ -9,7 +9,7 @@ export interface VideoTrackInfo {
     frameRate: number;
     profile?: string;
     language?: string;
-    title?: string;
+    name?: string;
 }
 
 export interface AudioTrackInfo {
@@ -19,7 +19,7 @@ export interface AudioTrackInfo {
     channels: number;
     sampleRate: number;
     language?: string;
-    title?: string;
+    name?: string;
 }
 
 export interface FormatInfo {
@@ -73,6 +73,9 @@ export interface EncodeConfig {
     videoRenditions?: VideoRendition[];
     audioGroups?: AudioGroup[];
     audioRenditions?: AudioRendition[];
+    videoTrackNames?: { index: number; name: string }[];
+    /** Audio track metadata (name, language) for restored configs — persisted in localStorage only */
+    audioTrackMetadata?: { index: number; name?: string; language?: string }[];
 }
 
 export type SuggestedConfig = EncodeConfig;
@@ -135,5 +138,6 @@ export interface SessionStatusResponse {
     suggestedConfig?: SuggestedConfig;
     files?: string[];
     masterPlaylist?: string;
+    anglePlaylists?: { name: string; key: string }[];
     error?: string;
 }

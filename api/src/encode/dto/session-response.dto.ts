@@ -135,6 +135,17 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
+            'Per-angle playlists for angle switching. Present when status is "completed" and video was encoded.',
+        example: [
+            { name: 'Main angle', key: 'videos/project-1/master.m3u8' },
+            { name: 'Side angle', key: 'videos/project-1/side_angle.m3u8' },
+        ],
+    })
+    @Expose()
+    anglePlaylists?: { name: string; key: string }[];
+
+    @ApiPropertyOptional({
+        description:
             'Error message. Present when status is "failed".',
         example: 'FFmpeg exited with code 1: Invalid input file',
     })

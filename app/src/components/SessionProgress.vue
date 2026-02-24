@@ -15,6 +15,7 @@ const props = defineProps<{
     queuePosition?: number;
     files?: readonly string[];
     masterPlaylist?: string;
+    anglePlaylists?: readonly { name: string; key: string }[];
     error?: string;
     s3PublicBaseUrl?: string;
     encodingType?: 'video' | 'audio';
@@ -24,20 +25,56 @@ const emit = defineEmits<{ reset: [] }>();
 
 const playerEl = ref<HTMLVideoElement | null>(null);
 const copied = ref(false);
+const currentAngleIndex = ref(0);
+const pendingSeekTime = ref<number | null>(null);
 let player: Player | null = null;
 let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 
-const playbackUrl = computed(() => {
-    if (!props.s3PublicBaseUrl || !props.masterPlaylist) return null;
-    return `${props.s3PublicBaseUrl}/${props.masterPlaylist}`;
+const primaryPlaylistKey = computed(() => {
+    const lists = uniqueAnglePlaylists.value;
+    if (lists.length) {
+        return lists[currentAngleIndex.value]?.key ?? lists[0]?.key;
+    }
+    return props.masterPlaylist;
 });
+
+const playbackUrl = computed(() => {
+    if (!props.s3PublicBaseUrl || !primaryPlaylistKey.value) return null;
+    return `${props.s3PublicBaseUrl}/${primaryPlaylistKey.value}`;
+});
+
+const uniqueAnglePlaylists = computed(() => {
+    const lists = props.anglePlaylists;
+    if (!lists?.length) return [];
+    const seen = new Set<string>();
+    const result: { name: string; key: string }[] = [];
+    for (const ap of lists) {
+        if (seen.has(ap.name)) continue;
+        seen.add(ap.name);
+        result.push(ap);
+    }
+    return result;
+});
+
+const showAngleSwitcher = computed(
+    () => uniqueAnglePlaylists.value.length > 1,
+);
 
 const isAudioOnly = computed(() => props.encodingType === 'audio');
 
 function initPlayer() {
     if (!playerEl.value || !playbackUrl.value) return;
     if (player) {
+        const wasPaused = player.paused();
         player.src({ src: playbackUrl.value, type: 'application/x-mpegURL' });
+        if (pendingSeekTime.value != null) {
+            const seekTo = pendingSeekTime.value;
+            pendingSeekTime.value = null;
+            player.one('loadedmetadata', () => {
+                player!.currentTime(seekTo);
+                if (!wasPaused) player!.play();
+            });
+        }
         return;
     }
 
@@ -102,6 +139,14 @@ function badgeClasses(s: string | null): string {
     const cfg = s ? statusConfig[s] : null;
     return `inline-block rounded-full px-3 py-1 text-xs font-semibold text-white ${cfg?.color ?? 'bg-zinc-700'}`;
 }
+
+function switchToAngle(index: number) {
+    if (index === currentAngleIndex.value) return;
+    if (player) {
+        pendingSeekTime.value = player.currentTime() ?? 0;
+    }
+    currentAngleIndex.value = index;
+}
 </script>
 
 <template>
@@ -144,6 +189,28 @@ function badgeClasses(s: string | null): string {
         <div v-if="status === 'completed'" class="space-y-3">
             <div class="rounded-lg bg-emerald-950/40 border border-emerald-800/50 p-4">
                 <p class="text-sm font-medium text-emerald-400">Encoding complete</p>
+            </div>
+
+            <!-- Angle switcher (multi-angle only; one button per unique track name) -->
+            <div
+                v-if="showAngleSwitcher && uniqueAnglePlaylists.length"
+                class="flex flex-wrap items-center gap-2"
+            >
+                <span class="text-xs font-medium text-zinc-500">Angle:</span>
+                <div class="flex flex-wrap gap-1.5">
+                    <button
+                        v-for="(ap, i) in uniqueAnglePlaylists"
+                        :key="ap.key"
+                        type="button"
+                        class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer"
+                        :class="i === currentAngleIndex
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'"
+                        @click="switchToAngle(i)"
+                    >
+                        {{ ap.name }}
+                    </button>
+                </div>
             </div>
 
             <!-- Player -->

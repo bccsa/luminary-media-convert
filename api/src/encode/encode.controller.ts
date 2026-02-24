@@ -225,7 +225,7 @@ export class EncodeController {
                 this.queueService.getPosition(sessionId) ?? undefined;
         }
 
-        if (session.status === 'encoding') {
+        if (session.status === 'encoding' || session.status === 'uploading_to_s3') {
             result.progress = session.progress;
         }
 
@@ -233,6 +233,7 @@ export class EncodeController {
             result.progress = 100;
             result.files = session.files;
             result.masterPlaylist = session.masterPlaylist;
+            result.anglePlaylists = session.anglePlaylists;
         }
 
         if (session.status === 'failed') {

@@ -5,7 +5,7 @@ import {
     OnModuleDestroy,
 } from '@nestjs/common';
 import { spawn, execSync, type ChildProcess } from 'child_process';
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import type { EncodeConfigDto, VideoRenditionDto, AudioGroupDto, AudioRenditionDto } from '../dto/encode-config.dto.js';
 import dotenv from 'dotenv';
@@ -20,9 +20,15 @@ export interface EncodeOptions {
     onProgress: (percent: number) => void;
 }
 
+export interface AnglePlaylist {
+    name: string;
+    filename: string;
+}
+
 export interface EncodeResult {
     outputDir: string;
     masterPlaylist: string;
+    anglePlaylists: AnglePlaylist[];
 }
 
 @Injectable()
@@ -33,6 +39,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private readonly timeoutMs = process.env.FFMPEG_TIMEOUT_MS
         ? parseInt(process.env.FFMPEG_TIMEOUT_MS, 10)
         : 0;
+    private readonly threads = process.env.FFMPEG_THREADS
+        ? parseInt(process.env.FFMPEG_THREADS, 10)
+        : 8;
 
     async onModuleInit(): Promise<void> {
         this.gpuAvailable = this.detectNvidiaGpu();
@@ -43,6 +52,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         } else {
             this.logger.log('No NVIDIA GPU found, using CPU encoding');
         }
+        this.logger.log(`FFmpeg threads: ${this.threads}`);
     }
 
     async onModuleDestroy(): Promise<void> {
@@ -134,20 +144,29 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             args.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda');
         }
         args.push('-i', inputPath);
+        args.push('-threads', String(this.threads));
         args.push('-progress', 'pipe:2', '-stats_period', '1');
 
         const reencodeRenditions = renditions.filter(r => !r.copyStream);
         const copyRenditions = renditions.filter(r => r.copyStream);
 
-        // Build filter_complex for re-encoded streams only
         if (reencodeRenditions.length > 0) {
-            const filterParts: string[] = [];
-            const splitOutputs = reencodeRenditions.map((_, i) => `[reencode${i}]`).join('');
-            filterParts.push(`[0:v:0]split=${reencodeRenditions.length}${splitOutputs}`);
+            const reencodeByTrack = new Map<number, { rendition: VideoRenditionDto; globalIndex: number }[]>();
             reencodeRenditions.forEach((r, i) => {
-                const scaler = this.gpuAvailable ? 'scale_cuda' : 'scale';
-                filterParts.push(`[reencode${i}]${scaler}=${r.width}:${r.height}[vout${i}]`);
+                const trackIdx = r.sourceTrackIndex ?? 0;
+                if (!reencodeByTrack.has(trackIdx)) reencodeByTrack.set(trackIdx, []);
+                reencodeByTrack.get(trackIdx)!.push({ rendition: r, globalIndex: i });
             });
+
+            const filterParts: string[] = [];
+            for (const [trackIdx, entries] of reencodeByTrack) {
+                const splitOutputs = entries.map(e => `[reencode${e.globalIndex}]`).join('');
+                filterParts.push(`[0:v:${trackIdx}]split=${entries.length}${splitOutputs}`);
+                for (const e of entries) {
+                    const scaler = this.gpuAvailable ? 'scale_cuda' : 'scale';
+                    filterParts.push(`[reencode${e.globalIndex}]${scaler}=${e.rendition.width}:${e.rendition.height}[vout${e.globalIndex}]`);
+                }
+            }
             args.push('-filter_complex', filterParts.join(';'));
         }
 
@@ -224,12 +243,11 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             '-master_pl_name', 'master.m3u8',
         );
 
-        // Build var_stream_map with audio groups
-        const varParts: string[] = [];
+        const multiTrack = new Set(renditions.map(r => r.sourceTrackIndex ?? 0)).size > 1;
 
-        // Video entries referencing audio groups
+        const varParts: string[] = [];
         for (const { rendition, outputIndex } of videoIndexMap) {
-            const name = (rendition.label ?? `${rendition.height}p`).replace(/\s+/g, '_');
+            const name = this.buildVideoStreamName(rendition, multiTrack);
             let part = `v:${outputIndex},agroup:${rendition.audioGroupId},name:${name}`;
             varParts.push(part);
         }
@@ -264,6 +282,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const renditions = encodeConfig.audioRenditions!;
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
         const args: string[] = ['-i', inputPath];
+        args.push('-threads', String(this.threads));
 
         args.push('-progress', 'pipe:2', '-stats_period', '1');
         args.push('-vn');
@@ -440,12 +459,24 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 if (err) {
                     reject(err);
                 } else {
+                    let anglePlaylists: AnglePlaylist[] = [];
+                    let masterPlaylistFilename = 'master.m3u8';
                     if (type === 'video') {
-                        this.fixMasterPlaylistAudioNames(outputDir, encodeConfig);
+                        this.fixMasterPlaylist(outputDir, encodeConfig);
+                        anglePlaylists = this.generateAnglePlaylists(outputDir, encodeConfig);
+                        if (anglePlaylists.length > 1) {
+                            const masterPath = join(outputDir, 'master.m3u8');
+                            if (existsSync(masterPath)) {
+                                unlinkSync(masterPath);
+                            }
+                            masterPlaylistFilename =
+                                anglePlaylists[0]?.filename ?? 'master.m3u8';
+                        }
                     }
                     resolve({
                         outputDir,
-                        masterPlaylist: 'master.m3u8',
+                        masterPlaylist: masterPlaylistFilename,
+                        anglePlaylists,
                     });
                 }
             };
@@ -488,25 +519,34 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         });
     }
 
-    private fixMasterPlaylistAudioNames(
+    private fixMasterPlaylist(
         outputDir: string,
         config: EncodeConfigDto,
     ): void {
         const masterPath = join(outputDir, 'master.m3u8');
         if (!existsSync(masterPath)) return;
 
+        let content = readFileSync(masterPath, 'utf-8');
+        content = this.fixMasterPlaylistAudioNames(content, config);
+        content = this.fixMasterPlaylistVideoGroups(content, config);
+        writeFileSync(masterPath, content, 'utf-8');
+    }
+
+    private fixMasterPlaylistAudioNames(
+        content: string,
+        config: EncodeConfigDto,
+    ): string {
         const audioGroups = config.audioGroups ?? [];
-        if (audioGroups.length === 0) return;
+        if (audioGroups.length === 0) return content;
 
         const nameByUri = new Map<string, string>();
         for (const group of audioGroups) {
             const streamName = (group.label ?? `${group.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
             const uri = `stream_${streamName}/playlist.m3u8`;
-            nameByUri.set(uri, group.language ?? group.label ?? 'Audio');
+            nameByUri.set(uri, group.label ?? group.language ?? 'Audio');
         }
 
-        const content = readFileSync(masterPath, 'utf-8');
-        const lines = content.split('\n').map((line) => {
+        return content.split('\n').map((line) => {
             if (
                 !line.startsWith('#EXT-X-MEDIA:') ||
                 !line.includes('TYPE=AUDIO')
@@ -519,9 +559,177 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             const name = nameByUri.get(uriMatch[1]);
             if (!name) return line;
             return line.replace(/NAME="[^"]*"/, `NAME="${name}"`);
-        });
+        }).join('\n');
+    }
 
-        writeFileSync(masterPath, lines.join('\n'), 'utf-8');
+    /**
+     * Parse the already-fixed master.m3u8 (which has VIDEO="angle" attributes)
+     * and split it into one playlist per angle. Does NOT upload the original
+     * multi-angle master because most HLS web players don't support it.
+     */
+    private generateAnglePlaylists(
+        outputDir: string,
+        config: EncodeConfigDto,
+    ): AnglePlaylist[] {
+        const renditions = config.videoRenditions ?? [];
+        if (renditions.length === 0) return [];
+
+        const masterPath = join(outputDir, 'master.m3u8');
+        if (!existsSync(masterPath)) return [];
+
+        const uniqueTracks = new Set(renditions.map(r => r.sourceTrackIndex ?? 0));
+        if (uniqueTracks.size <= 1) {
+            return [{ name: 'Default', filename: 'master.m3u8' }];
+        }
+
+        const content = readFileSync(masterPath, 'utf-8');
+        const lines = content.split('\n');
+
+        let extVersion = '#EXT-X-VERSION:3';
+        const audioMediaLines: string[] = [];
+        const streamsByAngle = new Map<string, { infLine: string; uri: string }[]>();
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.startsWith('#EXT-X-VERSION:')) {
+                extVersion = line;
+            } else if (line.startsWith('#EXT-X-MEDIA:') && line.includes('TYPE=AUDIO')) {
+                audioMediaLines.push(line);
+            } else if (line.startsWith('#EXT-X-STREAM-INF:')) {
+                const uriLine = lines[i + 1]?.trim();
+                if (!uriLine || uriLine.startsWith('#')) continue;
+
+                const videoMatch = line.match(/VIDEO="([^"]+)"/);
+                const angleId = videoMatch?.[1] ?? 'default';
+
+                if (!streamsByAngle.has(angleId)) {
+                    streamsByAngle.set(angleId, []);
+                }
+
+                const cleanedLine = line.replace(/,?VIDEO="[^"]*"/g, '');
+                streamsByAngle.get(angleId)!.push({ infLine: cleanedLine, uri: uriLine });
+            }
+        }
+
+        this.logger.debug(
+            `generateAnglePlaylists: found ${streamsByAngle.size} angle(s) in master.m3u8: ` +
+            `${[...streamsByAngle.entries()].map(([k, v]) => `"${k}" (${v.length} streams)`).join(', ')}`,
+        );
+
+        const nameByTrackIndex = new Map<number, string>();
+        for (const tn of config.videoTrackNames ?? []) {
+            nameByTrackIndex.set(tn.index, tn.name ?? `Angle ${tn.index}`);
+        }
+
+        const sanitize = (s: string): string =>
+            s.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'angle';
+
+        const anglePlaylists: AnglePlaylist[] = [];
+
+        for (const [angleId, streams] of streamsByAngle) {
+            const angleName = [...nameByTrackIndex.values()].find(
+                name => sanitize(name) === angleId,
+            ) ?? angleId;
+
+            const filename = `${angleId}.m3u8`;
+            const parts: string[] = ['#EXTM3U', extVersion, ...audioMediaLines];
+
+            for (const { infLine, uri } of streams) {
+                parts.push(infLine, uri);
+            }
+
+            const anglePath = join(outputDir, filename);
+            writeFileSync(anglePath, parts.join('\n') + '\n', 'utf-8');
+            anglePlaylists.push({ name: angleName, filename });
+
+            this.logger.debug(
+                `generateAnglePlaylists: wrote "${filename}" for angle "${angleName}" with ${streams.length} stream(s)`,
+            );
+        }
+
+        return anglePlaylists;
+    }
+
+    /**
+     * Add VIDEO attribute to each EXT-X-STREAM-INF identifying the angle.
+     * Uses positional matching (re-encode first, then copy) and derives the
+     * angle name from videoTrackNames + sourceTrackIndex.
+     */
+    private fixMasterPlaylistVideoGroups(
+        content: string,
+        config: EncodeConfigDto,
+    ): string {
+        const renditions = config.videoRenditions ?? [];
+        if (renditions.length === 0) return content;
+
+        const uniqueTracks = new Set(renditions.map(r => r.sourceTrackIndex ?? 0));
+        if (uniqueTracks.size <= 1) return content;
+
+        const nameByTrackIndex = new Map<number, string>();
+        for (const tn of config.videoTrackNames ?? []) {
+            nameByTrackIndex.set(tn.index, tn.name ?? `Angle ${tn.index}`);
+        }
+        for (const idx of uniqueTracks) {
+            if (!nameByTrackIndex.has(idx)) {
+                nameByTrackIndex.set(idx, `Angle ${idx}`);
+            }
+        }
+
+        const sanitize = (s: string): string =>
+            s.replace(/[^a-zA-Z0-9_-]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'angle';
+
+        const orderedRenditions = [
+            ...renditions.filter(r => !r.copyStream),
+            ...renditions.filter(r => r.copyStream),
+        ];
+
+        const lines = content.split('\n');
+        const result: string[] = [];
+        let videoEntryIndex = 0;
+        let insertedVideoMedia = false;
+        const insertedGroupIds = new Set<string>();
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+
+            if (!insertedVideoMedia && (line.startsWith('#EXT-X-MEDIA:') || line.startsWith('#EXT-X-STREAM-INF:'))) {
+                for (const [, angleName] of nameByTrackIndex) {
+                    const groupId = sanitize(angleName);
+                    if (insertedGroupIds.has(groupId)) continue;
+                    insertedGroupIds.add(groupId);
+                    const isDefault = insertedGroupIds.size === 1;
+                    result.push(`#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="${groupId}",NAME="${angleName}",DEFAULT=${isDefault ? 'YES' : 'NO'}`);
+                }
+                insertedVideoMedia = true;
+            }
+
+            if (line.startsWith('#EXT-X-STREAM-INF:') && videoEntryIndex < orderedRenditions.length) {
+                const rendition = orderedRenditions[videoEntryIndex];
+                const angleName = nameByTrackIndex.get(rendition.sourceTrackIndex ?? 0) ?? 'Angle 0';
+                const groupId = sanitize(angleName);
+                const newLine = line.includes('AUDIO=')
+                    ? line.replace(/AUDIO="([^"]+)"/, `VIDEO="${groupId}",AUDIO="$1"`)
+                    : `${line},VIDEO="${groupId}"`;
+                result.push(newLine);
+                videoEntryIndex++;
+                continue;
+            }
+
+            result.push(line);
+        }
+
+        return result.join('\n');
+    }
+
+    private buildVideoStreamName(
+        rendition: VideoRenditionDto,
+        multiTrack: boolean,
+    ): string {
+        const base = (rendition.label ?? `${rendition.height}p`).replace(/\s+/g, '_');
+        if (multiTrack) {
+            return `${base}_t${rendition.sourceTrackIndex ?? 0}_${rendition.width}x${rendition.height}`;
+        }
+        return `${base}_${rendition.width}x${rendition.height}`;
     }
 
     isGpuAvailable(): boolean {

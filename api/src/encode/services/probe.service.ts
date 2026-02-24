@@ -10,7 +10,7 @@ export interface VideoTrackInfo {
     frameRate: number;
     profile?: string;
     language?: string;
-    title?: string;
+    name?: string;
 }
 
 export interface AudioTrackInfo {
@@ -20,7 +20,7 @@ export interface AudioTrackInfo {
     channels: number;
     sampleRate: number;
     language?: string;
-    title?: string;
+    name?: string;
 }
 
 export interface ProbeResult {
@@ -144,7 +144,7 @@ export class ProbeService {
                     frameRate: this.parseFrameRate(s.avg_frame_rate ?? s.r_frame_rate ?? '0/1'),
                     profile: s.profile,
                     language: s.tags?.language,
-                    title: s.tags?.title,
+                    name: s.tags?.title,
                 });
             } else if (s.codec_type === 'audio') {
                 audioTracks.push({
@@ -154,7 +154,7 @@ export class ProbeService {
                     channels: s.channels ?? 2,
                     sampleRate: s.sample_rate ? parseInt(s.sample_rate, 10) : 44100,
                     language: s.tags?.language,
-                    title: s.tags?.title,
+                    name: s.tags?.title,
                 });
             }
         }
@@ -252,7 +252,10 @@ export class ProbeService {
         const maxTracksPerLang = Math.max(
             ...Array.from(langMap.values()).map(t => t.length),
         );
-        const numTiers = Math.min(sortedVideoTracks.length, maxTracksPerLang);
+        const numTiers = Math.max(
+            Math.min(sortedVideoTracks.length, maxTracksPerLang),
+            3,
+        );
 
         const audioGroups: SuggestedAudioGroup[] = [];
         for (let tier = 0; tier < numTiers; tier++) {
@@ -263,7 +266,7 @@ export class ProbeService {
                 const codec: 'aac' | 'mp3' = track.codec === 'mp3' ? 'mp3' : 'aac';
                 audioGroups.push({
                     id: tierId,
-                    label: `${lang.toUpperCase()} ${track.bitrateKbps || '?'}kbps`,
+                    label: track.name ?? `${lang.toUpperCase()} ${track.bitrateKbps || '?'}kbps`,
                     audioBitrateKbps: track.bitrateKbps || 128,
                     channels: track.channels,
                     audioCodec: codec,
@@ -274,17 +277,28 @@ export class ProbeService {
             }
         }
 
-        const videoRenditions: SuggestedVideoRendition[] = sortedVideoTracks.map(
-            (track, i) => ({
-                width: track.width,
-                height: track.height,
-                videoBitrateKbps: track.bitrateKbps || this.estimateBitrateForHeight(track.height),
-                copyStream: true,
-                sourceTrackIndex: track.index,
-                audioGroupId: i < numTiers ? `tier_${i}` : `tier_${numTiers - 1}`,
-                label: track.title ?? `${track.height}p`,
-            }),
-        );
+        const videoRenditions: SuggestedVideoRendition[] = [];
+        for (let i = 0; i < sortedVideoTracks.length; i++) {
+            const track = sortedVideoTracks[i];
+            const ladder = ABR_LADDER.filter(r => r.height <= track.height);
+            const rungs = ladder.length > 0
+                ? ladder
+                : [{ height: track.height, width: track.width, bitrateKbps: track.bitrateKbps || 1000, label: `${track.height}p` }];
+            for (const rung of rungs) {
+                const tier = this.getAudioTierForHeight(rung.height);
+                const tierId = tier.groupId === 'hd' ? 'tier_0' : tier.groupId === 'mid' ? 'tier_1' : 'tier_2';
+                const matchesSource = rung.height === track.height && rung.width === track.width;
+                videoRenditions.push({
+                    width: rung.width,
+                    height: rung.height,
+                    videoBitrateKbps: rung.bitrateKbps,
+                    copyStream: matchesSource,
+                    sourceTrackIndex: track.index,
+                    audioGroupId: tierId,
+                    label: track.name ? `${track.name} ${rung.label}` : rung.label,
+                });
+            }
+        }
 
         return {
             type: 'video',
@@ -302,28 +316,35 @@ export class ProbeService {
         const audioGroupSet = new Map<string, SuggestedAudioGroup>();
 
         for (const track of sortedVideoTracks) {
-            const tier = this.getAudioTierForHeight(track.height);
-            videoRenditions.push({
-                width: track.width,
-                height: track.height,
-                videoBitrateKbps: track.bitrateKbps || this.estimateBitrateForHeight(track.height),
-                copyStream: true,
-                sourceTrackIndex: track.index,
-                audioGroupId: tier.groupId,
-                label: track.title ?? `${track.height}p`,
-            });
-
-            if (!audioGroupSet.has(tier.groupId)) {
-                const sourceAudio = probe.audioTracks[0];
-                audioGroupSet.set(tier.groupId, {
-                    id: tier.groupId,
-                    label: tier.label,
-                    audioBitrateKbps: tier.bitrateKbps,
-                    channels: tier.channels,
-                    audioCodec: 'aac',
-                    sourceTrackIndex: sourceAudio?.index ?? 0,
-                    language: sourceAudio?.language,
+            const ladder = ABR_LADDER.filter(r => r.height <= track.height);
+            const rungs = ladder.length > 0
+                ? ladder
+                : [{ height: track.height, width: track.width, bitrateKbps: track.bitrateKbps || 1000, label: `${track.height}p` }];
+            for (const rung of rungs) {
+                const tier = this.getAudioTierForHeight(rung.height);
+                const matchesSource = rung.height === track.height && rung.width === track.width;
+                videoRenditions.push({
+                    width: rung.width,
+                    height: rung.height,
+                    videoBitrateKbps: rung.bitrateKbps,
+                    copyStream: matchesSource,
+                    sourceTrackIndex: track.index,
+                    audioGroupId: tier.groupId,
+                    label: track.name ? `${track.name} ${rung.label}` : rung.label,
                 });
+
+                if (!audioGroupSet.has(tier.groupId)) {
+                    const sourceAudio = probe.audioTracks[0];
+                    audioGroupSet.set(tier.groupId, {
+                        id: tier.groupId,
+                        label: tier.label,
+                        audioBitrateKbps: tier.bitrateKbps,
+                        channels: tier.channels,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: sourceAudio?.index ?? 0,
+                        language: sourceAudio?.language,
+                    });
+                }
             }
         }
 
