@@ -33,45 +33,6 @@ export interface ProbeResult {
     audioTracks: AudioTrackInfo[];
 }
 
-export interface SuggestedVideoRendition {
-    width: number;
-    height: number;
-    videoBitrateKbps: number;
-    copyStream: boolean;
-    sourceTrackIndex?: number;
-    audioGroupId: string;
-    label?: string;
-}
-
-export interface SuggestedAudioGroup {
-    id: string;
-    label?: string;
-    audioBitrateKbps: number;
-    channels: number;
-    audioCodec: 'aac' | 'mp3';
-    sourceTrackIndex: number;
-    language?: string;
-    copyStream?: boolean;
-}
-
-export interface SuggestedAudioRendition {
-    audioBitrateKbps: number;
-    channels: number;
-    audioCodec: 'aac' | 'mp3';
-    sourceTrackIndex: number;
-    language?: string;
-    label?: string;
-    copyStream?: boolean;
-}
-
-export interface SuggestedConfig {
-    type: 'video' | 'audio';
-    segmentDuration: number;
-    videoRenditions?: SuggestedVideoRendition[];
-    audioGroups?: SuggestedAudioGroup[];
-    audioRenditions?: SuggestedAudioRendition[];
-}
-
 interface FfprobeStream {
     index: number;
     codec_type: string;
@@ -98,34 +59,12 @@ interface FfprobeOutput {
     format: FfprobeFormat;
 }
 
-const ABR_LADDER: { height: number; width: number; bitrateKbps: number; label: string }[] = [
-    { height: 2160, width: 3840, bitrateKbps: 15000, label: '4K' },
-    { height: 1440, width: 2560, bitrateKbps: 8000, label: '1440p' },
-    { height: 1080, width: 1920, bitrateKbps: 5000, label: '1080p' },
-    { height: 720, width: 1280, bitrateKbps: 2500, label: '720p' },
-    { height: 480, width: 854, bitrateKbps: 1000, label: '480p' },
-    { height: 360, width: 640, bitrateKbps: 600, label: '360p' },
-    { height: 240, width: 426, bitrateKbps: 300, label: '240p' },
-    { height: 144, width: 256, bitrateKbps: 150, label: '144p' },
-];
-
-const AUDIO_GROUP_TIERS: { minHeight: number; groupId: string; label: string; bitrateKbps: number; channels: number }[] = [
-    { minHeight: 720, groupId: 'hd', label: 'HD Audio', bitrateKbps: 192, channels: 2 },
-    { minHeight: 360, groupId: 'mid', label: 'Standard Audio', bitrateKbps: 128, channels: 2 },
-    { minHeight: 0, groupId: 'low', label: 'Low Audio', bitrateKbps: 64, channels: 1 },
-];
-
 @Injectable()
 export class ProbeService {
     private readonly logger = new Logger(ProbeService.name);
 
     probe(filePath: string): ProbeResult {
-        const raw = execSync(
-            `ffprobe -v quiet -print_format json -show_format -show_streams "${filePath}"`,
-            { encoding: 'utf-8', timeout: 60000 },
-        );
-
-        const data: FfprobeOutput = JSON.parse(raw);
+        const data = this.runFfprobe(filePath);
 
         const videoTracks: VideoTrackInfo[] = [];
         const audioTracks: AudioTrackInfo[] = [];
@@ -140,7 +79,7 @@ export class ProbeService {
                     codec: s.codec_name ?? 'unknown',
                     width: s.width ?? 0,
                     height: s.height ?? 0,
-                    bitrateKbps: s.bit_rate ? Math.round(parseInt(s.bit_rate, 10) / 1000) : 0,
+                    bitrateKbps: this.extractBitrateKbps(s),
                     frameRate: this.parseFrameRate(s.avg_frame_rate ?? s.r_frame_rate ?? '0/1'),
                     profile: s.profile,
                     language: s.tags?.language,
@@ -150,7 +89,7 @@ export class ProbeService {
                 audioTracks.push({
                     index: audioStreamIndex++,
                     codec: s.codec_name ?? 'unknown',
-                    bitrateKbps: s.bit_rate ? Math.round(parseInt(s.bit_rate, 10) / 1000) : 0,
+                    bitrateKbps: this.extractBitrateKbps(s),
                     channels: s.channels ?? 2,
                     sampleRate: s.sample_rate ? parseInt(s.sample_rate, 10) : 44100,
                     language: s.tags?.language,
@@ -159,9 +98,19 @@ export class ProbeService {
             }
         }
 
+        const formatBitrateKbps = data.format.bit_rate
+            ? Math.round(parseInt(data.format.bit_rate, 10) / 1000)
+            : 0;
+
+        const hasMissingBitrates = [...videoTracks, ...audioTracks].some(t => t.bitrateKbps === 0);
+        if (hasMissingBitrates) {
+            const duration = data.format.duration ? parseFloat(data.format.duration) : 0;
+            this.computeBitratesFromPackets(filePath, data.streams, videoTracks, audioTracks, duration);
+        }
+
         const format = {
             duration: data.format.duration ? parseFloat(data.format.duration) : 0,
-            bitrateKbps: data.format.bit_rate ? Math.round(parseInt(data.format.bit_rate, 10) / 1000) : 0,
+            bitrateKbps: formatBitrateKbps,
             formatName: data.format.format_name ?? 'unknown',
         };
 
@@ -173,253 +122,103 @@ export class ProbeService {
         return { format, videoTracks, audioTracks };
     }
 
-    suggest(probe: ProbeResult): SuggestedConfig {
-        const hasVideo = probe.videoTracks.length > 0;
-        const hasMultipleVideoTracks = probe.videoTracks.length > 1;
-
-        if (!hasVideo) {
-            return this.suggestAudioOnly(probe);
-        }
-
-        if (hasMultipleVideoTracks) {
-            return this.suggestMultiVideoTrack(probe);
-        }
-
-        return this.suggestSingleVideoTrack(probe);
-    }
-
-    private suggestAudioOnly(probe: ProbeResult): SuggestedConfig {
-        const audioRenditions: SuggestedAudioRendition[] = [];
-
-        const sourceTrack = probe.audioTracks[0];
-        const sourceBitrate = sourceTrack?.bitrateKbps || 256;
-
-        const tiers = [256, 128, 64].filter(b => b <= sourceBitrate + 32);
-        if (tiers.length === 0) tiers.push(sourceBitrate || 128);
-
-        for (const bitrate of tiers) {
-            const channels = bitrate <= 64 ? 1 : 2;
-            audioRenditions.push({
-                audioBitrateKbps: bitrate,
-                channels,
-                audioCodec: 'aac',
-                sourceTrackIndex: sourceTrack?.index ?? 0,
-                language: sourceTrack?.language,
-                label: `${bitrate}kbps`,
-            });
-        }
-
-        return {
-            type: 'audio',
-            segmentDuration: 6,
-            audioRenditions,
-        };
-    }
-
-    private suggestMultiVideoTrack(probe: ProbeResult): SuggestedConfig {
-        const sortedVideoTracks = [...probe.videoTracks].sort(
-            (a, b) => (b.height * b.width) - (a.height * a.width),
+    private runFfprobe(filePath: string): FfprobeOutput {
+        const raw = execSync(
+            `ffprobe -v quiet -print_format json -show_format -show_streams "${filePath}"`,
+            { encoding: 'utf-8', timeout: 60000 },
         );
+        return JSON.parse(raw);
+    }
 
-        const langMap = new Map<string, AudioTrackInfo[]>();
-        for (const track of probe.audioTracks) {
-            const lang = track.language || 'und';
-            if (!langMap.has(lang)) langMap.set(lang, []);
-            langMap.get(lang)!.push(track);
+    private extractBitrateKbps(stream: FfprobeStream): number {
+        if (stream.bit_rate) {
+            return Math.round(parseInt(stream.bit_rate, 10) / 1000);
         }
-        for (const tracks of langMap.values()) {
-            tracks.sort((a, b) => (b.bitrateKbps || 0) - (a.bitrateKbps || 0));
+        if (stream.tags?.BPS) {
+            return Math.round(parseInt(stream.tags.BPS, 10) / 1000);
         }
+        if (stream.tags?.NUMBER_OF_BYTES && stream.tags?.DURATION) {
+            const bytes = parseInt(stream.tags.NUMBER_OF_BYTES, 10);
+            const duration = this.parseDurationTag(stream.tags.DURATION);
+            if (duration > 0) {
+                return Math.round((bytes * 8) / duration / 1000);
+            }
+        }
+        return 0;
+    }
 
-        const languages = Array.from(langMap.keys());
-        const isMultiLang = languages.length > 1
-            || (languages.length === 1 && (langMap.get(languages[0])?.length ?? 0) > 1);
+    /**
+     * When stream-level bitrates are unavailable (common in Matroska),
+     * compute actual bitrates by summing packet sizes per stream via ffprobe.
+     */
+    private computeBitratesFromPackets(
+        filePath: string,
+        rawStreams: FfprobeStream[],
+        videoTracks: VideoTrackInfo[],
+        audioTracks: AudioTrackInfo[],
+        duration: number,
+    ): void {
+        if (duration <= 0) return;
 
-        if (isMultiLang) {
-            return this.suggestMultiVideoMultiLangAudio(
-                sortedVideoTracks, langMap, languages,
+        this.logger.log('Stream-level bitrates missing, computing from packet data...');
+
+        try {
+            const csv = execSync(
+                `ffprobe -v quiet -print_format csv=p=0 -show_entries packet=stream_index,size "${filePath}"`,
+                { encoding: 'utf-8', timeout: 120000, maxBuffer: 200 * 1024 * 1024 },
             );
-        }
 
-        return this.suggestMultiVideoSingleAudio(sortedVideoTracks, probe);
-    }
-
-    private suggestMultiVideoMultiLangAudio(
-        sortedVideoTracks: VideoTrackInfo[],
-        langMap: Map<string, AudioTrackInfo[]>,
-        languages: string[],
-    ): SuggestedConfig {
-        const maxTracksPerLang = Math.max(
-            ...Array.from(langMap.values()).map(t => t.length),
-        );
-        const numTiers = Math.max(
-            Math.min(sortedVideoTracks.length, maxTracksPerLang),
-            3,
-        );
-
-        const audioGroups: SuggestedAudioGroup[] = [];
-        for (let tier = 0; tier < numTiers; tier++) {
-            const tierId = `tier_${tier}`;
-            for (const lang of languages) {
-                const tracks = langMap.get(lang)!;
-                const track = tracks[tier] ?? tracks[tracks.length - 1];
-                const codec: 'aac' | 'mp3' = track.codec === 'mp3' ? 'mp3' : 'aac';
-                audioGroups.push({
-                    id: tierId,
-                    label: track.name ?? `${lang.toUpperCase()} ${track.bitrateKbps || '?'}kbps`,
-                    audioBitrateKbps: track.bitrateKbps || 128,
-                    channels: track.channels,
-                    audioCodec: codec,
-                    sourceTrackIndex: track.index,
-                    language: lang === 'und' ? undefined : lang,
-                    copyStream: true,
-                });
+            const bytesPerStream = new Map<number, number>();
+            for (const line of csv.split('\n')) {
+                if (!line) continue;
+                const parts = line.split(',');
+                if (parts.length < 2) continue;
+                const streamIndex = parseInt(parts[0], 10);
+                const size = parseInt(parts[1], 10);
+                if (isNaN(streamIndex) || isNaN(size)) continue;
+                bytesPerStream.set(streamIndex, (bytesPerStream.get(streamIndex) ?? 0) + size);
             }
-        }
 
-        const videoRenditions: SuggestedVideoRendition[] = [];
-        for (let i = 0; i < sortedVideoTracks.length; i++) {
-            const track = sortedVideoTracks[i];
-            const ladder = ABR_LADDER.filter(r => r.height <= track.height);
-            const rungs = ladder.length > 0
-                ? ladder
-                : [{ height: track.height, width: track.width, bitrateKbps: track.bitrateKbps || 1000, label: `${track.height}p` }];
-            for (const rung of rungs) {
-                const tier = this.getAudioTierForHeight(rung.height);
-                const tierId = tier.groupId === 'hd' ? 'tier_0' : tier.groupId === 'mid' ? 'tier_1' : 'tier_2';
-                const matchesSource = rung.height === track.height && rung.width === track.width;
-                videoRenditions.push({
-                    width: rung.width,
-                    height: rung.height,
-                    videoBitrateKbps: rung.bitrateKbps,
-                    copyStream: matchesSource,
-                    sourceTrackIndex: track.index,
-                    audioGroupId: tierId,
-                    label: track.name ? `${track.name} ${rung.label}` : rung.label,
-                });
-            }
-        }
-
-        return {
-            type: 'video',
-            segmentDuration: 6,
-            videoRenditions,
-            audioGroups,
-        };
-    }
-
-    private suggestMultiVideoSingleAudio(
-        sortedVideoTracks: VideoTrackInfo[],
-        probe: ProbeResult,
-    ): SuggestedConfig {
-        const videoRenditions: SuggestedVideoRendition[] = [];
-        const audioGroupSet = new Map<string, SuggestedAudioGroup>();
-
-        for (const track of sortedVideoTracks) {
-            const ladder = ABR_LADDER.filter(r => r.height <= track.height);
-            const rungs = ladder.length > 0
-                ? ladder
-                : [{ height: track.height, width: track.width, bitrateKbps: track.bitrateKbps || 1000, label: `${track.height}p` }];
-            for (const rung of rungs) {
-                const tier = this.getAudioTierForHeight(rung.height);
-                const matchesSource = rung.height === track.height && rung.width === track.width;
-                videoRenditions.push({
-                    width: rung.width,
-                    height: rung.height,
-                    videoBitrateKbps: rung.bitrateKbps,
-                    copyStream: matchesSource,
-                    sourceTrackIndex: track.index,
-                    audioGroupId: tier.groupId,
-                    label: track.name ? `${track.name} ${rung.label}` : rung.label,
-                });
-
-                if (!audioGroupSet.has(tier.groupId)) {
-                    const sourceAudio = probe.audioTracks[0];
-                    audioGroupSet.set(tier.groupId, {
-                        id: tier.groupId,
-                        label: tier.label,
-                        audioBitrateKbps: tier.bitrateKbps,
-                        channels: tier.channels,
-                        audioCodec: 'aac',
-                        sourceTrackIndex: sourceAudio?.index ?? 0,
-                        language: sourceAudio?.language,
-                    });
+            const avStreamToType = new Map<number, { type: 'video' | 'audio'; localIndex: number }>();
+            let vi = 0;
+            let ai = 0;
+            for (const s of rawStreams) {
+                if (s.codec_type === 'video') {
+                    avStreamToType.set(s.index, { type: 'video', localIndex: vi++ });
+                } else if (s.codec_type === 'audio') {
+                    avStreamToType.set(s.index, { type: 'audio', localIndex: ai++ });
                 }
             }
-        }
 
-        return {
-            type: 'video',
-            segmentDuration: 6,
-            videoRenditions,
-            audioGroups: Array.from(audioGroupSet.values()),
-        };
-    }
-
-    private suggestSingleVideoTrack(probe: ProbeResult): SuggestedConfig {
-        const source = probe.videoTracks[0];
-        const sourceHeight = source.height;
-        const sourceWidth = source.width;
-
-        const ladder = ABR_LADDER.filter(r => r.height <= sourceHeight);
-        if (ladder.length === 0) {
-            ladder.push({
-                height: sourceHeight,
-                width: sourceWidth,
-                bitrateKbps: source.bitrateKbps || 1000,
-                label: `${sourceHeight}p`,
-            });
-        }
-
-        const audioGroupSet = new Map<string, SuggestedAudioGroup>();
-        const videoRenditions: SuggestedVideoRendition[] = [];
-
-        for (const rung of ladder) {
-            const tier = this.getAudioTierForHeight(rung.height);
-
-            videoRenditions.push({
-                width: rung.width,
-                height: rung.height,
-                videoBitrateKbps: rung.bitrateKbps,
-                copyStream: false,
-                audioGroupId: tier.groupId,
-                label: rung.label,
-            });
-
-            if (!audioGroupSet.has(tier.groupId)) {
-                const sourceAudio = probe.audioTracks[0];
-                audioGroupSet.set(tier.groupId, {
-                    id: tier.groupId,
-                    label: tier.label,
-                    audioBitrateKbps: tier.bitrateKbps,
-                    channels: tier.channels,
-                    audioCodec: 'aac',
-                    sourceTrackIndex: sourceAudio?.index ?? 0,
-                    language: sourceAudio?.language,
-                });
+            for (const [streamIndex, totalBytes] of bytesPerStream) {
+                const mapping = avStreamToType.get(streamIndex);
+                if (!mapping) continue;
+                const bitrateKbps = Math.round((totalBytes * 8) / duration / 1000);
+                if (mapping.type === 'video') {
+                    const track = videoTracks[mapping.localIndex];
+                    if (track && track.bitrateKbps === 0) {
+                        track.bitrateKbps = bitrateKbps;
+                    }
+                } else {
+                    const track = audioTracks[mapping.localIndex];
+                    if (track && track.bitrateKbps === 0) {
+                        track.bitrateKbps = bitrateKbps;
+                    }
+                }
             }
-        }
 
-        return {
-            type: 'video',
-            segmentDuration: 6,
-            videoRenditions,
-            audioGroups: Array.from(audioGroupSet.values()),
-        };
+            this.logger.log('Packet-based bitrate computation complete');
+        } catch (err) {
+            this.logger.warn(
+                `Packet-based bitrate computation failed: ${(err as Error).message}`,
+            );
+        }
     }
 
-    private getAudioTierForHeight(height: number): (typeof AUDIO_GROUP_TIERS)[number] {
-        for (const tier of AUDIO_GROUP_TIERS) {
-            if (height >= tier.minHeight) return tier;
-        }
-        return AUDIO_GROUP_TIERS[AUDIO_GROUP_TIERS.length - 1];
-    }
-
-    private estimateBitrateForHeight(height: number): number {
-        for (const rung of ABR_LADDER) {
-            if (height >= rung.height) return rung.bitrateKbps;
-        }
-        return 300;
+    private parseDurationTag(duration: string): number {
+        const match = duration.match(/^(\d+):(\d+):(\d+(?:\.\d+)?)$/);
+        if (!match) return 0;
+        return parseInt(match[1], 10) * 3600 + parseInt(match[2], 10) * 60 + parseFloat(match[3]);
     }
 
     private parseFrameRate(rate: string): number {

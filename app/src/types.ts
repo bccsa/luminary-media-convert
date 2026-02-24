@@ -55,6 +55,7 @@ export interface AudioGroup {
     sourceTrackIndex: number;
     language?: string;
     copyStream?: boolean;
+    vbr?: boolean;
 }
 
 export interface AudioRendition {
@@ -65,6 +66,7 @@ export interface AudioRendition {
     language?: string;
     label?: string;
     copyStream?: boolean;
+    vbr?: boolean;
 }
 
 export interface EncodeConfig {
@@ -77,8 +79,6 @@ export interface EncodeConfig {
     /** Audio track metadata (name, language) for restored configs — persisted in localStorage only */
     audioTrackMetadata?: { index: number; name?: string; language?: string }[];
 }
-
-export type SuggestedConfig = EncodeConfig;
 
 // --- S3 & Webhook Config ---
 
@@ -135,7 +135,6 @@ export interface SessionStatusResponse {
     progress?: number;
     queuePosition?: number;
     probeResult?: ProbeResult;
-    suggestedConfig?: SuggestedConfig;
     files?: string[];
     masterPlaylist?: string;
     anglePlaylists?: { name: string; key: string }[];

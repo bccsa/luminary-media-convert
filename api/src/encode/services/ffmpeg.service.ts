@@ -131,6 +131,11 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return 'p7';
     }
 
+    private bitrateToVbrQuality(bitrateKbps: number): string {
+        const q = Math.max(0.1, Math.min(2.0, bitrateKbps / 128));
+        return q.toFixed(1);
+    }
+
     private buildVideoArgs(opts: EncodeOptions): string[] {
         const { inputPath, outputDir, encodeConfig } = opts;
         const renditions = encodeConfig.videoRenditions!;
@@ -223,11 +228,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 args.push(`-c:a:${audioOutputIndex}`, 'copy');
             } else {
                 const codec = group.audioCodec === 'mp3' ? 'libmp3lame' : 'aac';
-                args.push(
-                    `-c:a:${audioOutputIndex}`, codec,
-                    `-b:a:${audioOutputIndex}`, `${group.audioBitrateKbps}k`,
-                    `-ac:a:${audioOutputIndex}`, `${group.channels}`,
-                );
+                args.push(`-c:a:${audioOutputIndex}`, codec);
+                if (group.vbr && codec === 'aac') {
+                    args.push(`-q:a:${audioOutputIndex}`, this.bitrateToVbrQuality(group.audioBitrateKbps));
+                } else {
+                    args.push(`-b:a:${audioOutputIndex}`, `${group.audioBitrateKbps}k`);
+                }
+                args.push(`-ac:a:${audioOutputIndex}`, `${group.channels}`);
             }
             audioOutputs.push({ group, outputIndex: audioOutputIndex });
             audioOutputIndex++;
@@ -299,9 +306,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 args.push(
                     '-map', `0:a:${r.sourceTrackIndex}`,
                     '-c:a', codec,
-                    '-b:a', `${r.audioBitrateKbps}k`,
-                    '-ac', `${r.channels}`,
                 );
+                if (r.vbr && codec === 'aac') {
+                    args.push('-q:a', this.bitrateToVbrQuality(r.audioBitrateKbps));
+                } else {
+                    args.push('-b:a', `${r.audioBitrateKbps}k`);
+                }
+                args.push('-ac', `${r.channels}`);
             }
             args.push(
                 '-f', 'hls',
@@ -319,11 +330,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     args.push(`-c:a:${i}`, 'copy');
                 } else {
                     const codec = r.audioCodec === 'mp3' ? 'libmp3lame' : 'aac';
-                    args.push(
-                        `-c:a:${i}`, codec,
-                        `-b:a:${i}`, `${r.audioBitrateKbps}k`,
-                        `-ac:a:${i}`, `${r.channels}`,
-                    );
+                    args.push(`-c:a:${i}`, codec);
+                    if (r.vbr && codec === 'aac') {
+                        args.push(`-q:a:${i}`, this.bitrateToVbrQuality(r.audioBitrateKbps));
+                    } else {
+                        args.push(`-b:a:${i}`, `${r.audioBitrateKbps}k`);
+                    }
+                    args.push(`-ac:a:${i}`, `${r.channels}`);
                 }
             });
 

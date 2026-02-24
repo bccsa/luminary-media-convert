@@ -7,7 +7,7 @@ import SessionProgress from './components/SessionProgress.vue';
 import { createSession, uploadFile, getSessionStatus, startEncode, deleteSession } from './api';
 import { useSessionPoller } from './composables/useSessionPoller';
 import { computeLayoutKey, saveConfig } from './utils/layoutStorage';
-import type { CreateSessionRequest, S3Config, ProbeResult, SuggestedConfig, EncodeConfig } from './types';
+import type { CreateSessionRequest, S3Config, ProbeResult, EncodeConfig } from './types';
 
 function formatBytes(bytes: number): string {
     if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
@@ -27,7 +27,6 @@ const uploadProgress = ref(0);
 const s3PublicBaseUrl = ref('');
 const encodingType = ref<'video' | 'audio'>('video');
 const probeResult = ref<ProbeResult | null>(null);
-const suggestedConfig = ref<SuggestedConfig | null>(null);
 const s3Config = ref<S3Config | null>(null);
 
 function buildS3PublicBaseUrl(s3: S3Config): string {
@@ -76,8 +75,7 @@ async function onUploadSubmit(payload: {
 
         const status = await getSessionStatus(session.sessionId, accessToken);
         probeResult.value = status.probeResult ?? null;
-        suggestedConfig.value = status.suggestedConfig ?? null;
-        encodingType.value = suggestedConfig.value?.type ?? 'video';
+        encodingType.value = probeResult.value?.videoTracks.length ? 'video' : 'audio';
 
         view.value = 'configure';
     } catch (e) {
@@ -123,7 +121,6 @@ async function onEncodeBack() {
     view.value = 'config';
     sessionId.value = '';
     probeResult.value = null;
-    suggestedConfig.value = null;
 }
 
 function reset() {
@@ -135,7 +132,6 @@ function reset() {
     s3PublicBaseUrl.value = '';
     encodingType.value = 'video';
     probeResult.value = null;
-    suggestedConfig.value = null;
     s3Config.value = null;
 }
 </script>
@@ -212,9 +208,8 @@ function reset() {
 
                 <!-- Step 2: Review probe results + configure encoding -->
                 <EncodeConfigForm
-                    v-else-if="view === 'configure' && probeResult && suggestedConfig"
+                    v-else-if="view === 'configure' && probeResult"
                     :probe-result="probeResult"
-                    :suggested-config="suggestedConfig"
                     @submit="onEncodeSubmit"
                     @back="onEncodeBack"
                 />

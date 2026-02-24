@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { CreateSessionDto } from '../dto/create-session.dto.js';
 import type { SessionStatus } from '../dto/webhook-payload.dto.js';
-import type { ProbeResult, SuggestedConfig } from './probe.service.js';
+import type { ProbeResult } from './probe.service.js';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 
 export interface AnglePlaylistInfo {
@@ -17,7 +17,6 @@ export interface Session {
     progress: number;
     config: CreateSessionDto;
     probeResult?: ProbeResult;
-    suggestedConfig?: SuggestedConfig;
     encodeConfig?: EncodeConfigDto;
     filePath?: string;
     outputDir?: string;
@@ -85,11 +84,10 @@ export class SessionService {
         }
     }
 
-    setProbeResult(id: string, probeResult: ProbeResult, suggestedConfig: SuggestedConfig): void {
+    setProbeResult(id: string, probeResult: ProbeResult): void {
         const session = this.sessions.get(id);
         if (session) {
             session.probeResult = probeResult;
-            session.suggestedConfig = suggestedConfig;
         }
     }
 

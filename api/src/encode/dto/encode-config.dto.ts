@@ -103,6 +103,12 @@ export class AudioGroupDto {
     @IsOptional()
     @Expose()
     copyStream?: boolean;
+
+    @ApiPropertyOptional({ description: 'Use VBR encoding instead of CBR.', example: true })
+    @IsBoolean()
+    @IsOptional()
+    @Expose()
+    vbr?: boolean;
 }
 
 export class AudioRenditionDto {
@@ -146,6 +152,12 @@ export class AudioRenditionDto {
     @IsOptional()
     @Expose()
     copyStream?: boolean;
+
+    @ApiPropertyOptional({ description: 'Use VBR encoding instead of CBR.', example: true })
+    @IsBoolean()
+    @IsOptional()
+    @Expose()
+    vbr?: boolean;
 }
 
 export class EncodeConfigDto {

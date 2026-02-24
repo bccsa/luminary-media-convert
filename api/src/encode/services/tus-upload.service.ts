@@ -142,13 +142,8 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                 this.sessionService.setFilePath(sessionId, destPath);
 
                 const probeResult = this.probeService.probe(destPath);
-                const suggestedConfig = this.probeService.suggest(probeResult);
 
-                this.sessionService.setProbeResult(
-                    sessionId,
-                    probeResult,
-                    suggestedConfig,
-                );
+                this.sessionService.setProbeResult(sessionId, probeResult);
                 this.sessionService.updateStatus(sessionId, 'uploaded');
 
                 this.logger.log(

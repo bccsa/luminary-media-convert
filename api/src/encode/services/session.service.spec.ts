@@ -114,19 +114,17 @@ describe('SessionService', () => {
     });
 
     describe('setProbeResult', () => {
-        it('should store probe result and suggested config', () => {
+        it('should store probe result', () => {
             const session = service.create(makeConfig());
             const probeResult = {
                 format: { duration: 60, bitrateKbps: 3000, formatName: 'mp4' },
                 videoTracks: [],
                 audioTracks: [],
             };
-            const suggestedConfig = { type: 'audio' as const, segmentDuration: 6, audioRenditions: [] };
-            service.setProbeResult(session.id, probeResult, suggestedConfig);
+            service.setProbeResult(session.id, probeResult);
 
             const updated = service.get(session.id)!;
             expect(updated.probeResult).toEqual(probeResult);
-            expect(updated.suggestedConfig).toEqual(suggestedConfig);
         });
     });
 

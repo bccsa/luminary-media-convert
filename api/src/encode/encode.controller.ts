@@ -186,7 +186,7 @@ export class EncodeController {
         summary: 'Get session status',
         description:
             'Poll the current status of an encoding session. ' +
-            'When status is "uploaded", includes probe results and suggested config. ' +
+            'When status is "uploaded", includes probe results. ' +
             'When status is "encoding", includes progress percentage. ' +
             'When "completed", includes file listing.',
     })
@@ -217,7 +217,6 @@ export class EncodeController {
 
         if (session.status === 'uploaded') {
             result.probeResult = session.probeResult as any;
-            result.suggestedConfig = session.suggestedConfig;
         }
 
         if (session.status === 'queued') {

@@ -75,7 +75,7 @@ api/
 │       │   └── upload-timeout.middleware.ts    # 10-minute upload timeout
 │       └── services/
 │           ├── session.service.ts       # In-memory session store + token management
-│           ├── probe.service.ts         # ffprobe wrapper: media analysis + suggested encoding config
+│           ├── probe.service.ts         # ffprobe wrapper: media analysis
 │           ├── queue.service.ts         # FIFO encoding queue (one-at-a-time)
 │           ├── ffmpeg.service.ts        # FFmpeg process management + GPU detection
 │           ├── s3.service.ts            # S3 upload via MinIO client
@@ -118,8 +118,8 @@ app/
 1. **POST** `/api/sessions` — Client sends S3 config + optional webhook URL with Auth0 JWT
 2. Service returns `{ sessionId, uploadUrl, uploadToken }`
 3. **POST** `/api/sessions/:id/upload` — Client uploads source file with Bearer token; API auto-probes with ffprobe
-4. Service returns `{ probeResult, suggestedConfig }` — detected tracks and a suggested encoding configuration
-5. Client reviews probe results, modifies encoding config (renditions, audio groups, copy/reencode toggles)
+4. Service returns `{ probeResult }` — detected tracks (video and audio metadata)
+5. Client computes suggested encoding config from probe results, user reviews and modifies (renditions, audio groups, copy/reencode toggles)
 6. **POST** `/api/sessions/:id/encode` — Client submits final encoding config with Auth0 JWT
 7. Session enters FIFO queue; webhook sent (if configured) with `queued` status + queue position
 8. When session reaches front of queue, FFmpeg encodes to HLS with ABR variants
@@ -132,10 +132,7 @@ app/
 - Wraps `ffprobe -v quiet -print_format json -show_format -show_streams`
 - Detects video tracks (codec, resolution, bitrate, frame rate, profile, language, title)
 - Detects audio tracks (codec, bitrate, channels, sample rate, language, title)
-- Generates suggested encoding config based on input:
-  - **Single video**: Standard ABR ladder with audio groups (HD/mid/low quality mapped to video resolutions)
-  - **Multiple video tracks** (pre-encoded): Suggests copy mode (no re-encoding), just HLS chunking
-  - **Audio-only**: Suggests 2-3 audio quality tiers (256/128/64 kbps)
+- Returns raw probe results to the client; encoding config suggestions are computed entirely in the frontend (`EncodeConfigForm.vue`)
 
 ### Encoding features
 
@@ -155,8 +152,8 @@ app/
 1. User signs in via Auth0 Universal Login (redirect flow)
 2. User fills in S3 config and selects a file in `SessionConfigForm`
 3. On submit, `App.vue` creates a session and uploads the file
-4. API probes the file and returns detected tracks + suggested encoding config
-5. User reviews probe results and configures encoding in `EncodeConfigForm` (renditions, audio groups, copy toggles)
+4. API probes the file and returns detected tracks
+5. `EncodeConfigForm` computes a suggested encoding config from the probe results on mount; user reviews and configures encoding (renditions, audio groups, copy toggles)
 6. User clicks "Start Encoding" — `App.vue` submits the encode config
 7. Transitions to progress view; `useSessionPoller` polls the API every 2s
 8. Polling auto-stops when session reaches a terminal status (`completed` or `failed`)
@@ -173,7 +170,7 @@ app/
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/api/sessions` | Auth0 JWT | Create encoding session (S3 + webhook config) |
-| POST | `/api/sessions/:sessionId/upload` | Bearer (upload token) | Upload source media file, auto-probe, return suggestions |
+| POST | `/api/sessions/:sessionId/upload` | Bearer (upload token) | Upload source media file, auto-probe |
 | POST | `/api/sessions/:sessionId/encode` | Auth0 JWT | Submit encoding config, enqueue for processing |
 | GET | `/api/sessions/:sessionId` | Auth0 JWT | Poll session status |
 | DELETE | `/api/sessions/:sessionId` | Auth0 JWT | Cancel and delete session (only `created` or `uploaded` status) |

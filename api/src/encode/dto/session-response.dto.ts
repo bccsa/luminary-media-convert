@@ -108,12 +108,6 @@ export class SessionStatusDto {
     probeResult?: ProbeResultDto;
 
     @ApiPropertyOptional({
-        description: 'Suggested encoding configuration. Present when status is "uploaded".',
-    })
-    @Expose()
-    suggestedConfig?: any;
-
-    @ApiPropertyOptional({
         description:
             'List of S3 object keys for all uploaded files. Present when status is "completed".',
         example: [

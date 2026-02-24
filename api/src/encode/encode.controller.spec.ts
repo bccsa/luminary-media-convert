@@ -130,19 +130,18 @@ describe('EncodeController', () => {
             expect(result.status).toBe('created');
         });
 
-        it('should include probeResult and suggestedConfig when uploaded', () => {
+        it('should include probeResult when uploaded', () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploaded');
             sessionService.setProbeResult(session.id, {
                 format: { duration: 60, bitrateKbps: 3000, formatName: 'mp4' },
                 videoTracks: [],
                 audioTracks: [],
-            }, { type: 'audio', segmentDuration: 6, audioRenditions: [] });
+            });
 
             const result = controller.getStatus(session.id);
 
             expect(result.probeResult).toBeDefined();
-            expect(result.suggestedConfig).toBeDefined();
         });
 
         it('should include queuePosition when session is queued', () => {

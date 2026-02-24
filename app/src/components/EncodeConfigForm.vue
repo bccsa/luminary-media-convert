@@ -2,7 +2,6 @@
 import { reactive, computed, ref } from 'vue';
 import type {
     ProbeResult,
-    SuggestedConfig,
     EncodeConfig,
     VideoRendition,
     AudioGroup,
@@ -14,7 +13,6 @@ import { computeLayoutKey, getStoredConfig } from '../utils/layoutStorage';
 
 const props = defineProps<{
     probeResult: ProbeResult;
-    suggestedConfig: SuggestedConfig;
 }>();
 
 const emit = defineEmits<{
@@ -25,24 +23,18 @@ const emit = defineEmits<{
 const showBackConfirm = ref(false);
 
 const encodingType = reactive<{ value: 'video' | 'audio' }>({
-    value: props.suggestedConfig.type,
+    value: props.probeResult.videoTracks.length > 0 ? 'video' : 'audio',
 });
 
 const segmentDuration = reactive<{ value: number }>({
-    value: props.suggestedConfig.segmentDuration ?? 6,
+    value: 6,
 });
 
-const videoRenditions = reactive<VideoRendition[]>(
-    props.suggestedConfig.videoRenditions?.map(r => ({ ...r })) ?? [],
-);
+const videoRenditions = reactive<VideoRendition[]>([]);
 
-const audioGroups = reactive<AudioGroup[]>(
-    props.suggestedConfig.audioGroups?.map(g => ({ ...g })) ?? [],
-);
+const audioGroups = reactive<AudioGroup[]>([]);
 
-const audioRenditions = reactive<AudioRendition[]>(
-    props.suggestedConfig.audioRenditions?.map(r => ({ ...r })) ?? [],
-);
+const audioRenditions = reactive<AudioRendition[]>([]);
 
 const editableVideoTracks = reactive<VideoTrackInfo[]>(
     props.probeResult.videoTracks.map(t => ({ ...t })),
@@ -64,9 +56,9 @@ const ABR_LADDER = [
 ];
 
 const AUDIO_GROUP_TIERS = [
-    { minHeight: 720, groupId: 'hd', label: 'HD Audio', bitrateKbps: 192, channels: 2 },
-    { minHeight: 360, groupId: 'mid', label: 'Standard Audio', bitrateKbps: 128, channels: 2 },
-    { minHeight: 0, groupId: 'low', label: 'Low Audio', bitrateKbps: 64, channels: 1 },
+    { minHeight: 720, groupId: 'hd', label: 'HD', bitrateKbps: 256, channels: 2 },
+    { minHeight: 360, groupId: 'mid', label: 'Standard', bitrateKbps: 128, channels: 2 },
+    { minHeight: 0, groupId: 'low', label: 'Mono', bitrateKbps: 64, channels: 1 },
 ];
 
 function getAudioTierForHeight(height: number) {
@@ -82,7 +74,7 @@ function mapTierToGroupId(standardGroupId: string, tierIds: string[]): string {
     return tierIds[Math.min(tierIndex, tierIds.length - 1)] ?? tierIds[0] ?? 'tier_0';
 }
 
-function reanalyze() {
+function reanalyzeVideo() {
     const sortedVideoTracks = [...editableVideoTracks].sort(
         (a, b) => (b.height * b.width) - (a.height * a.width),
     );
@@ -114,20 +106,21 @@ function reanalyze() {
                 3,
             );
             for (let tier = 0; tier < numTiers; tier++) {
-                const tierId = `tier_${tier}`;
+                const standardTier = AUDIO_GROUP_TIERS[Math.min(tier, AUDIO_GROUP_TIERS.length - 1)];
+                const tierId = standardTier.groupId;
                 tierIds.push(tierId);
                 for (const lang of languages) {
                     const tracks = langMap.get(lang)!;
                     const track = tracks[tier] ?? tracks[tracks.length - 1];
                     newGroups.push({
                         id: tierId,
-                        label: track.name ?? `${lang.toUpperCase()} ${track.bitrateKbps || '?'}kbps`,
-                        audioBitrateKbps: track.bitrateKbps || 128,
-                        channels: track.channels,
-                        audioCodec: (track.codec === 'mp3' ? 'mp3' : 'aac') as 'aac' | 'mp3',
+                        label: track.name ?? `${lang.toUpperCase()} ${standardTier.label}`,
+                        audioBitrateKbps: standardTier.bitrateKbps,
+                        channels: standardTier.channels,
+                        audioCodec: 'aac' as 'aac' | 'mp3',
                         sourceTrackIndex: track.index,
                         language: lang === 'und' ? undefined : lang,
-                        copyStream: true,
+                        vbr: true,
                     });
                 }
             }
@@ -143,6 +136,7 @@ function reanalyze() {
                     audioCodec: 'aac',
                     sourceTrackIndex: sourceAudio.index,
                     language: sourceAudio.language,
+                    vbr: true,
                 });
             }
         }
@@ -191,6 +185,36 @@ function reanalyze() {
         videoRenditions.splice(0, videoRenditions.length, ...newRenditions);
     }
 }
+
+function reanalyzeAudio() {
+    const sourceTrack = editableAudioTracks[0];
+    const sourceBitrate = sourceTrack?.bitrateKbps || 256;
+
+    const tiers = [256, 128, 64].filter(b => b <= sourceBitrate + 32);
+    if (tiers.length === 0) tiers.push(sourceBitrate || 128);
+
+    const newRenditions: AudioRendition[] = tiers.map(bitrate => ({
+        audioBitrateKbps: bitrate,
+        channels: bitrate <= 64 ? 1 : 2,
+        audioCodec: 'aac' as const,
+        sourceTrackIndex: sourceTrack?.index ?? 0,
+        language: sourceTrack?.language,
+        label: `${bitrate}kbps`,
+        vbr: true,
+    }));
+
+    audioRenditions.splice(0, audioRenditions.length, ...newRenditions);
+}
+
+function reanalyze() {
+    if (encodingType.value === 'audio') {
+        reanalyzeAudio();
+    } else {
+        reanalyzeVideo();
+    }
+}
+
+reanalyze();
 
 const uniqueAudioGroupOptions = computed(() => {
     const seen = new Set<string>();
@@ -265,6 +289,7 @@ function addAudioGroup() {
         channels: 2,
         audioCodec: 'aac',
         sourceTrackIndex: 0,
+        vbr: true,
     });
 }
 
@@ -279,6 +304,7 @@ function addAudioRendition() {
         audioCodec: 'aac',
         sourceTrackIndex: 0,
         label: '128kbps',
+        vbr: true,
     });
 }
 
@@ -702,7 +728,22 @@ function onSubmit() {
                     </div>
                     <div class="flex items-center gap-4 text-sm">
                         <label class="flex items-center gap-2">
-                            <input type="checkbox" v-model="g.copyStream" class="accent-indigo-500" />
+                            <input
+                                type="checkbox"
+                                v-model="g.vbr"
+                                class="accent-indigo-500"
+                                :disabled="g.copyStream"
+                                @change="g.vbr && (g.copyStream = false)"
+                            />
+                            <span class="text-xs text-zinc-400">VBR encoding</span>
+                        </label>
+                        <label class="flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                v-model="g.copyStream"
+                                class="accent-indigo-500"
+                                @change="g.copyStream && (g.vbr = false)"
+                            />
                             <span class="text-xs text-zinc-400">Copy audio (no re-encode)</span>
                         </label>
                     </div>
@@ -772,7 +813,22 @@ function onSubmit() {
                     </div>
                     <div class="flex items-center gap-4 text-sm">
                         <label class="flex items-center gap-2">
-                            <input type="checkbox" v-model="r.copyStream" class="accent-indigo-500" />
+                            <input
+                                type="checkbox"
+                                v-model="r.vbr"
+                                class="accent-indigo-500"
+                                :disabled="r.copyStream"
+                                @change="r.vbr && (r.copyStream = false)"
+                            />
+                            <span class="text-xs text-zinc-400">VBR encoding</span>
+                        </label>
+                        <label class="flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                v-model="r.copyStream"
+                                class="accent-indigo-500"
+                                @change="r.copyStream && (r.vbr = false)"
+                            />
                             <span class="text-xs text-zinc-400">Copy audio (no re-encode)</span>
                         </label>
                     </div>
