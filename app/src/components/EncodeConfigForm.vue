@@ -174,6 +174,7 @@ function reanalyzeVideo() {
                 sourceTrackIndex: track.index,
                 audioGroupId,
                 label: track.name ?? `Track ${track.index}`,
+                vbr: true,
             };
         });
         videoRenditions.splice(0, videoRenditions.length, ...newRenditions);
@@ -198,6 +199,7 @@ function reanalyzeVideo() {
                 copyStream: false,
                 audioGroupId,
                 label: rung.label,
+                vbr: true,
             };
         });
         videoRenditions.splice(0, videoRenditions.length, ...newRenditions);
@@ -275,6 +277,7 @@ function addVideoRendition() {
         copyStream: false,
         audioGroupId: defaultGroupId,
         label: '480p',
+        vbr: true,
     });
 }
 
@@ -309,12 +312,15 @@ function onVbrToggle(g: AudioGroup) {
 }
 
 function onCopyToggle(rendition: VideoRendition) {
-    if (rendition.copyStream && editableVideoTracks.length > 0) {
-        const track = editableVideoTracks[rendition.sourceTrackIndex ?? 0];
-        if (track) {
-            rendition.width = track.width;
-            rendition.height = track.height;
-            rendition.videoBitrateKbps = track.bitrateKbps || rendition.videoBitrateKbps;
+    if (rendition.copyStream) {
+        rendition.vbr = false;
+        if (editableVideoTracks.length > 0) {
+            const track = editableVideoTracks[rendition.sourceTrackIndex ?? 0];
+            if (track) {
+                rendition.width = track.width;
+                rendition.height = track.height;
+                rendition.videoBitrateKbps = track.bitrateKbps || rendition.videoBitrateKbps;
+            }
         }
     }
 }
@@ -633,6 +639,16 @@ function onSubmit() {
                         </button>
                     </div>
                     <div class="flex items-center gap-4 text-sm">
+                        <label class="flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                v-model="r.vbr"
+                                class="accent-indigo-500"
+                                :disabled="r.copyStream"
+                                @change="r.vbr && (r.copyStream = false)"
+                            />
+                            <span class="text-xs text-zinc-400">VBR encoding</span>
+                        </label>
                         <label class="flex items-center gap-2">
                             <input
                                 type="checkbox"

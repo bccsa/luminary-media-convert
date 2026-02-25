@@ -114,7 +114,7 @@ export class S3Service {
     private getContentType(filePath: string): string {
         if (filePath.endsWith('.m3u8'))
             return 'application/vnd.apple.mpegurl';
-        if (filePath.endsWith('.ts')) return 'video/MP2T';
+        if (filePath.endsWith('.m4s')) return 'video/iso.segment';
         if (filePath.endsWith('.mp4')) return 'video/mp4';
         return 'application/octet-stream';
     }

@@ -136,6 +136,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return q.toFixed(1);
     }
 
+    private bitrateToVideoCrf(bitrateKbps: number, width: number, height: number): number {
+        const bpp = (bitrateKbps * 1000) / (width * height * 30);
+        const crf = 23 - Math.log2(bpp / 0.1) * 3;
+        return Math.max(16, Math.min(34, Math.round(crf)));
+    }
+
     private buildVideoArgs(opts: EncodeOptions): string[] {
         const { inputPath, outputDir, encodeConfig } = opts;
         const renditions = encodeConfig.videoRenditions!;
@@ -189,18 +195,41 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     `-preset:v:${videoOutputIndex}`, this.getNvencPreset(r.height),
                     `-tune:v:${videoOutputIndex}`, 'hq',
                     `-rc:v:${videoOutputIndex}`, 'vbr',
-                    `-b:v:${videoOutputIndex}`, `${r.videoBitrateKbps}k`,
-                    `-maxrate:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * 1.07)}k`,
-                    `-bufsize:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * 1.5)}k`,
                 );
+                if (r.vbr) {
+                    const cq = this.bitrateToVideoCrf(r.videoBitrateKbps, r.width, r.height);
+                    args.push(
+                        `-cq:v:${videoOutputIndex}`, `${cq}`,
+                        `-b:v:${videoOutputIndex}`, '0',
+                        `-maxrate:v:${videoOutputIndex}`, `${r.videoBitrateKbps}k`,
+                        `-bufsize:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * 1.5)}k`,
+                    );
+                } else {
+                    args.push(
+                        `-b:v:${videoOutputIndex}`, `${r.videoBitrateKbps}k`,
+                        `-maxrate:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * 1.07)}k`,
+                        `-bufsize:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * 1.5)}k`,
+                    );
+                }
             } else {
                 args.push(
                     `-c:v:${videoOutputIndex}`, 'libx264',
                     `-preset:v:${videoOutputIndex}`, this.getX264Preset(r.height),
-                    `-b:v:${videoOutputIndex}`, `${r.videoBitrateKbps}k`,
-                    `-maxrate:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * 1.07)}k`,
-                    `-bufsize:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * 1.5)}k`,
                 );
+                if (r.vbr) {
+                    const crf = this.bitrateToVideoCrf(r.videoBitrateKbps, r.width, r.height);
+                    args.push(
+                        `-crf:v:${videoOutputIndex}`, `${crf}`,
+                        `-maxrate:v:${videoOutputIndex}`, `${r.videoBitrateKbps}k`,
+                        `-bufsize:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * 1.5)}k`,
+                    );
+                } else {
+                    args.push(
+                        `-b:v:${videoOutputIndex}`, `${r.videoBitrateKbps}k`,
+                        `-maxrate:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * 1.07)}k`,
+                        `-bufsize:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * 1.5)}k`,
+                    );
+                }
             }
             args.push(
                 `-g:v:${videoOutputIndex}`, `${segmentDuration * 30}`,
@@ -246,7 +275,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             '-hls_time', String(segmentDuration),
             '-hls_playlist_type', 'vod',
             '-hls_flags', 'independent_segments',
-            '-hls_segment_type', 'mpegts',
+            '-hls_segment_type', 'fmp4',
+            '-hls_fmp4_init_filename', 'init.mp4',
             '-master_pl_name', 'master.m3u8',
         );
 
@@ -277,7 +307,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         args.push(
             '-hls_segment_filename',
-            join(outputDir, 'stream_%v', 'segment_%03d.ts'),
+            join(outputDir, 'stream_%v', 'segment_%03d.m4s'),
             join(outputDir, 'stream_%v', 'playlist.m3u8'),
         );
 
@@ -322,11 +352,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             '-hls_time', String(segmentDuration),
             '-hls_playlist_type', 'vod',
             '-hls_flags', 'independent_segments',
-            '-hls_segment_type', 'mpegts',
+            '-hls_segment_type', 'fmp4',
+            '-hls_fmp4_init_filename', 'init.mp4',
             '-master_pl_name', 'master.m3u8',
             '-var_stream_map', varParts.join(' '),
             '-hls_segment_filename',
-            join(outputDir, 'stream_%v', 'segment_%03d.ts'),
+            join(outputDir, 'stream_%v', 'segment_%03d.m4s'),
             join(outputDir, 'stream_%v', 'playlist.m3u8'),
         );
 

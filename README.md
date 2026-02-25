@@ -1,10 +1,10 @@
 # Luminary Media Convert
 
-HLS/ABR media encoding service built with NestJS. Accepts encoding requests via REST API, processes media files with FFmpeg (GPU-accelerated when NVIDIA hardware is available), uploads HLS output to any S3-compatible storage, and delivers status updates via webhooks or polling.
+HLS/ABR media encoding service built with NestJS. Accepts encoding requests via REST API, processes media files with FFmpeg (GPU-accelerated when NVIDIA hardware is available), uploads HLS output (fMP4 segments) to any S3-compatible storage, and delivers status updates via webhooks or polling.
 
 The repository is an npm workspaces monorepo containing:
 
-- **`api/`** — NestJS encoding service (REST API, FFmpeg, S3 upload, webhooks)
+- **`api/`** — NestJS encoding service (REST API, tus upload, FFmpeg, S3 upload, webhooks)
 - **`app/`** — Vue 3 web client for uploading and monitoring encoding sessions
 
 ## Table of Contents
@@ -17,8 +17,9 @@ The repository is an npm workspaces monorepo containing:
 - [Web Client](#web-client)
 - [API Documentation](#api-documentation)
   - [1. Create an Encoding Session](#1-create-an-encoding-session)
-  - [2. Upload the Source File](#2-upload-the-source-file)
+  - [2. Upload the Source File (tus)](#2-upload-the-source-file-tus)
   - [3. Poll Session Status](#3-poll-session-status)
+  - [4. Start Encoding](#4-start-encoding)
 - [Webhook Callbacks](#webhook-callbacks)
 - [Encoding Workflow](#encoding-workflow)
 - [GPU Acceleration](#gpu-acceleration)
@@ -41,12 +42,21 @@ Client           Auth0          Luminary Service                External
   │  (Bearer JWT + config) ─────────>│                           │
   │                                   │── validate JWT via JWKS   │
   │<── { sessionId,                   │                           │
-  │      uploadUrl,                   │                           │
+  │      tusEndpoint,                 │                           │
   │      uploadToken }                │                           │
   │                                   │                           │
-  │  2. POST uploadUrl               │                           │
-  │  (Bearer uploadToken + file) ──>│                           │
-  │<── 202 { queued }               │                           │
+  │  2. tus upload to /api/tus        │                           │
+  │  (Bearer uploadToken) ─────────>│                           │
+  │  (resumable, chunked)             │── auto-probe on complete  │
+  │                                   │                           │
+  │  3. GET /api/sessions/:id         │                           │
+  │  (Bearer JWT, polling) ─────────>│                           │
+  │<── { status: uploaded,            │                           │
+  │      probeResult }                │                           │
+  │                                   │                           │
+  │  4. POST /api/sessions/:id/encode │                           │
+  │  (Bearer JWT + encodeConfig) ──>│                           │
+  │<── 202 { queued }                 │                           │
   │                                   │                           │
   │                                   │── webhook: { queued } ──>│ Webhook
   │                                   │── FFmpeg encode ──┐      │ Endpoint
@@ -56,7 +66,7 @@ Client           Auth0          Luminary Service                External
   │                                   │── upload to S3 ────────>│ S3
   │                                   │── webhook: { completed } >│ Storage
   │                                   │                           │
-  │  3. GET /api/sessions/:id         │                           │
+  │  5. GET /api/sessions/:id         │                           │
   │  (Bearer JWT, polling) ─────────>│                           │
   │<── { status, progress, ... }     │                           │
 ```
@@ -119,6 +129,8 @@ Authentication is handled by [Auth0](https://auth0.com). You need to create two 
 | `AUTH0_AUDIENCE` | **Yes** | — | Auth0 API identifier / audience |
 | `WORK_DIR` | No | `./work` | Directory for temporary files during encoding |
 | `FFMPEG_TIMEOUT_MS` | No | `0` (none) | Max time for FFmpeg process before forced kill |
+| `FFMPEG_THREADS` | No | `8` | Number of threads for FFmpeg encoding |
+| `MAX_UPLOAD_SIZE` | No | `10737418240` (10 GB) | Maximum upload file size in bytes |
 | `CORS_ORIGIN` | No | `http://localhost:5173` | Allowed CORS origin for the web client |
 
 Example `api/.env`:
@@ -188,14 +200,17 @@ The `app/` directory contains a Vue 3 single-page application for interacting wi
 
 - **Auth0 login** — users sign in via Auth0's Universal Login; access tokens are obtained automatically for API calls
 - Drag-and-drop file upload with a browse fallback
-- Configurable encoding settings (video/audio type, renditions, segment duration)
+- Resumable chunked file upload via the tus protocol
+- Probe result display showing detected video and audio tracks with editable metadata (names, languages)
+- Configurable encoding settings (video renditions with ABR ladder suggestions, audio groups with quality tiers, copy/re-encode toggles, VBR/CBR)
+- Encode config persistence — previous configs for the same media layout are saved to localStorage and can be restored
 - S3 storage configuration (persisted to localStorage between sessions)
 - Optional webhook configuration
 - Real-time session progress via polling with status badges and a progress bar
 - **HLS media preview** — on completion, a Video.js player loads the master playlist directly from S3 (assumes public bucket access), with an ABR quality selector for switching between renditions
 - **Copy playlist URL** — one-click copy of the public m3u8 URL to clipboard
 
-**Tech stack:** Vite, Vue 3, Tailwind CSS v4, Video.js 8, Auth0 Vue SDK, TypeScript.
+**Tech stack:** Vite, Vue 3, Tailwind CSS v4, Video.js 8, tus-js-client, Auth0 Vue SDK, TypeScript.
 
 The web client communicates directly with the API (no proxy). CORS is configured on the API via the `CORS_ORIGIN` environment variable (defaults to `http://localhost:5173`). Authentication is handled via Auth0 — the web client requires `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and `VITE_AUTH0_AUDIENCE` environment variables.
 
@@ -203,7 +218,7 @@ The web client communicates directly with the API (no proxy). CORS is configured
 
 ## API Documentation
 
-All endpoints under `/api/sessions` require authentication. Session creation and status polling use a **Bearer JWT** (Auth0 access token). File upload uses a separate **Bearer token** returned from session creation.
+Session creation, encoding, status polling, and deletion use a **Bearer JWT** (Auth0 access token). File upload uses the **tus protocol** with a separate **Bearer token** returned from session creation.
 
 ### 1. Create an Encoding Session
 
@@ -217,31 +232,6 @@ Content-Type: application/json
 
 ```json
 {
-  "type": "video",
-  "renditions": [
-    {
-      "width": 1920,
-      "height": 1080,
-      "videoBitrateKbps": 5000,
-      "audioBitrateKbps": 192,
-      "audioCodec": "aac"
-    },
-    {
-      "width": 1280,
-      "height": 720,
-      "videoBitrateKbps": 2500,
-      "audioBitrateKbps": 128,
-      "audioCodec": "aac"
-    },
-    {
-      "width": 854,
-      "height": 480,
-      "videoBitrateKbps": 1000,
-      "audioBitrateKbps": 96,
-      "audioCodec": "aac"
-    }
-  ],
-  "segmentDuration": 6,
   "s3": {
     "endPoint": "minio.example.com",
     "port": 9000,
@@ -266,26 +256,21 @@ The `webhook` field is optional. When omitted, no webhook callbacks are sent —
 ```json
 {
   "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "uploadUrl": "http://localhost:3000/api/sessions/a1b2c3d4-e5f6-7890-abcd-ef1234567890/upload",
-  "uploadToken": "tok_f8e7d6c5b4a32910876543210abcdef0"
+  "tusEndpoint": "http://localhost:3000/api/tus",
+  "uploadToken": "tok_f8e7d6c5b4a32910876543210abcdef0",
+  "maxUploadSize": 10737418240
 }
 ```
 
 **curl example:**
 
 ```bash
-# Obtain an Auth0 access token first (e.g. via client credentials or test token from Auth0 dashboard)
 TOKEN="your-auth0-access-token"
 
 curl -X POST http://localhost:3000/api/sessions \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "type": "video",
-    "renditions": [
-      { "width": 1280, "height": 720, "videoBitrateKbps": 2500, "audioBitrateKbps": 128 },
-      { "width": 854, "height": 480, "videoBitrateKbps": 1000, "audioBitrateKbps": 96 }
-    ],
     "s3": {
       "endPoint": "minio.example.com",
       "port": 9000,
@@ -301,57 +286,72 @@ curl -X POST http://localhost:3000/api/sessions \
   }'
 ```
 
-### Audio-Only Encoding
-
-For audio-only HLS encoding, set `type` to `"audio"` and omit video fields from renditions:
-
-```json
-{
-  "type": "audio",
-  "renditions": [
-    { "audioBitrateKbps": 192, "audioCodec": "aac" },
-    { "audioBitrateKbps": 96, "audioCodec": "aac" }
-  ],
-  "s3": { "..." : "..." },
-  "webhook": { "..." : "..." }
-}
-```
-
 ---
 
-### 2. Upload the Source File
+### 2. Upload the Source File (tus)
 
+File upload uses the [tus protocol](https://tus.io) for resumable, chunked uploads. After creating a session, upload your file to the `tusEndpoint` using any tus client library.
+
+The upload must include:
+
+- **Authorization header**: `Bearer <uploadToken>` (the token from session creation)
+- **Metadata**: `sessionId` (the session ID from step 1), `filename` (original filename)
+
+On upload completion, the API automatically probes the file with ffprobe. The session transitions through `uploading` → `uploaded`, and probe results become available via the [poll endpoint](#3-poll-session-status).
+
+**JavaScript (tus-js-client):**
+
+```javascript
+import * as tus from 'tus-js-client';
+
+const upload = new tus.Upload(file, {
+  endpoint: tusEndpoint,
+  retryDelays: [0, 1000, 3000, 5000],
+  chunkSize: 50 * 1024 * 1024,
+  metadata: {
+    sessionId: sessionId,
+    filename: file.name,
+    filetype: file.type,
+  },
+  headers: {
+    Authorization: `Bearer ${uploadToken}`,
+  },
+  onProgress(bytesUploaded, bytesTotal) {
+    console.log(`${Math.round((bytesUploaded / bytesTotal) * 100)}%`);
+  },
+  onSuccess() {
+    console.log('Upload complete');
+  },
+});
+
+upload.start();
 ```
-POST /api/sessions/:sessionId/upload
-Authorization: Bearer <uploadToken>
-Content-Type: multipart/form-data
-```
 
-Upload the media file as a multipart form field named `file`.
-
-**Response (202):**
-
-```json
-{
-  "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "status": "queued",
-  "queuePosition": 1
-}
-```
-
-**curl example:**
+**curl (tus creation + upload):**
 
 ```bash
-curl -X POST http://localhost:3000/api/sessions/SESSION_ID/upload \
-  -H "Authorization: Bearer tok_f8e7d6c5b4a32910876543210abcdef0" \
-  -F "file=@/path/to/video.mp4"
+# Create tus upload
+curl -X POST http://localhost:3000/api/tus \
+  -H "Authorization: Bearer $UPLOAD_TOKEN" \
+  -H "Tus-Resumable: 1.0.0" \
+  -H "Upload-Length: $(stat -f%z video.mp4)" \
+  -H 'Upload-Metadata: sessionId '$(echo -n $SESSION_ID | base64)',filename '$(echo -n video.mp4 | base64) \
+  -D -
+
+# Upload data to the returned Location URL
+curl -X PATCH http://localhost:3000/api/tus/<upload-id> \
+  -H "Authorization: Bearer $UPLOAD_TOKEN" \
+  -H "Tus-Resumable: 1.0.0" \
+  -H "Upload-Offset: 0" \
+  -H "Content-Type: application/offset+octet-stream" \
+  --data-binary @video.mp4
 ```
 
 ---
 
 ### 3. Poll Session Status
 
-Poll the current status of an encoding session. This is the primary status mechanism when webhooks are not configured.
+Poll the current status of an encoding session. This is the primary status mechanism when webhooks are not configured. After upload completes, poll until `status` is `uploaded` to retrieve probe results.
 
 ```
 GET /api/sessions/:sessionId
@@ -373,11 +373,174 @@ Possible `status` values:
 | Status | Description | Extra fields |
 |---|---|---|
 | `created` | Session created, awaiting file upload | — |
-| `queued` | File received, waiting in FIFO queue | `queuePosition` |
+| `uploading` | File upload in progress (tus) | — |
+| `uploaded` | Upload complete, file probed | `probeResult` |
+| `queued` | Encoding queued, waiting in FIFO queue | `queuePosition` |
 | `encoding` | FFmpeg actively processing | `progress` (0-100) |
-| `uploading_to_s3` | Encoding done, uploading to S3 | — |
-| `completed` | All files uploaded to S3 | `files`, `masterPlaylist` |
+| `uploading_to_s3` | Encoding done, uploading output to S3 | `progress` (0-100) |
+| `completed` | All files uploaded to S3 | `files`, `masterPlaylist`, `anglePlaylists` |
 | `failed` | Error occurred | `error` |
+
+**Uploaded status response (with probe results):**
+
+```json
+{
+  "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "uploaded",
+  "probeResult": {
+    "format": {
+      "duration": 120.5,
+      "bitrateKbps": 5000,
+      "formatName": "mov,mp4,m4a,3gp,3g2,mj2"
+    },
+    "videoTracks": [
+      {
+        "index": 0,
+        "codec": "h264",
+        "width": 1920,
+        "height": 1080,
+        "bitrateKbps": 4500,
+        "frameRate": 30,
+        "profile": "High"
+      }
+    ],
+    "audioTracks": [
+      {
+        "index": 0,
+        "codec": "aac",
+        "bitrateKbps": 192,
+        "channels": 2,
+        "sampleRate": 48000,
+        "language": "eng"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 4. Start Encoding
+
+After the file is uploaded and probed (session status is `uploaded`), submit an encoding configuration to start the encoding process.
+
+```
+POST /api/sessions/:sessionId/encode
+Authorization: Bearer <auth0_access_token>
+Content-Type: application/json
+```
+
+**Video encoding request body:**
+
+```json
+{
+  "type": "video",
+  "segmentDuration": 6,
+  "videoRenditions": [
+    {
+      "width": 1920,
+      "height": 1080,
+      "videoBitrateKbps": 5000,
+      "copyStream": false,
+      "audioGroupId": "hd",
+      "label": "1080p",
+      "vbr": true
+    },
+    {
+      "width": 1280,
+      "height": 720,
+      "videoBitrateKbps": 2500,
+      "copyStream": false,
+      "audioGroupId": "hd",
+      "label": "720p",
+      "vbr": true
+    },
+    {
+      "width": 854,
+      "height": 480,
+      "videoBitrateKbps": 1000,
+      "copyStream": false,
+      "audioGroupId": "mid",
+      "label": "480p",
+      "vbr": true
+    }
+  ],
+  "audioGroups": [
+    {
+      "id": "hd",
+      "label": "HD Audio",
+      "audioBitrateKbps": 256,
+      "channels": 2,
+      "audioCodec": "aac",
+      "sourceTrackIndex": 0,
+      "language": "eng",
+      "vbr": true
+    },
+    {
+      "id": "mid",
+      "label": "Standard Audio",
+      "audioBitrateKbps": 128,
+      "channels": 2,
+      "audioCodec": "aac",
+      "sourceTrackIndex": 0,
+      "language": "eng",
+      "vbr": true
+    }
+  ]
+}
+```
+
+**Audio-only encoding request body:**
+
+```json
+{
+  "type": "audio",
+  "segmentDuration": 6,
+  "audioGroups": [
+    {
+      "id": "hd",
+      "label": "High Quality",
+      "audioBitrateKbps": 192,
+      "channels": 2,
+      "audioCodec": "aac",
+      "sourceTrackIndex": 0,
+      "vbr": true
+    },
+    {
+      "id": "low",
+      "label": "Bandwidth Saving",
+      "audioBitrateKbps": 64,
+      "channels": 2,
+      "audioCodec": "aac",
+      "sourceTrackIndex": 0,
+      "vbr": true
+    }
+  ]
+}
+```
+
+**Response (202):**
+
+```json
+{
+  "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "queued",
+  "queuePosition": 1
+}
+```
+
+---
+
+### 5. Delete a Session
+
+Cancel and delete a session. Only sessions in `created`, `uploading`, or `uploaded` status can be deleted.
+
+```
+DELETE /api/sessions/:sessionId
+Authorization: Bearer <auth0_access_token>
+```
+
+**Response:** `204 No Content`
 
 ---
 
@@ -407,11 +570,11 @@ Webhooks are optional. When a `webhook` configuration is provided in the session
 
 | Status | When | Key fields |
 |---|---|---|
-| `queued` | File uploaded, waiting in queue | `queuePosition` |
+| `queued` | Encoding config submitted, waiting in queue | `queuePosition` |
 | `queued` | Queue position updated (earlier job finished) | `queuePosition` |
 | `encoding` | Encoding started / progress update (~every 5%) | `progress` |
 | `uploading_to_s3` | Encoding complete, uploading files | — |
-| `completed` | All done | `files`, `masterPlaylist` |
+| `completed` | All done | `files`, `masterPlaylist`, `anglePlaylists` |
 | `failed` | Error at any stage | `error` |
 
 ### Completed Webhook Example
@@ -424,12 +587,16 @@ Webhooks are optional. When a `webhook` configuration is provided in the session
   "message": "Encoding and upload complete",
   "files": [
     "videos/my-project/master.m3u8",
-    "videos/my-project/v0/playlist.m3u8",
-    "videos/my-project/v0/segment_000.ts",
-    "videos/my-project/v0/segment_001.ts",
-    "videos/my-project/v1/playlist.m3u8",
-    "videos/my-project/v1/segment_000.ts",
-    "videos/my-project/v1/segment_001.ts"
+    "videos/my-project/stream_1080p_1920x1080/init.mp4",
+    "videos/my-project/stream_1080p_1920x1080/playlist.m3u8",
+    "videos/my-project/stream_1080p_1920x1080/segment_000.m4s",
+    "videos/my-project/stream_1080p_1920x1080/segment_001.m4s",
+    "videos/my-project/stream_720p_1280x720/init.mp4",
+    "videos/my-project/stream_720p_1280x720/playlist.m3u8",
+    "videos/my-project/stream_720p_1280x720/segment_000.m4s",
+    "videos/my-project/stream_HD/init.mp4",
+    "videos/my-project/stream_HD/playlist.m3u8",
+    "videos/my-project/stream_HD/segment_000.m4s"
   ],
   "masterPlaylist": "videos/my-project/master.m3u8"
 }
@@ -439,12 +606,13 @@ Webhooks are optional. When a `webhook` configuration is provided in the session
 
 ## Encoding Workflow
 
-1. **Session creation** — Client sends encoding configuration (renditions, S3 creds, optional webhook URL). Service returns upload URL + token.
-2. **File upload** — Client uploads the source media file using the token. File is saved and session enters the FIFO queue.
-3. **Queue processing** — Sessions are processed one at a time in first-come-first-served order. Only one FFmpeg process runs at a time.
-4. **Encoding** — FFmpeg produces HLS segments and playlists for each rendition, plus a master playlist. Progress is reported via webhooks.
-5. **S3 upload** — All output files (`.ts` segments + `.m3u8` playlists) are uploaded to the client-specified S3 bucket.
-6. **Completion** — Final webhook includes the full list of S3 object keys and the master playlist path.
+1. **Session creation** — Client sends S3 credentials and optional webhook URL. Service returns a tus upload endpoint and upload token.
+2. **File upload** — Client uploads the source media file via tus (resumable, chunked). On completion, the API auto-probes the file with ffprobe.
+3. **Probe & configure** — Client polls for probe results (detected video/audio tracks), then submits an encoding configuration (video renditions, audio groups, copy/re-encode choices).
+4. **Queue processing** — The session enters a FIFO queue. Sessions are processed one at a time in first-come-first-served order.
+5. **Encoding** — FFmpeg produces HLS output with fMP4 segments (`.m4s` files + `init.mp4` init segments) and playlists for each variant, plus a master playlist. Progress is reported via webhooks or polling.
+6. **S3 upload** — All output files are uploaded to the client-specified S3 bucket.
+7. **Completion** — Final webhook includes the full list of S3 object keys and the master playlist path.
 
 ---
 
@@ -461,7 +629,7 @@ When a GPU is detected, video encoding uses:
 - **Encoder**: `h264_nvenc` (instead of `libx264`)
 - **Scaler**: `scale_cuda` (instead of `scale`) — keeps frames in GPU memory
 
-When no GPU is detected, the service falls back to CPU encoding with `libx264 -preset veryfast`.
+When no GPU is detected, the service falls back to CPU encoding with `libx264`.
 
 Audio encoding always uses CPU regardless (no GPU benefit).
 
@@ -490,44 +658,58 @@ The service uses the [MinIO JavaScript client](https://min.io/docs/minio/linux/d
 - **DigitalOcean Spaces**
 - Any other S3-compatible storage
 
-S3 credentials are provided per-session in the encoding request, so different sessions can upload to different buckets or storage providers.
+S3 credentials are provided per-session in the session creation request, so different sessions can upload to different buckets or storage providers.
 
 ---
 
 ## HLS Output Structure
 
-For a video encoding session with 3 renditions, the output uploaded to S3 looks like:
+Output uses fMP4 segments (fragmented MP4 / CMAF). Each stream directory contains an `init.mp4` initialization segment and numbered `.m4s` media segments.
+
+For a video encoding session with 2 video renditions and 2 audio groups:
 
 ```
 {pathPrefix}/
-├── master.m3u8          # Master playlist referencing all variants
-├── v0/
-│   ├── playlist.m3u8    # Variant playlist (e.g. 1080p)
-│   ├── segment_000.ts
-│   ├── segment_001.ts
+├── master.m3u8                         # Master playlist referencing all variants
+├── stream_1080p_1920x1080/
+│   ├── init.mp4                        # fMP4 init segment
+│   ├── playlist.m3u8                   # Variant playlist (1080p video)
+│   ├── segment_000.m4s
+│   ├── segment_001.m4s
 │   └── ...
-├── v1/
-│   ├── playlist.m3u8    # Variant playlist (e.g. 720p)
-│   ├── segment_000.ts
+├── stream_720p_1280x720/
+│   ├── init.mp4
+│   ├── playlist.m3u8                   # Variant playlist (720p video)
+│   ├── segment_000.m4s
 │   └── ...
-└── v2/
-    ├── playlist.m3u8    # Variant playlist (e.g. 480p)
-    ├── segment_000.ts
+├── stream_HD/
+│   ├── init.mp4
+│   ├── playlist.m3u8                   # Audio rendition (HD Audio)
+│   ├── segment_000.m4s
+│   └── ...
+└── stream_Standard/
+    ├── init.mp4
+    ├── playlist.m3u8                   # Audio rendition (Standard Audio)
+    ├── segment_000.m4s
     └── ...
 ```
+
+Stream directory names are derived from the rendition labels (e.g. `stream_1080p_1920x1080`, `stream_HD`).
 
 For audio-only with multiple bitrates:
 
 ```
 {pathPrefix}/
 ├── master.m3u8
-├── a0/
-│   ├── playlist.m3u8    # High quality audio
-│   ├── segment_000.ts
+├── stream_High_Quality/
+│   ├── init.mp4
+│   ├── playlist.m3u8
+│   ├── segment_000.m4s
 │   └── ...
-└── a1/
-    ├── playlist.m3u8    # Lower quality audio
-    ├── segment_000.ts
+└── stream_Bandwidth_Saving/
+    ├── init.mp4
+    ├── playlist.m3u8
+    ├── segment_000.m4s
     └── ...
 ```
 
@@ -537,6 +719,7 @@ For audio-only with multiple bitrates:
 
 - **Process isolation**: FFmpeg runs as a child process. Crashes, timeouts, or errors in FFmpeg never crash the NestJS service.
 - **Queue resilience**: A failed encoding job is marked as `failed` with an error webhook, and the queue continues to the next job.
-- **Graceful shutdown**: On `SIGTERM`/`SIGINT`, in-flight FFmpeg processes are terminated cleanly before the service exits.
+- **Graceful shutdown**: On `SIGTERM`/`SIGINT`, in-flight FFmpeg processes are terminated cleanly, and expired tus uploads are cleaned up before the service exits.
 - **Webhook failures**: If a webhook delivery fails, it is logged but never blocks or crashes the encoding pipeline.
+- **Upload resilience**: The tus protocol supports resumable uploads — if a connection drops, the client can resume from where it left off.
 - **Temp file cleanup**: Working files are removed after each session completes or fails.

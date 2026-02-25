@@ -54,6 +54,12 @@ export class VideoRenditionDto {
     @IsOptional()
     @Expose()
     label?: string;
+
+    @ApiPropertyOptional({ description: 'Use VBR encoding (CRF/CQ) instead of fixed bitrate.', example: true })
+    @IsBoolean()
+    @IsOptional()
+    @Expose()
+    vbr?: boolean;
 }
 
 export class AudioGroupDto {

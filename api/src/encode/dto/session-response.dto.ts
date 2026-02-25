@@ -112,8 +112,9 @@ export class SessionStatusDto {
             'List of S3 object keys for all uploaded files. Present when status is "completed".',
         example: [
             'videos/project-1/master.m3u8',
-            'videos/project-1/v0/playlist.m3u8',
-            'videos/project-1/v0/segment_000.ts',
+            'videos/project-1/stream_1080p_1920x1080/playlist.m3u8',
+            'videos/project-1/stream_1080p_1920x1080/init.mp4',
+            'videos/project-1/stream_1080p_1920x1080/segment_000.m4s',
         ],
     })
     @Expose()

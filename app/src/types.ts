@@ -44,6 +44,7 @@ export interface VideoRendition {
     sourceTrackIndex?: number;
     audioGroupId: string;
     label?: string;
+    vbr?: boolean;
 }
 
 export interface AudioGroup {
