@@ -47,12 +47,12 @@ export class RenditionDto {
 
     @ApiPropertyOptional({
         description: 'Audio codec to use. Defaults to aac.',
-        enum: ['aac', 'mp3'],
+        enum: ['aac'],
         default: 'aac',
     })
     @IsString()
     @IsOptional()
-    @IsIn(['aac', 'mp3'])
+    @IsIn(['aac'])
     @Expose()
-    audioCodec?: 'aac' | 'mp3';
+    audioCodec?: 'aac';
 }

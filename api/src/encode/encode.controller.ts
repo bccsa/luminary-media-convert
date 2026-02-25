@@ -158,9 +158,9 @@ export class EncodeController {
                 }
             }
         } else {
-            if (!dto.audioRenditions?.length) {
+            if (!dto.audioGroups?.length) {
                 throw new BadRequestException(
-                    'Audio type requires at least one audioRendition',
+                    'Audio type requires at least one audioGroup',
                 );
             }
         }

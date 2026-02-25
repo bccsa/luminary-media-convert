@@ -66,7 +66,7 @@ Client           Auth0          Luminary Service                External
 - **Node.js** >= 18
 - **Auth0 account** with an API and a Single Page Application configured (see [Auth0 Setup](#auth0-setup))
 - **FFmpeg** with the following encoders/filters:
-  - CPU: `libx264`, `aac`, `libmp3lame`
+  - CPU: `libx264`, `aac`
   - GPU (optional): `h264_nvenc`, `scale_cuda` (requires NVIDIA GPU + CUDA drivers)
 
 ### Installing FFmpeg

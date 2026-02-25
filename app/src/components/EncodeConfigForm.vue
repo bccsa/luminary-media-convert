@@ -5,7 +5,6 @@ import type {
     EncodeConfig,
     VideoRendition,
     AudioGroup,
-    AudioRendition,
     AudioTrackInfo,
     VideoTrackInfo,
 } from '../types';
@@ -34,8 +33,6 @@ const videoRenditions = reactive<VideoRendition[]>([]);
 
 const audioGroups = reactive<AudioGroup[]>([]);
 
-const audioRenditions = reactive<AudioRendition[]>([]);
-
 const editableVideoTracks = reactive<VideoTrackInfo[]>(
     props.probeResult.videoTracks.map(t => ({ ...t })),
 );
@@ -58,7 +55,7 @@ const ABR_LADDER = [
 const AUDIO_GROUP_TIERS = [
     { minHeight: 720, groupId: 'hd', label: 'HD', bitrateKbps: 256, channels: 2 },
     { minHeight: 360, groupId: 'mid', label: 'Standard', bitrateKbps: 128, channels: 2 },
-    { minHeight: 0, groupId: 'low', label: 'Mono', bitrateKbps: 64, channels: 1 },
+    { minHeight: 0, groupId: 'low', label: 'Bandwidth Saving', bitrateKbps: 64, channels: 2 },
 ];
 
 function getAudioTierForHeight(height: number) {
@@ -74,74 +71,95 @@ function mapTierToGroupId(standardGroupId: string, tierIds: string[]): string {
     return tierIds[Math.min(tierIndex, tierIds.length - 1)] ?? tierIds[0] ?? 'tier_0';
 }
 
+function buildSuggestedAudioGroups(audioTracks: AudioTrackInfo[]): AudioGroup[] {
+    if (audioTracks.length === 0) return [];
+
+    const langMap = new Map<string, AudioTrackInfo[]>();
+    for (const track of audioTracks) {
+        const lang = track.language || 'und';
+        if (!langMap.has(lang)) langMap.set(lang, []);
+        langMap.get(lang)!.push(track);
+    }
+    for (const tracks of langMap.values()) {
+        tracks.sort((a, b) => (b.bitrateKbps || 0) - (a.bitrateKbps || 0));
+    }
+
+    const languages = Array.from(langMap.keys());
+    const isMultiSource = languages.length > 1
+        || (languages.length === 1 && (langMap.get(languages[0])?.length ?? 0) > 1);
+
+    const maxSourceBitrate = Math.max(...audioTracks.map(t => t.bitrateKbps || 0));
+    const maxSourceChannels = Math.max(...audioTracks.map(t => t.channels || 2));
+    const isMono = maxSourceChannels === 1;
+
+    const applicableTiers = (maxSourceBitrate > 0
+        ? AUDIO_GROUP_TIERS.filter(t => {
+            const effective = isMono ? Math.round(t.bitrateKbps / 2) : t.bitrateKbps;
+            return effective <= maxSourceBitrate + 32;
+        })
+        : [...AUDIO_GROUP_TIERS]
+    ).map((t, i) => ({
+        ...t,
+        bitrateKbps: isMono ? Math.round(t.bitrateKbps / 2) : t.bitrateKbps,
+        channels: i === 0 ? maxSourceChannels : Math.min(2, maxSourceChannels),
+    }));
+    if (applicableTiers.length === 0) {
+        const fallback = AUDIO_GROUP_TIERS[AUDIO_GROUP_TIERS.length - 1];
+        applicableTiers.push({
+            ...fallback,
+            bitrateKbps: isMono ? Math.round(fallback.bitrateKbps / 2) : fallback.bitrateKbps,
+            channels: Math.min(2, maxSourceChannels),
+        });
+    }
+
+    const groups: AudioGroup[] = [];
+
+    if (isMultiSource) {
+        for (let i = 0; i < applicableTiers.length; i++) {
+            const tier = applicableTiers[i];
+            for (const lang of languages) {
+                const tracks = langMap.get(lang)!;
+                const track = tracks[Math.min(i, tracks.length - 1)];
+                groups.push({
+                    id: tier.groupId,
+                    label: languages.length > 1
+                        ? (track.name ?? `${lang.toUpperCase()} ${tier.label}`)
+                        : (track.name ?? tier.label),
+                    audioBitrateKbps: tier.bitrateKbps,
+                    channels: tier.channels,
+                    audioCodec: 'aac',
+                    sourceTrackIndex: track.index,
+                    language: lang === 'und' ? undefined : lang,
+                    vbr: true,
+                });
+            }
+        }
+    } else {
+        const sourceAudio = audioTracks[0];
+        for (const tier of applicableTiers) {
+            groups.push({
+                id: tier.groupId,
+                label: tier.label,
+                audioBitrateKbps: tier.bitrateKbps,
+                channels: tier.channels,
+                audioCodec: 'aac',
+                sourceTrackIndex: sourceAudio.index,
+                language: sourceAudio.language,
+                vbr: true,
+            });
+        }
+    }
+
+    return groups;
+}
+
 function reanalyzeVideo() {
     const sortedVideoTracks = [...editableVideoTracks].sort(
         (a, b) => (b.height * b.width) - (a.height * a.width),
     );
 
-    const newGroups: AudioGroup[] = [];
-    const tierIds: string[] = [];
-
-    if (editableAudioTracks.length > 0) {
-        const langMap = new Map<string, AudioTrackInfo[]>();
-        for (const track of editableAudioTracks) {
-            const lang = track.language || 'und';
-            if (!langMap.has(lang)) langMap.set(lang, []);
-            langMap.get(lang)!.push(track);
-        }
-        for (const tracks of langMap.values()) {
-            tracks.sort((a, b) => (b.bitrateKbps || 0) - (a.bitrateKbps || 0));
-        }
-
-        const languages = Array.from(langMap.keys());
-        const isMultiLang = languages.length > 1
-            || (languages.length === 1 && (langMap.get(languages[0])?.length ?? 0) > 1);
-
-        if (isMultiLang) {
-            const maxTracksPerLang = Math.max(
-                ...Array.from(langMap.values()).map(t => t.length),
-            );
-            const numTiers = Math.max(
-                Math.min(sortedVideoTracks.length || 1, maxTracksPerLang),
-                3,
-            );
-            for (let tier = 0; tier < numTiers; tier++) {
-                const standardTier = AUDIO_GROUP_TIERS[Math.min(tier, AUDIO_GROUP_TIERS.length - 1)];
-                const tierId = standardTier.groupId;
-                tierIds.push(tierId);
-                for (const lang of languages) {
-                    const tracks = langMap.get(lang)!;
-                    const track = tracks[tier] ?? tracks[tracks.length - 1];
-                    newGroups.push({
-                        id: tierId,
-                        label: track.name ?? `${lang.toUpperCase()} ${standardTier.label}`,
-                        audioBitrateKbps: standardTier.bitrateKbps,
-                        channels: standardTier.channels,
-                        audioCodec: 'aac' as 'aac' | 'mp3',
-                        sourceTrackIndex: track.index,
-                        language: lang === 'und' ? undefined : lang,
-                        vbr: true,
-                    });
-                }
-            }
-        } else {
-            const sourceAudio = editableAudioTracks[0];
-            for (const tier of AUDIO_GROUP_TIERS) {
-                tierIds.push(tier.groupId);
-                newGroups.push({
-                    id: tier.groupId,
-                    label: tier.label,
-                    audioBitrateKbps: tier.bitrateKbps,
-                    channels: tier.channels,
-                    audioCodec: 'aac',
-                    sourceTrackIndex: sourceAudio.index,
-                    language: sourceAudio.language,
-                    vbr: true,
-                });
-            }
-        }
-    }
-
+    const newGroups = buildSuggestedAudioGroups(editableAudioTracks);
+    const tierIds = [...new Set(newGroups.map(g => g.id))];
     audioGroups.splice(0, audioGroups.length, ...newGroups);
 
     if (sortedVideoTracks.length > 1) {
@@ -187,23 +205,7 @@ function reanalyzeVideo() {
 }
 
 function reanalyzeAudio() {
-    const sourceTrack = editableAudioTracks[0];
-    const sourceBitrate = sourceTrack?.bitrateKbps || 256;
-
-    const tiers = [256, 128, 64].filter(b => b <= sourceBitrate + 32);
-    if (tiers.length === 0) tiers.push(sourceBitrate || 128);
-
-    const newRenditions: AudioRendition[] = tiers.map(bitrate => ({
-        audioBitrateKbps: bitrate,
-        channels: bitrate <= 64 ? 1 : 2,
-        audioCodec: 'aac' as const,
-        sourceTrackIndex: sourceTrack?.index ?? 0,
-        language: sourceTrack?.language,
-        label: `${bitrate}kbps`,
-        vbr: true,
-    }));
-
-    audioRenditions.splice(0, audioRenditions.length, ...newRenditions);
+    audioGroups.splice(0, audioGroups.length, ...buildSuggestedAudioGroups(editableAudioTracks));
 }
 
 function reanalyze() {
@@ -297,19 +299,13 @@ function removeAudioGroup(index: number) {
     if (audioGroups.length > 1) audioGroups.splice(index, 1);
 }
 
-function addAudioRendition() {
-    audioRenditions.push({
-        audioBitrateKbps: 128,
-        channels: 2,
-        audioCodec: 'aac',
-        sourceTrackIndex: 0,
-        label: '128kbps',
-        vbr: true,
-    });
-}
 
-function removeAudioRendition(index: number) {
-    if (audioRenditions.length > 1) audioRenditions.splice(index, 1);
+function onVbrToggle(g: AudioGroup) {
+    if (g.vbr) {
+        g.copyStream = false;
+    } else if (g.audioBitrateKbps < 100) {
+        g.channels = 1;
+    }
 }
 
 function onCopyToggle(rendition: VideoRendition) {
@@ -404,7 +400,7 @@ const canSubmit = computed(() => {
             (!r.copyStream || r.sourceTrackIndex != null),
         ) && audioGroups.every(g => g.audioBitrateKbps > 0);
     }
-    return audioRenditions.length > 0 && audioRenditions.every(r => r.audioBitrateKbps > 0);
+    return audioGroups.length > 0 && audioGroups.every(g => g.audioBitrateKbps > 0);
 });
 
 function onSubmit() {
@@ -428,7 +424,7 @@ function onSubmit() {
             language: t.language,
         }));
     } else {
-        config.audioRenditions = audioRenditions.map(r => ({ ...r }));
+        config.audioGroups = audioGroups.map(g => ({ ...g }));
         config.audioTrackMetadata = editableAudioTracks.map(t => ({
             index: t.index,
             name: t.name,
@@ -697,10 +693,88 @@ function onSubmit() {
                             </select>
                         </div>
                         <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Codec</label>
-                            <select v-model="g.audioCodec" class="input w-24" :disabled="g.copyStream">
-                                <option value="aac">AAC</option>
-                                <option value="mp3">MP3</option>
+                            <label class="mb-1 block text-xs text-zinc-500">Source Track</label>
+                            <select v-model.number="g.sourceTrackIndex" class="input w-40 text-xs">
+                                <option v-for="t in editableAudioTracks" :key="t.index" :value="t.index">
+                                    #{{ t.index }}: {{ t.codec }} {{ t.bitrateKbps ? `${t.bitrateKbps}kbps` : '' }} {{ channelLabel(t.channels) }}{{ t.language ? ` [${t.language}]` : '' }}
+                                </option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-xs text-zinc-500">Language</label>
+                            <input v-model="g.language" type="text" class="input w-20" placeholder="eng" />
+                        </div>
+                        <button
+                            v-if="audioGroups.length > 1"
+                            type="button"
+                            @click="removeAudioGroup(i)"
+                            class="mb-0.5 rounded p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+                        >
+                            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-4 text-sm">
+                        <label class="flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                v-model="g.vbr"
+                                class="accent-indigo-500"
+                                :disabled="g.copyStream"
+                                @change="onVbrToggle(g)"
+                            />
+                            <span class="text-xs text-zinc-400">VBR encoding</span>
+                        </label>
+                        <label class="flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                v-model="g.copyStream"
+                                class="accent-indigo-500"
+                                @change="g.copyStream && (g.vbr = false)"
+                            />
+                            <span class="text-xs text-zinc-400">Copy audio (no re-encode)</span>
+                        </label>
+                    </div>
+                    <p v-if="!g.vbr && !g.copyStream && g.audioBitrateKbps < 100" class="text-xs text-amber-400">
+                        CBR below 100 kbps — will be encoded as mono
+                    </p>
+                </div>
+            </fieldset>
+        </template>
+
+        <!-- AUDIO-ONLY MODE -->
+        <template v-else>
+            <fieldset class="space-y-3">
+                <div class="flex items-center justify-between">
+                    <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Audio Groups</legend>
+                    <button type="button" @click="addAudioGroup" class="btn-sm">+ Add</button>
+                </div>
+                <div
+                    v-for="(g, i) in audioGroups"
+                    :key="i"
+                    class="rounded-md bg-zinc-900/60 p-3 space-y-2"
+                >
+                    <div class="flex flex-wrap items-end gap-3">
+                        <div>
+                            <label class="mb-1 block text-xs text-zinc-500">Group ID</label>
+                            <input v-model="g.id" type="text" class="input w-24" />
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-xs text-zinc-500">Label</label>
+                            <input v-model="g.label" type="text" class="input w-28" placeholder="HD Audio" />
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-xs text-zinc-500">Audio kbps</label>
+                            <input v-model.number="g.audioBitrateKbps" type="number" min="1" class="input w-28" :disabled="g.copyStream" />
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-xs text-zinc-500">Channels</label>
+                            <select v-model.number="g.channels" class="input w-24" :disabled="g.copyStream">
+                                <option :value="1">Mono</option>
+                                <option :value="2">Stereo</option>
+                                <option :value="6">5.1</option>
+                                <option :value="8">7.1</option>
                             </select>
                         </div>
                         <div>
@@ -733,7 +807,7 @@ function onSubmit() {
                                 v-model="g.vbr"
                                 class="accent-indigo-500"
                                 :disabled="g.copyStream"
-                                @change="g.vbr && (g.copyStream = false)"
+                                @change="onVbrToggle(g)"
                             />
                             <span class="text-xs text-zinc-400">VBR encoding</span>
                         </label>
@@ -747,91 +821,9 @@ function onSubmit() {
                             <span class="text-xs text-zinc-400">Copy audio (no re-encode)</span>
                         </label>
                     </div>
-                </div>
-            </fieldset>
-        </template>
-
-        <!-- AUDIO-ONLY MODE -->
-        <template v-else>
-            <fieldset class="space-y-3">
-                <div class="flex items-center justify-between">
-                    <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Audio Renditions</legend>
-                    <button type="button" @click="addAudioRendition" class="btn-sm">+ Add</button>
-                </div>
-                <div
-                    v-for="(r, i) in audioRenditions"
-                    :key="i"
-                    class="rounded-md bg-zinc-900/60 p-3 space-y-2"
-                >
-                    <div class="flex flex-wrap items-end gap-3">
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Audio kbps</label>
-                            <input v-model.number="r.audioBitrateKbps" type="number" min="1" class="input w-28" :disabled="r.copyStream" />
-                        </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Channels</label>
-                            <select v-model.number="r.channels" class="input w-24" :disabled="r.copyStream">
-                                <option :value="1">Mono</option>
-                                <option :value="2">Stereo</option>
-                                <option :value="6">5.1</option>
-                                <option :value="8">7.1</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Codec</label>
-                            <select v-model="r.audioCodec" class="input w-24" :disabled="r.copyStream">
-                                <option value="aac">AAC</option>
-                                <option value="mp3">MP3</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Source Track</label>
-                            <select v-model.number="r.sourceTrackIndex" class="input w-40 text-xs">
-                                <option v-for="t in editableAudioTracks" :key="t.index" :value="t.index">
-                                    #{{ t.index }}: {{ t.codec }} {{ t.bitrateKbps ? `${t.bitrateKbps}kbps` : '' }} {{ channelLabel(t.channels) }}{{ t.language ? ` [${t.language}]` : '' }}
-                                </option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Language</label>
-                            <input v-model="r.language" type="text" class="input w-20" placeholder="eng" />
-                        </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Label</label>
-                            <input v-model="r.label" type="text" class="input w-24" placeholder="128kbps" />
-                        </div>
-                        <button
-                            v-if="audioRenditions.length > 1"
-                            type="button"
-                            @click="removeAudioRendition(i)"
-                            class="mb-0.5 rounded p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
-                        >
-                            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
-                    </div>
-                    <div class="flex items-center gap-4 text-sm">
-                        <label class="flex items-center gap-2">
-                            <input
-                                type="checkbox"
-                                v-model="r.vbr"
-                                class="accent-indigo-500"
-                                :disabled="r.copyStream"
-                                @change="r.vbr && (r.copyStream = false)"
-                            />
-                            <span class="text-xs text-zinc-400">VBR encoding</span>
-                        </label>
-                        <label class="flex items-center gap-2">
-                            <input
-                                type="checkbox"
-                                v-model="r.copyStream"
-                                class="accent-indigo-500"
-                                @change="r.copyStream && (r.vbr = false)"
-                            />
-                            <span class="text-xs text-zinc-400">Copy audio (no re-encode)</span>
-                        </label>
-                    </div>
+                    <p v-if="!g.vbr && !g.copyStream && g.audioBitrateKbps < 100" class="text-xs text-amber-400">
+                        CBR below 100 kbps — will be encoded as mono
+                    </p>
                 </div>
             </fieldset>
         </template>

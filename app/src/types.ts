@@ -51,20 +51,9 @@ export interface AudioGroup {
     label?: string;
     audioBitrateKbps: number;
     channels: number;
-    audioCodec: 'aac' | 'mp3';
+    audioCodec: 'aac';
     sourceTrackIndex: number;
     language?: string;
-    copyStream?: boolean;
-    vbr?: boolean;
-}
-
-export interface AudioRendition {
-    audioBitrateKbps: number;
-    channels: number;
-    audioCodec: 'aac' | 'mp3';
-    sourceTrackIndex: number;
-    language?: string;
-    label?: string;
     copyStream?: boolean;
     vbr?: boolean;
 }
@@ -74,7 +63,6 @@ export interface EncodeConfig {
     segmentDuration?: number;
     videoRenditions?: VideoRendition[];
     audioGroups?: AudioGroup[];
-    audioRenditions?: AudioRendition[];
     videoTrackNames?: { index: number; name: string }[];
     /** Audio track metadata (name, language) for restored configs — persisted in localStorage only */
     audioTrackMetadata?: { index: number; name?: string; language?: string }[];

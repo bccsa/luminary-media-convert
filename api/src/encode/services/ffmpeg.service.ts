@@ -7,7 +7,7 @@ import {
 import { spawn, execSync, type ChildProcess } from 'child_process';
 import { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import type { EncodeConfigDto, VideoRenditionDto, AudioGroupDto, AudioRenditionDto } from '../dto/encode-config.dto.js';
+import type { EncodeConfigDto, VideoRenditionDto, AudioGroupDto } from '../dto/encode-config.dto.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -227,14 +227,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             if (group.copyStream) {
                 args.push(`-c:a:${audioOutputIndex}`, 'copy');
             } else {
-                const codec = group.audioCodec === 'mp3' ? 'libmp3lame' : 'aac';
-                args.push(`-c:a:${audioOutputIndex}`, codec);
-                if (group.vbr && codec === 'aac') {
+                args.push(`-c:a:${audioOutputIndex}`, 'aac');
+                if (group.vbr) {
                     args.push(`-q:a:${audioOutputIndex}`, this.bitrateToVbrQuality(group.audioBitrateKbps));
                 } else {
                     args.push(`-b:a:${audioOutputIndex}`, `${group.audioBitrateKbps}k`);
                 }
-                args.push(`-ac:a:${audioOutputIndex}`, `${group.channels}`);
+                const channels = (!group.vbr && group.audioBitrateKbps < 100) ? 1 : group.channels;
+                args.push(`-ac:a:${audioOutputIndex}`, `${channels}`);
             }
             audioOutputs.push({ group, outputIndex: audioOutputIndex });
             audioOutputIndex++;
@@ -286,7 +286,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
     private buildAudioArgs(opts: EncodeOptions): string[] {
         const { inputPath, outputDir, encodeConfig } = opts;
-        const renditions = encodeConfig.audioRenditions!;
+        const audioGroups = encodeConfig.audioGroups!;
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
         const args: string[] = ['-i', inputPath];
         args.push('-threads', String(this.threads));
@@ -294,73 +294,41 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         args.push('-progress', 'pipe:2', '-stats_period', '1');
         args.push('-vn');
 
-        if (renditions.length === 1) {
-            const r = renditions[0];
-            if (r.copyStream) {
-                args.push(
-                    '-map', `0:a:${r.sourceTrackIndex}`,
-                    '-c:a', 'copy',
-                );
+        audioGroups.forEach((group, i) => {
+            args.push('-map', `0:a:${group.sourceTrackIndex}`);
+            if (group.copyStream) {
+                args.push(`-c:a:${i}`, 'copy');
             } else {
-                const codec = r.audioCodec === 'mp3' ? 'libmp3lame' : 'aac';
-                args.push(
-                    '-map', `0:a:${r.sourceTrackIndex}`,
-                    '-c:a', codec,
-                );
-                if (r.vbr && codec === 'aac') {
-                    args.push('-q:a', this.bitrateToVbrQuality(r.audioBitrateKbps));
+                args.push(`-c:a:${i}`, 'aac');
+                if (group.vbr) {
+                    args.push(`-q:a:${i}`, this.bitrateToVbrQuality(group.audioBitrateKbps));
                 } else {
-                    args.push('-b:a', `${r.audioBitrateKbps}k`);
+                    args.push(`-b:a:${i}`, `${group.audioBitrateKbps}k`);
                 }
-                args.push('-ac', `${r.channels}`);
+                const channels = (!group.vbr && group.audioBitrateKbps < 100) ? 1 : group.channels;
+                args.push(`-ac:a:${i}`, `${channels}`);
             }
-            args.push(
-                '-f', 'hls',
-                '-hls_time', String(segmentDuration),
-                '-hls_playlist_type', 'vod',
-                '-hls_segment_type', 'mpegts',
-                '-hls_segment_filename',
-                join(outputDir, 'a0', 'segment_%03d.ts'),
-                join(outputDir, 'a0', 'playlist.m3u8'),
-            );
-        } else {
-            renditions.forEach((r, i) => {
-                args.push('-map', `0:a:${r.sourceTrackIndex}`);
-                if (r.copyStream) {
-                    args.push(`-c:a:${i}`, 'copy');
-                } else {
-                    const codec = r.audioCodec === 'mp3' ? 'libmp3lame' : 'aac';
-                    args.push(`-c:a:${i}`, codec);
-                    if (r.vbr && codec === 'aac') {
-                        args.push(`-q:a:${i}`, this.bitrateToVbrQuality(r.audioBitrateKbps));
-                    } else {
-                        args.push(`-b:a:${i}`, `${r.audioBitrateKbps}k`);
-                    }
-                    args.push(`-ac:a:${i}`, `${r.channels}`);
-                }
-            });
+        });
 
-            const varParts = renditions.map((r, i) => {
-                const name = (r.label ?? `${r.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
-                let part = `a:${i},name:${name}`;
-                if (r.language) part += `,language:${r.language}`;
-                if (i === 0) part += ',default:yes';
-                return part;
-            });
-
-            args.push(
-                '-f', 'hls',
-                '-hls_time', String(segmentDuration),
-                '-hls_playlist_type', 'vod',
-                '-hls_flags', 'independent_segments',
-                '-hls_segment_type', 'mpegts',
-                '-master_pl_name', 'master.m3u8',
-                '-var_stream_map', varParts.join(' '),
-                '-hls_segment_filename',
-                join(outputDir, 'a%v', 'segment_%03d.ts'),
-                join(outputDir, 'a%v', 'playlist.m3u8'),
-            );
+        const varParts: string[] = [];
+        for (let i = 0; i < audioGroups.length; i++) {
+            const group = audioGroups[i];
+            const name = (group.label ?? `${group.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
+            varParts.push(`a:${i},name:${name}`);
         }
+
+        args.push(
+            '-f', 'hls',
+            '-hls_time', String(segmentDuration),
+            '-hls_playlist_type', 'vod',
+            '-hls_flags', 'independent_segments',
+            '-hls_segment_type', 'mpegts',
+            '-master_pl_name', 'master.m3u8',
+            '-var_stream_map', varParts.join(' '),
+            '-hls_segment_filename',
+            join(outputDir, 'stream_%v', 'segment_%03d.ts'),
+            join(outputDir, 'stream_%v', 'playlist.m3u8'),
+        );
 
         return args;
     }
@@ -403,15 +371,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
             }
         } else {
-            const numRenditions = encodeConfig.audioRenditions?.length ?? 1;
-            if (numRenditions === 1) {
-                const dir = join(outputDir, 'a0');
+            const numGroups = encodeConfig.audioGroups?.length ?? 1;
+            for (let i = 0; i < numGroups; i++) {
+                const dir = join(outputDir, `stream_${i}`);
                 if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-            } else {
-                for (let i = 0; i < numRenditions; i++) {
-                    const dir = join(outputDir, `a${i}`);
-                    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-                }
             }
         }
 

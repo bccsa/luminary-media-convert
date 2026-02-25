@@ -252,7 +252,7 @@ describe('EncodeController', () => {
             ).toThrow(BadRequestException);
         });
 
-        it('should reject audio config without audioRenditions', () => {
+        it('should reject audio config without audioGroups', () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploaded');
 

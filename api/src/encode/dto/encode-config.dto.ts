@@ -81,11 +81,11 @@ export class AudioGroupDto {
     @Expose()
     channels: number;
 
-    @ApiProperty({ description: 'Audio codec.', enum: ['aac', 'mp3'], default: 'aac' })
+    @ApiProperty({ description: 'Audio codec.', enum: ['aac'], default: 'aac' })
     @IsString()
-    @IsIn(['aac', 'mp3'])
+    @IsIn(['aac'])
     @Expose()
-    audioCodec: 'aac' | 'mp3';
+    audioCodec: 'aac';
 
     @ApiProperty({ description: 'Source audio track index.', example: 0 })
     @IsNumber()
@@ -97,55 +97,6 @@ export class AudioGroupDto {
     @IsOptional()
     @Expose()
     language?: string;
-
-    @ApiPropertyOptional({ description: 'Copy source audio without re-encoding.', example: false })
-    @IsBoolean()
-    @IsOptional()
-    @Expose()
-    copyStream?: boolean;
-
-    @ApiPropertyOptional({ description: 'Use VBR encoding instead of CBR.', example: true })
-    @IsBoolean()
-    @IsOptional()
-    @Expose()
-    vbr?: boolean;
-}
-
-export class AudioRenditionDto {
-    @ApiProperty({ description: 'Audio bitrate in kbps.', example: 128 })
-    @IsNumber()
-    @Min(1)
-    @Expose()
-    audioBitrateKbps: number;
-
-    @ApiProperty({ description: 'Number of audio channels.', example: 2 })
-    @IsNumber()
-    @IsIn([1, 2, 6, 8])
-    @Expose()
-    channels: number;
-
-    @ApiProperty({ description: 'Audio codec.', enum: ['aac', 'mp3'], default: 'aac' })
-    @IsString()
-    @IsIn(['aac', 'mp3'])
-    @Expose()
-    audioCodec: 'aac' | 'mp3';
-
-    @ApiProperty({ description: 'Source audio track index.', example: 0 })
-    @IsNumber()
-    @Expose()
-    sourceTrackIndex: number;
-
-    @ApiPropertyOptional({ description: 'ISO 639 language code.', example: 'eng' })
-    @IsString()
-    @IsOptional()
-    @Expose()
-    language?: string;
-
-    @ApiPropertyOptional({ description: 'Human-readable label.', example: '128kbps' })
-    @IsString()
-    @IsOptional()
-    @Expose()
-    label?: string;
 
     @ApiPropertyOptional({ description: 'Copy source audio without re-encoding.', example: false })
     @IsBoolean()
@@ -184,23 +135,13 @@ export class EncodeConfigDto {
     @Expose()
     videoRenditions?: VideoRenditionDto[];
 
-    @ApiPropertyOptional({ description: 'Audio groups mapped to video renditions (required when type is video).', type: [AudioGroupDto] })
+    @ApiPropertyOptional({ description: 'Audio groups for quality tiers and language grouping.', type: [AudioGroupDto] })
     @IsArray()
     @IsOptional()
     @ValidateNested({ each: true })
     @Type(() => AudioGroupDto)
-    @ValidateIf(o => o.type === 'video')
     @Expose()
     audioGroups?: AudioGroupDto[];
-
-    @ApiPropertyOptional({ description: 'Audio renditions (required when type is audio).', type: [AudioRenditionDto] })
-    @IsArray()
-    @IsOptional()
-    @ValidateNested({ each: true })
-    @Type(() => AudioRenditionDto)
-    @ValidateIf(o => o.type === 'audio')
-    @Expose()
-    audioRenditions?: AudioRenditionDto[];
 
     @ApiPropertyOptional({
         description:

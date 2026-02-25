@@ -96,6 +96,7 @@ function initPlayer() {
             } catch (e) {
                 console.warn('HLS quality selector unavailable:', e);
             }
+
         });
     } catch (e) {
         console.error('Failed to initialize video player:', e);

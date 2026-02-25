@@ -214,7 +214,7 @@ describe('FfmpegService', () => {
                     { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'mp3', sourceTrackIndex: 0 },
+                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
                 ],
             };
 
@@ -224,7 +224,7 @@ describe('FfmpegService', () => {
                 encodeConfig,
             });
 
-            expect(args).toContain('libmp3lame');
+            expect(args).toContain('aac');
             expect(args).toContain('192k');
         });
 
@@ -500,44 +500,48 @@ describe('FfmpegService', () => {
             return (service as any).buildAudioArgs(opts);
         };
 
-        it('should build single-rendition audio args', () => {
+        it('should build single-group audio args with master playlist', () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 6,
-                audioRenditions: [
-                    { audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'HD' },
                 ],
             };
 
             const args = buildAudioArgs({
-                inputPath: '/tmp/audio.mp3',
+                inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
             });
 
             expect(args).toContain('-vn');
             expect(args).toContain('-i');
-            expect(args).toContain('/tmp/audio.mp3');
+            expect(args).toContain('/tmp/audio.flac');
             expect(args).toContain('-f');
             expect(args).toContain('hls');
             expect(args).toContain('aac');
-            expect(args).toContain('128k');
-            expect(args).not.toContain('-master_pl_name');
-            expect(args).not.toContain('-var_stream_map');
+            expect(args).toContain('-master_pl_name');
+            expect(args).toContain('master.m3u8');
+            expect(args).toContain('-var_stream_map');
+            const varMap = args[args.indexOf('-var_stream_map') + 1];
+            expect(varMap).toContain('a:0,name:HD');
+            expect(varMap).not.toContain('agroup');
         });
 
-        it('should build multi-rendition audio args with master playlist', () => {
+        it('should build multi-group audio args as direct variants without agroup', () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 4,
-                audioRenditions: [
-                    { audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: '192kbps' },
-                    { audioBitrateKbps: 96, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: '96kbps' },
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'HD' },
+                    { id: 'mid', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'Standard' },
+                    { id: 'low', audioBitrateKbps: 64, channels: 1, audioCodec: 'aac', sourceTrackIndex: 0, label: 'Mono' },
                 ],
             };
 
             const args = buildAudioArgs({
-                inputPath: '/tmp/audio.mp3',
+                inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
             });
@@ -545,37 +549,24 @@ describe('FfmpegService', () => {
             expect(args).toContain('-master_pl_name');
             expect(args).toContain('master.m3u8');
             expect(args).toContain('-var_stream_map');
-        });
-
-        it('should use mp3 codec when specified', () => {
-            const encodeConfig: EncodeConfigDto = {
-                type: 'audio',
-                segmentDuration: 6,
-                audioRenditions: [
-                    { audioBitrateKbps: 320, channels: 2, audioCodec: 'mp3', sourceTrackIndex: 0 },
-                ],
-            };
-
-            const args = buildAudioArgs({
-                inputPath: '/tmp/audio.wav',
-                outputDir: '/tmp/output',
-                encodeConfig,
-            });
-
-            expect(args).toContain('libmp3lame');
+            const varMap = args[args.indexOf('-var_stream_map') + 1];
+            expect(varMap).toContain('a:0,name:HD');
+            expect(varMap).toContain('a:1,name:Standard');
+            expect(varMap).toContain('a:2,name:Mono');
+            expect(varMap).not.toContain('agroup');
         });
 
         it('should include -threads with default value', () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 6,
-                audioRenditions: [
-                    { audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
                 ],
             };
 
             const args = buildAudioArgs({
-                inputPath: '/tmp/audio.mp3',
+                inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
             });
@@ -585,23 +576,45 @@ describe('FfmpegService', () => {
             expect(args[threadsIdx + 1]).toBe('8');
         });
 
-        it('should use copy codec for copyStream audio renditions', () => {
+        it('should use copy codec for copyStream audio groups', () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 6,
-                audioRenditions: [
-                    { audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, copyStream: true },
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, copyStream: true },
                 ],
             };
 
             const args = buildAudioArgs({
-                inputPath: '/tmp/audio.mp3',
+                inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
             });
 
             expect(args).toContain('copy');
             expect(args).not.toContain('aac');
+        });
+
+        it('should create direct variants for multi-language audio groups', () => {
+            const encodeConfig: EncodeConfigDto = {
+                type: 'audio',
+                segmentDuration: 6,
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng', label: 'English HD' },
+                    { id: 'hd', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'fra', label: 'French HD' },
+                ],
+            };
+
+            const args = buildAudioArgs({
+                inputPath: '/tmp/audio.flac',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            const varMap = args[args.indexOf('-var_stream_map') + 1];
+            expect(varMap).toContain('a:0,name:English_HD');
+            expect(varMap).toContain('a:1,name:French_HD');
+            expect(varMap).not.toContain('agroup');
         });
     });
 });
