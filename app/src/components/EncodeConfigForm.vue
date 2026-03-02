@@ -71,7 +71,7 @@ function mapTierToGroupId(standardGroupId: string, tierIds: string[]): string {
     return tierIds[Math.min(tierIndex, tierIds.length - 1)] ?? tierIds[0] ?? 'tier_0';
 }
 
-function buildSuggestedAudioGroups(audioTracks: AudioTrackInfo[]): AudioGroup[] {
+function buildSuggestedAudioGroups(audioTracks: AudioTrackInfo[], videoTrackCount: number): AudioGroup[] {
     if (audioTracks.length === 0) return [];
 
     const langMap = new Map<string, AudioTrackInfo[]>();
@@ -87,6 +87,8 @@ function buildSuggestedAudioGroups(audioTracks: AudioTrackInfo[]): AudioGroup[] 
     const languages = Array.from(langMap.keys());
     const isMultiSource = languages.length > 1
         || (languages.length === 1 && (langMap.get(languages[0])?.length ?? 0) > 1);
+    const hasMultiAudioPerLang = Array.from(langMap.values()).some(tracks => tracks.length > 1);
+    const isAlreadyABR = videoTrackCount > 1 && hasMultiAudioPerLang;
 
     const maxSourceBitrate = Math.max(...audioTracks.map(t => t.bitrateKbps || 0));
     const maxSourceChannels = Math.max(...audioTracks.map(t => t.channels || 2));
@@ -125,12 +127,13 @@ function buildSuggestedAudioGroups(audioTracks: AudioTrackInfo[]): AudioGroup[] 
                     label: languages.length > 1
                         ? (track.name ?? `${lang.toUpperCase()} ${tier.label}`)
                         : (track.name ?? tier.label),
-                    audioBitrateKbps: tier.bitrateKbps,
-                    channels: tier.channels,
+                    audioBitrateKbps: isAlreadyABR ? (track.bitrateKbps || tier.bitrateKbps) : tier.bitrateKbps,
+                    channels: isAlreadyABR ? track.channels : tier.channels,
                     audioCodec: 'aac',
                     sourceTrackIndex: track.index,
                     language: lang === 'und' ? undefined : lang,
-                    vbr: true,
+                    copyStream: isAlreadyABR ? true : undefined,
+                    vbr: !isAlreadyABR,
                 });
             }
         }
@@ -158,7 +161,7 @@ function reanalyzeVideo() {
         (a, b) => (b.height * b.width) - (a.height * a.width),
     );
 
-    const newGroups = buildSuggestedAudioGroups(editableAudioTracks);
+    const newGroups = buildSuggestedAudioGroups(editableAudioTracks, sortedVideoTracks.length);
     const tierIds = [...new Set(newGroups.map(g => g.id))];
     audioGroups.splice(0, audioGroups.length, ...newGroups);
 
@@ -207,7 +210,7 @@ function reanalyzeVideo() {
 }
 
 function reanalyzeAudio() {
-    audioGroups.splice(0, audioGroups.length, ...buildSuggestedAudioGroups(editableAudioTracks));
+    audioGroups.splice(0, audioGroups.length, ...buildSuggestedAudioGroups(editableAudioTracks, 0));
 }
 
 function reanalyze() {

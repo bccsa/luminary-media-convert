@@ -6,7 +6,7 @@ import 'video.js/dist/video-js.css';
 import { registerQualitySelector } from '../videojs-quality-selector';
 
 registerQualitySelector();
-import type { SessionStatus } from '../types';
+import type { AccelMode, SessionStatus } from '../types';
 
 const props = defineProps<{
     sessionId: string;
@@ -17,11 +17,16 @@ const props = defineProps<{
     masterPlaylist?: string;
     anglePlaylists?: readonly { name: string; key: string }[];
     error?: string;
+    encoder?: AccelMode;
     s3PublicBaseUrl?: string;
     encodingType?: 'video' | 'audio';
 }>();
 
-const emit = defineEmits<{ reset: [] }>();
+const emit = defineEmits<{ reset: []; cancel: [] }>();
+
+const isCancellable = computed(
+    () => props.status === 'queued' || props.status === 'encoding',
+);
 
 const playerEl = ref<HTMLVideoElement | null>(null);
 const copied = ref(false);
@@ -136,6 +141,12 @@ const statusConfig: Record<string, { label: string; color: string }> = {
     failed: { label: 'Failed', color: 'bg-red-600' },
 };
 
+const encoderConfig: Record<AccelMode, { label: string; icon: string }> = {
+    cpu: { label: 'CPU', icon: 'M9 3.5V2m0 17.5V21M5.06 5.06l-.94-.94m13.76 13.76-.94-.94M2 12H3.5m17 0H22M5.06 18.94l-.94.94M18.82 5.06l.94-.94M12 8a4 4 0 100 8 4 4 0 000-8z' },
+    nvidia: { label: 'NVIDIA GPU', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+    apple: { label: 'Apple GPU', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+};
+
 function badgeClasses(s: string | null): string {
     const cfg = s ? statusConfig[s] : null;
     return `inline-block rounded-full px-3 py-1 text-xs font-semibold text-white ${cfg?.color ?? 'bg-zinc-700'}`;
@@ -158,9 +169,23 @@ function switchToAngle(index: number) {
                 <h2 class="text-lg font-semibold text-zinc-100">Session Progress</h2>
                 <p class="mt-0.5 font-mono text-xs text-zinc-500">{{ sessionId }}</p>
             </div>
-            <span :class="badgeClasses(status)">
-                {{ status ? statusConfig[status]?.label ?? status : 'Connecting...' }}
-            </span>
+            <div class="flex items-center gap-2">
+                <span
+                    v-if="encoder"
+                    class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium"
+                    :class="encoder === 'cpu'
+                        ? 'border-zinc-700 text-zinc-400'
+                        : 'border-violet-700/60 text-violet-400'"
+                >
+                    <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path :d="encoderConfig[encoder].icon" />
+                    </svg>
+                    {{ encoderConfig[encoder].label }}
+                </span>
+                <span :class="badgeClasses(status)">
+                    {{ status ? statusConfig[status]?.label ?? status : 'Connecting...' }}
+                </span>
+            </div>
         </div>
 
         <!-- Queue position -->
@@ -268,6 +293,16 @@ function switchToAngle(index: number) {
             <p class="text-sm font-medium text-red-400">Encoding failed</p>
             <p v-if="error" class="mt-1 text-sm text-red-300/80">{{ error }}</p>
         </div>
+
+        <!-- Cancel -->
+        <button
+            v-if="isCancellable"
+            type="button"
+            class="w-full rounded-lg border border-zinc-700 px-6 py-3 text-sm font-semibold text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+            @click="emit('cancel')"
+        >
+            Cancel
+        </button>
 
         <!-- Reset -->
         <button

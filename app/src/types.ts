@@ -118,6 +118,8 @@ export type SessionStatus =
     | 'completed'
     | 'failed';
 
+export type AccelMode = 'cpu' | 'nvidia' | 'apple';
+
 export interface SessionStatusResponse {
     sessionId: string;
     status: SessionStatus;
@@ -128,4 +130,5 @@ export interface SessionStatusResponse {
     masterPlaylist?: string;
     anglePlaylists?: { name: string; key: string }[];
     error?: string;
+    encoder?: AccelMode;
 }

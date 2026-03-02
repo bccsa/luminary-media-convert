@@ -5,6 +5,7 @@ import { tmpdir } from 'os';
 import { EncodeController } from './encode.controller.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
+import { FfmpegService } from './services/ffmpeg.service.js';
 import type { CreateSessionDto } from './dto/create-session.dto.js';
 import type { EncodeConfigDto } from './dto/encode-config.dto.js';
 
@@ -51,6 +52,7 @@ describe('EncodeController', () => {
     let controller: EncodeController;
     let sessionService: SessionService;
     let queueService: jest.Mocked<QueueService>;
+    let ffmpegService: jest.Mocked<FfmpegService>;
     let testWorkDir: string;
 
     beforeEach(() => {
@@ -62,11 +64,18 @@ describe('EncodeController', () => {
         queueService = {
             enqueue: jest.fn().mockReturnValue(1),
             getPosition: jest.fn().mockReturnValue(null),
+            dequeue: jest.fn().mockReturnValue(true),
             length: 0,
             isProcessing: false,
         } as any;
 
-        controller = new EncodeController(sessionService, queueService);
+        ffmpegService = {
+            getAccelMode: jest.fn().mockReturnValue('cpu'),
+            isGpuAvailable: jest.fn().mockReturnValue(false),
+            killActiveProcess: jest.fn(),
+        } as any;
+
+        controller = new EncodeController(sessionService, queueService, ffmpegService);
     });
 
     afterEach(() => {
@@ -128,6 +137,16 @@ describe('EncodeController', () => {
 
             expect(result.sessionId).toBe(session.id);
             expect(result.status).toBe('created');
+            expect(result.encoder).toBe('cpu');
+        });
+
+        it('should reflect active accel mode in encoder field', () => {
+            ffmpegService.getAccelMode.mockReturnValue('apple');
+            const session = sessionService.create(makeConfig());
+
+            const result = controller.getStatus(session.id);
+
+            expect(result.encoder).toBe('apple');
         });
 
         it('should include probeResult when uploaded', () => {
@@ -306,9 +325,63 @@ describe('EncodeController', () => {
             expect(sessionService.get(session.id)).toBeUndefined();
         });
 
-        it('should reject deletion of a queued session', () => {
+        it('should delete a queued session and dequeue it', () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'queued');
+
+            controller.deleteSession(session.id);
+
+            expect(queueService.dequeue).toHaveBeenCalledWith(session.id);
+            expect(sessionService.get(session.id)).toBeUndefined();
+        });
+
+        it('should delete an encoding session and kill FFmpeg', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'encoding');
+
+            controller.deleteSession(session.id);
+
+            expect(ffmpegService.killActiveProcess).toHaveBeenCalled();
+            expect(sessionService.get(session.id)).toBeUndefined();
+        });
+
+        it('should not call dequeue when deleting a non-queued session', () => {
+            const session = sessionService.create(makeConfig());
+
+            controller.deleteSession(session.id);
+
+            expect(queueService.dequeue).not.toHaveBeenCalled();
+        });
+
+        it('should not call killActiveProcess when deleting a non-encoding session', () => {
+            const session = sessionService.create(makeConfig());
+
+            controller.deleteSession(session.id);
+
+            expect(ffmpegService.killActiveProcess).not.toHaveBeenCalled();
+        });
+
+        it('should reject deletion of a session uploading to S3', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading_to_s3');
+
+            expect(() =>
+                controller.deleteSession(session.id),
+            ).toThrow(BadRequestException);
+        });
+
+        it('should reject deletion of a completed session', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.setCompleted(session.id, ['master.m3u8'], 'master.m3u8');
+
+            expect(() =>
+                controller.deleteSession(session.id),
+            ).toThrow(BadRequestException);
+        });
+
+        it('should reject deletion of a failed session', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.setFailed(session.id, 'some error');
 
             expect(() =>
                 controller.deleteSession(session.id),

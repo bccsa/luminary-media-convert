@@ -121,6 +121,74 @@ describe('QueueService', () => {
         });
     });
 
+    describe('dequeue', () => {
+        it('should remove a queued session and return true', () => {
+            encodeService.processSession.mockReturnValue(
+                new Promise(() => {}),
+            );
+
+            const s1 = sessionService.create(makeConfig());
+            const s2 = sessionService.create(makeConfig());
+
+            queueService.enqueue(s1.id);
+            queueService.enqueue(s2.id);
+
+            const removed = queueService.dequeue(s2.id);
+
+            expect(removed).toBe(true);
+            expect(queueService.getPosition(s2.id)).toBeNull();
+        });
+
+        it('should return false for a session not in the queue', () => {
+            expect(queueService.dequeue('nonexistent')).toBe(false);
+        });
+
+        it('should update positions of remaining sessions after removal', () => {
+            encodeService.processSession.mockReturnValue(
+                new Promise(() => {}),
+            );
+
+            const s1 = sessionService.create(makeConfig());
+            const s2 = sessionService.create(makeConfig());
+            const s3 = sessionService.create(makeConfig());
+
+            queueService.enqueue(s1.id);
+            queueService.enqueue(s2.id);
+            queueService.enqueue(s3.id);
+
+            queueService.dequeue(s2.id);
+
+            expect(queueService.getPosition(s3.id)).toBe(1);
+        });
+
+        it('should send updated position webhooks after removal', () => {
+            encodeService.processSession.mockReturnValue(
+                new Promise(() => {}),
+            );
+
+            const s1 = sessionService.create(makeConfig());
+            const s2 = sessionService.create(makeConfig());
+            const s3 = sessionService.create(makeConfig());
+
+            queueService.enqueue(s1.id);
+            queueService.enqueue(s2.id);
+            queueService.enqueue(s3.id);
+
+            webhookService.send.mockClear();
+            queueService.dequeue(s2.id);
+
+            expect(webhookService.send).toHaveBeenCalledWith(
+                'https://example.com/webhook',
+                'tok',
+                expect.objectContaining({
+                    sessionId: s3.id,
+                    status: 'queued',
+                    queuePosition: 1,
+                }),
+            );
+        });
+    });
+
     describe('drain', () => {
         it('should process sessions in FIFO order', async () => {
             const order: string[] = [];

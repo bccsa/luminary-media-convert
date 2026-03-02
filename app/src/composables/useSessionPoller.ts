@@ -1,6 +1,6 @@
 import { ref, readonly, onUnmounted } from 'vue';
 import { getSessionStatus } from '../api';
-import type { SessionStatus, SessionStatusResponse } from '../types';
+import type { AccelMode, SessionStatus, SessionStatusResponse } from '../types';
 
 const POLL_INTERVAL_MS = 2000;
 const TERMINAL_STATUSES: SessionStatus[] = ['completed', 'failed'];
@@ -13,6 +13,7 @@ export function useSessionPoller() {
     const masterPlaylist = ref<string | undefined>();
     const anglePlaylists = ref<{ name: string; key: string }[] | undefined>();
     const error = ref<string | undefined>();
+    const encoder = ref<AccelMode | undefined>();
     const polling = ref(false);
 
     let timer: ReturnType<typeof setInterval> | null = null;
@@ -25,6 +26,7 @@ export function useSessionPoller() {
         masterPlaylist.value = data.masterPlaylist;
         anglePlaylists.value = data.anglePlaylists;
         error.value = data.error;
+        encoder.value = data.encoder;
     }
 
     function stop() {
@@ -67,6 +69,7 @@ export function useSessionPoller() {
         masterPlaylist: readonly(masterPlaylist),
         anglePlaylists: readonly(anglePlaylists),
         error: readonly(error),
+        encoder: readonly(encoder),
         polling: readonly(polling),
         start,
         stop,

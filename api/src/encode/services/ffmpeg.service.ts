@@ -31,10 +31,12 @@ export interface EncodeResult {
     anglePlaylists: AnglePlaylist[];
 }
 
+export type AccelMode = 'cpu' | 'nvidia' | 'apple';
+
 @Injectable()
 export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(FfmpegService.name);
-    private gpuAvailable = false;
+    private accelMode: AccelMode = 'cpu';
     private activeProcess: ChildProcess | null = null;
     private readonly timeoutMs = process.env.FFMPEG_TIMEOUT_MS
         ? parseInt(process.env.FFMPEG_TIMEOUT_MS, 10)
@@ -44,13 +46,16 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         : 8;
 
     async onModuleInit(): Promise<void> {
-        this.gpuAvailable = this.detectNvidiaGpu();
-        if (this.gpuAvailable) {
-            this.logger.log(
-                'NVIDIA GPU detected, using NVENC acceleration',
-            );
-        } else {
-            this.logger.log('No NVIDIA GPU found, using CPU encoding');
+        this.accelMode = this.detectAcceleration();
+        switch (this.accelMode) {
+            case 'nvidia':
+                this.logger.log('NVIDIA GPU detected, using NVENC acceleration');
+                break;
+            case 'apple':
+                this.logger.log('Apple Silicon detected, using VideoToolbox acceleration');
+                break;
+            default:
+                this.logger.log('No GPU found, using CPU encoding');
         }
         this.logger.log(`FFmpeg threads: ${this.threads}`);
     }
@@ -83,6 +88,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
+    private detectAcceleration(): AccelMode {
+        if (this.detectNvidiaGpu()) return 'nvidia';
+        if (this.detectAppleGpu()) return 'apple';
+        return 'cpu';
+    }
+
     private detectNvidiaGpu(): boolean {
         try {
             execSync('nvidia-smi', { stdio: 'ignore', timeout: 5000 });
@@ -96,6 +107,33 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 timeout: 5000,
             });
             return hwaccels.includes('cuda');
+        } catch {
+            return false;
+        }
+    }
+
+    private detectAppleGpu(): boolean {
+        if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+            return false;
+        }
+        try {
+            const hwaccels = execSync('ffmpeg -hwaccels 2>/dev/null', {
+                encoding: 'utf-8',
+                timeout: 5000,
+            });
+            if (!hwaccels.includes('videotoolbox')) return false;
+
+            const encoders = execSync('ffmpeg -encoders 2>/dev/null', {
+                encoding: 'utf-8',
+                timeout: 5000,
+            });
+            if (!encoders.includes('h264_videotoolbox')) return false;
+
+            const filters = execSync('ffmpeg -filters 2>/dev/null', {
+                encoding: 'utf-8',
+                timeout: 5000,
+            });
+            return filters.includes('scale_vt');
         } catch {
             return false;
         }
@@ -151,8 +189,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         const hasReencode = renditions.some(r => !r.copyStream);
 
-        if (hasReencode && this.gpuAvailable) {
+        if (hasReencode && this.accelMode === 'nvidia') {
             args.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda');
+        } else if (hasReencode && this.accelMode === 'apple') {
+            args.push('-hwaccel', 'videotoolbox', '-hwaccel_output_format', 'videotoolbox_vld');
         }
         args.push('-i', inputPath);
         args.push('-threads', String(this.threads));
@@ -174,8 +214,15 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 const splitOutputs = entries.map(e => `[reencode${e.globalIndex}]`).join('');
                 filterParts.push(`[0:v:${trackIdx}]split=${entries.length}${splitOutputs}`);
                 for (const e of entries) {
-                    const scaler = this.gpuAvailable ? 'scale_cuda' : 'scale';
-                    filterParts.push(`[reencode${e.globalIndex}]${scaler}=${e.rendition.width}:${e.rendition.height}[vout${e.globalIndex}]`);
+                    let scalerExpr: string;
+                    if (this.accelMode === 'nvidia') {
+                        scalerExpr = `scale_cuda=${e.rendition.width}:${e.rendition.height}`;
+                    } else if (this.accelMode === 'apple') {
+                        scalerExpr = `scale_vt=w=${e.rendition.width}:h=${e.rendition.height}`;
+                    } else {
+                        scalerExpr = `scale=${e.rendition.width}:${e.rendition.height}`;
+                    }
+                    filterParts.push(`[reencode${e.globalIndex}]${scalerExpr}[vout${e.globalIndex}]`);
                 }
             }
             args.push('-filter_complex', filterParts.join(';'));
@@ -189,7 +236,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             const r = reencodeRenditions[i];
             args.push('-map', `[vout${i}]`);
 
-            if (this.gpuAvailable) {
+            if (this.accelMode === 'nvidia') {
                 args.push(
                     `-c:v:${videoOutputIndex}`, 'h264_nvenc',
                     `-preset:v:${videoOutputIndex}`, this.getNvencPreset(r.height),
@@ -211,6 +258,18 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                         `-bufsize:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * 1.5)}k`,
                     );
                 }
+            } else if (this.accelMode === 'apple') {
+                args.push(
+                    `-c:v:${videoOutputIndex}`, 'h264_videotoolbox',
+                    `-allow_sw:v:${videoOutputIndex}`, '1',
+                    `-realtime:v:${videoOutputIndex}`, '0',
+                    `-profile:v:${videoOutputIndex}`, 'high',
+                );
+                args.push(
+                    `-b:v:${videoOutputIndex}`, `${r.videoBitrateKbps}k`,
+                    `-maxrate:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * (r.vbr ? 1.5 : 1.07))}k`,
+                    `-bufsize:v:${videoOutputIndex}`, `${Math.round(r.videoBitrateKbps * (r.vbr ? 2 : 1.5))}k`,
+                );
             } else {
                 args.push(
                     `-c:v:${videoOutputIndex}`, 'libx264',
@@ -739,7 +798,18 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return `${base}_${rendition.width}x${rendition.height}`;
     }
 
+    killActiveProcess(): void {
+        if (this.activeProcess && !this.activeProcess.killed) {
+            this.logger.log('Killing active FFmpeg process (user cancel)');
+            this.activeProcess.kill('SIGTERM');
+        }
+    }
+
     isGpuAvailable(): boolean {
-        return this.gpuAvailable;
+        return this.accelMode !== 'cpu';
+    }
+
+    getAccelMode(): AccelMode {
+        return this.accelMode;
     }
 }

@@ -27,6 +27,7 @@ import { join } from 'path';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
+import { FfmpegService } from './services/ffmpeg.service.js';
 import { CreateSessionDto } from './dto/create-session.dto.js';
 import { EncodeConfigDto } from './dto/encode-config.dto.js';
 import {
@@ -45,6 +46,7 @@ export class EncodeController {
     constructor(
         private readonly sessionService: SessionService,
         private readonly queueService: QueueService,
+        private readonly ffmpegService: FfmpegService,
     ) {}
 
     @Post()
@@ -213,6 +215,7 @@ export class EncodeController {
         const result: SessionStatusDto = {
             sessionId: session.id,
             status: session.status,
+            encoder: this.ffmpegService.getAccelMode(),
         };
 
         if (session.status === 'uploaded') {
@@ -249,9 +252,10 @@ export class EncodeController {
     @ApiOperation({
         summary: 'Cancel and delete an encoding session',
         description:
-            'Deletes a session and its uploaded file from disk. ' +
-            'Only sessions in "created", "uploading", or "uploaded" status can be deleted. ' +
-            'Sessions that are queued, encoding, or completed cannot be cancelled.',
+            'Deletes a session and cleans up associated resources. ' +
+            'Allowed in "created", "uploading", "uploaded", "queued", or "encoding" status. ' +
+            'Queued sessions are removed from the queue. Encoding sessions have their FFmpeg process terminated. ' +
+            'Sessions in "uploading_to_s3", "completed", or "failed" status cannot be deleted.',
     })
     @ApiParam({
         name: 'sessionId',
@@ -273,14 +277,19 @@ export class EncodeController {
             throw new NotFoundException(`Session ${sessionId} not found`);
         }
 
-        if (
-            session.status !== 'created' &&
-            session.status !== 'uploading' &&
-            session.status !== 'uploaded'
-        ) {
+        const deletableStatuses = ['created', 'uploading', 'uploaded', 'queued', 'encoding'];
+        if (!deletableStatuses.includes(session.status)) {
             throw new BadRequestException(
                 `Cannot delete session in "${session.status}" status`,
             );
+        }
+
+        if (session.status === 'queued') {
+            this.queueService.dequeue(sessionId);
+        }
+
+        if (session.status === 'encoding') {
+            this.ffmpegService.killActiveProcess();
         }
 
         const workDir =

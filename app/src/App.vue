@@ -38,6 +38,7 @@ function buildS3PublicBaseUrl(s3: S3Config): string {
 const poller = useSessionPoller();
 
 let abortUpload: (() => void) | null = null;
+let isCancelling = false;
 
 async function onUploadSubmit(payload: {
     config: CreateSessionRequest;
@@ -80,9 +81,32 @@ async function onUploadSubmit(payload: {
         view.value = 'configure';
     } catch (e) {
         abortUpload = null;
-        submissionError.value = e instanceof Error ? e.message : String(e);
-        view.value = 'config';
+        if (!isCancelling) {
+            submissionError.value = e instanceof Error ? e.message : String(e);
+            view.value = 'config';
+        }
     }
+}
+
+async function cancelUpload() {
+    isCancelling = true;
+    abortUpload?.();
+    abortUpload = null;
+
+    view.value = 'config';
+    uploadProgress.value = 0;
+
+    if (sessionId.value) {
+        try {
+            const accessToken = await getAccessTokenSilently();
+            await deleteSession(sessionId.value, accessToken);
+        } catch {
+            // Best-effort cleanup
+        }
+        sessionId.value = '';
+    }
+
+    isCancelling = false;
 }
 
 async function onEncodeSubmit(config: EncodeConfig) {
@@ -121,6 +145,28 @@ async function onEncodeBack() {
     view.value = 'config';
     sessionId.value = '';
     probeResult.value = null;
+}
+
+async function onCancelEncode() {
+    poller.stop();
+
+    if (sessionId.value) {
+        try {
+            const accessToken = await getAccessTokenSilently();
+            await deleteSession(sessionId.value, accessToken);
+        } catch {
+            // Best-effort cleanup
+        }
+    }
+
+    view.value = 'config';
+    sessionId.value = '';
+    submissionError.value = null;
+    uploadProgress.value = 0;
+    s3PublicBaseUrl.value = '';
+    encodingType.value = 'video';
+    probeResult.value = null;
+    s3Config.value = null;
 }
 
 function reset() {
@@ -204,6 +250,14 @@ function reset() {
                             />
                         </div>
                     </div>
+                    <button
+                        v-if="uploadProgress < 100"
+                        type="button"
+                        class="rounded-lg border border-zinc-700 px-6 py-2 text-sm font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+                        @click="cancelUpload"
+                    >
+                        Cancel
+                    </button>
                 </div>
 
                 <!-- Step 2: Review probe results + configure encoding -->
@@ -234,9 +288,11 @@ function reset() {
                     :master-playlist="poller.masterPlaylist.value"
                     :angle-playlists="poller.anglePlaylists.value"
                     :error="poller.error.value"
+                    :encoder="poller.encoder.value"
                     :s3-public-base-url="s3PublicBaseUrl"
                     :encoding-type="encodingType"
                     @reset="reset"
+                    @cancel="onCancelEncode"
                 />
             </div>
         </template>

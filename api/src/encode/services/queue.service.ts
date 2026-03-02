@@ -81,6 +81,20 @@ export class QueueService implements OnModuleDestroy {
     }
 
     /**
+     * Remove a session from the queue before it starts processing.
+     * Returns true if the session was found and removed.
+     */
+    dequeue(sessionId: string): boolean {
+        const idx = this.queue.indexOf(sessionId);
+        if (idx === -1) return false;
+
+        this.queue.splice(idx, 1);
+        this.logger.log(`Session ${sessionId} dequeued`);
+        this.notifyQueuePositions();
+        return true;
+    }
+
+    /**
      * Drain the queue: process one job at a time in FIFO order.
      * Never throws -- individual job failures are caught and the queue continues.
      */

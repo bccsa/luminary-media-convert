@@ -1,8 +1,23 @@
-import { FfmpegService } from './ffmpeg.service.js';
+import { FfmpegService, type AccelMode, type EncodeOptions } from './ffmpeg.service.js';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { EventEmitter } from 'events';
+import type { ChildProcess } from 'child_process';
+
+function createMockProcess(): ChildProcess & { emitStderr: (data: string) => void; emitClose: (code: number, signal?: string) => void; emitError: (err: Error) => void } {
+    const proc = new EventEmitter() as any;
+    proc.stderr = new EventEmitter();
+    proc.stdout = { resume: jest.fn() };
+    proc.kill = jest.fn();
+    proc.killed = false;
+    proc.pid = 12345;
+    proc.emitStderr = (data: string) => proc.stderr.emit('data', Buffer.from(data));
+    proc.emitClose = (code: number, signal?: string) => proc.emit('close', code, signal ?? null);
+    proc.emitError = (err: Error) => proc.emit('error', err);
+    return proc;
+}
 
 describe('FfmpegService', () => {
     let service: FfmpegService;
@@ -12,8 +27,21 @@ describe('FfmpegService', () => {
     });
 
     describe('GPU detection', () => {
-        it('should default to GPU not available', () => {
+        it('should default to CPU mode', () => {
             expect(service.isGpuAvailable()).toBe(false);
+            expect(service.getAccelMode()).toBe('cpu');
+        });
+
+        it('should report GPU available for nvidia mode', () => {
+            (service as any).accelMode = 'nvidia';
+            expect(service.isGpuAvailable()).toBe(true);
+            expect(service.getAccelMode()).toBe('nvidia');
+        });
+
+        it('should report GPU available for apple mode', () => {
+            (service as any).accelMode = 'apple';
+            expect(service.isGpuAvailable()).toBe(true);
+            expect(service.getAccelMode()).toBe('apple');
         });
     });
 
@@ -159,11 +187,14 @@ describe('FfmpegService', () => {
 
             expect(args).toContain('libx264');
             expect(args).not.toContain('h264_nvenc');
+            expect(args).not.toContain('h264_videotoolbox');
+            expect(args).not.toContain('-hwaccel');
 
             const filterIdx = args.indexOf('-filter_complex');
             const filterVal = args[filterIdx + 1];
             expect(filterVal).toContain('scale=');
             expect(filterVal).not.toContain('scale_cuda');
+            expect(filterVal).not.toContain('scale_vt');
             expect(filterVal).toContain('split=2');
 
             // 720p -> faster, 480p -> fast
@@ -173,8 +204,8 @@ describe('FfmpegService', () => {
             expect(args[preset1Idx + 1]).toBe('fast');
         });
 
-        it('should include -hwaccel cuda when GPU is available', () => {
-            (service as any).gpuAvailable = true;
+        it('should include -hwaccel cuda when NVIDIA GPU is available', () => {
+            (service as any).accelMode = 'nvidia';
 
             const encodeConfig: EncodeConfigDto = {
                 type: 'video',
@@ -196,14 +227,196 @@ describe('FfmpegService', () => {
             expect(args).toContain('-hwaccel');
             expect(args).toContain('cuda');
             expect(args).toContain('h264_nvenc');
+            expect(args).not.toContain('h264_videotoolbox');
+            expect(args).not.toContain('videotoolbox');
+            expect(args).not.toContain('libx264');
 
             const filterIdx = args.indexOf('-filter_complex');
             const filterVal = args[filterIdx + 1];
             expect(filterVal).toContain('scale_cuda');
+            expect(filterVal).not.toContain('scale_vt');
+            expect(filterVal).not.toMatch(/(?<![_a-z])scale=/);
 
             // 720p -> p5
             const presetIdx = args.indexOf('-preset:v:0');
             expect(args[presetIdx + 1]).toBe('p5');
+        });
+
+        it('should use h264_videotoolbox when Apple GPU is available', () => {
+            (service as any).accelMode = 'apple';
+
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const args = buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            expect(args).toContain('-hwaccel');
+            expect(args).toContain('videotoolbox');
+            expect(args).toContain('-hwaccel_output_format');
+            expect(args).toContain('videotoolbox_vld');
+            expect(args).toContain('h264_videotoolbox');
+            expect(args).not.toContain('cuda');
+            expect(args).not.toContain('h264_nvenc');
+            expect(args).not.toContain('scale_cuda');
+            expect(args).not.toContain('libx264');
+
+            const filterIdx = args.indexOf('-filter_complex');
+            const filterVal = args[filterIdx + 1];
+            expect(filterVal).toContain('scale_vt=');
+            expect(filterVal).not.toContain('scale_cuda');
+            expect(filterVal).not.toContain('scale=');
+
+            expect(args).toContain('-allow_sw:v:0');
+            expect(args).toContain('-realtime:v:0');
+            expect(args).toContain('-profile:v:0');
+            expect(args).toContain('high');
+            expect(args).toContain('2500k');
+        });
+
+        it('should use scale_vt with split for multiple Apple GPU renditions', () => {
+            (service as any).accelMode = 'apple';
+
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    { width: 854, height: 480, videoBitrateKbps: 1000, copyStream: false, audioGroupId: 'hd', label: '480p' },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const args = buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            const filterIdx = args.indexOf('-filter_complex');
+            const filterVal = args[filterIdx + 1];
+            expect(filterVal).toContain('split=2');
+            expect(filterVal).toContain('scale_vt=w=1280:h=720');
+            expect(filterVal).toContain('scale_vt=w=854:h=480');
+            expect(filterVal).not.toContain('scale_cuda');
+            expect(filterVal).not.toMatch(/(?<![_a-z])scale=/);
+
+            expect(args).toContain('h264_videotoolbox');
+            expect(args).toContain('-allow_sw:v:0');
+            expect(args).toContain('-allow_sw:v:1');
+        });
+
+        it('should use wider bufsize/maxrate multipliers for Apple VBR', () => {
+            (service as any).accelMode = 'apple';
+
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2000, copyStream: false, audioGroupId: 'hd', label: '720p', vbr: true },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const args = buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            // VBR: maxrate = 2000 * 1.5 = 3000k, bufsize = 2000 * 2 = 4000k
+            expect(args).toContain(`${Math.round(2000 * 1.5)}k`);
+            expect(args).toContain(`${Math.round(2000 * 2)}k`);
+        });
+
+        it('should use standard bufsize/maxrate multipliers for Apple CBR', () => {
+            (service as any).accelMode = 'apple';
+
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2000, copyStream: false, audioGroupId: 'hd', label: '720p', vbr: false },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const args = buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            // CBR: maxrate = 2000 * 1.07 = 2140k, bufsize = 2000 * 1.5 = 3000k
+            expect(args).toContain(`${Math.round(2000 * 1.07)}k`);
+            expect(args).toContain(`${Math.round(2000 * 1.5)}k`);
+        });
+
+        it('should include -threads in Apple GPU mode', () => {
+            (service as any).accelMode = 'apple';
+
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const args = buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            const threadsIdx = args.indexOf('-threads');
+            expect(threadsIdx).toBeGreaterThan(-1);
+            expect(args[threadsIdx + 1]).toBe('8');
+        });
+
+        it('should include -threads in NVIDIA GPU mode', () => {
+            (service as any).accelMode = 'nvidia';
+
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const args = buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            const threadsIdx = args.indexOf('-threads');
+            expect(threadsIdx).toBeGreaterThan(-1);
+            expect(args[threadsIdx + 1]).toBe('8');
         });
 
         it('should set correct audio codec and bitrate', () => {
@@ -479,8 +692,12 @@ describe('FfmpegService', () => {
             fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'tier_0', label: 'main' },
-                    { width: 854, height: 480, videoBitrateKbps: 1000, copyStream: false, audioGroupId: 'tier_0', label: 'pulpit' },
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'tier_0', label: 'main', sourceTrackIndex: 0 },
+                    { width: 854, height: 480, videoBitrateKbps: 1000, copyStream: false, audioGroupId: 'tier_0', label: 'pulpit', sourceTrackIndex: 1 },
+                ],
+                videoTrackNames: [
+                    { index: 0, name: 'main' },
+                    { index: 1, name: 'pulpit' },
                 ],
                 audioGroups: [
                     { id: 'tier_0', label: 'English', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
@@ -615,6 +832,327 @@ describe('FfmpegService', () => {
             expect(varMap).toContain('a:0,name:English_HD');
             expect(varMap).toContain('a:1,name:French_HD');
             expect(varMap).not.toContain('agroup');
+        });
+    });
+
+    describe('encode', () => {
+        let tmpDir: string;
+        let spawnSpy: jest.SpyInstance;
+        let probeDurationSpy: jest.SpyInstance;
+        let fixMasterPlaylistSpy: jest.SpyInstance;
+        let generateAnglePlaylistsSpy: jest.SpyInstance;
+
+        const baseEncodeConfig: EncodeConfigDto = {
+            type: 'video',
+            segmentDuration: 6,
+            videoRenditions: [
+                { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+            ],
+            audioGroups: [
+                { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+            ],
+        };
+
+        function makeEncodeOpts(overrides: Partial<EncodeOptions> = {}): EncodeOptions {
+            return {
+                sessionId: 'test-session',
+                inputPath: '/tmp/input.mp4',
+                outputDir: join(tmpDir, 'output'),
+                encodeConfig: baseEncodeConfig,
+                onProgress: jest.fn(),
+                ...overrides,
+            };
+        }
+
+        beforeEach(() => {
+            tmpDir = mkdtempSync(join(tmpdir(), 'ffmpeg-encode-'));
+            const { spawn } = jest.requireActual('child_process');
+            spawnSpy = jest.spyOn(require('child_process'), 'spawn');
+            probeDurationSpy = jest.spyOn(service as any, 'probeDuration').mockReturnValue(100);
+            fixMasterPlaylistSpy = jest.spyOn(service as any, 'fixMasterPlaylist').mockImplementation(() => {});
+            generateAnglePlaylistsSpy = jest.spyOn(service as any, 'generateAnglePlaylists').mockReturnValue([]);
+        });
+
+        afterEach(() => {
+            rmSync(tmpDir, { recursive: true, force: true });
+            spawnSpy.mockRestore();
+            probeDurationSpy.mockRestore();
+            fixMasterPlaylistSpy.mockRestore();
+            generateAnglePlaylistsSpy.mockRestore();
+        });
+
+        it('should resolve with outputDir and masterPlaylist on success', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const opts = makeEncodeOpts();
+            const promise = service.encode(opts);
+
+            mockProc.emitClose(0);
+
+            const result = await promise;
+            expect(result.outputDir).toBe(opts.outputDir);
+            expect(result.masterPlaylist).toBe('master.m3u8');
+            expect(result.anglePlaylists).toEqual([]);
+        });
+
+        it('should call spawn with "ffmpeg" and correct args', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const opts = makeEncodeOpts();
+            const promise = service.encode(opts);
+
+            expect(spawnSpy).toHaveBeenCalledWith('ffmpeg', expect.any(Array), {
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+
+            const args: string[] = spawnSpy.mock.calls[0][1];
+            expect(args).toContain('-i');
+            expect(args).toContain(opts.inputPath);
+            expect(args).toContain('-f');
+            expect(args).toContain('hls');
+
+            mockProc.emitClose(0);
+            await promise;
+        });
+
+        it('should reject when FFmpeg exits with non-zero code', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const opts = makeEncodeOpts();
+            const promise = service.encode(opts);
+
+            mockProc.emitStderr('Error: something went wrong\n');
+            mockProc.emitClose(1);
+
+            await expect(promise).rejects.toThrow('FFmpeg exited with code 1');
+        });
+
+        it('should include signal in error message when killed', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const promise = service.encode(makeEncodeOpts());
+
+            mockProc.emitClose(null as any, 'SIGKILL');
+
+            await expect(promise).rejects.toThrow('signal: SIGKILL');
+        });
+
+        it('should reject when FFmpeg process emits an error event', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const promise = service.encode(makeEncodeOpts());
+
+            mockProc.emitError(new Error('ENOENT: ffmpeg not found'));
+
+            await expect(promise).rejects.toThrow('FFmpeg spawn error: ENOENT: ffmpeg not found');
+        });
+
+        it('should report progress via onProgress callback', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+            probeDurationSpy.mockReturnValue(100);
+
+            const onProgress = jest.fn();
+            const opts = makeEncodeOpts({ onProgress });
+            const promise = service.encode(opts);
+
+            // 50% progress (50s out of 100s)
+            mockProc.emitStderr('out_time_us=50000000\n');
+            // 75% progress
+            mockProc.emitStderr('out_time_us=75000000\n');
+
+            mockProc.emitClose(0);
+            await promise;
+
+            expect(onProgress).toHaveBeenCalled();
+            const calls = onProgress.mock.calls.map((c: any[]) => c[0]);
+            expect(calls).toContain(50);
+            expect(calls).toContain(75);
+        });
+
+        it('should not report progress when duration is unknown', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+            probeDurationSpy.mockReturnValue(0);
+
+            const onProgress = jest.fn();
+            const promise = service.encode(makeEncodeOpts({ onProgress }));
+
+            mockProc.emitStderr('out_time_us=50000000\n');
+            mockProc.emitClose(0);
+            await promise;
+
+            expect(onProgress).not.toHaveBeenCalled();
+        });
+
+        it('should cap progress at 99.9%', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+            probeDurationSpy.mockReturnValue(100);
+
+            const onProgress = jest.fn();
+            const promise = service.encode(makeEncodeOpts({ onProgress }));
+
+            // 150% worth of time (150s out of 100s)
+            mockProc.emitStderr('out_time_us=150000000\n');
+            mockProc.emitClose(0);
+            await promise;
+
+            const calls = onProgress.mock.calls.map((c: any[]) => c[0]);
+            expect(calls.every((v: number) => v <= 99.9)).toBe(true);
+        });
+
+        it('should call fixMasterPlaylist and generateAnglePlaylists for video type', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const opts = makeEncodeOpts();
+            const promise = service.encode(opts);
+
+            mockProc.emitClose(0);
+            await promise;
+
+            expect(fixMasterPlaylistSpy).toHaveBeenCalledWith(opts.outputDir, opts.encodeConfig);
+            expect(generateAnglePlaylistsSpy).toHaveBeenCalledWith(opts.outputDir, opts.encodeConfig);
+        });
+
+        it('should not call fixMasterPlaylist for audio type', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const opts = makeEncodeOpts({
+                encodeConfig: {
+                    type: 'audio',
+                    segmentDuration: 6,
+                    audioGroups: [
+                        { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    ],
+                },
+            });
+            const promise = service.encode(opts);
+
+            mockProc.emitClose(0);
+            await promise;
+
+            expect(fixMasterPlaylistSpy).not.toHaveBeenCalled();
+        });
+
+        it('should create output subdirectories for video type', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const opts = makeEncodeOpts();
+            const promise = service.encode(opts);
+
+            mockProc.emitClose(0);
+            await promise;
+
+            // 1 video rendition + 1 audio group = 2 stream dirs
+            const { existsSync } = require('fs');
+            expect(existsSync(join(opts.outputDir, 'stream_0'))).toBe(true);
+            expect(existsSync(join(opts.outputDir, 'stream_1'))).toBe(true);
+        });
+
+        it('should clear activeProcess after completion', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const promise = service.encode(makeEncodeOpts());
+
+            expect((service as any).activeProcess).toBe(mockProc);
+
+            mockProc.emitClose(0);
+            await promise;
+
+            expect((service as any).activeProcess).toBeNull();
+        });
+
+        it('should clear activeProcess after error', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const promise = service.encode(makeEncodeOpts());
+
+            mockProc.emitClose(1);
+
+            await expect(promise).rejects.toThrow();
+            expect((service as any).activeProcess).toBeNull();
+        });
+
+        it('should include stderr tail in error message on failure', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const promise = service.encode(makeEncodeOpts());
+
+            mockProc.emitStderr('Processing frames...\n');
+            mockProc.emitStderr('Error: codec not found\n');
+            mockProc.emitClose(1);
+
+            await expect(promise).rejects.toThrow('codec not found');
+        });
+    });
+
+    describe('killActiveProcess', () => {
+        it('should send SIGTERM to the active process', () => {
+            const mockProc = createMockProcess();
+            (service as any).activeProcess = mockProc;
+
+            service.killActiveProcess();
+
+            expect(mockProc.kill).toHaveBeenCalledWith('SIGTERM');
+        });
+
+        it('should be a no-op when no active process', () => {
+            (service as any).activeProcess = null;
+
+            expect(() => service.killActiveProcess()).not.toThrow();
+        });
+
+        it('should not kill an already-killed process', () => {
+            const mockProc = createMockProcess();
+            mockProc.killed = true;
+            (service as any).activeProcess = mockProc;
+
+            service.killActiveProcess();
+
+            expect(mockProc.kill).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('onModuleDestroy', () => {
+        it('should kill active FFmpeg process', async () => {
+            const mockProc = createMockProcess();
+            (service as any).activeProcess = mockProc;
+
+            const destroyPromise = service.onModuleDestroy();
+
+            // Simulate process exit after SIGTERM
+            mockProc.emit('close', 0, 'SIGTERM');
+            await destroyPromise;
+
+            expect(mockProc.kill).toHaveBeenCalledWith('SIGTERM');
+            expect((service as any).activeProcess).toBeNull();
+        });
+
+        it('should be a no-op when no active process', async () => {
+            (service as any).activeProcess = null;
+            await expect(service.onModuleDestroy()).resolves.toBeUndefined();
+        });
+
+        it('should not kill already-killed process', async () => {
+            const mockProc = createMockProcess();
+            mockProc.killed = true;
+            (service as any).activeProcess = mockProc;
+
+            await service.onModuleDestroy();
+
+            expect(mockProc.kill).not.toHaveBeenCalled();
         });
     });
 });

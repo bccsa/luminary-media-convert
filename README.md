@@ -1,6 +1,6 @@
 # Luminary Media Convert
 
-HLS/ABR media encoding service built with NestJS. Accepts encoding requests via REST API, processes media files with FFmpeg (GPU-accelerated when NVIDIA hardware is available), uploads HLS output (fMP4 segments) to any S3-compatible storage, and delivers status updates via webhooks or polling.
+HLS/ABR media encoding service built with NestJS. Accepts encoding requests via REST API, processes media files with FFmpeg (GPU-accelerated when NVIDIA or Apple Silicon hardware is available), uploads HLS output (fMP4 segments) to any S3-compatible storage, and delivers status updates via webhooks or polling.
 
 The repository is an npm workspaces monorepo containing:
 
@@ -77,7 +77,8 @@ Client           Auth0          Luminary Service                External
 - **Auth0 account** with an API and a Single Page Application configured (see [Auth0 Setup](#auth0-setup))
 - **FFmpeg** with the following encoders/filters:
   - CPU: `libx264`, `aac`
-  - GPU (optional): `h264_nvenc`, `scale_cuda` (requires NVIDIA GPU + CUDA drivers)
+  - NVIDIA GPU (optional): `h264_nvenc`, `scale_cuda` (requires NVIDIA GPU + CUDA drivers)
+  - Apple Silicon GPU (optional): `h264_videotoolbox` (requires macOS on Apple M1+ hardware)
 
 ### Installing FFmpeg
 
@@ -100,6 +101,10 @@ sudo apt update && sudo apt install -y ffmpeg
 # FFmpeg must be compiled with --enable-nvenc --enable-cuda
 # See: https://docs.nvidia.com/video-technologies/video-codec-sdk/
 ```
+
+**Apple Silicon (macOS, M1+):**
+
+VideoToolbox hardware encoding is available automatically when FFmpeg is built with VideoToolbox support (the default for Homebrew FFmpeg on Apple Silicon). No extra configuration is needed.
 
 ## Auth0 Setup
 
@@ -618,20 +623,41 @@ Webhooks are optional. When a `webhook` configuration is provided in the session
 
 ## GPU Acceleration
 
-The service automatically detects NVIDIA GPU availability at startup by checking:
+The service automatically detects hardware acceleration at startup, checking for NVIDIA first, then Apple Silicon, with CPU as the final fallback.
+
+### NVIDIA (Linux / Windows)
+
+Detected when:
 
 1. `nvidia-smi` is available and exits cleanly
 2. `ffmpeg -hwaccels` includes `cuda`
 
-When a GPU is detected, video encoding uses:
+When detected, video encoding uses:
 
 - **Decoder**: `-hwaccel cuda -hwaccel_output_format cuda`
 - **Encoder**: `h264_nvenc` (instead of `libx264`)
 - **Scaler**: `scale_cuda` (instead of `scale`) — keeps frames in GPU memory
 
-When no GPU is detected, the service falls back to CPU encoding with `libx264`.
+### Apple Silicon (macOS M1+)
 
-Audio encoding always uses CPU regardless (no GPU benefit).
+Detected when:
+
+1. Platform is `darwin` and architecture is `arm64`
+2. `ffmpeg -hwaccels` includes `videotoolbox`
+3. `ffmpeg -encoders` includes `h264_videotoolbox`
+4. `ffmpeg -filters` includes `scale_vt`
+
+When detected, video encoding uses:
+
+- **Decoder**: `-hwaccel videotoolbox -hwaccel_output_format videotoolbox_vld`
+- **Encoder**: `h264_videotoolbox` with `-profile high`, `-allow_sw 1` (graceful software fallback), `-realtime 0` (quality-optimised)
+- **Scaler**: `scale_vt` (instead of `scale`) — keeps frames in VideoToolbox GPU memory
+
+### CPU Fallback
+
+When no GPU is detected, the service uses `libx264` with resolution-based presets.
+
+Audio encoding always uses CPU regardless of GPU availability (no GPU benefit).
 
 The active mode is logged at startup:
 
@@ -639,10 +665,12 @@ The active mode is logged at startup:
 NVIDIA GPU detected, using NVENC acceleration
 ```
 
-or
+```
+Apple Silicon detected, using VideoToolbox acceleration
+```
 
 ```
-No NVIDIA GPU found, using CPU encoding
+No GPU found, using CPU encoding
 ```
 
 ---
