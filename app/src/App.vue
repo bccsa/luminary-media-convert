@@ -28,6 +28,7 @@ const s3PublicBaseUrl = ref('');
 const encodingType = ref<'video' | 'audio'>('video');
 const probeResult = ref<ProbeResult | null>(null);
 const s3Config = ref<S3Config | null>(null);
+const byteRangeEnabled = ref(true);
 
 function buildS3PublicBaseUrl(s3: S3Config): string {
     const protocol = s3.useSSL === false ? 'http' : 'https';
@@ -51,6 +52,7 @@ async function onUploadSubmit(payload: {
     try {
         const accessToken = await getAccessTokenSilently();
         s3Config.value = payload.config.s3;
+        byteRangeEnabled.value = payload.config.byteRange !== false;
         s3PublicBaseUrl.value = buildS3PublicBaseUrl(payload.config.s3);
 
         const session = await createSession(payload.config, accessToken);
@@ -167,6 +169,7 @@ async function onCancelEncode() {
     encodingType.value = 'video';
     probeResult.value = null;
     s3Config.value = null;
+    byteRangeEnabled.value = true;
 }
 
 function reset() {
@@ -179,6 +182,7 @@ function reset() {
     encodingType.value = 'video';
     probeResult.value = null;
     s3Config.value = null;
+    byteRangeEnabled.value = true;
 }
 </script>
 
@@ -264,6 +268,7 @@ function reset() {
                 <EncodeConfigForm
                     v-else-if="view === 'configure' && probeResult"
                     :probe-result="probeResult"
+                    :byte-range="byteRangeEnabled"
                     @submit="onEncodeSubmit"
                     @back="onEncodeBack"
                 />

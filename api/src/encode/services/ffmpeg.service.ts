@@ -5,7 +5,10 @@ import {
     OnModuleDestroy,
 } from '@nestjs/common';
 import { spawn, execSync, type ChildProcess } from 'child_process';
-import { mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
+import {
+    mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync,
+    readdirSync, statSync, openSync, writeSync, closeSync,
+} from 'fs';
 import { join } from 'path';
 import type { EncodeConfigDto, VideoRenditionDto, AudioGroupDto } from '../dto/encode-config.dto.js';
 import dotenv from 'dotenv';
@@ -18,6 +21,8 @@ export interface EncodeOptions {
     outputDir: string;
     encodeConfig: EncodeConfigDto;
     onProgress: (percent: number) => void;
+    byteRange?: boolean;
+    byteRangeMaxFileSizeBytes?: number;
 }
 
 export interface AnglePlaylist {
@@ -525,6 +530,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 if (err) {
                     reject(err);
                 } else {
+                    if (opts.byteRange !== false) {
+                        const maxBytes = opts.byteRangeMaxFileSizeBytes
+                            ?? 500 * 1024 * 1024;
+                        this.convertToByteRange(outputDir, maxBytes);
+                    }
+
                     let anglePlaylists: AnglePlaylist[] = [];
                     let masterPlaylistFilename = 'master.m3u8';
                     if (type === 'video') {
@@ -583,6 +594,102 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 }, this.timeoutMs);
             }
         });
+    }
+
+    private convertToByteRange(outputDir: string, maxFileSizeBytes: number): void {
+        const entries = readdirSync(outputDir, { withFileTypes: true });
+        const streamDirs = entries
+            .filter(e => e.isDirectory() && e.name.startsWith('stream_'))
+            .map(e => e.name)
+            .sort();
+
+        for (const dir of streamDirs) {
+            this.convertStreamToByteRange(join(outputDir, dir), maxFileSizeBytes);
+        }
+
+        this.logger.log(
+            `Byte-range conversion complete for ${streamDirs.length} stream(s) (max ${Math.round(maxFileSizeBytes / 1024 / 1024)} MB per file)`,
+        );
+    }
+
+    private convertStreamToByteRange(streamDir: string, maxFileSizeBytes: number): void {
+        const playlistPath = join(streamDir, 'playlist.m3u8');
+        if (!existsSync(playlistPath)) return;
+
+        const content = readFileSync(playlistPath, 'utf-8');
+        const lines = content.split('\n');
+
+        const headerLines: string[] = [];
+        const segments: { extinfLine: string; filename: string }[] = [];
+        let footerLine = '';
+        let inSegments = false;
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.startsWith('#EXTINF:')) {
+                inSegments = true;
+                const filename = lines[i + 1]?.trim();
+                if (filename && !filename.startsWith('#')) {
+                    segments.push({ extinfLine: line, filename });
+                    i++;
+                }
+            } else if (line.startsWith('#EXT-X-ENDLIST')) {
+                footerLine = line;
+            } else if (!inSegments) {
+                headerLines.push(line);
+            }
+        }
+
+        if (segments.length === 0) return;
+
+        const byteRanges: { extinfLine: string; length: number; offset: number; mediaFile: string }[] = [];
+        let fileIndex = 0;
+        let currentOffset = 0;
+        let currentMediaFile = `media_${fileIndex}.m4s`;
+        let fd = openSync(join(streamDir, currentMediaFile), 'w');
+
+        for (const seg of segments) {
+            const segPath = join(streamDir, seg.filename);
+            if (!existsSync(segPath)) continue;
+
+            const segData = readFileSync(segPath);
+            const segSize = segData.length;
+
+            if (currentOffset > 0 && currentOffset + segSize > maxFileSizeBytes) {
+                closeSync(fd);
+                fileIndex++;
+                currentOffset = 0;
+                currentMediaFile = `media_${fileIndex}.m4s`;
+                fd = openSync(join(streamDir, currentMediaFile), 'w');
+            }
+
+            writeSync(fd, segData);
+            byteRanges.push({
+                extinfLine: seg.extinfLine,
+                length: segSize,
+                offset: currentOffset,
+                mediaFile: currentMediaFile,
+            });
+            currentOffset += segSize;
+        }
+
+        closeSync(fd);
+
+        const newLines: string[] = [...headerLines];
+        for (const br of byteRanges) {
+            newLines.push(br.extinfLine);
+            newLines.push(`#EXT-X-BYTERANGE:${br.length}@${br.offset}`);
+            newLines.push(br.mediaFile);
+        }
+        if (footerLine) newLines.push(footerLine);
+        newLines.push('');
+
+        writeFileSync(playlistPath, newLines.join('\n'), 'utf-8');
+
+        for (const seg of segments) {
+            const segPath = join(streamDir, seg.filename);
+            if (existsSync(segPath)) unlinkSync(segPath);
+        }
     }
 
     private fixMasterPlaylist(

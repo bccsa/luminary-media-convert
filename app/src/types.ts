@@ -91,6 +91,8 @@ export interface WebhookConfig {
 
 export interface CreateSessionRequest {
     segmentDuration?: number;
+    byteRange?: boolean;
+    byteRangeMaxFileSizeMB?: number;
     s3: S3Config;
     webhook?: WebhookConfig;
 }

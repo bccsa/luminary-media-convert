@@ -1,6 +1,8 @@
 import {
+    IsBoolean,
     IsNumber,
     IsOptional,
+    Max,
     Min,
     ValidateNested,
 } from 'class-validator';
@@ -20,6 +22,29 @@ export class CreateSessionDto {
     @Min(1)
     @Expose()
     segmentDuration?: number;
+
+    @ApiPropertyOptional({
+        description:
+            'Use byte-range HLS segments (one file per rendition, split if exceeding max file size). Defaults to true.',
+        default: true,
+    })
+    @IsBoolean()
+    @IsOptional()
+    @Expose()
+    byteRange?: boolean;
+
+    @ApiPropertyOptional({
+        description:
+            'Max byte-range output file size in MB. Varies by storage provider / CDN. Defaults to 500.',
+        default: 500,
+        example: 500,
+    })
+    @IsNumber()
+    @IsOptional()
+    @Min(1)
+    @Max(10240)
+    @Expose()
+    byteRangeMaxFileSizeMB?: number;
 
     @ApiProperty({
         description: 'S3-compatible storage configuration for output files.',

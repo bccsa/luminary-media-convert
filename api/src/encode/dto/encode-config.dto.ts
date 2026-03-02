@@ -159,4 +159,5 @@ export class EncodeConfigDto {
     @ValidateIf(o => o.type === 'video')
     @Expose()
     videoTrackNames?: { index: number; name: string }[];
+
 }

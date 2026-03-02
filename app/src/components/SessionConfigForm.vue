@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { reactive, computed } from 'vue';
+import { reactive, computed, ref } from 'vue';
 import type { S3Config, CreateSessionRequest } from '../types';
 import FileDropZone from './FileDropZone.vue';
 
 const S3_STORAGE_KEY = 'luminary_s3_config';
+const BYTE_RANGE_KEY = 'luminary_byte_range';
+const MAX_FILE_SIZE_KEY = 'luminary_byte_range_max_mb';
 
 const emit = defineEmits<{
     submit: [payload: { config: CreateSessionRequest; file: File }];
@@ -27,13 +29,42 @@ function loadS3Config(): S3Config {
 
 const s3 = reactive<S3Config>(loadS3Config());
 
+function loadByteRange(): boolean {
+    try {
+        const raw = localStorage.getItem(BYTE_RANGE_KEY);
+        if (raw != null) return raw === 'true';
+    } catch { /* ignore */ }
+    return true;
+}
+
+const byteRange = ref(loadByteRange());
+
+function loadMaxFileSizeMB(): number {
+    try {
+        const raw = localStorage.getItem(MAX_FILE_SIZE_KEY);
+        if (raw) {
+            const val = parseInt(raw, 10);
+            if (val > 0) return val;
+        }
+    } catch { /* ignore */ }
+    return 500;
+}
+
+const byteRangeMaxFileSizeMB = ref(loadMaxFileSizeMB());
+
 function saveS3Config() {
     localStorage.setItem(S3_STORAGE_KEY, JSON.stringify({ ...s3 }));
+    localStorage.setItem(BYTE_RANGE_KEY, String(byteRange.value));
+    localStorage.setItem(MAX_FILE_SIZE_KEY, String(byteRangeMaxFileSizeMB.value || 500));
 }
 
 function clearS3Config() {
     localStorage.removeItem(S3_STORAGE_KEY);
+    localStorage.removeItem(BYTE_RANGE_KEY);
+    localStorage.removeItem(MAX_FILE_SIZE_KEY);
     Object.assign(s3, { endPoint: '', port: undefined, useSSL: true, bucket: '', region: undefined, accessKey: '', secretKey: '', pathPrefix: undefined });
+    byteRange.value = true;
+    byteRangeMaxFileSizeMB.value = 500;
 }
 
 const canSubmit = computed(() => {
@@ -48,6 +79,8 @@ function onSubmit() {
 
     const config: CreateSessionRequest = {
         s3: { ...s3 },
+        byteRange: byteRange.value,
+        byteRangeMaxFileSizeMB: byteRange.value ? (byteRangeMaxFileSizeMB.value || 500) : undefined,
     };
 
     emit('submit', { config, file: file.value });
@@ -102,6 +135,16 @@ function onSubmit() {
                 <div class="sm:col-span-2 lg:col-span-4">
                     <label class="mb-1 block text-xs text-zinc-500">Path Prefix</label>
                     <input v-model="s3.pathPrefix" type="text" class="input" placeholder="optional/prefix" />
+                </div>
+            </div>
+            <div class="flex items-center gap-4">
+                <label class="flex items-center gap-2 text-sm">
+                    <input type="checkbox" v-model="byteRange" class="accent-indigo-500" />
+                    Byte-range segments
+                </label>
+                <div v-if="byteRange" class="flex items-center gap-2">
+                    <label class="text-xs text-zinc-500">Max file size (MB)</label>
+                    <input v-model.number="byteRangeMaxFileSizeMB" type="number" min="1" class="input w-24" placeholder="500" />
                 </div>
             </div>
         </fieldset>

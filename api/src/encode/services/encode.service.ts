@@ -54,6 +54,9 @@ export class EncodeService {
                 inputPath: session.filePath!,
                 outputDir,
                 encodeConfig: session.encodeConfig,
+                byteRange: session.config.byteRange,
+                byteRangeMaxFileSizeBytes:
+                    (session.config.byteRangeMaxFileSizeMB ?? 500) * 1024 * 1024,
                 onProgress: (percent) => {
                     this.sessionService.updateProgress(
                         sessionId,

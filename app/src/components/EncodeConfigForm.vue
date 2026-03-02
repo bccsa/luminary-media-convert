@@ -12,6 +12,7 @@ import { computeLayoutKey, getStoredConfig } from '../utils/layoutStorage';
 
 const props = defineProps<{
     probeResult: ProbeResult;
+    byteRange: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -417,7 +418,7 @@ function onSubmit() {
 
     const config: EncodeConfig = {
         type: encodingType.value,
-        segmentDuration: segmentDuration.value,
+        segmentDuration: props.byteRange ? 6 : segmentDuration.value,
     };
 
     if (encodingType.value === 'video') {
@@ -587,7 +588,7 @@ function onSubmit() {
                     <input type="radio" v-model="encodingType.value" value="audio" class="accent-indigo-500" />
                     Audio Only
                 </label>
-                <div class="ml-auto flex items-center gap-2">
+                <div v-if="!byteRange" class="ml-auto flex items-center gap-2">
                     <label class="text-xs text-zinc-500">Segment (s)</label>
                     <input v-model.number="segmentDuration.value" type="number" min="1" class="input w-20 text-center" />
                 </div>

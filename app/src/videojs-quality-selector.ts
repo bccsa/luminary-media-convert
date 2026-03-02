@@ -105,6 +105,16 @@ class QualitySelectorButton extends MenuButton {
             this.qualityLevels[i].enabled = quality === 'auto' || pixels === quality;
         }
 
+        if (quality !== 'auto') {
+            try {
+                const tech = (this.player() as any).tech({ IWillNotUseThisInPlugins: true });
+                const pc = tech?.vhs?.playlistController_;
+                if (pc && typeof pc.fastQualityChange_ === 'function') {
+                    pc.fastQualityChange_();
+                }
+            } catch { /* VHS internals unavailable — ABR will switch at next segment */ }
+        }
+
         this.updateLabel(quality === 'auto' ? this.player().localize('Auto') : `${quality}p`);
 
         for (const item of this.items ?? []) {
