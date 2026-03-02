@@ -43,6 +43,7 @@ export function uploadFile(
         const upload = new tus.Upload(file, {
             endpoint: tusEndpoint,
             retryDelays: [0, 1000, 3000, 5000],
+            removeFingerprintOnSuccess: true,
             metadata: {
                 sessionId,
                 filename: file.name,
