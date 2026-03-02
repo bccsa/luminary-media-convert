@@ -158,6 +158,56 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
+    private probeFrameRate(inputPath: string): number {
+        try {
+            const output = execSync(
+                `ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 "${inputPath}"`,
+                { encoding: 'utf-8', timeout: 30000 },
+            );
+            const raw = output.trim();
+            const parts = raw.split('/');
+            if (parts.length === 2) {
+                const num = parseFloat(parts[0]);
+                const den = parseFloat(parts[1]);
+                if (den > 0 && num > 0) return num / den;
+            }
+            const parsed = parseFloat(raw);
+            return parsed > 0 ? parsed : 30;
+        } catch {
+            this.logger.warn('Could not probe frame rate, defaulting to 30 fps');
+            return 30;
+        }
+    }
+
+    private probeGopDuration(inputPath: string, frameRate: number): number | null {
+        try {
+            const output = execSync(
+                `ffprobe -v error -select_streams v:0 -show_frames -show_entries frame=pict_type -of csv=p=0 -read_intervals "%+#200" "${inputPath}"`,
+                { encoding: 'utf-8', timeout: 60000 },
+            );
+            const frames = output.trim().split('\n').filter(l => l.trim());
+            let keyframeCount = 0;
+            let firstKeyIdx = -1;
+            let secondKeyIdx = -1;
+            for (let i = 0; i < frames.length; i++) {
+                if (frames[i].trim() === 'I') {
+                    keyframeCount++;
+                    if (keyframeCount === 1) firstKeyIdx = i;
+                    else if (keyframeCount === 2) { secondKeyIdx = i; break; }
+                }
+            }
+            if (firstKeyIdx >= 0 && secondKeyIdx > firstKeyIdx && frameRate > 0) {
+                const gopFrames = secondKeyIdx - firstKeyIdx;
+                const gopSeconds = gopFrames / frameRate;
+                return Math.round(gopSeconds * 1000) / 1000;
+            }
+            return null;
+        } catch {
+            this.logger.warn('Could not probe GOP duration');
+            return null;
+        }
+    }
+
     private getX264Preset(height: number): string {
         if (height >= 1080) return 'veryfast';
         if (height >= 720) return 'faster';
@@ -190,6 +240,27 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const renditions = encodeConfig.videoRenditions!;
         const audioGroups = encodeConfig.audioGroups!;
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
+        const sourceFrameRate = this.probeFrameRate(inputPath);
+        const gopFrames = Math.round(segmentDuration * sourceFrameRate);
+
+        let hlsTime = segmentDuration;
+        if (opts.byteRange !== false) {
+            const sourceGopDuration = this.probeGopDuration(inputPath, sourceFrameRate);
+            if (sourceGopDuration && sourceGopDuration > 0) {
+                hlsTime = sourceGopDuration;
+                this.logger.log(
+                    `Byte-range mode: using source GOP duration ${hlsTime}s for -hls_time (source: ${sourceFrameRate.toFixed(2)} fps, GOP: ${Math.round(hlsTime * sourceFrameRate)} frames)`,
+                );
+            } else {
+                this.logger.log(
+                    `Byte-range mode: could not detect source GOP, using segment duration ${hlsTime}s for -hls_time`,
+                );
+            }
+        }
+
+        this.logger.log(
+            `Source frame rate: ${sourceFrameRate.toFixed(2)} fps, GOP: ${gopFrames} frames (${segmentDuration}s segments), hls_time: ${hlsTime}s`,
+        );
         const args: string[] = [];
 
         const hasReencode = renditions.some(r => !r.copyStream);
@@ -296,8 +367,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 }
             }
             args.push(
-                `-g:v:${videoOutputIndex}`, `${segmentDuration * 30}`,
-                `-keyint_min:v:${videoOutputIndex}`, `${segmentDuration * 30}`,
+                `-g:v:${videoOutputIndex}`, `${gopFrames}`,
+                `-keyint_min:v:${videoOutputIndex}`, `${gopFrames}`,
             );
             videoIndexMap.push({ rendition: r, outputIndex: videoOutputIndex });
             videoOutputIndex++;
@@ -336,7 +407,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         // HLS output options
         args.push(
             '-f', 'hls',
-            '-hls_time', String(segmentDuration),
+            '-hls_time', String(hlsTime),
             '-hls_playlist_type', 'vod',
             '-hls_flags', 'independent_segments',
             '-hls_segment_type', 'fmp4',
@@ -371,7 +442,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         args.push(
             '-hls_segment_filename',
-            join(outputDir, 'stream_%v', 'segment_%03d.m4s'),
+            join(outputDir, 'stream_%v', 'segment_%05d.m4s'),
             join(outputDir, 'stream_%v', 'playlist.m3u8'),
         );
 
@@ -381,7 +452,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private buildAudioArgs(opts: EncodeOptions): string[] {
         const { inputPath, outputDir, encodeConfig } = opts;
         const audioGroups = encodeConfig.audioGroups!;
-        const segmentDuration = encodeConfig.segmentDuration ?? 6;
+        const segmentDuration = opts.byteRange !== false ? 2 : (encodeConfig.segmentDuration ?? 6);
         const args: string[] = ['-i', inputPath];
         args.push('-threads', String(this.threads));
 
@@ -421,7 +492,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             '-master_pl_name', 'master.m3u8',
             '-var_stream_map', varParts.join(' '),
             '-hls_segment_filename',
-            join(outputDir, 'stream_%v', 'segment_%03d.m4s'),
+            join(outputDir, 'stream_%v', 'segment_%05d.m4s'),
             join(outputDir, 'stream_%v', 'playlist.m3u8'),
         );
 

@@ -532,6 +532,81 @@ describe('FfmpegService', () => {
             expect(args[threadsIdx + 1]).toBe('8');
         });
 
+        it('should use detected GOP duration for -hls_time in byte-range mode', () => {
+            jest.spyOn(service as any, 'probeFrameRate').mockReturnValue(24);
+            jest.spyOn(service as any, 'probeGopDuration').mockReturnValue(2);
+
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const args = buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+                byteRange: true,
+            });
+
+            const hlsTimeIdx = args.indexOf('-hls_time');
+            expect(args[hlsTimeIdx + 1]).toBe('2');
+        });
+
+        it('should fall back to segmentDuration when GOP detection fails in byte-range mode', () => {
+            jest.spyOn(service as any, 'probeFrameRate').mockReturnValue(30);
+            jest.spyOn(service as any, 'probeGopDuration').mockReturnValue(null);
+
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 8,
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const args = buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+                byteRange: true,
+            });
+
+            const hlsTimeIdx = args.indexOf('-hls_time');
+            expect(args[hlsTimeIdx + 1]).toBe('8');
+        });
+
+        it('should use segmentDuration for -hls_time when byte-range is disabled', () => {
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 10,
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const args = buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+                byteRange: false,
+            });
+
+            const hlsTimeIdx = args.indexOf('-hls_time');
+            expect(args[hlsTimeIdx + 1]).toBe('10');
+        });
+
         it('should use -ac:a:N to target audio streams correctly', () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'video',
@@ -812,6 +887,65 @@ describe('FfmpegService', () => {
             expect(args).not.toContain('aac');
         });
 
+        it('should use 2s segment duration when byte-range is enabled', () => {
+            const encodeConfig: EncodeConfigDto = {
+                type: 'audio',
+                segmentDuration: 6,
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'HD' },
+                ],
+            };
+
+            const args = buildAudioArgs({
+                inputPath: '/tmp/audio.flac',
+                outputDir: '/tmp/output',
+                encodeConfig,
+                byteRange: true,
+            });
+
+            const hlsTimeIdx = args.indexOf('-hls_time');
+            expect(args[hlsTimeIdx + 1]).toBe('2');
+        });
+
+        it('should use 2s segment duration when byte-range is not explicitly disabled', () => {
+            const encodeConfig: EncodeConfigDto = {
+                type: 'audio',
+                segmentDuration: 6,
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'HD' },
+                ],
+            };
+
+            const args = buildAudioArgs({
+                inputPath: '/tmp/audio.flac',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            const hlsTimeIdx = args.indexOf('-hls_time');
+            expect(args[hlsTimeIdx + 1]).toBe('2');
+        });
+
+        it('should use configured segment duration when byte-range is disabled', () => {
+            const encodeConfig: EncodeConfigDto = {
+                type: 'audio',
+                segmentDuration: 4,
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'HD' },
+                ],
+            };
+
+            const args = buildAudioArgs({
+                inputPath: '/tmp/audio.flac',
+                outputDir: '/tmp/output',
+                encodeConfig,
+                byteRange: false,
+            });
+
+            const hlsTimeIdx = args.indexOf('-hls_time');
+            expect(args[hlsTimeIdx + 1]).toBe('4');
+        });
+
         it('should create direct variants for multi-language audio groups', () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
@@ -832,6 +966,68 @@ describe('FfmpegService', () => {
             expect(varMap).toContain('a:0,name:English_HD');
             expect(varMap).toContain('a:1,name:French_HD');
             expect(varMap).not.toContain('agroup');
+        });
+    });
+
+    describe('probeGopDuration (private, tested via reflection)', () => {
+        const probeGopDuration = (inputPath: string, frameRate: number): number | null => {
+            return (service as any).probeGopDuration(inputPath, frameRate);
+        };
+
+        let execSyncSpy: jest.SpyInstance;
+
+        afterEach(() => {
+            execSyncSpy?.mockRestore();
+        });
+
+        it('should detect GOP duration from I-frame spacing', () => {
+            const frameOutput = 'I\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nP\nI\nP\nP\n';
+            execSyncSpy = jest.spyOn(require('child_process'), 'execSync').mockReturnValue(frameOutput);
+
+            const result = probeGopDuration('/tmp/input.mp4', 30);
+            expect(result).toBe(1);
+        });
+
+        it('should calculate fractional GOP duration for non-standard frame rates', () => {
+            // 48 frames between keyframes at 24 fps = 2s
+            const frames = ['I', ...Array(47).fill('P'), 'I', 'P'].join('\n') + '\n';
+            execSyncSpy = jest.spyOn(require('child_process'), 'execSync').mockReturnValue(frames);
+
+            const result = probeGopDuration('/tmp/input.mp4', 24);
+            expect(result).toBe(2);
+        });
+
+        it('should return null when only one keyframe is found', () => {
+            const frameOutput = 'I\nP\nP\nP\nP\n';
+            execSyncSpy = jest.spyOn(require('child_process'), 'execSync').mockReturnValue(frameOutput);
+
+            const result = probeGopDuration('/tmp/input.mp4', 30);
+            expect(result).toBeNull();
+        });
+
+        it('should return null when no keyframes are found', () => {
+            const frameOutput = 'P\nP\nP\nP\n';
+            execSyncSpy = jest.spyOn(require('child_process'), 'execSync').mockReturnValue(frameOutput);
+
+            const result = probeGopDuration('/tmp/input.mp4', 30);
+            expect(result).toBeNull();
+        });
+
+        it('should return null when execSync throws', () => {
+            execSyncSpy = jest.spyOn(require('child_process'), 'execSync').mockImplementation(() => {
+                throw new Error('ffprobe not found');
+            });
+
+            const result = probeGopDuration('/tmp/input.mp4', 30);
+            expect(result).toBeNull();
+        });
+
+        it('should return null when frame rate is zero', () => {
+            const frameOutput = 'I\nP\nP\nI\n';
+            execSyncSpy = jest.spyOn(require('child_process'), 'execSync').mockReturnValue(frameOutput);
+
+            const result = probeGopDuration('/tmp/input.mp4', 0);
+            expect(result).toBeNull();
         });
     });
 

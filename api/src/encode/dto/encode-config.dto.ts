@@ -160,4 +160,13 @@ export class EncodeConfigDto {
     @Expose()
     videoTrackNames?: { index: number; name: string }[];
 
+    @ApiPropertyOptional({
+        description:
+            'Use byte-range HLS segments (one file per rendition, split if exceeding max file size). Defaults to true.',
+        default: true,
+    })
+    @IsBoolean()
+    @IsOptional()
+    @Expose()
+    byteRange?: boolean;
 }

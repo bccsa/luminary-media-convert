@@ -169,6 +169,36 @@ describe('EncodeService', () => {
         );
     });
 
+    it('should pass byteRange from session config to ffmpeg', async () => {
+        const config = makeConfig();
+        config.byteRange = false;
+        const session = sessionService.create(config);
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        await service.processSession(session.id);
+
+        expect(ffmpegService.encode).toHaveBeenCalledWith(
+            expect.objectContaining({
+                byteRange: false,
+            }),
+        );
+    });
+
+    it('should default byteRange to undefined when not set in session config', async () => {
+        const session = sessionService.create(makeConfig());
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        await service.processSession(session.id);
+
+        expect(ffmpegService.encode).toHaveBeenCalledWith(
+            expect.objectContaining({
+                byteRange: undefined,
+            }),
+        );
+    });
+
     it('should mark session as failed when FFmpeg errors', async () => {
         ffmpegService.encode.mockRejectedValue(
             new Error('FFmpeg exited with code 1'),
