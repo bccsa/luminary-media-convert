@@ -65,11 +65,23 @@ const showAngleSwitcher = computed(
     () => uniqueAnglePlaylists.value.length > 1,
 );
 
-const isAudioOnly = computed(() => props.encodingType === 'audio');
+const currentAngleIsAudioOnly = computed(() => {
+    const lists = uniqueAnglePlaylists.value;
+    if (!lists.length) return false;
+    return lists[currentAngleIndex.value]?.name === 'Audio only';
+});
+
+const isAudioOnly = computed(
+    () => props.encodingType === 'audio' || currentAngleIsAudioOnly.value,
+);
 
 function initPlayer() {
     if (!playerEl.value || !playbackUrl.value) return;
     if (player) {
+        const audioOnly = isAudioOnly.value;
+        try { (player as any).audioOnlyMode(audioOnly); } catch {}
+        player.fluid(!audioOnly);
+
         const wasPaused = player.paused();
         player.src({ src: playbackUrl.value, type: 'application/x-mpegURL' });
         if (pendingSeekTime.value != null) {

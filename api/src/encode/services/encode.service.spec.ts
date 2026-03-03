@@ -272,6 +272,48 @@ describe('EncodeService', () => {
         expect(statuses).toContain('uploading_to_s3');
     });
 
+    it('should include audio-only angle playlist in completed session and webhook', async () => {
+        ffmpegService.encode.mockResolvedValue({
+            outputDir: '/tmp/output',
+            masterPlaylist: 'master.m3u8',
+            anglePlaylists: [
+                { name: 'Video', filename: 'master.m3u8' },
+                { name: 'Audio only', filename: 'audio_only.m3u8' },
+            ],
+        });
+        s3Service.uploadDirectory.mockResolvedValue({
+            keys: ['master.m3u8', 'audio_only.m3u8', 'stream_720p/playlist.m3u8', 'stream_HD_Audio/playlist.m3u8'],
+            masterPlaylistKey: 'master.m3u8',
+        });
+
+        const session = sessionService.create(makeConfig());
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        await service.processSession(session.id);
+
+        const updated = sessionService.get(session.id)!;
+        expect(updated.status).toBe('completed');
+        expect(updated.masterPlaylist).toBe('master.m3u8');
+        expect(updated.anglePlaylists).toEqual([
+            { name: 'Video', key: 'master.m3u8' },
+            { name: 'Audio only', key: 'audio_only.m3u8' },
+        ]);
+
+        expect(webhookService.send).toHaveBeenCalledWith(
+            'https://example.com/webhook',
+            'tok',
+            expect.objectContaining({
+                status: 'completed',
+                masterPlaylist: 'master.m3u8',
+                anglePlaylists: [
+                    { name: 'Video', key: 'master.m3u8' },
+                    { name: 'Audio only', key: 'audio_only.m3u8' },
+                ],
+            }),
+        );
+    });
+
     it('should not throw even when everything fails', async () => {
         ffmpegService.encode.mockRejectedValue(new Error('fail'));
         webhookService.send.mockRejectedValue(new Error('webhook fail'));

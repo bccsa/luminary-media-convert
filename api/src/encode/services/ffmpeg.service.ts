@@ -620,6 +620,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                             masterPlaylistFilename =
                                 anglePlaylists[0]?.filename ?? 'master.m3u8';
                         }
+
+                        const audioOnlyPlaylist = this.generateAudioOnlyPlaylist(outputDir, encodeConfig);
+                        if (audioOnlyPlaylist) {
+                            if (anglePlaylists.length === 1 && anglePlaylists[0].name === 'Default') {
+                                anglePlaylists[0] = { ...anglePlaylists[0], name: 'Video' };
+                            }
+                            anglePlaylists.push(audioOnlyPlaylist);
+                        }
                     }
                     resolve({
                         outputDir,
@@ -892,6 +900,58 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
 
         return anglePlaylists;
+    }
+
+    /**
+     * Generate a standalone audio-only master playlist from a video encode's
+     * audio streams. Follows the same structure as audio-file-upload playlists.
+     */
+    private generateAudioOnlyPlaylist(
+        outputDir: string,
+        config: EncodeConfigDto,
+    ): AnglePlaylist | null {
+        const audioGroups = config.audioGroups ?? [];
+        if (audioGroups.length === 0) return null;
+
+        const masterPath = join(outputDir, 'master.m3u8');
+        let extVersion = '#EXT-X-VERSION:7';
+        if (existsSync(masterPath)) {
+            const versionMatch = readFileSync(masterPath, 'utf-8').match(/#EXT-X-VERSION:\d+/);
+            if (versionMatch) extVersion = versionMatch[0];
+        }
+
+        const parts: string[] = ['#EXTM3U', extVersion];
+
+        let isFirst = true;
+        for (const group of audioGroups) {
+            const streamName = (group.label ?? `${group.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
+            const uri = `stream_${streamName}/playlist.m3u8`;
+            const name = group.label ?? group.language ?? 'Audio';
+            const lang = group.language ? `,LANGUAGE="${group.language}"` : '';
+
+            parts.push(
+                `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="${name}",DEFAULT=${isFirst ? 'YES' : 'NO'}${lang},URI="${uri}"`,
+            );
+            isFirst = false;
+        }
+
+        const firstGroup = audioGroups[0];
+        const firstName = (firstGroup.label ?? `${firstGroup.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
+        const bandwidth = firstGroup.audioBitrateKbps * 1000;
+        parts.push(
+            '',
+            `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},CODECS="mp4a.40.2",AUDIO="audio"`,
+            `stream_${firstName}/playlist.m3u8`,
+        );
+
+        const filename = 'audio_only.m3u8';
+        writeFileSync(join(outputDir, filename), parts.join('\n') + '\n', 'utf-8');
+
+        this.logger.debug(
+            `generateAudioOnlyPlaylist: wrote "${filename}" with ${audioGroups.length} audio group(s)`,
+        );
+
+        return { name: 'Audio only', filename };
     }
 
     /**
