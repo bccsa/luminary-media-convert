@@ -4,6 +4,7 @@ import { CreateSessionDto } from '../dto/create-session.dto.js';
 import type { SessionStatus } from '../dto/webhook-payload.dto.js';
 import type { ProbeResult } from './probe.service.js';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
+import type { SegmentFormat } from './ffmpeg.service.js';
 
 export interface AnglePlaylistInfo {
     name: string;
@@ -23,8 +24,12 @@ export interface Session {
     files?: string[];
     masterPlaylist?: string;
     anglePlaylists?: AnglePlaylistInfo[];
+    thumbnailsVtt?: string;
     error?: string;
+    segmentFormat?: SegmentFormat;
     createdAt: number;
+    encryptionKey?: Buffer;
+    previewPlaylists?: Record<string, string>;
 }
 
 @Injectable()
@@ -110,6 +115,8 @@ export class SessionService {
         files: string[],
         masterPlaylist: string,
         anglePlaylists?: AnglePlaylistInfo[],
+        thumbnailsVtt?: string,
+        segmentFormat?: SegmentFormat,
     ): void {
         const session = this.sessions.get(id);
         if (session) {
@@ -118,6 +125,8 @@ export class SessionService {
             session.files = files;
             session.masterPlaylist = masterPlaylist;
             session.anglePlaylists = anglePlaylists;
+            session.thumbnailsVtt = thumbnailsVtt;
+            session.segmentFormat = segmentFormat;
         }
     }
 

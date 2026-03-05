@@ -115,7 +115,12 @@ export class S3Service {
         if (filePath.endsWith('.m3u8'))
             return 'application/vnd.apple.mpegurl';
         if (filePath.endsWith('.m4s')) return 'video/iso.segment';
+        if (filePath.endsWith('.ts')) return 'video/mp2t';
         if (filePath.endsWith('.mp4')) return 'video/mp4';
+        if (filePath.endsWith('.webp')) return 'image/webp';
+        if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg'))
+            return 'image/jpeg';
+        if (filePath.endsWith('.vtt')) return 'text/vtt';
         return 'application/octet-stream';
     }
 }

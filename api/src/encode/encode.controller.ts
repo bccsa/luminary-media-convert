@@ -9,6 +9,7 @@ import {
     Param,
     Post,
     Req,
+    Res,
     UseGuards,
     BadRequestException,
     Logger,
@@ -21,10 +22,11 @@ import {
     ApiResponse,
     ApiTags,
 } from '@nestjs/swagger';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { rmSync } from 'fs';
-import { join } from 'path';
+import { join, dirname, posix } from 'path';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { PreviewAuthGuard } from './guards/preview-auth.guard.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
@@ -206,7 +208,10 @@ export class EncodeController {
         description: 'Unauthorized — invalid or missing Auth0 token.',
     })
     @ApiResponse({ status: 404, description: 'Session not found.' })
-    getStatus(@Param('sessionId') sessionId: string): SessionStatusDto {
+    getStatus(
+        @Param('sessionId') sessionId: string,
+        @Req() req: Request,
+    ): SessionStatusDto {
         const session = this.sessionService.get(sessionId);
         if (!session) {
             throw new NotFoundException(`Session ${sessionId} not found`);
@@ -236,6 +241,15 @@ export class EncodeController {
             result.files = session.files;
             result.masterPlaylist = session.masterPlaylist;
             result.anglePlaylists = session.anglePlaylists;
+            result.thumbnailsVtt = session.thumbnailsVtt;
+            result.segmentFormat = session.segmentFormat;
+
+            if (session.encryptionKey && session.previewPlaylists) {
+                const protocol = req.protocol;
+                const host = req.get('host');
+                result.previewBaseUrl = `${protocol}://${host}/api/sessions/${sessionId}/preview`;
+                result.previewToken = session.uploadToken;
+            }
         }
 
         if (session.status === 'failed') {
@@ -243,6 +257,131 @@ export class EncodeController {
         }
 
         return result;
+    }
+
+    @Get(':sessionId/preview/key')
+    @UseGuards(PreviewAuthGuard)
+    @ApiOperation({
+        summary: 'Get preview decryption key',
+        description: 'Returns the raw 16-byte AES-128 encryption key for preview playback.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 200, description: 'Raw encryption key bytes.' })
+    @ApiResponse({ status: 404, description: 'Session not found or no encryption key.' })
+    getPreviewKey(
+        @Param('sessionId') sessionId: string,
+        @Res() res: Response,
+    ): void {
+        const session = this.sessionService.get(sessionId);
+        if (!session?.encryptionKey) {
+            throw new NotFoundException('No encryption key for this session');
+        }
+
+        res.set({
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': String(session.encryptionKey.length),
+            'Cache-Control': 'no-store',
+        });
+        res.send(session.encryptionKey);
+    }
+
+    @Get(':sessionId/preview/{*path}')
+    @UseGuards(PreviewAuthGuard)
+    @ApiOperation({
+        summary: 'Get rewritten preview playlist',
+        description:
+            'Serves an HLS playlist with key URIs rewritten to the local preview key ' +
+            'endpoint and segment URIs rewritten to absolute S3 URLs.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiParam({ name: 'path', description: 'Playlist path relative to output root' })
+    @ApiResponse({ status: 200, description: 'Rewritten HLS playlist.' })
+    @ApiResponse({ status: 404, description: 'Playlist not found.' })
+    getPreviewPlaylist(
+        @Param('sessionId') sessionId: string,
+        @Param('path') path: string | string[],
+        @Req() req: Request,
+        @Res() res: Response,
+    ): void {
+        const normalizedPath = (Array.isArray(path) ? path.join('/') : String(path))
+            .replace(/^\//, '')
+            .replace(/\\/g, '/');
+        const session = this.sessionService.get(sessionId);
+        if (!session?.previewPlaylists) {
+            throw new NotFoundException('No preview playlists for this session');
+        }
+
+        const content = session.previewPlaylists[normalizedPath];
+        if (!content) {
+            throw new NotFoundException(`Playlist not found: ${normalizedPath}`);
+        }
+
+        const protocol = req.protocol;
+        const host = req.get('host');
+        const previewBase = `${protocol}://${host}/api/sessions/${sessionId}/preview`;
+        const keyUrl = `${previewBase}/key`;
+
+        const s3 = session.config.s3;
+        const s3Protocol = s3.useSSL === false ? 'http' : 'https';
+        const s3Port = s3.port ? `:${s3.port}` : '';
+        const s3Base = `${s3Protocol}://${s3.endPoint}${s3Port}/${s3.bucket}`;
+        const s3Prefix = s3.pathPrefix
+            ? `${s3Base}/${s3.pathPrefix}`
+            : s3Base;
+
+        const playlistDir = dirname(normalizedPath);
+        const isMaster = !content.includes('#EXTINF:') && !content.includes('#EXT-X-TARGETDURATION');
+
+        const rewritten = content
+            .split('\n')
+            .map((line) => {
+                if (line.startsWith('#EXT-X-KEY:')) {
+                    return line.replace(/URI="[^"]*"/, `URI="${keyUrl}"`);
+                }
+
+                if (line.startsWith('#EXT-X-MAP:')) {
+                    const uriMatch = line.match(/URI="([^"]+)"/);
+                    if (uriMatch) {
+                        const absUri = this.resolveS3Url(s3Prefix, playlistDir, uriMatch[1]);
+                        return line.replace(/URI="[^"]*"/, `URI="${absUri}"`);
+                    }
+                    return line;
+                }
+
+                if (isMaster) {
+                    if (line.startsWith('#EXT-X-MEDIA:') && line.includes('URI="')) {
+                        const uriMatch = line.match(/URI="([^"]+)"/);
+                        if (uriMatch) {
+                            const previewUri = `${previewBase}/${uriMatch[1]}`;
+                            return line.replace(/URI="[^"]*"/, `URI="${previewUri}"`);
+                        }
+                    }
+                    if (!line.startsWith('#') && line.trim() && line.includes('.m3u8')) {
+                        return `${previewBase}/${line.trim()}`;
+                    }
+                    return line;
+                }
+
+                if (!line.startsWith('#') && line.trim()) {
+                    return this.resolveS3Url(s3Prefix, playlistDir, line.trim());
+                }
+
+                return line;
+            })
+            .join('\n');
+
+        res.set({
+            'Content-Type': 'application/vnd.apple.mpegurl',
+            'Cache-Control': 'no-store',
+        });
+        res.send(rewritten);
+    }
+
+    private resolveS3Url(s3Prefix: string, playlistDir: string, relativePath: string): string {
+        const resolved = playlistDir && playlistDir !== '.'
+            ? posix.join(playlistDir, relativePath)
+            : relativePath;
+        return `${s3Prefix}/${resolved}`;
     }
 
     @Delete(':sessionId')

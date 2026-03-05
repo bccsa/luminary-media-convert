@@ -23,6 +23,7 @@ export interface EncodeOptions {
     onProgress: (percent: number) => void;
     byteRange?: boolean;
     byteRangeMaxFileSizeBytes?: number;
+    preByteRangeHook?: (outputDir: string) => void;
 }
 
 export interface AnglePlaylist {
@@ -30,10 +31,13 @@ export interface AnglePlaylist {
     filename: string;
 }
 
+export type SegmentFormat = 'fmp4' | 'mpegts';
+
 export interface EncodeResult {
     outputDir: string;
     masterPlaylist: string;
     anglePlaylists: AnglePlaylist[];
+    segmentFormat: SegmentFormat;
 }
 
 export type AccelMode = 'cpu' | 'nvidia' | 'apple';
@@ -144,6 +148,70 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
+    /**
+     * Probe per-stream start times grouped by codec type.
+     */
+    private probeStreamStartTimes(inputPath: string): { video: number[]; audio: number[] } {
+        try {
+            const output = execSync(
+                `ffprobe -v error -show_entries stream=codec_type,start_time -of json "${inputPath}"`,
+                { encoding: 'utf-8', timeout: 30000 },
+            );
+            const data = JSON.parse(output);
+            const video: number[] = [];
+            const audio: number[] = [];
+            for (const stream of data.streams ?? []) {
+                const st = parseFloat(stream.start_time);
+                if (stream.codec_type === 'video') video.push(isNaN(st) ? 0 : st);
+                else if (stream.codec_type === 'audio') audio.push(isNaN(st) ? 0 : st);
+            }
+            return { video, audio };
+        } catch {
+            this.logger.warn('Could not probe stream start times');
+            return { video: [], audio: [] };
+        }
+    }
+
+    /**
+     * Check whether all streams used by the encode config have aligned start times.
+     * When aligned, fMP4 segments can be used safely. When misaligned, MPEG-TS
+     * segments are needed because hls.js's TS→fMP4 transmuxer synchronizes
+     * audio and video PTS during transmux.
+     */
+    private areStreamStartTimesAligned(inputPath: string, encodeConfig: EncodeConfigDto): boolean {
+        const startTimes = this.probeStreamStartTimes(inputPath);
+
+        const usedStartTimes: number[] = [];
+        if (encodeConfig.type === 'video') {
+            for (const r of encodeConfig.videoRenditions ?? []) {
+                const idx = r.sourceTrackIndex ?? 0;
+                if (idx < startTimes.video.length) usedStartTimes.push(startTimes.video[idx]);
+            }
+        }
+        for (const g of encodeConfig.audioGroups ?? []) {
+            const idx = g.sourceTrackIndex;
+            if (idx < startTimes.audio.length) usedStartTimes.push(startTimes.audio[idx]);
+        }
+
+        if (usedStartTimes.length < 2) return true;
+
+        const maxStart = Math.max(...usedStartTimes);
+        const minStart = Math.min(...usedStartTimes);
+        const spread = maxStart - minStart;
+
+        if (spread < 0.05) {
+            this.logger.log(
+                `Stream start times aligned (spread ${(spread * 1000).toFixed(0)}ms) — using fMP4 segments`,
+            );
+            return true;
+        }
+
+        this.logger.log(
+            `Stream start times misaligned (spread ${(spread * 1000).toFixed(0)}ms, min ${minStart.toFixed(3)}s, max ${maxStart.toFixed(3)}s) — falling back to MPEG-TS segments`,
+        );
+        return false;
+    }
+
     private probeDuration(inputPath: string): number {
         try {
             const output = execSync(
@@ -235,7 +303,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return Math.max(16, Math.min(34, Math.round(crf)));
     }
 
-    private buildVideoArgs(opts: EncodeOptions): string[] {
+    private buildVideoArgs(opts: EncodeOptions, useFmp4 = true): string[] {
         const { inputPath, outputDir, encodeConfig } = opts;
         const renditions = encodeConfig.videoRenditions!;
         const audioGroups = encodeConfig.audioGroups!;
@@ -404,16 +472,25 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             audioOutputIndex++;
         }
 
-        // HLS output options
+        // HLS output options — use fMP4 when stream start times are aligned (preferred:
+        // CMAF-compatible, lower overhead). Fall back to MPEG-TS when misaligned, because
+        // hls.js's TS→fMP4 transmuxer synchronizes audio/video PTS during transmux,
+        // while fMP4 segments are appended directly and rely on tfdt alignment.
+        const segExt = useFmp4 ? 'm4s' : 'ts';
         args.push(
             '-f', 'hls',
             '-hls_time', String(hlsTime),
             '-hls_playlist_type', 'vod',
             '-hls_flags', 'independent_segments',
-            '-hls_segment_type', 'fmp4',
-            '-hls_fmp4_init_filename', 'init.mp4',
+            '-hls_segment_type', useFmp4 ? 'fmp4' : 'mpegts',
             '-master_pl_name', 'master.m3u8',
         );
+        if (useFmp4) {
+            args.push(
+                '-hls_fmp4_init_filename', 'init.mp4',
+                '-movflags', '+negative_cts_offsets+default_base_moof',
+            );
+        }
 
         const multiTrack = new Set(renditions.map(r => r.sourceTrackIndex ?? 0)).size > 1;
 
@@ -442,17 +519,17 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         args.push(
             '-hls_segment_filename',
-            join(outputDir, 'stream_%v', 'segment_%05d.m4s'),
+            join(outputDir, 'stream_%v', `segment_%05d.${segExt}`),
             join(outputDir, 'stream_%v', 'playlist.m3u8'),
         );
 
         return args;
     }
 
-    private buildAudioArgs(opts: EncodeOptions): string[] {
+    private buildAudioArgs(opts: EncodeOptions, useFmp4 = true): string[] {
         const { inputPath, outputDir, encodeConfig } = opts;
         const audioGroups = encodeConfig.audioGroups!;
-        const segmentDuration = opts.byteRange !== false ? 2 : (encodeConfig.segmentDuration ?? 6);
+        const segmentDuration = encodeConfig.segmentDuration ?? 6;
         const args: string[] = ['-i', inputPath];
         args.push('-threads', String(this.threads));
 
@@ -482,17 +559,26 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             varParts.push(`a:${i},name:${name}`);
         }
 
+        const segExt = useFmp4 ? 'm4s' : 'ts';
         args.push(
             '-f', 'hls',
             '-hls_time', String(segmentDuration),
             '-hls_playlist_type', 'vod',
             '-hls_flags', 'independent_segments',
-            '-hls_segment_type', 'fmp4',
-            '-hls_fmp4_init_filename', 'init.mp4',
+            '-hls_segment_type', useFmp4 ? 'fmp4' : 'mpegts',
             '-master_pl_name', 'master.m3u8',
+        );
+        if (useFmp4) {
+            args.push(
+                '-hls_fmp4_init_filename', 'init.mp4',
+                '-movflags', '+negative_cts_offsets+default_base_moof',
+            );
+        }
+
+        args.push(
             '-var_stream_map', varParts.join(' '),
             '-hls_segment_filename',
-            join(outputDir, 'stream_%v', 'segment_%05d.m4s'),
+            join(outputDir, 'stream_%v', `segment_%05d.${segExt}`),
             join(outputDir, 'stream_%v', 'playlist.m3u8'),
         );
 
@@ -544,11 +630,15 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             }
         }
 
+        // Use fMP4 when stream start times are aligned (CMAF-compatible, lower overhead).
+        // Fall back to MPEG-TS when misaligned — hls.js's transmuxer fixes sync for TS.
+        const useFmp4 = this.areStreamStartTimesAligned(opts.inputPath, encodeConfig);
+
         const totalDuration = this.probeDuration(opts.inputPath);
         const args =
             type === 'video'
-                ? this.buildVideoArgs(opts)
-                : this.buildAudioArgs(opts);
+                ? this.buildVideoArgs(opts, useFmp4)
+                : this.buildAudioArgs(opts, useFmp4);
 
         this.logger.debug(`FFmpeg args: ffmpeg ${args.join(' ')}`);
 
@@ -601,6 +691,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 if (err) {
                     reject(err);
                 } else {
+                    if (opts.preByteRangeHook) {
+                        opts.preByteRangeHook(outputDir);
+                    }
+
                     if (opts.byteRange !== false) {
                         const maxBytes = opts.byteRangeMaxFileSizeBytes
                             ?? 500 * 1024 * 1024;
@@ -633,6 +727,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                         outputDir,
                         masterPlaylist: masterPlaylistFilename,
                         anglePlaylists,
+                        segmentFormat: useFmp4 ? 'fmp4' : 'mpegts',
                     });
                 }
             };
@@ -721,10 +816,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         if (segments.length === 0) return;
 
+        // Detect segment extension from the first segment filename (.m4s or .ts)
+        const firstSeg = segments[0].filename;
+        const segExt = firstSeg.endsWith('.m4s') ? 'm4s' : 'ts';
+
         const byteRanges: { extinfLine: string; length: number; offset: number; mediaFile: string }[] = [];
         let fileIndex = 0;
         let currentOffset = 0;
-        let currentMediaFile = `media_${fileIndex}.m4s`;
+        let currentMediaFile = `media_${fileIndex}.${segExt}`;
         let fd = openSync(join(streamDir, currentMediaFile), 'w');
 
         for (const seg of segments) {
@@ -738,7 +837,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 closeSync(fd);
                 fileIndex++;
                 currentOffset = 0;
-                currentMediaFile = `media_${fileIndex}.m4s`;
+                currentMediaFile = `media_${fileIndex}.${segExt}`;
                 fd = openSync(join(streamDir, currentMediaFile), 'w');
             }
 

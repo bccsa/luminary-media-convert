@@ -141,6 +141,14 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
+            'S3 object key of the WebVTT thumbnails file. Present when status is "completed" and thumbnails were generated.',
+        example: 'videos/project-1/thumbnails/thumbnails.vtt',
+    })
+    @Expose()
+    thumbnailsVtt?: string;
+
+    @ApiPropertyOptional({
+        description:
             'Error message. Present when status is "failed".',
         example: 'FFmpeg exited with code 1: Invalid input file',
     })
@@ -155,4 +163,34 @@ export class SessionStatusDto {
     })
     @Expose()
     encoder?: string;
+
+    @ApiPropertyOptional({
+        description:
+            'HLS segment format used for encoding. "fmp4" (CMAF-compatible, lower overhead) ' +
+            'is used when source stream start times are aligned. "mpegts" is used as a fallback ' +
+            'when source streams have misaligned start times, because the player\'s TS transmuxer ' +
+            'can synchronize audio and video during playback.',
+        enum: ['fmp4', 'mpegts'],
+        example: 'fmp4',
+    })
+    @Expose()
+    segmentFormat?: string;
+
+    @ApiPropertyOptional({
+        description:
+            'Base URL for preview playlist endpoints with rewritten key URIs. ' +
+            'Present when status is "completed" and HLS encryption is enabled.',
+        example: 'http://localhost:3000/api/sessions/abc123/preview',
+    })
+    @Expose()
+    previewBaseUrl?: string;
+
+    @ApiPropertyOptional({
+        description:
+            'Bearer token for authenticating preview playlist/key requests. ' +
+            'Present when previewBaseUrl is set.',
+        example: 'tok_f8e7d6c5b4a3291087654321',
+    })
+    @Expose()
+    previewToken?: string;
 }

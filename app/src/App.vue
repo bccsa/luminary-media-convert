@@ -294,8 +294,12 @@ function reset() {
                     :angle-playlists="poller.anglePlaylists.value"
                     :error="poller.error.value"
                     :encoder="poller.encoder.value"
+                    :segment-format="poller.segmentFormat.value"
                     :s3-public-base-url="s3PublicBaseUrl"
                     :encoding-type="encodingType"
+                    :thumbnails-vtt="poller.thumbnailsVtt.value"
+                    :preview-base-url="poller.previewBaseUrl.value"
+                    :preview-token="poller.previewToken.value"
                     @reset="reset"
                     @cancel="onCancelEncode"
                 />

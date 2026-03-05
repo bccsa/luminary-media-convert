@@ -4,9 +4,11 @@ import videojs from 'video.js';
 import type Player from 'video.js/dist/types/player';
 import 'video.js/dist/video-js.css';
 import { registerQualitySelector } from '../videojs-quality-selector';
+import { registerThumbnailPreview } from '../videojs-thumbnail-preview';
 
 registerQualitySelector();
-import type { AccelMode, SessionStatus } from '../types';
+registerThumbnailPreview();
+import type { AccelMode, SegmentFormat, SessionStatus } from '../types';
 
 const props = defineProps<{
     sessionId: string;
@@ -18,8 +20,12 @@ const props = defineProps<{
     anglePlaylists?: readonly { name: string; key: string }[];
     error?: string;
     encoder?: AccelMode;
+    segmentFormat?: SegmentFormat;
     s3PublicBaseUrl?: string;
     encodingType?: 'video' | 'audio';
+    thumbnailsVtt?: string;
+    previewBaseUrl?: string;
+    previewToken?: string;
 }>();
 
 const emit = defineEmits<{ reset: []; cancel: [] }>();
@@ -44,8 +50,18 @@ const primaryPlaylistKey = computed(() => {
 });
 
 const playbackUrl = computed(() => {
-    if (!props.s3PublicBaseUrl || !primaryPlaylistKey.value) return null;
+    if (!primaryPlaylistKey.value) return null;
+    if (props.previewBaseUrl) {
+        const filename = primaryPlaylistKey.value.split('/').pop();
+        return `${props.previewBaseUrl}/${filename}`;
+    }
+    if (!props.s3PublicBaseUrl) return null;
     return `${props.s3PublicBaseUrl}/${primaryPlaylistKey.value}`;
+});
+
+const thumbnailVttUrl = computed(() => {
+    if (!props.thumbnailsVtt || !props.s3PublicBaseUrl) return null;
+    return `${props.s3PublicBaseUrl}/${props.thumbnailsVtt}`;
 });
 
 const uniqueAnglePlaylists = computed(() => {
@@ -101,11 +117,24 @@ function initPlayer() {
             fluid: !isAudioOnly.value,
             audioOnlyMode: isAudioOnly.value,
             responsive: true,
-            html5: {
-                vhs: { overrideNative: true },
-            },
-            sources: [{ src: playbackUrl.value, type: 'application/x-mpegURL' }],
+            html5: { vhs: { overrideNative: true } },
         });
+
+        if (props.previewToken) {
+            const token = props.previewToken;
+            player.on('xhr-hooks-ready', () => {
+                const tech = player!.tech({ IWillNotUseThisInPlugins: true } as any) as any;
+                tech?.vhs?.xhr?.onRequest?.((options: any) => {
+                    if (options.uri?.includes('/api/sessions/')) {
+                        options.headers = options.headers || {};
+                        options.headers['Authorization'] = `Bearer ${token}`;
+                    }
+                    return options;
+                });
+            });
+        }
+
+        player.src({ src: playbackUrl.value, type: 'application/x-mpegURL' });
 
         player.ready(() => {
             try {
@@ -113,7 +142,13 @@ function initPlayer() {
             } catch (e) {
                 console.warn('HLS quality selector unavailable:', e);
             }
-
+            if (thumbnailVttUrl.value) {
+                try {
+                    (player as any).thumbnailPreview({ vttUrl: thumbnailVttUrl.value });
+                } catch (e) {
+                    console.warn('Thumbnail preview unavailable:', e);
+                }
+            }
         });
     } catch (e) {
         console.error('Failed to initialize video player:', e);
@@ -193,6 +228,16 @@ function switchToAngle(index: number) {
                         <path :d="encoderConfig[encoder].icon" />
                     </svg>
                     {{ encoderConfig[encoder].label }}
+                </span>
+                <span
+                    v-if="segmentFormat === 'mpegts'"
+                    class="inline-flex items-center gap-1 rounded-full border border-amber-700/60 px-2.5 py-1 text-xs font-medium text-amber-400"
+                    title="MPEG-TS segments used because source streams have misaligned start times. fMP4 (CMAF) is used when streams are aligned."
+                >
+                    <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    MPEG-TS
                 </span>
                 <span :class="badgeClasses(status)">
                     {{ status ? statusConfig[status]?.label ?? status : 'Connecting...' }}

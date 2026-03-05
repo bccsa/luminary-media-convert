@@ -7,8 +7,11 @@ import { FfmpegService } from './services/ffmpeg.service.js';
 import { S3Service } from './services/s3.service.js';
 import { WebhookService } from './services/webhook.service.js';
 import { EncodeService } from './services/encode.service.js';
+import { EncryptionService } from './services/encryption.service.js';
+import { ThumbnailService } from './services/thumbnail.service.js';
 import { ProbeService } from './services/probe.service.js';
 import { TusUploadService } from './services/tus-upload.service.js';
+import { PreviewAuthGuard } from './guards/preview-auth.guard.js';
 
 @Module({
     controllers: [EncodeController],
@@ -19,8 +22,11 @@ import { TusUploadService } from './services/tus-upload.service.js';
         S3Service,
         WebhookService,
         EncodeService,
+        EncryptionService,
+        ThumbnailService,
         ProbeService,
         TusUploadService,
+        PreviewAuthGuard,
     ],
     exports: [SessionService],
 })

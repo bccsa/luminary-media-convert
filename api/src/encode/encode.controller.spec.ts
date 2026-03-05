@@ -8,6 +8,7 @@ import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
 import type { CreateSessionDto } from './dto/create-session.dto.js';
 import type { EncodeConfigDto } from './dto/encode-config.dto.js';
+import type { Response } from 'express';
 
 function makeConfig(): CreateSessionDto {
     return {
@@ -133,7 +134,7 @@ describe('EncodeController', () => {
         it('should return session status for created session', () => {
             const session = sessionService.create(makeConfig());
 
-            const result = controller.getStatus(session.id);
+            const result = controller.getStatus(session.id, makeRequest());
 
             expect(result.sessionId).toBe(session.id);
             expect(result.status).toBe('created');
@@ -144,7 +145,7 @@ describe('EncodeController', () => {
             ffmpegService.getAccelMode.mockReturnValue('apple');
             const session = sessionService.create(makeConfig());
 
-            const result = controller.getStatus(session.id);
+            const result = controller.getStatus(session.id, makeRequest());
 
             expect(result.encoder).toBe('apple');
         });
@@ -158,7 +159,7 @@ describe('EncodeController', () => {
                 audioTracks: [],
             });
 
-            const result = controller.getStatus(session.id);
+            const result = controller.getStatus(session.id, makeRequest());
 
             expect(result.probeResult).toBeDefined();
         });
@@ -168,7 +169,7 @@ describe('EncodeController', () => {
             sessionService.updateStatus(session.id, 'queued');
             queueService.getPosition.mockReturnValue(3);
 
-            const result = controller.getStatus(session.id);
+            const result = controller.getStatus(session.id, makeRequest());
 
             expect(result.queuePosition).toBe(3);
         });
@@ -178,7 +179,7 @@ describe('EncodeController', () => {
             sessionService.updateStatus(session.id, 'encoding');
             sessionService.updateProgress(session.id, 42.5);
 
-            const result = controller.getStatus(session.id);
+            const result = controller.getStatus(session.id, makeRequest());
 
             expect(result.progress).toBe(42.5);
         });
@@ -191,7 +192,7 @@ describe('EncodeController', () => {
                 'master.m3u8',
             );
 
-            const result = controller.getStatus(session.id);
+            const result = controller.getStatus(session.id, makeRequest());
 
             expect(result.status).toBe('completed');
             expect(result.progress).toBe(100);
@@ -199,18 +200,43 @@ describe('EncodeController', () => {
             expect(result.masterPlaylist).toBe('master.m3u8');
         });
 
+        it('should include previewBaseUrl and previewToken when encryption key is present', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.setCompleted(session.id, ['master.m3u8'], 'master.m3u8');
+            const sess = sessionService.get(session.id)!;
+            sess.encryptionKey = Buffer.alloc(16, 0xab);
+            sess.previewPlaylists = { 'master.m3u8': '#EXTM3U\n' };
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.previewBaseUrl).toBe(
+                `http://localhost:3000/api/sessions/${session.id}/preview`,
+            );
+            expect(result.previewToken).toBe(session.uploadToken);
+        });
+
+        it('should not include previewBaseUrl when no encryption key', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.setCompleted(session.id, ['master.m3u8'], 'master.m3u8');
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.previewBaseUrl).toBeUndefined();
+            expect(result.previewToken).toBeUndefined();
+        });
+
         it('should include error when session failed', () => {
             const session = sessionService.create(makeConfig());
             sessionService.setFailed(session.id, 'FFmpeg crashed');
 
-            const result = controller.getStatus(session.id);
+            const result = controller.getStatus(session.id, makeRequest());
 
             expect(result.status).toBe('failed');
             expect(result.error).toBe('FFmpeg crashed');
         });
 
         it('should throw NotFoundException for unknown session', () => {
-            expect(() => controller.getStatus('nonexistent')).toThrow(
+            expect(() => controller.getStatus('nonexistent', makeRequest())).toThrow(
                 NotFoundException,
             );
         });
@@ -295,6 +321,162 @@ describe('EncodeController', () => {
             expect(() =>
                 controller.startEncode(session.id, config),
             ).toThrow(BadRequestException);
+        });
+    });
+
+    describe('getPreviewKey', () => {
+        function makeResponse(): jest.Mocked<Response> {
+            return {
+                set: jest.fn().mockReturnThis(),
+                send: jest.fn().mockReturnThis(),
+            } as any;
+        }
+
+        it('should return the encryption key as raw bytes', () => {
+            const session = sessionService.create(makeConfig());
+            const key = Buffer.alloc(16, 0xab);
+            const sess = sessionService.get(session.id)!;
+            sess.encryptionKey = key;
+
+            const res = makeResponse();
+            controller.getPreviewKey(session.id, res);
+
+            expect(res.set).toHaveBeenCalledWith(expect.objectContaining({
+                'Content-Type': 'application/octet-stream',
+                'Content-Length': '16',
+            }));
+            expect(res.send).toHaveBeenCalledWith(key);
+        });
+
+        it('should throw NotFoundException when no encryption key', () => {
+            const session = sessionService.create(makeConfig());
+
+            const res = makeResponse();
+            expect(() => controller.getPreviewKey(session.id, res)).toThrow(
+                NotFoundException,
+            );
+        });
+
+        it('should throw NotFoundException for unknown session', () => {
+            const res = makeResponse();
+            expect(() => controller.getPreviewKey('nonexistent', res)).toThrow(
+                NotFoundException,
+            );
+        });
+    });
+
+    describe('getPreviewPlaylist', () => {
+        function makeResponse(): jest.Mocked<Response> {
+            return {
+                set: jest.fn().mockReturnThis(),
+                send: jest.fn().mockReturnThis(),
+            } as any;
+        }
+
+        function setupEncryptedSession() {
+            const config = makeConfig();
+            const session = sessionService.create(config);
+            const sess = sessionService.get(session.id)!;
+            sess.encryptionKey = Buffer.alloc(16, 0xab);
+            sess.previewPlaylists = {
+                'master.m3u8': [
+                    '#EXTM3U',
+                    '#EXT-X-VERSION:7',
+                    '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="HD Audio",URI="stream_HD_Audio/playlist.m3u8"',
+                    '#EXT-X-STREAM-INF:BANDWIDTH=3000000,AUDIO="group_hd"',
+                    'stream_720p/playlist.m3u8',
+                ].join('\n'),
+                'stream_720p/playlist.m3u8': [
+                    '#EXTM3U',
+                    '#EXT-X-VERSION:7',
+                    '#EXT-X-TARGETDURATION:6',
+                    '#EXT-X-KEY:METHOD=AES-128,URI="https://prod.example.com/key"',
+                    '#EXT-X-MAP:URI="init.mp4"',
+                    '#EXTINF:6.000,',
+                    'segment_000.m4s',
+                    '#EXT-X-ENDLIST',
+                ].join('\n'),
+            };
+            return session;
+        }
+
+        it('should rewrite key URI in media playlist', () => {
+            const session = setupEncryptedSession();
+            const res = makeResponse();
+            const req = makeRequest();
+
+            controller.getPreviewPlaylist(session.id, 'stream_720p/playlist.m3u8', req, res);
+
+            const body = res.send.mock.calls[0][0] as string;
+            expect(body).toContain('URI="http://localhost:3000/api/sessions/' + session.id + '/preview/key"');
+            expect(body).not.toContain('https://prod.example.com/key');
+        });
+
+        it('should rewrite segment URIs to absolute S3 URLs', () => {
+            const session = setupEncryptedSession();
+            const res = makeResponse();
+            const req = makeRequest();
+
+            controller.getPreviewPlaylist(session.id, 'stream_720p/playlist.m3u8', req, res);
+
+            const body = res.send.mock.calls[0][0] as string;
+            expect(body).toContain('https://s3.example.com/test/stream_720p/segment_000.m4s');
+        });
+
+        it('should rewrite EXT-X-MAP URI to absolute S3 URL', () => {
+            const session = setupEncryptedSession();
+            const res = makeResponse();
+            const req = makeRequest();
+
+            controller.getPreviewPlaylist(session.id, 'stream_720p/playlist.m3u8', req, res);
+
+            const body = res.send.mock.calls[0][0] as string;
+            expect(body).toContain('URI="https://s3.example.com/test/stream_720p/init.mp4"');
+        });
+
+        it('should rewrite master playlist sub-playlist URIs to preview URLs', () => {
+            const session = setupEncryptedSession();
+            const res = makeResponse();
+            const req = makeRequest();
+
+            controller.getPreviewPlaylist(session.id, 'master.m3u8', req, res);
+
+            const body = res.send.mock.calls[0][0] as string;
+            const previewBase = `http://localhost:3000/api/sessions/${session.id}/preview`;
+            expect(body).toContain(`${previewBase}/stream_720p/playlist.m3u8`);
+            expect(body).toContain(`URI="${previewBase}/stream_HD_Audio/playlist.m3u8"`);
+        });
+
+        it('should set correct content type header', () => {
+            const session = setupEncryptedSession();
+            const res = makeResponse();
+            const req = makeRequest();
+
+            controller.getPreviewPlaylist(session.id, 'master.m3u8', req, res);
+
+            expect(res.set).toHaveBeenCalledWith(expect.objectContaining({
+                'Content-Type': 'application/vnd.apple.mpegurl',
+            }));
+        });
+
+        it('should throw NotFoundException when no preview playlists', () => {
+            const session = sessionService.create(makeConfig());
+            const res = makeResponse();
+            const req = makeRequest();
+
+            expect(() => controller.getPreviewPlaylist(session.id, 'master.m3u8', req, res)).toThrow(
+                NotFoundException,
+            );
+        });
+
+        it('should throw NotFoundException for unknown playlist path', () => {
+            const session = setupEncryptedSession();
+            const res = makeResponse();
+            const req = makeRequest();
+
+            expect(() => controller.getPreviewPlaylist(session.id, 'nonexistent.m3u8', req, res)).toThrow(
+                NotFoundException,
+            );
         });
     });
 

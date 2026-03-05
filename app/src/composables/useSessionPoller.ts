@@ -1,6 +1,6 @@
 import { ref, readonly, onUnmounted } from 'vue';
 import { getSessionStatus } from '../api';
-import type { AccelMode, SessionStatus, SessionStatusResponse } from '../types';
+import type { AccelMode, SegmentFormat, SessionStatus, SessionStatusResponse } from '../types';
 
 const POLL_INTERVAL_MS = 2000;
 const TERMINAL_STATUSES: SessionStatus[] = ['completed', 'failed'];
@@ -14,6 +14,10 @@ export function useSessionPoller() {
     const anglePlaylists = ref<{ name: string; key: string }[] | undefined>();
     const error = ref<string | undefined>();
     const encoder = ref<AccelMode | undefined>();
+    const segmentFormat = ref<SegmentFormat | undefined>();
+    const thumbnailsVtt = ref<string | undefined>();
+    const previewBaseUrl = ref<string | undefined>();
+    const previewToken = ref<string | undefined>();
     const polling = ref(false);
 
     let timer: ReturnType<typeof setInterval> | null = null;
@@ -27,6 +31,10 @@ export function useSessionPoller() {
         anglePlaylists.value = data.anglePlaylists;
         error.value = data.error;
         encoder.value = data.encoder;
+        segmentFormat.value = data.segmentFormat;
+        thumbnailsVtt.value = data.thumbnailsVtt;
+        previewBaseUrl.value = data.previewBaseUrl;
+        previewToken.value = data.previewToken;
     }
 
     function stop() {
@@ -70,6 +78,10 @@ export function useSessionPoller() {
         anglePlaylists: readonly(anglePlaylists),
         error: readonly(error),
         encoder: readonly(encoder),
+        segmentFormat: readonly(segmentFormat),
+        thumbnailsVtt: readonly(thumbnailsVtt),
+        previewBaseUrl: readonly(previewBaseUrl),
+        previewToken: readonly(previewToken),
         polling: readonly(polling),
         start,
         stop,

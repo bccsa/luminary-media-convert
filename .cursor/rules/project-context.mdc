@@ -59,25 +59,29 @@ api/
 │       ├── encode.module.ts             # Feature module
 │       ├── encode.controller.ts         # REST endpoints under /api/sessions
 │       ├── dto/
-│       │   ├── create-session.dto.ts    # Session creation request (S3 + webhook config)
+│       │   ├── create-session.dto.ts    # Session creation request (S3 + webhook + encryption config)
 │       │   ├── encode-config.dto.ts     # Encoding configuration (type, video renditions, audio groups, VBR, labels)
+│       │   ├── encryption-config.dto.ts # HLS encryption configuration DTO
 │       │   ├── probe-result.dto.ts      # Probe result DTOs for Swagger docs
 │       │   ├── rendition.dto.ts         # Legacy rendition DTO (unused — VideoRenditionDto in encode-config.dto.ts is used)
 │       │   ├── review-range.dto.ts      # Review range DTOs (keyframe-aligned in/out points, not yet wired up)
 │       │   ├── s3-config.dto.ts         # S3 storage credentials
 │       │   ├── webhook-config.dto.ts    # Webhook URL + session token
-│       │   ├── session-response.dto.ts  # Response DTOs (create, upload, encode, status + anglePlaylists + encoder)
+│       │   ├── session-response.dto.ts  # Response DTOs (create, upload, encode, status + anglePlaylists + encoder + segmentFormat)
 │       │   └── webhook-payload.dto.ts   # Webhook callback payload + SessionStatus type
 │       ├── guards/
-│       │   └── session-auth.guard.ts    # Bearer token auth for file upload
+│       │   ├── session-auth.guard.ts    # Bearer token auth for file upload
+│       │   └── preview-auth.guard.ts    # Bearer token auth for preview playlist/key requests
 │       └── services/
 │           ├── session.service.ts       # In-memory session store + token management
 │           ├── probe.service.ts         # ffprobe wrapper: media analysis + multi-strategy bitrate detection
 │           ├── queue.service.ts         # FIFO encoding queue (one-at-a-time, graceful drain on shutdown)
-│           ├── ffmpeg.service.ts        # FFmpeg process management, GPU detection, angle playlist generation
+│           ├── ffmpeg.service.ts        # FFmpeg process management, GPU detection, angle playlist generation, stream alignment detection
 │           ├── s3.service.ts            # S3 upload via MinIO client
 │           ├── webhook.service.ts       # Webhook POST delivery
 │           ├── encode.service.ts        # Orchestrates encoding pipeline
+│           ├── encryption.service.ts    # AES-128 HLS encryption + preview playlist rewriting
+│           ├── thumbnail.service.ts     # Sprite-based thumbnail generation with WebVTT
 │           └── tus-upload.service.ts    # Resumable file upload via tus protocol
 ├── test/
 ├── package.json
@@ -91,14 +95,15 @@ app/
 │   ├── main.ts                          # Vue app entry point
 │   ├── App.vue                          # Root component (config → upload → configure → progress flow)
 │   ├── api.ts                           # Fetch-based API client (create session, upload, start encode, delete, poll)
-│   ├── types.ts                         # Shared TypeScript interfaces (probe, encode config, session, AccelMode)
+│   ├── types.ts                         # Shared TypeScript interfaces (probe, encode config, session, AccelMode, SegmentFormat)
 │   ├── style.css                        # Global styles (Tailwind import)
 │   ├── videojs-quality-selector.ts      # Custom Video.js HLS quality selector plugin (native ES6)
+│   ├── videojs-thumbnail-preview.ts     # Custom Video.js thumbnail preview plugin (timeline scrubbing)
 │   ├── components/
 │   │   ├── SessionConfigForm.vue        # S3 config + file selection form
 │   │   ├── EncodeConfigForm.vue         # Probe results display + encoding config (renditions, audio groups, VBR, copy)
 │   │   ├── FileDropZone.vue             # Drag-and-drop file upload area
-│   │   └── SessionProgress.vue          # Progress display, Video.js player, angle switcher, encoder badge, copy URL
+│   │   └── SessionProgress.vue          # Progress display, Video.js player, angle switcher, encoder/segment format badges, copy URL
 │   ├── composables/
 │   │   └── useSessionPoller.ts          # Polling composable (2s interval, auto-stops on terminal status)
 │   └── utils/
@@ -123,7 +128,7 @@ app/
 6. Client computes suggested encoding config from probe results, user reviews and modifies (renditions, audio groups, copy/VBR toggles); auto-selects audio-only mode when no video tracks detected
 7. **POST** `/api/sessions/:id/encode` — Client submits final encoding config (type: `'video'` or `'audio'`) with Auth0 JWT
 8. Session enters FIFO queue; webhook sent (if configured) with `queued` status + queue position
-9. When session reaches front of queue, FFmpeg encodes to HLS with fMP4 segments and ABR variants
+9. When session reaches front of queue, FFmpeg probes stream start times and encodes to HLS with ABR variants (fMP4 segments when streams are aligned, MPEG-TS fallback when misaligned)
 10. Progress webhooks sent during encoding (~every 5%), or client polls `GET /api/sessions/:id`
 11. For video encodes, master playlist is post-processed (audio names, video groups) and per-angle playlists generated when multiple video tracks are present
 12. Output files uploaded to client-specified S3 bucket via MinIO client
@@ -140,7 +145,8 @@ app/
 ### Encoding features
 
 - **Video + audio-only modes**: `EncodeConfigDto.type` is `'video'` or `'audio'`; audio-only mode encodes HLS with audio groups only (no video renditions)
-- **fMP4 segments**: HLS output uses fragmented MP4 (`.m4s` segments + `init.mp4` init segments) for lower overhead and CMAF compatibility
+- **Adaptive segment format**: Before encoding, `FfmpegService` probes per-stream start times via ffprobe. When all used streams are aligned (spread < 50ms), fMP4 segments (`.m4s` + `init.mp4`) are used for CMAF compatibility and lower overhead. When streams have misaligned start times, MPEG-TS segments (`.ts`) are used as a fallback because the player's TS transmuxer synchronizes audio/video PTS during playback. The chosen format is reported to the client via the `segmentFormat` field in the session status response
+- **Byte-range HLS**: When enabled (default), segments are consolidated into fewer large files using HLS byte-range addressing (`#EXT-X-BYTERANGE`), reducing the number of S3 objects. Configurable max file size per consolidated file
 - **Copy mode** (`-c:v copy` / `-c:a copy`): Pass-through for pre-encoded streams, avoiding re-encoding
 - **VBR encoding**: Video renditions and audio groups support VBR mode (CRF/CQ) instead of fixed bitrate via `vbr` flag
 - **Audio groups**: Different audio quality tiers mapped to video renditions via HLS `#EXT-X-MEDIA` GROUP-ID
@@ -149,7 +155,9 @@ app/
 - **Master playlist post-processing**: `fixMasterPlaylist` rewrites FFmpeg's master.m3u8 to inject correct audio group NAMEs and VIDEO group annotations per rendition
 - **Metadata**: Language and name attributes in `-var_stream_map` for HLS `#EXT-X-MEDIA` and `#EXT-X-STREAM-INF` tags; rendition `label` for HLS NAME
 - **Channel control**: Mono/stereo/5.1/7.1 per audio group via `-ac`
-- **Encoder reporting**: Session status includes `encoder` field indicating the acceleration mode used (`cpu`, `nvidia`, or `apple`)
+- **Encoder reporting**: Session status includes `encoder` field indicating the acceleration mode used (`cpu`, `nvidia`, or `apple`) and `segmentFormat` field indicating the HLS segment format (`fmp4` or `mpegts`)
+- **HLS encryption**: Optional AES-128 encryption for HLS segments via `EncryptionService`, with preview endpoints that rewrite key URIs for authenticated playback
+- **Thumbnail generation**: `ThumbnailService` generates sprite-based thumbnail previews with a WebVTT file for timeline scrubbing
 
 ### Upload resilience
 
@@ -168,7 +176,7 @@ app/
 7. User clicks "Start Encoding" — `App.vue` strips client-only `audioTrackMetadata` and submits the encode config; saves config to `layoutStorage` for future reuse
 8. Transitions to progress view; `useSessionPoller` polls the API every 2s
 9. Polling auto-stops when session reaches a terminal status (`completed` or `failed`)
-10. On completion, `SessionProgress` shows a Video.js player for the HLS master playlist, an angle switcher (if multi-angle), encoder badge, copy URL, and output file list
+10. On completion, `SessionProgress` shows a Video.js player for the HLS master playlist, an angle switcher (if multi-angle), encoder badge, segment format badge (amber warning when MPEG-TS fallback is used), copy URL, and output file list
 
 ### FIFO queue
 
@@ -184,6 +192,8 @@ app/
 | ALL | `/api/tus` , `/api/tus/*` | Bearer (upload token) | Tus upload endpoint — resumable chunked file upload, auto-probes on completion |
 | POST | `/api/sessions/:sessionId/encode` | Auth0 JWT | Submit encoding config, enqueue for processing |
 | GET | `/api/sessions/:sessionId` | Auth0 JWT | Poll session status |
+| GET | `/api/sessions/:sessionId/preview/key` | Bearer (preview token) | Serve HLS encryption key for preview playback |
+| GET | `/api/sessions/:sessionId/preview/*` | Bearer (preview token) | Serve rewritten HLS playlists with proxied key URIs for preview |
 | DELETE | `/api/sessions/:sessionId` | Auth0 JWT | Cancel and delete session (`created`, `uploading`, or `uploaded` status) |
 
 ## Session Lifecycle

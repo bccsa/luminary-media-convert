@@ -996,7 +996,7 @@ describe('FfmpegService', () => {
             expect(args).not.toContain('aac');
         });
 
-        it('should use 2s segment duration when byte-range is enabled', () => {
+        it('should use configured segment duration for audio regardless of byte-range', () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 6,
@@ -1013,13 +1013,12 @@ describe('FfmpegService', () => {
             });
 
             const hlsTimeIdx = args.indexOf('-hls_time');
-            expect(args[hlsTimeIdx + 1]).toBe('2');
+            expect(args[hlsTimeIdx + 1]).toBe('6');
         });
 
-        it('should use 2s segment duration when byte-range is not explicitly disabled', () => {
+        it('should use default segment duration when none configured', () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
-                segmentDuration: 6,
                 audioGroups: [
                     { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'HD' },
                 ],
@@ -1032,10 +1031,10 @@ describe('FfmpegService', () => {
             });
 
             const hlsTimeIdx = args.indexOf('-hls_time');
-            expect(args[hlsTimeIdx + 1]).toBe('2');
+            expect(args[hlsTimeIdx + 1]).toBe('6');
         });
 
-        it('should use configured segment duration when byte-range is disabled', () => {
+        it('should use custom segment duration when configured', () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 4,
@@ -1464,6 +1463,46 @@ describe('FfmpegService', () => {
 
             await expect(promise).rejects.toThrow();
             expect((service as any).activeProcess).toBeNull();
+        });
+
+        it('should call preByteRangeHook before convertToByteRange when provided', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const callOrder: string[] = [];
+            const convertSpy = jest.spyOn(service as any, 'convertToByteRange').mockImplementation(() => {
+                callOrder.push('convertToByteRange');
+            });
+
+            const hook = jest.fn(() => { callOrder.push('preByteRangeHook'); });
+            const opts = makeEncodeOpts({ preByteRangeHook: hook });
+            const promise = service.encode(opts);
+
+            mockProc.emitClose(0);
+            await promise;
+
+            expect(hook).toHaveBeenCalledWith(opts.outputDir);
+            expect(callOrder[0]).toBe('preByteRangeHook');
+            expect(callOrder[1]).toBe('convertToByteRange');
+
+            convertSpy.mockRestore();
+        });
+
+        it('should not call preByteRangeHook when not provided', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const convertSpy = jest.spyOn(service as any, 'convertToByteRange').mockImplementation(() => {});
+
+            const opts = makeEncodeOpts();
+            const promise = service.encode(opts);
+
+            mockProc.emitClose(0);
+            await promise;
+
+            expect(convertSpy).toHaveBeenCalled();
+
+            convertSpy.mockRestore();
         });
 
         it('should include stderr tail in error message on failure', async () => {

@@ -10,3 +10,4 @@ work
 .cursor/**/*.log
 dispatchQueue.json
 jobQueue.json
+CLAUDE.md

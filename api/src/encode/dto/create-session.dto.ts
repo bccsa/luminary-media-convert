@@ -10,6 +10,7 @@ import { Expose, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { S3ConfigDto } from './s3-config.dto.js';
 import { WebhookConfigDto } from './webhook-config.dto.js';
+import { EncryptionConfigDto } from './encryption-config.dto.js';
 
 export class CreateSessionDto {
     @ApiPropertyOptional({
@@ -46,6 +47,16 @@ export class CreateSessionDto {
     @Expose()
     byteRangeMaxFileSizeMB?: number;
 
+    @ApiPropertyOptional({
+        description:
+            'Generate WebVTT thumbnail sprites for scrubbing preview. Only applies to video encodes. Defaults to true.',
+        default: true,
+    })
+    @IsBoolean()
+    @IsOptional()
+    @Expose()
+    thumbnails?: boolean;
+
     @ApiProperty({
         description: 'S3-compatible storage configuration for output files.',
         type: S3ConfigDto,
@@ -65,4 +76,15 @@ export class CreateSessionDto {
     @Type(() => WebhookConfigDto)
     @Expose()
     webhook?: WebhookConfigDto;
+
+    @ApiPropertyOptional({
+        description:
+            'HLS AES-128 encryption configuration. Enabled by default when provided.',
+        type: EncryptionConfigDto,
+    })
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => EncryptionConfigDto)
+    @Expose()
+    encryption?: EncryptionConfigDto;
 }

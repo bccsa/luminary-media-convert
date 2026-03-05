@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { rmSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, readdirSync, rmSync, statSync } from 'fs';
+import { join, relative } from 'path';
 import { SessionService, type Session } from './session.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
+import { EncryptionService } from './encryption.service.js';
+import { ThumbnailService } from './thumbnail.service.js';
 import { S3Service } from './s3.service.js';
 import { WebhookService } from './webhook.service.js';
 import type { WebhookPayloadDto } from '../dto/webhook-payload.dto.js';
@@ -16,6 +18,8 @@ export class EncodeService {
     constructor(
         private readonly sessionService: SessionService,
         private readonly ffmpegService: FfmpegService,
+        private readonly encryptionService: EncryptionService,
+        private readonly thumbnailService: ThumbnailService,
         private readonly s3Service: S3Service,
         private readonly webhookService: WebhookService,
     ) {}
@@ -49,6 +53,12 @@ export class EncodeService {
                 message: 'Encoding started',
             });
 
+            const encryptionEnabled =
+                session.config.encryption?.enabled !== false &&
+                !!session.config.encryption?.keyUrl;
+
+            let encryptionKey: Buffer | undefined;
+
             const encodeResult = await this.ffmpegService.encode({
                 sessionId,
                 inputPath: session.filePath!,
@@ -57,6 +67,16 @@ export class EncodeService {
                 byteRange: session.config.byteRange,
                 byteRangeMaxFileSizeBytes:
                     (session.config.byteRangeMaxFileSizeMB ?? 500) * 1024 * 1024,
+                preByteRangeHook: encryptionEnabled
+                    ? (outDir) => {
+                        const result = this.encryptionService.encryptHlsOutput(
+                            outDir,
+                            sessionId,
+                            session.config.encryption!.keyUrl!,
+                        );
+                        encryptionKey = result.key;
+                    }
+                    : undefined,
                 onProgress: (percent) => {
                     this.sessionService.updateProgress(
                         sessionId,
@@ -75,6 +95,38 @@ export class EncodeService {
                     }
                 },
             });
+
+            let thumbnailsVttRelPath: string | undefined;
+            if (
+                session.encodeConfig.type === 'video' &&
+                session.config.thumbnails !== false
+            ) {
+                try {
+                    const thumbResult =
+                        await this.thumbnailService.generateThumbnails({
+                            inputPath: session.filePath!,
+                            outputDir,
+                            duration:
+                                session.probeResult?.format?.duration ?? 0,
+                            sourceWidth:
+                                session.probeResult?.videoTracks?.[0]?.width ??
+                                1920,
+                            sourceHeight:
+                                session.probeResult?.videoTracks?.[0]?.height ??
+                                1080,
+                        });
+                    if (thumbResult) {
+                        thumbnailsVttRelPath = thumbResult.vttRelativePath;
+                        this.logger.log(
+                            `Generated thumbnail sprites for session ${sessionId}`,
+                        );
+                    }
+                } catch (err) {
+                    this.logger.warn(
+                        `Thumbnail generation failed for session ${sessionId}: ${(err as Error).message}`,
+                    );
+                }
+            }
 
             this.sessionService.updateStatus(
                 sessionId,
@@ -128,11 +180,31 @@ export class EncodeService {
                     ? anglePlaylistsWithKeys[0].key
                     : uploadResult.masterPlaylistKey;
 
+            const thumbnailsVttKey = thumbnailsVttRelPath
+                ? uploadResult.keys.find((k) =>
+                      k.endsWith(thumbnailsVttRelPath!),
+                  )
+                : undefined;
+
+            if (encryptionEnabled && encryptionKey) {
+                const previewPlaylists = this.collectPlaylists(outputDir);
+                const sess = this.sessionService.get(sessionId);
+                if (sess) {
+                    sess.encryptionKey = encryptionKey;
+                    sess.previewPlaylists = previewPlaylists;
+                }
+                this.logger.debug(
+                    `Stored ${Object.keys(previewPlaylists).length} preview playlist(s) for session ${sessionId}`,
+                );
+            }
+
             this.sessionService.setCompleted(
                 sessionId,
                 uploadResult.keys,
                 effectiveMasterPlaylist,
                 anglePlaylistsWithKeys.length > 0 ? anglePlaylistsWithKeys : undefined,
+                thumbnailsVttKey,
+                encodeResult.segmentFormat,
             );
             await this.sendWebhook(session, {
                 sessionId,
@@ -145,6 +217,7 @@ export class EncodeService {
                     anglePlaylistsWithKeys.length > 0
                         ? anglePlaylistsWithKeys
                         : undefined,
+                thumbnailsVtt: thumbnailsVttKey,
             });
 
             this.logger.log(`Session ${sessionId} completed successfully`);
@@ -179,6 +252,21 @@ export class EncodeService {
         } catch {
             // Webhook errors are already logged inside WebhookService
         }
+    }
+
+    private collectPlaylists(dir: string, base?: string): Record<string, string> {
+        const result: Record<string, string> = {};
+        const root = base ?? dir;
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            const fullPath = join(dir, entry.name);
+            if (entry.isDirectory()) {
+                Object.assign(result, this.collectPlaylists(fullPath, root));
+            } else if (entry.name.endsWith('.m3u8')) {
+                const relPath = relative(root, fullPath);
+                result[relPath] = readFileSync(fullPath, 'utf-8');
+            }
+        }
+        return result;
     }
 
     private cleanupSessionFiles(

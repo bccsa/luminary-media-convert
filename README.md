@@ -1,6 +1,6 @@
 # Luminary Media Convert
 
-HLS/ABR media encoding service built with NestJS. Accepts encoding requests via REST API, processes media files with FFmpeg (GPU-accelerated when NVIDIA or Apple Silicon hardware is available), uploads HLS output (fMP4 segments) to any S3-compatible storage, and delivers status updates via webhooks or polling.
+HLS/ABR media encoding service built with NestJS. Accepts encoding requests via REST API, processes media files with FFmpeg (GPU-accelerated when NVIDIA or Apple Silicon hardware is available), uploads HLS output to any S3-compatible storage, and delivers status updates via webhooks or polling.
 
 The repository is an npm workspaces monorepo containing:
 
@@ -383,7 +383,7 @@ Possible `status` values:
 | `queued` | Encoding queued, waiting in FIFO queue | `queuePosition` |
 | `encoding` | FFmpeg actively processing | `progress` (0-100) |
 | `uploading_to_s3` | Encoding done, uploading output to S3 | `progress` (0-100) |
-| `completed` | All files uploaded to S3 | `files`, `masterPlaylist`, `anglePlaylists` |
+| `completed` | All files uploaded to S3 | `files`, `masterPlaylist`, `anglePlaylists`, `encoder`, `segmentFormat` |
 | `failed` | Error occurred | `error` |
 
 **Uploaded status response (with probe results):**
@@ -603,7 +603,9 @@ Webhooks are optional. When a `webhook` configuration is provided in the session
     "videos/my-project/stream_HD/playlist.m3u8",
     "videos/my-project/stream_HD/segment_000.m4s"
   ],
-  "masterPlaylist": "videos/my-project/master.m3u8"
+  "masterPlaylist": "videos/my-project/master.m3u8",
+  "encoder": "apple",
+  "segmentFormat": "fmp4"
 }
 ```
 
@@ -615,7 +617,7 @@ Webhooks are optional. When a `webhook` configuration is provided in the session
 2. **File upload** — Client uploads the source media file via tus (resumable, chunked). On completion, the API auto-probes the file with ffprobe.
 3. **Probe & configure** — Client polls for probe results (detected video/audio tracks), then submits an encoding configuration (video renditions, audio groups, copy/re-encode choices).
 4. **Queue processing** — The session enters a FIFO queue. Sessions are processed one at a time in first-come-first-served order.
-5. **Encoding** — FFmpeg produces HLS output with fMP4 segments (`.m4s` files + `init.mp4` init segments) and playlists for each variant, plus a master playlist. Progress is reported via webhooks or polling.
+5. **Encoding** — FFmpeg probes per-stream start times and selects the optimal segment format: fMP4 segments (`.m4s` + `init.mp4`) when streams are aligned, or MPEG-TS segments (`.ts`) when streams have misaligned start times (the player's TS transmuxer synchronizes audio/video during playback). When byte-range mode is enabled (default), segments are consolidated into fewer large files using HLS byte-range addressing. Progress is reported via webhooks or polling.
 6. **S3 upload** — All output files are uploaded to the client-specified S3 bucket.
 7. **Completion** — Final webhook includes the full list of S3 object keys and the master playlist path.
 
@@ -692,9 +694,16 @@ S3 credentials are provided per-session in the session creation request, so diff
 
 ## HLS Output Structure
 
-Output uses fMP4 segments (fragmented MP4 / CMAF). Each stream directory contains an `init.mp4` initialization segment and numbered `.m4s` media segments.
+The segment format is chosen automatically based on source stream alignment:
 
-For a video encoding session with 2 video renditions and 2 audio groups:
+- **fMP4** (default when streams are aligned) — fragmented MP4 / CMAF segments (`.m4s` + `init.mp4`). Lower overhead, wider CMAF compatibility.
+- **MPEG-TS** (fallback when streams have misaligned start times) — Transport Stream segments (`.ts`). The player's TS transmuxer synchronizes audio/video PTS during playback.
+
+When byte-range mode is enabled (default), individual segments are consolidated into fewer large files using HLS `#EXT-X-BYTERANGE` addressing, significantly reducing the number of S3 objects.
+
+The session status response includes a `segmentFormat` field (`"fmp4"` or `"mpegts"`) indicating which format was used.
+
+**fMP4 output** (aligned streams) for a session with 2 video renditions and 2 audio groups:
 
 ```
 {pathPrefix}/
@@ -720,6 +729,32 @@ For a video encoding session with 2 video renditions and 2 audio groups:
     ├── playlist.m3u8                   # Audio rendition (Standard Audio)
     ├── segment_000.m4s
     └── ...
+```
+
+**MPEG-TS output** (misaligned streams) has the same structure but with `.ts` segments and no `init.mp4`:
+
+```
+{pathPrefix}/
+├── master.m3u8
+├── stream_1080p_1920x1080/
+│   ├── playlist.m3u8
+│   ├── segment_000.ts
+│   ├── segment_001.ts
+│   └── ...
+├── ...
+```
+
+**With byte-range mode** (default), segments are consolidated into larger media files:
+
+```
+{pathPrefix}/
+├── master.m3u8
+├── stream_1080p_1920x1080/
+│   ├── init.mp4                        # (fMP4 only)
+│   ├── playlist.m3u8                   # Contains #EXT-X-BYTERANGE entries
+│   ├── media_0.m4s (or media_0.ts)    # Consolidated segment file
+│   └── ...
+├── ...
 ```
 
 Stream directory names are derived from the rendition labels (e.g. `stream_1080p_1920x1080`, `stream_HD`).

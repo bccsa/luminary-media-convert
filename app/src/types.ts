@@ -87,14 +87,21 @@ export interface WebhookConfig {
     sessionToken: string;
 }
 
+export interface EncryptionConfig {
+    enabled?: boolean;
+    keyUrl?: string;
+}
+
 // --- Session Request/Response Types ---
 
 export interface CreateSessionRequest {
     segmentDuration?: number;
     byteRange?: boolean;
     byteRangeMaxFileSizeMB?: number;
+    thumbnails?: boolean;
     s3: S3Config;
     webhook?: WebhookConfig;
+    encryption?: EncryptionConfig;
 }
 
 export interface SessionResponse {
@@ -121,6 +128,7 @@ export type SessionStatus =
     | 'failed';
 
 export type AccelMode = 'cpu' | 'nvidia' | 'apple';
+export type SegmentFormat = 'fmp4' | 'mpegts';
 
 export interface SessionStatusResponse {
     sessionId: string;
@@ -131,6 +139,10 @@ export interface SessionStatusResponse {
     files?: string[];
     masterPlaylist?: string;
     anglePlaylists?: { name: string; key: string }[];
+    thumbnailsVtt?: string;
     error?: string;
     encoder?: AccelMode;
+    segmentFormat?: SegmentFormat;
+    previewBaseUrl?: string;
+    previewToken?: string;
 }

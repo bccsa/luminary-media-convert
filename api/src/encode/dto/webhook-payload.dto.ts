@@ -73,6 +73,13 @@ export class WebhookPayloadDto {
 
     @ApiPropertyOptional({
         description:
+            'S3 object key of the WebVTT thumbnails file. Present on "completed" when thumbnails were generated.',
+        example: 'videos/project-1/thumbnails/thumbnails.vtt',
+    })
+    thumbnailsVtt?: string;
+
+    @ApiPropertyOptional({
+        description:
             'Per-angle playlists for angle switching. Present on "completed" when video was encoded.',
         example: [
             { name: 'Main angle', key: 'videos/project-1/master.m3u8' },
