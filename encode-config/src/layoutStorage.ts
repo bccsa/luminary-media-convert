@@ -1,4 +1,4 @@
-import type { ProbeResult, EncodeConfig } from '../types';
+import type { ProbeResult, EncodeConfig } from './types';
 
 const STORAGE_KEY = 'luminary_encode_configs';
 

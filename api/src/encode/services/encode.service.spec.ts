@@ -64,7 +64,7 @@ describe('EncodeService', () => {
         } as any;
 
         encryptionService = {
-            encryptHlsOutput: jest.fn().mockReturnValue({
+            encryptHlsOutput: jest.fn().mockResolvedValue({
                 key: Buffer.alloc(16, 0xcd),
                 iv: Buffer.alloc(16, 0xab),
             }),
@@ -369,7 +369,7 @@ describe('EncodeService', () => {
         await service.processSession(session.id);
 
         const hook = ffmpegService.encode.mock.calls[0][0].preByteRangeHook!;
-        hook('/tmp/output');
+        await hook('/tmp/output');
 
         expect(encryptionService.encryptHlsOutput).toHaveBeenCalledWith(
             '/tmp/output',
@@ -414,14 +414,14 @@ describe('EncodeService', () => {
 
     it('should store encryptionKey and previewPlaylists on session when encryption is used', async () => {
         const encryptionKey = Buffer.alloc(16, 0xcd);
-        encryptionService.encryptHlsOutput.mockReturnValue({
+        encryptionService.encryptHlsOutput.mockResolvedValue({
             key: encryptionKey,
             iv: Buffer.alloc(16, 0xab),
         });
 
         ffmpegService.encode.mockImplementation(async (opts) => {
             if (opts.preByteRangeHook) {
-                opts.preByteRangeHook(opts.outputDir);
+                await opts.preByteRangeHook(opts.outputDir);
             }
             return {
                 outputDir: opts.outputDir,

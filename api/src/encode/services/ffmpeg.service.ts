@@ -23,7 +23,7 @@ export interface EncodeOptions {
     onProgress: (percent: number) => void;
     byteRange?: boolean;
     byteRangeMaxFileSizeBytes?: number;
-    preByteRangeHook?: (outputDir: string) => void;
+    preByteRangeHook?: (outputDir: string) => void | Promise<void>;
 }
 
 export interface AnglePlaylist {
@@ -690,9 +690,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 if (timeoutTimer) clearTimeout(timeoutTimer);
                 if (err) {
                     reject(err);
-                } else {
+                    return;
+                }
+
+                (async () => {
                     if (opts.preByteRangeHook) {
-                        opts.preByteRangeHook(outputDir);
+                        await opts.preByteRangeHook(outputDir);
                     }
 
                     if (opts.byteRange !== false) {
@@ -729,7 +732,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                         anglePlaylists,
                         segmentFormat: useFmp4 ? 'fmp4' : 'mpegts',
                     });
-                }
+                })().catch(reject);
             };
 
             proc.on('error', (err) => {

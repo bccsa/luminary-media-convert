@@ -56,56 +56,70 @@ export class S3Service {
         config: S3ConfigDto,
         outputDir: string,
         masterPlaylistFilename: string,
-        options?: { onProgress?: (percent: number) => void }
+        options?: { onProgress?: (percent: number) => void; concurrency?: number }
     ): Promise<S3UploadResult> {
         const client = this.createClient(config);
         const files = this.walkDir(outputDir);
         const totalFiles = files.length;
-        const keys: string[] = [];
+        const results: string[] = new Array(totalFiles);
         let masterPlaylistKey = '';
+        let completedCount = 0;
+        const concurrency = options?.concurrency ?? 5;
 
         const prefix = config.pathPrefix
             ? config.pathPrefix.replace(/\/+$/, '')
             : '';
 
-        for (const filePath of files) {
-            const relativePath = relative(outputDir, filePath);
-            // Use posix separators for S3 object keys
-            const objectKey = prefix
-                ? posix.join(prefix, relativePath.split(/[\\/]/).join('/'))
-                : relativePath.split(/[\\/]/).join('/');
+        let nextIndex = 0;
 
-            const contentType = this.getContentType(filePath);
+        const uploadWorker = async () => {
+            while (nextIndex < totalFiles) {
+                const i = nextIndex++;
+                const filePath = files[i];
+                const relativePath = relative(outputDir, filePath);
+                const objectKey = prefix
+                    ? posix.join(prefix, relativePath.split(/[\\/]/).join('/'))
+                    : relativePath.split(/[\\/]/).join('/');
+                const contentType = this.getContentType(filePath);
 
-            try {
-                await client.fPutObject(
-                    config.bucket,
-                    objectKey,
-                    filePath,
-                    { 'Content-Type': contentType }
-                );
-                keys.push(objectKey);
+                try {
+                    await client.fPutObject(
+                        config.bucket,
+                        objectKey,
+                        filePath,
+                        { 'Content-Type': contentType },
+                    );
+                } catch (err) {
+                    throw new Error(
+                        `S3 upload failed for ${objectKey}: ${(err as Error).message}`,
+                    );
+                }
 
+                results[i] = objectKey;
                 if (relativePath === masterPlaylistFilename) {
                     masterPlaylistKey = objectKey;
                 }
 
+                completedCount++;
                 const percent =
                     totalFiles > 0
-                        ? Math.round((keys.length / totalFiles) * 100)
+                        ? Math.round((completedCount / totalFiles) * 100)
                         : 100;
                 options?.onProgress?.(Math.min(percent, 100));
-
                 this.logger.debug(`Uploaded: ${objectKey}`);
-            } catch (err) {
-                throw new Error(
-                    `S3 upload failed for ${objectKey}: ${(err as Error).message}`
-                );
             }
-        }
+        };
+
+        const workers = Array.from(
+            { length: Math.min(concurrency, totalFiles) },
+            () => uploadWorker(),
+        );
+        await Promise.all(workers);
+
+        const keys = results.filter(Boolean);
 
         this.logger.log(
-            `Uploaded ${keys.length} file(s) to s3://${config.bucket}/${prefix || ''}`
+            `Uploaded ${keys.length} file(s) to s3://${config.bucket}/${prefix || ''}`,
         );
 
         return { keys, masterPlaylistKey };

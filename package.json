@@ -4,10 +4,11 @@
     "license": "Apache-2.0",
     "workspaces": [
         "api",
-        "app"
+        "app",
+        "encode-config"
     ],
     "scripts": {
-        "dev": "concurrently -k -n api,app -c blue,magenta \"npm -w api run start:dev\" \"npm -w app run dev\""
+        "dev": "concurrently -k -n ecfg,api,app -c green,blue,magenta \"npm -w encode-config run dev\" \"npm -w api run start:dev\" \"npm -w app run dev\""
     },
     "devDependencies": {
         "concurrently": "^9.2.1"

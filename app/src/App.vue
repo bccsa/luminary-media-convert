@@ -2,12 +2,12 @@
 import { ref } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import SessionConfigForm from './components/SessionConfigForm.vue';
-import EncodeConfigForm from './components/EncodeConfigForm.vue';
+import { EncodeConfigForm, computeLayoutKey, saveConfig } from '@luminary-media-converter/encode-config';
+import type { ProbeResult, EncodeConfig } from '@luminary-media-converter/encode-config';
 import SessionProgress from './components/SessionProgress.vue';
 import { createSession, uploadFile, getSessionStatus, startEncode, deleteSession } from './api';
 import { useSessionPoller } from './composables/useSessionPoller';
-import { computeLayoutKey, saveConfig } from './utils/layoutStorage';
-import type { CreateSessionRequest, S3Config, ProbeResult, EncodeConfig } from './types';
+import type { CreateSessionRequest, S3Config } from './types';
 
 function formatBytes(bytes: number): string {
     if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;

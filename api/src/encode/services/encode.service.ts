@@ -68,8 +68,8 @@ export class EncodeService {
                 byteRangeMaxFileSizeBytes:
                     (session.config.byteRangeMaxFileSizeMB ?? 500) * 1024 * 1024,
                 preByteRangeHook: encryptionEnabled
-                    ? (outDir) => {
-                        const result = this.encryptionService.encryptHlsOutput(
+                    ? async (outDir) => {
+                        const result = await this.encryptionService.encryptHlsOutput(
                             outDir,
                             sessionId,
                             session.config.encryption!.keyUrl!,

@@ -1,0 +1,432 @@
+/*
+ * @luminary-media-converter/encode-config — Default dark-theme stylesheet
+ *
+ * All classes use the `ecf-` prefix. Override any class in your own stylesheet
+ * to customise the appearance. See README.md for the full class reference.
+ */
+
+/* ── Layout ────────────────────────────────────────────────────────── */
+
+.ecf-root {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem; /* space-y-6 */
+    box-sizing: border-box;
+    line-height: 1.5;
+    color: #e4e4e7; /* zinc-200 — default text */
+    font-size: 0.875rem;
+}
+
+.ecf-root *,
+.ecf-root *::before,
+.ecf-root *::after {
+    box-sizing: border-box;
+}
+
+.ecf-fieldset-padded {
+    margin-top: 0.5rem; /* mt-2 */
+}
+
+.ecf-fieldset {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem; /* space-y-3 */
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ecf-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.ecf-legend {
+    font-size: 0.875rem; /* text-sm */
+    font-weight: 600; /* font-semibold */
+    text-transform: uppercase;
+    letter-spacing: 0.05em; /* tracking-wider */
+    color: #a1a1aa; /* zinc-400 */
+    padding: 0;
+    float: none;
+}
+
+.ecf-section-title {
+    margin-bottom: 0.25rem; /* mb-1 */
+    font-size: 0.75rem; /* text-xs */
+    font-weight: 500; /* font-medium */
+    color: #71717a; /* zinc-500 */
+}
+
+/* ── Info Panel ────────────────────────────────────────────────────── */
+
+.ecf-info-panel {
+    border-radius: 0.375rem; /* rounded-md */
+    background: rgb(24 24 27 / 0.6); /* bg-zinc-900/60 */
+    padding: 0.75rem; /* p-3 */
+    font-size: 0.875rem; /* text-sm */
+}
+
+.ecf-info-items {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 1.5rem; /* gap-x-6 */
+    row-gap: 0.25rem; /* gap-y-1 */
+    color: #d4d4d8; /* text-zinc-300 */
+}
+
+.ecf-info-value {
+    color: #f4f4f5; /* text-zinc-100 */
+}
+
+/* ── Tables ────────────────────────────────────────────────────────── */
+
+.ecf-table-wrap {
+    overflow-x: auto;
+}
+
+.ecf-table {
+    width: 100%;
+    font-size: 0.75rem; /* text-xs */
+    text-align: left;
+    border-collapse: collapse;
+}
+
+.ecf-thead {
+    color: #71717a; /* text-zinc-500 */
+    border-bottom: 1px solid #27272a; /* border-zinc-800 */
+}
+
+.ecf-th {
+    padding: 0.25rem 0.5rem; /* px-2 py-1 */
+    font-weight: 500;
+    text-align: left;
+}
+
+.ecf-tbody {
+    color: #d4d4d8; /* text-zinc-300 */
+}
+
+.ecf-tr {
+    border-bottom: 1px solid rgb(39 39 42 / 0.5); /* border-zinc-800/50 */
+}
+
+.ecf-td {
+    padding: 0.25rem 0.5rem; /* px-2 py-1 */
+}
+
+/* ── Cards ─────────────────────────────────────────────────────────── */
+
+.ecf-card {
+    position: relative;
+    border-radius: 0.375rem; /* rounded-md */
+    background: rgb(24 24 27 / 0.6); /* bg-zinc-900/60 */
+    padding: 0.75rem; /* p-3 */
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem; /* space-y-2 */
+}
+
+/* ── Form rows & fields ───────────────────────────────────────────── */
+
+.ecf-form-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem; /* gap-3 */
+}
+
+.ecf-form-field {
+    display: flex;
+    flex-direction: column;
+}
+
+.ecf-field-label {
+    margin-bottom: 0.25rem; /* mb-1 */
+    display: block;
+    font-size: 0.75rem; /* text-xs */
+    color: #71717a; /* text-zinc-500 */
+}
+
+.ecf-reanalyze-row {
+    margin-top: 0.5rem; /* mt-2 */
+}
+
+/* ── Inputs ────────────────────────────────────────────────────────── */
+
+.ecf-input,
+.ecf-select {
+    width: 100%; /* w-full */
+    border-radius: 0.375rem; /* rounded-md */
+    border: 1px solid #3f3f46; /* border-zinc-700 */
+    background-color: #27272a; /* bg-zinc-800 */
+    padding: 0.5rem 0.75rem; /* px-3 py-2 */
+    font-size: 0.875rem; /* text-sm */
+    line-height: 1.25rem;
+    color: #f4f4f5; /* text-zinc-100 */
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    font-family: inherit;
+}
+
+.ecf-select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2371717a' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.5em 1.5em;
+    padding-right: 2.5rem;
+}
+
+.ecf-input::placeholder {
+    color: #71717a; /* placeholder-zinc-500 */
+}
+
+.ecf-input:focus,
+.ecf-select:focus {
+    border-color: #6366f1; /* focus:border-indigo-500 */
+    box-shadow: 0 0 0 1px #6366f1; /* focus:ring-1 focus:ring-indigo-500 */
+}
+
+.ecf-input:disabled,
+.ecf-select:disabled {
+    cursor: not-allowed; /* disabled:cursor-not-allowed */
+    border-color: #27272a; /* disabled:border-zinc-800 */
+    background-color: #18181b; /* disabled:bg-zinc-900 */
+    color: #71717a; /* disabled:text-zinc-500 */
+}
+
+/* Input size variants */
+.ecf-input-sm { width: 6rem; font-size: 0.75rem; } /* w-24 text-xs */
+.ecf-input-xs { width: 4rem; font-size: 0.75rem; } /* w-16 text-xs */
+.ecf-input-center { text-align: center; }
+.ecf-input-w20 { width: 5rem; } /* w-20 */
+.ecf-input-w24 { width: 6rem; } /* w-24 */
+.ecf-input-w28 { width: 7rem; } /* w-28 */
+.ecf-input-w40 { width: 16rem; } /* w-64 */
+.ecf-input-w48 { width: 15rem; font-size: 0.75rem; } /* w-60 text-xs */
+.ecf-input-segment { width: 5rem; text-align: center; } /* w-20 text-center */
+
+/* ── Checkboxes & Radios ──────────────────────────────────────────── */
+
+.ecf-checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem; /* gap-4 */
+    font-size: 0.875rem; /* text-sm */
+}
+
+.ecf-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem; /* gap-2 */
+    cursor: pointer;
+}
+
+.ecf-checkbox,
+.ecf-radio {
+    accent-color: #6366f1; /* accent-indigo-500 */
+    cursor: pointer;
+}
+
+.ecf-checkbox-text {
+    font-size: 0.75rem; /* text-xs */
+    color: #a1a1aa; /* text-zinc-400 */
+}
+
+.ecf-radio-group {
+    display: flex;
+    align-items: center;
+    gap: 1rem; /* gap-4 */
+}
+
+.ecf-radio-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem; /* gap-2 */
+    font-size: 0.875rem; /* text-sm */
+    cursor: pointer;
+}
+
+.ecf-segment-field {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem; /* gap-2 */
+}
+
+.ecf-segment-label {
+    font-size: 0.75rem; /* text-xs */
+    color: #71717a; /* text-zinc-500 */
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────── */
+
+.ecf-btn-sm {
+    border-radius: 0.375rem; /* rounded-md */
+    border: 1px solid #3f3f46; /* border-zinc-700 */
+    padding: 0.25rem 0.75rem; /* px-3 py-1 */
+    font-size: 0.75rem; /* text-xs */
+    font-weight: 500; /* font-medium */
+    color: #a1a1aa; /* text-zinc-400 */
+    background: transparent;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.ecf-btn-sm:hover {
+    border-color: #71717a; /* hover:border-zinc-500 */
+    color: #e4e4e7; /* hover:text-zinc-200 */
+}
+
+.ecf-btn-accent {
+    border-radius: 0.25rem; /* rounded */
+    border: 1px solid #4338ca; /* border-indigo-700 */
+    padding: 0.375rem 0.75rem; /* px-3 py-1.5 */
+    font-size: 0.75rem; /* text-xs */
+    font-weight: 500; /* font-medium */
+    color: #a5b4fc; /* text-indigo-300 */
+    background: transparent;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.ecf-btn-accent:hover {
+    background: rgb(49 46 129 / 0.4); /* hover:bg-indigo-900/40 */
+}
+
+.ecf-btn-remove {
+    margin-bottom: 0.125rem; /* mb-0.5 */
+    border-radius: 0.25rem; /* rounded */
+    padding: 0.375rem; /* p-1.5 */
+    color: #71717a; /* text-zinc-500 */
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ecf-btn-remove:hover {
+    background: #27272a; /* hover:bg-zinc-800 */
+    color: #f87171; /* hover:text-red-400 */
+}
+
+.ecf-btn-remove-corner {
+    position: absolute;
+    top: 0.5rem; /* top-2 */
+    right: 0.5rem; /* right-2 */
+}
+
+.ecf-btn-primary {
+    flex: 1;
+    border-radius: 0.5rem; /* rounded-lg */
+    padding: 0.75rem 1.5rem; /* px-6 py-3 */
+    font-size: 0.875rem; /* text-sm */
+    font-weight: 600; /* font-semibold */
+    background-color: #4f46e5; /* bg-indigo-600 */
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.ecf-btn-primary:hover {
+    background-color: #6366f1; /* hover:bg-indigo-500 */
+}
+
+.ecf-btn-primary-disabled,
+.ecf-btn-primary-disabled:hover {
+    background-color: #27272a; /* bg-zinc-800 */
+    color: #71717a; /* text-zinc-500 */
+    cursor: not-allowed;
+}
+
+.ecf-btn-secondary {
+    border-radius: 0.5rem; /* rounded-lg */
+    border: 1px solid #3f3f46; /* border-zinc-700 */
+    padding: 0.75rem 1.5rem; /* px-6 py-3 */
+    font-size: 0.875rem; /* text-sm */
+    font-weight: 600; /* font-semibold */
+    color: #d4d4d8; /* text-zinc-300 */
+    background: transparent;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.ecf-btn-secondary:hover {
+    background-color: #27272a; /* hover:bg-zinc-800 */
+}
+
+.ecf-btn-danger {
+    border-radius: 0.5rem; /* rounded-lg */
+    padding: 0.5rem 1rem; /* px-4 py-2 */
+    font-size: 0.875rem; /* text-sm */
+    font-weight: 600; /* font-semibold */
+    background-color: #dc2626; /* bg-red-600 */
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.ecf-btn-danger:hover {
+    background-color: #ef4444; /* hover:bg-red-500 */
+}
+
+/* ── Icons ─────────────────────────────────────────────────────────── */
+
+.ecf-icon {
+    width: 1rem; /* h-4 w-4 */
+    height: 1rem;
+}
+
+/* ── Warning ───────────────────────────────────────────────────────── */
+
+.ecf-warning {
+    font-size: 0.75rem; /* text-xs */
+    color: #fbbf24; /* text-amber-400 */
+    margin: 0;
+}
+
+/* ── Confirm banner ────────────────────────────────────────────────── */
+
+.ecf-confirm-banner {
+    border-radius: 0.5rem; /* rounded-lg */
+    border: 1px solid rgb(146 64 14 / 0.5); /* border-amber-800/50 */
+    background: rgb(69 26 3 / 0.4); /* bg-amber-950/40 */
+    padding: 1rem; /* p-4 */
+}
+
+.ecf-confirm-text {
+    margin: 0 0 0.75rem 0; /* mb-3 */
+    font-size: 0.875rem; /* text-sm */
+    color: #fcd34d; /* text-amber-300 */
+}
+
+.ecf-confirm-actions {
+    display: flex;
+    gap: 0.75rem; /* gap-3 */
+}
+
+/* ── Actions bar ───────────────────────────────────────────────────── */
+
+.ecf-actions {
+    display: flex;
+    gap: 0.75rem; /* gap-3 */
+}

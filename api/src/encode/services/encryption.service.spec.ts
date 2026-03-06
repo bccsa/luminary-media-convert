@@ -179,9 +179,9 @@ describe('EncryptionService', () => {
             );
         }
 
-        it('should return a 16-byte key and 16-byte IV', () => {
+        it('should return a 16-byte key and 16-byte IV', async () => {
             createHlsOutput();
-            const result = service.encryptHlsOutput(
+            const result = await service.encryptHlsOutput(
                 tmpDir,
                 'session-1',
                 'https://example.com/key',
@@ -192,13 +192,13 @@ describe('EncryptionService', () => {
             expect(result.iv.length).toBe(16);
         });
 
-        it('should encrypt .m4s segment files', () => {
+        it('should encrypt .m4s segment files', async () => {
             createHlsOutput();
             const originalSegment = readFileSync(
                 join(tmpDir, 'stream_0', 'segment_00000.m4s'),
             );
 
-            service.encryptHlsOutput(tmpDir, 'session-1', 'https://example.com/key');
+            await service.encryptHlsOutput(tmpDir, 'session-1', 'https://example.com/key');
 
             const encryptedSegment = readFileSync(
                 join(tmpDir, 'stream_0', 'segment_00000.m4s'),
@@ -207,13 +207,13 @@ describe('EncryptionService', () => {
             expect(encryptedSegment.length % 16).toBe(0);
         });
 
-        it('should NOT encrypt init.mp4 files', () => {
+        it('should NOT encrypt init.mp4 files', async () => {
             createHlsOutput();
             const originalInit = readFileSync(
                 join(tmpDir, 'stream_0', 'init.mp4'),
             );
 
-            service.encryptHlsOutput(tmpDir, 'session-1', 'https://example.com/key');
+            await service.encryptHlsOutput(tmpDir, 'session-1', 'https://example.com/key');
 
             const afterInit = readFileSync(
                 join(tmpDir, 'stream_0', 'init.mp4'),
@@ -221,13 +221,13 @@ describe('EncryptionService', () => {
             expect(afterInit).toEqual(originalInit);
         });
 
-        it('should produce decryptable segments', () => {
+        it('should produce decryptable segments', async () => {
             createHlsOutput();
             const plaintext = readFileSync(
                 join(tmpDir, 'stream_0', 'segment_00000.m4s'),
             );
 
-            const { key, iv } = service.encryptHlsOutput(
+            const { key, iv } = await service.encryptHlsOutput(
                 tmpDir,
                 'session-1',
                 'https://example.com/key',
@@ -244,9 +244,9 @@ describe('EncryptionService', () => {
             expect(decrypted).toEqual(plaintext);
         });
 
-        it('should inject #EXT-X-KEY tag into media playlists', () => {
+        it('should inject #EXT-X-KEY tag into media playlists', async () => {
             createHlsOutput();
-            const { iv } = service.encryptHlsOutput(
+            const { iv } = await service.encryptHlsOutput(
                 tmpDir,
                 'session-1',
                 'https://example.com/key',
@@ -260,9 +260,9 @@ describe('EncryptionService', () => {
             expect(playlist).toContain(expectedTag);
         });
 
-        it('should place #EXT-X-KEY tag before the first #EXTINF', () => {
+        it('should place #EXT-X-KEY tag before the first #EXTINF', async () => {
             createHlsOutput();
-            service.encryptHlsOutput(tmpDir, 'session-1', 'https://example.com/key');
+            await service.encryptHlsOutput(tmpDir, 'session-1', 'https://example.com/key');
 
             const playlist = readFileSync(
                 join(tmpDir, 'stream_0', 'playlist.m3u8'),
@@ -276,9 +276,9 @@ describe('EncryptionService', () => {
             expect(keyIdx).toBeLessThan(firstExtinfIdx);
         });
 
-        it('should NOT inject #EXT-X-KEY into master playlists (no #EXTINF)', () => {
+        it('should NOT inject #EXT-X-KEY into master playlists (no #EXTINF)', async () => {
             createHlsOutput();
-            service.encryptHlsOutput(tmpDir, 'session-1', 'https://example.com/key');
+            await service.encryptHlsOutput(tmpDir, 'session-1', 'https://example.com/key');
 
             const master = readFileSync(
                 join(tmpDir, 'master.m3u8'),
@@ -287,9 +287,9 @@ describe('EncryptionService', () => {
             expect(master).not.toContain('#EXT-X-KEY:');
         });
 
-        it('should inject #EXT-X-KEY into all media playlists across streams', () => {
+        it('should inject #EXT-X-KEY into all media playlists across streams', async () => {
             createHlsOutput();
-            service.encryptHlsOutput(tmpDir, 'session-1', 'https://example.com/key');
+            await service.encryptHlsOutput(tmpDir, 'session-1', 'https://example.com/key');
 
             const pl0 = readFileSync(join(tmpDir, 'stream_0', 'playlist.m3u8'), 'utf-8');
             const pl1 = readFileSync(join(tmpDir, 'stream_1', 'playlist.m3u8'), 'utf-8');
@@ -297,22 +297,22 @@ describe('EncryptionService', () => {
             expect(pl1).toContain('#EXT-X-KEY:METHOD=AES-128');
         });
 
-        it('should encrypt segments across all stream directories', () => {
+        it('should encrypt segments across all stream directories', async () => {
             createHlsOutput();
             const origVideo = readFileSync(join(tmpDir, 'stream_0', 'segment_00000.m4s'));
             const origAudio = readFileSync(join(tmpDir, 'stream_1', 'segment_00000.m4s'));
 
-            service.encryptHlsOutput(tmpDir, 'session-1', 'https://example.com/key');
+            await service.encryptHlsOutput(tmpDir, 'session-1', 'https://example.com/key');
 
             expect(readFileSync(join(tmpDir, 'stream_0', 'segment_00000.m4s'))).not.toEqual(origVideo);
             expect(readFileSync(join(tmpDir, 'stream_1', 'segment_00000.m4s'))).not.toEqual(origAudio);
         });
 
-        it('should handle output with no stream directories gracefully', () => {
+        it('should handle output with no stream directories gracefully', async () => {
             mkdirSync(tmpDir, { recursive: true });
             writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n', 'utf-8');
 
-            const result = service.encryptHlsOutput(
+            const result = await service.encryptHlsOutput(
                 tmpDir,
                 'session-1',
                 'https://example.com/key',

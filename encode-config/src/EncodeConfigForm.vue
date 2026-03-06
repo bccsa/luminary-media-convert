@@ -7,8 +7,8 @@ import type {
     AudioGroup,
     AudioTrackInfo,
     VideoTrackInfo,
-} from '../types';
-import { computeLayoutKey, getStoredConfig } from '../utils/layoutStorage';
+} from './types';
+import { computeLayoutKey, getStoredConfig } from './layoutStorage';
 
 const props = defineProps<{
     probeResult: ProbeResult;
@@ -223,6 +223,32 @@ function reanalyze() {
 }
 
 reanalyze();
+
+{
+    const savedConfig = getStoredConfig(computeLayoutKey(props.probeResult, encodingType.value));
+    if (savedConfig) {
+        if (savedConfig.videoTrackNames) {
+            const nameMap = new Map(savedConfig.videoTrackNames.map(t => [t.index, t.name]));
+            for (const t of editableVideoTracks) {
+                const saved = nameMap.get(t.index);
+                if (saved != null) t.name = saved;
+            }
+        }
+        if (savedConfig.audioTrackMetadata) {
+            const audioMetaMap = new Map(
+                savedConfig.audioTrackMetadata.map(m => [m.index, { name: m.name, language: m.language }]),
+            );
+            for (const t of editableAudioTracks) {
+                const saved = audioMetaMap.get(t.index);
+                if (saved) {
+                    if (saved.name !== undefined) t.name = saved.name;
+                    if (saved.language !== undefined) t.language = saved.language;
+                }
+            }
+        }
+        reanalyze();
+    }
+}
 
 const uniqueAudioGroupOptions = computed(() => {
     const seen = new Set<string>();
@@ -447,56 +473,56 @@ function onSubmit() {
 </script>
 
 <template>
-    <div class="space-y-6">
+    <div class="ecf-root">
         <!-- Probe Results -->
-        <fieldset class="space-y-3">
-            <div class="flex items-center justify-between">
-                <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Detected Media</legend>
+        <fieldset class="ecf-fieldset">
+            <div class="ecf-section-header">
+                <legend class="ecf-legend">Detected Media</legend>
                 <button
                     v-if="hasPreviousConfig"
                     type="button"
                     @click="loadPreviousTrackLabels"
-                    class="rounded border border-indigo-700 px-3 py-1.5 text-xs font-medium text-indigo-300 transition-colors hover:bg-indigo-900/40 cursor-pointer"
+                    class="ecf-btn-accent"
                 >
                     Load saved track labels
                 </button>
             </div>
 
-            <div class="rounded-md bg-zinc-900/60 p-3 text-sm">
-                <div class="flex flex-wrap gap-x-6 gap-y-1 text-zinc-300">
-                    <span>Format: <span class="text-zinc-100">{{ probeResult.format.formatName }}</span></span>
-                    <span>Duration: <span class="text-zinc-100">{{ formatDuration(probeResult.format.duration) }}</span></span>
-                    <span>Bitrate: <span class="text-zinc-100">{{ probeResult.format.bitrateKbps }} kbps</span></span>
+            <div class="ecf-info-panel">
+                <div class="ecf-info-items">
+                    <span>Format: <span class="ecf-info-value">{{ probeResult.format.formatName }}</span></span>
+                    <span>Duration: <span class="ecf-info-value">{{ formatDuration(probeResult.format.duration) }}</span></span>
+                    <span>Bitrate: <span class="ecf-info-value">{{ probeResult.format.bitrateKbps }} kbps</span></span>
                 </div>
             </div>
 
             <!-- Video Tracks -->
             <div v-if="editableVideoTracks.length > 0">
-                <h4 class="mb-1 text-xs font-medium text-zinc-500">Video Tracks ({{ editableVideoTracks.length }})</h4>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-xs text-left">
-                        <thead class="text-zinc-500 border-b border-zinc-800">
+                <h4 class="ecf-section-title">Video Tracks ({{ editableVideoTracks.length }})</h4>
+                <div class="ecf-table-wrap">
+                    <table class="ecf-table">
+                        <thead class="ecf-thead">
                             <tr>
-                                <th class="px-2 py-1">#</th>
-                                <th class="px-2 py-1">Codec</th>
-                                <th class="px-2 py-1">Resolution</th>
-                                <th class="px-2 py-1">Bitrate</th>
-                                <th class="px-2 py-1">FPS</th>
-                                <th class="px-2 py-1">Name</th>
+                                <th class="ecf-th">#</th>
+                                <th class="ecf-th">Codec</th>
+                                <th class="ecf-th">Resolution</th>
+                                <th class="ecf-th">Bitrate</th>
+                                <th class="ecf-th">FPS</th>
+                                <th class="ecf-th">Name</th>
                             </tr>
                         </thead>
-                        <tbody class="text-zinc-300">
-                            <tr v-for="t in editableVideoTracks" :key="t.index" class="border-b border-zinc-800/50">
-                                <td class="px-2 py-1">{{ t.index }}</td>
-                                <td class="px-2 py-1">{{ t.codec }}{{ t.profile ? ` (${t.profile})` : '' }}</td>
-                                <td class="px-2 py-1">{{ t.width }}&times;{{ t.height }}</td>
-                                <td class="px-2 py-1">{{ t.bitrateKbps ? `${t.bitrateKbps} kbps` : '—' }}</td>
-                                <td class="px-2 py-1">{{ t.frameRate }}</td>
-                                <td class="px-2 py-1">
+                        <tbody class="ecf-tbody">
+                            <tr v-for="t in editableVideoTracks" :key="t.index" class="ecf-tr">
+                                <td class="ecf-td">{{ t.index }}</td>
+                                <td class="ecf-td">{{ t.codec }}{{ t.profile ? ` (${t.profile})` : '' }}</td>
+                                <td class="ecf-td">{{ t.width }}&times;{{ t.height }}</td>
+                                <td class="ecf-td">{{ t.bitrateKbps ? `${t.bitrateKbps} kbps` : '—' }}</td>
+                                <td class="ecf-td">{{ t.frameRate }}</td>
+                                <td class="ecf-td">
                                     <input
                                         v-model="t.name"
                                         type="text"
-                                        class="input w-24 text-xs"
+                                        class="ecf-input ecf-input-sm"
                                         placeholder="e.g. Main angle"
                                         data-track-field="video-name"
                                         :data-track-index="t.index"
@@ -513,32 +539,32 @@ function onSubmit() {
 
             <!-- Audio Tracks -->
             <div v-if="editableAudioTracks.length > 0">
-                <h4 class="mb-1 text-xs font-medium text-zinc-500">Audio Tracks ({{ editableAudioTracks.length }})</h4>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-xs text-left">
-                        <thead class="text-zinc-500 border-b border-zinc-800">
+                <h4 class="ecf-section-title">Audio Tracks ({{ editableAudioTracks.length }})</h4>
+                <div class="ecf-table-wrap">
+                    <table class="ecf-table">
+                        <thead class="ecf-thead">
                             <tr>
-                                <th class="px-2 py-1">#</th>
-                                <th class="px-2 py-1">Codec</th>
-                                <th class="px-2 py-1">Bitrate</th>
-                                <th class="px-2 py-1">Channels</th>
-                                <th class="px-2 py-1">Sample Rate</th>
-                                <th class="px-2 py-1">Language</th>
-                                <th class="px-2 py-1">Name</th>
+                                <th class="ecf-th">#</th>
+                                <th class="ecf-th">Codec</th>
+                                <th class="ecf-th">Bitrate</th>
+                                <th class="ecf-th">Channels</th>
+                                <th class="ecf-th">Sample Rate</th>
+                                <th class="ecf-th">Language</th>
+                                <th class="ecf-th">Name</th>
                             </tr>
                         </thead>
-                        <tbody class="text-zinc-300">
-                            <tr v-for="(t, audioIdx) in editableAudioTracks" :key="t.index" class="border-b border-zinc-800/50">
-                                <td class="px-2 py-1">{{ t.index }}</td>
-                                <td class="px-2 py-1">{{ t.codec }}</td>
-                                <td class="px-2 py-1">{{ t.bitrateKbps ? `${t.bitrateKbps} kbps` : '—' }}</td>
-                                <td class="px-2 py-1">{{ channelLabel(t.channels) }}</td>
-                                <td class="px-2 py-1">{{ t.sampleRate }} Hz</td>
-                                <td class="px-2 py-1">
+                        <tbody class="ecf-tbody">
+                            <tr v-for="(t, audioIdx) in editableAudioTracks" :key="t.index" class="ecf-tr">
+                                <td class="ecf-td">{{ t.index }}</td>
+                                <td class="ecf-td">{{ t.codec }}</td>
+                                <td class="ecf-td">{{ t.bitrateKbps ? `${t.bitrateKbps} kbps` : '—' }}</td>
+                                <td class="ecf-td">{{ channelLabel(t.channels) }}</td>
+                                <td class="ecf-td">{{ t.sampleRate }} Hz</td>
+                                <td class="ecf-td">
                                     <input
                                         v-model="t.language"
                                         type="text"
-                                        class="input w-16 text-xs text-center"
+                                        class="ecf-input ecf-input-xs ecf-input-center"
                                         placeholder="und"
                                         data-track-field="audio-language"
                                         :data-track-index="t.index"
@@ -547,11 +573,11 @@ function onSubmit() {
                                         @keydown="onTrackInputKeydown"
                                     />
                                 </td>
-                                <td class="px-2 py-1">
+                                <td class="ecf-td">
                                     <input
                                         v-model="t.name"
                                         type="text"
-                                        class="input w-24 text-xs"
+                                        class="ecf-input ecf-input-sm"
                                         placeholder="e.g. Commentary"
                                         data-track-field="audio-name"
                                         :data-track-index="t.index"
@@ -565,11 +591,11 @@ function onSubmit() {
                     </table>
                 </div>
             </div>
-            <div v-if="encodingType.value === 'video' && (editableVideoTracks.length > 0 || editableAudioTracks.length > 0)" class="mt-2">
+            <div v-if="encodingType.value === 'video' && (editableVideoTracks.length > 0 || editableAudioTracks.length > 0)" class="ecf-reanalyze-row">
                 <button
                     type="button"
                     @click="reanalyze"
-                    class="rounded border border-indigo-700 px-3 py-1.5 text-xs font-medium text-indigo-300 transition-colors hover:bg-indigo-900/40 cursor-pointer"
+                    class="ecf-btn-accent"
                 >
                     Re-analyze Mapping
                 </button>
@@ -577,20 +603,20 @@ function onSubmit() {
         </fieldset>
 
         <!-- Encoding Type + Segment Duration -->
-        <fieldset class="space-y-3">
-            <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Encoding</legend>
-            <div class="flex items-center gap-4">
-                <label class="flex items-center gap-2 text-sm">
-                            <input type="radio" v-model="encodingType.value" value="video" class="accent-indigo-500" :disabled="editableVideoTracks.length === 0" />
+        <fieldset class="ecf-fieldset ecf-fieldset-padded">
+            <legend class="ecf-legend">Encoding</legend>
+            <div class="ecf-radio-group">
+                <label class="ecf-radio-label">
+                    <input type="radio" v-model="encodingType.value" value="video" class="ecf-radio" :disabled="editableVideoTracks.length === 0" />
                     Video
                 </label>
-                <label class="flex items-center gap-2 text-sm">
-                    <input type="radio" v-model="encodingType.value" value="audio" class="accent-indigo-500" />
+                <label class="ecf-radio-label">
+                    <input type="radio" v-model="encodingType.value" value="audio" class="ecf-radio" />
                     Audio Only
                 </label>
-                <div v-if="!byteRange" class="ml-auto flex items-center gap-2">
-                    <label class="text-xs text-zinc-500">Segment (s)</label>
-                    <input v-model.number="segmentDuration.value" type="number" min="1" class="input w-20 text-center" />
+                <div v-if="!byteRange" class="ecf-segment-field">
+                    <label class="ecf-segment-label">Segment (s)</label>
+                    <input v-model.number="segmentDuration.value" type="number" min="1" class="ecf-input ecf-input-segment" />
                 </div>
             </div>
         </fieldset>
@@ -598,76 +624,76 @@ function onSubmit() {
         <!-- VIDEO MODE -->
         <template v-if="encodingType.value === 'video'">
             <!-- Video Renditions -->
-            <fieldset class="space-y-3">
-                <div class="flex items-center justify-between">
-                    <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Video Renditions</legend>
-                    <button type="button" @click="addVideoRendition" class="btn-sm">+ Add</button>
+            <fieldset class="ecf-fieldset ecf-fieldset-padded">
+                <div class="ecf-section-header">
+                    <legend class="ecf-legend">Video Renditions</legend>
+                    <button type="button" @click="addVideoRendition" class="ecf-btn-sm">+ Add</button>
                 </div>
                 <div
                     v-for="(r, i) in videoRenditions"
                     :key="i"
-                    class="rounded-md bg-zinc-900/60 p-3 space-y-2"
+                    class="ecf-card"
                 >
-                    <div class="flex flex-wrap items-end gap-3">
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Width</label>
-                            <input v-model.number="r.width" type="number" min="1" class="input w-24" :disabled="r.copyStream" />
+                    <button
+                        v-if="videoRenditions.length > 1"
+                        type="button"
+                        @click="removeVideoRendition(i)"
+                        class="ecf-btn-remove ecf-btn-remove-corner"
+                    >
+                        <svg class="ecf-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                    <div class="ecf-form-row">
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Width</label>
+                            <input v-model.number="r.width" type="number" min="1" class="ecf-input ecf-input-w24" :disabled="r.copyStream" />
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Height</label>
-                            <input v-model.number="r.height" type="number" min="1" class="input w-24" :disabled="r.copyStream" />
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Height</label>
+                            <input v-model.number="r.height" type="number" min="1" class="ecf-input ecf-input-w24" :disabled="r.copyStream" />
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Video kbps</label>
-                            <input v-model.number="r.videoBitrateKbps" type="number" min="1" class="input w-28" :disabled="r.copyStream" />
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Video kbps</label>
+                            <input v-model.number="r.videoBitrateKbps" type="number" min="1" class="ecf-input ecf-input-w28" :disabled="r.copyStream" />
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Audio Group</label>
-                            <select v-model="r.audioGroupId" class="input w-40">
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Audio Group</label>
+                            <select v-model="r.audioGroupId" class="ecf-select ecf-input-w40">
                                 <option v-for="opt in uniqueAudioGroupOptions" :key="opt.id" :value="opt.id">{{ opt.label }}</option>
                             </select>
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Label</label>
-                            <input v-model="r.label" type="text" class="input w-24" placeholder="1080p" />
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Label</label>
+                            <input v-model="r.label" type="text" class="ecf-input ecf-input-w24" placeholder="1080p" />
                         </div>
-                        <button
-                            v-if="videoRenditions.length > 1"
-                            type="button"
-                            @click="removeVideoRendition(i)"
-                            class="mb-0.5 rounded p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
-                        >
-                            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
                     </div>
-                    <div class="flex items-center gap-4 text-sm">
-                        <label class="flex items-center gap-2">
+                    <div class="ecf-checkbox-row">
+                        <label class="ecf-checkbox-label">
                             <input
                                 type="checkbox"
                                 v-model="r.vbr"
-                                class="accent-indigo-500"
+                                class="ecf-checkbox"
                                 :disabled="r.copyStream"
                                 @change="r.vbr && (r.copyStream = false)"
                             />
-                            <span class="text-xs text-zinc-400">VBR encoding</span>
+                            <span class="ecf-checkbox-text">VBR encoding</span>
                         </label>
-                        <label class="flex items-center gap-2">
+                        <label class="ecf-checkbox-label">
                             <input
                                 type="checkbox"
                                 v-model="r.copyStream"
-                                class="accent-indigo-500"
+                                class="ecf-checkbox"
                                 :disabled="editableVideoTracks.length === 0"
                                 @change="onCopyToggle(r)"
                             />
-                            <span class="text-xs text-zinc-400">Copy stream (no re-encode)</span>
+                            <span class="ecf-checkbox-text">Copy stream (no re-encode)</span>
                         </label>
                         <template v-if="r.copyStream && editableVideoTracks.length > 0">
-                            <label class="text-xs text-zinc-500">Source track:</label>
+                            <label class="ecf-field-label">Source track:</label>
                             <select
                                 v-model.number="r.sourceTrackIndex"
-                                class="input w-48 text-xs"
+                                class="ecf-select ecf-input-w48"
                                 @change="onCopySourceChange(r)"
                             >
                                 <option v-for="t in editableVideoTracks" :key="t.index" :value="t.index">
@@ -680,83 +706,83 @@ function onSubmit() {
             </fieldset>
 
             <!-- Audio Groups -->
-            <fieldset class="space-y-3">
-                <div class="flex items-center justify-between">
-                    <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Audio Groups</legend>
-                    <button type="button" @click="addAudioGroup" class="btn-sm">+ Add</button>
+            <fieldset class="ecf-fieldset ecf-fieldset-padded">
+                <div class="ecf-section-header">
+                    <legend class="ecf-legend">Audio Groups</legend>
+                    <button type="button" @click="addAudioGroup" class="ecf-btn-sm">+ Add</button>
                 </div>
                 <div
                     v-for="(g, i) in audioGroups"
                     :key="i"
-                    class="rounded-md bg-zinc-900/60 p-3 space-y-2"
+                    class="ecf-card"
                 >
-                    <div class="flex flex-wrap items-end gap-3">
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Group ID</label>
-                            <input v-model="g.id" type="text" class="input w-24" />
+                    <button
+                        v-if="audioGroups.length > 1"
+                        type="button"
+                        @click="removeAudioGroup(i)"
+                        class="ecf-btn-remove ecf-btn-remove-corner"
+                    >
+                        <svg class="ecf-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                    <div class="ecf-form-row">
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Group ID</label>
+                            <input v-model="g.id" type="text" class="ecf-input ecf-input-w24" />
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Label</label>
-                            <input v-model="g.label" type="text" class="input w-28" placeholder="HD Audio" />
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Label</label>
+                            <input v-model="g.label" type="text" class="ecf-input ecf-input-w28" placeholder="HD Audio" />
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Audio kbps</label>
-                            <input v-model.number="g.audioBitrateKbps" type="number" min="1" class="input w-28" :disabled="g.copyStream" />
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Audio kbps</label>
+                            <input v-model.number="g.audioBitrateKbps" type="number" min="1" class="ecf-input ecf-input-w28" :disabled="g.copyStream" />
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Channels</label>
-                            <select v-model.number="g.channels" class="input w-24" :disabled="g.copyStream">
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Channels</label>
+                            <select v-model.number="g.channels" class="ecf-select ecf-input-w24" :disabled="g.copyStream">
                                 <option :value="1">Mono</option>
                                 <option :value="2">Stereo</option>
                                 <option :value="6">5.1</option>
                                 <option :value="8">7.1</option>
                             </select>
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Source Track</label>
-                            <select v-model.number="g.sourceTrackIndex" class="input w-40 text-xs">
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Source Track</label>
+                            <select v-model.number="g.sourceTrackIndex" class="ecf-select ecf-input-w40">
                                 <option v-for="t in editableAudioTracks" :key="t.index" :value="t.index">
                                     #{{ t.index }}: {{ t.codec }} {{ t.bitrateKbps ? `${t.bitrateKbps}kbps` : '' }} {{ channelLabel(t.channels) }}{{ t.language ? ` [${t.language}]` : '' }}
                                 </option>
                             </select>
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Language</label>
-                            <input v-model="g.language" type="text" class="input w-20" placeholder="eng" />
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Language</label>
+                            <input v-model="g.language" type="text" class="ecf-input ecf-input-w20" placeholder="eng" />
                         </div>
-                        <button
-                            v-if="audioGroups.length > 1"
-                            type="button"
-                            @click="removeAudioGroup(i)"
-                            class="mb-0.5 rounded p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
-                        >
-                            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
                     </div>
-                    <div class="flex items-center gap-4 text-sm">
-                        <label class="flex items-center gap-2">
+                    <div class="ecf-checkbox-row">
+                        <label class="ecf-checkbox-label">
                             <input
                                 type="checkbox"
                                 v-model="g.vbr"
-                                class="accent-indigo-500"
+                                class="ecf-checkbox"
                                 :disabled="g.copyStream"
                                 @change="onVbrToggle(g)"
                             />
-                            <span class="text-xs text-zinc-400">VBR encoding</span>
+                            <span class="ecf-checkbox-text">VBR encoding</span>
                         </label>
-                        <label class="flex items-center gap-2">
+                        <label class="ecf-checkbox-label">
                             <input
                                 type="checkbox"
                                 v-model="g.copyStream"
-                                class="accent-indigo-500"
+                                class="ecf-checkbox"
                                 @change="g.copyStream && (g.vbr = false)"
                             />
-                            <span class="text-xs text-zinc-400">Copy audio (no re-encode)</span>
+                            <span class="ecf-checkbox-text">Copy audio (no re-encode)</span>
                         </label>
                     </div>
-                    <p v-if="!g.vbr && !g.copyStream && g.audioBitrateKbps < 100" class="text-xs text-amber-400">
+                    <p v-if="!g.vbr && !g.copyStream && g.audioBitrateKbps < 100" class="ecf-warning">
                         CBR below 100 kbps — will be encoded as mono
                     </p>
                 </div>
@@ -765,83 +791,83 @@ function onSubmit() {
 
         <!-- AUDIO-ONLY MODE -->
         <template v-else>
-            <fieldset class="space-y-3">
-                <div class="flex items-center justify-between">
-                    <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Audio Groups</legend>
-                    <button type="button" @click="addAudioGroup" class="btn-sm">+ Add</button>
+            <fieldset class="ecf-fieldset ecf-fieldset-padded">
+                <div class="ecf-section-header">
+                    <legend class="ecf-legend">Audio Groups</legend>
+                    <button type="button" @click="addAudioGroup" class="ecf-btn-sm">+ Add</button>
                 </div>
                 <div
                     v-for="(g, i) in audioGroups"
                     :key="i"
-                    class="rounded-md bg-zinc-900/60 p-3 space-y-2"
+                    class="ecf-card"
                 >
-                    <div class="flex flex-wrap items-end gap-3">
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Group ID</label>
-                            <input v-model="g.id" type="text" class="input w-24" />
+                    <button
+                        v-if="audioGroups.length > 1"
+                        type="button"
+                        @click="removeAudioGroup(i)"
+                        class="ecf-btn-remove ecf-btn-remove-corner"
+                    >
+                        <svg class="ecf-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                    <div class="ecf-form-row">
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Group ID</label>
+                            <input v-model="g.id" type="text" class="ecf-input ecf-input-w24" />
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Label</label>
-                            <input v-model="g.label" type="text" class="input w-28" placeholder="HD Audio" />
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Label</label>
+                            <input v-model="g.label" type="text" class="ecf-input ecf-input-w28" placeholder="HD Audio" />
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Audio kbps</label>
-                            <input v-model.number="g.audioBitrateKbps" type="number" min="1" class="input w-28" :disabled="g.copyStream" />
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Audio kbps</label>
+                            <input v-model.number="g.audioBitrateKbps" type="number" min="1" class="ecf-input ecf-input-w28" :disabled="g.copyStream" />
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Channels</label>
-                            <select v-model.number="g.channels" class="input w-24" :disabled="g.copyStream">
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Channels</label>
+                            <select v-model.number="g.channels" class="ecf-select ecf-input-w24" :disabled="g.copyStream">
                                 <option :value="1">Mono</option>
                                 <option :value="2">Stereo</option>
                                 <option :value="6">5.1</option>
                                 <option :value="8">7.1</option>
                             </select>
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Source Track</label>
-                            <select v-model.number="g.sourceTrackIndex" class="input w-40 text-xs">
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Source Track</label>
+                            <select v-model.number="g.sourceTrackIndex" class="ecf-select ecf-input-w40">
                                 <option v-for="t in editableAudioTracks" :key="t.index" :value="t.index">
                                     #{{ t.index }}: {{ t.codec }} {{ t.bitrateKbps ? `${t.bitrateKbps}kbps` : '' }} {{ channelLabel(t.channels) }}{{ t.language ? ` [${t.language}]` : '' }}
                                 </option>
                             </select>
                         </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Language</label>
-                            <input v-model="g.language" type="text" class="input w-20" placeholder="eng" />
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label">Language</label>
+                            <input v-model="g.language" type="text" class="ecf-input ecf-input-w20" placeholder="eng" />
                         </div>
-                        <button
-                            v-if="audioGroups.length > 1"
-                            type="button"
-                            @click="removeAudioGroup(i)"
-                            class="mb-0.5 rounded p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
-                        >
-                            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
                     </div>
-                    <div class="flex items-center gap-4 text-sm">
-                        <label class="flex items-center gap-2">
+                    <div class="ecf-checkbox-row">
+                        <label class="ecf-checkbox-label">
                             <input
                                 type="checkbox"
                                 v-model="g.vbr"
-                                class="accent-indigo-500"
+                                class="ecf-checkbox"
                                 :disabled="g.copyStream"
                                 @change="onVbrToggle(g)"
                             />
-                            <span class="text-xs text-zinc-400">VBR encoding</span>
+                            <span class="ecf-checkbox-text">VBR encoding</span>
                         </label>
-                        <label class="flex items-center gap-2">
+                        <label class="ecf-checkbox-label">
                             <input
                                 type="checkbox"
                                 v-model="g.copyStream"
-                                class="accent-indigo-500"
+                                class="ecf-checkbox"
                                 @change="g.copyStream && (g.vbr = false)"
                             />
-                            <span class="text-xs text-zinc-400">Copy audio (no re-encode)</span>
+                            <span class="ecf-checkbox-text">Copy audio (no re-encode)</span>
                         </label>
                     </div>
-                    <p v-if="!g.vbr && !g.copyStream && g.audioBitrateKbps < 100" class="text-xs text-amber-400">
+                    <p v-if="!g.vbr && !g.copyStream && g.audioBitrateKbps < 100" class="ecf-warning">
                         CBR below 100 kbps — will be encoded as mono
                     </p>
                 </div>
@@ -851,23 +877,23 @@ function onSubmit() {
         <!-- Back confirmation banner -->
         <div
             v-if="showBackConfirm"
-            class="rounded-lg border border-amber-800/50 bg-amber-950/40 p-4"
+            class="ecf-confirm-banner"
         >
-            <p class="mb-3 text-sm text-amber-300">
+            <p class="ecf-confirm-text">
                 Going back will delete the uploaded file from the server. Are you sure?
             </p>
-            <div class="flex gap-3">
+            <div class="ecf-confirm-actions">
                 <button
                     type="button"
                     @click="showBackConfirm = false"
-                    class="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer"
+                    class="ecf-btn-secondary"
                 >
                     Cancel
                 </button>
                 <button
                     type="button"
                     @click="emit('back')"
-                    class="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-500 cursor-pointer"
+                    class="ecf-btn-danger"
                 >
                     Delete &amp; Go Back
                 </button>
@@ -875,11 +901,11 @@ function onSubmit() {
         </div>
 
         <!-- Actions -->
-        <div v-else class="flex gap-3">
+        <div v-else class="ecf-actions">
             <button
                 type="button"
                 @click="showBackConfirm = true"
-                class="rounded-lg border border-zinc-700 px-6 py-3 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer"
+                class="ecf-btn-secondary"
             >
                 Back
             </button>
@@ -888,10 +914,7 @@ function onSubmit() {
                 @click="onSubmit"
                 :disabled="!canSubmit"
                 :class="[
-                    'flex-1 rounded-lg px-6 py-3 text-sm font-semibold transition-colors',
-                    canSubmit
-                        ? 'bg-indigo-600 text-white hover:bg-indigo-500 cursor-pointer'
-                        : 'bg-zinc-800 text-zinc-500 cursor-not-allowed',
+                    canSubmit ? 'ecf-btn-primary' : 'ecf-btn-primary ecf-btn-primary-disabled',
                 ]"
             >
                 Start Encoding

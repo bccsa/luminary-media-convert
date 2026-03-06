@@ -1,12 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createCipheriv, createHmac, randomBytes } from 'crypto';
 import {
+    existsSync,
     readdirSync,
     readFileSync,
     writeFileSync,
     statSync,
 } from 'fs';
 import { join } from 'path';
+import { Worker } from 'worker_threads';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -37,39 +39,66 @@ export class EncryptionService {
         return Buffer.concat([cipher.update(data), cipher.final()]);
     }
 
-    encryptHlsOutput(
+    async encryptHlsOutput(
         outputDir: string,
         sessionId: string,
         keyUrl: string,
-    ): { key: Buffer; iv: Buffer } {
-        const key = this.deriveKey(sessionId);
-        const iv = this.generateIV();
-
-        const entries = readdirSync(outputDir, { withFileTypes: true });
-        const streamDirs = entries
-            .filter(e => e.isDirectory() && e.name.startsWith('stream_'))
-            .map(e => e.name)
-            .sort();
-
-        let segmentsEncrypted = 0;
-        for (const dir of streamDirs) {
-            segmentsEncrypted += this.encryptStreamDir(
-                join(outputDir, dir),
-                key,
-                iv,
+    ): Promise<{ key: Buffer; iv: Buffer }> {
+        const seed = process.env.HLS_ENCRYPTION_SEED;
+        if (!seed) {
+            throw new Error(
+                'HLS_ENCRYPTION_SEED environment variable is required for HLS encryption',
             );
         }
 
-        this.logger.log(
-            `Encrypted ${segmentsEncrypted} segment(s) across ${streamDirs.length} stream(s) for session ${sessionId} (IV: ${iv.toString('hex')})`,
-        );
+        const tsPath = join(__dirname, 'encryption.worker.ts');
+        const useTsWorker = existsSync(tsPath);
+        const workerPath = useTsWorker
+            ? tsPath
+            : join(__dirname, 'encryption.worker.js');
 
-        const playlistsRewritten = this.injectKeyTags(outputDir, keyUrl, iv);
-        this.logger.log(
-            `Injected #EXT-X-KEY into ${playlistsRewritten} playlist(s) for session ${sessionId}`,
-        );
+        return new Promise<{ key: Buffer; iv: Buffer }>((resolve, reject) => {
+            const worker = new Worker(workerPath, {
+                workerData: { outputDir, sessionId, keyUrl, seed },
+                ...(useTsWorker
+                    ? {
+                          execArgv: [
+                              '--require',
+                              'ts-node/register',
+                          ],
+                      }
+                    : {}),
+            });
 
-        return { key, iv };
+            worker.on('message', (msg) => {
+                const key = Buffer.from(msg.key);
+                const iv = Buffer.from(msg.iv);
+
+                this.logger.log(
+                    `Encrypted ${msg.segmentsEncrypted} segment(s) across ${msg.streamDirCount} stream(s) for session ${sessionId} (IV: ${iv.toString('hex')})`,
+                );
+
+                resolve({ key, iv });
+            });
+
+            worker.on('error', (err) => {
+                reject(
+                    new Error(
+                        `Encryption worker error: ${err.message}`,
+                    ),
+                );
+            });
+
+            worker.on('exit', (code) => {
+                if (code !== 0) {
+                    reject(
+                        new Error(
+                            `Encryption worker exited with code ${code}`,
+                        ),
+                    );
+                }
+            });
+        });
     }
 
     private encryptStreamDir(
