@@ -22,26 +22,28 @@ jest.mock('@tus/file-store', () => ({
     FileStore: jest.fn().mockImplementation(() => ({})),
 }));
 
+const mockRename = jest.fn().mockResolvedValue(undefined);
+const mockCopyFile = jest.fn().mockResolvedValue(undefined);
+const mockUnlink = jest.fn().mockResolvedValue(undefined);
+const mockMkdir = jest.fn().mockResolvedValue(undefined);
+
+jest.mock('fs/promises', () => ({
+    rename: (...args: any[]) => mockRename(...args),
+    copyFile: (...args: any[]) => mockCopyFile(...args),
+    unlink: (...args: any[]) => mockUnlink(...args),
+    mkdir: (...args: any[]) => mockMkdir(...args),
+}));
+
 jest.mock('fs', () => {
     const actual = jest.requireActual('fs');
     return {
         ...actual,
         mkdirSync: jest.fn(),
-        renameSync: jest.fn(),
-        existsSync: jest.fn().mockReturnValue(false),
-        unlinkSync: jest.fn(),
-        copyFileSync: jest.fn(),
     };
 });
 
 import { TusUploadService } from './tus-upload.service.js';
-import { mkdirSync, renameSync, existsSync, unlinkSync } from 'fs';
 import type { CreateSessionDto } from '../dto/create-session.dto.js';
-
-const mockMkdirSync = mkdirSync as jest.MockedFunction<typeof mkdirSync>;
-const mockRenameSync = renameSync as jest.MockedFunction<typeof renameSync>;
-const mockExistsSync = existsSync as jest.MockedFunction<typeof existsSync>;
-const mockUnlinkSync = unlinkSync as jest.MockedFunction<typeof unlinkSync>;
 
 function makeConfig(): CreateSessionDto {
     return {
@@ -105,7 +107,6 @@ describe('TusUploadService', () => {
 
         it('should reject empty Bearer token', async () => {
             const hook = capturedServerConfig.onIncomingRequest;
-            // Bypass Headers trimming by providing a raw object with get()
             const req = {
                 headers: { get: (name: string) => name === 'authorization' ? 'Bearer ' : null },
             };
@@ -198,7 +199,7 @@ describe('TusUploadService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
                 audioTracks: [{ index: 0, codec: 'aac', bitrateKbps: 192, channels: 2, sampleRate: 48000 }],
             };
-            (probeService.probe as jest.Mock).mockReturnValue(probeResult);
+            (probeService.probe as jest.Mock).mockResolvedValue(probeResult);
 
             const hook = capturedServerConfig.onUploadFinish;
             const upload = {
@@ -210,7 +211,7 @@ describe('TusUploadService', () => {
             const result = await hook({}, upload);
 
             expect(result).toEqual({});
-            expect(mockRenameSync).toHaveBeenCalledWith(
+            expect(mockRename).toHaveBeenCalledWith(
                 '/tmp/tus-uploads/upload-1',
                 `/tmp/tus-test-work/${session.id}/video.mp4`,
             );
@@ -226,7 +227,7 @@ describe('TusUploadService', () => {
 
         it('should use "input" as default filename when metadata lacks filename', async () => {
             const session = sessionService.create(makeConfig());
-            (probeService.probe as jest.Mock).mockReturnValue({
+            (probeService.probe as jest.Mock).mockResolvedValue({
                 format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
                 videoTracks: [],
                 audioTracks: [],
@@ -241,7 +242,7 @@ describe('TusUploadService', () => {
 
             await hook({}, upload);
 
-            expect(mockRenameSync).toHaveBeenCalledWith(
+            expect(mockRename).toHaveBeenCalledWith(
                 '/tmp/tus-uploads/upload-2',
                 expect.stringContaining('/input'),
             );
@@ -270,14 +271,13 @@ describe('TusUploadService', () => {
             expect(probeService.probe).not.toHaveBeenCalled();
         });
 
-        it('should clean up tus metadata sidecar when it exists', async () => {
+        it('should clean up tus metadata sidecar', async () => {
             const session = sessionService.create(makeConfig());
-            (probeService.probe as jest.Mock).mockReturnValue({
+            (probeService.probe as jest.Mock).mockResolvedValue({
                 format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
                 videoTracks: [],
                 audioTracks: [],
             });
-            mockExistsSync.mockReturnValue(true);
 
             const hook = capturedServerConfig.onUploadFinish;
             await hook({}, {
@@ -286,13 +286,33 @@ describe('TusUploadService', () => {
                 storage: { path: '/tmp/tus-uploads/upload-4' },
             });
 
-            expect(mockUnlinkSync).toHaveBeenCalledWith(
+            expect(mockUnlink).toHaveBeenCalledWith(
                 '/tmp/tus-uploads/upload-4.json',
             );
         });
 
-        // Dynamic import('fs') in the cross-device fallback path requires
-        // --experimental-vm-modules which is not available in standard Jest.
+        it('should fall back to copyFile when rename fails', async () => {
+            const session = sessionService.create(makeConfig());
+            (probeService.probe as jest.Mock).mockResolvedValue({
+                format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
+                videoTracks: [],
+                audioTracks: [],
+            });
+            mockRename.mockRejectedValueOnce(new Error('EXDEV: cross-device link'));
+
+            const hook = capturedServerConfig.onUploadFinish;
+            await hook({}, {
+                id: 'upload-5',
+                metadata: { sessionId: session.id, filename: 'test.mp4' },
+                storage: { path: '/tmp/tus-uploads/upload-5' },
+            });
+
+            expect(mockCopyFile).toHaveBeenCalledWith(
+                '/tmp/tus-uploads/upload-5',
+                `/tmp/tus-test-work/${session.id}/test.mp4`,
+            );
+            expect(mockUnlink).toHaveBeenCalledWith('/tmp/tus-uploads/upload-5');
+        });
     });
 
     describe('onModuleDestroy', () => {

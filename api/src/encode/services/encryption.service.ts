@@ -1,12 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { createCipheriv, createHmac, randomBytes } from 'crypto';
-import {
-    existsSync,
-    readdirSync,
-    readFileSync,
-    writeFileSync,
-    statSync,
-} from 'fs';
+import { createHmac, randomBytes } from 'crypto';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import { Worker } from 'worker_threads';
 import dotenv from 'dotenv';
@@ -32,11 +26,6 @@ export class EncryptionService {
 
     generateIV(): Buffer {
         return randomBytes(16);
-    }
-
-    encryptSegment(data: Buffer, key: Buffer, iv: Buffer): Buffer {
-        const cipher = createCipheriv('aes-128-cbc', key, iv);
-        return Buffer.concat([cipher.update(data), cipher.final()]);
     }
 
     async encryptHlsOutput(
@@ -101,65 +90,4 @@ export class EncryptionService {
         });
     }
 
-    private encryptStreamDir(
-        streamDir: string,
-        key: Buffer,
-        iv: Buffer,
-    ): number {
-        const files = readdirSync(streamDir);
-        let count = 0;
-        for (const file of files) {
-            if (!(file.endsWith('.m4s') || file.endsWith('.ts')) || file === 'init.mp4') continue;
-            const filePath = join(streamDir, file);
-            const stat = statSync(filePath);
-            if (!stat.isFile()) continue;
-
-            const plaintext = readFileSync(filePath);
-            const ciphertext = this.encryptSegment(plaintext, key, iv);
-            writeFileSync(filePath, ciphertext);
-            count++;
-        }
-        return count;
-    }
-
-    private injectKeyTags(
-        outputDir: string,
-        keyUrl: string,
-        iv: Buffer,
-    ): number {
-        const keyTag = `#EXT-X-KEY:METHOD=AES-128,URI="${keyUrl}",IV=0x${iv.toString('hex')}`;
-        let count = 0;
-
-        const processDir = (dir: string) => {
-            for (const entry of readdirSync(dir, { withFileTypes: true })) {
-                const fullPath = join(dir, entry.name);
-                if (entry.isDirectory()) {
-                    processDir(fullPath);
-                } else if (entry.name.endsWith('.m3u8')) {
-                    const content = readFileSync(fullPath, 'utf-8');
-                    if (!content.includes('#EXTINF:')) continue;
-
-                    const lines = content.split('\n');
-                    const result: string[] = [];
-                    let keyInserted = false;
-
-                    for (const line of lines) {
-                        if (!keyInserted && line.startsWith('#EXTINF:')) {
-                            result.push(keyTag);
-                            keyInserted = true;
-                        }
-                        result.push(line);
-                    }
-
-                    if (keyInserted) {
-                        writeFileSync(fullPath, result.join('\n'), 'utf-8');
-                        count++;
-                    }
-                }
-            }
-        };
-
-        processDir(outputDir);
-        return count;
-    }
 }

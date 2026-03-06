@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { readFileSync, readdirSync, rmSync, statSync } from 'fs';
+import { readdir, readFile, rm } from 'fs/promises';
 import { join, relative } from 'path';
 import { SessionService, type Session } from './session.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
@@ -187,7 +187,7 @@ export class EncodeService {
                 : undefined;
 
             if (encryptionEnabled && encryptionKey) {
-                const previewPlaylists = this.collectPlaylists(outputDir);
+                const previewPlaylists = await this.collectPlaylists(outputDir);
                 const sess = this.sessionService.get(sessionId);
                 if (sess) {
                     sess.encryptionKey = encryptionKey;
@@ -234,7 +234,7 @@ export class EncodeService {
                 message: 'Encoding failed',
             });
         } finally {
-            this.cleanupSessionFiles(sessionId, session);
+            await this.cleanupSessionFiles(sessionId, session);
         }
     }
 
@@ -254,28 +254,29 @@ export class EncodeService {
         }
     }
 
-    private collectPlaylists(dir: string, base?: string): Record<string, string> {
+    private async collectPlaylists(dir: string, base?: string): Promise<Record<string, string>> {
         const result: Record<string, string> = {};
         const root = base ?? dir;
-        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const entries = await readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
             const fullPath = join(dir, entry.name);
             if (entry.isDirectory()) {
-                Object.assign(result, this.collectPlaylists(fullPath, root));
+                Object.assign(result, await this.collectPlaylists(fullPath, root));
             } else if (entry.name.endsWith('.m3u8')) {
                 const relPath = relative(root, fullPath);
-                result[relPath] = readFileSync(fullPath, 'utf-8');
+                result[relPath] = await readFile(fullPath, 'utf-8');
             }
         }
         return result;
     }
 
-    private cleanupSessionFiles(
+    private async cleanupSessionFiles(
         sessionId: string,
         session: Session,
-    ): void {
+    ): Promise<void> {
         try {
             const sessionDir = join(this.workDir, sessionId);
-            rmSync(sessionDir, { recursive: true, force: true });
+            await rm(sessionDir, { recursive: true, force: true });
             this.logger.debug(
                 `Cleaned up work directory for session ${sessionId}`,
             );

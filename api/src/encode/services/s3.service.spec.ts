@@ -74,19 +74,19 @@ describe('S3Service', () => {
             rmSync(tmpDir, { recursive: true, force: true });
         });
 
-        it('should return all files recursively', () => {
+        it('should return all files recursively', async () => {
             mkdirSync(join(tmpDir, 'sub'), { recursive: true });
             writeFileSync(join(tmpDir, 'a.txt'), 'a');
             writeFileSync(join(tmpDir, 'sub', 'b.txt'), 'b');
 
-            const files = (service as any).walkDir(tmpDir);
+            const files = await (service as any).walkDir(tmpDir);
             expect(files).toHaveLength(2);
             expect(files).toContain(join(tmpDir, 'a.txt'));
             expect(files).toContain(join(tmpDir, 'sub', 'b.txt'));
         });
 
-        it('should return empty array for empty directory', () => {
-            const files = (service as any).walkDir(tmpDir);
+        it('should return empty array for empty directory', async () => {
+            const files = await (service as any).walkDir(tmpDir);
             expect(files).toEqual([]);
         });
     });

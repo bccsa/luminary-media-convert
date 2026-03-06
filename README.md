@@ -6,6 +6,7 @@ The repository is an npm workspaces monorepo containing:
 
 - **`api/`** — NestJS encoding service (REST API, tus upload, FFmpeg, S3 upload, webhooks)
 - **`app/`** — Vue 3 web client for uploading and monitoring encoding sessions
+- **`encode-config/`** — Shared Vue 3 component library (`EncodeConfigForm`, encoding types, layout-based config persistence)
 
 ## Table of Contents
 
@@ -175,7 +176,7 @@ npm install
 npm run dev
 ```
 
-This runs the NestJS API on `http://localhost:3000` and the Vue web client on `http://localhost:5173`.
+This runs the encode-config library in watch mode, the NestJS API on `http://localhost:3000`, and the Vue web client on `http://localhost:5173`.
 
 To start workspaces individually:
 
@@ -185,6 +186,9 @@ npm -w api run start:dev
 
 # Web client only
 npm -w app run dev
+
+# Encode config library (watch build)
+npm -w encode-config run dev
 
 # API production build
 npm -w api run build
@@ -207,15 +211,15 @@ The `app/` directory contains a Vue 3 single-page application for interacting wi
 - Drag-and-drop file upload with a browse fallback
 - Resumable chunked file upload via the tus protocol
 - Probe result display showing detected video and audio tracks with editable metadata (names, languages)
-- Configurable encoding settings (video renditions with ABR ladder suggestions, audio groups with quality tiers, copy/re-encode toggles, VBR/CBR)
+- Configurable encoding settings (video renditions with ABR ladder suggestions, audio groups with quality tiers, copy/re-encode toggles, VBR/CBR) via the shared `EncodeConfigForm` component
 - Encode config persistence — previous configs for the same media layout are saved to localStorage and can be restored
 - S3 storage configuration (persisted to localStorage between sessions)
-- Optional webhook configuration
+- Optional webhook and encryption configuration
 - Real-time session progress via polling with status badges and a progress bar
-- **HLS media preview** — on completion, a Video.js player loads the master playlist directly from S3 (assumes public bucket access), with an ABR quality selector for switching between renditions
-- **Copy playlist URL** — one-click copy of the public m3u8 URL to clipboard
+- **HLS media preview** — on completion, a Video.js player loads the master playlist directly from S3, with an ABR quality selector for switching between renditions and thumbnail scrubbing preview
+- **Copy S3 URL** — one-click copy of the S3 m3u8 URL to clipboard
 
-**Tech stack:** Vite, Vue 3, Tailwind CSS v4, Video.js 8, tus-js-client, Auth0 Vue SDK, TypeScript.
+**Tech stack:** Vite, Vue 3, Tailwind CSS v4, Video.js 8, tus-js-client, Auth0 Vue SDK, Vitest, TypeScript.
 
 The web client communicates directly with the API (no proxy). CORS is configured on the API via the `CORS_ORIGIN` environment variable (defaults to `http://localhost:5173`). Authentication is handled via Auth0 — the web client requires `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, and `VITE_AUTH0_AUDIENCE` environment variables.
 
@@ -250,11 +254,25 @@ Content-Type: application/json
   "webhook": {
     "url": "https://myapp.example.com/webhooks/encode",
     "sessionToken": "my-webhook-secret-token"
-  }
+  },
+  "encryption": {
+    "enabled": true,
+    "keyUrl": "https://myapp.example.com/keys"
+  },
+  "segmentDuration": 6,
+  "byteRange": true,
+  "byteRangeMaxFileSizeMB": 500,
+  "thumbnails": true
 }
 ```
 
-The `webhook` field is optional. When omitted, no webhook callbacks are sent — use the [polling endpoint](#3-poll-session-status) to track progress instead.
+The `webhook`, `encryption`, `segmentDuration`, `byteRange`, `byteRangeMaxFileSizeMB`, and `thumbnails` fields are all optional.
+
+- `segmentDuration` defaults to `6` seconds
+- `byteRange` defaults to `true` (consolidate segments into fewer large files)
+- `byteRangeMaxFileSizeMB` defaults to `500` MB
+- `thumbnails` defaults to `true` for video encodes (generates WebVTT thumbnail sprites)
+- `encryption` enables AES-128 HLS encryption when provided
 
 **Response (201):**
 
@@ -383,7 +401,7 @@ Possible `status` values:
 | `queued` | Encoding queued, waiting in FIFO queue | `queuePosition` |
 | `encoding` | FFmpeg actively processing | `progress` (0-100) |
 | `uploading_to_s3` | Encoding done, uploading output to S3 | `progress` (0-100) |
-| `completed` | All files uploaded to S3 | `files`, `masterPlaylist`, `anglePlaylists`, `encoder`, `segmentFormat` |
+| `completed` | All files uploaded to S3 | `files`, `masterPlaylist`, `anglePlaylists`, `encoder`, `segmentFormat`, `thumbnailsVtt`, `previewBaseUrl`, `previewToken` |
 | `failed` | Error occurred | `error` |
 
 **Uploaded status response (with probe results):**
@@ -440,7 +458,6 @@ Content-Type: application/json
 ```json
 {
   "type": "video",
-  "segmentDuration": 6,
   "videoRenditions": [
     {
       "width": 1920,
@@ -500,7 +517,6 @@ Content-Type: application/json
 ```json
 {
   "type": "audio",
-  "segmentDuration": 6,
   "audioGroups": [
     {
       "id": "hd",
@@ -546,6 +562,26 @@ Authorization: Bearer <auth0_access_token>
 ```
 
 **Response:** `204 No Content`
+
+---
+
+### 6. Preview Endpoints (Encrypted HLS)
+
+When HLS encryption is enabled, the API provides preview endpoints that rewrite key URIs in playlists for authenticated playback.
+
+```
+GET /api/sessions/:sessionId/preview/*
+Authorization: Bearer <previewToken>
+```
+
+Serves rewritten HLS playlists with proxied key URIs.
+
+```
+GET /api/sessions/:sessionId/preview/key
+Authorization: Bearer <previewToken>
+```
+
+Serves the HLS encryption key for preview playback. The `previewBaseUrl` and `previewToken` are returned in the completed session status response.
 
 ---
 
@@ -613,13 +649,15 @@ Webhooks are optional. When a `webhook` configuration is provided in the session
 
 ## Encoding Workflow
 
-1. **Session creation** — Client sends S3 credentials and optional webhook URL. Service returns a tus upload endpoint and upload token.
+1. **Session creation** — Client sends S3 credentials, optional webhook URL, encryption config, and encoding options (segment duration, byte-range, thumbnails). Service returns a tus upload endpoint and upload token.
 2. **File upload** — Client uploads the source media file via tus (resumable, chunked). On completion, the API auto-probes the file with ffprobe.
 3. **Probe & configure** — Client polls for probe results (detected video/audio tracks), then submits an encoding configuration (video renditions, audio groups, copy/re-encode choices).
 4. **Queue processing** — The session enters a FIFO queue. Sessions are processed one at a time in first-come-first-served order.
 5. **Encoding** — FFmpeg probes per-stream start times and selects the optimal segment format: fMP4 segments (`.m4s` + `init.mp4`) when streams are aligned, or MPEG-TS segments (`.ts`) when streams have misaligned start times (the player's TS transmuxer synchronizes audio/video during playback). When byte-range mode is enabled (default), segments are consolidated into fewer large files using HLS byte-range addressing. Progress is reported via webhooks or polling.
-6. **S3 upload** — All output files are uploaded to the client-specified S3 bucket.
-7. **Completion** — Final webhook includes the full list of S3 object keys and the master playlist path.
+6. **Encryption** — If encryption is enabled, HLS segments are encrypted with AES-128 via a worker thread. Preview endpoints are set up for authenticated playback.
+7. **Thumbnail generation** — For video encodes (when enabled), sprite-based thumbnails with a WebVTT file are generated for timeline scrubbing.
+8. **S3 upload** — All output files are uploaded to the client-specified S3 bucket (with configurable concurrency).
+9. **Completion** — Final webhook includes the full list of S3 object keys, master playlist path, thumbnail VTT path, and preview URLs (if encrypted).
 
 ---
 
@@ -724,11 +762,14 @@ The session status response includes a `segmentFormat` field (`"fmp4"` or `"mpeg
 │   ├── playlist.m3u8                   # Audio rendition (HD Audio)
 │   ├── segment_000.m4s
 │   └── ...
-└── stream_Standard/
-    ├── init.mp4
-    ├── playlist.m3u8                   # Audio rendition (Standard Audio)
-    ├── segment_000.m4s
-    └── ...
+├── stream_Standard/
+│   ├── init.mp4
+│   ├── playlist.m3u8                   # Audio rendition (Standard Audio)
+│   ├── segment_000.m4s
+│   └── ...
+└── thumbnails/                         # (when thumbnails enabled)
+    ├── thumbnails.vtt                  # WebVTT file for timeline scrubbing
+    └── sprite_*.jpg                    # Thumbnail sprite sheets
 ```
 
 **MPEG-TS output** (misaligned streams) has the same structure but with `.ts` segments and no `init.mp4`:

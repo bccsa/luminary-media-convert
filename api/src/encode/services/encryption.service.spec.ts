@@ -69,48 +69,6 @@ describe('EncryptionService', () => {
         });
     });
 
-    describe('encryptSegment', () => {
-        it('should produce valid AES-128-CBC ciphertext', () => {
-            const key = service.deriveKey('session-1');
-            const iv = Buffer.alloc(16, 0x01);
-            const plaintext = Buffer.from('Hello, HLS encryption!');
-
-            const ciphertext = service.encryptSegment(plaintext, key, iv);
-
-            expect(ciphertext).toBeInstanceOf(Buffer);
-            expect(ciphertext.length).toBeGreaterThan(0);
-            expect(ciphertext.length % 16).toBe(0);
-            expect(ciphertext).not.toEqual(plaintext);
-        });
-
-        it('should be decryptable with the same key and IV', () => {
-            const key = service.deriveKey('session-1');
-            const iv = Buffer.alloc(16, 0x02);
-            const plaintext = Buffer.from('Roundtrip test data for AES-128-CBC');
-
-            const ciphertext = service.encryptSegment(plaintext, key, iv);
-
-            const decipher = createDecipheriv('aes-128-cbc', key, iv);
-            const decrypted = Buffer.concat([
-                decipher.update(ciphertext),
-                decipher.final(),
-            ]);
-            expect(decrypted).toEqual(plaintext);
-        });
-
-        it('should apply PKCS7 padding (output >= input, multiple of 16)', () => {
-            const key = service.deriveKey('session-1');
-            const iv = Buffer.alloc(16, 0x03);
-
-            for (const len of [1, 15, 16, 17, 31, 32, 100]) {
-                const plaintext = Buffer.alloc(len, 0xaa);
-                const ciphertext = service.encryptSegment(plaintext, key, iv);
-                expect(ciphertext.length).toBeGreaterThanOrEqual(len);
-                expect(ciphertext.length % 16).toBe(0);
-            }
-        });
-    });
-
     describe('encryptHlsOutput', () => {
         let tmpDir: string;
 

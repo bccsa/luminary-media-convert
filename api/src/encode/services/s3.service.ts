@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as Minio from 'minio';
-import { readdirSync, statSync } from 'fs';
+import { readdir } from 'fs/promises';
 import { join, relative, posix } from 'path';
 import type { S3ConfigDto } from '../dto/s3-config.dto.js';
 
@@ -30,15 +30,14 @@ export class S3Service {
     /**
      * Recursively collect all file paths under a directory.
      */
-    private walkDir(dir: string): string[] {
+    private async walkDir(dir: string): Promise<string[]> {
         const results: string[] = [];
-        const entries = readdirSync(dir);
+        const entries = await readdir(dir, { withFileTypes: true });
 
         for (const entry of entries) {
-            const fullPath = join(dir, entry);
-            const stat = statSync(fullPath);
-            if (stat.isDirectory()) {
-                results.push(...this.walkDir(fullPath));
+            const fullPath = join(dir, entry.name);
+            if (entry.isDirectory()) {
+                results.push(...await this.walkDir(fullPath));
             } else {
                 results.push(fullPath);
             }
@@ -59,7 +58,7 @@ export class S3Service {
         options?: { onProgress?: (percent: number) => void; concurrency?: number }
     ): Promise<S3UploadResult> {
         const client = this.createClient(config);
-        const files = this.walkDir(outputDir);
+        const files = await this.walkDir(outputDir);
         const totalFiles = files.length;
         const results: string[] = new Array(totalFiles);
         let masterPlaylistKey = '';

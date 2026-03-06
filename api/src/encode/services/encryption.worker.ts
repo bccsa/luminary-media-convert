@@ -1,6 +1,15 @@
 import { parentPort, workerData } from 'worker_threads';
 import { createCipheriv, createHmac, randomBytes } from 'crypto';
-import { readdirSync, readFileSync, writeFileSync, statSync } from 'fs';
+import { createReadStream, createWriteStream } from 'fs';
+import {
+    readdir,
+    readFile,
+    writeFile,
+    rename,
+    unlink,
+    stat,
+} from 'fs/promises';
+import { pipeline } from 'stream/promises';
 import { join } from 'path';
 
 interface WorkerData {
@@ -10,6 +19,8 @@ interface WorkerData {
     seed: string;
 }
 
+const CONCURRENCY_LIMIT = 6;
+
 function deriveKey(seed: string, sessionId: string): Buffer {
     return createHmac('sha256', seed)
         .update(sessionId)
@@ -17,98 +28,131 @@ function deriveKey(seed: string, sessionId: string): Buffer {
         .subarray(0, 16);
 }
 
-function encryptSegment(data: Buffer, key: Buffer, iv: Buffer): Buffer {
-    const cipher = createCipheriv('aes-128-cbc', key, iv);
-    return Buffer.concat([cipher.update(data), cipher.final()]);
-}
+async function mapWithLimit<T, R>(
+    items: T[],
+    limit: number,
+    fn: (item: T) => Promise<R>
+): Promise<R[]> {
+    const results: R[] = new Array(items.length);
+    let index = 0;
 
-function encryptStreamDir(
-    streamDir: string,
-    key: Buffer,
-    iv: Buffer,
-): number {
-    const files = readdirSync(streamDir);
-    let count = 0;
-    for (const file of files) {
-        if (
-            !(file.endsWith('.m4s') || file.endsWith('.ts')) ||
-            file === 'init.mp4'
-        )
-            continue;
-        const filePath = join(streamDir, file);
-        const stat = statSync(filePath);
-        if (!stat.isFile()) continue;
-
-        const plaintext = readFileSync(filePath);
-        const ciphertext = encryptSegment(plaintext, key, iv);
-        writeFileSync(filePath, ciphertext);
-        count++;
-    }
-    return count;
-}
-
-function injectKeyTags(
-    outputDir: string,
-    keyUrl: string,
-    iv: Buffer,
-): number {
-    const keyTag = `#EXT-X-KEY:METHOD=AES-128,URI="${keyUrl}",IV=0x${iv.toString('hex')}`;
-    let count = 0;
-
-    const processDir = (dir: string) => {
-        for (const entry of readdirSync(dir, { withFileTypes: true })) {
-            const fullPath = join(dir, entry.name);
-            if (entry.isDirectory()) {
-                processDir(fullPath);
-            } else if (entry.name.endsWith('.m3u8')) {
-                const content = readFileSync(fullPath, 'utf-8');
-                if (!content.includes('#EXTINF:')) continue;
-
-                const lines = content.split('\n');
-                const result: string[] = [];
-                let keyInserted = false;
-
-                for (const line of lines) {
-                    if (!keyInserted && line.startsWith('#EXTINF:')) {
-                        result.push(keyTag);
-                        keyInserted = true;
-                    }
-                    result.push(line);
-                }
-
-                if (keyInserted) {
-                    writeFileSync(fullPath, result.join('\n'), 'utf-8');
-                    count++;
-                }
-            }
+    async function worker() {
+        while (index < items.length) {
+            const i = index++;
+            results[i] = await fn(items[i]);
         }
-    };
+    }
 
-    processDir(outputDir);
-    return count;
+    await Promise.all(
+        Array.from({ length: Math.min(limit, items.length) }, () => worker())
+    );
+    return results;
 }
 
-const { outputDir, sessionId, keyUrl, seed } = workerData as WorkerData;
-
-const key = deriveKey(seed, sessionId);
-const iv = randomBytes(16);
-
-const entries = readdirSync(outputDir, { withFileTypes: true });
-const streamDirs = entries
-    .filter((e) => e.isDirectory() && e.name.startsWith('stream_'))
-    .map((e) => e.name)
-    .sort();
-
-let segmentsEncrypted = 0;
-for (const dir of streamDirs) {
-    segmentsEncrypted += encryptStreamDir(join(outputDir, dir), key, iv);
+async function encryptSegmentFile(
+    filePath: string,
+    key: Buffer,
+    iv: Buffer
+): Promise<void> {
+    const tmpPath = filePath + '.enc.tmp';
+    try {
+        const cipher = createCipheriv('aes-128-cbc', key, iv);
+        await pipeline(
+            createReadStream(filePath),
+            cipher,
+            createWriteStream(tmpPath)
+        );
+        await rename(tmpPath, filePath);
+    } catch (err) {
+        await unlink(tmpPath).catch(() => {});
+        throw err;
+    }
 }
 
-injectKeyTags(outputDir, keyUrl, iv);
+async function findPlaylistFiles(dir: string): Promise<string[]> {
+    const playlists: string[] = [];
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+        const fullPath = join(dir, entry.name);
+        if (entry.isDirectory()) {
+            playlists.push(...(await findPlaylistFiles(fullPath)));
+        } else if (entry.name.endsWith('.m3u8')) {
+            playlists.push(fullPath);
+        }
+    }
+    return playlists;
+}
 
-parentPort!.postMessage({
-    key: Array.from(key),
-    iv: Array.from(iv),
-    segmentsEncrypted,
-    streamDirCount: streamDirs.length,
+async function injectKeyTag(
+    filePath: string,
+    keyTag: string
+): Promise<boolean> {
+    const content = await readFile(filePath, 'utf-8');
+    if (!content.includes('#EXTINF:')) return false;
+
+    const lines = content.split('\n');
+    const result: string[] = [];
+    let keyInserted = false;
+
+    for (const line of lines) {
+        if (!keyInserted && line.startsWith('#EXTINF:')) {
+            result.push(keyTag);
+            keyInserted = true;
+        }
+        result.push(line);
+    }
+
+    if (keyInserted) {
+        await writeFile(filePath, result.join('\n'), 'utf-8');
+    }
+    return keyInserted;
+}
+
+(async () => {
+    const { outputDir, sessionId, keyUrl, seed } = workerData as WorkerData;
+
+    const key = deriveKey(seed, sessionId);
+    const iv = randomBytes(16);
+
+    const entries = await readdir(outputDir, { withFileTypes: true });
+    const streamDirs = entries
+        .filter((e) => e.isDirectory() && e.name.startsWith('stream_'))
+        .map((e) => e.name)
+        .sort();
+
+    // Collect all segment files across all stream dirs
+    const segmentFiles: string[] = [];
+    for (const dir of streamDirs) {
+        const dirPath = join(outputDir, dir);
+        const files = await readdir(dirPath);
+        for (const file of files) {
+            if (
+                !(file.endsWith('.m4s') || file.endsWith('.ts')) ||
+                file === 'init.mp4'
+            )
+                continue;
+            const filePath = join(dirPath, file);
+            const s = await stat(filePath);
+            if (s.isFile()) segmentFiles.push(filePath);
+        }
+    }
+
+    // Encrypt segments concurrently
+    await mapWithLimit(segmentFiles, CONCURRENCY_LIMIT, (filePath) =>
+        encryptSegmentFile(filePath, key, iv)
+    );
+
+    // Inject key tags into playlists
+    const keyTag = `#EXT-X-KEY:METHOD=AES-128,URI="${keyUrl}",IV=0x${iv.toString('hex')}`;
+    const playlists = await findPlaylistFiles(outputDir);
+    await Promise.all(playlists.map((p) => injectKeyTag(p, keyTag)));
+
+    parentPort!.postMessage({
+        key: Array.from(key),
+        iv: Array.from(iv),
+        segmentsEncrypted: segmentFiles.length,
+        streamDirCount: streamDirs.length,
+    });
+})().catch((err) => {
+    throw err;
 });

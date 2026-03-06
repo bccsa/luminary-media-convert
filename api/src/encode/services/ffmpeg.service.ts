@@ -4,14 +4,16 @@ import {
     OnModuleInit,
     OnModuleDestroy,
 } from '@nestjs/common';
-import { spawn, execSync, type ChildProcess } from 'child_process';
-import {
-    mkdirSync, existsSync, readFileSync, writeFileSync, unlinkSync,
-    readdirSync, statSync, openSync, writeSync, closeSync,
-} from 'fs';
+import { spawn, execFile, execSync, type ChildProcess } from 'child_process';
+import { mkdirSync, existsSync } from 'fs';
+import { readFile, writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
+import { promisify } from 'util';
+import { Worker } from 'worker_threads';
 import type { EncodeConfigDto, VideoRenditionDto, AudioGroupDto } from '../dto/encode-config.dto.js';
 import dotenv from 'dotenv';
+
+const execFileAsync = promisify(execFile);
 
 dotenv.config();
 
@@ -151,13 +153,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     /**
      * Probe per-stream start times grouped by codec type.
      */
-    private probeStreamStartTimes(inputPath: string): { video: number[]; audio: number[] } {
+    private async probeStreamStartTimes(inputPath: string): Promise<{ video: number[]; audio: number[] }> {
         try {
-            const output = execSync(
-                `ffprobe -v error -show_entries stream=codec_type,start_time -of json "${inputPath}"`,
-                { encoding: 'utf-8', timeout: 30000 },
-            );
-            const data = JSON.parse(output);
+            const { stdout } = await execFileAsync('ffprobe', [
+                '-v', 'error', '-show_entries', 'stream=codec_type,start_time',
+                '-of', 'json', inputPath,
+            ], { timeout: 30000 });
+            const data = JSON.parse(stdout);
             const video: number[] = [];
             const audio: number[] = [];
             for (const stream of data.streams ?? []) {
@@ -178,8 +180,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      * segments are needed because hls.js's TS→fMP4 transmuxer synchronizes
      * audio and video PTS during transmux.
      */
-    private areStreamStartTimesAligned(inputPath: string, encodeConfig: EncodeConfigDto): boolean {
-        const startTimes = this.probeStreamStartTimes(inputPath);
+    private async areStreamStartTimesAligned(inputPath: string, encodeConfig: EncodeConfigDto): Promise<boolean> {
+        const startTimes = await this.probeStreamStartTimes(inputPath);
 
         const usedStartTimes: number[] = [];
         if (encodeConfig.type === 'video') {
@@ -212,13 +214,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return false;
     }
 
-    private probeDuration(inputPath: string): number {
+    private async probeDuration(inputPath: string): Promise<number> {
         try {
-            const output = execSync(
-                `ffprobe -v error -show_entries format=duration -of csv=p=0 "${inputPath}"`,
-                { encoding: 'utf-8', timeout: 30000 },
-            );
-            const duration = parseFloat(output.trim());
+            const { stdout } = await execFileAsync('ffprobe', [
+                '-v', 'error', '-show_entries', 'format=duration',
+                '-of', 'csv=p=0', inputPath,
+            ], { timeout: 30000 });
+            const duration = parseFloat(stdout.trim());
             return isNaN(duration) ? 0 : duration;
         } catch {
             this.logger.warn('Could not probe input duration, progress will be unavailable');
@@ -226,13 +228,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    private probeFrameRate(inputPath: string): number {
+    private async probeFrameRate(inputPath: string): Promise<number> {
         try {
-            const output = execSync(
-                `ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of csv=p=0 "${inputPath}"`,
-                { encoding: 'utf-8', timeout: 30000 },
-            );
-            const raw = output.trim();
+            const { stdout } = await execFileAsync('ffprobe', [
+                '-v', 'error', '-select_streams', 'v:0',
+                '-show_entries', 'stream=r_frame_rate',
+                '-of', 'csv=p=0', inputPath,
+            ], { timeout: 30000 });
+            const raw = stdout.trim();
             const parts = raw.split('/');
             if (parts.length === 2) {
                 const num = parseFloat(parts[0]);
@@ -247,13 +250,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    private probeGopDuration(inputPath: string, frameRate: number): number | null {
+    private async probeGopDuration(inputPath: string, frameRate: number): Promise<number | null> {
         try {
-            const output = execSync(
-                `ffprobe -v error -select_streams v:0 -show_frames -show_entries frame=pict_type -of csv=p=0 -read_intervals "%+#200" "${inputPath}"`,
-                { encoding: 'utf-8', timeout: 60000 },
-            );
-            const frames = output.trim().split('\n').filter(l => l.trim());
+            const { stdout } = await execFileAsync('ffprobe', [
+                '-v', 'error', '-select_streams', 'v:0',
+                '-show_frames', '-show_entries', 'frame=pict_type',
+                '-of', 'csv=p=0', '-read_intervals', '%+#200', inputPath,
+            ], { timeout: 60000 });
+            const frames = stdout.trim().split('\n').filter(l => l.trim());
             let keyframeCount = 0;
             let firstKeyIdx = -1;
             let secondKeyIdx = -1;
@@ -303,17 +307,17 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return Math.max(16, Math.min(34, Math.round(crf)));
     }
 
-    private buildVideoArgs(opts: EncodeOptions, useFmp4 = true): string[] {
+    private async buildVideoArgs(opts: EncodeOptions, useFmp4 = true): Promise<string[]> {
         const { inputPath, outputDir, encodeConfig } = opts;
         const renditions = encodeConfig.videoRenditions!;
         const audioGroups = encodeConfig.audioGroups!;
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
-        const sourceFrameRate = this.probeFrameRate(inputPath);
+        const sourceFrameRate = await this.probeFrameRate(inputPath);
         const gopFrames = Math.round(segmentDuration * sourceFrameRate);
 
         let hlsTime = segmentDuration;
         if (opts.byteRange !== false) {
-            const sourceGopDuration = this.probeGopDuration(inputPath, sourceFrameRate);
+            const sourceGopDuration = await this.probeGopDuration(inputPath, sourceFrameRate);
             if (sourceGopDuration && sourceGopDuration > 0) {
                 hlsTime = sourceGopDuration;
                 this.logger.log(
@@ -632,12 +636,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         // Use fMP4 when stream start times are aligned (CMAF-compatible, lower overhead).
         // Fall back to MPEG-TS when misaligned — hls.js's transmuxer fixes sync for TS.
-        const useFmp4 = this.areStreamStartTimesAligned(opts.inputPath, encodeConfig);
+        const useFmp4 = await this.areStreamStartTimesAligned(opts.inputPath, encodeConfig);
 
-        const totalDuration = this.probeDuration(opts.inputPath);
+        const totalDuration = await this.probeDuration(opts.inputPath);
         const args =
             type === 'video'
-                ? this.buildVideoArgs(opts, useFmp4)
+                ? await this.buildVideoArgs(opts, useFmp4)
                 : this.buildAudioArgs(opts, useFmp4);
 
         this.logger.debug(`FFmpeg args: ffmpeg ${args.join(' ')}`);
@@ -701,24 +705,22 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     if (opts.byteRange !== false) {
                         const maxBytes = opts.byteRangeMaxFileSizeBytes
                             ?? 500 * 1024 * 1024;
-                        this.convertToByteRange(outputDir, maxBytes);
+                        await this.convertToByteRange(outputDir, maxBytes);
                     }
 
                     let anglePlaylists: AnglePlaylist[] = [];
                     let masterPlaylistFilename = 'master.m3u8';
                     if (type === 'video') {
-                        this.fixMasterPlaylist(outputDir, encodeConfig);
-                        anglePlaylists = this.generateAnglePlaylists(outputDir, encodeConfig);
+                        await this.fixMasterPlaylist(outputDir, encodeConfig);
+                        anglePlaylists = await this.generateAnglePlaylists(outputDir, encodeConfig);
                         if (anglePlaylists.length > 1) {
                             const masterPath = join(outputDir, 'master.m3u8');
-                            if (existsSync(masterPath)) {
-                                unlinkSync(masterPath);
-                            }
+                            await unlink(masterPath).catch(() => {});
                             masterPlaylistFilename =
                                 anglePlaylists[0]?.filename ?? 'master.m3u8';
                         }
 
-                        const audioOnlyPlaylist = this.generateAudioOnlyPlaylist(outputDir, encodeConfig);
+                        const audioOnlyPlaylist = await this.generateAudioOnlyPlaylist(outputDir, encodeConfig);
                         if (audioOnlyPlaylist) {
                             if (anglePlaylists.length === 1 && anglePlaylists[0].name === 'Default') {
                                 anglePlaylists[0] = { ...anglePlaylists[0], name: 'Video' };
@@ -726,7 +728,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                             anglePlaylists.push(audioOnlyPlaylist);
                         }
                     } else {
-                        this.fixAudioOnlyMasterPlaylist(outputDir, encodeConfig);
+                        await this.fixAudioOnlyMasterPlaylist(outputDir, encodeConfig);
                     }
                     resolve({
                         outputDir,
@@ -775,139 +777,79 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         });
     }
 
-    private convertToByteRange(outputDir: string, maxFileSizeBytes: number): void {
-        const entries = readdirSync(outputDir, { withFileTypes: true });
-        const streamDirs = entries
-            .filter(e => e.isDirectory() && e.name.startsWith('stream_'))
-            .map(e => e.name)
-            .sort();
+    private async convertToByteRange(outputDir: string, maxFileSizeBytes: number): Promise<void> {
+        const tsPath = join(__dirname, 'byte-range.worker.ts');
+        const useTsWorker = existsSync(tsPath);
+        const workerPath = useTsWorker
+            ? tsPath
+            : join(__dirname, 'byte-range.worker.js');
 
-        for (const dir of streamDirs) {
-            this.convertStreamToByteRange(join(outputDir, dir), maxFileSizeBytes);
-        }
-
-        this.logger.log(
-            `Byte-range conversion complete for ${streamDirs.length} stream(s) (max ${Math.round(maxFileSizeBytes / 1024 / 1024)} MB per file)`,
-        );
-    }
-
-    private convertStreamToByteRange(streamDir: string, maxFileSizeBytes: number): void {
-        const playlistPath = join(streamDir, 'playlist.m3u8');
-        if (!existsSync(playlistPath)) return;
-
-        const content = readFileSync(playlistPath, 'utf-8');
-        const lines = content.split('\n');
-
-        const headerLines: string[] = [];
-        const segments: { extinfLine: string; filename: string }[] = [];
-        let footerLine = '';
-        let inSegments = false;
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (line.startsWith('#EXTINF:')) {
-                inSegments = true;
-                const filename = lines[i + 1]?.trim();
-                if (filename && !filename.startsWith('#')) {
-                    segments.push({ extinfLine: line, filename });
-                    i++;
-                }
-            } else if (line.startsWith('#EXT-X-ENDLIST')) {
-                footerLine = line;
-            } else if (!inSegments) {
-                headerLines.push(line);
-            }
-        }
-
-        if (segments.length === 0) return;
-
-        // Detect segment extension from the first segment filename (.m4s or .ts)
-        const firstSeg = segments[0].filename;
-        const segExt = firstSeg.endsWith('.m4s') ? 'm4s' : 'ts';
-
-        const byteRanges: { extinfLine: string; length: number; offset: number; mediaFile: string }[] = [];
-        let fileIndex = 0;
-        let currentOffset = 0;
-        let currentMediaFile = `media_${fileIndex}.${segExt}`;
-        let fd = openSync(join(streamDir, currentMediaFile), 'w');
-
-        for (const seg of segments) {
-            const segPath = join(streamDir, seg.filename);
-            if (!existsSync(segPath)) continue;
-
-            const segData = readFileSync(segPath);
-            const segSize = segData.length;
-
-            if (currentOffset > 0 && currentOffset + segSize > maxFileSizeBytes) {
-                closeSync(fd);
-                fileIndex++;
-                currentOffset = 0;
-                currentMediaFile = `media_${fileIndex}.${segExt}`;
-                fd = openSync(join(streamDir, currentMediaFile), 'w');
-            }
-
-            writeSync(fd, segData);
-            byteRanges.push({
-                extinfLine: seg.extinfLine,
-                length: segSize,
-                offset: currentOffset,
-                mediaFile: currentMediaFile,
+        return new Promise<void>((resolve, reject) => {
+            const worker = new Worker(workerPath, {
+                workerData: { outputDir, maxFileSizeBytes },
+                ...(useTsWorker
+                    ? { execArgv: ['--require', 'ts-node/register'] }
+                    : {}),
             });
-            currentOffset += segSize;
-        }
 
-        closeSync(fd);
+            worker.on('message', (msg) => {
+                this.logger.log(
+                    `Byte-range conversion complete for ${msg.streamCount} stream(s) (max ${Math.round(maxFileSizeBytes / 1024 / 1024)} MB per file)`,
+                );
+                resolve();
+            });
 
-        const newLines: string[] = [...headerLines];
-        for (const br of byteRanges) {
-            newLines.push(br.extinfLine);
-            newLines.push(`#EXT-X-BYTERANGE:${br.length}@${br.offset}`);
-            newLines.push(br.mediaFile);
-        }
-        if (footerLine) newLines.push(footerLine);
-        newLines.push('');
+            worker.on('error', (err) => {
+                reject(new Error(`Byte-range worker error: ${err.message}`));
+            });
 
-        writeFileSync(playlistPath, newLines.join('\n'), 'utf-8');
-
-        for (const seg of segments) {
-            const segPath = join(streamDir, seg.filename);
-            if (existsSync(segPath)) unlinkSync(segPath);
-        }
+            worker.on('exit', (code) => {
+                if (code !== 0) {
+                    reject(new Error(`Byte-range worker exited with code ${code}`));
+                }
+            });
+        });
     }
 
-    private fixMasterPlaylist(
+    private async fixMasterPlaylist(
         outputDir: string,
         config: EncodeConfigDto,
-    ): void {
+    ): Promise<void> {
         const masterPath = join(outputDir, 'master.m3u8');
-        if (!existsSync(masterPath)) return;
-
-        let content = readFileSync(masterPath, 'utf-8');
+        let content: string;
+        try {
+            content = await readFile(masterPath, 'utf-8');
+        } catch {
+            return;
+        }
         content = this.fixMasterPlaylistAudioNames(content, config);
         content = this.fixMasterPlaylistVideoGroups(content, config);
-        writeFileSync(masterPath, content, 'utf-8');
+        await writeFile(masterPath, content, 'utf-8');
     }
 
     /**
      * Rewrite the FFmpeg-generated audio-only master.m3u8 to add proper
      * EXT-X-MEDIA entries with language tags and GROUP-IDs per quality tier.
      */
-    private fixAudioOnlyMasterPlaylist(
+    private async fixAudioOnlyMasterPlaylist(
         outputDir: string,
         config: EncodeConfigDto,
-    ): void {
+    ): Promise<void> {
         const audioGroups = config.audioGroups ?? [];
         if (audioGroups.length === 0) return;
 
         const masterPath = join(outputDir, 'master.m3u8');
-        if (!existsSync(masterPath)) return;
-
-        const raw = readFileSync(masterPath, 'utf-8');
+        let raw: string;
+        try {
+            raw = await readFile(masterPath, 'utf-8');
+        } catch {
+            return;
+        }
         const versionMatch = raw.match(/#EXT-X-VERSION:\d+/);
         const extVersion = versionMatch?.[0] ?? '#EXT-X-VERSION:7';
 
         const content = this.buildAudioOnlyMasterContent(extVersion, audioGroups);
-        writeFileSync(masterPath, content, 'utf-8');
+        await writeFile(masterPath, content, 'utf-8');
 
         this.logger.debug(
             `fixAudioOnlyMasterPlaylist: rewrote master.m3u8 with ${audioGroups.length} audio group(s)`,
@@ -949,22 +891,25 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      * and split it into one playlist per angle. Does NOT upload the original
      * multi-angle master because most HLS web players don't support it.
      */
-    private generateAnglePlaylists(
+    private async generateAnglePlaylists(
         outputDir: string,
         config: EncodeConfigDto,
-    ): AnglePlaylist[] {
+    ): Promise<AnglePlaylist[]> {
         const renditions = config.videoRenditions ?? [];
         if (renditions.length === 0) return [];
 
         const masterPath = join(outputDir, 'master.m3u8');
-        if (!existsSync(masterPath)) return [];
-
         const uniqueTracks = new Set(renditions.map(r => r.sourceTrackIndex ?? 0));
         if (uniqueTracks.size <= 1) {
             return [{ name: 'Default', filename: 'master.m3u8' }];
         }
 
-        const content = readFileSync(masterPath, 'utf-8');
+        let content: string;
+        try {
+            content = await readFile(masterPath, 'utf-8');
+        } catch {
+            return [];
+        }
         const lines = content.split('\n');
 
         let extVersion = '#EXT-X-VERSION:3';
@@ -1021,7 +966,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             }
 
             const anglePath = join(outputDir, filename);
-            writeFileSync(anglePath, parts.join('\n') + '\n', 'utf-8');
+            await writeFile(anglePath, parts.join('\n') + '\n', 'utf-8');
             anglePlaylists.push({ name: angleName, filename });
 
             this.logger.debug(
@@ -1036,23 +981,26 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      * Generate a standalone audio-only master playlist from a video encode's
      * audio streams. Follows the same structure as audio-file-upload playlists.
      */
-    private generateAudioOnlyPlaylist(
+    private async generateAudioOnlyPlaylist(
         outputDir: string,
         config: EncodeConfigDto,
-    ): AnglePlaylist | null {
+    ): Promise<AnglePlaylist | null> {
         const audioGroups = config.audioGroups ?? [];
         if (audioGroups.length === 0) return null;
 
         const masterPath = join(outputDir, 'master.m3u8');
         let extVersion = '#EXT-X-VERSION:7';
-        if (existsSync(masterPath)) {
-            const versionMatch = readFileSync(masterPath, 'utf-8').match(/#EXT-X-VERSION:\d+/);
+        try {
+            const raw = await readFile(masterPath, 'utf-8');
+            const versionMatch = raw.match(/#EXT-X-VERSION:\d+/);
             if (versionMatch) extVersion = versionMatch[0];
+        } catch {
+            // master.m3u8 may not exist yet
         }
 
         const content = this.buildAudioOnlyMasterContent(extVersion, audioGroups);
         const filename = 'audio_only.m3u8';
-        writeFileSync(join(outputDir, filename), content, 'utf-8');
+        await writeFile(join(outputDir, filename), content, 'utf-8');
 
         this.logger.debug(
             `generateAudioOnlyPlaylist: wrote "${filename}" with ${audioGroups.length} audio group(s)`,

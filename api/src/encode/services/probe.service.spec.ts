@@ -1,11 +1,31 @@
-import { execSync } from 'child_process';
+import { execFile } from 'child_process';
 import { ProbeService } from './probe.service.js';
 
 jest.mock('child_process', () => ({
-    execSync: jest.fn(),
+    execFile: jest.fn(),
 }));
 
-const mockExecSync = execSync as jest.MockedFunction<typeof execSync>;
+const mockExecFile = execFile as unknown as jest.MockedFunction<
+    (cmd: string, args: string[], opts: any, cb: (err: Error | null, result: { stdout: string; stderr: string }) => void) => void
+>;
+
+function mockExecFileResult(stdout: string) {
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
+        cb(null, { stdout, stderr: '' });
+    });
+}
+
+function mockExecFileSequence(results: Array<string | Error>) {
+    let callIndex = 0;
+    mockExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
+        const result = results[callIndex++];
+        if (result instanceof Error) {
+            cb(result, { stdout: '', stderr: '' });
+        } else {
+            cb(null, { stdout: result, stderr: '' });
+        }
+    });
+}
 
 function makeFfprobeOutput(overrides: {
     streams?: any[];
@@ -48,14 +68,14 @@ describe('ProbeService', () => {
 
     beforeEach(() => {
         service = new ProbeService();
-        mockExecSync.mockReset();
+        mockExecFile.mockReset();
     });
 
     describe('probe', () => {
-        it('should parse a standard MP4 with 1 video + 1 audio track', () => {
-            mockExecSync.mockReturnValue(makeFfprobeOutput());
+        it('should parse a standard MP4 with 1 video + 1 audio track', async () => {
+            mockExecFileResult(makeFfprobeOutput());
 
-            const result = service.probe('/tmp/test.mp4');
+            const result = await service.probe('/tmp/test.mp4');
 
             expect(result.format.duration).toBe(120.5);
             expect(result.format.bitrateKbps).toBe(5200);
@@ -86,8 +106,8 @@ describe('ProbeService', () => {
             });
         });
 
-        it('should handle multiple video and audio tracks', () => {
-            mockExecSync.mockReturnValue(makeFfprobeOutput({
+        it('should handle multiple video and audio tracks', async () => {
+            mockExecFileResult(makeFfprobeOutput({
                 streams: [
                     { index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, bit_rate: '5000000', avg_frame_rate: '24/1' },
                     { index: 1, codec_type: 'video', codec_name: 'h264', width: 1280, height: 720, bit_rate: '2500000', avg_frame_rate: '24/1' },
@@ -96,7 +116,7 @@ describe('ProbeService', () => {
                 ],
             }));
 
-            const result = service.probe('/tmp/multi.mp4');
+            const result = await service.probe('/tmp/multi.mp4');
 
             expect(result.videoTracks).toHaveLength(2);
             expect(result.videoTracks[0].index).toBe(0);
@@ -108,22 +128,22 @@ describe('ProbeService', () => {
             expect(result.audioTracks[1].language).toBe('fra');
         });
 
-        it('should fall back to BPS tag when bit_rate is missing', () => {
-            mockExecSync.mockReturnValue(makeFfprobeOutput({
+        it('should fall back to BPS tag when bit_rate is missing', async () => {
+            mockExecFileResult(makeFfprobeOutput({
                 streams: [
                     { index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, avg_frame_rate: '30/1', tags: { BPS: '4500000' } },
                     { index: 1, codec_type: 'audio', codec_name: 'aac', channels: 2, sample_rate: '48000', tags: { BPS: '128000' } },
                 ],
             }));
 
-            const result = service.probe('/tmp/mkv.mkv');
+            const result = await service.probe('/tmp/mkv.mkv');
 
             expect(result.videoTracks[0].bitrateKbps).toBe(4500);
             expect(result.audioTracks[0].bitrateKbps).toBe(128);
         });
 
-        it('should fall back to NUMBER_OF_BYTES / DURATION tags for bitrate', () => {
-            mockExecSync.mockReturnValue(makeFfprobeOutput({
+        it('should fall back to NUMBER_OF_BYTES / DURATION tags for bitrate', async () => {
+            mockExecFileResult(makeFfprobeOutput({
                 streams: [
                     {
                         index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, avg_frame_rate: '30/1',
@@ -136,7 +156,7 @@ describe('ProbeService', () => {
                 ],
             }));
 
-            const result = service.probe('/tmp/test.mkv');
+            const result = await service.probe('/tmp/test.mkv');
 
             // 50000000 bytes * 8 bits / 60s / 1000 = 6667 kbps
             expect(result.videoTracks[0].bitrateKbps).toBe(6667);
@@ -144,102 +164,94 @@ describe('ProbeService', () => {
             expect(result.audioTracks[0].bitrateKbps).toBe(160);
         });
 
-        it('should trigger packet-based bitrate computation when stream bitrates are 0', () => {
-            const calls: string[] = [];
-            mockExecSync.mockImplementation((cmd: any) => {
-                const cmdStr = String(cmd);
-                calls.push(cmdStr);
-                if (cmdStr.includes('-show_format -show_streams')) {
-                    return makeFfprobeOutput({
-                        streams: [
-                            { index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, avg_frame_rate: '30/1' },
-                            { index: 1, codec_type: 'audio', codec_name: 'aac', channels: 2, sample_rate: '48000' },
-                        ],
-                        format: { duration: '60.0', bit_rate: '5000000', format_name: 'matroska,webm' },
-                    });
-                }
-                if (cmdStr.includes('-show_entries packet=stream_index,size')) {
-                    return '0,100000\n0,100000\n0,100000\n1,10000\n1,10000\n';
-                }
-                return '';
-            });
+        it('should trigger packet-based bitrate computation when stream bitrates are 0', async () => {
+            mockExecFileSequence([
+                makeFfprobeOutput({
+                    streams: [
+                        { index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, avg_frame_rate: '30/1' },
+                        { index: 1, codec_type: 'audio', codec_name: 'aac', channels: 2, sample_rate: '48000' },
+                    ],
+                    format: { duration: '60.0', bit_rate: '5000000', format_name: 'matroska,webm' },
+                }),
+                '0,100000\n0,100000\n0,100000\n1,10000\n1,10000\n',
+            ]);
 
-            const result = service.probe('/tmp/test.mkv');
+            const result = await service.probe('/tmp/test.mkv');
 
-            expect(calls.length).toBe(2);
+            expect(mockExecFile).toHaveBeenCalledTimes(2);
             // 300000 bytes * 8 / 60s / 1000 = 40 kbps for video
             expect(result.videoTracks[0].bitrateKbps).toBe(40);
             // 20000 bytes * 8 / 60s / 1000 ≈ 3 kbps for audio
             expect(result.audioTracks[0].bitrateKbps).toBe(3);
         });
 
-        it('should skip packet computation when duration is zero', () => {
-            mockExecSync.mockReturnValue(makeFfprobeOutput({
+        it('should skip packet computation when duration is zero', async () => {
+            mockExecFileResult(makeFfprobeOutput({
                 streams: [
                     { index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, avg_frame_rate: '30/1' },
                 ],
                 format: { duration: '0', bit_rate: '0', format_name: 'mp4' },
             }));
 
-            const result = service.probe('/tmp/test.mp4');
+            const result = await service.probe('/tmp/test.mp4');
 
             expect(result.videoTracks[0].bitrateKbps).toBe(0);
-            // execSync should only be called once (for the initial probe, not for packets)
-            expect(mockExecSync).toHaveBeenCalledTimes(1);
+            // execFile should only be called once (for the initial probe, not for packets)
+            expect(mockExecFile).toHaveBeenCalledTimes(1);
         });
 
-        it('should return "unknown" codec when codec_name is absent', () => {
-            mockExecSync.mockReturnValue(makeFfprobeOutput({
+        it('should return "unknown" codec when codec_name is absent', async () => {
+            mockExecFileResult(makeFfprobeOutput({
                 streams: [
                     { index: 0, codec_type: 'video', width: 640, height: 480, bit_rate: '1000000', avg_frame_rate: '25/1' },
                     { index: 1, codec_type: 'audio', bit_rate: '64000', channels: 1, sample_rate: '22050' },
                 ],
             }));
 
-            const result = service.probe('/tmp/test.mp4');
+            const result = await service.probe('/tmp/test.mp4');
 
             expect(result.videoTracks[0].codec).toBe('unknown');
             expect(result.audioTracks[0].codec).toBe('unknown');
         });
 
-        it('should default channels to 2 and sampleRate to 44100 when absent', () => {
-            mockExecSync.mockReturnValue(makeFfprobeOutput({
+        it('should default channels to 2 and sampleRate to 44100 when absent', async () => {
+            mockExecFileResult(makeFfprobeOutput({
                 streams: [
                     { index: 0, codec_type: 'audio', codec_name: 'aac', bit_rate: '128000' },
                 ],
             }));
 
-            const result = service.probe('/tmp/test.mp4');
+            const result = await service.probe('/tmp/test.mp4');
 
             expect(result.audioTracks[0].channels).toBe(2);
             expect(result.audioTracks[0].sampleRate).toBe(44100);
         });
 
-        it('should return unknown format name when absent', () => {
-            mockExecSync.mockReturnValue(JSON.stringify({
+        it('should return unknown format name when absent', async () => {
+            mockExecFileResult(JSON.stringify({
                 streams: [],
                 format: { duration: '10.0', bit_rate: '1000' },
             }));
 
-            const result = service.probe('/tmp/test.mp4');
+            const result = await service.probe('/tmp/test.mp4');
 
             expect(result.format.formatName).toBe('unknown');
         });
 
-        it('should return zero duration and bitrate when format fields are missing', () => {
-            mockExecSync.mockReturnValue(JSON.stringify({
+        it('should return zero duration and bitrate when format fields are missing', async () => {
+            mockExecFileResult(JSON.stringify({
                 streams: [],
                 format: {},
             }));
 
-            const result = service.probe('/tmp/test.mp4');
+            const result = await service.probe('/tmp/test.mp4');
 
             expect(result.format.duration).toBe(0);
             expect(result.format.bitrateKbps).toBe(0);
         });
 
-        it('should skip non-audio/video streams', () => {
-            mockExecSync.mockReturnValue(makeFfprobeOutput({
+        it('should skip non-audio/video streams', async () => {
+            mockExecFileResult(makeFfprobeOutput({
                 streams: [
                     { index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, bit_rate: '5000000', avg_frame_rate: '30/1' },
                     { index: 1, codec_type: 'subtitle', codec_name: 'srt' },
@@ -248,36 +260,32 @@ describe('ProbeService', () => {
                 ],
             }));
 
-            const result = service.probe('/tmp/test.mp4');
+            const result = await service.probe('/tmp/test.mp4');
 
             expect(result.videoTracks).toHaveLength(1);
             expect(result.audioTracks).toHaveLength(1);
         });
 
-        it('should throw when ffprobe command fails', () => {
-            mockExecSync.mockImplementation(() => {
-                throw new Error('ffprobe not found');
+        it('should throw when ffprobe command fails', async () => {
+            mockExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
+                cb(new Error('ffprobe not found'), { stdout: '', stderr: '' });
             });
 
-            expect(() => service.probe('/tmp/test.mp4')).toThrow('ffprobe not found');
+            await expect(service.probe('/tmp/test.mp4')).rejects.toThrow('ffprobe not found');
         });
 
-        it('should handle packet computation failure gracefully', () => {
-            let callCount = 0;
-            mockExecSync.mockImplementation((cmd: any) => {
-                callCount++;
-                if (callCount === 1) {
-                    return makeFfprobeOutput({
-                        streams: [
-                            { index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, avg_frame_rate: '30/1' },
-                        ],
-                        format: { duration: '60.0', bit_rate: '5000000', format_name: 'matroska' },
-                    });
-                }
-                throw new Error('packet probe failed');
-            });
+        it('should handle packet computation failure gracefully', async () => {
+            mockExecFileSequence([
+                makeFfprobeOutput({
+                    streams: [
+                        { index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, avg_frame_rate: '30/1' },
+                    ],
+                    format: { duration: '60.0', bit_rate: '5000000', format_name: 'matroska' },
+                }),
+                new Error('packet probe failed'),
+            ]);
 
-            const result = service.probe('/tmp/test.mkv');
+            const result = await service.probe('/tmp/test.mkv');
 
             expect(result.videoTracks[0].bitrateKbps).toBe(0);
         });

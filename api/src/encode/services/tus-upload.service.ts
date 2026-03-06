@@ -7,7 +7,8 @@ import {
 import { Server, EVENTS } from '@tus/server';
 import { FileStore } from '@tus/file-store';
 import { join } from 'path';
-import { mkdirSync, renameSync, existsSync, unlinkSync } from 'fs';
+import { mkdirSync } from 'fs';
+import { rename, copyFile, unlink, mkdir } from 'fs/promises';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { SessionService } from './session.service.js';
 import { ProbeService } from './probe.service.js';
@@ -117,31 +118,23 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                 }
 
                 const sessionDir = join(this.workDir, sessionId);
-                mkdirSync(sessionDir, { recursive: true });
+                await mkdir(sessionDir, { recursive: true });
 
                 const destPath = join(sessionDir, filename);
                 try {
-                    renameSync(tusFilePath, destPath);
+                    await rename(tusFilePath, destPath);
                 } catch {
                     // Cross-device fallback: copy then delete
-                    const { copyFileSync } = await import('fs');
-                    copyFileSync(tusFilePath, destPath);
-                    unlinkSync(tusFilePath);
+                    await copyFile(tusFilePath, destPath);
+                    await unlink(tusFilePath);
                 }
 
                 // Clean up tus metadata sidecar
-                const metaPath = `${tusFilePath}.json`;
-                if (existsSync(metaPath)) {
-                    try {
-                        unlinkSync(metaPath);
-                    } catch {
-                        // Non-critical
-                    }
-                }
+                await unlink(`${tusFilePath}.json`).catch(() => {});
 
                 this.sessionService.setFilePath(sessionId, destPath);
 
-                const probeResult = this.probeService.probe(destPath);
+                const probeResult = await this.probeService.probe(destPath);
 
                 this.sessionService.setProbeResult(sessionId, probeResult);
                 this.sessionService.updateStatus(sessionId, 'uploaded');

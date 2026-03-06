@@ -1,5 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { execSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 
 export interface VideoTrackInfo {
     index: number;
@@ -63,8 +66,8 @@ interface FfprobeOutput {
 export class ProbeService {
     private readonly logger = new Logger(ProbeService.name);
 
-    probe(filePath: string): ProbeResult {
-        const data = this.runFfprobe(filePath);
+    async probe(filePath: string): Promise<ProbeResult> {
+        const data = await this.runFfprobe(filePath);
 
         const videoTracks: VideoTrackInfo[] = [];
         const audioTracks: AudioTrackInfo[] = [];
@@ -105,7 +108,7 @@ export class ProbeService {
         const hasMissingBitrates = [...videoTracks, ...audioTracks].some(t => t.bitrateKbps === 0);
         if (hasMissingBitrates) {
             const duration = data.format.duration ? parseFloat(data.format.duration) : 0;
-            this.computeBitratesFromPackets(filePath, data.streams, videoTracks, audioTracks, duration);
+            await this.computeBitratesFromPackets(filePath, data.streams, videoTracks, audioTracks, duration);
         }
 
         const format = {
@@ -122,12 +125,12 @@ export class ProbeService {
         return { format, videoTracks, audioTracks };
     }
 
-    private runFfprobe(filePath: string): FfprobeOutput {
-        const raw = execSync(
-            `ffprobe -v quiet -print_format json -show_format -show_streams "${filePath}"`,
-            { encoding: 'utf-8', timeout: 60000 },
-        );
-        return JSON.parse(raw);
+    private async runFfprobe(filePath: string): Promise<FfprobeOutput> {
+        const { stdout } = await execFileAsync('ffprobe', [
+            '-v', 'quiet', '-print_format', 'json',
+            '-show_format', '-show_streams', filePath,
+        ], { timeout: 60000 });
+        return JSON.parse(stdout);
     }
 
     private extractBitrateKbps(stream: FfprobeStream): number {
@@ -151,22 +154,22 @@ export class ProbeService {
      * When stream-level bitrates are unavailable (common in Matroska),
      * compute actual bitrates by summing packet sizes per stream via ffprobe.
      */
-    private computeBitratesFromPackets(
+    private async computeBitratesFromPackets(
         filePath: string,
         rawStreams: FfprobeStream[],
         videoTracks: VideoTrackInfo[],
         audioTracks: AudioTrackInfo[],
         duration: number,
-    ): void {
+    ): Promise<void> {
         if (duration <= 0) return;
 
         this.logger.log('Stream-level bitrates missing, computing from packet data...');
 
         try {
-            const csv = execSync(
-                `ffprobe -v quiet -print_format csv=p=0 -show_entries packet=stream_index,size "${filePath}"`,
-                { encoding: 'utf-8', timeout: 120000, maxBuffer: 200 * 1024 * 1024 },
-            );
+            const { stdout: csv } = await execFileAsync('ffprobe', [
+                '-v', 'quiet', '-print_format', 'csv=p=0',
+                '-show_entries', 'packet=stream_index,size', filePath,
+            ], { timeout: 120000, maxBuffer: 200 * 1024 * 1024 });
 
             const bytesPerStream = new Map<number, number>();
             for (const line of csv.split('\n')) {

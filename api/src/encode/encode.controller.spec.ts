@@ -481,99 +481,99 @@ describe('EncodeController', () => {
     });
 
     describe('deleteSession', () => {
-        it('should delete a session in created status', () => {
+        it('should delete a session in created status', async () => {
             const session = sessionService.create(makeConfig());
 
-            controller.deleteSession(session.id);
+            await controller.deleteSession(session.id);
 
             expect(sessionService.get(session.id)).toBeUndefined();
         });
 
-        it('should delete a session in uploaded status', () => {
+        it('should delete a session in uploaded status', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploaded');
 
-            controller.deleteSession(session.id);
+            await controller.deleteSession(session.id);
 
             expect(sessionService.get(session.id)).toBeUndefined();
         });
 
-        it('should delete a session in uploading status', () => {
+        it('should delete a session in uploading status', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploading');
 
-            controller.deleteSession(session.id);
+            await controller.deleteSession(session.id);
 
             expect(sessionService.get(session.id)).toBeUndefined();
         });
 
-        it('should delete a queued session and dequeue it', () => {
+        it('should delete a queued session and dequeue it', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'queued');
 
-            controller.deleteSession(session.id);
+            await controller.deleteSession(session.id);
 
             expect(queueService.dequeue).toHaveBeenCalledWith(session.id);
             expect(sessionService.get(session.id)).toBeUndefined();
         });
 
-        it('should delete an encoding session and kill FFmpeg', () => {
+        it('should delete an encoding session and kill FFmpeg', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'encoding');
 
-            controller.deleteSession(session.id);
+            await controller.deleteSession(session.id);
 
             expect(ffmpegService.killActiveProcess).toHaveBeenCalled();
             expect(sessionService.get(session.id)).toBeUndefined();
         });
 
-        it('should not call dequeue when deleting a non-queued session', () => {
+        it('should not call dequeue when deleting a non-queued session', async () => {
             const session = sessionService.create(makeConfig());
 
-            controller.deleteSession(session.id);
+            await controller.deleteSession(session.id);
 
             expect(queueService.dequeue).not.toHaveBeenCalled();
         });
 
-        it('should not call killActiveProcess when deleting a non-encoding session', () => {
+        it('should not call killActiveProcess when deleting a non-encoding session', async () => {
             const session = sessionService.create(makeConfig());
 
-            controller.deleteSession(session.id);
+            await controller.deleteSession(session.id);
 
             expect(ffmpegService.killActiveProcess).not.toHaveBeenCalled();
         });
 
-        it('should reject deletion of a session uploading to S3', () => {
+        it('should reject deletion of a session uploading to S3', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploading_to_s3');
 
-            expect(() =>
+            await expect(
                 controller.deleteSession(session.id),
-            ).toThrow(BadRequestException);
+            ).rejects.toThrow(BadRequestException);
         });
 
-        it('should reject deletion of a completed session', () => {
+        it('should reject deletion of a completed session', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.setCompleted(session.id, ['master.m3u8'], 'master.m3u8');
 
-            expect(() =>
+            await expect(
                 controller.deleteSession(session.id),
-            ).toThrow(BadRequestException);
+            ).rejects.toThrow(BadRequestException);
         });
 
-        it('should reject deletion of a failed session', () => {
+        it('should reject deletion of a failed session', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.setFailed(session.id, 'some error');
 
-            expect(() =>
+            await expect(
                 controller.deleteSession(session.id),
-            ).toThrow(BadRequestException);
+            ).rejects.toThrow(BadRequestException);
         });
 
-        it('should throw NotFoundException for unknown session', () => {
-            expect(() =>
+        it('should throw NotFoundException for unknown session', async () => {
+            await expect(
                 controller.deleteSession('nonexistent'),
-            ).toThrow(NotFoundException);
+            ).rejects.toThrow(NotFoundException);
         });
     });
 });

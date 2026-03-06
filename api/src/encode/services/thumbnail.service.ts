@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { execSync, execFileSync } from 'child_process';
-import { mkdirSync, readdirSync, writeFileSync } from 'fs';
+import { execFile } from 'child_process';
+import { mkdir, readdir, writeFile } from 'fs/promises';
 import { join } from 'path';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 
 const THUMB_WIDTH = 160;
 const INTERVAL_SECONDS = 5;
@@ -24,20 +27,19 @@ export class ThumbnailService {
     private readonly logger = new Logger(ThumbnailService.name);
     private spriteFormat: SpriteFormat | null | undefined = undefined;
 
-    private detectSpriteFormat(): SpriteFormat | null {
+    private async detectSpriteFormat(): Promise<SpriteFormat | null> {
         if (this.spriteFormat !== undefined) return this.spriteFormat;
         try {
-            const output = execSync('ffmpeg -encoders 2>/dev/null', {
-                encoding: 'utf-8',
+            const { stdout } = await execFileAsync('ffmpeg', ['-encoders'], {
                 timeout: 10_000,
             });
-            if (output.includes('libwebp')) {
+            if (stdout.includes('libwebp')) {
                 this.spriteFormat = {
                     encoder: 'libwebp',
                     ext: 'webp',
                     args: ['-quality', '30', '-compression_level', '6'],
                 };
-            } else if (/\bmjpeg\b/.test(output)) {
+            } else if (/\bmjpeg\b/.test(stdout)) {
                 this.spriteFormat = {
                     encoder: 'mjpeg',
                     ext: 'jpg',
@@ -68,7 +70,7 @@ export class ThumbnailService {
         sourceWidth: number;
         sourceHeight: number;
     }): Promise<ThumbnailResult | null> {
-        const format = this.detectSpriteFormat();
+        const format = await this.detectSpriteFormat();
         if (!format) return null;
         if (opts.duration <= 0) return null;
 
@@ -76,12 +78,12 @@ export class ThumbnailService {
             Math.ceil(((THUMB_WIDTH / opts.sourceWidth) * opts.sourceHeight) / 2) * 2;
 
         const thumbnailDir = join(opts.outputDir, 'thumbnails');
-        mkdirSync(thumbnailDir, { recursive: true });
+        await mkdir(thumbnailDir, { recursive: true });
 
         const spritePattern = join(thumbnailDir, `sprite_%03d.${format.ext}`);
 
         try {
-            execFileSync(
+            await execFileAsync(
                 'ffmpeg',
                 [
                     '-i', opts.inputPath,
@@ -91,7 +93,7 @@ export class ThumbnailService {
                     '-an',
                     spritePattern,
                 ],
-                { timeout: 300_000, stdio: 'pipe' },
+                { timeout: 300_000 },
             );
         } catch (err) {
             this.logger.warn(
@@ -100,7 +102,7 @@ export class ThumbnailService {
             return null;
         }
 
-        const spriteFiles = readdirSync(thumbnailDir)
+        const spriteFiles = (await readdir(thumbnailDir))
             .filter((f) => f.startsWith('sprite_') && f.endsWith(`.${format.ext}`))
             .sort();
 
@@ -116,7 +118,7 @@ export class ThumbnailService {
             thumbHeight,
         );
         const vttPath = join(thumbnailDir, 'thumbnails.vtt');
-        writeFileSync(vttPath, vttContent, 'utf-8');
+        await writeFile(vttPath, vttContent, 'utf-8');
 
         this.logger.log(
             `Generated ${spriteFiles.length} thumbnail sprite sheet(s) for ${Math.floor(opts.duration)}s video`,

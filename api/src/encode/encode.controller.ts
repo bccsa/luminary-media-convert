@@ -23,7 +23,7 @@ import {
     ApiTags,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
-import { rmSync } from 'fs';
+import { rm } from 'fs/promises';
 import { join, dirname, posix } from 'path';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { PreviewAuthGuard } from './guards/preview-auth.guard.js';
@@ -410,7 +410,7 @@ export class EncodeController {
         description: 'Unauthorized — invalid or missing Auth0 token.',
     })
     @ApiResponse({ status: 404, description: 'Session not found.' })
-    deleteSession(@Param('sessionId') sessionId: string): void {
+    async deleteSession(@Param('sessionId') sessionId: string): Promise<void> {
         const session = this.sessionService.get(sessionId);
         if (!session) {
             throw new NotFoundException(`Session ${sessionId} not found`);
@@ -435,7 +435,7 @@ export class EncodeController {
             process.env.WORK_DIR || join(process.cwd(), 'work');
         const sessionDir = join(workDir, sessionId);
         try {
-            rmSync(sessionDir, { recursive: true, force: true });
+            await rm(sessionDir, { recursive: true, force: true });
         } catch (err) {
             this.logger.warn(
                 `Failed to clean up directory for session ${sessionId}: ${(err as Error).message}`,
