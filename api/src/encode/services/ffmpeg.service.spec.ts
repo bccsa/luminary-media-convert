@@ -898,6 +898,179 @@ describe('FfmpegService', () => {
             expect(content).toContain('URI="stream_hd_192kbps/playlist.m3u8"');
             expect(content).not.toContain('LANGUAGE=');
         });
+
+        it('should generate multi-language tiers with correct EXT-X-MEDIA and STREAM-INF per tier', () => {
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:7\n', 'utf-8');
+
+            const result = generateAudioOnlyPlaylist(tmpDir, {
+                type: 'video',
+                audioGroups: [
+                    { id: 'hd', label: 'English', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    { id: 'hd', label: 'Spanish', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'spa' },
+                    { id: 'low', label: 'English', audioBitrateKbps: 64, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    { id: 'low', label: 'Spanish', audioBitrateKbps: 64, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'spa' },
+                ],
+            });
+
+            expect(result).toEqual({ name: 'Audio only', filename: 'audio_only.m3u8' });
+
+            const content = readFileSync(join(tmpDir, 'audio_only.m3u8'), 'utf-8');
+
+            // Two tiers: hd and low
+            expect(content).toContain('GROUP-ID="hd"');
+            expect(content).toContain('GROUP-ID="low"');
+
+            // EXT-X-MEDIA entries with languages
+            expect(content).toContain('GROUP-ID="hd",NAME="English",DEFAULT=YES,LANGUAGE="eng"');
+            expect(content).toContain('GROUP-ID="hd",NAME="Spanish",DEFAULT=NO,LANGUAGE="spa"');
+            expect(content).toContain('GROUP-ID="low",NAME="English",DEFAULT=YES,LANGUAGE="eng"');
+            expect(content).toContain('GROUP-ID="low",NAME="Spanish",DEFAULT=NO,LANGUAGE="spa"');
+
+            // One STREAM-INF per tier with correct bandwidth and AUDIO group
+            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=256000,CODECS="mp4a.40.2",AUDIO="hd"');
+            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS="mp4a.40.2",AUDIO="low"');
+
+            // STREAM-INF lines reference the default (first) stream in each tier
+            expect(content).toContain('stream_hd_English/playlist.m3u8');
+            expect(content).toContain('stream_low_English/playlist.m3u8');
+        });
+
+        it('should use highest bandwidth within a tier for STREAM-INF', () => {
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:7\n', 'utf-8');
+
+            generateAudioOnlyPlaylist(tmpDir, {
+                type: 'video',
+                audioGroups: [
+                    { id: 'hd', label: 'Stereo', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    { id: 'hd', label: 'Surround', audioBitrateKbps: 384, channels: 6, audioCodec: 'aac', sourceTrackIndex: 1 },
+                ],
+            });
+
+            const content = readFileSync(join(tmpDir, 'audio_only.m3u8'), 'utf-8');
+
+            // Should use the max bitrate (384) for the tier STREAM-INF
+            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=384000,CODECS="mp4a.40.2",AUDIO="hd"');
+            // Default stream should be the first group in the tier
+            const streamInfIdx = content.indexOf('#EXT-X-STREAM-INF:BANDWIDTH=384000');
+            const uriLine = content.substring(streamInfIdx).split('\n')[1];
+            expect(uriLine).toBe('stream_hd_Stereo/playlist.m3u8');
+        });
+
+        it('should set DEFAULT=YES only for first entry in each tier', () => {
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:7\n', 'utf-8');
+
+            generateAudioOnlyPlaylist(tmpDir, {
+                type: 'video',
+                audioGroups: [
+                    { id: 'mid', label: 'Track A', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    { id: 'mid', label: 'Track B', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1 },
+                    { id: 'mid', label: 'Track C', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 2 },
+                ],
+            });
+
+            const content = readFileSync(join(tmpDir, 'audio_only.m3u8'), 'utf-8');
+            const mediaLines = content.split('\n').filter(l => l.startsWith('#EXT-X-MEDIA:'));
+
+            expect(mediaLines).toHaveLength(3);
+            expect(mediaLines[0]).toContain('DEFAULT=YES');
+            expect(mediaLines[1]).toContain('DEFAULT=NO');
+            expect(mediaLines[2]).toContain('DEFAULT=NO');
+        });
+    });
+
+    describe('fixAudioOnlyMasterPlaylist (private, tested via reflection)', () => {
+        const fixAudioOnlyMasterPlaylist = (outputDir: string, config: EncodeConfigDto) => {
+            return (service as any).fixAudioOnlyMasterPlaylist(outputDir, config);
+        };
+
+        let tmpDir: string;
+
+        beforeEach(() => {
+            tmpDir = mkdtempSync(join(tmpdir(), 'ffmpeg-fix-audio-'));
+        });
+
+        afterEach(() => {
+            rmSync(tmpDir, { recursive: true, force: true });
+        });
+
+        it('should do nothing when no audio groups', () => {
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:7\n', 'utf-8');
+
+            fixAudioOnlyMasterPlaylist(tmpDir, { type: 'audio' });
+
+            const content = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
+            expect(content).toBe('#EXTM3U\n#EXT-X-VERSION:7\n');
+        });
+
+        it('should do nothing when master.m3u8 does not exist', () => {
+            // Should not throw
+            fixAudioOnlyMasterPlaylist(tmpDir, {
+                type: 'audio',
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            });
+        });
+
+        it('should rewrite master.m3u8 with proper EXT-X-MEDIA and STREAM-INF structure', () => {
+            // Simulate FFmpeg's raw output for audio-only encode
+            writeFileSync(join(tmpDir, 'master.m3u8'), [
+                '#EXTM3U',
+                '#EXT-X-VERSION:7',
+                '#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2"',
+                'stream_hd_HD_Audio/playlist.m3u8',
+                '#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS="mp4a.40.2"',
+                'stream_low_Low_Audio/playlist.m3u8',
+                '',
+            ].join('\n'), 'utf-8');
+
+            fixAudioOnlyMasterPlaylist(tmpDir, {
+                type: 'audio',
+                audioGroups: [
+                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    { id: 'low', label: 'Low Audio', audioBitrateKbps: 64, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                ],
+            });
+
+            const content = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
+
+            // Should have EXT-X-MEDIA entries
+            expect(content).toContain('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="HD Audio",DEFAULT=YES,LANGUAGE="eng"');
+            expect(content).toContain('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="low",NAME="Low Audio",DEFAULT=YES,LANGUAGE="eng"');
+
+            // Should have STREAM-INF per tier
+            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2",AUDIO="hd"');
+            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS="mp4a.40.2",AUDIO="low"');
+
+            // Should preserve version from original
+            expect(content).toContain('#EXT-X-VERSION:7');
+        });
+
+        it('should rewrite multi-language audio-only master playlist', () => {
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:7\n', 'utf-8');
+
+            fixAudioOnlyMasterPlaylist(tmpDir, {
+                type: 'audio',
+                audioGroups: [
+                    { id: 'hd', label: 'English', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    { id: 'hd', label: 'French', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'fra' },
+                    { id: 'low', label: 'English', audioBitrateKbps: 64, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    { id: 'low', label: 'French', audioBitrateKbps: 64, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'fra' },
+                ],
+            });
+
+            const content = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
+
+            // EXT-X-MEDIA entries with correct DEFAULT flags
+            expect(content).toContain('GROUP-ID="hd",NAME="English",DEFAULT=YES,LANGUAGE="eng"');
+            expect(content).toContain('GROUP-ID="hd",NAME="French",DEFAULT=NO,LANGUAGE="fra"');
+            expect(content).toContain('GROUP-ID="low",NAME="English",DEFAULT=YES,LANGUAGE="eng"');
+            expect(content).toContain('GROUP-ID="low",NAME="French",DEFAULT=NO,LANGUAGE="fra"');
+
+            // Two STREAM-INFs
+            expect(content).toContain('BANDWIDTH=256000,CODECS="mp4a.40.2",AUDIO="hd"');
+            expect(content).toContain('BANDWIDTH=64000,CODECS="mp4a.40.2",AUDIO="low"');
+        });
     });
 
     describe('buildAudioArgs (private, tested via reflection)', () => {
@@ -1150,6 +1323,7 @@ describe('FfmpegService', () => {
         let fixMasterPlaylistSpy: jest.SpyInstance;
         let generateAnglePlaylistsSpy: jest.SpyInstance;
         let generateAudioOnlyPlaylistSpy: jest.SpyInstance;
+        let fixAudioOnlyMasterPlaylistSpy: jest.SpyInstance;
 
         const baseEncodeConfig: EncodeConfigDto = {
             type: 'video',
@@ -1181,6 +1355,7 @@ describe('FfmpegService', () => {
             fixMasterPlaylistSpy = jest.spyOn(service as any, 'fixMasterPlaylist').mockImplementation(() => {});
             generateAnglePlaylistsSpy = jest.spyOn(service as any, 'generateAnglePlaylists').mockReturnValue([]);
             generateAudioOnlyPlaylistSpy = jest.spyOn(service as any, 'generateAudioOnlyPlaylist').mockReturnValue(null);
+            fixAudioOnlyMasterPlaylistSpy = jest.spyOn(service as any, 'fixAudioOnlyMasterPlaylist').mockImplementation(() => {});
         });
 
         afterEach(() => {
@@ -1190,6 +1365,7 @@ describe('FfmpegService', () => {
             fixMasterPlaylistSpy.mockRestore();
             generateAnglePlaylistsSpy.mockRestore();
             generateAudioOnlyPlaylistSpy.mockRestore();
+            fixAudioOnlyMasterPlaylistSpy.mockRestore();
         });
 
         it('should resolve with outputDir and masterPlaylist on success', async () => {
@@ -1425,6 +1601,41 @@ describe('FfmpegService', () => {
                 { name: 'Side', filename: 'Side.m3u8' },
                 { name: 'Audio only', filename: 'audio_only.m3u8' },
             ]);
+        });
+
+        it('should call fixAudioOnlyMasterPlaylist for audio type', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const opts = makeEncodeOpts({
+                encodeConfig: {
+                    type: 'audio',
+                    segmentDuration: 6,
+                    audioGroups: [
+                        { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                        { id: 'low', audioBitrateKbps: 64, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    ],
+                },
+            });
+            const promise = service.encode(opts);
+
+            mockProc.emitClose(0);
+            await promise;
+
+            expect(fixAudioOnlyMasterPlaylistSpy).toHaveBeenCalledWith(opts.outputDir, opts.encodeConfig);
+        });
+
+        it('should not call fixAudioOnlyMasterPlaylist for video type', async () => {
+            const mockProc = createMockProcess();
+            spawnSpy.mockReturnValue(mockProc);
+
+            const opts = makeEncodeOpts();
+            const promise = service.encode(opts);
+
+            mockProc.emitClose(0);
+            await promise;
+
+            expect(fixAudioOnlyMasterPlaylistSpy).not.toHaveBeenCalled();
         });
 
         it('should create output subdirectories for video type', async () => {
