@@ -504,7 +504,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         // Audio entries with group, name, and language
         const defaultedGroups = new Set<string>();
         for (const { group, outputIndex } of audioOutputs) {
-            const name = (group.label ?? `${group.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
+            const name = this.buildAudioStreamName(group);
             let part = `a:${outputIndex},agroup:${group.id},name:${name}`;
             if (group.language) {
                 part += `,language:${group.language}`;
@@ -555,7 +555,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const varParts: string[] = [];
         for (let i = 0; i < audioGroups.length; i++) {
             const group = audioGroups[i];
-            const name = (group.label ?? `${group.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
+            const name = this.buildAudioStreamName(group);
             varParts.push(`a:${i},name:${name}`);
         }
 
@@ -725,6 +725,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                             }
                             anglePlaylists.push(audioOnlyPlaylist);
                         }
+                    } else {
+                        this.fixAudioOnlyMasterPlaylist(outputDir, encodeConfig);
                     }
                     resolve({
                         outputDir,
@@ -886,6 +888,32 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         writeFileSync(masterPath, content, 'utf-8');
     }
 
+    /**
+     * Rewrite the FFmpeg-generated audio-only master.m3u8 to add proper
+     * EXT-X-MEDIA entries with language tags and GROUP-IDs per quality tier.
+     */
+    private fixAudioOnlyMasterPlaylist(
+        outputDir: string,
+        config: EncodeConfigDto,
+    ): void {
+        const audioGroups = config.audioGroups ?? [];
+        if (audioGroups.length === 0) return;
+
+        const masterPath = join(outputDir, 'master.m3u8');
+        if (!existsSync(masterPath)) return;
+
+        const raw = readFileSync(masterPath, 'utf-8');
+        const versionMatch = raw.match(/#EXT-X-VERSION:\d+/);
+        const extVersion = versionMatch?.[0] ?? '#EXT-X-VERSION:7';
+
+        const content = this.buildAudioOnlyMasterContent(extVersion, audioGroups);
+        writeFileSync(masterPath, content, 'utf-8');
+
+        this.logger.debug(
+            `fixAudioOnlyMasterPlaylist: rewrote master.m3u8 with ${audioGroups.length} audio group(s)`,
+        );
+    }
+
     private fixMasterPlaylistAudioNames(
         content: string,
         config: EncodeConfigDto,
@@ -895,7 +923,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         const nameByUri = new Map<string, string>();
         for (const group of audioGroups) {
-            const streamName = (group.label ?? `${group.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
+            const streamName = this.buildAudioStreamName(group);
             const uri = `stream_${streamName}/playlist.m3u8`;
             nameByUri.set(uri, group.label ?? group.language ?? 'Audio');
         }
@@ -1022,38 +1050,68 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             if (versionMatch) extVersion = versionMatch[0];
         }
 
-        const parts: string[] = ['#EXTM3U', extVersion];
-
-        let isFirst = true;
-        for (const group of audioGroups) {
-            const streamName = (group.label ?? `${group.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
-            const uri = `stream_${streamName}/playlist.m3u8`;
-            const name = group.label ?? group.language ?? 'Audio';
-            const lang = group.language ? `,LANGUAGE="${group.language}"` : '';
-
-            parts.push(
-                `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="${name}",DEFAULT=${isFirst ? 'YES' : 'NO'}${lang},URI="${uri}"`,
-            );
-            isFirst = false;
-        }
-
-        const firstGroup = audioGroups[0];
-        const firstName = (firstGroup.label ?? `${firstGroup.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
-        const bandwidth = firstGroup.audioBitrateKbps * 1000;
-        parts.push(
-            '',
-            `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},CODECS="mp4a.40.2",AUDIO="audio"`,
-            `stream_${firstName}/playlist.m3u8`,
-        );
-
+        const content = this.buildAudioOnlyMasterContent(extVersion, audioGroups);
         const filename = 'audio_only.m3u8';
-        writeFileSync(join(outputDir, filename), parts.join('\n') + '\n', 'utf-8');
+        writeFileSync(join(outputDir, filename), content, 'utf-8');
 
         this.logger.debug(
             `generateAudioOnlyPlaylist: wrote "${filename}" with ${audioGroups.length} audio group(s)`,
         );
 
         return { name: 'Audio only', filename };
+    }
+
+    /**
+     * Build a proper audio-only master playlist with per-tier GROUP-IDs,
+     * language-based EXT-X-MEDIA entries, and one EXT-X-STREAM-INF per tier.
+     */
+    private buildAudioOnlyMasterContent(
+        extVersion: string,
+        audioGroups: AudioGroupDto[],
+    ): string {
+        const parts: string[] = ['#EXTM3U', extVersion];
+
+        // Group by tier ID (e.g. "hd", "mid", "low")
+        const tierMap = new Map<string, AudioGroupDto[]>();
+        for (const group of audioGroups) {
+            const tierId = group.id;
+            if (!tierMap.has(tierId)) tierMap.set(tierId, []);
+            tierMap.get(tierId)!.push(group);
+        }
+
+        const tiers = [...tierMap.entries()];
+
+        // EXT-X-MEDIA entries per tier
+        for (const [tierId, groups] of tiers) {
+            let isFirstInTier = true;
+            for (const group of groups) {
+                const streamName = this.buildAudioStreamName(group);
+                const uri = `stream_${streamName}/playlist.m3u8`;
+                const name = group.label ?? group.language ?? 'Audio';
+                const lang = group.language ? `,LANGUAGE="${group.language}"` : '';
+
+                parts.push(
+                    `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="${tierId}",NAME="${name}",DEFAULT=${isFirstInTier ? 'YES' : 'NO'}${lang},URI="${uri}"`,
+                );
+                isFirstInTier = false;
+            }
+        }
+
+        // One EXT-X-STREAM-INF per tier (highest bandwidth in tier)
+        parts.push('');
+        for (const [tierId, groups] of tiers) {
+            const maxBitrate = Math.max(...groups.map(g => g.audioBitrateKbps));
+            const bandwidth = maxBitrate * 1000;
+            const defaultGroup = groups[0];
+            const defaultStreamName = this.buildAudioStreamName(defaultGroup);
+
+            parts.push(
+                `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},CODECS="mp4a.40.2",AUDIO="${tierId}"`,
+                `stream_${defaultStreamName}/playlist.m3u8`,
+            );
+        }
+
+        return parts.join('\n') + '\n';
     }
 
     /**
@@ -1136,6 +1194,16 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             return `${base}_t${rendition.sourceTrackIndex ?? 0}_${rendition.width}x${rendition.height}`;
         }
         return `${base}_${rendition.width}x${rendition.height}`;
+    }
+
+    /**
+     * Build a unique stream name for an audio group by combining tier ID and
+     * label. Ensures each tier×language combination gets its own stream
+     * directory so that different quality tiers don't collide.
+     */
+    private buildAudioStreamName(group: AudioGroupDto): string {
+        const label = (group.label ?? `${group.audioBitrateKbps}kbps`).replace(/\s+/g, '_');
+        return `${group.id}_${label}`;
     }
 
     killActiveProcess(): void {

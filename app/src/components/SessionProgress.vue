@@ -41,6 +41,17 @@ const pendingSeekTime = ref<number | null>(null);
 let player: Player | null = null;
 let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 
+// SVG poster for audio-only playlists (headphone icon on dark background)
+const audioPosterUrl = `data:image/svg+xml,${encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">' +
+    '<rect width="640" height="360" fill="#18181b"/>' +
+    '<g transform="translate(280,130)" fill="none" stroke="#52525b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M4 56V34a36 36 0 0 1 72 0v22"/>' +
+    '<rect x="0" y="48" width="16" height="32" rx="4" fill="#52525b"/>' +
+    '<rect x="64" y="48" width="16" height="32" rx="4" fill="#52525b"/>' +
+    '</g></svg>',
+)}`;
+
 const primaryPlaylistKey = computed(() => {
     const lists = uniqueAnglePlaylists.value;
     if (lists.length) {
@@ -91,14 +102,38 @@ const isAudioOnly = computed(
     () => props.encodingType === 'audio' || currentAngleIsAudioOnly.value,
 );
 
+function setupPreviewAuth() {
+    if (!player || !props.previewToken) return;
+    const token = props.previewToken;
+    const hook = () => {
+        try {
+            const tech = player!.tech({ IWillNotUseThisInPlugins: true } as any) as any;
+            tech?.vhs?.xhr?.onRequest?.((options: any) => {
+                if (options.uri?.includes('/api/sessions/')) {
+                    options.headers = options.headers || {};
+                    options.headers['Authorization'] = `Bearer ${token}`;
+                }
+                return options;
+            });
+        } catch { /* tech not ready yet */ }
+    };
+    player.on('xhr-hooks-ready', hook);
+}
+
 function initPlayer() {
     if (!playerEl.value || !playbackUrl.value) return;
     if (player) {
-        const audioOnly = isAudioOnly.value;
-        try { (player as any).audioOnlyMode(audioOnly); } catch {}
-        player.fluid(!audioOnly);
+        try { (player as any).audioOnlyMode(false); } catch {}
+        player.fluid(true);
+
+        if (isAudioOnly.value) {
+            player.poster(audioPosterUrl);
+        } else {
+            player.poster('');
+        }
 
         const wasPaused = player.paused();
+        setupPreviewAuth();
         player.src({ src: playbackUrl.value, type: 'application/x-mpegURL' });
         if (pendingSeekTime.value != null) {
             const seekTo = pendingSeekTime.value;
@@ -114,26 +149,13 @@ function initPlayer() {
     try {
         player = videojs(playerEl.value, {
             controls: true,
-            fluid: !isAudioOnly.value,
-            audioOnlyMode: isAudioOnly.value,
+            fluid: true,
             responsive: true,
+            poster: isAudioOnly.value ? audioPosterUrl : undefined,
             html5: { vhs: { overrideNative: true } },
         });
 
-        if (props.previewToken) {
-            const token = props.previewToken;
-            player.on('xhr-hooks-ready', () => {
-                const tech = player!.tech({ IWillNotUseThisInPlugins: true } as any) as any;
-                tech?.vhs?.xhr?.onRequest?.((options: any) => {
-                    if (options.uri?.includes('/api/sessions/')) {
-                        options.headers = options.headers || {};
-                        options.headers['Authorization'] = `Bearer ${token}`;
-                    }
-                    return options;
-                });
-            });
-        }
-
+        setupPreviewAuth();
         player.src({ src: playbackUrl.value, type: 'application/x-mpegURL' });
 
         player.ready(() => {
@@ -297,7 +319,7 @@ function switchToAngle(index: number) {
             </div>
 
             <!-- Player -->
-            <div v-if="playbackUrl" class="overflow-hidden rounded-lg bg-black">
+            <div v-if="playbackUrl" class="rounded-lg bg-black [&_.video-js]:overflow-visible [&_.vjs-control-bar]:overflow-visible">
                 <video
                     ref="playerEl"
                     class="video-js vjs-big-play-centered"

@@ -654,9 +654,9 @@ describe('FfmpegService', () => {
             const masterContent = [
                 '#EXTM3U',
                 '#EXT-X-VERSION:6',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="audio_6",DEFAULT=YES,LANGUAGE="eng",CHANNELS="2",URI="stream_HD_Audio/playlist.m3u8"',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_mid",NAME="audio_7",DEFAULT=NO,LANGUAGE="eng",CHANNELS="2",URI="stream_Standard_Audio/playlist.m3u8"',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_low",NAME="audio_8",DEFAULT=NO,LANGUAGE="eng",CHANNELS="1",URI="stream_Low_Audio/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="audio_6",DEFAULT=YES,LANGUAGE="eng",CHANNELS="2",URI="stream_hd_HD_Audio/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_mid",NAME="audio_7",DEFAULT=NO,LANGUAGE="eng",CHANNELS="2",URI="stream_mid_Standard_Audio/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_low",NAME="audio_8",DEFAULT=NO,LANGUAGE="eng",CHANNELS="1",URI="stream_low_Low_Audio/playlist.m3u8"',
             ].join('\n');
             writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
 
@@ -677,7 +677,7 @@ describe('FfmpegService', () => {
         it('should also work with GROUP-IDs without the group_ prefix', () => {
             const masterContent = [
                 '#EXTM3U',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="audio_2",DEFAULT=YES,LANGUAGE="eng",URI="stream_HD_Audio/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="audio_2",DEFAULT=YES,LANGUAGE="eng",URI="stream_hd_HD_Audio/playlist.m3u8"',
             ].join('\n');
             writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
 
@@ -695,8 +695,8 @@ describe('FfmpegService', () => {
         it('should set different NAMEs for audio groups from different source tracks', () => {
             const masterContent = [
                 '#EXTM3U',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_eng",NAME="audio_2",DEFAULT=YES,LANGUAGE="eng",URI="stream_English/playlist.m3u8"',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_spa",NAME="audio_3",DEFAULT=NO,LANGUAGE="spa",URI="stream_Spanish/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_eng",NAME="audio_2",DEFAULT=YES,LANGUAGE="eng",URI="stream_eng_English/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_spa",NAME="audio_3",DEFAULT=NO,LANGUAGE="spa",URI="stream_spa_Spanish/playlist.m3u8"',
             ].join('\n');
             writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
 
@@ -716,7 +716,7 @@ describe('FfmpegService', () => {
         it('should fall back to "Audio" when no label or language is set', () => {
             const masterContent = [
                 '#EXTM3U',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="audio_2",DEFAULT=YES,URI="stream_192kbps/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="audio_2",DEFAULT=YES,URI="stream_hd_192kbps/playlist.m3u8"',
             ].join('\n');
             writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
 
@@ -735,7 +735,7 @@ describe('FfmpegService', () => {
             const masterContent = [
                 '#EXTM3U',
                 '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",DEFAULT=YES',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="audio_2",DEFAULT=YES,URI="stream_HD_Audio/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="audio_2",DEFAULT=YES,URI="stream_hd_HD_Audio/playlist.m3u8"',
             ].join('\n');
             writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
 
@@ -836,13 +836,13 @@ describe('FfmpegService', () => {
             expect(content).toContain('#EXTM3U');
             expect(content).toContain('#EXT-X-VERSION:6');
             expect(content).toContain('TYPE=AUDIO');
-            expect(content).toContain('GROUP-ID="audio"');
+            expect(content).toContain('GROUP-ID="hd"');
             expect(content).toContain('NAME="HD Audio"');
             expect(content).toContain('DEFAULT=YES');
             expect(content).toContain('LANGUAGE="eng"');
-            expect(content).toContain('URI="stream_HD_Audio/playlist.m3u8"');
-            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2",AUDIO="audio"');
-            expect(content).toContain('stream_HD_Audio/playlist.m3u8');
+            expect(content).toContain('URI="stream_hd_HD_Audio/playlist.m3u8"');
+            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2",AUDIO="hd"');
+            expect(content).toContain('stream_hd_HD_Audio/playlist.m3u8');
         });
 
         it('should generate audio_only.m3u8 with multiple groups', () => {
@@ -859,12 +859,16 @@ describe('FfmpegService', () => {
             expect(result).toEqual({ name: 'Audio only', filename: 'audio_only.m3u8' });
 
             const content = readFileSync(join(tmpDir, 'audio_only.m3u8'), 'utf-8');
+            expect(content).toContain('GROUP-ID="hd"');
+            expect(content).toContain('GROUP-ID="mid"');
             expect(content).toContain('NAME="HD Audio"');
             expect(content).toContain('NAME="Standard Audio"');
             expect(content).toMatch(/NAME="HD Audio",DEFAULT=YES/);
-            expect(content).toMatch(/NAME="Standard Audio",DEFAULT=NO/);
-            expect(content).toContain('URI="stream_HD_Audio/playlist.m3u8"');
-            expect(content).toContain('URI="stream_Standard_Audio/playlist.m3u8"');
+            expect(content).toMatch(/NAME="Standard Audio",DEFAULT=YES/);
+            expect(content).toContain('URI="stream_hd_HD_Audio/playlist.m3u8"');
+            expect(content).toContain('URI="stream_mid_Standard_Audio/playlist.m3u8"');
+            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2",AUDIO="hd"');
+            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS="mp4a.40.2",AUDIO="mid"');
         });
 
         it('should use default version when master.m3u8 does not exist', () => {
@@ -891,7 +895,7 @@ describe('FfmpegService', () => {
             expect(result).not.toBeNull();
             const content = readFileSync(join(tmpDir, 'audio_only.m3u8'), 'utf-8');
             expect(content).toContain('NAME="Audio"');
-            expect(content).toContain('URI="stream_192kbps/playlist.m3u8"');
+            expect(content).toContain('URI="stream_hd_192kbps/playlist.m3u8"');
             expect(content).not.toContain('LANGUAGE=');
         });
     });
@@ -926,7 +930,7 @@ describe('FfmpegService', () => {
             expect(args).toContain('master.m3u8');
             expect(args).toContain('-var_stream_map');
             const varMap = args[args.indexOf('-var_stream_map') + 1];
-            expect(varMap).toContain('a:0,name:HD');
+            expect(varMap).toContain('a:0,name:hd_HD');
             expect(varMap).not.toContain('agroup');
         });
 
@@ -951,9 +955,9 @@ describe('FfmpegService', () => {
             expect(args).toContain('master.m3u8');
             expect(args).toContain('-var_stream_map');
             const varMap = args[args.indexOf('-var_stream_map') + 1];
-            expect(varMap).toContain('a:0,name:HD');
-            expect(varMap).toContain('a:1,name:Standard');
-            expect(varMap).toContain('a:2,name:Mono');
+            expect(varMap).toContain('a:0,name:hd_HD');
+            expect(varMap).toContain('a:1,name:mid_Standard');
+            expect(varMap).toContain('a:2,name:low_Mono');
             expect(varMap).not.toContain('agroup');
         });
 
@@ -1071,8 +1075,8 @@ describe('FfmpegService', () => {
             });
 
             const varMap = args[args.indexOf('-var_stream_map') + 1];
-            expect(varMap).toContain('a:0,name:English_HD');
-            expect(varMap).toContain('a:1,name:French_HD');
+            expect(varMap).toContain('a:0,name:hd_English_HD');
+            expect(varMap).toContain('a:1,name:hd_French_HD');
             expect(varMap).not.toContain('agroup');
         });
     });
