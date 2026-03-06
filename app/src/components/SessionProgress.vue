@@ -60,14 +60,18 @@ const primaryPlaylistKey = computed(() => {
     return props.masterPlaylist;
 });
 
+const s3Url = computed(() => {
+    if (!primaryPlaylistKey.value || !props.s3PublicBaseUrl) return null;
+    return `${props.s3PublicBaseUrl}/${primaryPlaylistKey.value}`;
+});
+
 const playbackUrl = computed(() => {
     if (!primaryPlaylistKey.value) return null;
     if (props.previewBaseUrl) {
         const filename = primaryPlaylistKey.value.split('/').pop();
         return `${props.previewBaseUrl}/${filename}`;
     }
-    if (!props.s3PublicBaseUrl) return null;
-    return `${props.s3PublicBaseUrl}/${primaryPlaylistKey.value}`;
+    return s3Url.value;
 });
 
 const thumbnailVttUrl = computed(() => {
@@ -193,8 +197,8 @@ onBeforeUnmount(() => {
 });
 
 async function copyPlaybackUrl() {
-    if (!playbackUrl.value) return;
-    await navigator.clipboard.writeText(playbackUrl.value);
+    if (!s3Url.value) return;
+    await navigator.clipboard.writeText(s3Url.value);
     copied.value = true;
     if (copyTimeout) clearTimeout(copyTimeout);
     copyTimeout = setTimeout(() => { copied.value = false; }, 2000);
@@ -332,7 +336,7 @@ function switchToAngle(index: number) {
                 <div class="mb-1 flex items-center justify-between">
                     <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Master Playlist</p>
                     <button
-                        v-if="playbackUrl"
+                        v-if="s3Url"
                         type="button"
                         class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer"
                         :class="copied
@@ -350,7 +354,7 @@ function switchToAngle(index: number) {
                         {{ copied ? 'Copied!' : 'Copy URL' }}
                     </button>
                 </div>
-                <p class="break-all font-mono text-sm text-indigo-400">{{ playbackUrl ?? masterPlaylist }}</p>
+                <p class="break-all font-mono text-sm text-indigo-400">{{ s3Url ?? masterPlaylist }}</p>
             </div>
 
             <div v-if="files?.length" class="rounded-lg bg-zinc-900/60 p-4">
