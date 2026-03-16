@@ -76,8 +76,17 @@ async function onUploadSubmit(payload: {
         await promise;
         abortUpload = null;
 
-        const status = await getSessionStatus(session.sessionId, accessToken);
-        probeResult.value = status.probeResult ?? null;
+        // With tusd, the post-finish hook (which probes the file) runs after
+        // the upload response is sent to the client. Poll until probe results
+        // are available (session status becomes 'uploaded').
+        let status: Awaited<ReturnType<typeof getSessionStatus>>;
+        for (let i = 0; i < 60; i++) {
+            status = await getSessionStatus(session.sessionId, accessToken);
+            if (status.probeResult) break;
+            await new Promise((r) => setTimeout(r, 500));
+        }
+
+        probeResult.value = status!.probeResult ?? null;
         encodingType.value = probeResult.value?.videoTracks.length ? 'video' : 'audio';
 
         view.value = 'configure';

@@ -53,6 +53,7 @@ export function uploadFile(
                 Authorization: `Bearer ${uploadToken}`,
             },
             chunkSize: 50 * 1024 * 1024,
+            parallelUploads: 5,
             onProgress(bytesUploaded, bytesTotal) {
                 onProgress?.(Math.round((bytesUploaded / bytesTotal) * 100));
             },
