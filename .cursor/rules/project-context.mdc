@@ -12,10 +12,11 @@ A folder-based npm workspaces monorepo containing:
 - **`api/`** — NestJS REST API service that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA or Apple Silicon GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via webhooks or polling.
 - **`app/`** — Vue 3 single-page web client for uploading files and monitoring encoding sessions.
 - **`encode-config/`** — Shared Vue 3 component library providing the `EncodeConfigForm` component, encoding/probe type definitions, and layout-based config persistence. Published as `@luminary-media-converter/encode-config` for consumption by the app (and potentially other clients).
+- **`tusd/`** — Node.js wrapper (`node-tusd`) around the Go `tusd` binary, providing a `TusdServer` class that spawns tusd as a child process, proxies HTTP requests, and dispatches lifecycle hooks (auth, upload create/finish, progress) via an internal HTTP hook server.
 
 ## Monorepo Structure
 
-- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config"]`)
+- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "tusd"]`)
 - Dependencies are hoisted to the root `node_modules/`
 - Run workspace scripts from root: `npm -w api run <script>` or `npm -w app run <script>`
 - Root `npm run dev` starts all three workspaces concurrently (via `concurrently`): encode-config watch build, API dev server, and web client dev server
@@ -43,6 +44,16 @@ A folder-based npm workspaces monorepo containing:
 - **Exports**: `EncodeConfigForm` Vue component, probe/encode config TypeScript types, `layoutStorage` utilities
 - **Peer dependency**: Vue 3
 
+### Tusd Wrapper (`tusd/`)
+
+- **Package name**: `node-tusd` (private workspace package)
+- **Runtime**: Node.js with TypeScript (ES2023 target, `nodenext` modules, ESM)
+- **Core**: Wraps the Go `tusd` binary via child process spawning + HTTP proxying
+- **Hook server**: Internal Express-like HTTP server receives webhook callbacks from tusd
+- **Binary resolution**: 3-level fallback — `TUSD_BINARY_PATH` env var → local `bin/tusd` → system PATH
+- **Testing**: Jest
+- **Exports**: `TusdServer` class, `findTusdBinary` utility, TypeScript types (`TusdServerConfig`, `RequestInfo`, `UploadInfo`, `HookType`)
+
 ### Web Client (`app/`)
 
 - **Framework**: Vue 3 (Composition API, `<script setup>`)
@@ -52,7 +63,7 @@ A folder-based npm workspaces monorepo containing:
 - **Authentication**: Auth0 via `@auth0/auth0-vue` SDK (Universal Login, automatic token management)
 - **Media playback**: Video.js 8 with custom HLS quality selector and thumbnail preview plugins
 - **Testing**: Vitest
-- **API communication**: Fetch-based client (`api.ts`) with `VITE_API_BASE_URL`, no proxy — connects directly to the API via CORS; file uploads use `tus-js-client` for resumable chunked uploads
+- **API communication**: Fetch-based client (`api.ts`) with `VITE_API_BASE_URL`, no proxy — connects directly to the API via CORS; file uploads use `tus-js-client` for resumable chunked uploads (50 MB chunks, 5 parallel uploads)
 - **Shared package**: Imports `EncodeConfigForm`, types, and layout storage from `@luminary-media-converter/encode-config`
 
 ## Project Structure
@@ -93,8 +104,9 @@ api/
 │           ├── encode.service.ts        # Orchestrates encoding pipeline (async hooks support)
 │           ├── encryption.service.ts    # AES-128 HLS encryption + preview playlist rewriting
 │           ├── encryption.worker.ts     # Worker thread for encryption processing
+│           ├── byte-range.worker.ts     # Worker thread for non-blocking byte-range HLS segment consolidation
 │           ├── thumbnail.service.ts     # Sprite-based thumbnail generation with WebVTT
-│           └── tus-upload.service.ts    # Resumable file upload via tus protocol
+│           └── tus-upload.service.ts    # Resumable file upload via tusd Go binary (node-tusd wrapper)
 
 encode-config/
 ├── src/
@@ -131,6 +143,22 @@ app/
 ├── tsconfig.app.json
 ├── vite.config.ts
 └── env.d.ts
+
+tusd/
+├── src/
+│   ├── index.ts                         # Package entry: exports TusdServer, findTusdBinary, types
+│   ├── server.ts                        # TusdServer class: spawns tusd binary, manages lifecycle
+│   ├── types.ts                         # Config and hook types (TusdServerConfig, RequestInfo, UploadInfo, HookType)
+│   ├── hook-server.ts                   # Internal HTTP server receiving webhook callbacks from tusd binary
+│   ├── proxy.ts                         # HTTP proxy forwarding requests to tusd child process
+│   └── binary.ts                        # Tusd binary resolution: TUSD_BINARY_PATH env → bin/tusd → system PATH
+├── bin/
+│   └── tusd                             # Compiled tusd Go binary (platform-specific)
+├── scripts/
+│   └── download-tusd.sh                 # Downloads tusd binary for the current platform
+├── __tests__/                           # Jest tests
+├── package.json
+└── tsconfig.json
 ```
 
 ## Architecture
@@ -163,7 +191,7 @@ app/
 
 - **Video + audio-only modes**: `EncodeConfigDto.type` is `'video'` or `'audio'`; audio-only mode encodes HLS with audio groups only (no video renditions)
 - **Adaptive segment format**: Before encoding, `FfmpegService` probes per-stream start times via ffprobe. When all used streams are aligned (spread < 50ms), fMP4 segments (`.m4s` + `init.mp4`) are used for CMAF compatibility and lower overhead. When streams have misaligned start times, MPEG-TS segments (`.ts`) are used as a fallback because the player's TS transmuxer synchronizes audio/video PTS during playback. The chosen format is reported to the client via the `segmentFormat` field in the session status response
-- **Byte-range HLS**: When enabled (default), segments are consolidated into fewer large files using HLS byte-range addressing (`#EXT-X-BYTERANGE`), reducing the number of S3 objects. Configurable max file size per consolidated file
+- **Byte-range HLS**: When enabled (default), segments are consolidated into fewer large files using HLS byte-range addressing (`#EXT-X-BYTERANGE`), reducing the number of S3 objects. Configurable max file size per consolidated file. Consolidation runs in a non-blocking worker thread (`byte-range.worker.ts`) to avoid blocking the main event loop
 - **Copy mode** (`-c:v copy` / `-c:a copy`): Pass-through for pre-encoded streams, avoiding re-encoding
 - **VBR encoding**: Video renditions and audio groups support VBR mode (CRF/CQ) instead of fixed bitrate via `vbr` flag
 - **Audio groups**: Different audio quality tiers mapped to video renditions via HLS `#EXT-X-MEDIA` GROUP-ID
@@ -178,9 +206,10 @@ app/
 
 ### Upload resilience
 
-- **Tus protocol**: Resumable, chunked uploads via `@tus/server` + `@tus/file-store` (backend) and `tus-js-client` (frontend, 50 MB chunks with automatic retries)
-- **Upload expiration**: Incomplete uploads expire after 10 minutes; expired uploads cleaned up on shutdown via `TusUploadService.onModuleDestroy()`
-- **Bearer auth on tus**: Every tus request is authenticated via the upload token (validated in `onIncomingRequest` hook)
+- **Tus protocol**: Resumable, chunked uploads via the Go `tusd` binary wrapped by `node-tusd` (backend) and `tus-js-client` (frontend, 50 MB chunks, 5 parallel uploads, automatic retries)
+- **Tusd architecture**: `TusdServer` (from `node-tusd` workspace) spawns the Go `tusd` binary as a child process on an ephemeral port, runs an internal HTTP hook server for lifecycle events, and proxies incoming Express requests to tusd
+- **Upload expiration**: Incomplete uploads expire after 10 minutes; expired uploads cleaned up on shutdown via `TusUploadService.onModuleDestroy()` (based on `.info` sidecar file mtime)
+- **Bearer auth on tus**: Every tus request is authenticated via the upload token (validated in `onIncomingRequest` hook before proxying to tusd)
 
 ### Web client flow
 
@@ -226,9 +255,9 @@ created -> uploading -> uploaded -> queued -> encoding -> uploading_to_s3 -> com
 - Webhook configuration is optional in `CreateSessionDto` — when omitted, no webhooks are sent; clients can poll instead
 - Session-level options (`segmentDuration`, `byteRange`, `byteRangeMaxFileSizeMB`, `thumbnails`, `encryption`) are set at session creation time in `CreateSessionDto`, not in the encode config
 - FFmpeg args are built dynamically based on GPU availability, encode config (audio groups, copy mode, metadata)
-- File uploads use the tus protocol (`@tus/server` + `@tus/file-store`) with 10 GB max size, mounted via `EncodeModule.onModuleInit()` on `/api/tus`
+- File uploads use the tus protocol via the Go `tusd` binary (wrapped by the `node-tusd` workspace package) with 10 GB max size, mounted via `EncodeModule.onModuleInit()` on `/api/tus`
 - Graceful shutdown enabled (`app.enableShutdownHooks()`); `QueueService`, `FfmpegService`, and `TusUploadService` implement `OnModuleDestroy` to clean up active processes and expired uploads
-- Environment config via `dotenv`: `PORT`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `WORK_DIR`, `FFMPEG_TIMEOUT_MS`, `FFMPEG_THREADS`, `CORS_ORIGIN`, `MAX_UPLOAD_SIZE` (API); `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`, `VITE_API_BASE_URL` (app)
+- Environment config via `dotenv`: `PORT`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `WORK_DIR`, `FFMPEG_TIMEOUT_MS`, `FFMPEG_THREADS`, `CORS_ORIGIN`, `MAX_UPLOAD_SIZE` (API); `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`, `VITE_API_BASE_URL` (app); `TUSD_BINARY_PATH` (optional override for tusd binary location)
 - Swagger decorators on all DTOs and endpoints for auto-generated API docs
 - Web client stores S3 config in localStorage; encode configs are persisted via `layoutStorage` (from the `encode-config` package) keyed by media layout fingerprint
 - Shared types (ProbeResult, EncodeConfig, VideoRendition, AudioGroup) are defined in `encode-config/src/types.ts` and re-exported by both the encode-config package and `app/src/types.ts`
@@ -258,3 +287,5 @@ From the repo root:
 - `npm -w app run test` — web client tests (Vitest)
 - `npm -w encode-config run build` — build encode-config library
 - `npm -w encode-config run dev` — watch build encode-config library
+- `npm -w tusd run build` — build tusd wrapper library
+- `npm -w tusd run download-tusd` — download the tusd Go binary for the current platform

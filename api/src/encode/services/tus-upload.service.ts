@@ -4,8 +4,7 @@ import {
     type OnModuleDestroy,
     type OnModuleInit,
 } from '@nestjs/common';
-import { Server, EVENTS } from '@tus/server';
-import { FileStore } from '@tus/file-store';
+import { TusdServer } from 'node-tusd';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
 import { rename, copyFile, unlink, mkdir } from 'fs/promises';
@@ -19,7 +18,7 @@ const EXPIRATION_MS = 10 * 60 * 1000; // 10 minutes
 @Injectable()
 export class TusUploadService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(TusUploadService.name);
-    private tusServer!: Server;
+    private tusdServer!: TusdServer;
     private readonly tusDir: string;
     private readonly workDir: string;
 
@@ -32,25 +31,22 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
         mkdirSync(this.tusDir, { recursive: true });
     }
 
-    onModuleInit(): void {
+    async onModuleInit(): Promise<void> {
         const maxSize =
             parseInt(process.env.MAX_UPLOAD_SIZE || '0', 10) ||
             DEFAULT_MAX_SIZE;
         const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
 
-        this.tusServer = new Server({
+        this.tusdServer = new TusdServer({
             path: '/api/tus',
-            datastore: new FileStore({
-                directory: this.tusDir,
-                expirationPeriodInMilliseconds: EXPIRATION_MS,
-            }),
+            directory: this.tusDir,
             maxSize,
-            relativeLocation: true,
+            expirationMs: EXPIRATION_MS,
             allowedOrigins: [corsOrigin],
             allowedHeaders: ['Authorization'],
 
             onIncomingRequest: async (req) => {
-                const auth = req.headers.get('authorization');
+                const auth = req.headers['authorization'];
                 if (!auth || !auth.startsWith('Bearer ')) {
                     throw {
                         status_code: 401,
@@ -76,7 +72,7 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                 const sessionId = upload.metadata?.sessionId;
                 if (!sessionId) {
                     // Partial uploads (Concatenation extension) lack metadata — allow them
-                    return {};
+                    return;
                 }
 
                 const session = this.sessionService.get(sessionId);
@@ -98,23 +94,22 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                 }
 
                 this.sessionService.updateStatus(sessionId, 'uploading');
-                return {};
             },
 
             onUploadFinish: async (_req, upload) => {
                 const sessionId = upload.metadata?.sessionId;
                 if (!sessionId) {
                     // Partial upload completed — nothing to do
-                    return {};
+                    return;
                 }
 
                 const filename = upload.metadata?.filename || 'input';
-                const tusFilePath = upload.storage?.path as string | undefined;
+                const tusFilePath = upload.storage?.path;
                 if (!tusFilePath) {
                     this.logger.error(
                         `No storage path for completed upload ${upload.id}`,
                     );
-                    return {};
+                    return;
                 }
 
                 const sessionDir = join(this.workDir, sessionId);
@@ -129,8 +124,8 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                     await unlink(tusFilePath);
                 }
 
-                // Clean up tus metadata sidecar
-                await unlink(`${tusFilePath}.json`).catch(() => {});
+                // Clean up tusd metadata sidecar (.info file)
+                await unlink(`${tusFilePath}.info`).catch(() => {});
 
                 this.sessionService.setFilePath(sessionId, destPath);
 
@@ -144,16 +139,10 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                         `${probeResult.videoTracks.length} video, ` +
                         `${probeResult.audioTracks.length} audio track(s)`,
                 );
-
-                return {};
             },
         });
 
-        this.tusServer.on(EVENTS.POST_CREATE, (_req, upload) => {
-            this.logger.debug(
-                `TUS upload created: ${upload.id} (size: ${upload.size ?? 'deferred'})`,
-            );
-        });
+        await this.tusdServer.start();
 
         this.logger.log(
             `TUS server initialised (maxSize: ${maxSize} bytes, expiration: ${EXPIRATION_MS / 1000}s)`,
@@ -162,16 +151,24 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
 
     async onModuleDestroy(): Promise<void> {
         try {
-            await this.tusServer.cleanUpExpiredUploads();
+            await this.tusdServer.cleanUpExpiredUploads();
             this.logger.log('Cleaned up expired TUS uploads on shutdown');
         } catch (err) {
             this.logger.warn(
                 `Failed to clean up expired uploads: ${(err as Error).message}`,
             );
         }
+
+        try {
+            await this.tusdServer.stop();
+        } catch (err) {
+            this.logger.warn(
+                `Failed to stop TUS server: ${(err as Error).message}`,
+            );
+        }
     }
 
     handle(req: IncomingMessage, res: ServerResponse): void {
-        this.tusServer.handle(req, res);
+        this.tusdServer.handle(req, res);
     }
 }

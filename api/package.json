@@ -25,8 +25,7 @@
         "@nestjs/passport": "^11.0.5",
         "@nestjs/platform-express": "^11.0.1",
         "@nestjs/swagger": "^11.0.3",
-        "@tus/file-store": "^2.0.0",
-        "@tus/server": "^2.3.0",
+        "node-tusd": "file:../tusd",
         "class-transformer": "^0.5.1",
         "class-validator": "^0.14.2",
         "dotenv": "^17.2.3",
@@ -75,7 +74,8 @@
             "^.+\\.(t|j)s$": "ts-jest"
         },
         "moduleNameMapper": {
-            "^(\\.{1,2}/.*)\\.js$": "$1"
+            "^(\\.{1,2}/.*)\\.js$": "$1",
+            "^node-tusd$": "<rootDir>/../../node_modules/node-tusd/dist/index.js"
         },
         "collectCoverageFrom": [
             "**/*.(t|j)s"
