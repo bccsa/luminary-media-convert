@@ -209,6 +209,7 @@ const statusConfig: Record<string, { label: string; color: string }> = {
     uploading: { label: 'Uploading', color: 'bg-blue-600' },
     queued: { label: 'Queued', color: 'bg-amber-600' },
     encoding: { label: 'Encoding', color: 'bg-indigo-600' },
+    encrypting: { label: 'Encrypting', color: 'bg-amber-600' },
     uploading_to_s3: { label: 'Uploading to S3', color: 'bg-cyan-600' },
     completed: { label: 'Completed', color: 'bg-emerald-600' },
     failed: { label: 'Failed', color: 'bg-red-600' },
@@ -279,10 +280,10 @@ function switchToAngle(index: number) {
         </div>
 
         <!-- Progress bar -->
-        <div v-if="status === 'encoding' || status === 'uploading_to_s3'" class="space-y-2">
+        <div v-if="status === 'encoding' || status === 'encrypting' || status === 'uploading_to_s3'" class="space-y-2">
             <div class="flex items-center justify-between text-sm">
                 <span class="text-zinc-400">
-                    {{ status === 'encoding' ? 'Encoding...' : 'Uploading to S3...' }}
+                    {{ status === 'encoding' ? 'Encoding...' : status === 'encrypting' ? 'Encrypting...' : 'Uploading to S3...' }}
                 </span>
                 <span v-if="progress != null" class="font-mono text-zinc-300">{{ progress }}%</span>
             </div>
