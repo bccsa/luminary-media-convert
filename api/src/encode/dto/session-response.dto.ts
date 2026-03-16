@@ -20,11 +20,11 @@ export class SessionResponseDto {
 
     @ApiProperty({
         description:
-            'Bearer token to authenticate tus upload requests. Send as "Authorization: Bearer <token>".',
-        example: 'tok_f8e7d6c5b4a3291087654321',
+            'Bearer token to authenticate session requests (tus uploads, polling, preview). Send as "Authorization: Bearer <token>".',
+        example: 'sess_f8e7d6c5b4a3291087654321',
     })
     @Expose()
-    uploadToken: string;
+    sessionToken: string;
 
     @ApiProperty({
         description:
@@ -188,10 +188,10 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
-            'Bearer token for authenticating preview playlist/key requests. ' +
+            'Bearer token for authenticating session requests including preview playlist/key requests. ' +
             'Present when previewBaseUrl is set.',
-        example: 'tok_f8e7d6c5b4a3291087654321',
+        example: 'sess_f8e7d6c5b4a3291087654321',
     })
     @Expose()
-    previewToken?: string;
+    sessionToken?: string;
 }

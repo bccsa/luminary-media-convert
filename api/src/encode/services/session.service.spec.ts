@@ -29,7 +29,7 @@ describe('SessionService', () => {
             const session = service.create(makeConfig());
 
             expect(session.id).toBeDefined();
-            expect(session.uploadToken).toMatch(/^tok_/);
+            expect(session.sessionToken).toMatch(/^sess_/);
             expect(session.status).toBe('created');
             expect(session.progress).toBe(0);
             expect(session.config.s3.endPoint).toBe('s3.example.com');
@@ -41,7 +41,7 @@ describe('SessionService', () => {
             const s2 = service.create(makeConfig());
 
             expect(s1.id).not.toBe(s2.id);
-            expect(s1.uploadToken).not.toBe(s2.uploadToken);
+            expect(s1.sessionToken).not.toBe(s2.sessionToken);
         });
     });
 
@@ -59,17 +59,17 @@ describe('SessionService', () => {
         });
     });
 
-    describe('getByUploadToken', () => {
+    describe('getBySessionToken', () => {
         it('should return a session by upload token', () => {
             const created = service.create(makeConfig());
-            const found = service.getByUploadToken(created.uploadToken);
+            const found = service.getBySessionToken(created.sessionToken);
 
             expect(found).toBeDefined();
             expect(found!.id).toBe(created.id);
         });
 
         it('should return undefined for unknown token', () => {
-            expect(service.getByUploadToken('bad_token')).toBeUndefined();
+            expect(service.getBySessionToken('bad_token')).toBeUndefined();
         });
     });
 
@@ -203,7 +203,7 @@ describe('SessionService', () => {
             (service.get(session.id) as any).createdAt = 0;
 
             service.cleanup(1000);
-            expect(service.getByUploadToken(session.uploadToken)).toBeUndefined();
+            expect(service.getBySessionToken(session.sessionToken)).toBeUndefined();
         });
     });
 });

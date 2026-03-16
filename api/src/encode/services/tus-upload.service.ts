@@ -59,11 +59,11 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                     throw { status_code: 401, body: 'Empty bearer token' };
                 }
 
-                const session = this.sessionService.getByUploadToken(token);
+                const session = this.sessionService.getBySessionToken(token);
                 if (!session) {
                     throw {
                         status_code: 401,
-                        body: 'Invalid or expired upload token',
+                        body: 'Invalid or expired session token',
                     };
                 }
             },

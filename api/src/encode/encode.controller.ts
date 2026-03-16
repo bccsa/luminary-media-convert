@@ -11,6 +11,7 @@ import {
     Req,
     Res,
     UseGuards,
+    UseInterceptors,
     BadRequestException,
     Logger,
 } from '@nestjs/common';
@@ -25,8 +26,11 @@ import {
 import type { Request, Response } from 'express';
 import { rm } from 'fs/promises';
 import { join, dirname, posix } from 'path';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
-import { PreviewAuthGuard } from './guards/preview-auth.guard.js';
+import { AuthResolverGuard } from '../auth/auth-resolver.guard.js';
+import { AuthTypes } from '../auth/auth-types.decorator.js';
+import { AuthorizationWebhookService } from '../auth/authorization-webhook.service.js';
+import { RateLimitInterceptor } from '../apikey/rate-limit.interceptor.js';
+import { SessionTokenGuard } from './guards/session-token.guard.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
@@ -42,6 +46,7 @@ const DEFAULT_MAX_UPLOAD_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 
 @ApiTags('Encoding Sessions')
 @Controller('api/sessions')
+@UseInterceptors(RateLimitInterceptor)
 export class EncodeController {
     private readonly logger = new Logger(EncodeController.name);
 
@@ -49,34 +54,48 @@ export class EncodeController {
         private readonly sessionService: SessionService,
         private readonly queueService: QueueService,
         private readonly ffmpegService: FfmpegService,
+        private readonly authorizationWebhookService: AuthorizationWebhookService,
     ) {}
 
     @Post()
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('jwt', 'apikey')
     @ApiBearerAuth('oidc')
     @ApiOperation({
         summary: 'Create an encoding session',
         description:
             'Creates a new encoding session and returns a tus upload endpoint ' +
-            'and upload token. The client should create a tus upload ' +
+            'and session token. The client should create a tus upload ' +
             'to the provided endpoint using the Bearer token for authentication.',
     })
     @ApiResponse({
         status: 201,
         description:
-            'Session created. Use the returned tusEndpoint and uploadToken to upload your file via the tus protocol.',
+            'Session created. Use the returned tusEndpoint and sessionToken to upload your file via the tus protocol.',
         type: SessionResponseDto,
     })
     @ApiResponse({ status: 400, description: 'Invalid request body.' })
     @ApiResponse({
         status: 401,
-        description: 'Unauthorized — invalid or missing Auth0 token.',
+        description: 'Unauthorized — invalid or missing credentials.',
     })
-    createSession(
+    async createSession(
         @Body() dto: CreateSessionDto,
         @Req() req: Request,
-    ): SessionResponseDto {
+    ): Promise<SessionResponseDto> {
+        const apiKey = (req as any).apiKey;
+
+        await this.authorizationWebhookService.checkAuthorization(
+            'create_session',
+            { apiKey, dto },
+        );
+
         const session = this.sessionService.create(dto);
+
+        // Bind webhook from API key if no per-session webhook is configured
+        if (!dto.webhook && apiKey?.webhookUrl) {
+            session.config.webhook = { url: apiKey.webhookUrl, sessionToken: '' };
+        }
 
         const protocol = req.protocol;
         const host = req.get('host');
@@ -89,14 +108,15 @@ export class EncodeController {
         return {
             sessionId: session.id,
             tusEndpoint,
-            uploadToken: session.uploadToken,
+            sessionToken: session.sessionToken,
             maxUploadSize,
         };
     }
 
     @Post(':sessionId/encode')
     @HttpCode(HttpStatus.ACCEPTED)
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('jwt', 'apikey', 'session')
     @ApiBearerAuth('oidc')
     @ApiOperation({
         summary: 'Start encoding with the given configuration',
@@ -119,13 +139,20 @@ export class EncodeController {
     })
     @ApiResponse({
         status: 401,
-        description: 'Unauthorized — invalid or missing Auth0 token.',
+        description: 'Unauthorized — invalid or missing credentials.',
     })
     @ApiResponse({ status: 404, description: 'Session not found.' })
-    startEncode(
+    async startEncode(
         @Param('sessionId') sessionId: string,
         @Body() dto: EncodeConfigDto,
-    ): EncodeStartResponseDto {
+        @Req() req: Request,
+    ): Promise<EncodeStartResponseDto> {
+        const apiKey = (req as any).apiKey;
+
+        await this.authorizationWebhookService.checkAuthorization(
+            'start_encode',
+            { apiKey, sessionId, dto },
+        );
         const session = this.sessionService.get(sessionId);
         if (!session) {
             throw new NotFoundException(`Session ${sessionId} not found`);
@@ -184,7 +211,8 @@ export class EncodeController {
     }
 
     @Get(':sessionId')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('jwt', 'apikey', 'session')
     @ApiBearerAuth('oidc')
     @ApiOperation({
         summary: 'Get session status',
@@ -248,7 +276,7 @@ export class EncodeController {
                 const protocol = req.protocol;
                 const host = req.get('host');
                 result.previewBaseUrl = `${protocol}://${host}/api/sessions/${sessionId}/preview`;
-                result.previewToken = session.uploadToken;
+                result.sessionToken = session.sessionToken;
             }
         }
 
@@ -260,7 +288,7 @@ export class EncodeController {
     }
 
     @Get(':sessionId/preview/key')
-    @UseGuards(PreviewAuthGuard)
+    @UseGuards(SessionTokenGuard)
     @ApiOperation({
         summary: 'Get preview decryption key',
         description: 'Returns the raw 16-byte AES-128 encryption key for preview playback.',
@@ -286,7 +314,7 @@ export class EncodeController {
     }
 
     @Get(':sessionId/preview/{*path}')
-    @UseGuards(PreviewAuthGuard)
+    @UseGuards(SessionTokenGuard)
     @ApiOperation({
         summary: 'Get rewritten preview playlist',
         description:
@@ -386,7 +414,8 @@ export class EncodeController {
 
     @Delete(':sessionId')
     @HttpCode(HttpStatus.NO_CONTENT)
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('jwt', 'apikey')
     @ApiBearerAuth('oidc')
     @ApiOperation({
         summary: 'Cancel and delete an encoding session',

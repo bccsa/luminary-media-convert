@@ -13,7 +13,7 @@ export interface AnglePlaylistInfo {
 
 export interface Session {
     id: string;
-    uploadToken: string;
+    sessionToken: string;
     status: SessionStatus;
     progress: number;
     config: CreateSessionDto;
@@ -40,11 +40,11 @@ export class SessionService {
 
     create(config: CreateSessionDto): Session {
         const id = randomUUID();
-        const uploadToken = `tok_${randomUUID().replace(/-/g, '')}`;
+        const sessionToken = `sess_${randomUUID().replace(/-/g, '')}`;
 
         const session: Session = {
             id,
-            uploadToken,
+            sessionToken,
             status: 'created',
             progress: 0,
             config,
@@ -52,7 +52,7 @@ export class SessionService {
         };
 
         this.sessions.set(id, session);
-        this.tokenIndex.set(uploadToken, id);
+        this.tokenIndex.set(sessionToken, id);
         this.logger.log(`Session created: ${id}`);
 
         return session;
@@ -62,7 +62,7 @@ export class SessionService {
         return this.sessions.get(id);
     }
 
-    getByUploadToken(token: string): Session | undefined {
+    getBySessionToken(token: string): Session | undefined {
         const id = this.tokenIndex.get(token);
         if (!id) return undefined;
         return this.sessions.get(id);
@@ -142,7 +142,7 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (!session) return undefined;
 
-        this.tokenIndex.delete(session.uploadToken);
+        this.tokenIndex.delete(session.sessionToken);
         this.sessions.delete(id);
         this.logger.log(`Session removed: ${id}`);
         return session;
@@ -161,7 +161,7 @@ export class SessionService {
                 session.createdAt < cutoff &&
                 (session.status === 'completed' || session.status === 'failed')
             ) {
-                this.tokenIndex.delete(session.uploadToken);
+                this.tokenIndex.delete(session.sessionToken);
                 this.sessions.delete(id);
                 removed++;
             }

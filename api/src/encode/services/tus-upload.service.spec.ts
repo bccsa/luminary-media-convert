@@ -128,20 +128,20 @@ describe('TusUploadService', () => {
             });
         });
 
-        it('should reject unknown upload token', async () => {
+        it('should reject unknown session token', async () => {
             const hook = capturedServerConfig.value.onIncomingRequest;
             const req = makeRequestInfo('Bearer bad_token');
 
             await expect(hook(req)).rejects.toEqual({
                 status_code: 401,
-                body: 'Invalid or expired upload token',
+                body: 'Invalid or expired session token',
             });
         });
 
         it('should allow valid Bearer token', async () => {
             const session = sessionService.create(makeConfig());
             const hook = capturedServerConfig.value.onIncomingRequest;
-            const req = makeRequestInfo(`Bearer ${session.uploadToken}`);
+            const req = makeRequestInfo(`Bearer ${session.sessionToken}`);
 
             await expect(hook(req)).resolves.toBeUndefined();
         });

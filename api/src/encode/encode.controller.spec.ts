@@ -7,6 +7,7 @@ import { EncodeController } from './encode.controller.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
+import { AuthorizationWebhookService } from '../auth/authorization-webhook.service';
 import type { CreateSessionDto } from './dto/create-session.dto.js';
 import type { EncodeConfigDto } from './dto/encode-config.dto.js';
 import type { Response } from 'express';
@@ -55,6 +56,7 @@ describe('EncodeController', () => {
     let sessionService: SessionService;
     let queueService: Mocked<QueueService>;
     let ffmpegService: Mocked<FfmpegService>;
+    let authorizationWebhookService: Mocked<AuthorizationWebhookService>;
     let testWorkDir: string;
 
     beforeEach(() => {
@@ -77,7 +79,11 @@ describe('EncodeController', () => {
             killActiveProcess: vi.fn(),
         } as any;
 
-        controller = new EncodeController(sessionService, queueService, ffmpegService);
+        authorizationWebhookService = {
+            checkAuthorization: vi.fn().mockResolvedValue(undefined),
+        } as any;
+
+        controller = new EncodeController(sessionService, queueService, ffmpegService, authorizationWebhookService);
     });
 
     afterEach(() => {
@@ -91,19 +97,19 @@ describe('EncodeController', () => {
     });
 
     describe('createSession', () => {
-        it('should create a session and return tus endpoint', () => {
+        it('should create a session and return tus endpoint', async () => {
             const dto = makeConfig();
             const req = makeRequest();
 
-            const result = controller.createSession(dto, req);
+            const result = await controller.createSession(dto, req);
 
             expect(result.sessionId).toBeDefined();
             expect(result.tusEndpoint).toBe('http://localhost:3000/api/tus');
-            expect(result.uploadToken).toMatch(/^tok_/);
+            expect(result.sessionToken).toMatch(/^sess_/);
             expect(result.maxUploadSize).toBeGreaterThan(0);
         });
 
-        it('should build tusEndpoint from request protocol and host', () => {
+        it('should build tusEndpoint from request protocol and host', async () => {
             const dto = makeConfig();
             const req = makeRequest({
                 protocol: 'https',
@@ -111,20 +117,20 @@ describe('EncodeController', () => {
                     h === 'host' ? 'api.example.com' : undefined,
             });
 
-            const result = controller.createSession(dto, req);
+            const result = await controller.createSession(dto, req);
 
             expect(result.tusEndpoint).toBe('https://api.example.com/api/tus');
         });
 
-        it('should use MAX_UPLOAD_SIZE from env when set', () => {
+        it('should use MAX_UPLOAD_SIZE from env when set', async () => {
             process.env.MAX_UPLOAD_SIZE = '5368709120';
-            const result = controller.createSession(makeConfig(), makeRequest());
+            const result = await controller.createSession(makeConfig(), makeRequest());
 
             expect(result.maxUploadSize).toBe(5368709120);
         });
 
-        it('should default maxUploadSize to 10 GB', () => {
-            const result = controller.createSession(makeConfig(), makeRequest());
+        it('should default maxUploadSize to 10 GB', async () => {
+            const result = await controller.createSession(makeConfig(), makeRequest());
 
             expect(result.maxUploadSize).toBe(10 * 1024 * 1024 * 1024);
         });
@@ -201,7 +207,7 @@ describe('EncodeController', () => {
             expect(result.masterPlaylist).toBe('master.m3u8');
         });
 
-        it('should include previewBaseUrl and previewToken when encryption key is present', () => {
+        it('should include previewBaseUrl and sessionToken when encryption key is present', () => {
             const session = sessionService.create(makeConfig());
             sessionService.setCompleted(session.id, ['master.m3u8'], 'master.m3u8');
             const sess = sessionService.get(session.id)!;
@@ -213,7 +219,7 @@ describe('EncodeController', () => {
             expect(result.previewBaseUrl).toBe(
                 `http://localhost:3000/api/sessions/${session.id}/preview`,
             );
-            expect(result.previewToken).toBe(session.uploadToken);
+            expect(result.sessionToken).toBe(session.sessionToken);
         });
 
         it('should not include previewBaseUrl when no encryption key', () => {
@@ -223,7 +229,7 @@ describe('EncodeController', () => {
             const result = controller.getStatus(session.id, makeRequest());
 
             expect(result.previewBaseUrl).toBeUndefined();
-            expect(result.previewToken).toBeUndefined();
+            expect(result.sessionToken).toBeUndefined();
         });
 
         it('should include error when session failed', () => {
@@ -244,25 +250,25 @@ describe('EncodeController', () => {
     });
 
     describe('startEncode', () => {
-        it('should reject when session is not in uploaded state', () => {
+        it('should reject when session is not in uploaded state', async () => {
             const session = sessionService.create(makeConfig());
 
-            expect(() =>
-                controller.startEncode(session.id, makeEncodeConfig()),
-            ).toThrow(BadRequestException);
+            await expect(
+                controller.startEncode(session.id, makeEncodeConfig(), makeRequest()),
+            ).rejects.toThrow(BadRequestException);
         });
 
-        it('should reject when session not found', () => {
-            expect(() =>
-                controller.startEncode('nonexistent', makeEncodeConfig()),
-            ).toThrow(NotFoundException);
+        it('should reject when session not found', async () => {
+            await expect(
+                controller.startEncode('nonexistent', makeEncodeConfig(), makeRequest()),
+            ).rejects.toThrow(NotFoundException);
         });
 
-        it('should enqueue session and return queued status', () => {
+        it('should enqueue session and return queued status', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploaded');
 
-            const result = controller.startEncode(session.id, makeEncodeConfig());
+            const result = await controller.startEncode(session.id, makeEncodeConfig(), makeRequest());
 
             expect(result.sessionId).toBe(session.id);
             expect(result.status).toBe('queued');
@@ -270,7 +276,7 @@ describe('EncodeController', () => {
             expect(queueService.enqueue).toHaveBeenCalledWith(session.id);
         });
 
-        it('should reject video config without videoRenditions', () => {
+        it('should reject video config without videoRenditions', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploaded');
 
@@ -279,12 +285,12 @@ describe('EncodeController', () => {
                 audioGroups: [{ id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 }],
             };
 
-            expect(() =>
-                controller.startEncode(session.id, config),
-            ).toThrow(BadRequestException);
+            await expect(
+                controller.startEncode(session.id, config, makeRequest()),
+            ).rejects.toThrow(BadRequestException);
         });
 
-        it('should reject video config without audioGroups', () => {
+        it('should reject video config without audioGroups', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploaded');
 
@@ -293,23 +299,23 @@ describe('EncodeController', () => {
                 videoRenditions: [{ width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd' }],
             };
 
-            expect(() =>
-                controller.startEncode(session.id, config),
-            ).toThrow(BadRequestException);
+            await expect(
+                controller.startEncode(session.id, config, makeRequest()),
+            ).rejects.toThrow(BadRequestException);
         });
 
-        it('should reject audio config without audioGroups', () => {
+        it('should reject audio config without audioGroups', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploaded');
 
             const config: EncodeConfigDto = { type: 'audio' };
 
-            expect(() =>
-                controller.startEncode(session.id, config),
-            ).toThrow(BadRequestException);
+            await expect(
+                controller.startEncode(session.id, config, makeRequest()),
+            ).rejects.toThrow(BadRequestException);
         });
 
-        it('should reject unknown audioGroupId in video rendition', () => {
+        it('should reject unknown audioGroupId in video rendition', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploaded');
 
@@ -319,9 +325,9 @@ describe('EncodeController', () => {
                 audioGroups: [{ id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 }],
             };
 
-            expect(() =>
-                controller.startEncode(session.id, config),
-            ).toThrow(BadRequestException);
+            await expect(
+                controller.startEncode(session.id, config, makeRequest()),
+            ).rejects.toThrow(BadRequestException);
         });
     });
 
