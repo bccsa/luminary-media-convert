@@ -78,6 +78,7 @@ async function convertStreamToByteRange(
     let currentOffset = 0;
     let currentMediaFile = `media_${fileIndex}.${segExt}`;
     let writeStream = createWriteStream(join(streamDir, currentMediaFile));
+    writeStream.setMaxListeners(0);
 
     for (let i = 0; i < segments.length; i++) {
         const seg = segments[i];
@@ -96,6 +97,7 @@ async function convertStreamToByteRange(
             writeStream = createWriteStream(
                 join(streamDir, currentMediaFile),
             );
+            writeStream.setMaxListeners(0);
         }
 
         const segPath = join(streamDir, seg.filename);
