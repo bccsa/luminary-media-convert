@@ -153,13 +153,36 @@ The Encoding API calls back to the SaaS Service on two webhook channels:
 
 The Encoding API supports three credential types. All are validated locally — no external calls needed (except the optional authorization webhook).
 
-#### 3.1.1 JWT Authentication
+#### 3.1.1 JWT Authentication (Generic OIDC)
 
 - **Library**: `passport-jwt` with RS256 JWKS validation (existing)
 - **Source**: `Authorization: Bearer <jwt>` header
-- **Validation**: Signature, expiry, audience, issuer — same as current Auth0 validation
+- **Validation**: Signature, expiry, audience, issuer — generic OIDC (any provider)
 - **Capabilities**: All operations including API key management
 - **Identity**: JWT `sub` and `email` claims passed to authorization webhook (if configured)
+- **Configuration**: `OIDC_ISSUER_URL` and `OIDC_AUDIENCE` env vars (replaces Auth0-specific `AUTH0_DOMAIN` / `AUTH0_AUDIENCE`)
+- **JWKS discovery**: JWKS URI derived from `{OIDC_ISSUER_URL}/.well-known/openid-configuration` (standard OIDC discovery)
+
+```typescript
+// Refactored JwtStrategy — generic OIDC, not Auth0-specific
+constructor() {
+    const issuerUrl = process.env.OIDC_ISSUER_URL;  // e.g., "https://myapp.auth0.com/"
+    const audience = process.env.OIDC_AUDIENCE;
+
+    super({
+        secretOrKeyProvider: passportJwtSecret({
+            cache: true,
+            rateLimit: true,
+            jwksRequestsPerMinute: 5,
+            jwksUri: `${issuerUrl.replace(/\/$/, '')}/.well-known/jwks.json`,
+        }),
+        jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+        audience,
+        issuer: issuerUrl,
+        algorithms: ['RS256'],
+    });
+}
+```
 
 #### 3.1.2 API Key Authentication
 
@@ -298,7 +321,7 @@ POST /saas/webhooks/authorize
 
 *Traces: FR-3.1.1*
 
-The SaaS Service validates Auth0 JWTs on all endpoints. It does not accept API keys or session tokens — those are Encoding API concepts.
+The SaaS Service uses **Auth0** as its OIDC provider (unlike the Encoding API which is provider-agnostic). It validates Auth0 JWTs on all endpoints. It does not accept API keys or session tokens — those are Encoding API concepts.
 
 #### 3.3.1 Identity Resolution Flow
 
@@ -1187,10 +1210,12 @@ Mock `crypto` operations and worker threads for `EncryptionService` tests:
 
 ## 11. Environment Configuration Summary
 
-### 10.1 Encoding API (Added Variables)
+### 10.1 Encoding API (Changed & Added Variables)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `OIDC_ISSUER_URL` | (required) | OIDC issuer URL (replaces `AUTH0_DOMAIN`). Any OIDC provider. JWKS discovered via `/.well-known/openid-configuration` |
+| `OIDC_AUDIENCE` | (required) | Expected JWT audience claim (replaces `AUTH0_AUDIENCE`) |
 | `AUTHORIZATION_WEBHOOK_URL` | (none) | Global authorization webhook URL |
 | `AUTHORIZATION_WEBHOOK_TIMEOUT_MS` | `5000` | Authorization webhook timeout |
 | `AUTHORIZATION_WEBHOOK_FAIL_MODE` | `open` | `open` or `closed` |

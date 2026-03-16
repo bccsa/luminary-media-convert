@@ -37,13 +37,14 @@
 | 1.6 | Implement webhook URL resolution: per-session `dto.webhook` → per-key `webhookUrl` → none | 4.3 |
 | 1.7 | Implement authorization webhook: resolve URL, call before session creation and encode start, fail-open/closed modes | 3.2 |
 | 1.8 | Add per-key rate limiting (sliding window, response headers) | 4.1.4 |
-| 1.9 | Add env vars: `AUTHORIZATION_WEBHOOK_URL`, `AUTHORIZATION_WEBHOOK_TIMEOUT_MS`, `AUTHORIZATION_WEBHOOK_FAIL_MODE`, `API_KEY_RATE_LIMIT` | 10.1 |
-| 1.10 | Update Swagger/OpenAPI docs for all new and changed endpoints | — |
-| 1.11 | Unit tests for all Phase 1 code: API key CRUD, auth guards, session token, authorization webhook, rate limiting. Simulation mocks for authorization webhook HTTP calls. 100% coverage | 10.2 |
+| 1.9 | Refactor Encoding API JWT auth from Auth0-specific (`AUTH0_DOMAIN`, `AUTH0_AUDIENCE`) to generic OIDC (`OIDC_ISSUER_URL`, `OIDC_AUDIENCE`) with standard JWKS discovery | 3.1.1 |
+| 1.10 | Add env vars: `AUTHORIZATION_WEBHOOK_URL`, `AUTHORIZATION_WEBHOOK_TIMEOUT_MS`, `AUTHORIZATION_WEBHOOK_FAIL_MODE`, `API_KEY_RATE_LIMIT` | 10.1 |
+| 1.11 | Update Swagger/OpenAPI docs for all new and changed endpoints | — |
+| 1.12 | Unit tests for all Phase 1 code: API key CRUD, auth guards, session token, OIDC JWT validation, authorization webhook, rate limiting. Simulation mocks for authorization webhook HTTP calls. 100% coverage | 10.2 |
 
 ### Test Checklist
 
-- [ ] **JWT auth still works**: Create a session with Auth0 JWT, upload, encode, poll, preview — identical to current behavior
+- [ ] **OIDC JWT auth works**: Configure `OIDC_ISSUER_URL` and `OIDC_AUDIENCE` pointing to Auth0 (or any OIDC provider). Create a session with JWT, upload, encode, poll, preview — identical to current behavior but using generic OIDC env vars
 - [ ] **API key CRUD**: Use JWT to create an API key (`POST /api/keys`), list keys (`GET /api/keys`), verify full key shown once, revoke key (`DELETE /api/keys/:id`)
 - [ ] **API key session flow**: Use the API key (`X-API-Key` header) to create a session, upload via tus, submit encode config, poll until completed — full encoding pipeline works with API key auth
 - [ ] **Session token scope**: Create a session (JWT or API key), receive `sessionToken` in response, use it to upload, poll, encode, and access preview endpoints. Verify it cannot create new sessions or manage API keys

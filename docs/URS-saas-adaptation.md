@@ -39,8 +39,8 @@ The system currently operates as a single-tenant service with the following char
 - **No user association**: Sessions are globally addressable by UUID with no ownership model. Any authenticated user can access any session by ID.
 - **In-memory storage**: All session state lives in a `Map<string, Session>` — no persistence across restarts.
 - **Single global queue**: One FIFO encoding queue shared across all users with one concurrent job.
-- **Auth0 JWT validation only**: JWT is validated but no user identifier is extracted or stored.
-- **No API key concept**: All programmatic access requires Auth0 JWT tokens.
+- **JWT validation only**: JWT is validated but no user identifier is extracted or stored.
+- **No API key concept**: All programmatic access requires JWT tokens.
 - **No session history**: Completed sessions are garbage-collected after 24 hours.
 
 ---
@@ -87,7 +87,7 @@ The system consists of two independent services and two client SPAs:
 
 **Encoding API** (open-source, self-service): Runs standalone on suitable hardware (GPU-equipped). Supports **two authentication methods**: JWT tokens and **API keys**. Both can create sessions and perform all session operations. JWT is additionally required for API key management (privileged). The API key system is a built-in open-source feature. Sessions are ephemeral in-memory. Webhooks deliver status updates to configured URLs (per API key or per session). Can be scaled by running multiple instances.
 
-- **Web app users** authenticate to the Encoding API with their Auth0 JWT directly — no API key needed. The web app passes the SaaS Service's webhook URL in the session's `webhook` config so the SaaS Service stays informed.
+- **Web app users** authenticate to the Encoding API with their OIDC JWT directly — no API key needed. The web app passes the SaaS Service's webhook URL in the session's `webhook` config so the SaaS Service stays informed.
 - **Third-party services** authenticate with an API key (obtained from the SaaS web app). Webhooks are bound to the API key's `webhookUrl`.
 - Both paths produce the same result: a session token for upload/poll/encode/preview, and webhook callbacks to the SaaS Service for history/billing.
 
@@ -139,7 +139,7 @@ All other interactions (session creation, upload, encoding, polling) happen **di
 
 **Encoding API authentication** — two methods (both open-source features):
 
-1. **JWT** (privileged): For API key management only. The SaaS Service authenticates with a service-level JWT (Auth0 client credentials grant). Standalone users can also use JWT directly.
+1. **JWT** (privileged): For API key management only. The SaaS Service authenticates with a service-level JWT (OIDC client credentials grant). Standalone users can also use JWT directly.
 2. **API key** (standard): For all session operations. Third-party services and SaaS-managed users authenticate with an API key to create sessions, upload, encode, poll, and preview.
 
 **Webhook URL resolution**: The Encoding API determines the webhook URL for a session from two sources (in priority order):
@@ -1047,7 +1047,7 @@ Existing API contracts (request/response shapes, endpoint paths) shall remain un
 The open-source Encoding API is a fully independent service. It has no dependency on the SaaS Service and can be used standalone:
 
 - Sessions use in-memory storage (current behavior)
-- Authentication via JWT tokens signed by any configured Auth0 provider (or configurable static token for development)
+- Authentication via JWT tokens signed by any OIDC provider (or configurable static token for development)
 - Webhook delivery to any configured URL (or none)
 - No user management, no API keys, no session history, no billing
 - Any client that can obtain a JWT and follow the session flow can use the Encoding API directly
@@ -1262,7 +1262,16 @@ The Encoding API extends its current endpoint structure with API key authenticat
 | GET | `/api/keys` | JWT | List API keys (prefix, name, dates — never full key) |
 | DELETE | `/api/keys/:keyId` | JWT | Revoke API key |
 
-**Authentication**: The Encoding API supports three auth methods: (1) **JWT** for all operations including key management — used by the SaaS web app and the SaaS Service, (2) **API key** (`X-API-Key` header) for session creation/deletion and per-session operations — used by third-party services, (3) **Session token** (`Authorization: Bearer`) for per-session operations — used by end users in third-party web apps. The Encoding API has no concept of users, history, or billing.
+**Authentication**: The Encoding API supports three auth methods: (1) **JWT** (generic OIDC, any provider) for all operations including key management — used by the SaaS web app and the SaaS Service, (2) **API key** (`X-API-Key` header) for session creation/deletion and per-session operations — used by third-party services, (3) **Session token** (`Authorization: Bearer`) for per-session operations — used by end users in third-party web apps. The Encoding API has no concept of users, history, or billing.
+
+**Encoding API OIDC configuration**: The current Auth0-specific env vars (`AUTH0_DOMAIN`, `AUTH0_AUDIENCE`) shall be replaced with generic OIDC configuration:
+
+| Variable | Description |
+|----------|-------------|
+| `OIDC_ISSUER_URL` | OIDC issuer URL (e.g., `https://myapp.auth0.com/`). JWKS URI is discovered via `{issuer}/.well-known/openid-configuration` |
+| `OIDC_AUDIENCE` | Expected JWT audience claim |
+
+This allows the Encoding API to work with any OIDC-compliant provider (Auth0, Keycloak, Okta, Azure AD, Google, etc.) without code changes.
 
 ### 6.2 SaaS Service Endpoints (Closed Source — New)
 
@@ -1404,7 +1413,7 @@ Third-party services receive this directly from the Encoding API. They can pass 
 5. Implement Auth0 JWT identity resolution in SaaS Service (email-based user matching, `auth0Id` linking)
 6. Implement SaaS Service → Encoding API communication (session creation, webhook receiver)
 7. Rename `uploadToken` to `sessionToken` in Encoding API (extend scope to full session lifecycle)
-8. Configure Encoding API to accept JWT tokens signed by Auth0 (stateless validation, no user awareness)
+8. Refactor Encoding API JWT auth from Auth0-specific env vars (`AUTH0_DOMAIN`, `AUTH0_AUDIENCE`) to generic OIDC (`OIDC_ISSUER_URL`, `OIDC_AUDIENCE`) with JWKS discovery
 
 ### 7.2 Phase 2 — Admin Panel & User Management
 
