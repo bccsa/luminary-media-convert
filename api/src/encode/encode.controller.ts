@@ -53,7 +53,7 @@ export class EncodeController {
 
     @Post()
     @UseGuards(JwtAuthGuard)
-    @ApiBearerAuth('auth0')
+    @ApiBearerAuth('oidc')
     @ApiOperation({
         summary: 'Create an encoding session',
         description:
@@ -97,7 +97,7 @@ export class EncodeController {
     @Post(':sessionId/encode')
     @HttpCode(HttpStatus.ACCEPTED)
     @UseGuards(JwtAuthGuard)
-    @ApiBearerAuth('auth0')
+    @ApiBearerAuth('oidc')
     @ApiOperation({
         summary: 'Start encoding with the given configuration',
         description:
@@ -185,7 +185,7 @@ export class EncodeController {
 
     @Get(':sessionId')
     @UseGuards(JwtAuthGuard)
-    @ApiBearerAuth('auth0')
+    @ApiBearerAuth('oidc')
     @ApiOperation({
         summary: 'Get session status',
         description:
@@ -387,7 +387,7 @@ export class EncodeController {
     @Delete(':sessionId')
     @HttpCode(HttpStatus.NO_CONTENT)
     @UseGuards(JwtAuthGuard)
-    @ApiBearerAuth('auth0')
+    @ApiBearerAuth('oidc')
     @ApiOperation({
         summary: 'Cancel and delete an encoding session',
         description:

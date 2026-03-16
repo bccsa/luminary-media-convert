@@ -35,16 +35,16 @@ async function bootstrap() {
                 scheme: 'bearer',
                 bearerFormat: 'JWT',
                 description:
-                    'Auth0 access token (JWT). Obtain via Auth0 login flow.',
+                    'OIDC access token (JWT). Obtain via your OIDC provider\'s login flow.',
             },
-            'auth0',
+            'oidc',
         )
         .addBearerAuth(
             {
                 type: 'http',
                 scheme: 'bearer',
                 description:
-                    'Upload token returned from the session creation endpoint.',
+                    'Session token returned from the session creation endpoint.',
             },
         )
         .build();

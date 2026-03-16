@@ -8,29 +8,31 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     private readonly logger = new Logger(JwtStrategy.name);
 
     constructor() {
-        const domain = process.env.AUTH0_DOMAIN;
-        const audience = process.env.AUTH0_AUDIENCE;
+        const issuerUrl = process.env.OIDC_ISSUER_URL;
+        const audience = process.env.OIDC_AUDIENCE;
 
-        if (!domain || !audience) {
+        if (!issuerUrl || !audience) {
             throw new Error(
-                'AUTH0_DOMAIN and AUTH0_AUDIENCE environment variables must be set',
+                'OIDC_ISSUER_URL and OIDC_AUDIENCE environment variables must be set',
             );
         }
+
+        const issuer = issuerUrl.replace(/\/$/, '') + '/';
 
         super({
             secretOrKeyProvider: passportJwtSecret({
                 cache: true,
                 rateLimit: true,
                 jwksRequestsPerMinute: 5,
-                jwksUri: `https://${domain}/.well-known/jwks.json`,
+                jwksUri: `${issuer}.well-known/jwks.json`,
             }),
             jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
             audience,
-            issuer: `https://${domain}/`,
+            issuer,
             algorithms: ['RS256'],
         });
 
-        this.logger.log(`Auth0 JWT validation configured for domain: ${domain}`);
+        this.logger.log(`OIDC JWT validation configured for issuer: ${issuer}`);
     }
 
     validate(payload: Record<string, unknown>): Record<string, unknown> {
