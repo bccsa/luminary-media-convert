@@ -6,6 +6,7 @@ export type SessionStatus =
     | 'uploading'
     | 'queued'
     | 'encoding'
+    | 'encrypting'
     | 'uploading_to_s3'
     | 'completed'
     | 'failed';
@@ -22,6 +23,7 @@ export class WebhookPayloadDto {
         enum: [
             'queued',
             'encoding',
+            'encrypting',
             'uploading_to_s3',
             'completed',
             'failed',

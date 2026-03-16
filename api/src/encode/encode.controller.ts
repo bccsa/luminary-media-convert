@@ -232,7 +232,7 @@ export class EncodeController {
                 this.queueService.getPosition(sessionId) ?? undefined;
         }
 
-        if (session.status === 'encoding' || session.status === 'uploading_to_s3') {
+        if (session.status === 'encoding' || session.status === 'encrypting' || session.status === 'uploading_to_s3') {
             result.progress = session.progress;
         }
 

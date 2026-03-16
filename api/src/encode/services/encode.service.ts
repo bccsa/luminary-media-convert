@@ -69,10 +69,21 @@ export class EncodeService {
                     (session.config.byteRangeMaxFileSizeMB ?? 500) * 1024 * 1024,
                 preByteRangeHook: encryptionEnabled
                     ? async (outDir) => {
+                        this.sessionService.updateStatus(sessionId, 'encrypting');
+                        this.sessionService.updateProgress(sessionId, 0);
+                        await this.sendWebhook(session, {
+                            sessionId,
+                            status: 'encrypting',
+                            progress: 0,
+                            message: 'Encrypting HLS segments',
+                        });
                         const result = await this.encryptionService.encryptHlsOutput(
                             outDir,
                             sessionId,
                             session.config.encryption!.keyUrl!,
+                            (percent) => {
+                                this.sessionService.updateProgress(sessionId, percent);
+                            },
                         );
                         encryptionKey = result.key;
                     }

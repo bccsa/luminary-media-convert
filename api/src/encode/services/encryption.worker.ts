@@ -137,10 +137,15 @@ async function injectKeyTag(
         }
     }
 
-    // Encrypt segments concurrently
-    await mapWithLimit(segmentFiles, CONCURRENCY_LIMIT, (filePath) =>
-        encryptSegmentFile(filePath, key, iv)
-    );
+    // Encrypt segments concurrently, reporting progress
+    let encryptedCount = 0;
+    const totalSegments = segmentFiles.length;
+    await mapWithLimit(segmentFiles, CONCURRENCY_LIMIT, async (filePath) => {
+        await encryptSegmentFile(filePath, key, iv);
+        encryptedCount++;
+        const percent = Math.round((encryptedCount / totalSegments) * 100);
+        parentPort!.postMessage({ type: 'progress', percent });
+    });
 
     // Inject key tags into playlists
     const keyTag = `#EXT-X-KEY:METHOD=AES-128,URI="${keyUrl}",IV=0x${iv.toString('hex')}`;
@@ -148,6 +153,7 @@ async function injectKeyTag(
     await Promise.all(playlists.map((p) => injectKeyTag(p, keyTag)));
 
     parentPort!.postMessage({
+        type: 'done',
         key: Array.from(key),
         iv: Array.from(iv),
         segmentsEncrypted: segmentFiles.length,

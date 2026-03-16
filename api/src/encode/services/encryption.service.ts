@@ -32,6 +32,7 @@ export class EncryptionService {
         outputDir: string,
         sessionId: string,
         keyUrl: string,
+        onProgress?: (percent: number) => void,
     ): Promise<{ key: Buffer; iv: Buffer }> {
         const seed = process.env.HLS_ENCRYPTION_SEED;
         if (!seed) {
@@ -60,6 +61,11 @@ export class EncryptionService {
             });
 
             worker.on('message', (msg) => {
+                if (msg.type === 'progress') {
+                    onProgress?.(msg.percent);
+                    return;
+                }
+
                 const key = Buffer.from(msg.key);
                 const iv = Buffer.from(msg.iv);
 
