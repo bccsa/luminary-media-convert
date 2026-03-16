@@ -1,5 +1,7 @@
 import { Module, type OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
+import { AuthModule } from '../auth/auth.module.js';
+import { ApiKeyModule } from '../apikey/apikey.module.js';
 import { EncodeController } from './encode.controller.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
@@ -11,9 +13,11 @@ import { EncryptionService } from './services/encryption.service.js';
 import { ThumbnailService } from './services/thumbnail.service.js';
 import { ProbeService } from './services/probe.service.js';
 import { TusUploadService } from './services/tus-upload.service.js';
-import { PreviewAuthGuard } from './guards/preview-auth.guard.js';
+import { SessionTokenGuard } from './guards/session-token.guard.js';
+import { AuthorizationWebhookService } from '../auth/authorization-webhook.service.js';
 
 @Module({
+    imports: [AuthModule, ApiKeyModule],
     controllers: [EncodeController],
     providers: [
         SessionService,
@@ -26,7 +30,8 @@ import { PreviewAuthGuard } from './guards/preview-auth.guard.js';
         ThumbnailService,
         ProbeService,
         TusUploadService,
-        PreviewAuthGuard,
+        SessionTokenGuard,
+        AuthorizationWebhookService,
     ],
     exports: [SessionService],
 })
