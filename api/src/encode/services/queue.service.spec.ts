@@ -1,3 +1,4 @@
+import { type Mocked } from 'vitest';
 import { QueueService } from './queue.service.js';
 import { SessionService } from './session.service.js';
 import { EncodeService } from './encode.service.js';
@@ -22,18 +23,18 @@ function makeConfig(): CreateSessionDto {
 describe('QueueService', () => {
     let queueService: QueueService;
     let sessionService: SessionService;
-    let encodeService: jest.Mocked<EncodeService>;
-    let webhookService: jest.Mocked<WebhookService>;
+    let encodeService: Mocked<EncodeService>;
+    let webhookService: Mocked<WebhookService>;
 
     beforeEach(() => {
         sessionService = new SessionService();
 
         encodeService = {
-            processSession: jest.fn().mockResolvedValue(undefined),
+            processSession: vi.fn().mockResolvedValue(undefined),
         } as any;
 
         webhookService = {
-            send: jest.fn().mockResolvedValue(undefined),
+            send: vi.fn().mockResolvedValue(undefined),
         } as any;
 
         queueService = new QueueService(

@@ -1,11 +1,12 @@
+import { type MockedFunction } from 'vitest';
 import { execFile } from 'child_process';
 import { ProbeService } from './probe.service.js';
 
-jest.mock('child_process', () => ({
-    execFile: jest.fn(),
+vi.mock('child_process', () => ({
+    execFile: vi.fn(),
 }));
 
-const mockExecFile = execFile as unknown as jest.MockedFunction<
+const mockExecFile = execFile as unknown as MockedFunction<
     (cmd: string, args: string[], opts: any, cb: (err: Error | null, result: { stdout: string; stderr: string }) => void) => void
 >;
 

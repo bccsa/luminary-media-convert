@@ -1,12 +1,13 @@
+import { type MockInstance } from 'vitest';
 import { WebhookService } from './webhook.service.js';
 
 describe('WebhookService', () => {
     let service: WebhookService;
-    let fetchSpy: jest.SpyInstance;
+    let fetchSpy: MockInstance;
 
     beforeEach(() => {
         service = new WebhookService();
-        fetchSpy = jest.spyOn(globalThis, 'fetch');
+        fetchSpy = vi.spyOn(globalThis, 'fetch');
     });
 
     afterEach(() => {

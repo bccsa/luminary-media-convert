@@ -1,4 +1,3 @@
-import { jest } from '@jest/globals';
 import { HookServer } from '../src/hook-server.js';
 import type { TusdServerConfig, TusdHookPayload } from '../src/types.js';
 import http from 'node:http';
@@ -88,7 +87,7 @@ describe('HookServer', () => {
     });
 
     it('should dispatch pre-create and allow upload', async () => {
-        const onUploadCreate = jest.fn().mockResolvedValue(undefined);
+        const onUploadCreate = vi.fn().mockResolvedValue(undefined);
         hookServer = new HookServer({
             path: '/api/tus',
             directory: '/tmp/test-uploads',
@@ -117,7 +116,7 @@ describe('HookServer', () => {
     });
 
     it('should dispatch pre-create and reject upload when callback throws', async () => {
-        const onUploadCreate = jest
+        const onUploadCreate = vi
             .fn()
             .mockRejectedValue({ status_code: 404, body: 'Session not found' });
         hookServer = new HookServer({
@@ -138,7 +137,7 @@ describe('HookServer', () => {
     });
 
     it('should dispatch post-finish', async () => {
-        const onUploadFinish = jest.fn().mockResolvedValue(undefined);
+        const onUploadFinish = vi.fn().mockResolvedValue(undefined);
         hookServer = new HookServer({
             path: '/api/tus',
             directory: '/tmp/test-uploads',
@@ -164,7 +163,7 @@ describe('HookServer', () => {
     });
 
     it('should dispatch post-receive to onProgress', async () => {
-        const onProgress = jest.fn().mockResolvedValue(undefined);
+        const onProgress = vi.fn().mockResolvedValue(undefined);
         hookServer = new HookServer({
             path: '/api/tus',
             directory: '/tmp/test-uploads',
@@ -182,7 +181,7 @@ describe('HookServer', () => {
     });
 
     it('should handle partial uploads (no metadata)', async () => {
-        const onUploadCreate = jest.fn().mockResolvedValue(undefined);
+        const onUploadCreate = vi.fn().mockResolvedValue(undefined);
         hookServer = new HookServer({
             path: '/api/tus',
             directory: '/tmp/test-uploads',
@@ -207,7 +206,7 @@ describe('HookServer', () => {
     });
 
     it('should map concatenated final upload correctly', async () => {
-        const onUploadFinish = jest.fn().mockResolvedValue(undefined);
+        const onUploadFinish = vi.fn().mockResolvedValue(undefined);
         hookServer = new HookServer({
             path: '/api/tus',
             directory: '/tmp/test-uploads',

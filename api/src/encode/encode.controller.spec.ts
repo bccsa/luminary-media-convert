@@ -1,3 +1,4 @@
+import { type Mocked } from 'vitest';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { rmSync, mkdtempSync } from 'fs';
 import { join } from 'path';
@@ -52,8 +53,8 @@ function makeRequest(overrides: any = {}): any {
 describe('EncodeController', () => {
     let controller: EncodeController;
     let sessionService: SessionService;
-    let queueService: jest.Mocked<QueueService>;
-    let ffmpegService: jest.Mocked<FfmpegService>;
+    let queueService: Mocked<QueueService>;
+    let ffmpegService: Mocked<FfmpegService>;
     let testWorkDir: string;
 
     beforeEach(() => {
@@ -63,17 +64,17 @@ describe('EncodeController', () => {
         sessionService = new SessionService();
 
         queueService = {
-            enqueue: jest.fn().mockReturnValue(1),
-            getPosition: jest.fn().mockReturnValue(null),
-            dequeue: jest.fn().mockReturnValue(true),
+            enqueue: vi.fn().mockReturnValue(1),
+            getPosition: vi.fn().mockReturnValue(null),
+            dequeue: vi.fn().mockReturnValue(true),
             length: 0,
             isProcessing: false,
         } as any;
 
         ffmpegService = {
-            getAccelMode: jest.fn().mockReturnValue('cpu'),
-            isGpuAvailable: jest.fn().mockReturnValue(false),
-            killActiveProcess: jest.fn(),
+            getAccelMode: vi.fn().mockReturnValue('cpu'),
+            isGpuAvailable: vi.fn().mockReturnValue(false),
+            killActiveProcess: vi.fn(),
         } as any;
 
         controller = new EncodeController(sessionService, queueService, ffmpegService);
@@ -325,10 +326,10 @@ describe('EncodeController', () => {
     });
 
     describe('getPreviewKey', () => {
-        function makeResponse(): jest.Mocked<Response> {
+        function makeResponse(): Mocked<Response> {
             return {
-                set: jest.fn().mockReturnThis(),
-                send: jest.fn().mockReturnThis(),
+                set: vi.fn().mockReturnThis(),
+                send: vi.fn().mockReturnThis(),
             } as any;
         }
 
@@ -366,10 +367,10 @@ describe('EncodeController', () => {
     });
 
     describe('getPreviewPlaylist', () => {
-        function makeResponse(): jest.Mocked<Response> {
+        function makeResponse(): Mocked<Response> {
             return {
-                set: jest.fn().mockReturnThis(),
-                send: jest.fn().mockReturnThis(),
+                set: vi.fn().mockReturnThis(),
+                send: vi.fn().mockReturnThis(),
             } as any;
         }
 

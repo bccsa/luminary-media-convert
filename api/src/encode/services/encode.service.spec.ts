@@ -1,3 +1,4 @@
+import { type Mocked } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -42,11 +43,11 @@ function makeEncodeConfig(): EncodeConfigDto {
 describe('EncodeService', () => {
     let service: EncodeService;
     let sessionService: SessionService;
-    let ffmpegService: jest.Mocked<FfmpegService>;
-    let encryptionService: jest.Mocked<EncryptionService>;
-    let thumbnailService: jest.Mocked<ThumbnailService>;
-    let s3Service: jest.Mocked<S3Service>;
-    let webhookService: jest.Mocked<WebhookService>;
+    let ffmpegService: Mocked<FfmpegService>;
+    let encryptionService: Mocked<EncryptionService>;
+    let thumbnailService: Mocked<ThumbnailService>;
+    let s3Service: Mocked<S3Service>;
+    let webhookService: Mocked<WebhookService>;
     let testWorkDir: string;
 
     beforeEach(() => {
@@ -56,7 +57,7 @@ describe('EncodeService', () => {
         sessionService = new SessionService();
 
         ffmpegService = {
-            encode: jest.fn().mockResolvedValue({
+            encode: vi.fn().mockResolvedValue({
                 outputDir: '/tmp/output',
                 masterPlaylist: 'master.m3u8',
                 anglePlaylists: [{ name: 'Default', filename: 'master.m3u8' }],
@@ -64,27 +65,27 @@ describe('EncodeService', () => {
         } as any;
 
         encryptionService = {
-            encryptHlsOutput: jest.fn().mockResolvedValue({
+            encryptHlsOutput: vi.fn().mockResolvedValue({
                 key: Buffer.alloc(16, 0xcd),
                 iv: Buffer.alloc(16, 0xab),
             }),
         } as any;
 
         thumbnailService = {
-            generateThumbnails: jest.fn().mockResolvedValue({
+            generateThumbnails: vi.fn().mockResolvedValue({
                 vttRelativePath: 'thumbnails/thumbnails.vtt',
             }),
         } as any;
 
         s3Service = {
-            uploadDirectory: jest.fn().mockResolvedValue({
+            uploadDirectory: vi.fn().mockResolvedValue({
                 keys: ['master.m3u8', 'v0/playlist.m3u8', 'v0/segment_000.ts'],
                 masterPlaylistKey: 'master.m3u8',
             }),
         } as any;
 
         webhookService = {
-            send: jest.fn().mockResolvedValue(undefined),
+            send: vi.fn().mockResolvedValue(undefined),
         } as any;
 
         service = new EncodeService(
@@ -274,7 +275,7 @@ describe('EncodeService', () => {
     it('should update status through encoding phases', async () => {
         const statuses: string[] = [];
         const origUpdateStatus = sessionService.updateStatus.bind(sessionService);
-        jest.spyOn(sessionService, 'updateStatus').mockImplementation(
+        vi.spyOn(sessionService, 'updateStatus').mockImplementation(
             (id, status) => {
                 statuses.push(status);
                 origUpdateStatus(id, status);
@@ -375,6 +376,7 @@ describe('EncodeService', () => {
             '/tmp/output',
             session.id,
             'https://myapp.example.com/keys/abc',
+            expect.any(Function),
         );
     });
 
@@ -431,7 +433,7 @@ describe('EncodeService', () => {
         });
 
         const mockPlaylists = { 'master.m3u8': '#EXTM3U\n' };
-        jest.spyOn(service as any, 'collectPlaylists').mockReturnValue(mockPlaylists);
+        vi.spyOn(service as any, 'collectPlaylists').mockReturnValue(mockPlaylists);
 
         const config: CreateSessionDto = {
             ...makeConfig(),

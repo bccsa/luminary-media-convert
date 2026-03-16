@@ -1,10 +1,24 @@
-import { FfmpegService, type AccelMode, type EncodeOptions, type AnglePlaylist } from './ffmpeg.service.js';
+import { type MockInstance } from 'vitest';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
+
+const { mockSpawn } = vi.hoisted(() => ({
+    mockSpawn: vi.fn(),
+}));
+
+vi.mock('child_process', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('child_process')>();
+    return {
+        ...actual,
+        spawn: mockSpawn,
+    };
+});
+
+import { FfmpegService, type AccelMode, type EncodeOptions, type AnglePlaylist } from './ffmpeg.service.js';
 
 const flushPromises = async () => {
     for (let i = 0; i < 10; i++) {
@@ -15,8 +29,8 @@ const flushPromises = async () => {
 function createMockProcess(): ChildProcess & { emitStderr: (data: string) => void; emitClose: (code: number, signal?: string) => void; emitError: (err: Error) => void } {
     const proc = new EventEmitter() as any;
     proc.stderr = new EventEmitter();
-    proc.stdout = { resume: jest.fn() };
-    proc.kill = jest.fn();
+    proc.stdout = { resume: vi.fn() };
+    proc.kill = vi.fn();
     proc.killed = false;
     proc.pid = 12345;
     proc.emitStderr = (data: string) => proc.stderr.emit('data', Buffer.from(data));
@@ -539,8 +553,8 @@ describe('FfmpegService', () => {
         });
 
         it('should use detected GOP duration for -hls_time in byte-range mode', async () => {
-            jest.spyOn(service as any, 'probeFrameRate').mockResolvedValue(24);
-            jest.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
+            vi.spyOn(service as any, 'probeFrameRate').mockResolvedValue(24);
+            vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
 
             const encodeConfig: EncodeConfigDto = {
                 type: 'video',
@@ -565,8 +579,8 @@ describe('FfmpegService', () => {
         });
 
         it('should fall back to segmentDuration when GOP detection fails in byte-range mode', async () => {
-            jest.spyOn(service as any, 'probeFrameRate').mockResolvedValue(30);
-            jest.spyOn(service as any, 'probeGopDuration').mockResolvedValue(null);
+            vi.spyOn(service as any, 'probeFrameRate').mockResolvedValue(30);
+            vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(null);
 
             const encodeConfig: EncodeConfigDto = {
                 type: 'video',
@@ -1266,21 +1280,21 @@ describe('FfmpegService', () => {
         // The async I/O correctness is validated through integration in buildVideoArgs/encode tests.
 
         it('should return a number when keyframes are detected', async () => {
-            const spy = jest.spyOn(service as any, 'probeGopDuration').mockResolvedValue(1);
+            const spy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(1);
             const result = await (service as any).probeGopDuration('/tmp/input.mp4', 30);
             expect(result).toBe(1);
             spy.mockRestore();
         });
 
         it('should return fractional GOP duration for non-standard frame rates', async () => {
-            const spy = jest.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
+            const spy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
             const result = await (service as any).probeGopDuration('/tmp/input.mp4', 24);
             expect(result).toBe(2);
             spy.mockRestore();
         });
 
         it('should return null when detection fails', async () => {
-            const spy = jest.spyOn(service as any, 'probeGopDuration').mockResolvedValue(null);
+            const spy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(null);
             const result = await (service as any).probeGopDuration('/tmp/input.mp4', 30);
             expect(result).toBeNull();
             spy.mockRestore();
@@ -1289,16 +1303,15 @@ describe('FfmpegService', () => {
 
     describe('encode', () => {
         let tmpDir: string;
-        let spawnSpy: jest.SpyInstance;
-        let areAlignedSpy: jest.SpyInstance;
-        let probeDurationSpy: jest.SpyInstance;
-        let fixMasterPlaylistSpy: jest.SpyInstance;
-        let generateAnglePlaylistsSpy: jest.SpyInstance;
-        let generateAudioOnlyPlaylistSpy: jest.SpyInstance;
-        let fixAudioOnlyMasterPlaylistSpy: jest.SpyInstance;
-        let probeFrameRateSpy: jest.SpyInstance;
-        let probeGopDurationSpy: jest.SpyInstance;
-        let convertToByteRangeSpy: jest.SpyInstance;
+        let areAlignedSpy: MockInstance;
+        let probeDurationSpy: MockInstance;
+        let fixMasterPlaylistSpy: MockInstance;
+        let generateAnglePlaylistsSpy: MockInstance;
+        let generateAudioOnlyPlaylistSpy: MockInstance;
+        let fixAudioOnlyMasterPlaylistSpy: MockInstance;
+        let probeFrameRateSpy: MockInstance;
+        let probeGopDurationSpy: MockInstance;
+        let convertToByteRangeSpy: MockInstance;
 
         const baseEncodeConfig: EncodeConfigDto = {
             type: 'video',
@@ -1317,28 +1330,27 @@ describe('FfmpegService', () => {
                 inputPath: '/tmp/input.mp4',
                 outputDir: join(tmpDir, 'output'),
                 encodeConfig: baseEncodeConfig,
-                onProgress: jest.fn(),
+                onProgress: vi.fn(),
                 ...overrides,
             };
         }
 
         beforeEach(() => {
             tmpDir = mkdtempSync(join(tmpdir(), 'ffmpeg-encode-'));
-            spawnSpy = jest.spyOn(require('child_process'), 'spawn');
-            areAlignedSpy = jest.spyOn(service as any, 'areStreamStartTimesAligned').mockResolvedValue(true);
-            probeDurationSpy = jest.spyOn(service as any, 'probeDuration').mockResolvedValue(100);
-            fixMasterPlaylistSpy = jest.spyOn(service as any, 'fixMasterPlaylist').mockResolvedValue(undefined);
-            generateAnglePlaylistsSpy = jest.spyOn(service as any, 'generateAnglePlaylists').mockResolvedValue([]);
-            generateAudioOnlyPlaylistSpy = jest.spyOn(service as any, 'generateAudioOnlyPlaylist').mockResolvedValue(null);
-            fixAudioOnlyMasterPlaylistSpy = jest.spyOn(service as any, 'fixAudioOnlyMasterPlaylist').mockResolvedValue(undefined);
-            probeFrameRateSpy = jest.spyOn(service as any, 'probeFrameRate').mockResolvedValue(30);
-            probeGopDurationSpy = jest.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
-            convertToByteRangeSpy = jest.spyOn(service as any, 'convertToByteRange').mockResolvedValue(undefined);
+            mockSpawn.mockReset();
+            areAlignedSpy = vi.spyOn(service as any, 'areStreamStartTimesAligned').mockResolvedValue(true);
+            probeDurationSpy = vi.spyOn(service as any, 'probeDuration').mockResolvedValue(100);
+            fixMasterPlaylistSpy = vi.spyOn(service as any, 'fixMasterPlaylist').mockResolvedValue(undefined);
+            generateAnglePlaylistsSpy = vi.spyOn(service as any, 'generateAnglePlaylists').mockResolvedValue([]);
+            generateAudioOnlyPlaylistSpy = vi.spyOn(service as any, 'generateAudioOnlyPlaylist').mockResolvedValue(null);
+            fixAudioOnlyMasterPlaylistSpy = vi.spyOn(service as any, 'fixAudioOnlyMasterPlaylist').mockResolvedValue(undefined);
+            probeFrameRateSpy = vi.spyOn(service as any, 'probeFrameRate').mockResolvedValue(30);
+            probeGopDurationSpy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
+            convertToByteRangeSpy = vi.spyOn(service as any, 'convertToByteRange').mockResolvedValue(undefined);
         });
 
         afterEach(() => {
             rmSync(tmpDir, { recursive: true, force: true });
-            spawnSpy.mockRestore();
             areAlignedSpy.mockRestore();
             probeDurationSpy.mockRestore();
             fixMasterPlaylistSpy.mockRestore();
@@ -1352,7 +1364,7 @@ describe('FfmpegService', () => {
 
         it('should resolve with outputDir and masterPlaylist on success', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const opts = makeEncodeOpts();
             const promise = service.encode(opts);
@@ -1368,17 +1380,17 @@ describe('FfmpegService', () => {
 
         it('should call spawn with "ffmpeg" and correct args', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const opts = makeEncodeOpts();
             const promise = service.encode(opts);
             await flushPromises();
 
-            expect(spawnSpy).toHaveBeenCalledWith('ffmpeg', expect.any(Array), {
+            expect(mockSpawn).toHaveBeenCalledWith('ffmpeg', expect.any(Array), {
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
 
-            const args: string[] = spawnSpy.mock.calls[0][1];
+            const args: string[] = mockSpawn.mock.calls[0][1];
             expect(args).toContain('-i');
             expect(args).toContain(opts.inputPath);
             expect(args).toContain('-f');
@@ -1390,7 +1402,7 @@ describe('FfmpegService', () => {
 
         it('should reject when FFmpeg exits with non-zero code', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const opts = makeEncodeOpts();
             const promise = service.encode(opts);
@@ -1404,7 +1416,7 @@ describe('FfmpegService', () => {
 
         it('should include signal in error message when killed', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const promise = service.encode(makeEncodeOpts());
             await flushPromises();
@@ -1416,7 +1428,7 @@ describe('FfmpegService', () => {
 
         it('should reject when FFmpeg process emits an error event', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const promise = service.encode(makeEncodeOpts());
             await flushPromises();
@@ -1428,10 +1440,10 @@ describe('FfmpegService', () => {
 
         it('should report progress via onProgress callback', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
             probeDurationSpy.mockResolvedValue(100);
 
-            const onProgress = jest.fn();
+            const onProgress = vi.fn();
             const opts = makeEncodeOpts({ onProgress });
             const promise = service.encode(opts);
             await flushPromises();
@@ -1452,10 +1464,10 @@ describe('FfmpegService', () => {
 
         it('should not report progress when duration is unknown', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
             probeDurationSpy.mockResolvedValue(0);
 
-            const onProgress = jest.fn();
+            const onProgress = vi.fn();
             const promise = service.encode(makeEncodeOpts({ onProgress }));
             await flushPromises();
 
@@ -1468,10 +1480,10 @@ describe('FfmpegService', () => {
 
         it('should cap progress at 99.9%', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
             probeDurationSpy.mockResolvedValue(100);
 
-            const onProgress = jest.fn();
+            const onProgress = vi.fn();
             const promise = service.encode(makeEncodeOpts({ onProgress }));
             await flushPromises();
 
@@ -1486,7 +1498,7 @@ describe('FfmpegService', () => {
 
         it('should call fixMasterPlaylist and generateAnglePlaylists for video type', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const opts = makeEncodeOpts();
             const promise = service.encode(opts);
@@ -1501,7 +1513,7 @@ describe('FfmpegService', () => {
 
         it('should not call fixMasterPlaylist for audio type', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const opts = makeEncodeOpts({
                 encodeConfig: {
@@ -1523,7 +1535,7 @@ describe('FfmpegService', () => {
 
         it('should call generateAudioOnlyPlaylist for video type', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const opts = makeEncodeOpts();
             const promise = service.encode(opts);
@@ -1537,7 +1549,7 @@ describe('FfmpegService', () => {
 
         it('should not call generateAudioOnlyPlaylist for audio type', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const opts = makeEncodeOpts({
                 encodeConfig: {
@@ -1559,7 +1571,7 @@ describe('FfmpegService', () => {
 
         it('should append audio-only angle and rename Default to Video', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
             generateAnglePlaylistsSpy.mockResolvedValue([{ name: 'Default', filename: 'master.m3u8' }]);
             generateAudioOnlyPlaylistSpy.mockResolvedValue({ name: 'Audio only', filename: 'audio_only.m3u8' });
 
@@ -1578,7 +1590,7 @@ describe('FfmpegService', () => {
 
         it('should append audio-only angle to multi-angle playlists without renaming', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
             generateAnglePlaylistsSpy.mockResolvedValue([
                 { name: 'Main', filename: 'Main.m3u8' },
                 { name: 'Side', filename: 'Side.m3u8' },
@@ -1601,7 +1613,7 @@ describe('FfmpegService', () => {
 
         it('should call fixAudioOnlyMasterPlaylist for audio type', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const opts = makeEncodeOpts({
                 encodeConfig: {
@@ -1624,7 +1636,7 @@ describe('FfmpegService', () => {
 
         it('should not call fixAudioOnlyMasterPlaylist for video type', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const opts = makeEncodeOpts();
             const promise = service.encode(opts);
@@ -1638,7 +1650,7 @@ describe('FfmpegService', () => {
 
         it('should create output subdirectories for video type', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const opts = makeEncodeOpts();
             const promise = service.encode(opts);
@@ -1648,14 +1660,13 @@ describe('FfmpegService', () => {
             await promise;
 
             // 1 video rendition + 1 audio group = 2 stream dirs
-            const { existsSync } = require('fs');
             expect(existsSync(join(opts.outputDir, 'stream_0'))).toBe(true);
             expect(existsSync(join(opts.outputDir, 'stream_1'))).toBe(true);
         });
 
         it('should clear activeProcess after completion', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const promise = service.encode(makeEncodeOpts());
             await flushPromises();
@@ -1670,7 +1681,7 @@ describe('FfmpegService', () => {
 
         it('should clear activeProcess after error', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const promise = service.encode(makeEncodeOpts());
             await flushPromises();
@@ -1683,14 +1694,14 @@ describe('FfmpegService', () => {
 
         it('should call preByteRangeHook before convertToByteRange when provided', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const callOrder: string[] = [];
-            const convertSpy = jest.spyOn(service as any, 'convertToByteRange').mockImplementation(async () => {
+            const convertSpy = vi.spyOn(service as any, 'convertToByteRange').mockImplementation(async () => {
                 callOrder.push('convertToByteRange');
             });
 
-            const hook = jest.fn(() => { callOrder.push('preByteRangeHook'); });
+            const hook = vi.fn(() => { callOrder.push('preByteRangeHook'); });
             const opts = makeEncodeOpts({ preByteRangeHook: hook });
             const promise = service.encode(opts);
             await flushPromises();
@@ -1707,9 +1718,9 @@ describe('FfmpegService', () => {
 
         it('should not call preByteRangeHook when not provided', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
-            const convertSpy = jest.spyOn(service as any, 'convertToByteRange').mockResolvedValue(undefined);
+            const convertSpy = vi.spyOn(service as any, 'convertToByteRange').mockResolvedValue(undefined);
 
             const opts = makeEncodeOpts();
             const promise = service.encode(opts);
@@ -1725,7 +1736,7 @@ describe('FfmpegService', () => {
 
         it('should include stderr tail in error message on failure', async () => {
             const mockProc = createMockProcess();
-            spawnSpy.mockReturnValue(mockProc);
+            mockSpawn.mockReturnValue(mockProc);
 
             const promise = service.encode(makeEncodeOpts());
             await flushPromises();

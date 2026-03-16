@@ -1,21 +1,23 @@
-import { S3Service } from './s3.service.js';
+import { type Mock } from 'vitest';
 import type { S3ConfigDto } from '../dto/s3-config.dto.js';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-jest.mock('minio', () => {
-    const mockFPutObject = jest.fn().mockResolvedValue(undefined);
-    return {
-        Client: jest.fn().mockImplementation(() => ({
-            fPutObject: mockFPutObject,
-        })),
-        __mockFPutObject: mockFPutObject,
-    };
+const { mockFPutObject, MockClient } = vi.hoisted(() => {
+    const mockFPutObject = vi.fn().mockResolvedValue(undefined);
+    const MockClient = vi.fn().mockImplementation(function (this: any) {
+        this.fPutObject = mockFPutObject;
+    });
+    return { mockFPutObject, MockClient };
 });
 
-const minio = jest.requireMock('minio');
-const mockFPutObject: jest.Mock = minio.__mockFPutObject;
+vi.mock('minio', () => ({
+    Client: MockClient,
+}));
+
+import { S3Service } from './s3.service.js';
+import * as minio from 'minio';
 
 function makeS3Config(overrides: Partial<S3ConfigDto> = {}): S3ConfigDto {
     return {
@@ -34,7 +36,7 @@ describe('S3Service', () => {
         service = new S3Service();
         mockFPutObject.mockReset();
         mockFPutObject.mockResolvedValue(undefined);
-        (minio.Client as jest.Mock).mockClear();
+        (minio.Client as Mock).mockClear();
     });
 
     describe('getContentType (private)', () => {
