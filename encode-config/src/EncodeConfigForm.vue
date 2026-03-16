@@ -667,6 +667,18 @@ function onSubmit() {
                             <label class="ecf-field-label">Label</label>
                             <input v-model="r.label" type="text" class="ecf-input ecf-input-w24" placeholder="1080p" />
                         </div>
+                        <div v-if="r.copyStream && editableVideoTracks.length > 0" class="ecf-form-field">
+                            <label class="ecf-field-label">Source Track</label>
+                            <select
+                                v-model.number="r.sourceTrackIndex"
+                                class="ecf-select ecf-input-w48"
+                                @change="onCopySourceChange(r)"
+                            >
+                                <option v-for="t in editableVideoTracks" :key="t.index" :value="t.index">
+                                    #{{ t.index }}: {{ t.width }}&times;{{ t.height }} {{ t.codec }}{{ t.name ? ` ${t.name}` : '' }} {{ t.bitrateKbps ? `${t.bitrateKbps}kbps` : '' }}
+                                </option>
+                            </select>
+                        </div>
                     </div>
                     <div class="ecf-checkbox-row">
                         <label class="ecf-checkbox-label">
@@ -689,18 +701,6 @@ function onSubmit() {
                             />
                             <span class="ecf-checkbox-text">Copy stream (no re-encode)</span>
                         </label>
-                        <template v-if="r.copyStream && editableVideoTracks.length > 0">
-                            <label class="ecf-field-label">Source track:</label>
-                            <select
-                                v-model.number="r.sourceTrackIndex"
-                                class="ecf-select ecf-input-w48"
-                                @change="onCopySourceChange(r)"
-                            >
-                                <option v-for="t in editableVideoTracks" :key="t.index" :value="t.index">
-                                    #{{ t.index }}: {{ t.width }}&times;{{ t.height }} {{ t.codec }}{{ t.name ? ` ${t.name}` : '' }} {{ t.bitrateKbps ? `${t.bitrateKbps}kbps` : '' }}
-                                </option>
-                            </select>
-                        </template>
                     </div>
                 </div>
             </fieldset>

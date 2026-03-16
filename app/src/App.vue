@@ -196,7 +196,7 @@ function reset() {
 </script>
 
 <template>
-    <div class="mx-auto max-w-2xl px-4 py-12">
+    <div :class="['mx-auto px-4 py-12 transition-all duration-300', view === 'configure' ? 'max-w-fit' : 'max-w-2xl']">
         <header class="mb-8 text-center">
             <h1 class="text-2xl font-bold tracking-tight text-zinc-100">Luminary Media Convert</h1>
             <p class="mt-1 text-sm text-zinc-500">HLS / ABR encoding client</p>
