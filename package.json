@@ -6,7 +6,9 @@
         "api",
         "app",
         "encode-config",
-        "tusd"
+        "tusd",
+        "saas",
+        "admin"
     ],
     "scripts": {
         "dev": "concurrently -k -n ecfg,api,app -c green,blue,magenta \"npm -w encode-config run dev\" \"npm -w api run start:dev\" \"npm -w app run dev\""
