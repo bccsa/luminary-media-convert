@@ -39,19 +39,20 @@ Each design section references its originating URS requirements using FR/NFR ide
 │   app/           │     │ admin/            │
 └────────┬─────────┘     └────────┬──────────┘
          │                        │
-         │  JWT (Auth0)           │  JWT (Auth0, admin role)
-         │                        │
-         │              ┌─────────┴───────────┐
-         │              │   SaaS Service      │
-         │              │   saas/             │
-         │              │   ┌───────────────┐ │
-         │              │   │   CouchDB     │ │
-         │              │   └───────────────┘ │
-         │              └─────────┬───────────┘
-         │                        │  JWT (service account)
-         │                        │  for key management;
-         │                        │  receives webhooks
-         ▼                        ▼
+         │  Session token         │  JWT (Auth0, admin role in CouchDB)
+         │  (from SaaS Service)   │
+         │  JWT (Auth0)  ┌────────┴───────────┐
+         │  for SaaS ───►│   SaaS Service      │
+         │  endpoints    │   saas/             │
+         │               │   ┌───────────────┐ │
+         │               │   │   CouchDB     │ │
+         │               │   └───────────────┘ │
+         │               └─────────┬───────────┘
+         │                         │  Master key for session
+         │                         │  creation; validates API
+         │                         │  keys via webhook;
+         │                         │  receives encoding webhooks
+         ▼                         ▼
          ┌─────────────────────────┐
          │   Encoding API          │
          │   api/                  │
@@ -59,7 +60,8 @@ Each design section references its originating URS requirements using FR/NFR ide
          │   In-memory sessions    │
          └─────────────────────────┘
                     ▲
-                    │  API key (X-API-Key header)
+                    │  API key (validated via
+                    │  key validation webhook)
          ┌──────────┴──────────┐
          │  Third-Party        │
          │  Services           │
@@ -70,76 +72,83 @@ Each design section references its originating URS requirements using FR/NFR ide
 
 | Service | Responsibilities | State | Auth |
 |---------|-----------------|-------|------|
-| **Encoding API** | FFmpeg encoding, tus uploads, S3 upload, probing, HLS encryption, thumbnails, API key validation, authorization webhooks, session lifecycle webhooks | In-memory (ephemeral) | JWT, API Key, Session Token |
-| **SaaS Service** | User management, API key lifecycle (proxy to Encoding API), session history, billing/usage metering, admin API, S3 config management, authorization webhook handler, session import | CouchDB (persistent) | JWT (Auth0) |
+| **Encoding API** | FFmpeg encoding, tus uploads, S3 upload, probing, HLS encryption, thumbnails, API key validation (via webhook), authorization webhooks, session lifecycle webhooks | In-memory (ephemeral) | Master Key, API Key (webhook-validated), Session Token |
+| **SaaS Service** | User management, API key generation and storage, key validation webhook endpoint, session creation on behalf of web app users, session history, billing/usage metering, admin API, S3 config management, authorization webhook handler, session import | CouchDB (persistent) | JWT (Auth0) |
 
 ### 2.3 Communication Patterns
 
-#### 2.3.1 Web App → Encoding API (Direct)
+#### 2.3.1 Web App → SaaS Service → Encoding API
 
-The web app authenticates with Auth0 JWT and creates sessions directly on the Encoding API. The web app includes the SaaS Service's webhook URL in the session's `webhook` config so the SaaS Service receives status updates.
+The web app calls the SaaS Service to create a session. The SaaS Service creates the session on the Encoding API using the master key and returns the session token to the web app. The web app then uses the session token for all per-session operations directly on the Encoding API.
 
 ```
-Web App                          Encoding API
-  │                                    │
-  │  POST /api/sessions (JWT)          │
-  │  { webhook: { url: saas/wh/enc }, │
-  │    s3: {...} }                     │
-  │ ──────────────────────────────────►│
-  │                                    │──► Authorization webhook → SaaS Service
-  │  { sessionId, sessionToken,        │
-  │    tusEndpoint }                   │
-  │ ◄──────────────────────────────────│
-  │                                    │
-  │  Upload via tus (sessionToken)     │
-  │ ──────────────────────────────────►│
-  │                                    │──► Status webhook → SaaS Service
-  │  POST .../encode (sessionToken)    │
-  │ ──────────────────────────────────►│
-  │                                    │──► Authorization webhook → SaaS Service
-  │  Poll GET .../status               │
-  │ ──────────────────────────────────►│
-  │                                    │──► Completion webhook → SaaS Service
+Web App                  SaaS Service              Encoding API
+  │                           │                          │
+  │  POST /saas/sessions      │                          │
+  │  (Auth0 JWT)              │                          │
+  │ ─────────────────────────►│                          │
+  │                           │  POST /api/sessions      │
+  │                           │  (Master Key)            │
+  │                           │ ────────────────────────►│
+  │                           │  { sessionId,            │
+  │                           │    sessionToken, ... }   │
+  │                           │ ◄────────────────────────│
+  │  { sessionToken,          │                          │
+  │    encodingApiUrl,        │                          │
+  │    sessionId }            │                          │
+  │ ◄─────────────────────────│                          │
+  │                                                      │
+  │  Upload via tus (sessionToken)                       │
+  │ ────────────────────────────────────────────────────►│
+  │                                                      │──► Status webhook → SaaS Service
+  │  POST .../encode (sessionToken)                      │
+  │ ────────────────────────────────────────────────────►│
+  │                                                      │──► Authorization webhook → SaaS Service
+  │  Poll GET .../status (sessionToken)                  │
+  │ ────────────────────────────────────────────────────►│
+  │                                                      │──► Completion webhook → SaaS Service
 ```
 
 #### 2.3.2 Third-Party → Encoding API (Direct)
 
-Third-party services authenticate with an API key. Webhooks are bound to the API key's `webhookUrl` and `authorizationUrl` (configured by the SaaS Service at key creation time).
+Third-party services authenticate with an API key. The Encoding API validates the key via the SaaS Service's key validation webhook, which returns metadata including `webhookUrl` and `authorizationUrl`.
 
 ```
-Third-Party Server               Encoding API
-  │                                    │
-  │  POST /api/sessions (API Key)      │
-  │  { s3: {...} }                     │
-  │ ──────────────────────────────────►│
-  │                                    │──► Authorization webhook → SaaS Service
-  │  { sessionId, sessionToken }       │
-  │ ◄──────────────────────────────────│
-  │                                    │
-  │  Pass sessionToken to end users    │
-  │                                    │
-  │  End user: upload, poll, encode    │
-  │  (sessionToken)                    │
-  │                          ──────────►│
+Third-Party Server               Encoding API                  SaaS Service
+  │                                    │                             │
+  │  POST /api/sessions (API Key)      │                             │
+  │  { s3: {...} }                     │                             │
+  │ ──────────────────────────────────►│                             │
+  │                                    │──► Validate key webhook ───►│
+  │                                    │◄── { valid, userId,         │
+  │                                    │     webhookUrl, ... } ◄─────│
+  │                                    │──► Authorization webhook ──►│
+  │  { sessionId, sessionToken }       │                             │
+  │ ◄──────────────────────────────────│                             │
+  │                                    │                             │
+  │  Pass sessionToken to end users    │                             │
+  │                                    │                             │
+  │  End user: upload, poll, encode    │                             │
+  │  (sessionToken)                    │                             │
+  │                          ──────────►│                             │
   │                                    │──► Status/completion webhooks → SaaS Service
 ```
 
 #### 2.3.3 SaaS Service → Encoding API
 
-The SaaS Service only calls the Encoding API for API key management (JWT auth):
+The SaaS Service calls the Encoding API to create sessions on behalf of web app users (master key auth):
 
 | Operation | Call |
 |-----------|------|
-| Create API key | `POST /api/keys` (JWT) |
-| Revoke API key | `DELETE /api/keys/:id` (JWT) |
-| List API keys | `GET /api/keys` (JWT) |
+| Create session for web app user | `POST /api/sessions` (Master Key) |
 
 #### 2.3.4 Encoding API → SaaS Service (Webhooks)
 
-The Encoding API calls back to the SaaS Service on two webhook channels:
+The Encoding API calls back to the SaaS Service on three webhook channels:
 
 | Channel | URL | Trigger | Purpose |
 |---------|-----|---------|---------|
+| Key validation | `POST /saas/webhooks/validate-key` | When an API key is presented for authentication | Key validation, returns metadata (userId, webhookUrl, authorizationUrl) |
 | Authorization | `POST /saas/webhooks/authorize` | Before session creation and encode start | User/plan limit enforcement |
 | Session lifecycle | `POST /saas/webhooks/encoding` | On every session status change | Session history, usage metering, billing |
 
@@ -153,66 +162,52 @@ The Encoding API calls back to the SaaS Service on two webhook channels:
 
 The Encoding API supports three credential types. All are validated locally — no external calls needed (except the optional authorization webhook).
 
-#### 3.1.1 JWT Authentication (Generic OIDC)
+#### 3.1.1 Master Key Authentication
 
-- **Library**: `passport-jwt` with RS256 JWKS validation (existing)
-- **Source**: `Authorization: Bearer <jwt>` header
-- **Validation**: Signature, expiry, audience, issuer — generic OIDC (any provider)
-- **Capabilities**: All operations including API key management
-- **Identity**: JWT `sub` and `email` claims passed to authorization webhook (if configured)
-- **Configuration**: `OIDC_ISSUER_URL` and `OIDC_AUDIENCE` env vars (replaces Auth0-specific `AUTH0_DOMAIN` / `AUTH0_AUDIENCE`)
-- **JWKS discovery**: JWKS URI derived from `{OIDC_ISSUER_URL}/.well-known/openid-configuration` (standard OIDC discovery)
+- **Header**: `X-API-Key: <master_key>` (same header as API keys — distinguished by value match against `MASTER_API_KEY`)
+- **Source**: `MASTER_API_KEY` environment variable
+- **Validation**: Direct string comparison against the configured master key
+- **Capabilities**: All operations -- superkey accepted on every endpoint.
+- **Configuration**: `MASTER_API_KEY` env var (required)
+- **No external dependencies**: No OIDC provider, no Passport, no JWKS — pure key-based auth
 
 ```typescript
-// Refactored JwtStrategy — generic OIDC, not Auth0-specific
-constructor() {
-    const issuerUrl = process.env.OIDC_ISSUER_URL;  // e.g., "https://myapp.auth0.com/"
-    const audience = process.env.OIDC_AUDIENCE;
-
-    super({
-        secretOrKeyProvider: passportJwtSecret({
-            cache: true,
-            rateLimit: true,
-            jwksRequestsPerMinute: 5,
-            jwksUri: `${issuerUrl.replace(/\/$/, '')}/.well-known/jwks.json`,
-        }),
-        jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-        audience,
-        issuer: issuerUrl,
-        algorithms: ['RS256'],
-    });
+// Master key validation — checked first in the auth resolution chain
+function validateMasterKey(providedKey: string): boolean {
+    const masterKey = process.env.MASTER_API_KEY;
+    if (!masterKey) return false;
+    return crypto.timingSafeEqual(
+        Buffer.from(providedKey),
+        Buffer.from(masterKey),
+    );
 }
 ```
 
 #### 3.1.2 API Key Authentication
 
 - **Header**: `X-API-Key: <key>`
-- **Store**: In-memory `Map<keyHash, ApiKeyRecord>` with pluggable backend
-- **Validation**: SHA-256 hash lookup, expiry check, revocation check
-- **Capabilities**: Session operations (create, delete, encode, poll). Cannot manage other API keys.
-- **Bound metadata**: Each key carries `webhookUrl`, `authorizationUrl`, and `metadata` (opaque JSON)
+- **Store**: None -- the Encoding API has no key store. Keys are validated via an external webhook.
+- **Validation**: The Encoding API sends the key to `KEY_VALIDATION_WEBHOOK_URL`. The external service validates the key and returns metadata. Results are cached briefly (default 60s).
+- **Capabilities**: Session operations (create, delete, encode, poll).
+- **Returned metadata**: The key validation webhook returns `userId`, `webhookUrl`, `authorizationUrl`, and opaque `metadata`.
 
 ```typescript
-interface ApiKeyRecord {
-    id: string;
-    keyHash: string;              // SHA-256 of the full key
-    keyPrefix: string;            // First 8 chars for display
-    name: string;
-    webhookUrl?: string;
-    authorizationUrl?: string;
-    metadata?: Record<string, unknown>;
-    scopes: string[];             // Future: fine-grained permissions
-    expiresAt?: Date;
-    lastUsedAt?: Date;
-    createdAt: Date;
-    revokedAt?: Date;
+interface ValidatedKeyMetadata {
+    valid: boolean;
+    userId?: string;              // User who owns the key (from the SaaS Service)
+    webhookUrl?: string;          // Webhook URL for sessions created with this key
+    authorizationUrl?: string;    // Authorization webhook URL for this key
+    metadata?: Record<string, unknown>; // Opaque metadata passed through in webhooks
+    reason?: string;              // Rejection reason (when valid is false)
 }
 ```
+
+When `KEY_VALIDATION_WEBHOOK_URL` is not configured, the Encoding API operates in standalone mode -- only the master key is accepted and API key authentication is not available.
 
 #### 3.1.3 Session Token Authentication
 
 - **Header**: `Authorization: Bearer <sess_token>`
-- **Format**: `sess_<32-char-random>` (distinguishable from JWT by prefix)
+- **Format**: `sess_<32-char-random>` (identifiable by `sess_` prefix)
 - **Store**: In-memory, per-session (part of the `Session` object)
 - **Validation**: Direct lookup in `SessionService.tokenIndex` map
 - **Capabilities**: Per-session operations only (upload, poll, encode, preview)
@@ -222,10 +217,11 @@ interface ApiKeyRecord {
 
 ```typescript
 // Guard chain on each request:
-1. Check for X-API-Key header → ApiKeyGuard
+1. Check for X-API-Key header:
+   a. If matches MASTER_API_KEY → MasterKeyGuard (superkey — all operations)
+   b. Otherwise → KeyValidationWebhookGuard (validate via KEY_VALIDATION_WEBHOOK_URL, cache result — session operations only)
 2. Check for Authorization: Bearer header
-   a. If starts with "sess_" → SessionTokenGuard
-   b. Otherwise → JwtGuard (Auth0 JWT)
+   a. If starts with "sess_" → SessionTokenGuard (per-session operations)
 3. If no credentials → 401 Unauthorized
 ```
 
@@ -238,9 +234,9 @@ The Encoding API calls an external authorization webhook before privileged opera
 #### 3.2.1 Webhook Resolution
 
 ```typescript
-function resolveAuthorizationUrl(apiKey?: ApiKeyRecord): string | null {
-    // 1. Per-key URL takes precedence
-    if (apiKey?.authorizationUrl) return apiKey.authorizationUrl;
+function resolveAuthorizationUrl(validatedKey?: ValidatedKeyMetadata): string | null {
+    // 1. Per-key URL takes precedence (from key validation webhook response)
+    if (validatedKey?.authorizationUrl) return validatedKey.authorizationUrl;
     // 2. Fall back to global env var
     if (process.env.AUTHORIZATION_WEBHOOK_URL) return process.env.AUTHORIZATION_WEBHOOK_URL;
     // 3. No URL configured → skip authorization (standalone mode)
@@ -252,15 +248,14 @@ function resolveAuthorizationUrl(apiKey?: ApiKeyRecord): string | null {
 
 ```typescript
 async function checkAuthorization(action: string, context: AuthContext): Promise<void> {
-    const url = resolveAuthorizationUrl(context.apiKey);
+    const url = resolveAuthorizationUrl(context.validatedKey);
     if (!url) return; // No authorization configured — allow
 
     const payload = {
         action,                    // "create_session" | "start_encode"
-        apiKeyId: context.apiKey?.id ?? null,
-        apiKeyMetadata: context.apiKey?.metadata ?? null,
-        jwtSub: context.jwt?.sub ?? null,
-        jwtEmail: context.jwt?.email ?? null,
+        userId: context.validatedKey?.userId ?? null,
+        apiKeyMetadata: context.validatedKey?.metadata ?? null,
+        masterKey: context.isMasterKey ?? false,
         sessionId: context.sessionId ?? null,
         encodeConfig: context.encodeConfig ?? null,
         costEstimate: context.costEstimate ?? null,
@@ -303,8 +298,8 @@ async function checkAuthorization(action: string, context: AuthContext): Promise
 POST /saas/webhooks/authorize
 
 1. Extract userId from payload:
-   - If apiKeyMetadata.userId → lookup user by ID
-   - If jwtEmail → lookup user by email
+   - If payload.userId → lookup user by ID
+   - If masterKey is true → allow (master key caller, no user context)
    - If neither → allow (unknown caller, fail-open)
 
 2. Check user status:
@@ -321,7 +316,7 @@ POST /saas/webhooks/authorize
 
 *Traces: FR-3.1.1*
 
-The SaaS Service uses **Auth0** as its OIDC provider (unlike the Encoding API which is provider-agnostic). It validates Auth0 JWTs on all endpoints. It does not accept API keys or session tokens — those are Encoding API concepts.
+The SaaS Service uses **Auth0** as its OIDC provider (the Encoding API uses key-based auth with no OIDC at all). It validates Auth0 JWTs on all endpoints. It does not accept API keys or session tokens — those are Encoding API concepts.
 
 #### 3.3.1 Identity Resolution Flow
 
@@ -355,64 +350,62 @@ Request with Authorization: Bearer <jwt>
 
 *Traces: FR-3.2.1, FR-3.2.2, FR-3.2.4, FR-3.2.6, FR-3.3.2, FR-3.3.3*
 
-### 4.1 API Key Module
+### 4.1 Key Validation Webhook Service
 
-New NestJS module added to the Encoding API: `ApiKeyModule`.
+The Encoding API validates API keys via an external webhook. There is no API key module, no key store, no key management endpoints, and no rate limiter on the Encoding API.
 
-#### 4.1.1 Module Structure
+#### 4.1.1 Service Structure
 
 ```
-api/src/apikey/
-├── apikey.module.ts              # Module definition
-├── apikey.controller.ts          # REST endpoints (POST/GET/DELETE /api/keys)
-├── apikey.service.ts             # Key store, hash validation, CRUD
-├── apikey.guard.ts               # NestJS guard for X-API-Key header
-├── dto/
-│   ├── create-key.dto.ts         # { name, webhookUrl?, authorizationUrl?, metadata?, expiresAt? }
-│   └── key-response.dto.ts       # { id, name, keyPrefix, createdAt, lastUsedAt, expiresAt }
-└── interfaces/
-    └── api-key-store.interface.ts # Pluggable store interface
+api/src/auth/
+├── key-validation.service.ts     # Calls KEY_VALIDATION_WEBHOOK_URL, caches results
+├── key-validation.guard.ts       # NestJS guard for X-API-Key header (non-master keys)
+└── dto/
+    └── validated-key-metadata.ts  # { valid, userId, webhookUrl, authorizationUrl, metadata, reason }
 ```
 
-#### 4.1.2 Key Store Interface
+#### 4.1.2 Key Validation Flow
 
 ```typescript
-interface ApiKeyStore {
-    create(key: ApiKeyRecord): Promise<void>;
-    findByHash(keyHash: string): Promise<ApiKeyRecord | null>;
-    findAll(): Promise<ApiKeyRecord[]>;
-    updateLastUsed(id: string, timestamp: Date): Promise<void>;
-    revoke(id: string): Promise<void>;
+class KeyValidationService {
+    private cache = new Map<string, { metadata: ValidatedKeyMetadata; expiresAt: number }>();
+
+    async validateKey(apiKey: string): Promise<ValidatedKeyMetadata> {
+        const cacheKey = crypto.createHash('sha256').update(apiKey).digest('hex');
+        const cached = this.cache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+            return cached.metadata;
+        }
+
+        const webhookUrl = process.env.KEY_VALIDATION_WEBHOOK_URL;
+        if (!webhookUrl) {
+            return { valid: false, reason: 'No key validation webhook configured' };
+        }
+
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apiKey }),
+            signal: AbortSignal.timeout(
+                parseInt(process.env.KEY_VALIDATION_WEBHOOK_TIMEOUT_MS ?? '5000'),
+            ),
+        });
+
+        if (!response.ok) {
+            return { valid: false, reason: `Validation webhook returned ${response.status}` };
+        }
+
+        const metadata: ValidatedKeyMetadata = await response.json();
+        const ttl = parseInt(process.env.KEY_VALIDATION_CACHE_TTL_MS ?? '60000');
+        this.cache.set(cacheKey, { metadata, expiresAt: Date.now() + ttl });
+        return metadata;
+    }
 }
 ```
 
-Default implementation: `InMemoryApiKeyStore` (Map-based). The SaaS Service can provide a persistent implementation if needed, but since the SaaS Service generates keys via the Encoding API's REST endpoints, the in-memory store is sufficient (keys are recreated on restart by the SaaS Service reconciliation process).
+#### 4.1.3 Standalone Mode
 
-#### 4.1.3 Key Generation
-
-```typescript
-function generateApiKey(): { key: string; hash: string; prefix: string } {
-    const random = crypto.randomBytes(32).toString('hex');
-    const key = `lmc_${random}`;
-    const hash = crypto.createHash('sha256').update(key).digest('hex');
-    const prefix = key.substring(0, 12); // "lmc_XXXXXXXX"
-    return { key, hash, prefix };
-}
-```
-
-#### 4.1.4 Rate Limiting
-
-Per-key rate limiting using a sliding window counter (in-memory):
-
-```typescript
-interface RateLimitEntry {
-    keyId: string;
-    windowStart: number;
-    count: number;
-}
-```
-
-Default: 100 requests/minute/key. Configurable via `API_KEY_RATE_LIMIT` env var. Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.
+When `KEY_VALIDATION_WEBHOOK_URL` is not configured, the Encoding API operates in standalone mode. Only the master key (`MASTER_API_KEY`) is accepted. Any request with a non-master `X-API-Key` value returns `401 Unauthorized`.
 
 ### 4.2 Session Token Changes
 
@@ -438,12 +431,12 @@ When creating a session, the Encoding API determines the webhook URL:
 ```typescript
 function resolveWebhookUrl(
     dto: CreateSessionDto,
-    apiKey?: ApiKeyRecord,
+    validatedKey?: ValidatedKeyMetadata,
 ): WebhookConfig | null {
-    // 1. Per-session webhook takes precedence (web app flow)
+    // 1. Per-session webhook takes precedence (master key flow)
     if (dto.webhook?.url) return dto.webhook;
-    // 2. API key bound webhook (third-party flow)
-    if (apiKey?.webhookUrl) return { url: apiKey.webhookUrl, sessionToken: '' };
+    // 2. Validated key's webhook URL (third-party flow, from key validation webhook response)
+    if (validatedKey?.webhookUrl) return { url: validatedKey.webhookUrl, sessionToken: '' };
     // 3. No webhook configured
     return null;
 }
@@ -453,15 +446,14 @@ function resolveWebhookUrl(
 
 | Method | Path | Auth | New/Changed |
 |--------|------|------|-------------|
-| POST | `/api/keys` | JWT | **New** |
-| GET | `/api/keys` | JWT | **New** |
-| DELETE | `/api/keys/:keyId` | JWT | **New** |
-| POST | `/api/sessions` | JWT or API Key | **Changed** — accepts API key, calls auth webhook |
-| ALL | `/api/tus/*` | Session Token | **Changed** — renamed from uploadToken |
-| POST | `/api/sessions/:id/encode` | JWT/API Key/Session Token | **Changed** — calls auth webhook |
-| GET | `/api/sessions/:id` | JWT/API Key/Session Token | **Changed** — accepts all three auth types |
+| POST | `/api/sessions` | Master Key or API Key (webhook-validated) | **Changed** -- accepts webhook-validated API key, calls auth webhook |
+| ALL | `/api/tus/*` | Session Token | **Changed** -- renamed from uploadToken |
+| POST | `/api/sessions/:id/encode` | Master Key/API Key/Session Token | **Changed** -- calls auth webhook |
+| GET | `/api/sessions/:id` | Master Key/API Key/Session Token | **Changed** -- accepts all three auth types |
 | GET | `/api/sessions/:id/preview/*` | Session Token | Unchanged |
-| DELETE | `/api/sessions/:id` | JWT or API Key | **Changed** — accepts API key |
+| DELETE | `/api/sessions/:id` | Master Key or API Key | **Changed** -- accepts webhook-validated API key |
+
+No `/api/keys` endpoints. The Encoding API has no key store and no key management endpoints.
 
 ---
 
@@ -478,7 +470,7 @@ saas/
 │   ├── app.module.ts                 # Root module
 │   ├── auth/
 │   │   ├── auth.module.ts            # JWT validation + identity resolution
-│   │   ├── jwt.strategy.ts           # Auth0 JWT strategy (shared config with Encoding API)
+│   │   ├── jwt.strategy.ts           # Auth0 JWT strategy (SaaS Service only — Encoding API uses key-based auth)
 │   │   ├── identity.service.ts       # User lookup by auth0Id/email, auth0Id linking
 │   │   └── admin.guard.ts            # Role-based admin guard
 │   ├── users/
@@ -487,12 +479,13 @@ saas/
 │   │   └── users.service.ts          # CouchDB user document CRUD
 │   ├── keys/
 │   │   ├── keys.module.ts
-│   │   ├── keys.controller.ts        # /saas/keys (proxies to Encoding API)
-│   │   └── keys.service.ts           # CouchDB key reference store + Encoding API proxy
+│   │   ├── keys.controller.ts        # /saas/keys (generate, list, revoke — SaaS-managed, no proxy to Encoding API)
+│   │   ├── keys.service.ts           # CouchDB key store (generate, hash, validate)
+│   │   └── key-validation.controller.ts  # POST /saas/webhooks/validate-key (called by Encoding API)
 │   ├── sessions/
 │   │   ├── sessions.module.ts
-│   │   ├── sessions.controller.ts    # /saas/sessions (history, import, estimate)
-│   │   ├── sessions.service.ts       # CouchDB session history CRUD
+│   │   ├── sessions.controller.ts    # /saas/sessions (history, import, estimate, session creation on behalf of web app users)
+│   │   ├── sessions.service.ts       # CouchDB session history CRUD + Encoding API session creation (master key)
 │   │   └── import.service.ts         # HLS playlist parsing + S3 scanning for session import
 │   ├── s3-configs/
 │   │   ├── s3-configs.module.ts
@@ -576,9 +569,8 @@ POST /saas/webhooks/encoding
 1. Validate webhook token (from X-Session-Token header)
 2. Parse WebhookPayloadDto
 3. Resolve userId:
-   a. If payload contains apiKeyMetadata.userId → use directly
-   b. If payload contains JWT sub/email → lookup user by auth0Id/email
-   c. If neither → log warning, skip (orphan session)
+   a. If payload contains userId (from key validation metadata) → use directly
+   b. If neither → log warning, skip (orphan session — likely a master key session)
 4. Upsert session document in CouchDB:
    - If session document exists → update status, progress, error
    - If not exists → create new session document (first webhook for this session)
@@ -630,7 +622,7 @@ function compactSession(doc: ActiveSessionDoc, payload: CompletionPayload): Comp
 
 *Traces: FR-3.2.3*
 
-The SaaS Service proxies key operations to the Encoding API and maintains a local reference in CouchDB.
+The SaaS Service generates and manages API keys directly in CouchDB. The Encoding API has no key store and no key management endpoints -- it validates keys via the key validation webhook.
 
 #### 5.4.1 Key Creation Flow
 
@@ -638,30 +630,52 @@ The SaaS Service proxies key operations to the Encoding API and maintains a loca
 POST /saas/keys { name: "Production" }
 
 1. Resolve user from JWT
-2. Call Encoding API: POST /api/keys (service JWT) with:
-   - name: "Production"
-   - webhookUrl: "https://saas.luminary.io/saas/webhooks/encoding"
-   - authorizationUrl: "https://saas.luminary.io/saas/webhooks/authorize"
-   - metadata: { userId: "<user-uuid>" }
-3. Encoding API returns: { id, key, keyPrefix, createdAt }
-4. Store reference in CouchDB:
-   - { _id: "apikey:<id>", docType: "apikey", userId, name, keyPrefix, encodingApiKeyId: id }
+2. Generate API key:
+   - random = crypto.randomBytes(32).toString('hex')
+   - key = `lmc_${random}`
+   - hash = crypto.createHash('sha256').update(key).digest('hex')
+   - prefix = key.substring(0, 12)
+3. Store in CouchDB:
+   - { _id: "apikey:<uuid>", docType: "apikey", userId, name, keyHash: hash, keyPrefix: prefix, createdAt, revokedAt: null }
    - Never store the full key
-5. Return { id, key, name, keyPrefix, createdAt } to user
+4. Return { id, key, name, keyPrefix, createdAt } to user
    - key is shown once and never stored
 ```
 
-#### 5.4.2 Key Revocation Flow
+#### 5.4.2 Key Validation Webhook
+
+```
+POST /saas/webhooks/validate-key
+{ "apiKey": "lmc_..." }
+
+1. Hash the provided key: SHA-256
+2. Look up key document in CouchDB by keyHash
+3. If not found → { valid: false, reason: "Unknown API key" }
+4. If revokedAt is set → { valid: false, reason: "API key revoked" }
+5. If expiresAt is set and expired → { valid: false, reason: "API key expired" }
+6. Resolve user from key's userId
+7. Return:
+   {
+       valid: true,
+       userId: "<user-uuid>",
+       webhookUrl: "https://saas.luminary.io/saas/webhooks/encoding",
+       authorizationUrl: "https://saas.luminary.io/saas/webhooks/authorize",
+       metadata: { planTier: user.planTier }
+   }
+```
+
+#### 5.4.3 Key Revocation Flow
 
 ```
 DELETE /saas/keys/:keyId
 
 1. Resolve user from JWT
-2. Lookup key reference in CouchDB, verify ownership
-3. Call Encoding API: DELETE /api/keys/:encodingApiKeyId (service JWT)
-4. Delete key reference from CouchDB
-5. Return 204 No Content
+2. Lookup key in CouchDB, verify ownership
+3. Set revokedAt on the key document
+4. Return 204 No Content
 ```
+
+Note: The Encoding API's validation cache for this key expires within the configured TTL (default 60s). After that, the next validation request will return `valid: false`.
 
 ### 5.5 Session Import
 
@@ -891,8 +905,8 @@ The web app talks to two services:
 
 | Operation | Target | Auth |
 |-----------|--------|------|
-| Create session | Encoding API | JWT (Auth0) |
-| Upload file (tus) | Encoding API | Session Token |
+| Create session | SaaS Service | JWT (Auth0) -- SaaS creates on Encoding API with master key |
+| Upload file (tus) | Encoding API | Session Token (from SaaS session creation) |
 | Poll status | Encoding API | Session Token |
 | Submit encode config | Encoding API | Session Token |
 | Preview playback | Encoding API | Session Token |
@@ -902,19 +916,23 @@ The web app talks to two services:
 | Cost estimation | Client-side | N/A (pure function from `encode-config`) |
 | Usage/billing info | SaaS Service | JWT (Auth0) |
 
-### 7.2 Session Creation with Webhook Binding
+### 7.2 Session Creation via SaaS Service
 
-When the web app creates a session on the Encoding API, it includes the SaaS Service's webhook URL:
+The web app calls the SaaS Service to create a session. The SaaS Service creates the session on the Encoding API using the master key and returns the session token to the web app:
 
 ```typescript
-const session = await createSession(encodingApiUrl, {
+// Web app calls SaaS Service (Auth0 JWT)
+const { sessionToken, encodingApiUrl, sessionId } = await createSession(saasServiceUrl, {
     s3: selectedS3Config,
-    webhook: {
-        url: `${saasServiceUrl}/saas/webhooks/encoding`,
-        sessionToken: await getWebhookToken(),
-    },
     // ... other session options
-}, accessToken);
+}, authToken);  // Auth0 JWT, not API key
+
+// Web app uses sessionToken for all Encoding API operations
+const upload = new tus.Upload(file, {
+    endpoint: `${encodingApiUrl}/api/tus`,
+    headers: { Authorization: `Bearer ${sessionToken}` },
+    // ...
+});
 ```
 
 ### 7.3 Configuration
@@ -1214,12 +1232,13 @@ Mock `crypto` operations and worker threads for `EncryptionService` tests:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OIDC_ISSUER_URL` | (required) | OIDC issuer URL (replaces `AUTH0_DOMAIN`). Any OIDC provider. JWKS discovered via `/.well-known/openid-configuration` |
-| `OIDC_AUDIENCE` | (required) | Expected JWT audience claim (replaces `AUTH0_AUDIENCE`) |
+| `MASTER_API_KEY` | (required) | Master key accepted on all endpoints (superkey). Replaces all OIDC/JWT env vars (`AUTH0_DOMAIN`, `AUTH0_AUDIENCE`). |
+| `KEY_VALIDATION_WEBHOOK_URL` | (none) | URL the Encoding API calls to validate API keys. When not configured, only the master key works (standalone mode). |
+| `KEY_VALIDATION_WEBHOOK_TIMEOUT_MS` | `5000` | Key validation webhook timeout |
+| `KEY_VALIDATION_CACHE_TTL_MS` | `60000` | How long to cache key validation results (default 60s) |
 | `AUTHORIZATION_WEBHOOK_URL` | (none) | Global authorization webhook URL |
 | `AUTHORIZATION_WEBHOOK_TIMEOUT_MS` | `5000` | Authorization webhook timeout |
 | `AUTHORIZATION_WEBHOOK_FAIL_MODE` | `open` | `open` or `closed` |
-| `API_KEY_RATE_LIMIT` | `100` | Requests per minute per API key |
 
 ### 10.2 SaaS Service
 
@@ -1230,14 +1249,15 @@ Mock `crypto` operations and worker threads for `EncryptionService` tests:
 | `COUCHDB_DATABASE` | `luminary` | CouchDB database name |
 | `AUTH0_DOMAIN` | (required) | Auth0 tenant domain |
 | `AUTH0_AUDIENCE` | (required) | Auth0 API audience |
-| `ENCODING_API_URL` | (required) | Encoding API base URL (for key management proxy) |
-| `ENCODING_API_JWT` | (required) | Service-level JWT for Encoding API key management |
+| `ENCODING_API_URL` | (required) | Encoding API base URL (for session creation on behalf of web app users) |
+| `ENCODING_API_MASTER_KEY` | (required) | Master key for Encoding API session creation (value of the Encoding API's `MASTER_API_KEY`) |
 | `S3_CREDENTIAL_ENCRYPTION_KEY` | (required) | AES-256 key for encrypting S3 credentials at rest |
 | `SESSION_HISTORY_TTL_DAYS` | `30` | Default session history retention |
 | `SESSION_EXPIRY_CRON` | `0 3 * * *` | Cron schedule for expired session cleanup |
 | `FREE_TIER_MONTHLY_SOURCE_MINUTES` | `60` | Default free tier monthly source minutes cap |
 | `AUTH0_SIGNUP_MODE` | `manual` | `manual` or `auto` (future) |
 | `CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origins (web app + admin panel) |
+| `ENABLE_SWAGGER` | `false` | Set to `true` to enable Swagger/OpenAPI docs at `/saas/docs`. Disabled by default for security. |
 
 ### 10.3 Web App
 
@@ -1268,16 +1288,18 @@ Mock `crypto` operations and worker threads for `EncryptionService` tests:
 
 | # | Task | Component | URS Ref |
 |---|------|-----------|---------|
-| 1.1 | Scaffold `saas/` NestJS workspace | SaaS Service | — |
+| 1.1 | Scaffold `saas/` NestJS workspace | SaaS Service | -- |
 | 1.2 | Implement CouchDB database module + Mango indexes | SaaS Service | FR-3.4.1 |
 | 1.3 | Implement CLI seed command (`seed:admin`) | SaaS Service | FR-3.6.1 |
 | 1.4 | Implement Auth0 JWT identity resolution (email matching, auth0Id linking) | SaaS Service | FR-3.1.1 |
-| 1.5 | Add API key module (store, guard, CRUD endpoints) | Encoding API | FR-3.2.1, FR-3.2.2 |
+| 1.5 | Add key validation webhook service (`KEY_VALIDATION_WEBHOOK_URL`, cache, guard) | Encoding API | FR-3.2.1, FR-3.2.2 |
 | 1.6 | Add authorization webhook support | Encoding API | FR-3.2.4 |
-| 1.7 | Rename `uploadToken` → `sessionToken`, extend scope | Encoding API | FR-3.3.2 |
-| 1.8 | Implement webhook URL resolution (per-session + per-key) | Encoding API | Section 2.4 |
+| 1.7 | Rename `uploadToken` -> `sessionToken`, extend scope | Encoding API | FR-3.3.2 |
+| 1.8 | Implement webhook URL resolution (per-session + from validated key metadata) | Encoding API | Section 2.4 |
 | 1.9 | Implement webhook receiver (`/saas/webhooks/encoding`) | SaaS Service | Section 2.4 |
 | 1.10 | Implement authorization handler (`/saas/webhooks/authorize`) | SaaS Service | FR-3.2.4 |
+| 1.11 | Implement session creation endpoint (`POST /saas/sessions`) -- creates session on Encoding API with master key | SaaS Service | -- |
+| 1.12 | Implement key validation webhook endpoint (`POST /saas/webhooks/validate-key`) | SaaS Service | FR-3.2.1 |
 
 ### Phase 2 — Admin Panel & User Management
 
@@ -1298,9 +1320,8 @@ Mock `crypto` operations and worker threads for `EncryptionService` tests:
 | 3.2 | Session listing endpoint (paginated, filterable) | SaaS Service | FR-3.4.5 |
 | 3.3 | Session expiry cron job | SaaS Service | FR-3.4.3 |
 | 3.4 | S3 config CRUD endpoints + credential encryption | SaaS Service | FR-3.4.9, NFR-4.2.3 |
-| 3.5 | API key management endpoints (proxy to Encoding API) | SaaS Service | FR-3.2.3 |
-| 3.6 | Rate limiting middleware | Encoding API | FR-3.2.6 |
-| 3.7 | Session import from S3 | SaaS Service | FR-3.4.8 |
+| 3.5 | API key management endpoints (SaaS generates keys directly, stores in CouchDB) | SaaS Service | FR-3.2.3 |
+| 3.6 | Session import from S3 | SaaS Service | FR-3.4.8 |
 
 ### Phase 4 — Billing Interfaces & Open-Source Packaging
 
@@ -1318,7 +1339,7 @@ Mock `crypto` operations and worker threads for `EncryptionService` tests:
 
 | # | Task | Component | URS Ref |
 |---|------|-----------|---------|
-| 5.1 | Dual-backend API client (Encoding API + SaaS Service) | Web App | Section 2.3 |
+| 5.1 | Dual-backend API client (Encoding API via session token + SaaS Service via JWT) | Web App | Section 2.3 |
 | 5.2 | Session history view (list, filter, sort, playback) | Web App | FR-3.4.5, FR-3.4.7 |
 | 5.3 | Session import UI | Web App | FR-3.4.8 |
 | 5.4 | API key management UI | Web App | FR-3.2.3 |

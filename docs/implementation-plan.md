@@ -18,9 +18,9 @@
 
 ---
 
-## Phase 1 — Encoding API: API Key Auth & Session Tokens
+## Phase 1 — Encoding API: Key Validation Webhook & Session Tokens
 
-**Goal**: The open-source Encoding API gains API key authentication, the authorization webhook, and the renamed session token — making it self-service for any client that has a JWT or API key.
+**Goal**: The open-source Encoding API gains API key authentication via an external key validation webhook, the authorization webhook, and the renamed session token -- making it self-service for any client that has the master key or an API key validated by an external service.
 
 **Depends on**: Nothing (standalone Encoding API changes)
 
@@ -29,31 +29,32 @@
 | # | Task | FDS Ref |
 |---|------|---------|
 | 1.0 | Migrate `api/` and `tusd/` from Jest to Vitest. Update test config, replace `jest.*` with `vi.*` globals, verify existing tests pass with 100% coverage | 10.1 |
-| 1.1 | Add `ApiKeyModule`: in-memory key store, `ApiKeyGuard`, CRUD controller (`POST/GET/DELETE /api/keys`) | 4.1 |
-| 1.2 | Implement API key generation (`lmc_` prefix, SHA-256 hashing, one-time display) | 4.1.3 |
-| 1.3 | Implement auth resolution chain: `X-API-Key` → `Bearer sess_*` → JWT | 3.1.4 |
-| 1.4 | Rename `uploadToken` → `sessionToken` (`sess_` prefix), extend scope to all per-session operations | 4.2 |
+| 1.1 | Add `KeyValidationService`: calls `KEY_VALIDATION_WEBHOOK_URL` to validate API keys, caches results (configurable TTL, default 60s) | 4.1 |
+| 1.2 | Add `KeyValidationGuard`: NestJS guard for non-master `X-API-Key` values, uses `KeyValidationService` | 4.1 |
+| 1.3 | Implement auth resolution chain: `X-API-Key` (master key -> webhook-validated API key) -> `Bearer sess_*` | 3.1.4 |
+| 1.4 | Rename `uploadToken` -> `sessionToken` (`sess_` prefix), extend scope to all per-session operations | 4.2 |
 | 1.5 | Merge `SessionAuthGuard` and `PreviewAuthGuard` into unified `SessionTokenGuard` | 4.2 |
-| 1.6 | Implement webhook URL resolution: per-session `dto.webhook` → per-key `webhookUrl` → none | 4.3 |
-| 1.7 | Implement authorization webhook: resolve URL, call before session creation and encode start, fail-open/closed modes | 3.2 |
-| 1.8 | Add per-key rate limiting (sliding window, response headers) | 4.1.4 |
-| 1.9 | Refactor Encoding API JWT auth from Auth0-specific (`AUTH0_DOMAIN`, `AUTH0_AUDIENCE`) to generic OIDC (`OIDC_ISSUER_URL`, `OIDC_AUDIENCE`) with standard JWKS discovery | 3.1.1 |
-| 1.10 | Add env vars: `AUTHORIZATION_WEBHOOK_URL`, `AUTHORIZATION_WEBHOOK_TIMEOUT_MS`, `AUTHORIZATION_WEBHOOK_FAIL_MODE`, `API_KEY_RATE_LIMIT` | 10.1 |
-| 1.11 | Update Swagger/OpenAPI docs for all new and changed endpoints | — |
-| 1.12 | Unit tests for all Phase 1 code: API key CRUD, auth guards, session token, OIDC JWT validation, authorization webhook, rate limiting. Simulation mocks for authorization webhook HTTP calls. 100% coverage | 10.2 |
+| 1.6 | Implement webhook URL resolution: per-session `dto.webhook` -> validated key `webhookUrl` -> none | 4.3 |
+| 1.7 | Implement authorization webhook: resolve URL (from validated key metadata or global env var), call before session creation and encode start, fail-open/closed modes | 3.2 |
+| 1.8 | Replace Encoding API JWT/OIDC auth with master key auth (`MASTER_API_KEY` env var). Remove all OIDC/Passport dependencies (`passport`, `passport-jwt`, `jwks-rsa`, `@nestjs/passport`). The master key is the superkey for all endpoints. | 3.1.1 |
+| 1.9 | Add env vars: `MASTER_API_KEY`, `KEY_VALIDATION_WEBHOOK_URL`, `KEY_VALIDATION_WEBHOOK_TIMEOUT_MS`, `KEY_VALIDATION_CACHE_TTL_MS`, `AUTHORIZATION_WEBHOOK_URL`, `AUTHORIZATION_WEBHOOK_TIMEOUT_MS`, `AUTHORIZATION_WEBHOOK_FAIL_MODE` | 10.1 |
+| 1.10 | Update Swagger/OpenAPI docs for all new and changed endpoints | -- |
+| 1.11 | Unit tests for all Phase 1 code: key validation webhook, auth guards, session token, master key validation, authorization webhook. Simulation mocks for webhook HTTP calls. 100% coverage | 10.2 |
 
 ### Test Checklist
 
-- [ ] **OIDC JWT auth works**: Configure `OIDC_ISSUER_URL` and `OIDC_AUDIENCE` pointing to Auth0 (or any OIDC provider). Create a session with JWT, upload, encode, poll, preview — identical to current behavior but using generic OIDC env vars
-- [ ] **API key CRUD**: Use JWT to create an API key (`POST /api/keys`), list keys (`GET /api/keys`), verify full key shown once, revoke key (`DELETE /api/keys/:id`)
-- [ ] **API key session flow**: Use the API key (`X-API-Key` header) to create a session, upload via tus, submit encode config, poll until completed — full encoding pipeline works with API key auth
-- [ ] **Session token scope**: Create a session (JWT or API key), receive `sessionToken` in response, use it to upload, poll, encode, and access preview endpoints. Verify it cannot create new sessions or manage API keys
-- [ ] **Webhook URL binding**: Create an API key with `webhookUrl`, create a session with that key, verify webhooks are sent to the bound URL on status changes
-- [ ] **Per-session webhook override**: Create a session with JWT and include `webhook.url` in the request body. Verify webhooks go to the per-session URL, not the key's URL
+- [ ] **Master key auth works**: Configure `MASTER_API_KEY`. Create a session with the master key (`X-API-Key` header), upload, encode, poll, preview -- full encoding pipeline works with master key auth
+- [ ] **Key validation webhook**: Configure `KEY_VALIDATION_WEBHOOK_URL` pointing to a mock server. Send a request with an API key. Verify the Encoding API calls the webhook with `{ "apiKey": "..." }` and uses the returned metadata
+- [ ] **Key validation caching**: Send two requests with the same API key within the cache TTL. Verify only one webhook call is made
+- [ ] **Key validation rejection**: Configure mock to return `{ "valid": false, "reason": "Revoked" }`. Verify 401 response
+- [ ] **Standalone mode**: Do not configure `KEY_VALIDATION_WEBHOOK_URL`. Verify API key requests return 401 and only master key works
+- [ ] **API key session flow**: Configure webhook to return valid metadata. Use the API key (`X-API-Key` header) to create a session, upload via tus, submit encode config, poll until completed -- full encoding pipeline works
+- [ ] **Session token scope**: Create a session (master key or API key), receive `sessionToken` in response, use it to upload, poll, encode, and access preview endpoints. Verify it cannot create new sessions
+- [ ] **Webhook URL from validated key**: Configure webhook to return `webhookUrl` in metadata. Create a session with that key, verify webhooks are sent to the URL from the key metadata
+- [ ] **Per-session webhook override**: Create a session with an API key and include `webhook.url` in the request body. Verify webhooks go to the per-session URL, not the key's URL
 - [ ] **Authorization webhook (allow)**: Configure `AUTHORIZATION_WEBHOOK_URL` pointing to a mock server that returns `{ "allowed": true }`. Verify sessions can be created and encoding can start
 - [ ] **Authorization webhook (deny)**: Configure mock to return `{ "allowed": false, "reason": "Test denial" }`. Verify session creation returns 403 with the reason
 - [ ] **Authorization webhook (fail-open)**: Stop the mock server. Verify session creation still works (with warning logged). Repeat with `AUTHORIZATION_WEBHOOK_FAIL_MODE=closed` and verify 403
-- [ ] **Rate limiting**: Hit an endpoint >100 times in 1 minute with an API key. Verify 429 response and correct `X-RateLimit-*` headers
 - [ ] **Vitest migration**: All existing `api/` and `tusd/` tests pass under Vitest. No Jest dependencies remain
 - [ ] **100% coverage**: `npm -w api test -- --coverage` and `npm -w tusd test -- --coverage` report 100% line and branch coverage
 - [ ] **No regression**: Full test suite passes
@@ -64,7 +65,7 @@
 
 **Goal**: The SaaS Service exists as a running NestJS service with CouchDB, user management, and the admin seed command. An admin can log in, create users, and manage them through the API. The admin panel SPA is scaffolded with basic views.
 
-**Depends on**: Phase 1 (Encoding API has API key endpoints for Phase 3)
+**Depends on**: Phase 1 (Encoding API has key validation webhook and session tokens)
 
 ### Tasks
 
@@ -110,7 +111,7 @@
 
 | # | Task | FDS Ref |
 |---|------|---------|
-| 3.1 | Implement webhook receiver (`POST /saas/webhooks/encoding`): validate token, resolve user from API key metadata or JWT claims, upsert session document | 5.3.1 |
+| 3.1 | Implement webhook receiver (`POST /saas/webhooks/encoding`): validate token, resolve user from API key metadata, upsert session document | 5.3.1 |
 | 3.2 | Implement session document compaction on terminal status (completed/failed) | 5.3.2 |
 | 3.3 | Implement authorization webhook handler (`POST /saas/webhooks/authorize`): user status check, plan limit check (permissive defaults) | 3.2.3 |
 | 3.4 | Implement session listing endpoint (`GET /saas/sessions`: paginated, filterable by status, sorted by date) | — |
@@ -124,7 +125,7 @@
 
 ### Test Checklist
 
-- [ ] **End-to-end webhook flow**: Create an API key via SaaS Service (`POST /saas/keys` — implemented in Phase 4, or manually create a key on the Encoding API with `webhookUrl` pointing to SaaS Service). Use the key to create a session and encode a file on the Encoding API. Verify the SaaS Service receives webhooks and creates/updates a session document in CouchDB
+- [ ] **End-to-end webhook flow**: Create an API key via SaaS Service (`POST /saas/keys` -- implemented in Phase 4, or use master key to create a session with `webhook.url` pointing to SaaS Service). Use the key or master key to create a session and encode a file on the Encoding API. Verify the SaaS Service receives webhooks and creates/updates a session document in CouchDB
 - [ ] **Session history appears**: After encoding completes, call `GET /saas/sessions` with user JWT. Verify the completed session appears in the list with summary data
 - [ ] **Session detail**: Call `GET /saas/sessions/:id`. Verify compacted summary, S3 file references, encryption key (if applicable), cost estimate, timestamps
 - [ ] **Active session tracking**: While encoding is in progress, verify `GET /saas/sessions/:id` shows current status and progress (updated via webhooks)
@@ -145,26 +146,29 @@
 
 | # | Task | FDS Ref |
 |---|------|---------|
-| 4.1 | Implement SaaS key management endpoints (`POST/GET/DELETE /saas/keys`) that proxy to Encoding API and store references in CouchDB | 5.4 |
-| 4.2 | Implement S3 credential encryption (AES-256-GCM) | 9.2 |
-| 4.3 | Implement S3 config CRUD endpoints (`/saas/s3-configs`) | — |
-| 4.4 | Update web app: add API key management page (create, list, copy key, revoke) | — |
-| 4.5 | Update web app: add S3 config management page (save, edit, delete, select for session creation) | — |
-| 4.6 | Update web app: session creation flow to use saved S3 config + include SaaS Service webhook URL | 7.2 |
-| 4.7 | Implement admin API key revocation for any user (`DELETE /saas/admin/users/:userId/keys/:keyId`) | — |
-| 4.8 | Add API key list and revocation to admin user detail view | — |
-| 4.9 | Unit tests for all Phase 4 code: key proxy flow, S3 credential encryption/decryption, S3 config CRUD, component tests for key management and S3 config UI. 100% coverage | 10.2 |
+| 4.1 | Implement SaaS key management endpoints (`POST/GET/DELETE /saas/keys`) -- SaaS generates keys directly, stores hashes in CouchDB | 5.4 |
+| 4.2 | Implement SaaS key validation webhook endpoint (`POST /saas/webhooks/validate-key`) -- validates API keys, returns metadata | 5.4.2 |
+| 4.3 | Implement SaaS session creation endpoint (`POST /saas/sessions`) -- creates session on Encoding API with master key, returns sessionToken to web app | -- |
+| 4.4 | Implement S3 credential encryption (AES-256-GCM) | 9.2 |
+| 4.5 | Implement S3 config CRUD endpoints (`/saas/s3-configs`) | -- |
+| 4.6 | Update web app: add API key management page (create, list, copy key, revoke) | -- |
+| 4.7 | Update web app: add S3 config management page (save, edit, delete, select for session creation) | -- |
+| 4.8 | Update web app: session creation flow -- call SaaS Service to create session (gets sessionToken), use sessionToken for upload/encode/poll on Encoding API | 7.2 |
+| 4.9 | Implement admin API key revocation for any user (`DELETE /saas/admin/users/:userId/keys/:keyId`) | -- |
+| 4.10 | Add API key list and revocation to admin user detail view | -- |
+| 4.11 | Unit tests for all Phase 4 code: key generation, key validation webhook, SaaS session creation, S3 credential encryption/decryption, S3 config CRUD, component tests for key management and S3 config UI. 100% coverage | 10.2 |
 
 ### Test Checklist
 
 - [ ] **Create API key via web app**: Log in, navigate to API key management, create a new key. Verify the full key is displayed once. Verify it appears in the key list (prefix only)
-- [ ] **Third-party integration flow**: Copy the API key. Use it from a separate client (e.g., `curl`) to create a session on the Encoding API, upload a file, encode, and poll. Verify the session appears in the user's session history on the SaaS Service (via webhooks)
+- [ ] **Third-party integration flow**: Copy the API key. Use it from a separate client (e.g., `curl`) to create a session on the Encoding API, upload a file, encode, and poll. Verify the Encoding API validates the key via the SaaS webhook. Verify the session appears in the user's session history on the SaaS Service (via webhooks)
 - [ ] **Session token delegation**: Create a session with the API key. Pass the session token to a different client. Verify the second client can upload and poll using only the session token
+- [ ] **Web app session creation**: Log in to web app. Create a session. Verify the web app calls SaaS Service (not Encoding API directly). Verify sessionToken is returned. Verify upload/encode/poll work with sessionToken on Encoding API
 - [ ] **S3 config management**: Save an S3 config via the web app. Verify credentials are encrypted in CouchDB. Edit the config. Delete a config
 - [ ] **Session creation with saved S3 config**: Select a saved S3 config when creating a session in the web app. Verify encoding completes and S3 upload works
-- [ ] **Revoke API key**: Revoke a key via the web app. Verify the key is removed from CouchDB and rejected by the Encoding API on next use
-- [ ] **Admin key revocation**: Admin revokes a user's API key via admin panel. Verify the key stops working
-- [ ] **Webhook binding verification**: Create a key via SaaS Service, verify it has `webhookUrl` and `authorizationUrl` set to the SaaS Service endpoints. Create a session with the key. Verify both authorization and lifecycle webhooks fire correctly
+- [ ] **Revoke API key**: Revoke a key via the web app. Verify it is marked as revoked in CouchDB. Verify the Encoding API's validation cache expires and the key is rejected on next use
+- [ ] **Admin key revocation**: Admin revokes a user's API key via admin panel. Verify the key stops working (after cache TTL)
+- [ ] **Key validation webhook**: Create a key via SaaS Service. Use the key on the Encoding API. Verify the Encoding API calls `/saas/webhooks/validate-key`. Verify returned metadata includes `webhookUrl` and `authorizationUrl`. Verify both authorization and lifecycle webhooks fire correctly
 
 ---
 
@@ -250,7 +254,7 @@
 | # | Task | FDS Ref |
 |---|------|---------|
 | 7.1 | Audit Encoding API for any SaaS dependencies — remove if found | — |
-| 7.2 | Write Encoding API standalone usage documentation (README: setup, JWT config, API key flow, webhook config, session lifecycle) | — |
+| 7.2 | Write Encoding API standalone usage documentation (README: setup, master key config, API key flow, webhook config, session lifecycle) | — |
 | 7.3 | Extract Video.js plugins to `@luminary/video-player` package | — |
 | 7.4 | Update `encode-config` package exports (add `estimateEncodingCost`, types) | — |
 | 7.5 | Add LICENSE files: Apache 2.0 for `api/` and `encode-config/`, MIT for `video-player/` and `tusd/` | — |
@@ -260,7 +264,7 @@
 
 ### Test Checklist
 
-- [ ] **Standalone Encoding API**: Clone only the `api/` package. Install dependencies. Configure a JWT issuer. Start the server. Create an API key. Create a session, upload, encode, poll — full pipeline works without any SaaS Service or CouchDB
+- [ ] **Standalone Encoding API**: Clone only the `api/` package. Install dependencies. Configure `MASTER_API_KEY`. Start the server. Create a session with the master key, upload, encode, poll -- full pipeline works without any SaaS Service, CouchDB, or key validation webhook
 - [ ] **Standalone encode-config**: Import `@luminary/encode-config` in a fresh Vue project. Render `EncodeConfigForm` with mock probe results. Verify it works. Call `estimateEncodingCost()`. Verify correct output
 - [ ] **Standalone video-player**: Import `@luminary/video-player` in a fresh project. Register plugins with Video.js. Verify quality selector and thumbnail preview work with an HLS stream
 - [ ] **Standalone node-tusd**: Import `node-tusd` in a fresh project. Start a `TusdServer`. Upload a file via tus protocol. Verify hooks fire correctly
@@ -273,10 +277,10 @@
 
 | Phase | Deliverable | Key User-Testable Outcome |
 |-------|-------------|--------------------------|
-| 1 | Encoding API: API keys, session tokens, auth webhook | Third-party service can authenticate with API key and encode a video |
+| 1 | Encoding API: key validation webhook, session tokens, auth webhook | API keys validated via external webhook; master key for standalone use |
 | 2 | SaaS Service + Admin Panel foundation | Admin can seed, log in, create/manage users; users can log in |
 | 3 | Webhook pipeline + session history | Users see encoding history; admin sees dashboard and all sessions |
-| 4 | API key management + S3 configs in web app | Users create API keys and saved S3 configs; full third-party integration works |
+| 4 | API key management + S3 configs + SaaS session creation | Users create API keys (SaaS-managed), saved S3 configs; web app gets sessionTokens from SaaS; third-party integration works |
 | 5 | Session history UI + playback + import | Users browse history, play back encoded videos from S3, import external content |
 | 6 | Billing interfaces + cost estimation | Users see cost estimates before encoding; admin configures discounts and plan tiers |
 | 7 | Open-source packaging | Encoding API, encode-config, video-player, and tusd run fully standalone |
