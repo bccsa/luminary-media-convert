@@ -11,16 +11,15 @@ import {
     Req,
     Res,
     UseGuards,
-    UseInterceptors,
     BadRequestException,
     Logger,
 } from '@nestjs/common';
 
 import {
-    ApiBearerAuth,
     ApiOperation,
     ApiParam,
     ApiResponse,
+    ApiSecurity,
     ApiTags,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
@@ -29,7 +28,6 @@ import { join, dirname, posix } from 'path';
 import { AuthResolverGuard } from '../auth/auth-resolver.guard.js';
 import { AuthTypes } from '../auth/auth-types.decorator.js';
 import { AuthorizationWebhookService } from '../auth/authorization-webhook.service.js';
-import { RateLimitInterceptor } from '../apikey/rate-limit.interceptor.js';
 import { SessionTokenGuard } from './guards/session-token.guard.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
@@ -46,7 +44,6 @@ const DEFAULT_MAX_UPLOAD_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 
 @ApiTags('Encoding Sessions')
 @Controller('api/sessions')
-@UseInterceptors(RateLimitInterceptor)
 export class EncodeController {
     private readonly logger = new Logger(EncodeController.name);
 
@@ -59,8 +56,8 @@ export class EncodeController {
 
     @Post()
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('jwt', 'apikey')
-    @ApiBearerAuth('oidc')
+    @AuthTypes('master', 'apikey')
+    @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Create an encoding session',
         description:
@@ -116,8 +113,8 @@ export class EncodeController {
     @Post(':sessionId/encode')
     @HttpCode(HttpStatus.ACCEPTED)
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('jwt', 'apikey', 'session')
-    @ApiBearerAuth('oidc')
+    @AuthTypes('master', 'apikey', 'session')
+    @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Start encoding with the given configuration',
         description:
@@ -212,8 +209,8 @@ export class EncodeController {
 
     @Get(':sessionId')
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('jwt', 'apikey', 'session')
-    @ApiBearerAuth('oidc')
+    @AuthTypes('master', 'apikey', 'session')
+    @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Get session status',
         description:
@@ -233,7 +230,7 @@ export class EncodeController {
     })
     @ApiResponse({
         status: 401,
-        description: 'Unauthorized — invalid or missing Auth0 token.',
+        description: 'Unauthorized — invalid or missing credentials.',
     })
     @ApiResponse({ status: 404, description: 'Session not found.' })
     getStatus(
@@ -415,8 +412,8 @@ export class EncodeController {
     @Delete(':sessionId')
     @HttpCode(HttpStatus.NO_CONTENT)
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('jwt', 'apikey')
-    @ApiBearerAuth('oidc')
+    @AuthTypes('master', 'apikey')
+    @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Cancel and delete an encoding session',
         description:
@@ -436,7 +433,7 @@ export class EncodeController {
     })
     @ApiResponse({
         status: 401,
-        description: 'Unauthorized — invalid or missing Auth0 token.',
+        description: 'Unauthorized — invalid or missing credentials.',
     })
     @ApiResponse({ status: 404, description: 'Session not found.' })
     async deleteSession(@Param('sessionId') sessionId: string): Promise<void> {

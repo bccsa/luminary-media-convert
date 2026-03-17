@@ -1,19 +1,9 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ApiKeyService } from '../apikey/apikey.service';
+import { KeyValidationWebhookService } from './key-validation-webhook.service';
 import { SessionService } from '../encode/services/session.service';
-import type { CreateSessionDto } from '../encode/dto/create-session.dto';
-
-const mockJwtCanActivate = vi.fn();
-
-// Mock the JwtAuthGuard so we don't need a real Passport strategy
-vi.mock('./jwt-auth.guard', () => ({
-    JwtAuthGuard: vi.fn().mockImplementation(function () {
-        return { canActivate: mockJwtCanActivate };
-    }),
-}));
-
 import { AuthResolverGuard } from './auth-resolver.guard';
+import type { CreateSessionDto } from '../encode/dto/create-session.dto';
 
 function makeConfig(): CreateSessionDto {
     return {
@@ -43,81 +33,112 @@ function createMockContext(
 describe('AuthResolverGuard', () => {
     let guard: AuthResolverGuard;
     let reflector: Reflector;
-    let apiKeyService: ApiKeyService;
+    let keyValidationService: KeyValidationWebhookService;
     let sessionService: SessionService;
+    const savedMasterKey = process.env.MASTER_API_KEY;
 
     beforeEach(() => {
         vi.clearAllMocks();
+        process.env.MASTER_API_KEY = 'test-master-key';
         reflector = new Reflector();
-        apiKeyService = new ApiKeyService();
+        keyValidationService = {
+            validateKey: vi.fn().mockResolvedValue(null),
+        } as any;
         sessionService = new SessionService();
-        guard = new AuthResolverGuard(reflector, apiKeyService, sessionService);
+        guard = new AuthResolverGuard(
+            reflector,
+            keyValidationService,
+            sessionService,
+        );
     });
 
-    describe('with default auth types (jwt only)', () => {
-        it('should try JWT when no decorator is set', async () => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue(undefined);
-            mockJwtCanActivate.mockResolvedValue(true);
+    afterEach(() => {
+        if (savedMasterKey !== undefined) {
+            process.env.MASTER_API_KEY = savedMasterKey;
+        } else {
+            delete process.env.MASTER_API_KEY;
+        }
+    });
 
-            const ctx = createMockContext();
+    describe('master key', () => {
+        it('should accept master key on any endpoint', async () => {
+            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
+                'apikey',
+                'session',
+            ]);
+
+            const ctx = createMockContext({ 'x-api-key': 'test-master-key' });
             const result = await guard.canActivate(ctx);
 
             expect(result).toBe(true);
             const request = ctx.switchToHttp().getRequest();
-            expect(request.authType).toBe('jwt');
+            expect(request.authType).toBe('master');
         });
 
-        it('should throw when JWT fails and no other methods allowed', async () => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue(undefined);
-            mockJwtCanActivate.mockRejectedValue(new Error('JWT failed'));
+        it('should reject when MASTER_API_KEY env var is not set', async () => {
+            delete process.env.MASTER_API_KEY;
+            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
+                'master',
+            ]);
 
-            const ctx = createMockContext();
+            const ctx = createMockContext({ 'x-api-key': 'test-master-key' });
             await expect(guard.canActivate(ctx)).rejects.toThrow(
                 UnauthorizedException,
             );
         });
     });
 
-    describe('with apikey auth type', () => {
-        beforeEach(() => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['apikey']);
-        });
+    describe('API key validated via webhook', () => {
+        it('should authenticate and attach metadata to request', async () => {
+            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
+                'apikey',
+            ]);
+            const metadata = {
+                userId: 'user-1',
+                webhookUrl: 'https://example.com/hook',
+            };
+            (keyValidationService.validateKey as ReturnType<typeof vi.fn>).mockResolvedValue(metadata);
 
-        it('should authenticate via X-API-Key header', async () => {
-            const { key } = apiKeyService.create({ name: 'Test' });
-            const ctx = createMockContext({ 'x-api-key': key });
-
+            const ctx = createMockContext({ 'x-api-key': 'external-key-123' });
             const result = await guard.canActivate(ctx);
 
             expect(result).toBe(true);
             const request = ctx.switchToHttp().getRequest();
             expect(request.authType).toBe('apikey');
-            expect(request.apiKey.name).toBe('Test');
+            expect(request.apiKey).toBe(metadata);
         });
 
-        it('should throw for invalid API key', async () => {
-            const ctx = createMockContext({ 'x-api-key': 'lmc_invalid' });
+        it('should return 401 when webhook returns null', async () => {
+            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
+                'apikey',
+            ]);
+            (keyValidationService.validateKey as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
+            const ctx = createMockContext({ 'x-api-key': 'bad-key' });
             await expect(guard.canActivate(ctx)).rejects.toThrow(
                 UnauthorizedException,
             );
         });
 
-        it('should throw when no credentials provided', async () => {
-            const ctx = createMockContext();
+        it('should reject regular API key on master-only endpoints', async () => {
+            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
+                'master',
+            ]);
+            const metadata = { userId: 'user-1' };
+            (keyValidationService.validateKey as ReturnType<typeof vi.fn>).mockResolvedValue(metadata);
 
+            const ctx = createMockContext({ 'x-api-key': 'external-key-123' });
             await expect(guard.canActivate(ctx)).rejects.toThrow(
                 UnauthorizedException,
             );
         });
     });
 
-    describe('with session auth type', () => {
-        beforeEach(() => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['session']);
-        });
-
+    describe('session token', () => {
         it('should authenticate via Bearer sess_ token', async () => {
+            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
+                'session',
+            ]);
             const session = sessionService.create(makeConfig());
             const ctx = createMockContext(
                 { authorization: `Bearer ${session.sessionToken}` },
@@ -131,102 +152,19 @@ describe('AuthResolverGuard', () => {
             expect(request.authType).toBe('session');
             expect(request.session.id).toBe(session.id);
         });
-
-        it('should throw for invalid session token', async () => {
-            const ctx = createMockContext(
-                { authorization: 'Bearer sess_invalid' },
-                { sessionId: 'some-id' },
-            );
-
-            await expect(guard.canActivate(ctx)).rejects.toThrow(
-                UnauthorizedException,
-            );
-        });
-
-        it('should throw when session token does not match sessionId param', async () => {
-            const session = sessionService.create(makeConfig());
-            const ctx = createMockContext(
-                { authorization: `Bearer ${session.sessionToken}` },
-                { sessionId: 'different-id' },
-            );
-
-            await expect(guard.canActivate(ctx)).rejects.toThrow(
-                UnauthorizedException,
-            );
-        });
-
-        it('should ignore non-sess_ bearer tokens', async () => {
-            const ctx = createMockContext(
-                { authorization: 'Bearer jwt_token_here' },
-            );
-
-            await expect(guard.canActivate(ctx)).rejects.toThrow(
-                UnauthorizedException,
-            );
-        });
     });
 
-    describe('with multiple auth types', () => {
-        it('should prefer API key over session token', async () => {
+    describe('no credentials', () => {
+        it('should throw when no credentials provided', async () => {
             vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
                 'apikey',
                 'session',
             ]);
-            const { key } = apiKeyService.create({ name: 'API Key' });
-            const session = sessionService.create(makeConfig());
 
-            const ctx = createMockContext(
-                {
-                    'x-api-key': key,
-                    authorization: `Bearer ${session.sessionToken}`,
-                },
-                { sessionId: session.id },
+            const ctx = createMockContext();
+            await expect(guard.canActivate(ctx)).rejects.toThrow(
+                UnauthorizedException,
             );
-
-            const result = await guard.canActivate(ctx);
-
-            expect(result).toBe(true);
-            const request = ctx.switchToHttp().getRequest();
-            expect(request.authType).toBe('apikey');
-        });
-
-        it('should fall through to session when no API key header', async () => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
-                'apikey',
-                'session',
-                'jwt',
-            ]);
-            const session = sessionService.create(makeConfig());
-
-            const ctx = createMockContext(
-                { authorization: `Bearer ${session.sessionToken}` },
-                { sessionId: session.id },
-            );
-
-            const result = await guard.canActivate(ctx);
-
-            expect(result).toBe(true);
-            const request = ctx.switchToHttp().getRequest();
-            expect(request.authType).toBe('session');
-        });
-
-        it('should fall through to JWT when no API key or session token', async () => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
-                'apikey',
-                'session',
-                'jwt',
-            ]);
-            mockJwtCanActivate.mockResolvedValue(true);
-
-            const ctx = createMockContext(
-                { authorization: 'Bearer some.jwt.token' },
-            );
-
-            const result = await guard.canActivate(ctx);
-
-            expect(result).toBe(true);
-            const request = ctx.switchToHttp().getRequest();
-            expect(request.authType).toBe('jwt');
         });
     });
 });

@@ -3,10 +3,10 @@ import {
     Logger,
     ForbiddenException,
 } from '@nestjs/common';
-import type { ApiKeyRecord } from '../apikey/apikey.service.js';
+import type { ValidatedKeyMetadata } from './key-validation.types.js';
 
 export interface AuthorizationContext {
-    apiKey?: ApiKeyRecord;
+    apiKey?: ValidatedKeyMetadata;
     sessionId?: string;
     dto?: unknown;
 }
@@ -52,7 +52,7 @@ export class AuthorizationWebhookService {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     action,
-                    apiKeyId: context.apiKey?.id,
+                    userId: context.apiKey?.userId,
                     sessionId: context.sessionId,
                     metadata: context.apiKey?.metadata,
                 }),

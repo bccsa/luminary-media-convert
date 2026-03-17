@@ -6,23 +6,25 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
-import { ApiKeyService } from '../apikey/apikey.service.js';
+import { KeyValidationWebhookService } from './key-validation-webhook.service.js';
 import { SessionService } from '../encode/services/session.service.js';
-import { JwtAuthGuard } from './jwt-auth.guard.js';
 import { AUTH_TYPES_KEY, type AuthType } from './auth-types.decorator.js';
 
 /**
  * Composite guard that resolves authentication via a priority chain:
- * API Key -> Session Token -> JWT
+ * Master Key -> API Key -> Session Token
  *
  * Uses the @AuthTypes() decorator to determine which methods are allowed.
- * Defaults to ['jwt'] if no decorator is present.
+ * Defaults to ['master'] if no decorator is present.
+ *
+ * The master key (MASTER_API_KEY env var) is a superkey that is always
+ * accepted regardless of the @AuthTypes() decorator on the endpoint.
  */
 @Injectable()
 export class AuthResolverGuard implements CanActivate {
     constructor(
         private readonly reflector: Reflector,
-        private readonly apiKeyService: ApiKeyService,
+        private readonly keyValidationService: KeyValidationWebhookService,
         private readonly sessionService: SessionService,
     ) {}
 
@@ -31,22 +33,32 @@ export class AuthResolverGuard implements CanActivate {
             this.reflector.getAllAndOverride<AuthType[]>(AUTH_TYPES_KEY, [
                 context.getHandler(),
                 context.getClass(),
-            ]) ?? ['jwt'];
+            ]) ?? ['master'];
 
         const request = context.switchToHttp().getRequest<Request>();
 
-        // 1. Try API Key
-        if (allowedTypes.includes('apikey')) {
-            const apiKeyHeader = request.headers['x-api-key'] as string | undefined;
-            if (apiKeyHeader) {
-                const record = this.apiKeyService.validateKey(apiKeyHeader);
-                if (!record) {
-                    throw new UnauthorizedException('Invalid or expired API key');
-                }
-                (request as any).authType = 'apikey';
-                (request as any).apiKey = record;
+        // 1. Try X-API-Key header (master key or regular API key)
+        const apiKeyHeader = request.headers['x-api-key'] as string | undefined;
+        if (apiKeyHeader) {
+            // Check master key first — always accepted (superkey)
+            const masterKey = process.env.MASTER_API_KEY;
+            if (masterKey && apiKeyHeader === masterKey) {
+                (request as any).authType = 'master';
                 return true;
             }
+
+            // Check regular API key via webhook
+            if (allowedTypes.includes('apikey')) {
+                const metadata = await this.keyValidationService.validateKey(apiKeyHeader);
+                if (metadata) {
+                    (request as any).authType = 'apikey';
+                    (request as any).apiKey = metadata;
+                    return true;
+                }
+            }
+
+            // Key was provided but invalid
+            throw new UnauthorizedException('Invalid or expired API key');
         }
 
         // 2. Try Session Token (Bearer sess_*)
@@ -69,20 +81,6 @@ export class AuthResolverGuard implements CanActivate {
                 (request as any).authType = 'session';
                 (request as any).session = session;
                 return true;
-            }
-        }
-
-        // 3. Try JWT
-        if (allowedTypes.includes('jwt')) {
-            const jwtGuard = new JwtAuthGuard();
-            try {
-                const result = await jwtGuard.canActivate(context);
-                if (result) {
-                    (request as any).authType = 'jwt';
-                    return true;
-                }
-            } catch {
-                // JWT validation failed — fall through to final error
             }
         }
 

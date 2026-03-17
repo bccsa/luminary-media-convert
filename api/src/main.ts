@@ -29,22 +29,22 @@ async function bootstrap() {
             'and receive webhook callbacks with progress updates and S3 output locations.'
         )
         .setVersion('2.0.0')
-        .addBearerAuth(
+        .addApiKey(
             {
-                type: 'http',
-                scheme: 'bearer',
-                bearerFormat: 'JWT',
+                type: 'apiKey',
+                in: 'header',
+                name: 'X-API-Key',
                 description:
-                    'OIDC access token (JWT). Obtain via your OIDC provider\'s login flow.',
+                    'Master API key or externally-managed API key validated via webhook.',
             },
-            'oidc',
+            'apikey',
         )
         .addBearerAuth(
             {
                 type: 'http',
                 scheme: 'bearer',
                 description:
-                    'Session token returned from the session creation endpoint.',
+                    'Session token (sess_*) returned from the session creation endpoint.',
             },
         )
         .build();
@@ -53,7 +53,7 @@ async function bootstrap() {
     SwaggerModule.setup('api/docs', app, document);
 
     app.enableCors({
-        origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+        origin: process.env.CORS_ORIGIN || '*',
     });
 
     const port = process.env.PORT ?? 3000;

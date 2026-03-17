@@ -1,15 +1,10 @@
 import { ForbiddenException } from '@nestjs/common';
 import { AuthorizationWebhookService } from './authorization-webhook.service';
-import type { ApiKeyRecord } from '../apikey/apikey.service';
+import type { ValidatedKeyMetadata } from './key-validation.types';
 
-function makeApiKey(overrides: Partial<ApiKeyRecord> = {}): ApiKeyRecord {
+function makeApiKey(overrides: Partial<ValidatedKeyMetadata> = {}): ValidatedKeyMetadata {
     return {
-        id: 'key-1',
-        keyHash: 'hash',
-        keyPrefix: 'lmc_abc',
-        name: 'Test',
-        scopes: [],
-        createdAt: new Date(),
+        userId: 'user-1',
         ...overrides,
     };
 }
@@ -153,7 +148,7 @@ describe('AuthorizationWebhookService', () => {
         process.env.AUTHORIZATION_WEBHOOK_URL = 'https://auth.example.com/check';
 
         const apiKey = makeApiKey({
-            id: 'key-42',
+            userId: 'key-42',
             metadata: { tenant: 'acme' },
         });
 
@@ -170,7 +165,7 @@ describe('AuthorizationWebhookService', () => {
         const body = JSON.parse(callArgs[1]!.body as string);
         expect(body).toEqual({
             action: 'start_encode',
-            apiKeyId: 'key-42',
+            userId: 'key-42',
             sessionId: 'sess-123',
             metadata: { tenant: 'acme' },
         });
