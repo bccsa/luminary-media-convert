@@ -1,19 +1,37 @@
-# @luminary-media-converter/encode-config
+# @luminary/encode-config
 
-Vue 3 component for configuring HLS/ABR encoding parameters — video renditions, audio groups, codec settings, and stream copy options.
+Vue 3 component library for building encoding configuration UIs on top of the [Luminary Encoding API](../api/README.md). It takes ffprobe-generated media analysis results (probe results) from the API and presents a user-friendly form for configuring FFmpeg-compatible HLS/ABR encoding settings — video renditions, audio groups, bitrate/resolution selection, copy/re-encode toggles, and VBR/CBR mode.
 
-## Install
+This package is designed for developers building custom web interfaces for the Encoding API. It handles the complexity of translating media track information into valid encoding configurations that the API accepts.
 
-```bash
-npm install @luminary-media-converter/encode-config
-```
+## Exports
+
+- **`EncodeConfigForm`** -- Vue 3 component (Composition API, `<script setup>`) that displays probe results (detected video/audio tracks) and provides a configurable encoding form (video renditions, audio groups, copy/VBR toggles, ABR ladder suggestions)
+- **Types** -- `ProbeResult`, `FormatInfo`, `VideoTrackInfo`, `AudioTrackInfo`, `EncodeConfig`, `VideoRendition`, `AudioGroup`
+- **`layoutStorage`** -- `computeLayoutKey()`, `getStoredConfig()`, `saveConfig()` for persisting encoding configs keyed by media layout fingerprint (localStorage-backed)
+- **`estimateEncodingCost`** -- Cost estimation utility (future)
+
+## How It Works
+
+1. A client uploads a media file to the Encoding API via the tus protocol
+2. The Encoding API probes the file with ffprobe and returns a `ProbeResult` (detected video/audio tracks with codec, resolution, bitrate, language, etc.)
+3. The `EncodeConfigForm` component takes this `ProbeResult` as input and renders an interactive configuration form
+4. The component suggests an ABR ladder based on the source resolution and provides sensible defaults for audio groups
+5. The user adjusts settings (add/remove renditions, toggle copy mode, select VBR/CBR, assign audio groups)
+6. On submit, the component emits an `EncodeConfig` object that can be sent directly to the Encoding API's `POST /api/sessions/:id/encode` endpoint
+
+The component also persists configs to localStorage keyed by media layout fingerprint, so users get their previous settings restored when encoding media with the same track layout.
+
+## Peer Dependencies
+
+- Vue 3
 
 ## Usage
 
 ```vue
 <script setup lang="ts">
-import { EncodeConfigForm } from '@luminary-media-converter/encode-config';
-import type { ProbeResult, EncodeConfig } from '@luminary-media-converter/encode-config';
+import { EncodeConfigForm } from '@luminary/encode-config';
+import type { ProbeResult, EncodeConfig } from '@luminary/encode-config';
 
 const probeResult: ProbeResult = {
     format: { duration: 120, bitrateKbps: 5000, formatName: 'matroska' },
@@ -56,69 +74,32 @@ function onBack() {
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `submit` | `EncodeConfig` | Fired when the user submits the encoding configuration |
-| `back` | — | Fired when the user confirms they want to go back (after deletion warning) |
+| `back` | -- | Fired when the user confirms they want to go back (after deletion warning) |
 
 ## Styling
 
-The component uses semantic CSS class names prefixed with `ecf-`. It ships with **no built-in styles** — you must provide CSS for these classes.
-
-### Default stylesheet
+The component uses semantic CSS class names prefixed with `ecf-`. It ships with **no built-in styles** -- you must provide CSS for these classes.
 
 A ready-made dark-theme stylesheet is included:
 
 ```ts
-import '@luminary-media-converter/encode-config/styles.css';
+import '@luminary/encode-config/styles.css';
 ```
-
-### Custom styling
-
-Override any `ecf-*` class in your own CSS. Key classes:
-
-| Class | Element |
-|-------|---------|
-| `ecf-root` | Root container |
-| `ecf-fieldset` | Section wrapper |
-| `ecf-legend` | Section heading |
-| `ecf-input` | Text/number inputs |
-| `ecf-select` | Dropdowns |
-| `ecf-card` | Rendition/audio group card |
-| `ecf-btn-primary` | Submit button |
-| `ecf-btn-secondary` | Back/cancel button |
-| `ecf-btn-sm` | Small "Add" buttons |
-| `ecf-btn-accent` | Accent action buttons |
-| `ecf-btn-danger` | Destructive action button |
-| `ecf-btn-remove` | Remove (X) icon button |
-| `ecf-checkbox` | Checkbox inputs |
-| `ecf-radio` | Radio inputs |
-| `ecf-warning` | Warning text |
-| `ecf-confirm-banner` | Confirmation dialog |
-| `ecf-table` | Data tables |
-| `ecf-info-panel` | Detected media summary |
-
-Input size modifiers: `ecf-input-sm`, `ecf-input-xs`, `ecf-input-center`, `ecf-input-w20`, `ecf-input-w24`, `ecf-input-w28`, `ecf-input-w40`, `ecf-input-w48`, `ecf-input-segment`.
 
 See [src/styles.css](src/styles.css) for the full list of classes and the default implementation.
 
-## Utilities
+## Development
 
-Helper functions for persisting encoding configs in `localStorage`:
+```bash
+# Watch build (rebuilds on source changes)
+npm -w encode-config run dev
 
-```ts
-import { computeLayoutKey, getStoredConfig, saveConfig } from '@luminary-media-converter/encode-config';
-
-// Generate a key based on media layout (track codecs, resolutions, channels)
-const key = computeLayoutKey(probeResult, 'video');
-
-// Retrieve a previously saved config
-const saved = getStoredConfig(key);
-
-// Save a config for later reuse
-saveConfig(key, config);
+# One-time build
+npm -w encode-config run build
 ```
 
-## Types
+## Tech Stack
 
-All TypeScript interfaces are exported from the package entry point:
-
-- `ProbeResult`, `FormatInfo`, `VideoTrackInfo`, `AudioTrackInfo` — media analysis types
-- `EncodeConfig`, `VideoRendition`, `AudioGroup` — encoding configuration types
+- Vue 3 (Composition API)
+- Vite 6 (library mode)
+- TypeScript
