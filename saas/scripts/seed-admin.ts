@@ -74,6 +74,8 @@ async function main() {
         emailVerifiedAt: now,
         invitedBy: null,
         onboardingCompletedAt: null,
+        lastLoginAt: null,
+        lastApiAccessAt: null,
         createdAt: now,
         updatedAt: now,
     });

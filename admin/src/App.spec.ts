@@ -116,7 +116,7 @@ describe('App.vue', () => {
         mockGetCurrentUser.mockRejectedValue(new Error('Not found'));
         mockUser.value = {
             email: 'admin@test.com',
-            'https://luminary.dev/roles': ['admin'],
+            `${import.meta.env.VITE_AUTH0_CLAIM_NAMESPACE}/roles`: ['admin'],
         };
         mockIsAuthenticated.value = true;
 
@@ -131,7 +131,7 @@ describe('App.vue', () => {
         mockGetCurrentUser.mockRejectedValue(new Error('Not found'));
         mockUser.value = {
             email: 'user@test.com',
-            'https://luminary.dev/roles': ['user'],
+            `${import.meta.env.VITE_AUTH0_CLAIM_NAMESPACE}/roles`: ['user'],
         };
         mockIsAuthenticated.value = true;
 

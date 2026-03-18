@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
+import { ref, inject, onMounted, watch, type Ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuth0 } from '@auth0/auth0-vue';
 import {
@@ -8,6 +8,8 @@ import {
     enableUser,
     deleteUser,
 } from '../api';
+
+const currentUserId = inject<Ref<string | null>>('currentUserId');
 
 const router = useRouter();
 const { getAccessTokenSilently } = useAuth0();
@@ -18,6 +20,8 @@ interface User {
     name: string;
     role: string;
     status: string;
+    lastLoginAt: string | null;
+    lastApiAccessAt: string | null;
     createdAt: string;
 }
 
@@ -176,6 +180,8 @@ onMounted(fetchUsers);
                         <th class="px-4 py-3">Name</th>
                         <th class="px-4 py-3">Role</th>
                         <th class="px-4 py-3">Status</th>
+                        <th class="px-4 py-3">Last Login</th>
+                        <th class="px-4 py-3">Last API Access</th>
                         <th class="px-4 py-3">Created</th>
                         <th class="px-4 py-3 text-right">Actions</th>
                     </tr>
@@ -214,6 +220,12 @@ onMounted(fetchUsers);
                             </span>
                         </td>
                         <td class="px-4 py-3 text-zinc-500">
+                            {{ formatDate(u.lastLoginAt) }}
+                        </td>
+                        <td class="px-4 py-3 text-zinc-500">
+                            {{ formatDate(u.lastApiAccessAt) }}
+                        </td>
+                        <td class="px-4 py-3 text-zinc-500">
                             {{ formatDate(u.createdAt) }}
                         </td>
                         <td
@@ -222,20 +234,21 @@ onMounted(fetchUsers);
                         >
                             <div class="flex justify-end gap-2">
                                 <button
-                                    v-if="u.status === 'active'"
+                                    v-if="u.status === 'active' && u.id !== currentUserId?.value"
                                     @click="onDisable(u.id)"
                                     class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 transition-colors hover:border-amber-700 hover:text-amber-400 cursor-pointer"
                                 >
                                     Disable
                                 </button>
                                 <button
-                                    v-else
+                                    v-else-if="u.status !== 'active'"
                                     @click="onEnable(u.id)"
                                     class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 transition-colors hover:border-green-700 hover:text-green-400 cursor-pointer"
                                 >
                                     Enable
                                 </button>
                                 <button
+                                    v-if="u.id !== currentUserId?.value"
                                     @click="onDelete(u.id)"
                                     class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 transition-colors hover:border-red-700 hover:text-red-400 cursor-pointer"
                                 >
@@ -246,7 +259,7 @@ onMounted(fetchUsers);
                     </tr>
                     <tr v-if="users.length === 0">
                         <td
-                            colspan="6"
+                            colspan="9"
                             class="px-4 py-8 text-center text-zinc-500"
                         >
                             No users found.

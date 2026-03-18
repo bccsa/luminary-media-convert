@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, provide, watch } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { getCurrentUser } from './api';
 
@@ -16,6 +16,9 @@ const returnTo = window.location.origin;
 const isAdmin = ref(false);
 const adminCheckLoading = ref(false);
 const adminCheckError = ref<string | null>(null);
+const currentUserId = ref<string | null>(null);
+
+provide('currentUserId', currentUserId);
 
 watch(isAuthenticated, async (authenticated) => {
     if (!authenticated) {
@@ -27,16 +30,20 @@ watch(isAuthenticated, async (authenticated) => {
     try {
         const token = await getAccessTokenSilently();
         const me = await getCurrentUser(token);
+        currentUserId.value = me?.id ?? null;
         isAdmin.value = me?.role === 'admin';
         if (!isAdmin.value) {
             adminCheckError.value = 'Access denied — admin role required';
         }
     } catch {
         // /me endpoint may not exist yet — fall back to Auth0 user metadata
+        const namespace = import.meta.env.VITE_AUTH0_CLAIM_NAMESPACE;
         const roles =
-            (user.value as Record<string, unknown>)?.[
-                'https://luminary.dev/roles'
-            ] ??
+            (namespace
+                ? (user.value as Record<string, unknown>)?.[
+                      `${namespace}/roles`
+                  ]
+                : undefined) ??
             (user.value as Record<string, unknown>)?.['roles'];
         if (Array.isArray(roles) && roles.includes('admin')) {
             isAdmin.value = true;
@@ -87,7 +94,7 @@ watch(isAuthenticated, async (authenticated) => {
             <h1
                 class="mb-2 text-2xl font-bold tracking-tight text-zinc-100"
             >
-                Luminary Admin
+                Luminary Encode Admin
             </h1>
             <p class="mb-6 text-sm text-zinc-500">
                 Sign in to access the admin panel.
@@ -108,7 +115,7 @@ watch(isAuthenticated, async (authenticated) => {
             <h1
                 class="mb-2 text-2xl font-bold tracking-tight text-zinc-100"
             >
-                Luminary Admin
+                Luminary Encode Admin
             </h1>
             <p class="mb-6 text-sm text-red-400">{{ adminCheckError }}</p>
             <button
@@ -131,7 +138,7 @@ watch(isAuthenticated, async (authenticated) => {
                         <h1
                             class="text-sm font-bold tracking-tight text-zinc-100"
                         >
-                            Luminary Admin
+                            Luminary Encode Admin
                         </h1>
                         <nav class="flex gap-4 text-sm">
                             <router-link

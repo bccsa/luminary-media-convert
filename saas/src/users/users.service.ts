@@ -35,6 +35,8 @@ export class UsersService {
             emailVerifiedAt: now,
             invitedBy: null,
             onboardingCompletedAt: null,
+            lastLoginAt: null,
+            lastApiAccessAt: null,
             createdAt: now,
             updatedAt: now,
         };

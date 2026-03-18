@@ -7,13 +7,16 @@ import {
     Body,
     Param,
     Query,
+    Req,
     UseGuards,
     HttpCode,
     HttpStatus,
+    ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { AdminGuard } from '../auth/admin.guard.js';
+import { SkipAdmin } from '../auth/skip-admin.decorator.js';
 import { UsersService } from './users.service.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 import { UpdateUserDto } from './dto/update-user.dto.js';
@@ -27,6 +30,8 @@ function toResponse(user: UserDocument): UserResponseDto {
         name: user.name,
         role: user.role,
         status: user.status,
+        lastLoginAt: user.lastLoginAt ?? null,
+        lastApiAccessAt: user.lastApiAccessAt ?? null,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
     };
@@ -38,6 +43,12 @@ function toResponse(user: UserDocument): UserResponseDto {
 @UseGuards(JwtAuthGuard, AdminGuard)
 export class UsersController {
     constructor(private readonly usersService: UsersService) {}
+
+    @Get('me')
+    @SkipAdmin()
+    async me(@Req() req: { user: UserDocument }): Promise<UserResponseDto> {
+        return toResponse(req.user);
+    }
 
     @Post()
     async create(@Body() dto: CreateUserDto): Promise<UserResponseDto> {
@@ -96,7 +107,11 @@ export class UsersController {
     @HttpCode(HttpStatus.OK)
     async disable(
         @Param('userId') userId: string,
+        @Req() req: { user: UserDocument },
     ): Promise<UserResponseDto> {
+        if (req.user._id === userId) {
+            throw new ForbiddenException('Cannot disable your own account');
+        }
         const user = await this.usersService.update(userId, {
             status: 'disabled',
         });
@@ -116,7 +131,13 @@ export class UsersController {
 
     @Delete(':userId')
     @HttpCode(HttpStatus.NO_CONTENT)
-    async remove(@Param('userId') userId: string): Promise<void> {
+    async remove(
+        @Param('userId') userId: string,
+        @Req() req: { user: UserDocument },
+    ): Promise<void> {
+        if (req.user._id === userId) {
+            throw new ForbiddenException('Cannot delete your own account');
+        }
         await this.usersService.remove(userId);
     }
 }

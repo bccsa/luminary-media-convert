@@ -11,6 +11,8 @@ export interface UserDocument {
     emailVerifiedAt: string | null;
     invitedBy: string | null;
     onboardingCompletedAt: string | null;
+    lastLoginAt: string | null;
+    lastApiAccessAt: string | null;
     createdAt: string;
     updatedAt: string;
 }

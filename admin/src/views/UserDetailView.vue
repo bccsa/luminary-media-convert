@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, inject, onMounted, type Ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuth0 } from '@auth0/auth0-vue';
 import {
@@ -8,6 +8,9 @@ import {
     enableUser,
     deleteUser,
 } from '../api';
+
+const currentUserId = inject<Ref<string | null>>('currentUserId');
+const isSelf = () => currentUserId?.value === userId;
 
 const route = useRoute();
 const router = useRouter();
@@ -19,6 +22,8 @@ interface User {
     name: string;
     role: string;
     status: string;
+    lastLoginAt: string | null;
+    lastApiAccessAt: string | null;
     createdAt: string;
     updatedAt: string;
 }
@@ -142,20 +147,21 @@ onMounted(fetchUser);
                         Edit
                     </router-link>
                     <button
-                        v-if="user.status === 'active'"
+                        v-if="user.status === 'active' && !isSelf()"
                         @click="onDisable"
                         class="rounded border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-400 transition-colors hover:border-amber-700 hover:text-amber-400 cursor-pointer"
                     >
                         Disable
                     </button>
                     <button
-                        v-else
+                        v-else-if="user.status !== 'active'"
                         @click="onEnable"
                         class="rounded border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-400 transition-colors hover:border-green-700 hover:text-green-400 cursor-pointer"
                     >
                         Enable
                     </button>
                     <button
+                        v-if="!isSelf()"
                         @click="onDelete"
                         class="rounded border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-400 transition-colors hover:border-red-700 hover:text-red-400 cursor-pointer"
                     >
@@ -196,6 +202,18 @@ onMounted(fetchUser);
                             >
                                 {{ user.status }}
                             </span>
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-zinc-500">Last Login</dt>
+                        <dd class="mt-1 text-zinc-100">
+                            {{ formatDate(user.lastLoginAt) }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-zinc-500">Last API Access</dt>
+                        <dd class="mt-1 text-zinc-100">
+                            {{ formatDate(user.lastApiAccessAt) }}
                         </dd>
                     </div>
                     <div>
