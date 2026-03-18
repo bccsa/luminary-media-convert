@@ -54,6 +54,7 @@ The database and required indexes are created automatically on first startup.
 | `AUTH0_AUDIENCE` | **Yes** | -- | Auth0 API identifier / audience |
 | `ENCODING_API_URL` | **Yes** | -- | Encoding API base URL (for session creation on behalf of web app users) |
 | `ENCODING_API_MASTER_KEY` | **Yes** | -- | Master key for the Encoding API (value of the Encoding API's `MASTER_API_KEY`) |
+| `AUTH0_CLAIM_NAMESPACE` | No | -- | Auth0 custom claim namespace (e.g. `https://luminary.dev`). Must match the namespace used in the Auth0 Post Login Action |
 | `CORS_ORIGIN` | No | `http://localhost:5173` | Allowed CORS origin |
 | `ENABLE_SWAGGER` | No | `false` | Set to `true` to enable Swagger/OpenAPI docs at `/saas/docs` |
 
@@ -67,9 +68,32 @@ AUTH0_DOMAIN=your-tenant.auth0.com
 AUTH0_AUDIENCE=https://luminary-media-convert/api
 ENCODING_API_URL=http://localhost:3000
 ENCODING_API_MASTER_KEY=my-secret-master-key
+AUTH0_CLAIM_NAMESPACE=https://luminary.dev
 CORS_ORIGIN=http://localhost:5173
 ENABLE_SWAGGER=true
 ```
+
+## Auth0 Post Login Action (required)
+
+Auth0 does not include the user's email in access tokens by default. The SaaS Service needs the email to match Auth0 accounts to CouchDB user documents on first login. You must configure a **Post Login Action** in Auth0 to add it as a custom claim.
+
+1. Go to **Auth0 Dashboard > Actions > Flows > Login**
+2. Create a custom action:
+
+```javascript
+exports.onExecutePostLogin = async (event, api) => {
+  const namespace = 'https://luminary.dev'; // Must match AUTH0_CLAIM_NAMESPACE
+  api.accessToken.setCustomClaim(`${namespace}/email`, event.user.email);
+};
+```
+
+3. Deploy the action and drag it into the Login flow
+
+The namespace (`https://luminary.dev` in the example above) must match:
+- `AUTH0_CLAIM_NAMESPACE` in `saas/.env`
+- `VITE_AUTH0_CLAIM_NAMESPACE` in `admin/.env`
+
+Without this action, users will receive a **401 "Account not provisioned"** error because the SaaS Service cannot extract their email from the access token to look up their CouchDB user document.
 
 ## Seed Admin User
 

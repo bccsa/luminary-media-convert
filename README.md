@@ -68,6 +68,10 @@ This starts:
 | Admin Panel | `http://localhost:5174` |
 | encode-config | Watch build (library mode) |
 
+## Auth0 Post Login Action
+
+Auth0 does not include the user's email in access tokens by default. The SaaS Service needs the email to match Auth0 accounts to CouchDB user documents. You must configure a Post Login Action in Auth0 — see [SaaS Service README](saas/README.md#auth0-post-login-action-required) for full setup instructions.
+
 ## Seed Admin User
 
 Before using the admin panel, seed an initial admin user in CouchDB:
