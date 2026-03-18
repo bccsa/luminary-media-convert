@@ -172,11 +172,11 @@ function onSubmit() {
                 </div>
                 <div>
                     <label class="mb-1 block text-xs text-zinc-500">Access Key</label>
-                    <input v-model="s3.accessKey" type="text" class="input" />
+                    <input v-model="s3.accessKey" type="text" autocomplete="off" class="input" />
                 </div>
                 <div>
                     <label class="mb-1 block text-xs text-zinc-500">Secret Key</label>
-                    <input v-model="s3.secretKey" type="password" class="input" />
+                    <input v-model="s3.secretKey" type="password" autocomplete="off" class="input" />
                 </div>
                 <div class="sm:col-span-2 lg:col-span-4">
                     <label class="mb-1 block text-xs text-zinc-500">Path Prefix</label>

@@ -1,19 +1,24 @@
 import * as tus from 'tus-js-client';
 import type {
     CreateSessionRequest,
-    SessionResponse,
+    SaasSessionResponse,
     EncodeConfig,
     EncodeStartResponse,
     SessionStatusResponse,
 } from './types';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL;
+// SaaS Service — session lifecycle (Auth0 JWT auth)
+const SAAS_URL = import.meta.env.VITE_SAAS_SERVICE_URL;
+
+// ---------------------------------------------------------------------------
+// SaaS Service calls (Auth0 JWT)
+// ---------------------------------------------------------------------------
 
 export async function createSession(
     config: CreateSessionRequest,
     accessToken: string,
-): Promise<SessionResponse> {
-    const res = await fetch(`${BASE_URL}/api/sessions`, {
+): Promise<SaasSessionResponse> {
+    const res = await fetch(`${SAAS_URL}/saas/sessions`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -30,10 +35,31 @@ export async function createSession(
     return res.json();
 }
 
+export async function deleteSession(
+    sessionId: string,
+    accessToken: string,
+): Promise<void> {
+    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Session deletion failed (${res.status})`);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Encoding API calls (session token — direct to Encoding API)
+// ---------------------------------------------------------------------------
+
 export function uploadFile(
     tusEndpoint: string,
     sessionId: string,
-    uploadToken: string,
+    sessionToken: string,
     file: File,
     onProgress?: (percent: number) => void,
 ): { promise: Promise<void>; abort: () => void } {
@@ -50,7 +76,7 @@ export function uploadFile(
                 filetype: file.type,
             },
             headers: {
-                Authorization: `Bearer ${uploadToken}`,
+                Authorization: `Bearer ${sessionToken}`,
             },
             chunkSize: 50 * 1024 * 1024,
             parallelUploads: 5,
@@ -73,15 +99,16 @@ export function uploadFile(
 }
 
 export async function startEncode(
+    encodingApiUrl: string,
     sessionId: string,
     encodeConfig: EncodeConfig,
-    accessToken: string,
+    sessionToken: string,
 ): Promise<EncodeStartResponse> {
-    const res = await fetch(`${BASE_URL}/api/sessions/${sessionId}/encode`, {
+    const res = await fetch(`${encodingApiUrl}/api/sessions/${sessionId}/encode`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${sessionToken}`,
         },
         body: JSON.stringify(encodeConfig),
     });
@@ -94,30 +121,14 @@ export async function startEncode(
     return res.json();
 }
 
-export async function deleteSession(
-    sessionId: string,
-    accessToken: string,
-): Promise<void> {
-    const res = await fetch(`${BASE_URL}/api/sessions/${sessionId}`, {
-        method: 'DELETE',
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-        },
-    });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Session deletion failed (${res.status})`);
-    }
-}
-
 export async function getSessionStatus(
+    encodingApiUrl: string,
     sessionId: string,
-    accessToken: string,
+    sessionToken: string,
 ): Promise<SessionStatusResponse> {
-    const res = await fetch(`${BASE_URL}/api/sessions/${sessionId}`, {
+    const res = await fetch(`${encodingApiUrl}/api/sessions/${sessionId}`, {
         headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${sessionToken}`,
         },
     });
 

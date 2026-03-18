@@ -34,7 +34,7 @@ export function useSessionPoller() {
         segmentFormat.value = data.segmentFormat;
         thumbnailsVtt.value = data.thumbnailsVtt;
         previewBaseUrl.value = data.previewBaseUrl;
-        previewToken.value = data.previewToken;
+        previewToken.value = data.sessionToken;
     }
 
     function stop() {
@@ -45,10 +45,13 @@ export function useSessionPoller() {
         polling.value = false;
     }
 
-    async function poll(sessionId: string, getToken: () => Promise<string>) {
+    async function poll(
+        sessionId: string,
+        encodingApiUrl: string,
+        sessionToken: string,
+    ) {
         try {
-            const token = await getToken();
-            const data = await getSessionStatus(sessionId, token);
+            const data = await getSessionStatus(encodingApiUrl, sessionId, sessionToken);
             applyUpdate(data);
 
             if (TERMINAL_STATUSES.includes(data.status)) {
@@ -60,11 +63,18 @@ export function useSessionPoller() {
         }
     }
 
-    function start(sessionId: string, getToken: () => Promise<string>) {
+    function start(
+        sessionId: string,
+        encodingApiUrl: string,
+        sessionToken: string,
+    ) {
         stop();
         polling.value = true;
-        poll(sessionId, getToken);
-        timer = setInterval(() => poll(sessionId, getToken), POLL_INTERVAL_MS);
+        poll(sessionId, encodingApiUrl, sessionToken);
+        timer = setInterval(
+            () => poll(sessionId, encodingApiUrl, sessionToken),
+            POLL_INTERVAL_MS,
+        );
     }
 
     onUnmounted(stop);

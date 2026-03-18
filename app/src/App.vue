@@ -22,6 +22,8 @@ const returnTo = window.location.origin;
 
 const view = ref<View>('config');
 const sessionId = ref('');
+const encodingApiUrl = ref('');
+const sessionToken = ref('');
 const submissionError = ref<string | null>(null);
 const uploadProgress = ref(0);
 const s3PublicBaseUrl = ref('');
@@ -55,8 +57,11 @@ async function onUploadSubmit(payload: {
         byteRangeEnabled.value = payload.config.byteRange !== false;
         s3PublicBaseUrl.value = buildS3PublicBaseUrl(payload.config.s3);
 
+        // Create session via SaaS Service (Auth0 JWT)
         const session = await createSession(payload.config, accessToken);
         sessionId.value = session.sessionId;
+        encodingApiUrl.value = session.encodingApiUrl;
+        sessionToken.value = session.sessionToken;
 
         if (payload.file.size > session.maxUploadSize) {
             throw new Error(
@@ -64,10 +69,12 @@ async function onUploadSubmit(payload: {
             );
         }
 
+        // Upload directly to Encoding API via tus (session token)
+        const tusEndpoint = `${session.encodingApiUrl}/api/tus`;
         const { promise, abort } = uploadFile(
-            session.tusEndpoint,
+            tusEndpoint,
             session.sessionId,
-            session.uploadToken,
+            session.sessionToken,
             payload.file,
             (percent) => { uploadProgress.value = percent; },
         );
@@ -76,12 +83,14 @@ async function onUploadSubmit(payload: {
         await promise;
         abortUpload = null;
 
-        // With tusd, the post-finish hook (which probes the file) runs after
-        // the upload response is sent to the client. Poll until probe results
-        // are available (session status becomes 'uploaded').
+        // Poll Encoding API for probe results (session token)
         let status: Awaited<ReturnType<typeof getSessionStatus>>;
         for (let i = 0; i < 60; i++) {
-            status = await getSessionStatus(session.sessionId, accessToken);
+            status = await getSessionStatus(
+                session.encodingApiUrl,
+                session.sessionId,
+                session.sessionToken,
+            );
             if (status.probeResult) break;
             await new Promise((r) => setTimeout(r, 500));
         }
@@ -109,12 +118,13 @@ async function cancelUpload() {
 
     if (sessionId.value) {
         try {
+            // Delete via SaaS Service (Auth0 JWT)
             const accessToken = await getAccessTokenSilently();
             await deleteSession(sessionId.value, accessToken);
         } catch {
             // Best-effort cleanup
         }
-        sessionId.value = '';
+        resetSessionState();
     }
 
     isCancelling = false;
@@ -125,11 +135,16 @@ async function onEncodeSubmit(config: EncodeConfig) {
     submissionError.value = null;
 
     try {
-        const accessToken = await getAccessTokenSilently();
         encodingType.value = config.type;
 
+        // Start encode on Encoding API (session token)
         const { audioTrackMetadata: _, ...apiConfig } = config;
-        await startEncode(sessionId.value, apiConfig, accessToken);
+        await startEncode(
+            encodingApiUrl.value,
+            sessionId.value,
+            apiConfig,
+            sessionToken.value,
+        );
 
         if (probeResult.value) {
             const layoutKey = computeLayoutKey(probeResult.value, config.type);
@@ -137,7 +152,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
         }
 
         view.value = 'progress';
-        poller.start(sessionId.value, () => getAccessTokenSilently());
+        poller.start(sessionId.value, encodingApiUrl.value, sessionToken.value);
     } catch (e) {
         submissionError.value = e instanceof Error ? e.message : String(e);
         view.value = 'configure';
@@ -154,7 +169,7 @@ async function onEncodeBack() {
         }
     }
     view.value = 'config';
-    sessionId.value = '';
+    resetSessionState();
     probeResult.value = null;
 }
 
@@ -171,7 +186,7 @@ async function onCancelEncode() {
     }
 
     view.value = 'config';
-    sessionId.value = '';
+    resetSessionState();
     submissionError.value = null;
     uploadProgress.value = 0;
     s3PublicBaseUrl.value = '';
@@ -181,10 +196,16 @@ async function onCancelEncode() {
     byteRangeEnabled.value = true;
 }
 
+function resetSessionState() {
+    sessionId.value = '';
+    encodingApiUrl.value = '';
+    sessionToken.value = '';
+}
+
 function reset() {
     poller.stop();
     view.value = 'config';
-    sessionId.value = '';
+    resetSessionState();
     submissionError.value = null;
     uploadProgress.value = 0;
     s3PublicBaseUrl.value = '';

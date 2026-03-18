@@ -47,10 +47,10 @@ export interface CreateSessionRequest {
     encryption?: EncryptionConfig;
 }
 
-export interface SessionResponse {
+export interface SaasSessionResponse {
     sessionId: string;
-    tusEndpoint: string;
-    uploadToken: string;
+    encodingApiUrl: string;
+    sessionToken: string;
     maxUploadSize: number;
 }
 
@@ -88,5 +88,5 @@ export interface SessionStatusResponse {
     encoder?: AccelMode;
     segmentFormat?: SegmentFormat;
     previewBaseUrl?: string;
-    previewToken?: string;
+    sessionToken?: string;
 }
