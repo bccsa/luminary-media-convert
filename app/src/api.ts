@@ -14,6 +14,23 @@ const SAAS_URL = import.meta.env.VITE_SAAS_SERVICE_URL;
 // SaaS Service calls (Auth0 JWT)
 // ---------------------------------------------------------------------------
 
+export async function checkIdentity(
+    accessToken: string,
+): Promise<{ id: string; email: string; name: string; status: string }> {
+    const res = await fetch(`${SAAS_URL}/saas/me`, {
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Identity check failed (${res.status})`);
+    }
+
+    return res.json();
+}
+
 export async function createSession(
     config: CreateSessionRequest,
     accessToken: string,

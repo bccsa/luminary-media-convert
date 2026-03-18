@@ -13,6 +13,7 @@ vi.mock('tus-js-client', () => {
 
 import * as tus from 'tus-js-client';
 import {
+    checkIdentity,
     createSession,
     deleteSession,
     uploadFile,
@@ -30,6 +31,37 @@ describe('api', () => {
 
     afterEach(() => {
         vi.restoreAllMocks();
+    });
+
+    describe('checkIdentity', () => {
+        it('calls SaaS /saas/me with Auth0 JWT', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(
+                    JSON.stringify({ id: 'user:1', email: 'test@test.com', name: 'Test', status: 'active' }),
+                    { status: 200 },
+                ),
+            );
+
+            const result = await checkIdentity('jwt-token');
+
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/me'),
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        Authorization: 'Bearer jwt-token',
+                    }),
+                }),
+            );
+            expect(result.status).toBe('active');
+        });
+
+        it('throws on 401 (disabled/unprovisioned)', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Account disabled' }), { status: 401 }),
+            );
+
+            await expect(checkIdentity('jwt-token')).rejects.toThrow('Account disabled');
+        });
     });
 
     describe('createSession', () => {

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import SessionConfigForm from './components/SessionConfigForm.vue';
 import { EncodeConfigForm, computeLayoutKey, saveConfig } from '@luminary-media-converter/encode-config';
 import type { ProbeResult, EncodeConfig } from '@luminary-media-converter/encode-config';
 import SessionProgress from './components/SessionProgress.vue';
-import { createSession, uploadFile, getSessionStatus, startEncode, deleteSession } from './api';
+import { checkIdentity, createSession, uploadFile, getSessionStatus, startEncode, deleteSession } from './api';
 import { useSessionPoller } from './composables/useSessionPoller';
 import type { CreateSessionRequest, S3Config } from './types';
 
@@ -19,6 +19,24 @@ type View = 'config' | 'uploading' | 'configure' | 'submitting' | 'progress';
 
 const { isAuthenticated, isLoading, loginWithRedirect, logout, getAccessTokenSilently, user } = useAuth0();
 const returnTo = window.location.origin;
+
+const identityChecked = ref(false);
+const identityError = ref<string | null>(null);
+
+watch(isAuthenticated, async (authenticated) => {
+    if (!authenticated) {
+        identityChecked.value = false;
+        identityError.value = null;
+        return;
+    }
+    try {
+        const token = await getAccessTokenSilently();
+        await checkIdentity(token);
+        identityChecked.value = true;
+    } catch (e) {
+        identityError.value = e instanceof Error ? e.message : String(e);
+    }
+}, { immediate: true });
 
 const view = ref<View>('config');
 const sessionId = ref('');
@@ -223,8 +241,8 @@ function reset() {
             <p class="mt-1 text-sm text-zinc-500">HLS / ABR encoding client</p>
         </header>
 
-        <!-- Loading state while Auth0 initializes -->
-        <div v-if="isLoading" class="flex justify-center py-16">
+        <!-- Loading state while Auth0 initializes or identity check runs -->
+        <div v-if="isLoading || (isAuthenticated && !identityChecked && !identityError)" class="flex justify-center py-16">
             <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -239,6 +257,17 @@ function reset() {
                 class="rounded-lg bg-indigo-600 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 cursor-pointer"
             >
                 Sign In
+            </button>
+        </div>
+
+        <!-- Identity check failed (disabled, not provisioned, etc.) -->
+        <div v-else-if="identityError" class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 shadow-xl backdrop-blur text-center">
+            <p class="mb-4 text-sm text-red-400">{{ identityError }}</p>
+            <button
+                @click="logout({ logoutParams: { returnTo } })"
+                class="rounded-lg border border-zinc-700 px-6 py-3 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer"
+            >
+                Sign Out
             </button>
         </div>
 
