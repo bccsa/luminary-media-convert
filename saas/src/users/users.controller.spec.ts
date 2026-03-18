@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ForbiddenException } from '@nestjs/common';
 import { UsersController } from './users.controller.js';
 import { UsersService } from './users.service.js';
 import { UserDocument } from './interfaces/user-document.interface.js';
@@ -16,6 +17,8 @@ const makeUser = (overrides: Partial<UserDocument> = {}): UserDocument => ({
     emailVerifiedAt: new Date().toISOString(),
     invitedBy: null,
     onboardingCompletedAt: null,
+    lastLoginAt: null,
+    lastApiAccessAt: null,
     createdAt: '2024-01-01T00:00:00.000Z',
     updatedAt: '2024-01-01T00:00:00.000Z',
     ...overrides,
@@ -44,6 +47,23 @@ describe('UsersController', () => {
         );
     });
 
+    describe('me', () => {
+        it('should return the current user from request', async () => {
+            const user = makeUser({ role: 'admin' });
+            const req = { user };
+
+            const result = await controller.me(req);
+
+            expect(result.id).toBe('user:123');
+            expect(result.email).toBe('test@example.com');
+            expect(result.role).toBe('admin');
+            expect(result.lastLoginAt).toBeNull();
+            expect(result.lastApiAccessAt).toBeNull();
+            expect(result).not.toHaveProperty('_rev');
+            expect(result).not.toHaveProperty('docType');
+        });
+    });
+
     describe('create', () => {
         it('should create a user and return response DTO', async () => {
             const user = makeUser();
@@ -59,6 +79,8 @@ describe('UsersController', () => {
             expect(result.name).toBe('Test User');
             expect(result.role).toBe('user');
             expect(result.status).toBe('active');
+            expect(result.lastLoginAt).toBeNull();
+            expect(result.lastApiAccessAt).toBeNull();
             expect(result).not.toHaveProperty('_rev');
             expect(result).not.toHaveProperty('docType');
         });
@@ -132,13 +154,26 @@ describe('UsersController', () => {
         it('should disable a user', async () => {
             const user = makeUser({ status: 'disabled' });
             usersService.update.mockResolvedValue(user);
+            const req = { user: makeUser({ _id: 'user:admin' }) };
 
-            const result = await controller.disable('user:123');
+            const result = await controller.disable('user:123', req);
 
             expect(result.status).toBe('disabled');
             expect(usersService.update).toHaveBeenCalledWith('user:123', {
                 status: 'disabled',
             });
+        });
+
+        it('should throw ForbiddenException when disabling own account', async () => {
+            const req = { user: makeUser({ _id: 'user:123' }) };
+
+            await expect(controller.disable('user:123', req)).rejects.toThrow(
+                ForbiddenException,
+            );
+            await expect(controller.disable('user:123', req)).rejects.toThrow(
+                'Cannot disable your own account',
+            );
+            expect(usersService.update).not.toHaveBeenCalled();
         });
     });
 
@@ -159,10 +194,51 @@ describe('UsersController', () => {
     describe('remove', () => {
         it('should remove a user', async () => {
             usersService.remove.mockResolvedValue(undefined);
+            const req = { user: makeUser({ _id: 'user:admin' }) };
 
-            await controller.remove('user:123');
+            await controller.remove('user:123', req);
 
             expect(usersService.remove).toHaveBeenCalledWith('user:123');
+        });
+
+        it('should throw ForbiddenException when deleting own account', async () => {
+            const req = { user: makeUser({ _id: 'user:123' }) };
+
+            await expect(controller.remove('user:123', req)).rejects.toThrow(
+                ForbiddenException,
+            );
+            await expect(controller.remove('user:123', req)).rejects.toThrow(
+                'Cannot delete your own account',
+            );
+            expect(usersService.remove).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('toResponse', () => {
+        it('should map lastLoginAt and lastApiAccessAt from user document', async () => {
+            const user = makeUser({
+                lastLoginAt: '2026-03-18T10:00:00.000Z',
+                lastApiAccessAt: '2026-03-18T09:00:00.000Z',
+            });
+            const req = { user };
+
+            const result = await controller.me(req);
+
+            expect(result.lastLoginAt).toBe('2026-03-18T10:00:00.000Z');
+            expect(result.lastApiAccessAt).toBe('2026-03-18T09:00:00.000Z');
+        });
+
+        it('should default missing lastLoginAt/lastApiAccessAt to null', async () => {
+            const user = makeUser();
+            // Simulate old documents without the fields
+            delete (user as any).lastLoginAt;
+            delete (user as any).lastApiAccessAt;
+            const req = { user };
+
+            const result = await controller.me(req);
+
+            expect(result.lastLoginAt).toBeNull();
+            expect(result.lastApiAccessAt).toBeNull();
         });
     });
 });

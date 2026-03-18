@@ -17,6 +17,8 @@ const makeUser = (overrides: Partial<UserDocument> = {}): UserDocument => ({
     emailVerifiedAt: new Date().toISOString(),
     invitedBy: null,
     onboardingCompletedAt: null,
+    lastLoginAt: null,
+    lastApiAccessAt: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides,
@@ -28,6 +30,7 @@ describe('IdentityService', () => {
         findByAuth0Id: ReturnType<typeof vi.fn>;
         findByEmail: ReturnType<typeof vi.fn>;
         linkAuth0Id: ReturnType<typeof vi.fn>;
+        update: ReturnType<typeof vi.fn>;
     };
 
     beforeEach(() => {
@@ -35,6 +38,7 @@ describe('IdentityService', () => {
             findByAuth0Id: vi.fn(),
             findByEmail: vi.fn(),
             linkAuth0Id: vi.fn(),
+            update: vi.fn().mockResolvedValue({}),
         };
         service = new IdentityService(usersService as unknown as UsersService);
     });
@@ -91,6 +95,47 @@ describe('IdentityService', () => {
                 email: 'unknown@example.com',
             }),
         ).rejects.toThrow('Account not provisioned');
+    });
+
+    it('should update lastLoginAt on successful resolve', async () => {
+        const user = makeUser();
+        usersService.findByAuth0Id.mockResolvedValue(user);
+
+        await service.resolveUser({
+            sub: 'auth0|123',
+            email: 'test@example.com',
+        });
+
+        expect(usersService.update).toHaveBeenCalledWith(
+            'user:123',
+            expect.objectContaining({ lastLoginAt: expect.any(String) }),
+        );
+    });
+
+    it('should not throw when lastLoginAt update fails', async () => {
+        const user = makeUser();
+        usersService.findByAuth0Id.mockResolvedValue(user);
+        usersService.update.mockRejectedValue(new Error('CouchDB down'));
+
+        const result = await service.resolveUser({
+            sub: 'auth0|123',
+            email: 'test@example.com',
+        });
+
+        expect(result).toEqual(user);
+    });
+
+    it('should throw when no email and auth0Id not found', async () => {
+        usersService.findByAuth0Id.mockResolvedValue(null);
+
+        await expect(
+            service.resolveUser({
+                sub: 'auth0|999',
+                email: undefined as unknown as string,
+            }),
+        ).rejects.toThrow('Account not provisioned');
+
+        expect(usersService.findByEmail).not.toHaveBeenCalled();
     });
 
     it('should throw UnauthorizedException when user is disabled', async () => {
