@@ -35,14 +35,14 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
         const maxSize =
             parseInt(process.env.MAX_UPLOAD_SIZE || '0', 10) ||
             DEFAULT_MAX_SIZE;
-        const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
+        const corsOrigin = process.env.CORS_ORIGIN;
 
         this.tusdServer = new TusdServer({
             path: '/api/tus',
             directory: this.tusDir,
             maxSize,
             expirationMs: EXPIRATION_MS,
-            allowedOrigins: [corsOrigin],
+            ...(corsOrigin ? { allowedOrigins: corsOrigin.split(',').map((o) => o.trim()) } : {}),
             allowedHeaders: ['Authorization'],
 
             onIncomingRequest: async (req) => {

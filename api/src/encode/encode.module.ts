@@ -1,4 +1,4 @@
-import { Module, type OnModuleInit } from '@nestjs/common';
+import { Module, forwardRef, type OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { AuthModule } from '../auth/auth.module.js';
 import { EncodeController } from './encode.controller.js';
@@ -16,7 +16,7 @@ import { SessionTokenGuard } from './guards/session-token.guard.js';
 import { AuthorizationWebhookService } from '../auth/authorization-webhook.service.js';
 
 @Module({
-    imports: [AuthModule],
+    imports: [forwardRef(() => AuthModule)],
     controllers: [EncodeController],
     providers: [
         SessionService,
