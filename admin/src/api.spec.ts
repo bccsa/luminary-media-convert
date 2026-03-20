@@ -315,6 +315,33 @@ describe('api client', () => {
         });
     });
 
+    describe('listUserKeys', () => {
+        it('sends GET to /saas/admin/users/:id/keys', async () => {
+            const keys = [{ id: 'k1', name: 'Key 1', prefix: 'lmc_abc', status: 'active' }];
+            mockFetch.mockResolvedValue(jsonResponse(keys));
+
+            const result = await api.listUserKeys(token, 'u1');
+
+            expect(result).toEqual(keys);
+            const url = mockFetch.mock.calls[0][0] as string;
+            expect(url).toBe('http://localhost:3000/saas/admin/users/u1/keys');
+        });
+    });
+
+    describe('revokeUserKey', () => {
+        it('sends DELETE to /saas/admin/users/:id/keys/:keyId', async () => {
+            mockFetch.mockResolvedValue(noContentResponse());
+
+            const result = await api.revokeUserKey(token, 'u1', 'k1');
+
+            expect(result).toBeNull();
+            expect(mockFetch).toHaveBeenCalledWith(
+                'http://localhost:3000/saas/admin/users/u1/keys/k1',
+                expect.objectContaining({ method: 'DELETE' }),
+            );
+        });
+    });
+
     describe('getDashboard', () => {
         it('sends GET to /saas/admin/dashboard', async () => {
             const data = {

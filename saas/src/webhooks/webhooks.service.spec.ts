@@ -11,6 +11,7 @@ const mockDatabaseService = {
 
 const mockUsersService = {
     findById: vi.fn(),
+    update: vi.fn().mockResolvedValue({}),
 };
 
 const mockSessionsService = {
@@ -19,6 +20,11 @@ const mockSessionsService = {
 
 const mockSessionEventsService = {
     emit: vi.fn(),
+};
+
+const mockKeysService = {
+    findByHash: vi.fn(),
+    updateLastUsed: vi.fn(),
 };
 
 describe('WebhooksService', () => {
@@ -32,6 +38,7 @@ describe('WebhooksService', () => {
             mockUsersService as any,
             mockSessionsService as any,
             mockSessionEventsService as any,
+            mockKeysService as any,
         );
     });
 
@@ -362,6 +369,118 @@ describe('WebhooksService', () => {
             });
 
             expect(result).toEqual({ allowed: true });
+        });
+    });
+
+    describe('validateApiKey', () => {
+        beforeEach(() => {
+            process.env.SAAS_SERVICE_URL = 'http://localhost:3001';
+        });
+
+        afterEach(() => {
+            delete process.env.SAAS_SERVICE_URL;
+        });
+
+        it('should return valid with metadata for active key and active user', async () => {
+            mockKeysService.findByHash.mockResolvedValue({
+                _id: 'apikey:1',
+                userId: 'user:1',
+                status: 'active',
+            });
+            mockUsersService.findById.mockResolvedValue({ status: 'active' });
+
+            const result = await service.validateApiKey('lmc_test-key');
+
+            expect(result.valid).toBe(true);
+            expect(result.metadata).toEqual({
+                userId: 'user:1',
+                webhookUrl: 'http://localhost:3001/saas/webhooks/encoding',
+                authorizationUrl: 'http://localhost:3001/saas/webhooks/authorize',
+            });
+            expect(mockKeysService.updateLastUsed).toHaveBeenCalledWith('apikey:1');
+        });
+
+        it('should return invalid for nonexistent key', async () => {
+            mockKeysService.findByHash.mockResolvedValue(null);
+
+            const result = await service.validateApiKey('lmc_nonexistent');
+
+            expect(result.valid).toBe(false);
+        });
+
+        it('should return invalid for revoked key', async () => {
+            mockKeysService.findByHash.mockResolvedValue({
+                _id: 'apikey:1',
+                userId: 'user:1',
+                status: 'revoked',
+            });
+
+            const result = await service.validateApiKey('lmc_revoked');
+
+            expect(result.valid).toBe(false);
+        });
+
+        it('should return invalid for disabled user', async () => {
+            mockKeysService.findByHash.mockResolvedValue({
+                _id: 'apikey:1',
+                userId: 'user:1',
+                status: 'active',
+            });
+            mockUsersService.findById.mockResolvedValue({ status: 'disabled' });
+
+            const result = await service.validateApiKey('lmc_disabled-user');
+
+            expect(result.valid).toBe(false);
+        });
+
+        it('should return invalid when user not found', async () => {
+            mockKeysService.findByHash.mockResolvedValue({
+                _id: 'apikey:1',
+                userId: 'user:missing',
+                status: 'active',
+            });
+            mockUsersService.findById.mockRejectedValue({ statusCode: 404 });
+
+            const result = await service.validateApiKey('lmc_orphan-key');
+
+            expect(result.valid).toBe(false);
+        });
+
+        it('should use default SAAS_SERVICE_URL when env not set', async () => {
+            delete process.env.SAAS_SERVICE_URL;
+
+            mockKeysService.findByHash.mockResolvedValue({
+                _id: 'apikey:1',
+                userId: 'user:1',
+                status: 'active',
+            });
+            mockUsersService.findById.mockResolvedValue({ status: 'active' });
+
+            const result = await service.validateApiKey('lmc_test-key');
+
+            expect(result.valid).toBe(true);
+            expect(result.metadata).toEqual({
+                userId: 'user:1',
+                webhookUrl: 'http://localhost:3001/saas/webhooks/encoding',
+                authorizationUrl: 'http://localhost:3001/saas/webhooks/authorize',
+            });
+        });
+
+        it('should silently catch user update errors', async () => {
+            mockKeysService.findByHash.mockResolvedValue({
+                _id: 'apikey:1',
+                userId: 'user:1',
+                status: 'active',
+            });
+            mockUsersService.findById.mockResolvedValue({ status: 'active' });
+            mockUsersService.update.mockRejectedValue(new Error('db error'));
+
+            const result = await service.validateApiKey('lmc_test-key');
+
+            expect(result.valid).toBe(true);
+
+            // Allow fire-and-forget to settle
+            await new Promise((r) => setTimeout(r, 10));
         });
     });
 });

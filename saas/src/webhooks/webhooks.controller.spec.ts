@@ -8,6 +8,7 @@ describe('WebhooksController', () => {
         validateWebhookToken: ReturnType<typeof vi.fn>;
         processEncodingWebhook: ReturnType<typeof vi.fn>;
         checkAuthorization: ReturnType<typeof vi.fn>;
+        validateApiKey: ReturnType<typeof vi.fn>;
     };
 
     beforeEach(() => {
@@ -15,6 +16,7 @@ describe('WebhooksController', () => {
             validateWebhookToken: vi.fn(),
             processEncodingWebhook: vi.fn().mockResolvedValue(undefined),
             checkAuthorization: vi.fn().mockResolvedValue({ allowed: true }),
+            validateApiKey: vi.fn().mockResolvedValue({ valid: true, metadata: {} }),
         };
         controller = new WebhooksController(service as unknown as WebhooksService);
     });
@@ -37,6 +39,30 @@ describe('WebhooksController', () => {
 
             expect(service.checkAuthorization).toHaveBeenCalledWith(dto);
             expect(result).toEqual({ allowed: true });
+        });
+    });
+
+    describe('validateKey', () => {
+        it('should validate API key and return result', async () => {
+            service.validateApiKey.mockResolvedValue({
+                valid: true,
+                metadata: { userId: 'user:1', webhookUrl: 'http://localhost/webhooks' },
+            });
+
+            const dto = { apiKey: 'lmc_test-key' };
+            const result = await controller.validateKey(dto as any);
+
+            expect(service.validateApiKey).toHaveBeenCalledWith('lmc_test-key');
+            expect(result.valid).toBe(true);
+            expect(result.metadata).toBeDefined();
+        });
+
+        it('should return invalid for bad key', async () => {
+            service.validateApiKey.mockResolvedValue({ valid: false });
+
+            const result = await controller.validateKey({ apiKey: 'bad-key' } as any);
+
+            expect(result.valid).toBe(false);
         });
     });
 });

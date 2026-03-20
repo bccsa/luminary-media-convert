@@ -2,11 +2,13 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 const mockStart = vi.fn();
 const mockAbort = vi.fn();
+let lastUploadOpts: any = null;
 
 vi.mock('tus-js-client', () => {
-    const Upload = vi.fn(function (this: any) {
+    const Upload = vi.fn(function (this: any, _file: any, opts: any) {
         this.start = mockStart;
         this.abort = mockAbort;
+        lastUploadOpts = opts;
     });
     return { Upload };
 });
@@ -19,6 +21,15 @@ import {
     uploadFile,
     startEncode,
     getSessionStatus,
+    subscribeSessionEvents,
+    createApiKey,
+    listApiKeys,
+    revokeApiKey,
+    listS3Configs,
+    createS3Config,
+    getS3Config,
+    updateS3Config,
+    deleteS3Config,
 } from './api';
 
 describe('api', () => {
@@ -201,6 +212,501 @@ describe('api', () => {
             );
             expect(result.status).toBe('encoding');
             expect(result.progress).toBe(45);
+        });
+
+        it('throws on error response', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Not found' }), { status: 404 }),
+            );
+
+            await expect(
+                getSessionStatus('http://localhost:3000', 'sess-1', 'sess_abc'),
+            ).rejects.toThrow('Not found');
+        });
+
+        it('throws with status when no message in error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('{}', { status: 500 }),
+            );
+
+            await expect(
+                getSessionStatus('http://localhost:3000', 'sess-1', 'sess_abc'),
+            ).rejects.toThrow('Status poll failed (500)');
+        });
+    });
+
+    describe('subscribeSessionEvents', () => {
+        it('creates EventSource with session token', () => {
+            const instances: any[] = [];
+            const MockEventSource = vi.fn(function (this: any) {
+                this.onmessage = null;
+                this.onerror = null;
+                this.close = vi.fn();
+                instances.push(this);
+            }) as any;
+            vi.stubGlobal('EventSource', MockEventSource);
+
+            const onEvent = vi.fn();
+            subscribeSessionEvents('http://localhost:3000', 'sess-1', 'sess_abc', onEvent);
+
+            expect(MockEventSource).toHaveBeenCalledWith(
+                'http://localhost:3000/api/sessions/sess-1/events?token=sess_abc',
+            );
+
+            // Simulate message
+            instances[0].onmessage({ data: JSON.stringify({ status: 'encoding' }) });
+            expect(onEvent).toHaveBeenCalledWith({ status: 'encoding' });
+
+            vi.unstubAllGlobals();
+        });
+
+        it('ignores parse errors', () => {
+            const instances: any[] = [];
+            const MockEventSource = vi.fn(function (this: any) {
+                this.onmessage = null;
+                this.onerror = null;
+                instances.push(this);
+            }) as any;
+            vi.stubGlobal('EventSource', MockEventSource);
+
+            const onEvent = vi.fn();
+            subscribeSessionEvents('http://localhost:3000', 'sess-1', 'sess_abc', onEvent);
+
+            instances[0].onmessage({ data: 'bad json' });
+            expect(onEvent).not.toHaveBeenCalled();
+
+            vi.unstubAllGlobals();
+        });
+
+        it('sets onerror handler when provided', () => {
+            const instances: any[] = [];
+            const MockEventSource = vi.fn(function (this: any) {
+                this.onmessage = null;
+                this.onerror = null;
+                instances.push(this);
+            }) as any;
+            vi.stubGlobal('EventSource', MockEventSource);
+
+            const onEvent = vi.fn();
+            const onError = vi.fn();
+            subscribeSessionEvents('http://localhost:3000', 'sess-1', 'sess_abc', onEvent, onError);
+
+            expect(instances[0].onerror).toBe(onError);
+
+            vi.unstubAllGlobals();
+        });
+    });
+
+    describe('startEncode error', () => {
+        it('throws on error response', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Invalid config' }), { status: 400 }),
+            );
+
+            await expect(
+                startEncode('http://localhost:3000', 'sess-1', {} as any, 'sess_abc'),
+            ).rejects.toThrow('Invalid config');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('not json', { status: 500 }),
+            );
+
+            await expect(
+                startEncode('http://localhost:3000', 'sess-1', {} as any, 'sess_abc'),
+            ).rejects.toThrow('Encode start failed (500)');
+        });
+    });
+
+    describe('deleteSession error', () => {
+        it('throws on error response', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Session locked' }), { status: 409 }),
+            );
+
+            await expect(deleteSession('sess-1', 'jwt-token')).rejects.toThrow('Session locked');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('not json', { status: 500 }),
+            );
+
+            await expect(deleteSession('sess-1', 'jwt-token')).rejects.toThrow(
+                'Session deletion failed (500)',
+            );
+        });
+    });
+
+    describe('checkIdentity error', () => {
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('not json', { status: 403 }),
+            );
+
+            await expect(checkIdentity('jwt-token')).rejects.toThrow(
+                'Identity check failed (403)',
+            );
+        });
+    });
+
+    describe('createSession error', () => {
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('not json', { status: 502 }),
+            );
+
+            await expect(
+                createSession({ s3: {} } as any, 'jwt-token'),
+            ).rejects.toThrow('Session creation failed (502)');
+        });
+    });
+
+    describe('createApiKey', () => {
+        it('generates key client-side, sends hash, returns key', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ id: 'apikey:1', name: 'Test' }), { status: 201 }),
+            );
+
+            // Mock crypto.subtle.digest
+            const mockDigest = vi.fn().mockResolvedValue(new ArrayBuffer(32));
+            vi.stubGlobal('crypto', {
+                getRandomValues: (arr: Uint8Array) => {
+                    arr.fill(42);
+                    return arr;
+                },
+                subtle: { digest: mockDigest },
+            });
+
+            const result = await createApiKey('jwt-token', 'My Key');
+
+            expect(result.id).toBe('apikey:1');
+            expect(result.key).toMatch(/^lmc_/);
+
+            // Verify hash was sent, not raw key
+            const callBody = JSON.parse(
+                (vi.mocked(fetch).mock.calls[0][1] as any).body,
+            );
+            expect(callBody.name).toBe('My Key');
+            expect(callBody.keyHash).toBeDefined();
+            expect(callBody.prefix).toMatch(/^lmc_/);
+
+            vi.unstubAllGlobals();
+        });
+
+        it('throws on error response', async () => {
+            vi.stubGlobal('crypto', {
+                getRandomValues: (arr: Uint8Array) => {
+                    arr.fill(1);
+                    return arr;
+                },
+                subtle: { digest: vi.fn().mockResolvedValue(new ArrayBuffer(32)) },
+            });
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Duplicate name' }), { status: 409 }),
+            );
+
+            await expect(createApiKey('jwt-token', 'Dup')).rejects.toThrow('Duplicate name');
+
+            vi.unstubAllGlobals();
+        });
+
+        it('throws with status when no message', async () => {
+            vi.stubGlobal('crypto', {
+                getRandomValues: (arr: Uint8Array) => {
+                    arr.fill(1);
+                    return arr;
+                },
+                subtle: { digest: vi.fn().mockResolvedValue(new ArrayBuffer(32)) },
+            });
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(createApiKey('jwt-token', 'Key')).rejects.toThrow(
+                'API key creation failed (500)',
+            );
+
+            vi.unstubAllGlobals();
+        });
+    });
+
+    describe('listApiKeys', () => {
+        it('returns list of API keys', async () => {
+            const keys = [{ id: 'k1', name: 'Key 1' }];
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(keys), { status: 200 }),
+            );
+
+            const result = await listApiKeys('jwt-token');
+
+            expect(result).toEqual(keys);
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/keys'),
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        Authorization: 'Bearer jwt-token',
+                    }),
+                }),
+            );
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }),
+            );
+
+            await expect(listApiKeys('bad-token')).rejects.toThrow('Unauthorized');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(listApiKeys('jwt-token')).rejects.toThrow(
+                'Failed to list API keys (500)',
+            );
+        });
+    });
+
+    describe('revokeApiKey', () => {
+        it('sends DELETE to revoke a key', async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 204 }));
+
+            await revokeApiKey('jwt-token', 'apikey:1');
+
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/keys/apikey:1'),
+                expect.objectContaining({ method: 'DELETE' }),
+            );
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Already revoked' }), { status: 409 }),
+            );
+
+            await expect(revokeApiKey('jwt-token', 'k1')).rejects.toThrow('Already revoked');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(revokeApiKey('jwt-token', 'k1')).rejects.toThrow(
+                'API key revocation failed (500)',
+            );
+        });
+    });
+
+    describe('listS3Configs', () => {
+        it('returns S3 configs', async () => {
+            const configs = { configs: [{ id: 'c1', name: 'Config 1' }] };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(configs), { status: 200 }),
+            );
+
+            const result = await listS3Configs('jwt-token');
+
+            expect(result).toEqual(configs);
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }),
+            );
+
+            await expect(listS3Configs('bad')).rejects.toThrow('Unauthorized');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(listS3Configs('jwt-token')).rejects.toThrow(
+                'Failed to list S3 configs (500)',
+            );
+        });
+    });
+
+    describe('createS3Config', () => {
+        it('creates S3 config', async () => {
+            const config = { id: 'c1', name: 'New' };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(config), { status: 201 }),
+            );
+
+            const result = await createS3Config('jwt-token', { name: 'New', endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' });
+
+            expect(result).toEqual(config);
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/s3-configs'),
+                expect.objectContaining({ method: 'POST' }),
+            );
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Validation failed' }), { status: 400 }),
+            );
+
+            await expect(createS3Config('jwt-token', {})).rejects.toThrow('Validation failed');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(createS3Config('jwt-token', {})).rejects.toThrow(
+                'S3 config creation failed (500)',
+            );
+        });
+    });
+
+    describe('getS3Config', () => {
+        it('gets S3 config detail', async () => {
+            const config = { id: 'c1', accessKey: 'AKID' };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(config), { status: 200 }),
+            );
+
+            const result = await getS3Config('jwt-token', 'c1');
+
+            expect(result).toEqual(config);
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/s3-configs/c1'),
+                expect.any(Object),
+            );
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Not found' }), { status: 404 }),
+            );
+
+            await expect(getS3Config('jwt-token', 'bad')).rejects.toThrow('Not found');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(getS3Config('jwt-token', 'c1')).rejects.toThrow(
+                'Failed to get S3 config (500)',
+            );
+        });
+    });
+
+    describe('updateS3Config', () => {
+        it('updates S3 config', async () => {
+            const config = { id: 'c1', name: 'Updated' };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(config), { status: 200 }),
+            );
+
+            const result = await updateS3Config('jwt-token', 'c1', { name: 'Updated' });
+
+            expect(result).toEqual(config);
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/s3-configs/c1'),
+                expect.objectContaining({ method: 'PATCH' }),
+            );
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Forbidden' }), { status: 403 }),
+            );
+
+            await expect(updateS3Config('jwt-token', 'c1', {})).rejects.toThrow('Forbidden');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(updateS3Config('jwt-token', 'c1', {})).rejects.toThrow(
+                'S3 config update failed (500)',
+            );
+        });
+    });
+
+    describe('deleteS3Config', () => {
+        it('deletes S3 config', async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 204 }));
+
+            await deleteS3Config('jwt-token', 'c1');
+
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/s3-configs/c1'),
+                expect.objectContaining({ method: 'DELETE' }),
+            );
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Not found' }), { status: 404 }),
+            );
+
+            await expect(deleteS3Config('jwt-token', 'c1')).rejects.toThrow('Not found');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(deleteS3Config('jwt-token', 'c1')).rejects.toThrow(
+                'S3 config deletion failed (500)',
+            );
+        });
+    });
+
+    describe('uploadFile callbacks', () => {
+        it('returns abort function that aborts upload', () => {
+            const file = new File(['data'], 'test.mp4', { type: 'video/mp4' });
+            const { abort } = uploadFile('https://api.example.com/api/tus', 'sess-1', 'sess_abc', file);
+
+            abort();
+            expect(mockAbort).toHaveBeenCalledWith(true);
+        });
+
+        it('resolves promise on onSuccess', async () => {
+            const file = new File(['data'], 'test.mp4', { type: 'video/mp4' });
+            const { promise } = uploadFile('https://api.example.com/api/tus', 'sess-1', 'sess_abc', file);
+
+            // Trigger onSuccess callback
+            lastUploadOpts.onSuccess();
+
+            await expect(promise).resolves.toBeUndefined();
+        });
+
+        it('rejects promise on onError', async () => {
+            const file = new File(['data'], 'test.mp4', { type: 'video/mp4' });
+            const { promise } = uploadFile('https://api.example.com/api/tus', 'sess-1', 'sess_abc', file);
+
+            // Trigger onError callback
+            lastUploadOpts.onError(new Error('Upload failed'));
+
+            await expect(promise).rejects.toThrow('Upload failed');
+        });
+
+        it('reports progress via onProgress', () => {
+            const file = new File(['data'], 'test.mp4', { type: 'video/mp4' });
+            const onProgress = vi.fn();
+            uploadFile('https://api.example.com/api/tus', 'sess-1', 'sess_abc', file, onProgress);
+
+            // Trigger onProgress callback
+            lastUploadOpts.onProgress(500, 1000);
+
+            expect(onProgress).toHaveBeenCalledWith(50);
         });
     });
 });
