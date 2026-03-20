@@ -44,7 +44,7 @@ describe('AuthResolverGuard', () => {
         keyValidationService = {
             validateKey: vi.fn().mockResolvedValue(null),
         } as any;
-        sessionService = new SessionService();
+        sessionService = new SessionService({ emit: () => {} } as any);
         guard = new AuthResolverGuard(
             reflector,
             keyValidationService,

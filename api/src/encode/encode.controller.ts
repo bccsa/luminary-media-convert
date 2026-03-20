@@ -8,8 +8,11 @@ import {
     NotFoundException,
     Param,
     Post,
+    Query,
     Req,
     Res,
+    Sse,
+    UnauthorizedException,
     UseGuards,
     BadRequestException,
     Logger,
@@ -23,6 +26,7 @@ import {
     ApiTags,
 } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
+import { Observable, map } from 'rxjs';
 import { rm } from 'fs/promises';
 import { join, dirname, posix } from 'path';
 import { AuthResolverGuard } from '../auth/auth-resolver.guard.js';
@@ -30,6 +34,7 @@ import { AuthTypes } from '../auth/auth-types.decorator.js';
 import { AuthorizationWebhookService } from '../auth/authorization-webhook.service.js';
 import { SessionTokenGuard } from './guards/session-token.guard.js';
 import { SessionService } from './services/session.service.js';
+import { SessionEventsService, type SessionEvent } from './services/session-events.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
 import { CreateSessionDto } from './dto/create-session.dto.js';
@@ -42,6 +47,13 @@ import {
 
 const DEFAULT_MAX_UPLOAD_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 
+interface MessageEvent {
+    data: string | object;
+    type?: string;
+    id?: string;
+    retry?: number;
+}
+
 @ApiTags('Encoding Sessions')
 @Controller('api/sessions')
 export class EncodeController {
@@ -49,6 +61,7 @@ export class EncodeController {
 
     constructor(
         private readonly sessionService: SessionService,
+        private readonly sessionEventsService: SessionEventsService,
         private readonly queueService: QueueService,
         private readonly ffmpegService: FfmpegService,
         private readonly authorizationWebhookService: AuthorizationWebhookService,
@@ -205,6 +218,34 @@ export class EncodeController {
             status: 'queued',
             queuePosition: position,
         };
+    }
+
+    @Sse(':sessionId/events')
+    @ApiOperation({
+        summary: 'Stream session events via SSE',
+        description:
+            'Server-Sent Events stream for real-time session status updates. ' +
+            'Authenticate via `token` query parameter with the session token.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    streamEvents(
+        @Param('sessionId') sessionId: string,
+        @Query('token') token: string,
+    ): Observable<MessageEvent> {
+        if (!token) {
+            throw new UnauthorizedException('Missing token query parameter');
+        }
+        const session = this.sessionService.getBySessionToken(token);
+        if (!session || session.id !== sessionId) {
+            throw new UnauthorizedException('Invalid session token');
+        }
+
+        const accelMode = this.ffmpegService.getAccelMode();
+        return this.sessionEventsService.forSession(sessionId).pipe(
+            map((event) => ({
+                data: { ...event, encoder: accelMode },
+            })),
+        );
     }
 
     @Get(':sessionId')

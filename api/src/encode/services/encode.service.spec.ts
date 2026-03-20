@@ -54,7 +54,7 @@ describe('EncodeService', () => {
         testWorkDir = mkdtempSync(join(tmpdir(), 'luminary-test-'));
         process.env.WORK_DIR = testWorkDir;
 
-        sessionService = new SessionService();
+        sessionService = new SessionService({ emit: () => {} } as any);
 
         ffmpegService = {
             encode: vi.fn().mockResolvedValue({

@@ -5,7 +5,7 @@ import SessionConfigForm from './components/SessionConfigForm.vue';
 import { EncodeConfigForm, computeLayoutKey, saveConfig } from '@luminary-media-converter/encode-config';
 import type { ProbeResult, EncodeConfig } from '@luminary-media-converter/encode-config';
 import SessionProgress from './components/SessionProgress.vue';
-import { checkIdentity, createSession, uploadFile, getSessionStatus, startEncode, deleteSession } from './api';
+import { checkIdentity, createSession, uploadFile, getSessionStatus, subscribeSessionEvents, startEncode, deleteSession } from './api';
 import { useSessionPoller } from './composables/useSessionPoller';
 import type { CreateSessionRequest, S3Config } from './types';
 
@@ -61,6 +61,45 @@ const poller = useSessionPoller();
 let abortUpload: (() => void) | null = null;
 let isCancelling = false;
 
+function waitForProbe(
+    apiUrl: string,
+    sid: string,
+    token: string,
+): Promise<ProbeResult | null> {
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            es?.close();
+            reject(new Error('Probe timed out'));
+        }, 30000);
+
+        const es = subscribeSessionEvents(apiUrl, sid, token, (event) => {
+            if ((event as any).probeResult) {
+                clearTimeout(timeout);
+                es.close();
+                resolve((event as any).probeResult);
+            }
+        }, () => {
+            // SSE failed — fall back to polling
+            es.close();
+            clearTimeout(timeout);
+            pollForProbe(apiUrl, sid, token).then(resolve).catch(reject);
+        });
+    });
+}
+
+async function pollForProbe(
+    apiUrl: string,
+    sid: string,
+    token: string,
+): Promise<ProbeResult | null> {
+    for (let i = 0; i < 60; i++) {
+        const data = await getSessionStatus(apiUrl, sid, token);
+        if (data.probeResult) return data.probeResult;
+        await new Promise((r) => setTimeout(r, 500));
+    }
+    return null;
+}
+
 async function onUploadSubmit(payload: {
     config: CreateSessionRequest;
     file: File;
@@ -101,19 +140,14 @@ async function onUploadSubmit(payload: {
         await promise;
         abortUpload = null;
 
-        // Poll Encoding API for probe results (session token)
-        let status: Awaited<ReturnType<typeof getSessionStatus>>;
-        for (let i = 0; i < 60; i++) {
-            status = await getSessionStatus(
-                session.encodingApiUrl,
-                session.sessionId,
-                session.sessionToken,
-            );
-            if (status.probeResult) break;
-            await new Promise((r) => setTimeout(r, 500));
-        }
+        // Wait for probe results via SSE (with polling fallback)
+        const probeData = await waitForProbe(
+            session.encodingApiUrl,
+            session.sessionId,
+            session.sessionToken,
+        );
 
-        probeResult.value = status!.probeResult ?? null;
+        probeResult.value = probeData;
         encodingType.value = probeResult.value?.videoTracks.length ? 'video' : 'audio';
 
         view.value = 'configure';

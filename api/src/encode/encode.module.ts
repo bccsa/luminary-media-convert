@@ -3,6 +3,7 @@ import { HttpAdapterHost } from '@nestjs/core';
 import { AuthModule } from '../auth/auth.module.js';
 import { EncodeController } from './encode.controller.js';
 import { SessionService } from './services/session.service.js';
+import { SessionEventsService } from './services/session-events.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
 import { S3Service } from './services/s3.service.js';
@@ -19,6 +20,7 @@ import { AuthorizationWebhookService } from '../auth/authorization-webhook.servi
     imports: [forwardRef(() => AuthModule)],
     controllers: [EncodeController],
     providers: [
+        SessionEventsService,
         SessionService,
         QueueService,
         FfmpegService,
@@ -32,7 +34,7 @@ import { AuthorizationWebhookService } from '../auth/authorization-webhook.servi
         SessionTokenGuard,
         AuthorizationWebhookService,
     ],
-    exports: [SessionService],
+    exports: [SessionService, SessionEventsService],
 })
 export class EncodeModule implements OnModuleInit {
     constructor(

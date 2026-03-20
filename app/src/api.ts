@@ -7,11 +7,11 @@ import type {
     SessionStatusResponse,
 } from './types';
 
-// SaaS Service — session lifecycle (Auth0 JWT auth)
+// SaaS Service — session lifecycle (authenticated)
 const SAAS_URL = import.meta.env.VITE_SAAS_SERVICE_URL;
 
 // ---------------------------------------------------------------------------
-// SaaS Service calls (Auth0 JWT)
+// SaaS Service calls (access token)
 // ---------------------------------------------------------------------------
 
 export async function checkIdentity(
@@ -70,7 +70,7 @@ export async function deleteSession(
 }
 
 // ---------------------------------------------------------------------------
-// Encoding API calls (session token — direct to Encoding API)
+// Encoding API calls (session token — direct)
 // ---------------------------------------------------------------------------
 
 export function uploadFile(
@@ -155,4 +155,26 @@ export async function getSessionStatus(
     }
 
     return res.json();
+}
+
+export function subscribeSessionEvents(
+    encodingApiUrl: string,
+    sessionId: string,
+    sessionToken: string,
+    onEvent: (event: SessionStatusResponse) => void,
+    onError?: (error: Event) => void,
+): EventSource {
+    const url = `${encodingApiUrl}/api/sessions/${sessionId}/events?token=${encodeURIComponent(sessionToken)}`;
+    const es = new EventSource(url);
+    es.onmessage = (msg) => {
+        try {
+            onEvent(JSON.parse(msg.data));
+        } catch {
+            // ignore parse errors
+        }
+    };
+    if (onError) {
+        es.onerror = onError;
+    }
+    return es;
 }

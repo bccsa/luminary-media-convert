@@ -11,6 +11,7 @@ import { rename, copyFile, unlink, mkdir } from 'fs/promises';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { SessionService } from './session.service.js';
 import { ProbeService } from './probe.service.js';
+import { WebhookService } from './webhook.service.js';
 
 const DEFAULT_MAX_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 const EXPIRATION_MS = 10 * 60 * 1000; // 10 minutes
@@ -25,6 +26,7 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
     constructor(
         private readonly sessionService: SessionService,
         private readonly probeService: ProbeService,
+        private readonly webhookService: WebhookService,
     ) {
         this.workDir = process.env.WORK_DIR || join(process.cwd(), 'work');
         this.tusDir = join(this.workDir, '.tus-uploads');
@@ -94,6 +96,7 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                 }
 
                 this.sessionService.updateStatus(sessionId, 'uploading');
+                this.sendStatusWebhook(sessionId, 'uploading');
             },
 
             onUploadFinish: async (_req, upload) => {
@@ -133,6 +136,7 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
 
                 this.sessionService.setProbeResult(sessionId, probeResult);
                 this.sessionService.updateStatus(sessionId, 'uploaded');
+                this.sendStatusWebhook(sessionId, 'uploaded');
 
                 this.logger.log(
                     `Upload complete for session ${sessionId}: ` +
@@ -170,5 +174,17 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
 
     handle(req: IncomingMessage, res: ServerResponse): void {
         this.tusdServer.handle(req, res);
+    }
+
+    private sendStatusWebhook(sessionId: string, status: string): void {
+        const session = this.sessionService.get(sessionId);
+        if (!session?.config.webhook?.url) return;
+
+        this.webhookService
+            .send(session.config.webhook.url, session.config.webhook.sessionToken || '', {
+                sessionId,
+                status: status as any,
+            })
+            .catch(() => {});
     }
 }

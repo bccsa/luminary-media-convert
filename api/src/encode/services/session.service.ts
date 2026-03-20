@@ -5,6 +5,7 @@ import type { SessionStatus } from '../dto/webhook-payload.dto.js';
 import type { ProbeResult } from './probe.service.js';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 import type { SegmentFormat } from './ffmpeg.service.js';
+import { SessionEventsService, type SessionEvent } from './session-events.service.js';
 
 export interface AnglePlaylistInfo {
     name: string;
@@ -37,6 +38,23 @@ export class SessionService {
     private readonly logger = new Logger(SessionService.name);
     private readonly sessions = new Map<string, Session>();
     private readonly tokenIndex = new Map<string, string>();
+
+    constructor(private readonly sessionEvents: SessionEventsService) {}
+
+    private emitEvent(session: Session, extra?: Partial<SessionEvent>): void {
+        this.sessionEvents.emit({
+            sessionId: session.id,
+            status: session.status,
+            progress: session.progress || undefined,
+            error: session.error,
+            files: session.files,
+            masterPlaylist: session.masterPlaylist,
+            anglePlaylists: session.anglePlaylists,
+            thumbnailsVtt: session.thumbnailsVtt,
+            segmentFormat: session.segmentFormat,
+            ...extra,
+        });
+    }
 
     create(config: CreateSessionDto): Session {
         const id = randomUUID();
@@ -72,6 +90,7 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.status = status;
+            this.emitEvent(session);
         }
     }
 
@@ -79,6 +98,7 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.progress = progress;
+            this.emitEvent(session);
         }
     }
 
@@ -93,6 +113,7 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.probeResult = probeResult;
+            this.emitEvent(session, { probeResult });
         }
     }
 
@@ -127,6 +148,7 @@ export class SessionService {
             session.anglePlaylists = anglePlaylists;
             session.thumbnailsVtt = thumbnailsVtt;
             session.segmentFormat = segmentFormat;
+            this.emitEvent(session);
         }
     }
 
@@ -135,6 +157,7 @@ export class SessionService {
         if (session) {
             session.status = 'failed';
             session.error = error;
+            this.emitEvent(session);
         }
     }
 

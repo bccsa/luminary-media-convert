@@ -205,14 +205,15 @@ async function copyPlaybackUrl() {
 }
 
 const statusConfig: Record<string, { label: string; color: string }> = {
-    created: { label: 'Created', color: 'bg-zinc-600' },
-    uploading: { label: 'Uploading', color: 'bg-blue-600' },
-    queued: { label: 'Queued', color: 'bg-amber-600' },
-    encoding: { label: 'Encoding', color: 'bg-indigo-600' },
-    encrypting: { label: 'Encrypting', color: 'bg-amber-600' },
-    uploading_to_s3: { label: 'Uploading to S3', color: 'bg-cyan-600' },
-    completed: { label: 'Completed', color: 'bg-emerald-600' },
-    failed: { label: 'Failed', color: 'bg-red-600' },
+    created: { label: 'Created', color: 'bg-zinc-800 text-zinc-400' },
+    uploading: { label: 'Uploading', color: 'bg-cyan-900/40 text-cyan-400' },
+    uploaded: { label: 'Uploaded', color: 'bg-zinc-800 text-zinc-400' },
+    queued: { label: 'Queued', color: 'bg-amber-900/40 text-amber-400' },
+    encoding: { label: 'Encoding', color: 'bg-indigo-900/40 text-indigo-400' },
+    encrypting: { label: 'Encrypting', color: 'bg-amber-900/40 text-amber-400' },
+    uploading_to_s3: { label: 'Uploading to S3', color: 'bg-cyan-900/40 text-cyan-400' },
+    completed: { label: 'Completed', color: 'bg-emerald-900/40 text-emerald-400' },
+    failed: { label: 'Failed', color: 'bg-red-900/40 text-red-400' },
 };
 
 const encoderConfig: Record<AccelMode, { label: string; icon: string }> = {
@@ -223,7 +224,7 @@ const encoderConfig: Record<AccelMode, { label: string; icon: string }> = {
 
 function badgeClasses(s: string | null): string {
     const cfg = s ? statusConfig[s] : null;
-    return `inline-block rounded-full px-3 py-1 text-xs font-semibold text-white ${cfg?.color ?? 'bg-zinc-700'}`;
+    return `inline-block rounded-full px-3 py-1 text-xs font-semibold ${cfg?.color ?? 'bg-zinc-800 text-zinc-400'}`;
 }
 
 function switchToAngle(index: number) {

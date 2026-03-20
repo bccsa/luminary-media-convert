@@ -1,0 +1,35 @@
+import { Injectable } from '@nestjs/common';
+import { Subject, Observable } from 'rxjs';
+import { filter } from 'rxjs/operators';
+
+export interface SessionEvent {
+    sessionId: string;
+    status: string;
+    progress?: number;
+    queuePosition?: number;
+    error?: string;
+    files?: string[];
+    masterPlaylist?: string;
+    anglePlaylists?: { name: string; key: string }[];
+    thumbnailsVtt?: string;
+    segmentFormat?: string;
+    encoder?: string;
+    probeResult?: unknown;
+    previewBaseUrl?: string;
+    sessionToken?: string;
+}
+
+@Injectable()
+export class SessionEventsService {
+    private readonly subject = new Subject<SessionEvent>();
+
+    emit(event: SessionEvent): void {
+        this.subject.next(event);
+    }
+
+    forSession(sessionId: string): Observable<SessionEvent> {
+        return this.subject.asObservable().pipe(
+            filter((e) => e.sessionId === sessionId),
+        );
+    }
+}

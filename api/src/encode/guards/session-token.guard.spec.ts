@@ -34,7 +34,7 @@ describe('SessionTokenGuard', () => {
     let guard: SessionTokenGuard;
 
     beforeEach(() => {
-        sessionService = new SessionService();
+        sessionService = new SessionService({ emit: () => {} } as any);
         guard = new SessionTokenGuard(sessionService);
     });
 

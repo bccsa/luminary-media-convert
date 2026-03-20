@@ -78,12 +78,13 @@ describe('TusUploadService', () => {
         capturedServerConfig.value = undefined;
         vi.clearAllMocks();
 
-        sessionService = new SessionService();
+        sessionService = new SessionService({ emit: () => {} } as any);
         probeService = { probe: vi.fn() } as any;
+        const webhookService = { send: vi.fn().mockResolvedValue(undefined) } as any;
 
         process.env.WORK_DIR = '/tmp/tus-test-work';
 
-        service = new TusUploadService(sessionService, probeService);
+        service = new TusUploadService(sessionService, probeService, webhookService);
         await service.onModuleInit();
     });
 

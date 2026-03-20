@@ -27,7 +27,7 @@ describe('QueueService', () => {
     let webhookService: Mocked<WebhookService>;
 
     beforeEach(() => {
-        sessionService = new SessionService();
+        sessionService = new SessionService({ emit: () => {} } as any);
 
         encodeService = {
             processSession: vi.fn().mockResolvedValue(undefined),

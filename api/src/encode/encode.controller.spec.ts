@@ -63,7 +63,7 @@ describe('EncodeController', () => {
         testWorkDir = mkdtempSync(join(tmpdir(), 'luminary-test-'));
         process.env.WORK_DIR = testWorkDir;
 
-        sessionService = new SessionService();
+        sessionService = new SessionService({ emit: () => {} } as any);
 
         queueService = {
             enqueue: vi.fn().mockReturnValue(1),
@@ -83,7 +83,8 @@ describe('EncodeController', () => {
             checkAuthorization: vi.fn().mockResolvedValue(undefined),
         } as any;
 
-        controller = new EncodeController(sessionService, queueService, ffmpegService, authorizationWebhookService);
+        const sessionEventsService = { emit: vi.fn(), forSession: vi.fn() } as any;
+        controller = new EncodeController(sessionService, sessionEventsService, queueService, ffmpegService, authorizationWebhookService);
     });
 
     afterEach(() => {

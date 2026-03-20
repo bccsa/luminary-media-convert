@@ -21,7 +21,7 @@ describe('SessionService', () => {
     let service: SessionService;
 
     beforeEach(() => {
-        service = new SessionService();
+        service = new SessionService({ emit: () => {} } as any);
     });
 
     describe('create', () => {
