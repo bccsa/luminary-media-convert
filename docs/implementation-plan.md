@@ -242,29 +242,59 @@
 
 ---
 
-## Phase 7 — Billing Interfaces & Cost Estimation
+## Phase 7 — Open-Source Packaging & Documentation
 
-**Goal**: The cost estimation utility is available in the UI, usage metering is wired up (no-op), and plan limit interfaces are in place with permissive defaults. The admin panel gains discount and plan tier configuration. Everything is ready for a real payment gateway in a future release.
+**Goal**: The Encoding API is fully decoupled from SaaS code and documented for standalone use. Video.js plugins are extracted. Open-source packages are ready for independent publication.
 
-**Depends on**: Phase 6 (session history, web app infrastructure)
+**Depends on**: Phase 6 (all core features complete)
 
 ### Tasks
 
 | # | Task | FDS Ref |
 |---|------|---------|
-| 7.1 | Implement `estimateEncodingCost()` shared utility in `encode-config` package | 6.2 |
-| 7.2 | Add real-time cost estimation display to `EncodeConfigForm` (pixel-minutes, audio minutes, per-rendition breakdown, free tier eligibility) | — |
-| 7.3 | Implement `POST /saas/sessions/estimate` endpoint | — |
-| 7.4 | Implement billing account document CRUD (create on user creation, default `free` tier) | — |
-| 7.5 | Implement `PermissivePlanLimitsService` (all checks return allowed) | 6.3 |
-| 7.6 | Implement `NoOpUsageMeterService` (structured logging of usage events) | 6.4 |
-| 7.7 | Wire usage metering into webhook receiver (log events on session creation, encode start, completion) | — |
-| 7.8 | Wire authorization webhook handler to use `PlanLimitsService` (currently permissive, but plumbing is in place) | — |
-| 7.9 | Add admin discount/plan configuration to user detail view (discount %, plan tier, free minutes override) | — |
-| 7.10 | Implement `PATCH /saas/admin/users/:userId` to update billing fields (discount, plan tier, free minutes cap) | — |
-| 7.11 | Add usage summary to web app account/settings page | — |
-| 7.12 | Implement signup service interface (no-op, `isSignupEnabled() = false`) | — |
-| 7.13 | Unit tests for all Phase 7 code: `estimateEncodingCost()`, billing document CRUD, usage meter logging, plan limits service, cost estimation UI components. 100% coverage | 10.2 |
+| 7.1 | Audit Encoding API for any SaaS dependencies — remove if found | — |
+| 7.2 | Write Encoding API standalone usage documentation (README: setup, master key config, API key flow, webhook config, session lifecycle) | — |
+| 7.3 | Extract Video.js plugins to `@luminary/video-player` package | — |
+| 7.4 | Update `encode-config` package exports (add `estimateEncodingCost`, types) | — |
+| 7.5 | Add LICENSE files: Apache 2.0 for `api/` and `encode-config/`, MIT for `video-player/` and `tusd/` | — |
+| 7.6 | Add CHANGELOG and CONTRIBUTING docs for open-source packages | — |
+| 7.7 | Verify each open-source package builds, tests, and runs independently outside the monorepo | — |
+| 7.8 | Final coverage audit: all workspaces at 100%. CI pipeline enforces coverage thresholds | 10.1 |
+
+### Test Checklist
+
+- [ ] **Standalone Encoding API**: Clone only the `api/` package. Install dependencies. Configure `MASTER_API_KEY`. Start the server. Create a session with the master key, upload, encode, poll -- full pipeline works without any SaaS Service, CouchDB, or key validation webhook
+- [ ] **Standalone encode-config**: Import `@luminary/encode-config` in a fresh Vue project. Render `EncodeConfigForm` with mock probe results. Verify it works. Call `estimateEncodingCost()`. Verify correct output
+- [ ] **Standalone video-player**: Import `@luminary/video-player` in a fresh project. Register plugins with Video.js. Verify quality selector and thumbnail preview work with an HLS stream
+- [ ] **Standalone node-tusd**: Import `node-tusd` in a fresh project. Start a `TusdServer`. Upload a file via tus protocol. Verify hooks fire correctly
+- [ ] **No SaaS leakage**: `grep -r "saas\|couchdb\|billing\|admin" api/src/` returns no results (excluding comments/docs)
+- [ ] **Full SaaS platform regression**: Run the full stack (Encoding API + SaaS Service + Web App + Admin Panel). Verify everything still works end-to-end after extraction
+
+---
+
+## Phase 8 — Billing Interfaces & Cost Estimation (Postponed)
+
+**Goal**: The cost estimation utility is available in the UI, usage metering is wired up (no-op), and plan limit interfaces are in place with permissive defaults. The admin panel gains discount and plan tier configuration. Everything is ready for a real payment gateway in a future release.
+
+**Depends on**: Phase 7 (open-source packaging complete)
+
+### Tasks
+
+| # | Task | FDS Ref |
+|---|------|---------|
+| 8.1 | Implement `estimateEncodingCost()` shared utility in `encode-config` package | 6.2 |
+| 8.2 | Add real-time cost estimation display to `EncodeConfigForm` (pixel-minutes, audio minutes, per-rendition breakdown, free tier eligibility) | — |
+| 8.3 | Implement `POST /saas/sessions/estimate` endpoint | — |
+| 8.4 | Implement billing account document CRUD (create on user creation, default `free` tier) | — |
+| 8.5 | Implement `PermissivePlanLimitsService` (all checks return allowed) | 6.3 |
+| 8.6 | Implement `NoOpUsageMeterService` (structured logging of usage events) | 6.4 |
+| 8.7 | Wire usage metering into webhook receiver (log events on session creation, encode start, completion) | — |
+| 8.8 | Wire authorization webhook handler to use `PlanLimitsService` (currently permissive, but plumbing is in place) | — |
+| 8.9 | Add admin discount/plan configuration to user detail view (discount %, plan tier, free minutes override) | — |
+| 8.10 | Implement `PATCH /saas/admin/users/:userId` to update billing fields (discount, plan tier, free minutes cap) | — |
+| 8.11 | Add usage summary to web app account/settings page | — |
+| 8.12 | Implement signup service interface (no-op, `isSignupEnabled() = false`) | — |
+| 8.13 | Unit tests for all Phase 8 code: `estimateEncodingCost()`, billing document CRUD, usage meter logging, plan limits service, cost estimation UI components. 100% coverage | 10.2 |
 
 ### Test Checklist
 
@@ -280,36 +310,6 @@
 
 ---
 
-## Phase 8 — Open-Source Packaging & Documentation
-
-**Goal**: The Encoding API is fully decoupled from SaaS code and documented for standalone use. Video.js plugins are extracted. Open-source packages are ready for independent publication.
-
-**Depends on**: Phase 7 (all features complete)
-
-### Tasks
-
-| # | Task | FDS Ref |
-|---|------|---------|
-| 8.1 | Audit Encoding API for any SaaS dependencies — remove if found | — |
-| 8.2 | Write Encoding API standalone usage documentation (README: setup, master key config, API key flow, webhook config, session lifecycle) | — |
-| 8.3 | Extract Video.js plugins to `@luminary/video-player` package | — |
-| 8.4 | Update `encode-config` package exports (add `estimateEncodingCost`, types) | — |
-| 8.5 | Add LICENSE files: Apache 2.0 for `api/` and `encode-config/`, MIT for `video-player/` and `tusd/` | — |
-| 8.6 | Add CHANGELOG and CONTRIBUTING docs for open-source packages | — |
-| 8.7 | Verify each open-source package builds, tests, and runs independently outside the monorepo | — |
-| 8.8 | Final coverage audit: all workspaces at 100%. CI pipeline enforces coverage thresholds | 10.1 |
-
-### Test Checklist
-
-- [ ] **Standalone Encoding API**: Clone only the `api/` package. Install dependencies. Configure `MASTER_API_KEY`. Start the server. Create a session with the master key, upload, encode, poll -- full pipeline works without any SaaS Service, CouchDB, or key validation webhook
-- [ ] **Standalone encode-config**: Import `@luminary/encode-config` in a fresh Vue project. Render `EncodeConfigForm` with mock probe results. Verify it works. Call `estimateEncodingCost()`. Verify correct output
-- [ ] **Standalone video-player**: Import `@luminary/video-player` in a fresh project. Register plugins with Video.js. Verify quality selector and thumbnail preview work with an HLS stream
-- [ ] **Standalone node-tusd**: Import `node-tusd` in a fresh project. Start a `TusdServer`. Upload a file via tus protocol. Verify hooks fire correctly
-- [ ] **No SaaS leakage**: `grep -r "saas\|couchdb\|billing\|admin" api/src/` returns no results (excluding comments/docs)
-- [ ] **Full SaaS platform regression**: Run the full stack (Encoding API + SaaS Service + Web App + Admin Panel). Verify everything still works end-to-end after extraction
-
----
-
 ## Phase Summary
 
 | Phase | Deliverable | Key User-Testable Outcome |
@@ -320,5 +320,5 @@
 | 4 | Webhook pipeline + session history | Users see encoding history; admin sees dashboard and all sessions |
 | 5 | API key management + S3 configs | Users create API keys (SaaS-managed), saved S3 configs; third-party integration works |
 | 6 | Session history UI + playback + import | Users browse history, play back encoded videos from S3, import external content |
-| 7 | Billing interfaces + cost estimation | Users see cost estimates before encoding; admin configures discounts and plan tiers |
-| 8 | Open-source packaging | Encoding API, encode-config, video-player, and tusd run fully standalone |
+| 7 | Open-source packaging | Encoding API, encode-config, video-player, and tusd run fully standalone |
+| 8 | Billing interfaces + cost estimation (postponed) | Users see cost estimates before encoding; admin configures discounts and plan tiers |
