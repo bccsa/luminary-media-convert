@@ -4,9 +4,9 @@ Vue 3 single-page application for system administration. Connects to the SaaS Se
 
 ## Features
 
-- **User management** -- Create, view, edit, disable, enable, and delete users
-- **Dashboard** -- System overview (placeholder)
-- **Session browsing** -- View encoding sessions across all users (placeholder)
+- **User management** -- Create, view, edit, disable, enable, and delete users (admins cannot disable/delete their own account)
+- **Dashboard** -- User counts, session counts, recent activity
+- **Session browsing** -- View encoding sessions across all users with real-time updates via Server-Sent Events (SSE)
 
 ## Backends
 

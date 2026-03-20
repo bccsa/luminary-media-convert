@@ -159,7 +159,8 @@
 | 4.8 | Implement admin dashboard stats endpoint (`GET /saas/admin/dashboard`: user counts, active sessions, recent activity) | — |
 | 4.9 | Add session list and session detail views to admin panel | — |
 | 4.10 | Add admin dashboard view (user counts, queue depth, recent completions/failures) | — |
-| 4.11 | Unit tests for all Phase 4 code: webhook processing, session compaction, authorization handler, session expiry, CouchDB simulation. 100% coverage | 10.2 |
+| 4.11 | Add SSE endpoint (`/saas/admin/sessions/events`) for real-time session updates in admin panel, fed by webhook events | — |
+| 4.12 | Unit tests for all Phase 4 code: webhook processing, session compaction, authorization handler, session expiry, CouchDB simulation. 100% coverage | 10.2 |
 
 ### Test Checklist
 
@@ -185,7 +186,7 @@
 | # | Task | FDS Ref |
 |---|------|---------|
 | 5.1 | Implement SaaS key management endpoints (`POST/GET/DELETE /saas/keys`) -- SaaS generates keys directly, stores hashes in CouchDB | 5.4 |
-| 5.2 | Implement SaaS key validation webhook endpoint (`POST /saas/webhooks/validate-key`) -- validates API keys, returns metadata | 5.4.2 |
+| 5.2 | Implement SaaS key validation webhook endpoint (`POST /saas/webhooks/validate-key`) -- validates API keys, returns metadata including `webhookUrl` (pointing to `POST /saas/webhooks/encoding`) and `authorizationUrl` (pointing to `POST /saas/webhooks/authorize`). This ensures the SaaS Service receives webhooks and authorization checks for **all** sessions, including those created directly by third-party clients using API keys. Third-party clients can still override the webhook URL per-session via `dto.webhook` if they need direct notifications alongside SaaS-managed tracking | 5.4.2 |
 | 5.3 | Implement S3 credential encryption (AES-256-GCM) | 9.2 |
 | 5.4 | Implement S3 config CRUD endpoints (`/saas/s3-configs`) | -- |
 | 5.5 | Update web app: add API key management page (create, list, copy key, revoke) | -- |

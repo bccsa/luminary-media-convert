@@ -153,6 +153,12 @@ watch(isAuthenticated, async (authenticated) => {
                             >
                                 Users
                             </router-link>
+                            <router-link
+                                to="/sessions"
+                                class="text-zinc-400 transition-colors hover:text-zinc-200"
+                            >
+                                Sessions
+                            </router-link>
                         </nav>
                     </div>
                     <div

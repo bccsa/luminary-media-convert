@@ -78,3 +78,54 @@ export async function deleteUser(token: string, userId: string) {
         method: 'DELETE',
     });
 }
+
+// --- Sessions ---
+
+export async function listAllSessions(
+    token: string,
+    params?: { limit?: number; skip?: number; status?: string; userId?: string },
+) {
+    const query = new URLSearchParams();
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.skip) query.set('skip', String(params.skip));
+    if (params?.status) query.set('status', params.status);
+    if (params?.userId) query.set('userId', params.userId);
+    return fetchApi(`/saas/admin/sessions?${query}`, token);
+}
+
+export async function getSession(token: string, sessionId: string) {
+    return fetchApi(`/saas/admin/sessions/${sessionId}`, token);
+}
+
+// --- Session SSE ---
+
+export function subscribeSessionEvents(
+    token: string,
+    onEvent: (event: {
+        sessionId: string;
+        userId: string;
+        status: string;
+        progress?: number;
+        queuePosition?: number;
+        error?: string;
+        updatedAt: string;
+        completedAt?: string;
+    }) => void,
+): EventSource {
+    const url = `${BASE_URL}/saas/admin/sessions/events?token=${encodeURIComponent(token)}`;
+    const es = new EventSource(url);
+    es.onmessage = (msg) => {
+        try {
+            onEvent(JSON.parse(msg.data));
+        } catch {
+            // ignore parse errors
+        }
+    };
+    return es;
+}
+
+// --- Dashboard ---
+
+export async function getDashboard(token: string) {
+    return fetchApi('/saas/admin/dashboard', token);
+}

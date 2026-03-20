@@ -123,6 +123,25 @@ All endpoints require JWT authentication with the `admin` role.
 | POST | `/saas/admin/users/:userId/enable` | Enable a user account |
 | DELETE | `/saas/admin/users/:userId` | Delete a user |
 
+### Admin - Sessions
+
+All endpoints require JWT authentication with the `admin` role.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/saas/admin/sessions` | List all sessions (paginated, filterable by status/userId) |
+| SSE | `/saas/admin/sessions/events?token=JWT` | Real-time session event stream (status changes, progress) |
+| GET | `/saas/admin/sessions/:sessionId` | Get session details |
+| GET | `/saas/admin/users/:userId/sessions` | List sessions for a specific user |
+
+> **Note:** The SSE endpoint uses a `token` query parameter for authentication because the `EventSource` API does not support custom headers.
+
+### Admin - Dashboard
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/saas/admin/dashboard` | System stats (user counts, session counts, recent activity) |
+
 ### Session Creation (Web App)
 
 | Method | Path | Auth | Description |
@@ -145,9 +164,14 @@ All endpoints require JWT authentication with the `admin` role.
 | POST | `/saas/webhooks/encoding` | Webhook token | Receive session status webhooks from Encoding API |
 | POST | `/saas/webhooks/authorize` | (internal) | Authorization webhook -- check user/plan limits |
 
+### Identity (any authenticated user)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/saas/me` | JWT | Get current user identity (id, email, name, role, status) |
+
 ### Future Endpoints
 
-- Session history (list, detail, retention)
 - Usage and billing
 
 ## Development
