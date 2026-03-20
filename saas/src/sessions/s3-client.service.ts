@@ -51,6 +51,21 @@ export class S3ClientService {
         });
     }
 
+    async deleteObjects(
+        userId: string,
+        s3ConfigId: string,
+        keys: string[],
+    ): Promise<number> {
+        if (!keys.length) return 0;
+        const { client, bucket } = await this.createClient(userId, s3ConfigId);
+
+        await client.removeObjects(bucket, keys);
+        this.logger.log(
+            `Deleted ${keys.length} object(s) from ${bucket}`,
+        );
+        return keys.length;
+    }
+
     private async createClient(
         userId: string,
         s3ConfigId: string,

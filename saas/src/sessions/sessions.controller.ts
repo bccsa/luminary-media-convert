@@ -50,16 +50,19 @@ export class SessionsController {
     @ApiQuery({ name: 'limit', required: false, type: Number })
     @ApiQuery({ name: 'skip', required: false, type: Number })
     @ApiQuery({ name: 'status', required: false, type: String })
+    @ApiQuery({ name: 'name', required: false, type: String })
     async list(
         @Req() req: { user: { _id: string } },
         @Query('limit') limit?: number,
         @Query('skip') skip?: number,
         @Query('status') status?: string,
+        @Query('name') name?: string,
     ) {
         return this.sessionsService.listSessions(req.user._id, {
             limit,
             skip,
             status,
+            name,
         });
     }
 
@@ -87,10 +90,13 @@ export class SessionsController {
 
     @Delete(':sessionId')
     @HttpCode(HttpStatus.NO_CONTENT)
+    @ApiQuery({ name: 'deleteFiles', required: false, type: Boolean, description: 'Also delete S3 files' })
     async remove(
         @Param('sessionId') sessionId: string,
+        @Query('deleteFiles') deleteFiles: string | boolean | undefined,
         @Req() req: { user: { _id: string } },
     ): Promise<void> {
-        await this.sessionsService.deleteSession(req.user._id, sessionId);
+        const shouldDeleteFiles = deleteFiles === true || deleteFiles === 'true';
+        await this.sessionsService.deleteSession(req.user._id, sessionId, shouldDeleteFiles);
     }
 }

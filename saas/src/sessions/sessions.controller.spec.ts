@@ -72,13 +72,22 @@ describe('SessionsController', () => {
     });
 
     describe('remove', () => {
-        it('should delete session', async () => {
+        it('should delete session without S3 files by default', async () => {
             sessionsService.deleteSession.mockResolvedValue(undefined);
 
             const req = { user: { _id: 'user:1' } };
-            await controller.remove('sess-123', req);
+            await controller.remove('sess-123', undefined, req);
 
-            expect(sessionsService.deleteSession).toHaveBeenCalledWith('user:1', 'sess-123');
+            expect(sessionsService.deleteSession).toHaveBeenCalledWith('user:1', 'sess-123', false);
+        });
+
+        it('should delete session with S3 files when deleteFiles=true', async () => {
+            sessionsService.deleteSession.mockResolvedValue(undefined);
+
+            const req = { user: { _id: 'user:1' } };
+            await controller.remove('sess-123', 'true', req);
+
+            expect(sessionsService.deleteSession).toHaveBeenCalledWith('user:1', 'sess-123', true);
         });
     });
 

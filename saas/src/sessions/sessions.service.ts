@@ -144,45 +144,83 @@ export class SessionsService implements OnModuleInit {
         };
     }
 
-    async deleteSession(userId: string, sessionId: string): Promise<void> {
+    async deleteSession(
+        userId: string,
+        sessionId: string,
+        deleteFiles = false,
+    ): Promise<void> {
+        // Try to get the CouchDB doc first (works for both active and historical)
+        let doc: SessionDocument | null = null;
+        try {
+            doc = await this.databaseService.get<SessionDocument>(
+                `session:${sessionId}`,
+            );
+        } catch {
+            // No CouchDB doc — check in-memory
+        }
+
         const record = this.sessions.get(sessionId);
 
-        if (!record) {
+        // Must exist in either CouchDB or memory
+        if (!doc && !record) {
             throw new NotFoundException(`Session '${sessionId}' not found`);
         }
 
-        if (record.userId !== userId) {
+        // Ownership check
+        const ownerId = doc?.userId ?? record?.userId;
+        if (ownerId !== userId) {
             throw new ForbiddenException('Not authorized to delete this session');
         }
 
-        const res = await fetch(
-            `${this.encodingApiUrl}/api/sessions/${sessionId}`,
-            {
-                method: 'DELETE',
-                headers: { 'X-API-Key': this.encodingApiMasterKey },
-            },
-        );
-
-        if (!res.ok && res.status !== 404) {
-            const body = await res.json().catch(() => ({}));
-            this.logger.error(
-                `Encoding API session delete failed (${res.status}): ${body.message ?? ''}`,
-            );
-            throw new BadGatewayException(
-                body.message ?? `Encoding API returned ${res.status}`,
-            );
+        // Delete S3 files if requested
+        if (deleteFiles && doc?.files?.length && doc.s3ConfigId) {
+            try {
+                const deleted = await this.s3ClientService.deleteObjects(
+                    userId,
+                    doc.s3ConfigId,
+                    doc.files,
+                );
+                this.logger.log(
+                    `Deleted ${deleted} S3 file(s) for session ${sessionId}`,
+                );
+            } catch (err) {
+                this.logger.warn(
+                    `Failed to delete S3 files for session ${sessionId}: ${(err as Error).message}`,
+                );
+                // Continue with session deletion even if S3 cleanup fails
+            }
         }
 
-        this.sessions.delete(sessionId);
+        // Delete from Encoding API if active
+        if (record) {
+            try {
+                const res = await fetch(
+                    `${this.encodingApiUrl}/api/sessions/${sessionId}`,
+                    {
+                        method: 'DELETE',
+                        headers: { 'X-API-Key': this.encodingApiMasterKey },
+                    },
+                );
+
+                if (!res.ok && res.status !== 404) {
+                    const body = await res.json().catch(() => ({}));
+                    this.logger.warn(
+                        `Encoding API session delete failed (${res.status}): ${body.message ?? ''}`,
+                    );
+                }
+            } catch {
+                // Best-effort — encoding API may be unavailable
+            }
+            this.sessions.delete(sessionId);
+        }
 
         // Remove CouchDB document
-        try {
-            const doc = await this.databaseService.get<SessionDocument>(
-                `session:${sessionId}`,
-            );
-            await this.databaseService.destroy(doc._id, doc._rev!);
-        } catch {
-            // Ignore — document may not exist yet
+        if (doc?._rev) {
+            try {
+                await this.databaseService.destroy(doc._id, doc._rev);
+            } catch {
+                // Ignore — may have been updated concurrently
+            }
         }
 
         this.logger.log(`Session ${sessionId} deleted by user ${userId}`);
@@ -323,7 +361,7 @@ export class SessionsService implements OnModuleInit {
 
     async listSessions(
         userId: string,
-        opts: { limit?: number; skip?: number; status?: string },
+        opts: { limit?: number; skip?: number; status?: string; name?: string },
     ): Promise<{ sessions: SessionDocument[]; total: number }> {
         const selector: Record<string, any> = {
             docType: 'session',
@@ -331,6 +369,9 @@ export class SessionsService implements OnModuleInit {
         };
         if (opts.status) {
             selector.status = opts.status;
+        }
+        if (opts.name) {
+            selector.name = { $regex: `(?i)${opts.name}` };
         }
 
         const result = await this.databaseService.find<SessionDocument>({

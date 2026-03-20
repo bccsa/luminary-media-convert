@@ -22,6 +22,7 @@ const mockHlsParserService = {
 const mockS3ClientService = {
     getObject: vi.fn(),
     listObjects: vi.fn(),
+    deleteObjects: vi.fn().mockResolvedValue(0),
 };
 
 describe('SessionsService', () => {
@@ -386,7 +387,7 @@ describe('SessionsService', () => {
     });
 
     describe('deleteSession — error handling', () => {
-        it('should throw BadGatewayException when Encoding API delete fails', async () => {
+        it('should succeed even when Encoding API delete fails (best-effort)', async () => {
             await service.createSession('user:1', {
                 s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' },
             } as any);
@@ -394,10 +395,13 @@ describe('SessionsService', () => {
             vi.mocked(fetch).mockResolvedValue(
                 new Response(JSON.stringify({ message: 'Server error' }), { status: 500 }),
             );
+            mockDatabaseService.get.mockResolvedValueOnce({
+                _id: 'session:sess-123', _rev: '1-abc', userId: 'user:1',
+            });
 
             await expect(
                 service.deleteSession('user:1', 'sess-123'),
-            ).rejects.toThrow(BadGatewayException);
+            ).resolves.toBeUndefined();
         });
 
         it('should succeed when Encoding API returns 404 on delete', async () => {
@@ -406,27 +410,68 @@ describe('SessionsService', () => {
             } as any);
 
             vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 404 }));
+            mockDatabaseService.get.mockResolvedValueOnce({
+                _id: 'session:sess-123', _rev: '1-abc', userId: 'user:1',
+            });
 
             await expect(
                 service.deleteSession('user:1', 'sess-123'),
             ).resolves.toBeUndefined();
         });
 
-        it('should handle non-JSON error response from Encoding API delete', async () => {
-            await service.createSession('user:1', {
-                s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' },
-            } as any);
+        it('should delete historical session from CouchDB only (no in-memory record)', async () => {
+            mockDatabaseService.get.mockResolvedValueOnce({
+                _id: 'session:hist-1', _rev: '2-def', userId: 'user:1',
+                sessionId: 'hist-1', status: 'completed',
+            });
 
-            vi.mocked(fetch).mockResolvedValue(
-                new Response('not json', {
-                    status: 502,
-                    headers: { 'Content-Type': 'text/plain' },
-                }),
+            await service.deleteSession('user:1', 'hist-1');
+
+            expect(mockDatabaseService.destroy).toHaveBeenCalledWith('session:hist-1', '2-def');
+        });
+
+        it('should delete S3 files when deleteFiles=true and session has files + s3ConfigId', async () => {
+            mockDatabaseService.get.mockResolvedValueOnce({
+                _id: 'session:s3-1', _rev: '1-abc', userId: 'user:1',
+                sessionId: 's3-1', status: 'completed',
+                files: ['master.m3u8', 'stream/playlist.m3u8'],
+                s3ConfigId: 's3config:cfg-1',
+            });
+
+            await service.deleteSession('user:1', 's3-1', true);
+
+            expect(mockS3ClientService.deleteObjects).toHaveBeenCalledWith(
+                'user:1', 's3config:cfg-1', ['master.m3u8', 'stream/playlist.m3u8'],
             );
+        });
+
+        it('should not delete S3 files when deleteFiles=false', async () => {
+            mockDatabaseService.get.mockResolvedValueOnce({
+                _id: 'session:s3-2', _rev: '1-abc', userId: 'user:1',
+                sessionId: 's3-2', status: 'completed',
+                files: ['master.m3u8'],
+                s3ConfigId: 's3config:cfg-1',
+            });
+
+            await service.deleteSession('user:1', 's3-2', false);
+
+            expect(mockS3ClientService.deleteObjects).not.toHaveBeenCalled();
+        });
+
+        it('should continue deletion even if S3 file deletion fails', async () => {
+            mockDatabaseService.get.mockResolvedValueOnce({
+                _id: 'session:s3-3', _rev: '1-abc', userId: 'user:1',
+                sessionId: 's3-3', status: 'completed',
+                files: ['master.m3u8'],
+                s3ConfigId: 's3config:cfg-1',
+            });
+            mockS3ClientService.deleteObjects.mockRejectedValueOnce(new Error('S3 error'));
 
             await expect(
-                service.deleteSession('user:1', 'sess-123'),
-            ).rejects.toThrow(BadGatewayException);
+                service.deleteSession('user:1', 's3-3', true),
+            ).resolves.toBeUndefined();
+
+            expect(mockDatabaseService.destroy).toHaveBeenCalled();
         });
     });
 
