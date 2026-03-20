@@ -1,5 +1,5 @@
 import { type Mocked } from 'vitest';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { rmSync, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -83,7 +83,7 @@ describe('EncodeController', () => {
             checkAuthorization: vi.fn().mockResolvedValue(undefined),
         } as any;
 
-        const sessionEventsService = { emit: vi.fn(), forSession: vi.fn() } as any;
+        const sessionEventsService = { emit: vi.fn(), forSession: vi.fn().mockReturnValue({ pipe: vi.fn().mockReturnValue({ subscribe: vi.fn() }) }) } as any;
         controller = new EncodeController(sessionService, sessionEventsService, queueService, ffmpegService, authorizationWebhookService);
     });
 
@@ -208,30 +208,6 @@ describe('EncodeController', () => {
             expect(result.masterPlaylist).toBe('master.m3u8');
         });
 
-        it('should include previewBaseUrl and sessionToken when encryption key is present', () => {
-            const session = sessionService.create(makeConfig());
-            sessionService.setCompleted(session.id, ['master.m3u8'], 'master.m3u8');
-            const sess = sessionService.get(session.id)!;
-            sess.encryptionKey = Buffer.alloc(16, 0xab);
-            sess.previewPlaylists = { 'master.m3u8': '#EXTM3U\n' };
-
-            const result = controller.getStatus(session.id, makeRequest());
-
-            expect(result.previewBaseUrl).toBe(
-                `http://localhost:3000/api/sessions/${session.id}/preview`,
-            );
-            expect(result.sessionToken).toBe(session.sessionToken);
-        });
-
-        it('should not include previewBaseUrl when no encryption key', () => {
-            const session = sessionService.create(makeConfig());
-            sessionService.setCompleted(session.id, ['master.m3u8'], 'master.m3u8');
-
-            const result = controller.getStatus(session.id, makeRequest());
-
-            expect(result.previewBaseUrl).toBeUndefined();
-            expect(result.sessionToken).toBeUndefined();
-        });
 
         it('should include error when session failed', () => {
             const session = sessionService.create(makeConfig());
@@ -332,162 +308,6 @@ describe('EncodeController', () => {
         });
     });
 
-    describe('getPreviewKey', () => {
-        function makeResponse(): Mocked<Response> {
-            return {
-                set: vi.fn().mockReturnThis(),
-                send: vi.fn().mockReturnThis(),
-            } as any;
-        }
-
-        it('should return the encryption key as raw bytes', () => {
-            const session = sessionService.create(makeConfig());
-            const key = Buffer.alloc(16, 0xab);
-            const sess = sessionService.get(session.id)!;
-            sess.encryptionKey = key;
-
-            const res = makeResponse();
-            controller.getPreviewKey(session.id, res);
-
-            expect(res.set).toHaveBeenCalledWith(expect.objectContaining({
-                'Content-Type': 'application/octet-stream',
-                'Content-Length': '16',
-            }));
-            expect(res.send).toHaveBeenCalledWith(key);
-        });
-
-        it('should throw NotFoundException when no encryption key', () => {
-            const session = sessionService.create(makeConfig());
-
-            const res = makeResponse();
-            expect(() => controller.getPreviewKey(session.id, res)).toThrow(
-                NotFoundException,
-            );
-        });
-
-        it('should throw NotFoundException for unknown session', () => {
-            const res = makeResponse();
-            expect(() => controller.getPreviewKey('nonexistent', res)).toThrow(
-                NotFoundException,
-            );
-        });
-    });
-
-    describe('getPreviewPlaylist', () => {
-        function makeResponse(): Mocked<Response> {
-            return {
-                set: vi.fn().mockReturnThis(),
-                send: vi.fn().mockReturnThis(),
-            } as any;
-        }
-
-        function setupEncryptedSession() {
-            const config = makeConfig();
-            const session = sessionService.create(config);
-            const sess = sessionService.get(session.id)!;
-            sess.encryptionKey = Buffer.alloc(16, 0xab);
-            sess.previewPlaylists = {
-                'master.m3u8': [
-                    '#EXTM3U',
-                    '#EXT-X-VERSION:7',
-                    '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="HD Audio",URI="stream_HD_Audio/playlist.m3u8"',
-                    '#EXT-X-STREAM-INF:BANDWIDTH=3000000,AUDIO="group_hd"',
-                    'stream_720p/playlist.m3u8',
-                ].join('\n'),
-                'stream_720p/playlist.m3u8': [
-                    '#EXTM3U',
-                    '#EXT-X-VERSION:7',
-                    '#EXT-X-TARGETDURATION:6',
-                    '#EXT-X-KEY:METHOD=AES-128,URI="https://prod.example.com/key"',
-                    '#EXT-X-MAP:URI="init.mp4"',
-                    '#EXTINF:6.000,',
-                    'segment_000.m4s',
-                    '#EXT-X-ENDLIST',
-                ].join('\n'),
-            };
-            return session;
-        }
-
-        it('should rewrite key URI in media playlist', () => {
-            const session = setupEncryptedSession();
-            const res = makeResponse();
-            const req = makeRequest();
-
-            controller.getPreviewPlaylist(session.id, 'stream_720p/playlist.m3u8', req, res);
-
-            const body = res.send.mock.calls[0][0] as string;
-            expect(body).toContain('URI="http://localhost:3000/api/sessions/' + session.id + '/preview/key"');
-            expect(body).not.toContain('https://prod.example.com/key');
-        });
-
-        it('should rewrite segment URIs to absolute S3 URLs', () => {
-            const session = setupEncryptedSession();
-            const res = makeResponse();
-            const req = makeRequest();
-
-            controller.getPreviewPlaylist(session.id, 'stream_720p/playlist.m3u8', req, res);
-
-            const body = res.send.mock.calls[0][0] as string;
-            expect(body).toContain('https://s3.example.com/test/stream_720p/segment_000.m4s');
-        });
-
-        it('should rewrite EXT-X-MAP URI to absolute S3 URL', () => {
-            const session = setupEncryptedSession();
-            const res = makeResponse();
-            const req = makeRequest();
-
-            controller.getPreviewPlaylist(session.id, 'stream_720p/playlist.m3u8', req, res);
-
-            const body = res.send.mock.calls[0][0] as string;
-            expect(body).toContain('URI="https://s3.example.com/test/stream_720p/init.mp4"');
-        });
-
-        it('should rewrite master playlist sub-playlist URIs to preview URLs', () => {
-            const session = setupEncryptedSession();
-            const res = makeResponse();
-            const req = makeRequest();
-
-            controller.getPreviewPlaylist(session.id, 'master.m3u8', req, res);
-
-            const body = res.send.mock.calls[0][0] as string;
-            const previewBase = `http://localhost:3000/api/sessions/${session.id}/preview`;
-            expect(body).toContain(`${previewBase}/stream_720p/playlist.m3u8`);
-            expect(body).toContain(`URI="${previewBase}/stream_HD_Audio/playlist.m3u8"`);
-        });
-
-        it('should set correct content type header', () => {
-            const session = setupEncryptedSession();
-            const res = makeResponse();
-            const req = makeRequest();
-
-            controller.getPreviewPlaylist(session.id, 'master.m3u8', req, res);
-
-            expect(res.set).toHaveBeenCalledWith(expect.objectContaining({
-                'Content-Type': 'application/vnd.apple.mpegurl',
-            }));
-        });
-
-        it('should throw NotFoundException when no preview playlists', () => {
-            const session = sessionService.create(makeConfig());
-            const res = makeResponse();
-            const req = makeRequest();
-
-            expect(() => controller.getPreviewPlaylist(session.id, 'master.m3u8', req, res)).toThrow(
-                NotFoundException,
-            );
-        });
-
-        it('should throw NotFoundException for unknown playlist path', () => {
-            const session = setupEncryptedSession();
-            const res = makeResponse();
-            const req = makeRequest();
-
-            expect(() => controller.getPreviewPlaylist(session.id, 'nonexistent.m3u8', req, res)).toThrow(
-                NotFoundException,
-            );
-        });
-    });
-
     describe('deleteSession', () => {
         it('should delete a session in created status', async () => {
             const session = sessionService.create(makeConfig());
@@ -582,6 +402,54 @@ describe('EncodeController', () => {
             await expect(
                 controller.deleteSession('nonexistent'),
             ).rejects.toThrow(NotFoundException);
+        });
+    });
+
+    describe('streamEvents', () => {
+        it('should throw UnauthorizedException when no token', () => {
+            const session = sessionService.create(makeConfig());
+            expect(() => controller.streamEvents(session.id, '')).toThrow(
+                UnauthorizedException,
+            );
+        });
+
+        it('should throw UnauthorizedException for invalid token', () => {
+            const session = sessionService.create(makeConfig());
+            expect(() => controller.streamEvents(session.id, 'invalid')).toThrow(
+                UnauthorizedException,
+            );
+        });
+
+        it('should throw UnauthorizedException when token belongs to different session', () => {
+            const session1 = sessionService.create(makeConfig());
+            const session2 = sessionService.create(makeConfig());
+            expect(() =>
+                controller.streamEvents(session1.id, session2.sessionToken),
+            ).toThrow(UnauthorizedException);
+        });
+
+        it('should return an Observable for valid session token', () => {
+            const session = sessionService.create(makeConfig());
+            const result = controller.streamEvents(session.id, session.sessionToken);
+            expect(result).toBeDefined();
+            expect(typeof result.subscribe).toBe('function');
+        });
+    });
+
+    describe('createSession with apiKey', () => {
+        it('should pass apiKey to authorization webhook', async () => {
+            const req = makeRequest();
+            (req as any).apiKey = { userId: 'user:1', webhookUrl: 'http://example.com/hook' };
+
+            const result = await controller.createSession(makeConfig(), req);
+
+            expect(authorizationWebhookService.checkAuthorization).toHaveBeenCalledWith(
+                'create_session',
+                expect.objectContaining({
+                    apiKey: { userId: 'user:1', webhookUrl: 'http://example.com/hook' },
+                }),
+            );
+            expect(result.sessionId).toBeDefined();
         });
     });
 });

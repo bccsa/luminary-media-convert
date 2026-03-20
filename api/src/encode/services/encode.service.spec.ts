@@ -414,7 +414,7 @@ describe('EncodeService', () => {
         );
     });
 
-    it('should store encryptionKey and previewPlaylists on session when encryption is used', async () => {
+    it('should send encryptionKeyHex in webhook when encryption is used', async () => {
         const encryptionKey = Buffer.alloc(16, 0xcd);
         encryptionService.encryptHlsOutput.mockResolvedValue({
             key: encryptionKey,
@@ -432,9 +432,6 @@ describe('EncodeService', () => {
             };
         });
 
-        const mockPlaylists = { 'master.m3u8': '#EXTM3U\n' };
-        vi.spyOn(service as any, 'collectPlaylists').mockReturnValue(mockPlaylists);
-
         const config: CreateSessionDto = {
             ...makeConfig(),
             encryption: {
@@ -448,20 +445,15 @@ describe('EncodeService', () => {
 
         await service.processSession(session.id);
 
-        const updated = sessionService.get(session.id)!;
-        expect(updated.encryptionKey).toEqual(encryptionKey);
-        expect(updated.previewPlaylists).toEqual(mockPlaylists);
-    });
-
-    it('should not store encryptionKey when no encryption', async () => {
-        const session = sessionService.create(makeConfig());
-        sessionService.setFilePath(session.id, '/tmp/input.mp4');
-        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
-
-        await service.processSession(session.id);
-
-        const updated = sessionService.get(session.id)!;
-        expect(updated.encryptionKey).toBeUndefined();
+        // Verify encryptionKeyHex was sent in the completion webhook
+        expect(webhookService.send).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.any(String),
+            expect.objectContaining({
+                status: 'completed',
+                encryptionKeyHex: encryptionKey.toString('hex'),
+            }),
+        );
     });
 
     it('should preserve byteRange when encryption is enabled', async () => {

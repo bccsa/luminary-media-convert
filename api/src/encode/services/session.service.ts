@@ -29,8 +29,6 @@ export interface Session {
     error?: string;
     segmentFormat?: SegmentFormat;
     createdAt: number;
-    encryptionKey?: Buffer;
-    previewPlaylists?: Record<string, string>;
 }
 
 @Injectable()

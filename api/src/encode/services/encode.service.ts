@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { readdir, readFile, rm } from 'fs/promises';
-import { join, relative } from 'path';
+import { rm } from 'fs/promises';
+import { join } from 'path';
 import { SessionService, type Session } from './session.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import { EncryptionService } from './encryption.service.js';
@@ -197,18 +197,6 @@ export class EncodeService {
                   )
                 : undefined;
 
-            if (encryptionEnabled && encryptionKey) {
-                const previewPlaylists = await this.collectPlaylists(outputDir);
-                const sess = this.sessionService.get(sessionId);
-                if (sess) {
-                    sess.encryptionKey = encryptionKey;
-                    sess.previewPlaylists = previewPlaylists;
-                }
-                this.logger.debug(
-                    `Stored ${Object.keys(previewPlaylists).length} preview playlist(s) for session ${sessionId}`,
-                );
-            }
-
             this.sessionService.setCompleted(
                 sessionId,
                 uploadResult.keys,
@@ -266,22 +254,6 @@ export class EncodeService {
         } catch {
             // Webhook errors are already logged inside WebhookService
         }
-    }
-
-    private async collectPlaylists(dir: string, base?: string): Promise<Record<string, string>> {
-        const result: Record<string, string> = {};
-        const root = base ?? dir;
-        const entries = await readdir(dir, { withFileTypes: true });
-        for (const entry of entries) {
-            const fullPath = join(dir, entry.name);
-            if (entry.isDirectory()) {
-                Object.assign(result, await this.collectPlaylists(fullPath, root));
-            } else if (entry.name.endsWith('.m3u8')) {
-                const relPath = relative(root, fullPath);
-                result[relPath] = await readFile(fullPath, 'utf-8');
-            }
-        }
-        return result;
     }
 
     private async cleanupSessionFiles(

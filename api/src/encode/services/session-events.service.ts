@@ -15,8 +15,6 @@ export interface SessionEvent {
     segmentFormat?: string;
     encoder?: string;
     probeResult?: unknown;
-    previewBaseUrl?: string;
-    sessionToken?: string;
 }
 
 @Injectable()

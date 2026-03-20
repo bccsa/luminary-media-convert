@@ -177,21 +177,4 @@ export class SessionStatusDto {
     @Expose()
     segmentFormat?: string;
 
-    @ApiPropertyOptional({
-        description:
-            'Base URL for preview playlist endpoints with rewritten key URIs. ' +
-            'Present when status is "completed" and HLS encryption is enabled.',
-        example: 'http://localhost:3000/api/sessions/abc123/preview',
-    })
-    @Expose()
-    previewBaseUrl?: string;
-
-    @ApiPropertyOptional({
-        description:
-            'Bearer token for authenticating session requests including preview playlist/key requests. ' +
-            'Present when previewBaseUrl is set.',
-        example: 'sess_f8e7d6c5b4a3291087654321',
-    })
-    @Expose()
-    sessionToken?: string;
 }
