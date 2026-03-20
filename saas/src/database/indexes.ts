@@ -6,7 +6,12 @@ export const INDEXES = [
         name: 'sessions-by-user-status',
         fields: ['docType', 'userId', 'status'],
     },
+    { name: 'sessions-by-created', fields: ['docType', 'createdAt'] },
     { name: 'sessions-by-expiry', fields: ['docType', 'expiresAt'] },
+    {
+        name: 'sessions-by-updated',
+        fields: ['docType', 'updatedAt'],
+    },
     { name: 'apikeys-by-user', fields: ['docType', 'userId', 'createdAt'] },
     {
         name: 'usage-by-user-period',

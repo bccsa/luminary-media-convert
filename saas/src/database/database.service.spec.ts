@@ -42,6 +42,7 @@ describe('DatabaseService', () => {
 
             expect(mockServerDbGet).toHaveBeenCalledWith('luminary');
             expect(mockServerDbCreate).not.toHaveBeenCalled();
+            expect(service.isReady()).toBe(true);
         });
 
         it('should create database if it does not exist', async () => {
@@ -50,6 +51,7 @@ describe('DatabaseService', () => {
             await service.onModuleInit();
 
             expect(mockServerDbCreate).toHaveBeenCalledWith('luminary');
+            expect(service.isReady()).toBe(true);
         });
 
         it('should create all indexes', async () => {
@@ -67,16 +69,24 @@ describe('DatabaseService', () => {
             }
         });
 
-        it('should rethrow non-404 errors from db.get', async () => {
-            mockServerDbGet.mockRejectedValueOnce({
-                statusCode: 500,
-                message: 'Internal error',
-            });
+        it('should retry on connection error and succeed when CouchDB becomes available', async () => {
+            vi.useFakeTimers();
 
-            await expect(service.onModuleInit()).rejects.toEqual({
-                statusCode: 500,
-                message: 'Internal error',
-            });
+            // First attempt: connection error
+            mockServerDbGet.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+            // Second attempt: success
+            mockServerDbGet.mockResolvedValueOnce({});
+
+            const initPromise = service.onModuleInit();
+
+            // Advance past the retry delay
+            await vi.advanceTimersByTimeAsync(10_000);
+            await initPromise;
+
+            expect(mockServerDbGet).toHaveBeenCalledTimes(2);
+            expect(service.isReady()).toBe(true);
+
+            vi.useRealTimers();
         });
     });
 
@@ -142,6 +152,71 @@ describe('DatabaseService', () => {
             await service.bulk(docs);
 
             expect(mockDb.bulk).toHaveBeenCalledWith(docs);
+        });
+    });
+
+    describe('upsert', () => {
+        beforeEach(async () => {
+            mockServerDbGet.mockResolvedValueOnce({});
+            await service.onModuleInit();
+        });
+
+        it('should insert new doc when it does not exist', async () => {
+            mockDb.get.mockRejectedValueOnce({ statusCode: 404 });
+            mockDb.insert.mockResolvedValueOnce({ ok: true, id: 'doc:1', rev: '1-new' });
+
+            const result = await service.upsert({ _id: 'doc:1', name: 'New' } as any);
+
+            expect(result.rev).toBe('1-new');
+            expect(mockDb.insert).toHaveBeenCalledWith(
+                expect.objectContaining({ _id: 'doc:1', name: 'New' }),
+            );
+        });
+
+        it('should update existing doc with latest _rev', async () => {
+            mockDb.get.mockResolvedValueOnce({ _id: 'doc:1', _rev: '1-old', name: 'Old' });
+            mockDb.insert.mockResolvedValueOnce({ ok: true, id: 'doc:1', rev: '2-new' });
+
+            const result = await service.upsert({ _id: 'doc:1', name: 'Updated' } as any);
+
+            expect(result.rev).toBe('2-new');
+            expect(mockDb.insert).toHaveBeenCalledWith(
+                expect.objectContaining({ _id: 'doc:1', _rev: '1-old', name: 'Updated' }),
+            );
+        });
+
+        it('should skip write when content has not changed', async () => {
+            mockDb.get.mockResolvedValueOnce({ _id: 'doc:1', _rev: '1-old', name: 'Same' });
+
+            const result = await service.upsert({ _id: 'doc:1', name: 'Same' } as any);
+
+            expect(result.rev).toBe('1-old');
+            expect(mockDb.insert).not.toHaveBeenCalled();
+        });
+
+        it('should retry on 409 conflict', async () => {
+            // First attempt: conflict
+            mockDb.get.mockResolvedValueOnce({ _id: 'doc:1', _rev: '1-old', name: 'Old' });
+            mockDb.insert.mockRejectedValueOnce({ statusCode: 409 });
+            // Second attempt: success
+            mockDb.get.mockResolvedValueOnce({ _id: 'doc:1', _rev: '2-mid', name: 'Old' });
+            mockDb.insert.mockResolvedValueOnce({ ok: true, id: 'doc:1', rev: '3-new' });
+
+            const result = await service.upsert({ _id: 'doc:1', name: 'Updated' } as any);
+
+            expect(result.rev).toBe('3-new');
+            expect(mockDb.get).toHaveBeenCalledTimes(2);
+        });
+
+        it('should throw after max retries on persistent conflict', async () => {
+            for (let i = 0; i < 10; i++) {
+                mockDb.get.mockResolvedValueOnce({ _id: 'doc:1', _rev: `${i}-rev`, name: 'Old' });
+                mockDb.insert.mockRejectedValueOnce({ statusCode: 409 });
+            }
+
+            await expect(
+                service.upsert({ _id: 'doc:1', name: 'Updated' } as any),
+            ).rejects.toEqual(expect.objectContaining({ statusCode: 409 }));
         });
     });
 });

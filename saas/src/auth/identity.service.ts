@@ -59,7 +59,7 @@ export class IdentityService {
 
         this.logger.debug(`Resolved user ${user._id} (role=${user.role})`);
 
-        // Update lastLoginAt (fire-and-forget to avoid slowing auth)
+        // Update lastLoginAt (fire-and-forget — upsert handles conflicts)
         this.usersService
             .update(user._id, { lastLoginAt: new Date().toISOString() } as Partial<UserDocument>)
             .catch((err) =>

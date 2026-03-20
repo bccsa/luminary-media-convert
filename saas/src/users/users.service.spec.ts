@@ -12,6 +12,7 @@ describe('UsersService', () => {
     let dbService: {
         find: ReturnType<typeof vi.fn>;
         insert: ReturnType<typeof vi.fn>;
+        upsert: ReturnType<typeof vi.fn>;
         get: ReturnType<typeof vi.fn>;
         destroy: ReturnType<typeof vi.fn>;
     };
@@ -22,6 +23,9 @@ describe('UsersService', () => {
             insert: vi
                 .fn()
                 .mockResolvedValue({ ok: true, id: 'user:mock-uuid', rev: '1-abc' }),
+            upsert: vi
+                .fn()
+                .mockResolvedValue({ ok: true, id: 'user:mock-uuid', rev: '2-def' }),
             get: vi.fn(),
             destroy: vi.fn().mockResolvedValue({ ok: true }),
         };
@@ -206,9 +210,9 @@ describe('UsersService', () => {
             };
             dbService.get.mockResolvedValue(existing);
 
-            // Capture the doc passed to insert before it gets mutated
+            // Capture the doc passed to upsert before it gets mutated
             let capturedDoc: any;
-            dbService.insert.mockImplementation((doc: any) => {
+            dbService.upsert.mockImplementation((doc: any) => {
                 capturedDoc = { ...doc };
                 return Promise.resolve({ rev: '2-def' });
             });
@@ -221,7 +225,6 @@ describe('UsersService', () => {
             expect(result._rev).toBe('2-def');
 
             expect(capturedDoc._id).toBe('user:123');
-            expect(capturedDoc._rev).toBe('1-abc');
             expect(capturedDoc.name).toBe('New Name');
             expect(capturedDoc.docType).toBe('user');
         });
@@ -250,11 +253,11 @@ describe('UsersService', () => {
                 auth0Id: null,
             };
             dbService.get.mockResolvedValue(existing);
-            dbService.insert.mockResolvedValue({ rev: '2-def' });
+            dbService.upsert.mockResolvedValue({ rev: '2-def' });
 
             await service.linkAuth0Id('user:123', 'auth0|456');
 
-            expect(dbService.insert).toHaveBeenCalledWith(
+            expect(dbService.upsert).toHaveBeenCalledWith(
                 expect.objectContaining({
                     auth0Id: 'auth0|456',
                 }),

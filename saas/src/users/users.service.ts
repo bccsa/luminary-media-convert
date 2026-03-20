@@ -118,12 +118,11 @@ export class UsersService {
             ...existing,
             ...updates,
             _id: existing._id,
-            _rev: existing._rev,
             docType: existing.docType,
             updatedAt: now,
         } as UserDocument;
 
-        const response = await this.databaseService.insert(updated);
+        const response = await this.databaseService.upsert(updated);
         updated._rev = response.rev;
 
         return updated;
