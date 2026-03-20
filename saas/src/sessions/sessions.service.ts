@@ -325,7 +325,7 @@ export class SessionsService implements OnModuleInit {
 
     async listAllSessions(
         opts: { limit?: number; skip?: number; status?: string; userId?: string },
-    ): Promise<{ sessions: SessionDocument[]; total: number }> {
+    ): Promise<{ sessions: Partial<SessionDocument>[]; total: number }> {
         const selector: Record<string, any> = { docType: 'session' };
         if (opts.status) selector.status = opts.status;
         if (opts.userId) selector.userId = opts.userId;
@@ -338,11 +338,31 @@ export class SessionsService implements OnModuleInit {
             skip: opts.skip || 0,
         });
 
-        return { sessions: result.docs, total: result.docs.length };
+        return {
+            sessions: result.docs.map((s) => this.stripSensitiveFields(s)),
+            total: result.docs.length,
+        };
     }
 
-    async getSessionAdmin(sessionId: string): Promise<SessionDocument> {
-        return this.getSessionDoc(sessionId);
+    async getSessionAdmin(sessionId: string): Promise<Partial<SessionDocument>> {
+        const doc = await this.getSessionDoc(sessionId);
+        return this.stripSensitiveFields(doc);
+    }
+
+    /** Strip fields containing personal data, file locations, and credentials from admin responses. */
+    private stripSensitiveFields(session: SessionDocument): Partial<SessionDocument> {
+        const {
+            s3Config,
+            s3ConfigId,
+            files,
+            masterPlaylist,
+            anglePlaylists,
+            thumbnailsVtt,
+            probeResult,
+            encryptionKeyHex,
+            ...safe
+        } = session;
+        return safe;
     }
 
     private async getSessionDoc(sessionId: string): Promise<SessionDocument> {

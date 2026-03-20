@@ -13,14 +13,10 @@ interface Session {
     userId: string;
     status: string;
     progress?: number;
-    files?: string[];
-    masterPlaylist?: string;
-    anglePlaylists?: Array<{ name: string; key: string }>;
-    thumbnailsVtt?: string;
     error?: string;
     encoder?: string;
     segmentFormat?: string;
-    s3Config?: { endPoint: string; bucket: string; pathPrefix?: string };
+    encrypted?: boolean;
     createdAt: string;
     updatedAt: string;
     completedAt?: string;
@@ -103,13 +99,9 @@ onMounted(fetchSession);
                         <dt class="text-zinc-500">Segment Format</dt>
                         <dd class="mt-1 text-zinc-100">{{ session.segmentFormat }}</dd>
                     </div>
-                    <div v-if="session.s3Config">
-                        <dt class="text-zinc-500">S3 Bucket</dt>
-                        <dd class="mt-1 text-zinc-100">{{ session.s3Config.endPoint }}/{{ session.s3Config.bucket }}</dd>
-                    </div>
-                    <div v-if="session.masterPlaylist">
-                        <dt class="text-zinc-500">Master Playlist</dt>
-                        <dd class="mt-1 font-mono text-xs text-zinc-100 break-all">{{ session.masterPlaylist }}</dd>
+                    <div v-if="session.encrypted !== undefined">
+                        <dt class="text-zinc-500">Encrypted</dt>
+                        <dd class="mt-1 text-zinc-100">{{ session.encrypted ? 'Yes' : 'No' }}</dd>
                     </div>
                     <div>
                         <dt class="text-zinc-500">Created</dt>
@@ -132,13 +124,6 @@ onMounted(fetchSession);
                 <p class="text-sm text-red-300">{{ session.error }}</p>
             </div>
 
-            <!-- Files -->
-            <div v-if="session.files?.length" class="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/50 p-6">
-                <h3 class="mb-3 text-sm font-medium text-zinc-400">Output Files ({{ session.files.length }})</h3>
-                <ul class="space-y-1 text-xs font-mono text-zinc-500">
-                    <li v-for="file in session.files" :key="file">{{ file }}</li>
-                </ul>
-            </div>
         </div>
     </div>
 </template>

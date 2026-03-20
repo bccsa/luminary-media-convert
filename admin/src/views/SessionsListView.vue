@@ -13,7 +13,6 @@ interface Session {
     sessionId: string;
     userId: string;
     status: string;
-    masterPlaylist?: string;
     error?: string;
     createdAt: string;
     updatedAt: string;

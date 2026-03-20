@@ -286,21 +286,63 @@ describe('SessionsService', () => {
             );
             expect(result).toEqual({ sessions: docs, total: 1 });
         });
+
+        it('should strip sensitive fields from session documents', async () => {
+            const docs = [{
+                sessionId: 's1',
+                status: 'completed',
+                userId: 'user:1',
+                s3Config: { endPoint: 'minio.example.com', bucket: 'private-bucket' },
+                s3ConfigId: 'config-1',
+                files: ['output/master.m3u8', 'output/v0/init.mp4'],
+                masterPlaylist: 'output/master.m3u8',
+                anglePlaylists: [{ name: 'angle1', key: 'output/angle1.m3u8' }],
+                thumbnailsVtt: 'output/thumbs.vtt',
+                probeResult: { streams: [] },
+                encryptionKeyHex: 'deadbeef',
+            }];
+            mockDatabaseService.find.mockResolvedValue({ docs });
+
+            const result = await service.listAllSessions({});
+
+            const session = result.sessions[0];
+            expect(session.sessionId).toBe('s1');
+            expect(session.status).toBe('completed');
+            expect(session).not.toHaveProperty('s3Config');
+            expect(session).not.toHaveProperty('s3ConfigId');
+            expect(session).not.toHaveProperty('files');
+            expect(session).not.toHaveProperty('masterPlaylist');
+            expect(session).not.toHaveProperty('anglePlaylists');
+            expect(session).not.toHaveProperty('thumbnailsVtt');
+            expect(session).not.toHaveProperty('probeResult');
+            expect(session).not.toHaveProperty('encryptionKeyHex');
+        });
     });
 
     describe('getSessionAdmin', () => {
-        it('should return session without ownership check', async () => {
+        it('should return session without ownership check and strip sensitive fields', async () => {
             mockDatabaseService.get.mockResolvedValue({
                 _id: 'session:sess-1',
                 userId: 'user:other',
                 sessionId: 'sess-1',
                 status: 'completed',
+                s3Config: { endPoint: 'minio.example.com', bucket: 'private-bucket' },
+                files: ['output/master.m3u8'],
+                masterPlaylist: 'output/master.m3u8',
+                encryptionKeyHex: 'deadbeef',
+                probeResult: { streams: [] },
             });
 
             const result = await service.getSessionAdmin('sess-1');
 
             expect(result.sessionId).toBe('sess-1');
+            expect(result.status).toBe('completed');
             expect(mockDatabaseService.get).toHaveBeenCalledWith('session:sess-1');
+            expect(result).not.toHaveProperty('s3Config');
+            expect(result).not.toHaveProperty('files');
+            expect(result).not.toHaveProperty('masterPlaylist');
+            expect(result).not.toHaveProperty('encryptionKeyHex');
+            expect(result).not.toHaveProperty('probeResult');
         });
 
         it('should throw NotFoundException when not found', async () => {
