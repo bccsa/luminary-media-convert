@@ -15,6 +15,7 @@ export class MeController {
             name: req.user.name,
             role: req.user.role,
             status: req.user.status,
+            encodingApiUrl: process.env.ENCODING_API_URL || undefined,
         };
     }
 }

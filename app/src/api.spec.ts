@@ -249,6 +249,16 @@ describe('api', () => {
                 getSessionStatus('http://localhost:3000', 'sess-1', 'sess_abc'),
             ).rejects.toThrow('Status poll failed (500)');
         });
+
+        it('handles non-JSON error response', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('not json', { status: 502, headers: { 'Content-Type': 'text/plain' } }),
+            );
+
+            await expect(
+                getSessionStatus('http://localhost:3000', 'sess-1', 'sess_abc'),
+            ).rejects.toThrow('Status poll failed (502)');
+        });
     });
 
     describe('subscribeSessionEvents', () => {

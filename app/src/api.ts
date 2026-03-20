@@ -16,7 +16,7 @@ const SAAS_URL = import.meta.env.VITE_SAAS_SERVICE_URL;
 
 export async function checkIdentity(
     accessToken: string,
-): Promise<{ id: string; email: string; name: string; status: string }> {
+): Promise<{ id: string; email: string; name: string; status: string; encodingApiUrl?: string }> {
     const res = await fetch(`${SAAS_URL}/saas/me`, {
         headers: {
             Authorization: `Bearer ${accessToken}`,

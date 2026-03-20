@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref, provide, watch } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { checkIdentity } from './api';
 
@@ -8,16 +8,21 @@ const returnTo = window.location.origin;
 
 const identityChecked = ref(false);
 const identityError = ref<string | null>(null);
+const encodingApiUrl = ref('');
+
+provide('encodingApiUrl', encodingApiUrl);
 
 watch(isAuthenticated, async (authenticated) => {
     if (!authenticated) {
         identityChecked.value = false;
         identityError.value = null;
+        encodingApiUrl.value = '';
         return;
     }
     try {
         const token = await getAccessTokenSilently();
-        await checkIdentity(token);
+        const identity = await checkIdentity(token);
+        encodingApiUrl.value = identity.encodingApiUrl ?? '';
         identityChecked.value = true;
     } catch (e) {
         identityError.value = e instanceof Error ? e.message : String(e);

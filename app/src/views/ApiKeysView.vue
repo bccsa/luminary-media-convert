@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, inject, onMounted, type Ref } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { createApiKey, listApiKeys, revokeApiKey } from '../api';
 import InlineConfirm from '../components/InlineConfirm.vue';
+
+const encodingApiUrl = inject<Ref<string>>('encodingApiUrl', ref(''));
+const docsUrl = computed(() => encodingApiUrl.value ? `${encodingApiUrl.value}/api/docs` : '');
+const showDocs = ref(false);
 
 interface ApiKey {
     id: string;
@@ -99,7 +103,53 @@ onMounted(fetchKeys);
 <template>
     <div class="max-w-4xl mx-auto">
         <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 shadow-xl backdrop-blur">
-            <h2 class="text-lg font-semibold text-zinc-100 mb-6">API Keys</h2>
+            <h2 class="text-lg font-semibold text-zinc-100 mb-4">API Keys</h2>
+
+            <!-- Help text -->
+            <div class="mb-6 rounded-lg border border-zinc-800 bg-zinc-900/60 p-4 space-y-3">
+                <p class="text-sm text-zinc-400">
+                    API keys allow direct access to the Encoding API from third-party tools, scripts, or services.
+                    Pass the key in the <code class="rounded bg-zinc-800 px-1.5 py-0.5 text-xs font-mono text-indigo-400">X-API-Key</code> header with each request.
+                </p>
+                <div v-if="encodingApiUrl" class="space-y-2">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs text-zinc-500">Encoding API:</span>
+                        <code class="rounded bg-zinc-800 px-2 py-1 text-xs font-mono text-zinc-200">{{ encodingApiUrl }}</code>
+                    </div>
+                    <div v-if="docsUrl" class="flex items-center gap-2">
+                        <span class="text-xs text-zinc-500">API Documentation:</span>
+                        <a
+                            :href="docsUrl"
+                            target="_blank"
+                            rel="noopener"
+                            class="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                        >
+                            {{ docsUrl }}
+                        </a>
+                        <button
+                            type="button"
+                            class="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer transition-colors"
+                            @click="showDocs = !showDocs"
+                        >
+                            {{ showDocs ? 'Hide' : 'Show' }} docs
+                        </button>
+                    </div>
+                </div>
+                <p class="text-xs text-zinc-500">
+                    Keys are generated in your browser and only the hash is stored on the server.
+                    The raw key is shown once at creation — store it securely.
+                </p>
+            </div>
+
+            <!-- Embedded Swagger docs -->
+            <div v-if="showDocs && docsUrl" class="mb-6 rounded-lg border border-zinc-800 overflow-hidden">
+                <iframe
+                    :src="docsUrl"
+                    class="w-full border-0 bg-white"
+                    style="height: 600px"
+                    title="Encoding API Documentation"
+                />
+            </div>
 
             <!-- Create Key -->
             <div class="mb-6 rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
