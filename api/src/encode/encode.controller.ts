@@ -346,7 +346,7 @@ export class EncodeController {
         res.set({
             'Content-Type': 'application/octet-stream',
             'Content-Length': String(session.encryptionKey.length),
-            'Cache-Control': 'no-store',
+            'Cache-Control': 'private, max-age=60',
         });
         res.send(session.encryptionKey);
     }

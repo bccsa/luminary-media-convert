@@ -229,6 +229,9 @@ export class EncodeService {
                         ? anglePlaylistsWithKeys
                         : undefined,
                 thumbnailsVtt: thumbnailsVttKey,
+                encryptionKeyHex: encryptionKey
+                    ? encryptionKey.toString('hex')
+                    : undefined,
             });
 
             this.logger.log(`Session ${sessionId} completed successfully`);

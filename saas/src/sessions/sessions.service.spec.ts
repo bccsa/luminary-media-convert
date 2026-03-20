@@ -8,6 +8,20 @@ const mockDatabaseService = {
     insert: vi.fn(),
 };
 
+const mockS3ConfigsService = {
+    getById: vi.fn(),
+    decryptCredentials: vi.fn(),
+};
+
+const mockHlsParserService = {
+    parseMasterPlaylist: vi.fn(),
+};
+
+const mockS3ClientService = {
+    getObject: vi.fn(),
+    listObjects: vi.fn(),
+};
+
 describe('SessionsService', () => {
     let service: SessionsService;
 
@@ -18,7 +32,12 @@ describe('SessionsService', () => {
         process.env.SAAS_SERVICE_URL = 'http://localhost:3001';
         process.env.WEBHOOK_SECRET = 'test-webhook-secret';
 
-        service = new SessionsService(mockDatabaseService as any);
+        service = new SessionsService(
+            mockDatabaseService as any,
+            mockS3ConfigsService as any,
+            mockHlsParserService as any,
+            mockS3ClientService as any,
+        );
         service.onModuleInit();
 
         vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -138,7 +157,12 @@ describe('SessionsService', () => {
         it('should warn when env vars are not set', () => {
             delete process.env.ENCODING_API_URL;
             delete process.env.ENCODING_API_MASTER_KEY;
-            const warnService = new SessionsService(mockDatabaseService as any);
+            const warnService = new SessionsService(
+                mockDatabaseService as any,
+                mockS3ConfigsService as any,
+                mockHlsParserService as any,
+                mockS3ClientService as any,
+            );
             // Should not throw
             warnService.onModuleInit();
         });
@@ -351,7 +375,12 @@ describe('SessionsService', () => {
             delete process.env.SAAS_SERVICE_URL;
             process.env.PORT = '4000';
 
-            const svc = new SessionsService(mockDatabaseService as any);
+            const svc = new SessionsService(
+                mockDatabaseService as any,
+                mockS3ConfigsService as any,
+                mockHlsParserService as any,
+                mockS3ClientService as any,
+            );
             svc.onModuleInit();
 
             await svc.createSession('user:1', {
@@ -370,7 +399,12 @@ describe('SessionsService', () => {
             delete process.env.PORT;
             delete process.env.WEBHOOK_SECRET;
 
-            const svc = new SessionsService(mockDatabaseService as any);
+            const svc = new SessionsService(
+                mockDatabaseService as any,
+                mockS3ConfigsService as any,
+                mockHlsParserService as any,
+                mockS3ClientService as any,
+            );
             svc.onModuleInit();
 
             await svc.createSession('user:1', {

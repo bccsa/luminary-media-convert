@@ -12,4 +12,5 @@ export class EncodingWebhookDto {
     @IsString() @IsOptional() @Expose() masterPlaylist?: string;
     @IsString() @IsOptional() @Expose() thumbnailsVtt?: string;
     @IsArray() @IsOptional() @Expose() anglePlaylists?: Array<{ name: string; key: string }>;
+    @IsString() @IsOptional() @Expose() encryptionKeyHex?: string;
 }

@@ -22,6 +22,10 @@ export interface SessionDocument {
         port?: number;
         useSSL?: boolean;
     };
+    encrypted?: boolean;
+    encryptionKeyHex?: string;
+    imported?: boolean;
+    s3ConfigId?: string;
     createdAt: string;
     updatedAt: string;
     completedAt?: string;

@@ -13,8 +13,10 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
+import { SkipAdmin } from '../auth/skip-admin.decorator.js';
 import { SessionsService } from './sessions.service.js';
 import { CreateSaasSessionDto } from './dto/create-session.dto.js';
+import { ImportSessionDto } from './dto/import-session.dto.js';
 import { SaasSessionResponseDto } from './dto/session-response.dto.js';
 
 @ApiTags('Sessions')
@@ -22,7 +24,18 @@ import { SaasSessionResponseDto } from './dto/session-response.dto.js';
 @Controller('saas/sessions')
 @UseGuards(JwtAuthGuard)
 export class SessionsController {
-    constructor(private readonly sessionsService: SessionsService) {}
+    constructor(
+        private readonly sessionsService: SessionsService,
+    ) {}
+
+    @Post('import')
+    @SkipAdmin()
+    async importSession(
+        @Body() dto: ImportSessionDto,
+        @Req() req: { user: { _id: string } },
+    ) {
+        return this.sessionsService.importSession(req.user._id, dto);
+    }
 
     @Post()
     async create(

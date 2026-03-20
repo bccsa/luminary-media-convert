@@ -8,7 +8,6 @@ export class S3ConfigResponseDto {
     @ApiPropertyOptional() useSSL?: boolean;
     @ApiProperty() bucket: string;
     @ApiPropertyOptional() region?: string;
-    @ApiPropertyOptional() pathPrefix?: string;
     @ApiProperty({ description: 'Masked in list responses, decrypted in detail' })
     accessKey: string;
     @ApiProperty({ description: 'Masked in list responses, decrypted in detail' })

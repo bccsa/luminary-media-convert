@@ -169,7 +169,6 @@ describe('S3ConfigsService', () => {
                 useSSL: false,
                 bucket: 'old-bucket',
                 region: 'us-east-1',
-                pathPrefix: 'old/',
                 accessKey: { iv: 'x', tag: 'y', ciphertext: 'enc_AK' },
                 secretKey: { iv: 'x', tag: 'y', ciphertext: 'enc_SK' },
                 createdAt: '2026-01-01',
@@ -182,7 +181,6 @@ describe('S3ConfigsService', () => {
                 useSSL: true,
                 bucket: 'new-bucket',
                 region: 'eu-west-1',
-                pathPrefix: 'new/',
             });
 
             expect(doc.endPoint).toBe('new.endpoint.com');
@@ -190,7 +188,6 @@ describe('S3ConfigsService', () => {
             expect(doc.useSSL).toBe(true);
             expect(doc.bucket).toBe('new-bucket');
             expect(doc.region).toBe('eu-west-1');
-            expect(doc.pathPrefix).toBe('new/');
         });
     });
 

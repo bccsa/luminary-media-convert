@@ -8,7 +8,6 @@ export class CreateS3ConfigDto {
     @ApiPropertyOptional() @IsOptional() @IsBoolean() useSSL?: boolean;
     @ApiProperty() @IsString() @MinLength(1) bucket: string;
     @ApiPropertyOptional() @IsOptional() @IsString() region?: string;
-    @ApiPropertyOptional() @IsOptional() @IsString() pathPrefix?: string;
     @ApiProperty() @IsString() @MinLength(1) accessKey: string;
     @ApiProperty() @IsString() @MinLength(1) secretKey: string;
 }

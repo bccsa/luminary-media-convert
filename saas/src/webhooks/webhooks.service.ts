@@ -90,6 +90,8 @@ export class WebhooksService {
                 createdAt: now,
                 updatedAt: now,
                 ...(s3Config ? { s3Config } : {}),
+                ...(memRecord?.s3ConfigId ? { s3ConfigId: memRecord.s3ConfigId } : {}),
+                ...(memRecord?.encrypted ? { encrypted: true } : {}),
             };
         }
 
@@ -118,6 +120,10 @@ export class WebhooksService {
         if (dto.masterPlaylist) doc.masterPlaylist = dto.masterPlaylist;
         if (dto.anglePlaylists) doc.anglePlaylists = dto.anglePlaylists;
         if (dto.thumbnailsVtt) doc.thumbnailsVtt = dto.thumbnailsVtt;
+        if (dto.encryptionKeyHex) {
+            doc.encrypted = true;
+            doc.encryptionKeyHex = dto.encryptionKeyHex;
+        }
 
         // Compact on terminal status
         if (TERMINAL_STATUSES.includes(dto.status)) {

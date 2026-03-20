@@ -89,4 +89,11 @@ export class WebhookPayloadDto {
         ],
     })
     anglePlaylists?: { name: string; key: string }[];
+
+    @ApiPropertyOptional({
+        description:
+            'Hex-encoded AES-128 encryption key. Present on "completed" when HLS encryption was used.',
+        example: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
+    })
+    encryptionKeyHex?: string;
 }

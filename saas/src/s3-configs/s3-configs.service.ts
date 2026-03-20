@@ -32,7 +32,6 @@ export class S3ConfigsService {
             useSSL: dto.useSSL,
             bucket: dto.bucket,
             region: dto.region,
-            pathPrefix: dto.pathPrefix,
             accessKey: this.cryptoService.encrypt(dto.accessKey),
             secretKey: this.cryptoService.encrypt(dto.secretKey),
             createdAt: now,
@@ -78,7 +77,7 @@ export class S3ConfigsService {
         if (dto.useSSL !== undefined) doc.useSSL = dto.useSSL;
         if (dto.bucket !== undefined) doc.bucket = dto.bucket;
         if (dto.region !== undefined) doc.region = dto.region;
-        if (dto.pathPrefix !== undefined) doc.pathPrefix = dto.pathPrefix;
+
         if (dto.accessKey !== undefined)
             doc.accessKey = this.cryptoService.encrypt(dto.accessKey);
         if (dto.secretKey !== undefined)

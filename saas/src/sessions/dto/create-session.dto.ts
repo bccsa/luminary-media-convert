@@ -2,6 +2,7 @@ import {
     IsBoolean,
     IsNumber,
     IsOptional,
+    IsString,
     Max,
     Min,
     ValidateNested,
@@ -51,4 +52,10 @@ export class CreateSaasSessionDto {
     @Type(() => EncryptionConfigDto)
     @Expose()
     encryption?: EncryptionConfigDto;
+
+    @ApiPropertyOptional({ description: 'ID of the saved S3 config used (for session history reference)' })
+    @IsOptional()
+    @IsString()
+    @Expose()
+    s3ConfigId?: string;
 }
