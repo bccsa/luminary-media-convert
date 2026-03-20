@@ -26,9 +26,9 @@ Monorepo containing an open-source HLS/ABR encoding API and a closed-source SaaS
               Third-Party Services
 ```
 
-**Encoding API** -- Stateless, open-source encoding service. Accepts master key or webhook-validated API key authentication. Creates sessions, receives file uploads via tus, probes media, encodes to HLS/ABR with FFmpeg (GPU-accelerated when available), uploads output to S3-compatible storage, and delivers status updates via webhooks. Has no key store and no `/api/keys` endpoints.
+**Encoding API** -- Stateless, open-source encoding service. Accepts master key or webhook-validated API key authentication. Creates sessions, receives file uploads via tus, probes media, encodes to HLS/ABR with FFmpeg (GPU-accelerated when available), uploads output to S3-compatible storage, and delivers status updates via webhooks and SSE. Encrypted HLS playback is handled entirely client-side (no server-side key serving). Has no key store and no `/api/keys` endpoints.
 
-**SaaS Service** -- Closed-source management layer. Manages users, generates and stores API keys, creates sessions on behalf of web app users (master key), validates API keys via webhook endpoint, stores session history in CouchDB, and exposes admin endpoints. Does not proxy encoding -- clients talk to the Encoding API directly using session tokens.
+**SaaS Service** -- Closed-source management layer. Manages users, API keys (client-side generated, hash-only storage), S3 configs (AES-256-GCM encrypted credentials), creates sessions on behalf of web app users (master key), validates API keys via webhook endpoint, stores session history in CouchDB, and exposes admin endpoints. Sessions are tracked from creation through completion with real-time SSE updates. Does not proxy encoding -- clients talk to the Encoding API directly using session tokens.
 
 ## Monorepo Structure
 

@@ -142,11 +142,16 @@ All endpoints require JWT authentication with the `admin` role.
 |--------|------|-------------|
 | GET | `/saas/admin/dashboard` | System stats (user counts, session counts, recent activity) |
 
-### Session Creation (Web App)
+### Session Management (Web App)
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/saas/sessions` | JWT | Create encoding session on Encoding API (master key), return sessionToken to web app |
+| POST | `/saas/sessions` | JWT | Create encoding session (returns sessionToken + encodingApiUrl) |
+| GET | `/saas/sessions` | JWT | List user's sessions (paginated, filterable by status/name) |
+| GET | `/saas/sessions/:sessionId` | JWT | Get session detail (includes sessionToken for active sessions) |
+| PATCH | `/saas/sessions/:sessionId/name` | JWT | Update session name |
+| DELETE | `/saas/sessions/:sessionId?deleteFiles=true` | JWT | Delete session (optionally deletes S3 files) |
+| POST | `/saas/sessions/import` | JWT | Import external HLS output from S3 |
 
 ### API Key Management
 
@@ -178,7 +183,7 @@ All endpoints require JWT authentication with the `admin` role.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/saas/me` | JWT | Get current user identity (id, email, name, role, status) |
+| GET | `/saas/me` | JWT | Get current user identity (id, email, name, role, status, encodingApiUrl) |
 
 ### Future Endpoints
 

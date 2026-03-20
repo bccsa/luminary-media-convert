@@ -1,5 +1,5 @@
 ---
-description: Project context for luminary-media-convert — a NestJS HLS/ABR encoding service with a Vue 3 web client
+description: Project context for luminary-media-convert — a NestJS HLS/ABR encoding service with a Vue 3 web client, NestJS SaaS service, and Vue 3 admin panel
 alwaysApply: true
 ---
 
@@ -9,17 +9,19 @@ alwaysApply: true
 
 A folder-based npm workspaces monorepo containing:
 
-- **`api/`** — NestJS REST API service that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA or Apple Silicon GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via webhooks or polling.
-- **`app/`** — Vue 3 single-page web client for uploading files and monitoring encoding sessions.
+- **`api/`** — NestJS REST API service (the "Encoding API") that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA or Apple Silicon GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via SSE, webhooks, or polling.
+- **`app/`** — Vue 3 single-page web client for uploading files, monitoring encoding sessions, and managing API keys and S3 configs.
+- **`saas/`** — NestJS SaaS Service providing multi-tenant user management, session history, webhook ingestion, API key management, S3 config storage, and an admin dashboard. Backed by CouchDB and authenticated via Auth0 JWT.
+- **`admin/`** — Vue 3 admin panel SPA for managing users, sessions, and viewing the dashboard. Authenticated via Auth0.
 - **`encode-config/`** — Shared Vue 3 component library providing the `EncodeConfigForm` component, encoding/probe type definitions, and layout-based config persistence. Published as `@luminary-media-converter/encode-config` for consumption by the app (and potentially other clients).
 - **`tusd/`** — Node.js wrapper (`node-tusd`) around the Go `tusd` binary, providing a `TusdServer` class that spawns tusd as a child process, proxies HTTP requests, and dispatches lifecycle hooks (auth, upload create/finish, progress) via an internal HTTP hook server.
 
 ## Monorepo Structure
 
-- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "tusd"]`)
+- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "tusd", "saas", "admin"]`)
 - Dependencies are hoisted to the root `node_modules/`
 - Run workspace scripts from root: `npm -w api run <script>` or `npm -w app run <script>`
-- Root `npm run dev` starts all three workspaces concurrently (via `concurrently`): encode-config watch build, API dev server, and web client dev server
+- Root `npm run dev` starts all five workspaces concurrently (via `concurrently`): encode-config watch build, API dev server, SaaS dev server, web client dev server, and admin panel dev server
 
 ## Tech Stack
 
@@ -58,13 +60,35 @@ A folder-based npm workspaces monorepo containing:
 
 - **Framework**: Vue 3 (Composition API, `<script setup>`)
 - **Build**: Vite 6
+- **Routing**: Vue Router 4 (history mode)
 - **Styling**: Tailwind CSS v4
 - **Language**: TypeScript
 - **Authentication**: Auth0 via `@auth0/auth0-vue` SDK (Universal Login, automatic token management)
-- **Media playback**: Video.js 8 with custom HLS quality selector and thumbnail preview plugins
+- **Media playback**: Video.js 8 with custom HLS quality selector and thumbnail preview plugins; client-side encrypted HLS playback via blob URL rewriting in `HlsPlayer.vue`
 - **Testing**: Vitest
-- **API communication**: Fetch-based client (`api.ts`) with `VITE_API_BASE_URL`, no proxy — connects directly to the API via CORS; file uploads use `tus-js-client` for resumable chunked uploads (50 MB chunks, 5 parallel uploads)
+- **API communication**: Fetch-based client (`api.ts`) communicates with both the SaaS Service and the Encoding API; file uploads use `tus-js-client` for resumable chunked uploads (50 MB chunks, 5 parallel uploads)
+- **Real-time updates**: SSE via `GET /api/sessions/:id/events` on the Encoding API for live encoding progress
 - **Shared package**: Imports `EncodeConfigForm`, types, and layout storage from `@luminary-media-converter/encode-config`
+
+### SaaS Service (`saas/`)
+
+- **Runtime**: Node.js with TypeScript (ES2023 target, `nodenext` modules)
+- **Framework**: NestJS 11 (Express platform)
+- **Authentication**: Auth0 JWT validation via `@nestjs/passport` + `passport-jwt` + `jwks-rsa`
+- **Database**: CouchDB via `nano` client
+- **Scheduling**: `@nestjs/schedule` for periodic tasks (session cleanup)
+- **Testing**: Vitest
+- **Modules**: Auth, Users, Sessions, Webhooks, Dashboard, S3Configs, Me, Keys, Crypto, Database
+
+### Admin Panel (`admin/`)
+
+- **Framework**: Vue 3 (Composition API, `<script setup>`)
+- **Build**: Vite 6
+- **Routing**: Vue Router 4 (history mode)
+- **Styling**: Tailwind CSS v4
+- **Language**: TypeScript
+- **Authentication**: Auth0 via `@auth0/auth0-vue` SDK
+- **Testing**: Vitest
 
 ## Project Structure
 
@@ -79,7 +103,7 @@ api/
 │   │   └── jwt-auth.guard.ts          # NestJS guard wrapping Passport JWT
 │   └── encode/
 │       ├── encode.module.ts             # Feature module
-│       ├── encode.controller.ts         # REST endpoints under /api/sessions
+│       ├── encode.controller.ts         # REST endpoints under /api/sessions (including SSE)
 │       ├── dto/
 │       │   ├── create-session.dto.ts    # Session creation request (S3 + webhook + encryption + segment + thumbnail config)
 │       │   ├── encode-config.dto.ts     # Encoding configuration (type, video renditions, audio groups, VBR, labels)
@@ -89,11 +113,8 @@ api/
 │       │   ├── review-range.dto.ts      # Review range DTOs (keyframe-aligned in/out points, not yet wired up)
 │       │   ├── s3-config.dto.ts         # S3 storage credentials
 │       │   ├── webhook-config.dto.ts    # Webhook URL + session token
-│       │   ├── session-response.dto.ts  # Response DTOs (create, upload, encode, status + anglePlaylists + encoder + segmentFormat + thumbnailsVtt + preview)
-│       │   └── webhook-payload.dto.ts   # Webhook callback payload + SessionStatus type
-│       ├── guards/
-│       │   ├── session-auth.guard.ts    # Bearer token auth for file upload
-│       │   └── preview-auth.guard.ts    # Bearer token auth for preview playlist/key requests
+│       │   ├── session-response.dto.ts  # Response DTOs (create, upload, encode, status + anglePlaylists + encoder + segmentFormat + thumbnailsVtt)
+│       │   └── webhook-payload.dto.ts   # Webhook callback payload + SessionStatus type (includes encryptionKeyHex)
 │       └── services/
 │           ├── session.service.ts       # In-memory session store + token management
 │           ├── probe.service.ts         # ffprobe wrapper: media analysis + multi-strategy bitrate detection
@@ -101,8 +122,9 @@ api/
 │           ├── ffmpeg.service.ts        # FFmpeg process management, GPU detection, angle playlist generation, stream alignment detection
 │           ├── s3.service.ts            # S3 upload via MinIO client (with concurrency options)
 │           ├── webhook.service.ts       # Webhook POST delivery
+│           ├── session-events.service.ts # SSE event emitter for real-time session updates (RxJS Subject)
 │           ├── encode.service.ts        # Orchestrates encoding pipeline (async hooks support)
-│           ├── encryption.service.ts    # AES-128 HLS encryption + preview playlist rewriting
+│           ├── encryption.service.ts    # AES-128 HLS encryption (key derivation + worker-based segment encryption)
 │           ├── encryption.worker.ts     # Worker thread for encryption processing
 │           ├── byte-range.worker.ts     # Worker thread for non-blocking byte-range HLS segment consolidation
 │           ├── thumbnail.service.ts     # Sprite-based thumbnail generation with WebVTT
@@ -122,9 +144,10 @@ encode-config/
 
 app/
 ├── src/
-│   ├── main.ts                          # Vue app entry point
-│   ├── App.vue                          # Root component (config → upload → configure → progress flow)
-│   ├── api.ts                           # Fetch-based API client (create session, upload, start encode, delete, poll)
+│   ├── main.ts                          # Vue app entry point (Auth0, Vue Router)
+│   ├── App.vue                          # Root component (Auth0 identity check, navigation shell)
+│   ├── router.ts                        # Vue Router routes (sessions, keys, s3-configs, import)
+│   ├── api.ts                           # Fetch-based API client (SaaS Service + Encoding API)
 │   ├── api.spec.ts                      # API client tests (Vitest)
 │   ├── types.ts                         # App-specific types (S3Config, SessionStatus, etc.) + re-exports from encode-config
 │   ├── style.css                        # Global styles (Tailwind import)
@@ -133,9 +156,20 @@ app/
 │   ├── components/
 │   │   ├── SessionConfigForm.vue        # S3 config + file selection form
 │   │   ├── FileDropZone.vue             # Drag-and-drop file upload area
-│   │   └── SessionProgress.vue          # Progress display, Video.js player, angle switcher, encoder/segment format badges, S3 URL copy, thumbnail preview
+│   │   ├── HlsPlayer.vue               # Reusable Video.js HLS player with client-side encrypted playback (blob URL rewriting)
+│   │   ├── ProgressBar.vue              # Reusable progress bar component
+│   │   ├── StatusBadge.vue              # Reusable status badge with icon support
+│   │   └── InlineConfirm.vue            # Inline confirmation with overlay positioning
 │   ├── composables/
+│   │   ├── useActiveUploads.ts          # Singleton upload tracker surviving navigation
 │   │   └── useSessionPoller.ts          # Polling composable (2s interval, auto-stops on terminal status)
+│   ├── views/
+│   │   ├── EncodeView.vue               # New encoding session (S3 config + file selection → create + upload → navigate to session)
+│   │   ├── SessionView.vue              # Unified session lifecycle view (uploading → encoding config → progress → playback)
+│   │   ├── SessionHistoryView.vue       # Paginated session list with search and filters
+│   │   ├── SessionImportView.vue        # Import external HLS outputs
+│   │   ├── ApiKeysView.vue              # API key management
+│   │   └── S3ConfigsView.vue            # S3 config management
 │   └── utils/                           # (empty — layoutStorage moved to encode-config package)
 ├── index.html
 ├── package.json
@@ -159,6 +193,88 @@ tusd/
 ├── __tests__/                           # Jest tests
 ├── package.json
 └── tsconfig.json
+
+saas/
+├── src/
+│   ├── main.ts                          # Entry point: bootstraps NestJS, Swagger, CORS
+│   ├── app.module.ts                    # Root module: imports all feature modules
+│   ├── auth/
+│   │   ├── auth.module.ts              # Auth module (Passport + JWT strategy)
+│   │   ├── jwt.strategy.ts            # Auth0 JWT validation strategy
+│   │   ├── jwt-auth.guard.ts          # NestJS guard wrapping Passport JWT
+│   │   ├── admin.guard.ts             # Admin role guard
+│   │   ├── skip-admin.decorator.ts    # Decorator to bypass admin guard
+│   │   └── identity.service.ts        # User identity resolution + provisioning
+│   ├── crypto/
+│   │   ├── crypto.module.ts            # Crypto module
+│   │   └── crypto.service.ts           # Encryption utilities (API key hashing, etc.)
+│   ├── database/
+│   │   ├── database.module.ts          # CouchDB database module
+│   │   ├── database.service.ts         # CouchDB client via nano
+│   │   └── indexes.ts                  # CouchDB design document indexes
+│   ├── users/
+│   │   ├── users.module.ts             # Users module
+│   │   ├── users.controller.ts         # User CRUD endpoints (admin)
+│   │   ├── users.service.ts            # User persistence in CouchDB
+│   │   ├── dto/                        # Create/update/response DTOs
+│   │   └── interfaces/                 # User document interface
+│   ├── sessions/
+│   │   ├── sessions.module.ts          # Sessions module
+│   │   ├── sessions.controller.ts      # Session CRUD endpoints (user-facing)
+│   │   ├── admin-sessions.controller.ts # Session management endpoints (admin)
+│   │   ├── sessions.service.ts         # Session persistence in CouchDB
+│   │   ├── session-events.service.ts   # Session event handling
+│   │   ├── session-cleanup.service.ts  # Periodic cleanup of stale sessions
+│   │   ├── hls-parser.service.ts       # HLS manifest parsing for session import
+│   │   ├── s3-client.service.ts        # S3 client for session import operations
+│   │   ├── dto/                        # Create/import/response/S3/encryption DTOs
+│   │   └── interfaces/                 # Session document interface
+│   ├── webhooks/
+│   │   ├── webhooks.module.ts          # Webhooks module
+│   │   ├── webhooks.controller.ts      # Webhook ingestion endpoints (from Encoding API)
+│   │   ├── webhooks.service.ts         # Webhook processing + session status updates
+│   │   └── dto/                        # Authorize request, encoding webhook, validate key DTOs
+│   ├── keys/
+│   │   ├── keys.module.ts              # API keys module
+│   │   ├── keys.controller.ts          # API key CRUD endpoints (user-facing)
+│   │   ├── admin-keys.controller.ts    # API key management endpoints (admin)
+│   │   ├── keys.service.ts             # API key persistence + hashing in CouchDB
+│   │   ├── dto/                        # Create/response DTOs
+│   │   └── interfaces/                 # API key document interface
+│   ├── s3-configs/
+│   │   ├── s3-configs.module.ts        # S3 configs module
+│   │   ├── s3-configs.controller.ts    # S3 config CRUD endpoints (user-facing)
+│   │   ├── s3-configs.service.ts       # S3 config persistence in CouchDB (encrypted credentials)
+│   │   ├── dto/                        # Create/update/response DTOs
+│   │   └── interfaces/                 # S3 config document interface
+│   ├── dashboard/
+│   │   ├── dashboard.module.ts         # Dashboard module
+│   │   ├── dashboard.controller.ts     # Dashboard stats endpoints (admin)
+│   │   └── dashboard.service.ts        # Aggregated stats from CouchDB
+│   └── me/
+│       ├── me.module.ts                # Me module
+│       └── me.controller.ts            # Current user profile endpoint
+├── package.json
+└── tsconfig.json
+
+admin/
+├── src/
+│   ├── main.ts                          # Vue app entry point (Auth0, Vue Router)
+│   ├── App.vue                          # Root component (navigation shell)
+│   ├── router.ts                        # Vue Router routes (dashboard, users, sessions)
+│   ├── api.ts                           # Fetch-based API client (SaaS Service admin endpoints)
+│   ├── utils/
+│   │   └── status.ts                    # Session status utilities
+│   └── views/
+│       ├── DashboardView.vue            # Admin dashboard with stats
+│       ├── UsersListView.vue            # User list with search
+│       ├── UserDetailView.vue           # User detail view
+│       ├── UserFormView.vue             # User create/edit form
+│       ├── SessionsListView.vue         # Session list with filters
+│       └── SessionDetailView.vue        # Session detail view
+├── package.json
+├── tsconfig.json
+└── vite.config.ts
 ```
 
 ## Architecture
@@ -174,10 +290,10 @@ tusd/
 7. **POST** `/api/sessions/:id/encode` — Client submits final encoding config (type: `'video'` or `'audio'`) with Auth0 JWT
 8. Session enters FIFO queue; webhook sent (if configured) with `queued` status + queue position
 9. When session reaches front of queue, FFmpeg probes stream start times and encodes to HLS with ABR variants (fMP4 segments when streams are aligned, MPEG-TS fallback when misaligned)
-10. Progress webhooks sent during encoding (~every 5%), or client polls `GET /api/sessions/:id`
+10. Progress updates sent via SSE (`GET /api/sessions/:id/events`), webhooks (~every 5%), or client polls `GET /api/sessions/:id`
 11. For video encodes, master playlist is post-processed (audio names, video groups) and per-angle playlists generated when multiple video tracks are present
 12. Output files uploaded to client-specified S3 bucket via MinIO client (with configurable concurrency)
-13. Final webhook sent with `completed` status + list of S3 object keys + master playlist + angle playlists (if applicable)
+13. Final webhook sent with `completed` status + list of S3 object keys + master playlist + angle playlists (if applicable) + `encryptionKeyHex` (when encryption is enabled)
 
 ### Media analysis (ProbeService)
 
@@ -201,7 +317,7 @@ tusd/
 - **Metadata**: Language and name attributes in `-var_stream_map` for HLS `#EXT-X-MEDIA` and `#EXT-X-STREAM-INF` tags; rendition `label` for HLS NAME
 - **Channel control**: Mono/stereo/5.1/7.1 per audio group via `-ac`
 - **Encoder reporting**: Session status includes `encoder` field indicating the acceleration mode used (`cpu`, `nvidia`, or `apple`) and `segmentFormat` field indicating the HLS segment format (`fmp4` or `mpegts`)
-- **HLS encryption**: Optional AES-128 encryption for HLS segments via `EncryptionService` (uses worker threads for encryption processing), with preview endpoints that rewrite key URIs for authenticated playback
+- **HLS encryption**: Optional AES-128 encryption for HLS segments via `EncryptionService` (uses worker threads for encryption processing). The encryption key hex is included in the completion webhook payload (`encryptionKeyHex`) and stored in CouchDB by the SaaS Service. Encrypted playback is handled entirely client-side in `HlsPlayer.vue` via blob URL rewriting — fetching playlists from S3, replacing `#EXT-X-KEY` URIs with a blob URL of the key, and serving modified playlists as blob URLs. No server involvement for decryption
 - **Thumbnail generation**: `ThumbnailService` generates sprite-based thumbnail previews with a WebVTT file for timeline scrubbing; enabled by default for video encodes via `thumbnails` option in session creation
 
 ### Upload resilience
@@ -213,16 +329,17 @@ tusd/
 
 ### Web client flow
 
-1. User signs in via Auth0 Universal Login (redirect flow)
-2. User fills in S3 config and selects a file in `SessionConfigForm`
-3. On submit, `App.vue` creates a session and uploads the file via tus (resumable, chunked)
-4. On tus completion the API auto-probes the file; client polls until probe results are available
-5. `App.vue` auto-determines encoding type from probe results (`video` if video tracks present, `audio` otherwise)
+1. User signs in via Auth0 Universal Login (redirect flow); `App.vue` verifies identity with the SaaS Service
+2. User navigates to `/sessions/new` (`EncodeView`), selects an S3 config and file in `SessionConfigForm`
+3. On submit, `EncodeView` creates a session (via SaaS Service) and starts uploading via tus (resumable, chunked); navigates to `/sessions/:id` (`SessionView`) immediately
+4. `SessionView` handles the full session lifecycle — upload progress is shown via the `useActiveUploads` singleton composable that survives navigation
+5. On tus completion the Encoding API auto-probes the file; `SessionView` polls or listens via SSE until probe results are available
 6. `EncodeConfigForm` (from `encode-config` package) computes a suggested encoding config from the probe results on mount; user reviews and configures encoding (renditions, audio groups, copy/VBR toggles)
-7. User clicks "Start Encoding" — `App.vue` strips client-only `audioTrackMetadata` and submits the encode config; saves config to `layoutStorage` for future reuse
-8. Transitions to progress view; `useSessionPoller` polls the API every 2s
-9. Polling auto-stops when session reaches a terminal status (`completed` or `failed`)
-10. On completion, `SessionProgress` shows a Video.js player for the HLS master playlist using the S3 URL directly, an angle switcher (if multi-angle), encoder badge, segment format badge (amber warning when MPEG-TS fallback is used), copy S3 URL, thumbnail scrubbing preview, and output file list
+7. User clicks "Start Encoding" — `SessionView` strips client-only `audioTrackMetadata` and submits the encode config; saves config to `layoutStorage` for future reuse
+8. Real-time encoding progress displayed via SSE (`GET /api/sessions/:id/events`) with `useSessionPoller` as fallback
+9. On completion, `HlsPlayer` shows a Video.js player for the HLS master playlist; for encrypted sessions, playlists are rewritten client-side (blob URL rewriting of `#EXT-X-KEY` URIs) for seamless playback
+10. Session history available at `/sessions` (`SessionHistoryView`) with paginated search and filters; external HLS outputs can be imported at `/sessions/import`
+11. API keys managed at `/keys` (`ApiKeysView`); S3 configs managed at `/s3-configs` (`S3ConfigsView`)
 
 ### FIFO queue
 
@@ -238,14 +355,13 @@ tusd/
 | ALL | `/api/tus` , `/api/tus/*` | Bearer (upload token) | Tus upload endpoint — resumable chunked file upload, auto-probes on completion |
 | POST | `/api/sessions/:sessionId/encode` | Auth0 JWT | Submit encoding config, enqueue for processing |
 | GET | `/api/sessions/:sessionId` | Auth0 JWT | Poll session status |
-| GET | `/api/sessions/:sessionId/preview/key` | Bearer (preview token) | Serve HLS encryption key for preview playback |
-| GET | `/api/sessions/:sessionId/preview/*` | Bearer (preview token) | Serve rewritten HLS playlists with proxied key URIs for preview |
+| GET | `/api/sessions/:sessionId/events` | Auth0 JWT | Stream session events via SSE (status, progress, probe results, completion) |
 | DELETE | `/api/sessions/:sessionId` | Auth0 JWT | Cancel and delete session (`created`, `uploading`, or `uploaded` status) |
 
 ## Session Lifecycle
 
 ```
-created -> uploading -> uploaded -> queued -> encoding -> uploading_to_s3 -> completed
+created -> uploading -> uploaded -> queued -> encoding -> encrypting -> uploading_to_s3 -> completed
                                                       \-> failed
 ```
 
@@ -257,9 +373,9 @@ created -> uploading -> uploaded -> queued -> encoding -> uploading_to_s3 -> com
 - FFmpeg args are built dynamically based on GPU availability, encode config (audio groups, copy mode, metadata)
 - File uploads use the tus protocol via the Go `tusd` binary (wrapped by the `node-tusd` workspace package) with 10 GB max size, mounted via `EncodeModule.onModuleInit()` on `/api/tus`
 - Graceful shutdown enabled (`app.enableShutdownHooks()`); `QueueService`, `FfmpegService`, and `TusUploadService` implement `OnModuleDestroy` to clean up active processes and expired uploads
-- Environment config via `dotenv`: `PORT`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `WORK_DIR`, `FFMPEG_TIMEOUT_MS`, `FFMPEG_THREADS`, `CORS_ORIGIN`, `MAX_UPLOAD_SIZE` (API); `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`, `VITE_API_BASE_URL` (app); `TUSD_BINARY_PATH` (optional override for tusd binary location)
+- Environment config via `dotenv`: `PORT`, `AUTH0_DOMAIN`, `AUTH0_AUDIENCE`, `WORK_DIR`, `FFMPEG_TIMEOUT_MS`, `FFMPEG_THREADS`, `CORS_ORIGIN`, `MAX_UPLOAD_SIZE`, `HLS_ENCRYPTION_SEED` (API); `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`, `VITE_API_BASE_URL`, `VITE_SAAS_API_BASE_URL` (app); `TUSD_BINARY_PATH` (optional override for tusd binary location); CouchDB and Auth0 config (saas); Auth0 config (admin)
 - Swagger decorators on all DTOs and endpoints for auto-generated API docs
-- Web client stores S3 config in localStorage; encode configs are persisted via `layoutStorage` (from the `encode-config` package) keyed by media layout fingerprint
+- Web client manages S3 configs via the SaaS Service (stored in CouchDB with encrypted credentials); encode configs are persisted via `layoutStorage` (from the `encode-config` package) keyed by media layout fingerprint
 - Shared types (ProbeResult, EncodeConfig, VideoRendition, AudioGroup) are defined in `encode-config/src/types.ts` and re-exported by both the encode-config package and `app/src/types.ts`
 - Video.js quality selector is a custom plugin (`videojs-quality-selector.ts`) using native ES6 classes — the `videojs-hls-quality-selector` npm package is incompatible with Video.js 8 (Babel `_inheritsLoose` cannot extend native ES6 classes)
 - Vite config uses `resolve.dedupe: ['video.js']` to ensure a single Video.js instance across all modules
@@ -276,7 +392,7 @@ At startup, `FfmpegService.onModuleInit()` detects the acceleration mode (`Accel
 
 From the repo root:
 
-- `npm run dev` — start encode-config watch, API, and web client in dev mode (via `concurrently`)
+- `npm run dev` — start all workspaces in dev mode (via `concurrently`): encode-config watch, API, SaaS, web client, admin
 - `npm -w api run start:dev` — API dev server with watch mode
 - `npm -w api run build` — compile API to `api/dist/`
 - `npm -w api run start:prod` — run compiled API output
@@ -285,6 +401,13 @@ From the repo root:
 - `npm -w app run dev` — web client dev server (Vite, port 5173)
 - `npm -w app run build` — production build of the web client
 - `npm -w app run test` — web client tests (Vitest)
+- `npm -w saas run dev` — SaaS Service dev server with watch mode
+- `npm -w saas run build` — compile SaaS Service
+- `npm -w saas run test` — unit tests (Vitest)
+- `npm -w saas run seed:admin -- <email>` — seed an admin user (or `npm run seed:admin -- <email>` from root)
+- `npm -w admin run dev` — admin panel dev server (Vite)
+- `npm -w admin run build` — production build of the admin panel
+- `npm -w admin run test` — admin panel tests (Vitest)
 - `npm -w encode-config run build` — build encode-config library
 - `npm -w encode-config run dev` — watch build encode-config library
 - `npm -w tusd run build` — build tusd wrapper library

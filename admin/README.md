@@ -6,7 +6,8 @@ Vue 3 single-page application for system administration. Connects to the SaaS Se
 
 - **User management** -- Create, view, edit, disable, enable, and delete users (admins cannot disable/delete their own account)
 - **Dashboard** -- User counts, session counts, recent activity
-- **Session browsing** -- View encoding sessions across all users with real-time updates via Server-Sent Events (SSE)
+- **Session browsing** -- View encoding sessions across all users with real-time updates via Server-Sent Events (SSE). Sensitive data (S3 credentials, file paths, encryption keys) is stripped from admin responses for privacy compliance.
+- **API key management** -- View and revoke API keys for any user from the user detail view
 
 ## Backends
 

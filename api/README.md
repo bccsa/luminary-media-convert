@@ -14,7 +14,6 @@ The Encoding API is designed to run standalone on GPU-equipped hardware. It has 
   - [3. Poll Session Status](#3-poll-session-status)
   - [4. Start Encoding](#4-start-encoding)
   - [5. Delete a Session](#5-delete-a-session)
-  - [6. Preview Endpoints (Encrypted HLS)](#6-preview-endpoints-encrypted-hls)
 - [Webhook Callbacks](#webhook-callbacks)
 - [Authorization Webhook](#authorization-webhook)
 - [Encoding Workflow](#encoding-workflow)
@@ -110,8 +109,7 @@ Interactive Swagger/OpenAPI documentation is available at `/api/docs` when the s
 | GET | `/api/sessions/:sessionId` | Master key, API key, or session token | Poll session status |
 | POST | `/api/sessions/:sessionId/encode` | Master key, API key, or session token | Submit encoding config |
 | DELETE | `/api/sessions/:sessionId` | Master key or API key | Cancel and delete session |
-| GET | `/api/sessions/:sessionId/preview/*` | Session token | Rewritten HLS playlist for preview |
-| GET | `/api/sessions/:sessionId/preview/key` | Session token | HLS encryption key for preview |
+| SSE | `/api/sessions/:sessionId/events?token=sess_*` | Session token (query param) | Real-time session status stream |
 
 ### 1. Create an Encoding Session
 
@@ -296,7 +294,7 @@ X-API-Key: lmc_...
 | `encoding` | FFmpeg actively processing | `progress` (0-100) |
 | `encrypting` | HLS encryption in progress | `progress` (0-100) |
 | `uploading_to_s3` | Encoding done, uploading output to S3 | `progress` (0-100) |
-| `completed` | All files uploaded to S3 | `files`, `masterPlaylist`, `anglePlaylists`, `encoder`, `segmentFormat`, `thumbnailsVtt`, `previewBaseUrl`, `sessionToken` |
+| `completed` | All files uploaded to S3 | `files`, `masterPlaylist`, `anglePlaylists`, `encoder`, `segmentFormat`, `thumbnailsVtt` |
 | `failed` | Error occurred | `error` |
 
 **Uploaded status response (with probe results):**
@@ -461,23 +459,9 @@ X-API-Key: <master_key_or_api_key>
 
 ---
 
-### 6. Preview Endpoints (Encrypted HLS)
+### Encrypted HLS Playback
 
-When HLS encryption is enabled, the API provides preview endpoints that rewrite key URIs in playlists for authenticated playback. The `previewBaseUrl` and `sessionToken` are returned in the completed session status response.
-
-```
-GET /api/sessions/:sessionId/preview/*
-Authorization: Bearer <sessionToken>
-```
-
-Serves rewritten HLS playlists with proxied key URIs.
-
-```
-GET /api/sessions/:sessionId/preview/key
-Authorization: Bearer <sessionToken>
-```
-
-Serves the HLS encryption key for preview playback.
+Encrypted HLS playback is handled client-side. The encryption key hex is included in the completion webhook payload (`encryptionKeyHex` field). Clients rewrite HLS playlists to replace `#EXT-X-KEY` URIs with a blob URL containing the raw key bytes.
 
 ---
 
@@ -512,7 +496,7 @@ Webhooks are optional. When a `webhook` configuration is provided in the session
 | `encoding` | Encoding started / progress update (~every 5%) | `progress` |
 | `encrypting` | HLS encryption in progress | `progress` |
 | `uploading_to_s3` | Encoding complete, uploading files | `progress` |
-| `completed` | All done | `files`, `masterPlaylist`, `anglePlaylists`, `encoder`, `segmentFormat`, `thumbnailsVtt` |
+| `completed` | All done | `files`, `masterPlaylist`, `anglePlaylists`, `encoder`, `segmentFormat`, `thumbnailsVtt`, `encryptionKeyHex` |
 | `failed` | Error at any stage | `error` |
 
 ### Completed Webhook Example
@@ -531,9 +515,12 @@ Webhooks are optional. When a `webhook` configuration is provided in the session
   ],
   "masterPlaylist": "videos/my-project/master.m3u8",
   "encoder": "apple",
-  "segmentFormat": "fmp4"
+  "segmentFormat": "fmp4",
+  "encryptionKeyHex": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
 }
 ```
+
+`encryptionKeyHex` is present on `completed` status when HLS encryption was used. It contains the AES-128 key as a hex string for client-side playlist rewriting.
 
 ---
 
@@ -605,10 +592,10 @@ Or:
 3. **Probe and configure** -- Client polls for probe results (detected video/audio tracks), then submits an encoding configuration (video renditions, audio groups, copy/re-encode choices).
 4. **Queue processing** -- The session enters a FIFO queue. Sessions are processed one at a time in first-come-first-served order.
 5. **Encoding** -- FFmpeg probes per-stream start times and selects the optimal segment format: fMP4 segments (`.m4s` + `init.mp4`) when streams are aligned, or MPEG-TS segments (`.ts`) when streams have misaligned start times. When byte-range mode is enabled (default), segments are consolidated into fewer large files using HLS byte-range addressing. Progress is reported via webhooks or polling.
-6. **Encryption** -- If encryption is enabled, HLS segments are encrypted with AES-128 via a worker thread. Preview endpoints are set up for authenticated playback.
+6. **Encryption** -- If encryption is enabled, HLS segments are encrypted with AES-128 via a worker thread. The encryption key hex is included in the completion webhook for client-side playback.
 7. **Thumbnail generation** -- For video encodes (when enabled), sprite-based thumbnails with a WebVTT file are generated for timeline scrubbing.
 8. **S3 upload** -- All output files are uploaded to the client-specified S3 bucket.
-9. **Completion** -- Final webhook includes the full list of S3 object keys, master playlist path, thumbnail VTT path, and preview URLs (if encrypted).
+9. **Completion** -- Final webhook includes the full list of S3 object keys, master playlist path, thumbnail VTT path, and encryption key hex (if encrypted).
 
 ### Session Lifecycle
 
