@@ -68,15 +68,6 @@ watch(isAuthenticated, async (authenticated) => {
             <div class="mx-auto max-w-4xl mb-4 flex items-center justify-between text-sm text-zinc-400">
                 <nav class="flex items-center gap-4">
                     <router-link
-                        to="/"
-                        :class="[
-                            'transition-colors hover:text-zinc-200',
-                            $route.path === '/' ? 'text-indigo-400 font-medium' : 'text-zinc-400',
-                        ]"
-                    >
-                        Encode
-                    </router-link>
-                    <router-link
                         to="/sessions"
                         :class="[
                             'transition-colors hover:text-zinc-200',

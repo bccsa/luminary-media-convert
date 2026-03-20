@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { createApiKey, listApiKeys, revokeApiKey } from '../api';
+import InlineConfirm from '../components/InlineConfirm.vue';
 
 interface ApiKey {
     id: string;
@@ -67,16 +68,17 @@ async function copyKey() {
 }
 
 async function handleRevoke(keyId: string) {
+    revokeConfirmId.value = keyId;
     revoking.value = true;
     try {
         const token = await getAccessTokenSilently();
         await revokeApiKey(token, keyId);
-        revokeConfirmId.value = null;
         await fetchKeys();
     } catch (e) {
         error.value = e instanceof Error ? e.message : String(e);
     } finally {
         revoking.value = false;
+        revokeConfirmId.value = null;
     }
 }
 
@@ -194,31 +196,16 @@ onMounted(fetchKeys);
                             <td class="py-3 pr-4 text-zinc-400">{{ formatDate(key.lastUsedAt) }}</td>
                             <td class="py-3 pr-4 text-zinc-400">{{ formatDate(key.createdAt) }}</td>
                             <td class="py-3 text-right">
-                                <template v-if="key.status === 'active'">
-                                    <button
-                                        v-if="revokeConfirmId !== key.id"
-                                        @click="revokeConfirmId = key.id"
-                                        class="rounded border border-red-800/50 px-3 py-1 text-xs text-red-400 transition-colors hover:bg-red-950/30 cursor-pointer"
-                                    >
-                                        Revoke
-                                    </button>
-                                    <div v-else class="flex items-center justify-end gap-2">
-                                        <span class="text-xs text-zinc-400">Confirm?</span>
-                                        <button
-                                            @click="handleRevoke(key.id)"
-                                            :disabled="revoking"
-                                            class="rounded bg-red-600 px-3 py-1 text-xs text-white transition-colors hover:bg-red-500 cursor-pointer disabled:opacity-50"
-                                        >
-                                            {{ revoking ? 'Revoking...' : 'Yes' }}
-                                        </button>
-                                        <button
-                                            @click="revokeConfirmId = null"
-                                            class="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-800 cursor-pointer"
-                                        >
-                                            No
-                                        </button>
-                                    </div>
-                                </template>
+                                <div v-if="key.status === 'active'" class="flex items-center justify-end gap-2">
+                                    <InlineConfirm
+                                        label="Revoke"
+                                        prompt="Revoke?"
+                                        confirm-label="Yes"
+                                        :loading="revoking && revokeConfirmId === key.id"
+                                        loading-label="Revoking..."
+                                        @confirm="() => handleRevoke(key.id)"
+                                    />
+                                </div>
                             </td>
                         </tr>
                     </tbody>

@@ -1,18 +1,21 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import EncodeView from './views/EncodeView.vue';
 
 const router = createRouter({
     history: createWebHistory(),
     routes: [
         {
             path: '/',
-            name: 'encode',
-            component: EncodeView,
+            redirect: '/sessions',
         },
         {
             path: '/sessions',
             name: 'sessions',
             component: () => import('./views/SessionHistoryView.vue'),
+        },
+        {
+            path: '/sessions/new',
+            name: 'session-new',
+            component: () => import('./views/EncodeView.vue'),
         },
         {
             path: '/sessions/import',

@@ -2,7 +2,8 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { useRouter } from 'vue-router';
-import { listSessions } from '../api';
+import { listSessions, deleteSession } from '../api';
+import InlineConfirm from '../components/InlineConfirm.vue';
 
 const { getAccessTokenSilently } = useAuth0();
 const router = useRouter();
@@ -15,6 +16,8 @@ const loading = ref(true);
 const error = ref<string | null>(null);
 const currentPage = ref(1);
 const statusFilter = ref('');
+const nameSearch = ref('');
+let nameSearchTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const statusConfig: Record<string, { label: string; color: string }> = {
     created: { label: 'Created', color: 'bg-zinc-800 text-zinc-400' },
@@ -54,6 +57,7 @@ async function fetchSessions() {
             limit: PAGE_SIZE,
             skip: (currentPage.value - 1) * PAGE_SIZE,
             status: statusFilter.value || undefined,
+            name: nameSearch.value.trim() || undefined,
         });
         sessions.value = result.sessions ?? [];
         total.value = result.total ?? 0;
@@ -69,6 +73,14 @@ function onStatusChange() {
     fetchSessions();
 }
 
+function onNameSearch() {
+    if (nameSearchTimeout) clearTimeout(nameSearchTimeout);
+    nameSearchTimeout = setTimeout(() => {
+        currentPage.value = 1;
+        fetchSessions();
+    }, 300);
+}
+
 function goToPage(page: number) {
     if (page < 1 || page > totalPages.value) return;
     currentPage.value = page;
@@ -81,6 +93,21 @@ function navigateToSession(id: string) {
 
 function navigateToImport() {
     router.push('/sessions/import');
+}
+
+const deletingId = ref<string | null>(null);
+
+async function onConfirmDeleteSession(sid: string, withFiles: boolean) {
+    deletingId.value = sid;
+    try {
+        const token = await getAccessTokenSilently();
+        await deleteSession(sid, token, withFiles);
+        await fetchSessions();
+    } catch (e) {
+        error.value = e instanceof Error ? e.message : String(e);
+    } finally {
+        deletingId.value = null;
+    }
 }
 
 function truncateId(id: string): string {
@@ -113,16 +140,31 @@ onMounted(fetchSessions);
             <!-- Header -->
             <div class="flex items-center justify-between mb-6">
                 <h2 class="text-lg font-semibold text-zinc-100">Sessions</h2>
-                <button
-                    @click="navigateToImport"
-                    class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 cursor-pointer"
-                >
-                    Import
-                </button>
+                <div class="flex items-center gap-2">
+                    <button
+                        @click="router.push('/sessions/new')"
+                        class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 cursor-pointer"
+                    >
+                        New
+                    </button>
+                    <button
+                        @click="navigateToImport"
+                        class="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer"
+                    >
+                        Import
+                    </button>
+                </div>
             </div>
 
             <!-- Filters -->
             <div class="mb-4 flex items-center gap-3">
+                <input
+                    v-model="nameSearch"
+                    @input="onNameSearch"
+                    type="text"
+                    placeholder="Search by name..."
+                    class="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 flex-1 min-w-0"
+                />
                 <label class="text-xs text-zinc-500">Status:</label>
                 <select
                     v-model="statusFilter"
@@ -159,7 +201,8 @@ onMounted(fetchSessions);
                                 <th class="pb-3 pr-4">Status</th>
                                 <th class="pb-3 pr-4">Flags</th>
                                 <th class="pb-3 pr-4">Created</th>
-                                <th class="pb-3">Completed</th>
+                                <th class="pb-3 pr-4">Completed</th>
+                                <th class="pb-3"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -195,7 +238,21 @@ onMounted(fetchSessions);
                                     </div>
                                 </td>
                                 <td class="py-3 pr-4 text-zinc-400">{{ formatDate(session.createdAt) }}</td>
-                                <td class="py-3 text-zinc-400">{{ formatDate(session.completedAt) }}</td>
+                                <td class="py-3 pr-4 text-zinc-400">{{ formatDate(session.completedAt) }}</td>
+                                <td class="py-3 text-right" @click.stop>
+                                    <div class="flex items-center justify-end gap-2">
+                                        <InlineConfirm
+                                            label="Delete"
+                                            prompt="Delete?"
+                                            :secondary-prompt="(session.files?.length && session.s3ConfigId) ? 'Also delete S3 files?' : undefined"
+                                            secondary-confirm-label="Yes"
+                                            secondary-decline-label="No"
+                                            :loading="deletingId === (session.id || session.sessionId)"
+                                            loading-label="..."
+                                            @confirm="(withFiles: boolean) => onConfirmDeleteSession(session.id || session.sessionId, withFiles)"
+                                        />
+                                    </div>
+                                </td>
                             </tr>
                         </tbody>
                     </table>

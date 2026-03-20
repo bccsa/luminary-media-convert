@@ -4,7 +4,7 @@ import { useAuth0 } from '@auth0/auth0-vue';
 import { useRouter } from 'vue-router';
 import SessionConfigForm from '../components/SessionConfigForm.vue';
 import type { SavedS3Config } from '../components/SessionConfigForm.vue';
-import { createSession, uploadFile, listS3Configs, getS3Config, createS3Config } from '../api';
+import { createSession, uploadFile, listS3Configs, getS3Config, createS3Config, updateSessionName } from '../api';
 import { useActiveUploads } from '../composables/useActiveUploads';
 import type { CreateSessionRequest, S3Config } from '../types';
 
@@ -81,6 +81,7 @@ async function onUploadSubmit(payload: {
     config: CreateSessionRequest;
     file: File;
     s3ConfigId: string;
+    sessionName: string;
 }) {
     submitting.value = true;
     submissionError.value = null;
@@ -96,6 +97,11 @@ async function onUploadSubmit(payload: {
 
         // Create session via SaaS Service
         const session = await createSession(payload.config, accessToken);
+
+        // Set session name if provided (fire-and-forget)
+        if (payload.sessionName) {
+            updateSessionName(accessToken, session.sessionId, payload.sessionName).catch(() => {});
+        }
 
         if (payload.file.size > session.maxUploadSize) {
             throw new Error(

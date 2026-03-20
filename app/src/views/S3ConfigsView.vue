@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { listS3Configs, createS3Config, getS3Config, updateS3Config, deleteS3Config } from '../api';
+import InlineConfirm from '../components/InlineConfirm.vue';
 
 interface S3ConfigEntry {
     id: string;
@@ -155,16 +156,17 @@ async function handleSubmit() {
 }
 
 async function handleDelete(configId: string) {
+    deleteConfirmId.value = configId;
     deleting.value = true;
     try {
         const token = await getAccessTokenSilently();
         await deleteS3Config(token, configId);
-        deleteConfirmId.value = null;
         await fetchConfigs();
     } catch (e) {
         error.value = e instanceof Error ? e.message : String(e);
     } finally {
         deleting.value = false;
+        deleteConfirmId.value = null;
     }
 }
 
@@ -246,7 +248,9 @@ onMounted(fetchConfigs);
                             <input
                                 v-model="form.accessKey"
                                 type="text"
-                                autocomplete="off"
+                                autocomplete="new-password"
+                                data-1p-ignore
+                                data-lpignore="true"
                                 class="input"
                                 :placeholder="editingId ? '***' : ''"
                             />
@@ -258,8 +262,10 @@ onMounted(fetchConfigs);
                             </label>
                             <input
                                 v-model="form.secretKey"
-                                type="password"
-                                autocomplete="off"
+                                type="text"
+                                autocomplete="new-password"
+                                data-1p-ignore
+                                data-lpignore="true"
                                 class="input"
                                 :placeholder="editingId ? '***' : ''"
                             />
@@ -333,36 +339,18 @@ onMounted(fetchConfigs);
                             <td class="py-3 pr-4 text-zinc-400">{{ formatDate(config.createdAt) }}</td>
                             <td class="py-3 text-right">
                                 <div class="flex items-center justify-end gap-2">
-                                    <template v-if="deleteConfirmId !== config.id">
-                                        <button
-                                            @click="openEditForm(config.id)"
-                                            class="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
-                                        >
-                                            Edit
-                                        </button>
-                                        <button
-                                            @click="deleteConfirmId = config.id"
-                                            class="rounded border border-red-800/50 px-3 py-1 text-xs text-red-400 transition-colors hover:bg-red-950/30 cursor-pointer"
-                                        >
-                                            Delete
-                                        </button>
-                                    </template>
-                                    <template v-else>
-                                        <span class="text-xs text-zinc-400">Delete?</span>
-                                        <button
-                                            @click="handleDelete(config.id)"
-                                            :disabled="deleting"
-                                            class="rounded bg-red-600 px-3 py-1 text-xs text-white transition-colors hover:bg-red-500 cursor-pointer disabled:opacity-50"
-                                        >
-                                            {{ deleting ? 'Deleting...' : 'Yes' }}
-                                        </button>
-                                        <button
-                                            @click="deleteConfirmId = null"
-                                            class="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-800 cursor-pointer"
-                                        >
-                                            No
-                                        </button>
-                                    </template>
+                                    <button
+                                        @click="openEditForm(config.id)"
+                                        class="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+                                    >
+                                        Edit
+                                    </button>
+                                    <InlineConfirm
+                                        label="Delete"
+                                        prompt="Delete?"
+                                        :loading="deleting && deleteConfirmId === config.id"
+                                        @confirm="() => handleDelete(config.id)"
+                                    />
                                 </div>
                             </td>
                         </tr>

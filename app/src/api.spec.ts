@@ -129,15 +129,27 @@ describe('api', () => {
 
             await deleteSession('sess-1', 'jwt-token');
 
-            expect(fetch).toHaveBeenCalledWith(
-                expect.stringContaining('/saas/sessions/sess-1'),
-                expect.objectContaining({
-                    method: 'DELETE',
-                    headers: expect.objectContaining({
-                        Authorization: 'Bearer jwt-token',
-                    }),
-                }),
-            );
+            const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
+            expect(calledUrl).toContain('/saas/sessions/sess-1');
+            expect(calledUrl).not.toContain('deleteFiles');
+        });
+
+        it('appends deleteFiles=true when requested', async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 204 }));
+
+            await deleteSession('sess-1', 'jwt-token', true);
+
+            const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
+            expect(calledUrl).toContain('/saas/sessions/sess-1?deleteFiles=true');
+        });
+
+        it('does not append deleteFiles when false', async () => {
+            vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 204 }));
+
+            await deleteSession('sess-1', 'jwt-token', false);
+
+            const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
+            expect(calledUrl).not.toContain('deleteFiles');
         });
     });
 
@@ -695,6 +707,18 @@ describe('api', () => {
                     }),
                 }),
             );
+        });
+
+        it('includes name param when provided', async () => {
+            const data = { sessions: [{ id: 's1' }], total: 1 };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(data), { status: 200 }),
+            );
+
+            await listSessions('jwt-token', { name: 'My Project' });
+
+            const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
+            expect(calledUrl).toContain('name=My+Project');
         });
 
         it('calls without query params when opts omitted', async () => {

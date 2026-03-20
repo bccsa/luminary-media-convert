@@ -55,8 +55,10 @@ export async function createSession(
 export async function deleteSession(
     sessionId: string,
     accessToken: string,
+    deleteFiles = false,
 ): Promise<void> {
-    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}`, {
+    const query = deleteFiles ? '?deleteFiles=true' : '';
+    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}${query}`, {
         method: 'DELETE',
         headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -359,12 +361,13 @@ export async function deleteS3Config(
 
 export async function listSessions(
     accessToken: string,
-    opts?: { limit?: number; skip?: number; status?: string },
+    opts?: { limit?: number; skip?: number; status?: string; name?: string },
 ): Promise<{ sessions: any[]; total: number }> {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set('limit', String(opts.limit));
     if (opts?.skip != null) params.set('skip', String(opts.skip));
     if (opts?.status) params.set('status', opts.status);
+    if (opts?.name) params.set('name', opts.name);
 
     const qs = params.toString();
     const url = `${SAAS_URL}/saas/sessions${qs ? `?${qs}` : ''}`;

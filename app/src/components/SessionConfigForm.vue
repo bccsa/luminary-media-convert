@@ -26,13 +26,14 @@ const props = withDefaults(defineProps<{
 });
 
 const emit = defineEmits<{
-    submit: [payload: { config: CreateSessionRequest; file: File; s3ConfigId: string }];
+    submit: [payload: { config: CreateSessionRequest; file: File; s3ConfigId: string; sessionName: string }];
     loadS3Config: [configId: string];
     createS3Config: [data: { name: string; endPoint: string; port?: number; useSSL?: boolean; bucket: string; region?: string; accessKey: string; secretKey: string }];
 }>();
 
 const file = defineModel<File | null>('file', { default: null });
 
+const sessionName = ref('');
 const selectedConfigId = ref(props.selectedS3ConfigId);
 const pathPrefix = ref('');
 
@@ -172,7 +173,7 @@ function onSubmit() {
         },
     };
 
-    emit('submit', { config, file: file.value, s3ConfigId: selectedConfigId.value });
+    emit('submit', { config, file: file.value, s3ConfigId: selectedConfigId.value, sessionName: sessionName.value.trim() });
 }
 
 function onSelectConfig() {
@@ -190,6 +191,17 @@ const canCreateConfig = computed(() =>
 
 <template>
     <form @submit.prevent="onSubmit" class="space-y-6">
+        <!-- Session name -->
+        <fieldset class="space-y-3">
+            <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Session Name</legend>
+            <input
+                v-model="sessionName"
+                type="text"
+                class="input"
+                placeholder="e.g. My Project — Episode 1"
+            />
+        </fieldset>
+
         <!-- File -->
         <fieldset class="space-y-3">
             <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Source File</legend>
@@ -242,11 +254,11 @@ const canCreateConfig = computed(() =>
                     </div>
                     <div>
                         <label class="mb-1 block text-xs text-zinc-500">Access Key</label>
-                        <input v-model="newConfig.accessKey" type="text" autocomplete="off" class="input" />
+                        <input v-model="newConfig.accessKey" type="text" autocomplete="new-password" data-1p-ignore data-lpignore="true" class="input" />
                     </div>
                     <div>
                         <label class="mb-1 block text-xs text-zinc-500">Secret Key</label>
-                        <input v-model="newConfig.secretKey" type="password" autocomplete="off" class="input" />
+                        <input v-model="newConfig.secretKey" type="text" autocomplete="new-password" data-1p-ignore data-lpignore="true" class="input" />
                     </div>
                 </div>
                 <div class="flex gap-2">

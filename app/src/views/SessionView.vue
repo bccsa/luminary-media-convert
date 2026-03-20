@@ -7,6 +7,7 @@ import type { ProbeResult, EncodeConfig } from '@luminary-media-converter/encode
 import HlsPlayer from '../components/HlsPlayer.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import InlineConfirm from '../components/InlineConfirm.vue';
 import { getSessionDetail, getSessionStatus, startEncode, deleteSession, updateSessionName } from '../api';
 import { useSessionPoller } from '../composables/useSessionPoller';
 import { useActiveUploads } from '../composables/useActiveUploads';
@@ -295,6 +296,29 @@ async function copyEncryptionKey() {
 }
 
 // ---------------------------------------------------------------------------
+// Delete session
+// ---------------------------------------------------------------------------
+
+const deleting = ref(false);
+
+const hasS3Files = computed(
+    () => !!session.value?.files?.length && !!session.value?.s3ConfigId,
+);
+
+async function onConfirmDelete(withFiles: boolean) {
+    deleting.value = true;
+    try {
+        const token = await getAccessTokenSilently();
+        await deleteSession(sessionId.value, token, withFiles);
+        router.push('/sessions');
+    } catch (e) {
+        error.value = e instanceof Error ? e.message : String(e);
+    } finally {
+        deleting.value = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -478,7 +502,7 @@ async function onEncodeBack() {
     } catch {
         // Best-effort cleanup
     }
-    router.push('/');
+    router.push('/sessions/new');
 }
 
 // ---------------------------------------------------------------------------
@@ -499,7 +523,7 @@ async function cancelUpload() {
         // Best-effort cleanup
     }
 
-    router.push('/');
+    router.push('/sessions/new');
 }
 
 async function onCancelEncode() {
@@ -512,7 +536,7 @@ async function onCancelEncode() {
         // Best-effort cleanup
     }
 
-    router.push('/');
+    router.push('/sessions/new');
 }
 
 // ---------------------------------------------------------------------------
@@ -908,10 +932,21 @@ onUnmounted(() => {
                             v-if="isTerminal"
                             type="button"
                             class="flex-1 rounded-lg bg-zinc-800 px-6 py-3 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer"
-                            @click="router.push('/')"
+                            @click="router.push('/sessions/new')"
                         >
                             New Session
                         </button>
+                        <InlineConfirm
+                            v-if="isTerminal"
+                            label="Delete"
+                            prompt="Delete session?"
+                            :secondary-prompt="hasS3Files ? 'Also delete S3 files?' : undefined"
+                            secondary-confirm-label="Yes, delete files"
+                            secondary-decline-label="No, keep files"
+                            :loading="deleting"
+                            size="md"
+                            @confirm="onConfirmDelete"
+                        />
                     </div>
                 </template>
 
@@ -946,7 +981,7 @@ onUnmounted(() => {
                     <button
                         type="button"
                         class="mt-4 rounded-lg bg-zinc-800 px-6 py-3 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer"
-                        @click="router.push('/')"
+                        @click="router.push('/sessions/new')"
                     >
                         New Session
                     </button>
