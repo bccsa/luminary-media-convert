@@ -88,6 +88,4 @@ export interface SessionStatusResponse {
     error?: string;
     encoder?: AccelMode;
     segmentFormat?: SegmentFormat;
-    previewBaseUrl?: string;
-    sessionToken?: string;
 }

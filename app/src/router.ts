@@ -22,7 +22,7 @@ const router = createRouter({
         {
             path: '/sessions/:id',
             name: 'session-detail',
-            component: () => import('./views/SessionDetailView.vue'),
+            component: () => import('./views/SessionView.vue'),
         },
         {
             path: '/keys',

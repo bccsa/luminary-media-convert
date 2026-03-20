@@ -30,6 +30,10 @@ import {
     getS3Config,
     updateS3Config,
     deleteS3Config,
+    listSessions,
+    getSessionDetail,
+    updateSessionName,
+    importSession,
 } from './api';
 
 describe('api', () => {
@@ -666,6 +670,199 @@ describe('api', () => {
             await expect(deleteS3Config('jwt-token', 'c1')).rejects.toThrow(
                 'S3 config deletion failed (500)',
             );
+        });
+    });
+
+    describe('listSessions', () => {
+        it('returns sessions with all query params', async () => {
+            const data = { sessions: [{ id: 's1' }], total: 1 };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(data), { status: 200 }),
+            );
+
+            const result = await listSessions('jwt-token', { limit: 10, skip: 5, status: 'completed' });
+
+            expect(result).toEqual(data);
+            const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
+            expect(calledUrl).toContain('/saas/sessions');
+            expect(calledUrl).toContain('limit=10');
+            expect(calledUrl).toContain('skip=5');
+            expect(calledUrl).toContain('status=completed');
+            expect(vi.mocked(fetch).mock.calls[0][1]).toEqual(
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        Authorization: 'Bearer jwt-token',
+                    }),
+                }),
+            );
+        });
+
+        it('calls without query params when opts omitted', async () => {
+            const data = { sessions: [], total: 0 };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(data), { status: 200 }),
+            );
+
+            const result = await listSessions('jwt-token');
+
+            expect(result).toEqual(data);
+            const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
+            expect(calledUrl).toMatch(/\/saas\/sessions$/);
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Unauthorized' }), { status: 401 }),
+            );
+
+            await expect(listSessions('bad-token')).rejects.toThrow('Unauthorized');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(listSessions('jwt-token')).rejects.toThrow(
+                'Failed to list sessions (500)',
+            );
+        });
+    });
+
+    describe('getSessionDetail', () => {
+        it('returns session detail', async () => {
+            const detail = { id: 's1', status: 'completed', name: 'Test Session' };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(detail), { status: 200 }),
+            );
+
+            const result = await getSessionDetail('jwt-token', 's1');
+
+            expect(result).toEqual(detail);
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/sessions/s1'),
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        Authorization: 'Bearer jwt-token',
+                    }),
+                }),
+            );
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Not found' }), { status: 404 }),
+            );
+
+            await expect(getSessionDetail('jwt-token', 'bad-id')).rejects.toThrow('Not found');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(getSessionDetail('jwt-token', 's1')).rejects.toThrow(
+                'Failed to get session detail (500)',
+            );
+        });
+    });
+
+    describe('updateSessionName', () => {
+        it('sends PATCH with name in body', async () => {
+            const updated = { id: 's1', name: 'New Name' };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(updated), { status: 200 }),
+            );
+
+            const result = await updateSessionName('jwt-token', 's1', 'New Name');
+
+            expect(result).toEqual(updated);
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/sessions/s1/name'),
+                expect.objectContaining({
+                    method: 'PATCH',
+                    headers: expect.objectContaining({
+                        'Content-Type': 'application/json',
+                        Authorization: 'Bearer jwt-token',
+                    }),
+                }),
+            );
+            const callBody = JSON.parse(
+                (vi.mocked(fetch).mock.calls[0][1] as any).body,
+            );
+            expect(callBody).toEqual({ name: 'New Name' });
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Forbidden' }), { status: 403 }),
+            );
+
+            await expect(updateSessionName('jwt-token', 's1', 'X')).rejects.toThrow('Forbidden');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(updateSessionName('jwt-token', 's1', 'X')).rejects.toThrow(
+                'Failed to update session name (500)',
+            );
+        });
+    });
+
+    describe('importSession', () => {
+        it('sends POST with import data', async () => {
+            const imported = { id: 's-imp', status: 'completed' };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(imported), { status: 201 }),
+            );
+
+            const importData = {
+                s3ConfigId: 'c1',
+                masterPlaylistKey: 'output/master.m3u8',
+                folderPrefix: 'output/',
+                encryptionKey: 'abc123',
+            };
+            const result = await importSession('jwt-token', importData);
+
+            expect(result).toEqual(imported);
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/sessions/import'),
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: expect.objectContaining({
+                        'Content-Type': 'application/json',
+                        Authorization: 'Bearer jwt-token',
+                    }),
+                }),
+            );
+            const callBody = JSON.parse(
+                (vi.mocked(fetch).mock.calls[0][1] as any).body,
+            );
+            expect(callBody).toEqual(importData);
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Invalid S3 config' }), { status: 400 }),
+            );
+
+            await expect(
+                importSession('jwt-token', { s3ConfigId: 'bad' }),
+            ).rejects.toThrow('Invalid S3 config');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(
+                importSession('jwt-token', { s3ConfigId: 'c1' }),
+            ).rejects.toThrow('Session import failed (500)');
         });
     });
 

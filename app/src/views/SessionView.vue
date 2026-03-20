@@ -1,0 +1,957 @@
+<script setup lang="ts">
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { useAuth0 } from '@auth0/auth0-vue';
+import { useRoute, useRouter } from 'vue-router';
+import { EncodeConfigForm, computeLayoutKey, saveConfig } from '@luminary-media-converter/encode-config';
+import type { ProbeResult, EncodeConfig } from '@luminary-media-converter/encode-config';
+import HlsPlayer from '../components/HlsPlayer.vue';
+import ProgressBar from '../components/ProgressBar.vue';
+import StatusBadge from '../components/StatusBadge.vue';
+import { getSessionDetail, getSessionStatus, startEncode, deleteSession, updateSessionName } from '../api';
+import { useSessionPoller } from '../composables/useSessionPoller';
+import { useActiveUploads } from '../composables/useActiveUploads';
+import type { AccelMode, SegmentFormat } from '../types';
+
+const { getAccessTokenSilently } = useAuth0();
+const route = useRoute();
+const router = useRouter();
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+const session = ref<any>(null);
+const loading = ref(true);
+const error = ref<string | null>(null);
+const submissionError = ref<string | null>(null);
+
+// Active session tokens (from SaaS detail response)
+const sessionToken = ref<string | null>(null);
+const encodingApiUrl = ref<string | null>(null);
+
+// Probe/encode state
+const probeResult = ref<ProbeResult | null>(null);
+const probeLoading = ref(false);
+const encodingType = ref<'video' | 'audio'>('video');
+const byteRangeEnabled = ref(true);
+const submitting = ref(false);
+
+// Session name
+const sessionName = ref('');
+const editingName = ref(false);
+const nameInput = ref('');
+const savingName = ref(false);
+
+async function startEditName() {
+    nameInput.value = sessionName.value;
+    editingName.value = true;
+}
+
+async function saveName() {
+    const trimmed = nameInput.value.trim();
+    if (trimmed === sessionName.value) {
+        editingName.value = false;
+        return;
+    }
+    savingName.value = true;
+    try {
+        const token = await getAccessTokenSilently();
+        await updateSessionName(token, sessionId.value, trimmed);
+        sessionName.value = trimmed;
+        if (session.value) session.value.name = trimmed;
+    } catch {
+        // Non-critical
+    } finally {
+        savingName.value = false;
+        editingName.value = false;
+    }
+}
+
+function cancelEditName() {
+    editingName.value = false;
+}
+
+// Encryption key
+const encryptionKeyHex = ref<string | undefined>();
+
+// SaaS polling for non-local uploads
+let saasPollTimer: ReturnType<typeof setInterval> | null = null;
+
+const sessionId = computed(() => route.params.id as string);
+
+const poller = useSessionPoller();
+const activeUploads = useActiveUploads();
+
+// ---------------------------------------------------------------------------
+// Status badge config
+// ---------------------------------------------------------------------------
+
+const statusConfig: Record<string, { label: string; color: string; borderColor: string }> = {
+    created: { label: 'Created', color: 'text-zinc-400', borderColor: 'border-zinc-700' },
+    uploading: { label: 'Uploading', color: 'text-cyan-400', borderColor: 'border-cyan-700/60' },
+    uploaded: { label: 'Uploaded', color: 'text-zinc-400', borderColor: 'border-zinc-700' },
+    queued: { label: 'Queued', color: 'text-amber-400', borderColor: 'border-amber-700/60' },
+    encoding: { label: 'Encoding', color: 'text-indigo-400', borderColor: 'border-indigo-700/60' },
+    encrypting: { label: 'Encrypting', color: 'text-amber-400', borderColor: 'border-amber-700/60' },
+    uploading_to_s3: { label: 'Uploading to S3', color: 'text-cyan-400', borderColor: 'border-cyan-700/60' },
+    completed: { label: 'Completed', color: 'text-emerald-400', borderColor: 'border-emerald-700/60' },
+    failed: { label: 'Failed', color: 'text-red-400', borderColor: 'border-red-700/60' },
+    imported: { label: 'Imported', color: 'text-violet-400', borderColor: 'border-violet-700/60' },
+};
+
+const ICON_PATHS = {
+    cpu: 'M9 3.5V2m0 17.5V21M5.06 5.06l-.94-.94m13.76 13.76-.94-.94M2 12H3.5m17 0H22M5.06 18.94l-.94.94M18.82 5.06l.94-.94M12 8a4 4 0 100 8 4 4 0 000-8z',
+    gpu: 'M13 10V3L4 14h7v7l9-11h-7z',
+    warning: 'M12 9v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+    lock: 'M5 11V7a5 5 0 0110 0v4M3 11h18v11a2 2 0 01-2 2H5a2 2 0 01-2-2V11z',
+} as Record<string, string>;
+
+const encoderConfig: Record<string, { label: string; icon: string }> = {
+    cpu: { label: 'CPU', icon: ICON_PATHS.cpu },
+    nvidia: { label: 'NVIDIA GPU', icon: ICON_PATHS.gpu },
+    apple: { label: 'Apple GPU', icon: ICON_PATHS.gpu },
+};
+
+// ---------------------------------------------------------------------------
+// Computed
+// ---------------------------------------------------------------------------
+
+// Use poller status for active sessions, session doc status for historical
+const pollerStatus = computed(() => poller.status.value);
+const sessionDocStatus = computed(() => session.value?.status ?? null);
+
+const currentStatus = computed<string | null>(() => {
+    return pollerStatus.value ?? sessionDocStatus.value;
+});
+
+const isActiveSession = computed(() => !!sessionToken.value && !!encodingApiUrl.value);
+
+const isTerminal = computed(() => {
+    const ps = pollerStatus.value;
+    const ss = sessionDocStatus.value;
+    return ps === 'completed' || ps === 'failed'
+        || ss === 'completed' || ss === 'failed' || ss === 'imported';
+});
+
+const isCompleted = computed(() => {
+    const ps = pollerStatus.value;
+    const ss = sessionDocStatus.value;
+    return ps === 'completed'
+        || ss === 'completed' || ss === 'imported';
+});
+
+const isExpired = computed(() => {
+    // Non-terminal status but no session token means the encoding session expired
+    return !isTerminal.value && !isActiveSession.value && !loading.value && session.value;
+});
+
+const s3PublicBaseUrl = computed(() => {
+    const s3 = session.value?.s3Config;
+    if (!s3?.endPoint || !s3?.bucket) return undefined;
+    const protocol = s3.useSSL === false ? 'http' : 'https';
+    const port = s3.port ? ':' + s3.port : '';
+    return protocol + '://' + s3.endPoint + port + '/' + s3.bucket;
+});
+
+const isEncrypted = computed(() => !!session.value?.encrypted);
+
+// Access the uploads ref directly for reactivity
+const activeUpload = computed(() => {
+    const id = sessionId.value;
+    return id ? activeUploads.uploads.value[id] : undefined;
+});
+
+const showUploadProgress = computed(() => {
+    const s = currentStatus.value;
+    return (s === 'created' || s === 'uploading') && activeUpload.value && !activeUpload.value.done;
+});
+
+const showUploadDoneWaiting = computed(() => {
+    const s = currentStatus.value;
+    return (s === 'created' || s === 'uploading') && activeUpload.value?.done && !activeUpload.value?.error;
+});
+
+const showUploadRemoteMessage = computed(() => {
+    const s = currentStatus.value;
+    return (s === 'created' || s === 'uploading') && !activeUpload.value;
+});
+
+const showProbeConfig = computed(() => {
+    return currentStatus.value === 'uploaded' && isActiveSession.value && probeResult.value && !submitting.value;
+});
+
+const showEncoding = computed(() => {
+    const s = currentStatus.value;
+    return (s === 'queued' || s === 'encoding' || s === 'encrypting' || s === 'uploading_to_s3') && isActiveSession.value;
+});
+
+// Display metadata from the session detail or poller
+const displayEncoder = computed<AccelMode | string | undefined>(
+    () => poller.encoder.value ?? session.value?.encoder,
+);
+
+const displaySegmentFormat = computed<SegmentFormat | string | undefined>(
+    () => poller.segmentFormat.value ?? session.value?.segmentFormat,
+);
+
+// ---------------------------------------------------------------------------
+// Player — angle switching, playback URL, copy, files
+// ---------------------------------------------------------------------------
+
+const playerRef = ref<InstanceType<typeof HlsPlayer> | null>(null);
+const currentAngleIndex = ref(0);
+const copied = ref(false);
+const copiedKey = ref(false);
+const showFiles = ref(false);
+let copyTimeout: ReturnType<typeof setTimeout> | null = null;
+let copyKeyTimeout: ReturnType<typeof setTimeout> | null = null;
+
+const displayMasterPlaylist = computed(
+    () => poller.masterPlaylist.value ?? session.value?.masterPlaylist,
+);
+const displayAnglePlaylists = computed(
+    () => poller.anglePlaylists.value ?? session.value?.anglePlaylists,
+);
+const displayFiles = computed<string[] | undefined>(
+    () => (poller.files.value ?? session.value?.files) as string[] | undefined,
+);
+const displayThumbnailsVtt = computed(
+    () => poller.thumbnailsVtt.value ?? session.value?.thumbnailsVtt,
+);
+
+const uniqueAnglePlaylists = computed(() => {
+    const lists = displayAnglePlaylists.value;
+    if (!lists?.length) return [];
+    const seen = new Set<string>();
+    const result: { name: string; key: string }[] = [];
+    for (const ap of lists) {
+        if (seen.has(ap.name)) continue;
+        seen.add(ap.name);
+        result.push(ap);
+    }
+    return result;
+});
+
+const showAngleSwitcher = computed(() => uniqueAnglePlaylists.value.length > 1);
+
+const currentAngleIsAudioOnly = computed(() => {
+    const lists = uniqueAnglePlaylists.value;
+    if (!lists.length) return false;
+    return lists[currentAngleIndex.value]?.name === 'Audio only';
+});
+
+const isAudioOnly = computed(
+    () => encodingType.value === 'audio' || currentAngleIsAudioOnly.value,
+);
+
+const primaryPlaylistKey = computed(() => {
+    const lists = uniqueAnglePlaylists.value;
+    if (lists.length) {
+        return lists[currentAngleIndex.value]?.key ?? lists[0]?.key;
+    }
+    return displayMasterPlaylist.value;
+});
+
+const s3Url = computed(() => {
+    if (!primaryPlaylistKey.value || !s3PublicBaseUrl.value) return null;
+    return `${s3PublicBaseUrl.value}/${primaryPlaylistKey.value}`;
+});
+
+const playbackUrl = computed(() => {
+    if (!primaryPlaylistKey.value) return null;
+    return s3Url.value;
+});
+
+const thumbnailVttUrl = computed(() => {
+    if (!displayThumbnailsVtt.value || !s3PublicBaseUrl.value) return null;
+    return `${s3PublicBaseUrl.value}/${displayThumbnailsVtt.value}`;
+});
+
+const shouldCollapseFiles = computed(() => (displayFiles.value?.length ?? 0) > 10);
+
+function switchToAngle(index: number) {
+    if (index === currentAngleIndex.value) return;
+    if (playerRef.value) {
+        const currentTime = playerRef.value.getCurrentTime();
+        playerRef.value.setPendingSeek(currentTime);
+    }
+    currentAngleIndex.value = index;
+}
+
+async function copyPlaybackUrl() {
+    if (!s3Url.value) return;
+    await navigator.clipboard.writeText(s3Url.value);
+    copied.value = true;
+    if (copyTimeout) clearTimeout(copyTimeout);
+    copyTimeout = setTimeout(() => { copied.value = false; }, 2000);
+}
+
+async function copyEncryptionKey() {
+    if (!encryptionKeyHex.value) return;
+    await navigator.clipboard.writeText(encryptionKeyHex.value);
+    copiedKey.value = true;
+    if (copyKeyTimeout) clearTimeout(copyKeyTimeout);
+    copyKeyTimeout = setTimeout(() => { copiedKey.value = false; }, 2000);
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatDate(dateStr: string | null | undefined): string {
+    if (!dateStr) return '--';
+    return new Date(dateStr).toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Fetch session detail from SaaS
+// ---------------------------------------------------------------------------
+
+async function fetchSession() {
+    loading.value = true;
+    error.value = null;
+    try {
+        const token = await getAccessTokenSilently();
+        const detail = await getSessionDetail(token, sessionId.value);
+        session.value = detail;
+        sessionName.value = detail.name ?? '';
+        encryptionKeyHex.value = detail.encryptionKeyHex ?? undefined;
+
+        // Store active session tokens if present
+        sessionToken.value = detail.sessionToken ?? null;
+        encodingApiUrl.value = detail.encodingApiUrl ?? null;
+
+        // Determine encoding type from session data
+        if (detail.encodingType) {
+            encodingType.value = detail.encodingType;
+        }
+        if (detail.byteRange != null) {
+            byteRangeEnabled.value = detail.byteRange !== false;
+        }
+
+        // Route to appropriate behavior based on status
+        await handleStatusAfterLoad(detail.status);
+    } catch (e) {
+        error.value = e instanceof Error ? e.message : String(e);
+    } finally {
+        loading.value = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Status-based initialization after loading session detail
+// ---------------------------------------------------------------------------
+
+async function handleStatusAfterLoad(status: string) {
+    if ((status === 'created' || status === 'uploading') && !activeUpload.value) {
+        // Upload happening elsewhere -- poll SaaS until status changes
+        startSaasPoll();
+    } else if (status === 'uploaded' && isActiveSession.value) {
+        // Fetch probe results from encoding API
+        await fetchProbeResults();
+    } else if (
+        (status === 'queued' || status === 'encoding' || status === 'encrypting' || status === 'uploading_to_s3') &&
+        isActiveSession.value
+    ) {
+        // Start poller for encoding progress
+        poller.start(sessionId.value, encodingApiUrl.value!, sessionToken.value!);
+    }
+    // completed / failed / imported / expired => no additional setup needed
+}
+
+// ---------------------------------------------------------------------------
+// SaaS polling (for when upload is happening elsewhere)
+// ---------------------------------------------------------------------------
+
+function startSaasPoll() {
+    stopSaasPoll();
+    saasPollTimer = setInterval(async () => {
+        try {
+            const token = await getAccessTokenSilently();
+            const detail = await getSessionDetail(token, sessionId.value);
+            session.value = detail;
+            sessionToken.value = detail.sessionToken ?? null;
+            encodingApiUrl.value = detail.encodingApiUrl ?? null;
+
+            if (detail.status !== 'created' && detail.status !== 'uploading') {
+                stopSaasPoll();
+                await handleStatusAfterLoad(detail.status);
+            }
+        } catch {
+            // Ignore poll errors, retry on next interval
+        }
+    }, 3000);
+}
+
+function stopSaasPoll() {
+    if (saasPollTimer) {
+        clearInterval(saasPollTimer);
+        saasPollTimer = null;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fetch probe results from Encoding API
+// ---------------------------------------------------------------------------
+
+async function fetchProbeResults() {
+    if (!encodingApiUrl.value || !sessionToken.value) return;
+    probeLoading.value = true;
+    try {
+        // Status is already 'uploaded' so probe results should be available — poll directly
+        const probe = await pollForProbe(
+            encodingApiUrl.value,
+            sessionId.value,
+            sessionToken.value,
+        );
+        probeResult.value = probe;
+        if (probe) {
+            encodingType.value = probe.videoTracks.length ? 'video' : 'audio';
+        }
+    } catch (e) {
+        submissionError.value = e instanceof Error ? e.message : String(e);
+    } finally {
+        probeLoading.value = false;
+    }
+}
+
+async function pollForProbe(
+    apiUrl: string,
+    sid: string,
+    token: string,
+): Promise<ProbeResult | null> {
+    for (let i = 0; i < 60; i++) {
+        const data = await getSessionStatus(apiUrl, sid, token);
+        if (data.probeResult) return data.probeResult;
+        await new Promise((r) => setTimeout(r, 500));
+    }
+    return null;
+}
+
+// ---------------------------------------------------------------------------
+// Encode submission
+// ---------------------------------------------------------------------------
+
+async function onEncodeSubmit(config: EncodeConfig) {
+    if (!encodingApiUrl.value || !sessionToken.value) return;
+
+    submitting.value = true;
+    submissionError.value = null;
+
+    try {
+        encodingType.value = config.type;
+
+        // Strip audioTrackMetadata before sending to API
+        const { audioTrackMetadata: _, ...apiConfig } = config;
+        await startEncode(
+            encodingApiUrl.value,
+            sessionId.value,
+            apiConfig,
+            sessionToken.value,
+        );
+
+        // Save config for future reuse
+        if (probeResult.value) {
+            const layoutKey = computeLayoutKey(probeResult.value, config.type);
+            saveConfig(layoutKey, config);
+        }
+
+        // Start polling for encoding progress
+        poller.start(sessionId.value, encodingApiUrl.value, sessionToken.value);
+    } catch (e) {
+        submissionError.value = e instanceof Error ? e.message : String(e);
+    } finally {
+        submitting.value = false;
+    }
+}
+
+async function onEncodeBack() {
+    try {
+        const accessToken = await getAccessTokenSilently();
+        await deleteSession(sessionId.value, accessToken);
+    } catch {
+        // Best-effort cleanup
+    }
+    router.push('/');
+}
+
+// ---------------------------------------------------------------------------
+// Cancel actions
+// ---------------------------------------------------------------------------
+
+async function cancelUpload() {
+    const upload = activeUpload.value;
+    if (upload) {
+        upload.abort();
+        activeUploads.remove(sessionId.value);
+    }
+
+    try {
+        const accessToken = await getAccessTokenSilently();
+        await deleteSession(sessionId.value, accessToken);
+    } catch {
+        // Best-effort cleanup
+    }
+
+    router.push('/');
+}
+
+async function onCancelEncode() {
+    poller.stop();
+
+    try {
+        const accessToken = await getAccessTokenSilently();
+        await deleteSession(sessionId.value, accessToken);
+    } catch {
+        // Best-effort cleanup
+    }
+
+    router.push('/');
+}
+
+// ---------------------------------------------------------------------------
+// Watch for terminal status from poller (fetch encryption key)
+// ---------------------------------------------------------------------------
+
+watch(
+    () => poller.status.value,
+    async (status) => {
+        if (status === 'completed' && !encryptionKeyHex.value) {
+            try {
+                const token = await getAccessTokenSilently();
+                const detail = await getSessionDetail(token, sessionId.value);
+                encryptionKeyHex.value = detail.encryptionKeyHex;
+                session.value = detail;
+            } catch {
+                // Non-critical -- key display is informational
+            }
+        }
+    },
+);
+
+// Watch for the upload completing (if tracked locally)
+// After tus upload finishes, the Encoding API probes the file which takes time.
+// Poll the SaaS until the status advances beyond uploading.
+watch(
+    () => activeUpload.value?.done,
+    (done) => {
+        if (done && !activeUpload.value?.error) {
+            startSaasPoll();
+        }
+    },
+);
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+onMounted(fetchSession);
+
+onUnmounted(() => {
+    stopSaasPoll();
+    poller.stop();
+});
+</script>
+
+<template>
+    <div :class="['mx-auto transition-all duration-300', showProbeConfig ? 'max-w-fit' : 'max-w-2xl']">
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 shadow-xl backdrop-blur">
+            <!-- Back link -->
+            <div class="mb-4">
+                <router-link
+                    to="/sessions"
+                    class="inline-flex items-center gap-1.5 text-sm text-zinc-400 transition-colors hover:text-zinc-200"
+                >
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
+                    Back to Sessions
+                </router-link>
+            </div>
+
+            <!-- Loading -->
+            <div v-if="loading" class="flex justify-center py-16">
+                <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+            </div>
+
+            <!-- Load error -->
+            <div v-else-if="error" class="rounded-lg bg-red-950/40 border border-red-800/50 p-4">
+                <p class="text-sm text-red-400">{{ error }}</p>
+            </div>
+
+            <!-- Session loaded -->
+            <template v-else-if="session">
+                <!-- Header -->
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <!-- Editable session name -->
+                        <div v-if="editingName" class="flex items-center gap-2">
+                            <input
+                                v-model="nameInput"
+                                type="text"
+                                class="input text-lg font-semibold"
+                                placeholder="Session name"
+                                @keyup.enter="saveName"
+                                @keyup.escape="cancelEditName"
+                            />
+                            <button
+                                type="button"
+                                :disabled="savingName"
+                                @click="saveName"
+                                class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                            >
+                                {{ savingName ? '...' : 'Save' }}
+                            </button>
+                            <button
+                                type="button"
+                                @click="cancelEditName"
+                                class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                        <h2
+                            v-else
+                            class="text-lg font-semibold text-zinc-100 cursor-pointer hover:text-indigo-400 transition-colors"
+                            @click="startEditName"
+                            :title="sessionName ? 'Click to rename' : 'Click to add a name'"
+                        >
+                            {{ sessionName || 'Untitled session' }}
+                        </h2>
+                        <p class="mt-0.5 font-mono text-xs text-zinc-500">{{ sessionId }}</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <StatusBadge
+                            v-if="displayEncoder && encoderConfig[displayEncoder]"
+                            :label="encoderConfig[displayEncoder].label"
+                            :icon="encoderConfig[displayEncoder].icon"
+                            :color="displayEncoder === 'cpu' ? 'text-zinc-400' : 'text-violet-400'"
+                            :border-color="displayEncoder === 'cpu' ? 'border-zinc-700' : 'border-violet-700/60'"
+                        />
+                        <StatusBadge
+                            v-if="displaySegmentFormat === 'mpegts'"
+                            label="MPEG-TS"
+                            color="text-amber-400"
+                            border-color="border-amber-700/60"
+                            :icon="ICON_PATHS.warning"
+                            title="MPEG-TS segments used because source streams have misaligned start times."
+                        />
+                        <StatusBadge
+                            v-if="isEncrypted"
+                            label="Encrypted"
+                            color="text-amber-400"
+                            border-color="border-amber-700/60"
+                            :icon="ICON_PATHS.lock"
+                        />
+                        <StatusBadge
+                            v-if="session.imported"
+                            label="Imported"
+                            color="text-violet-400"
+                            border-color="border-violet-700/60"
+                        />
+                        <StatusBadge
+                            :label="currentStatus ? statusConfig[currentStatus]?.label ?? currentStatus : '--'"
+                            :color="statusConfig[currentStatus ?? '']?.color ?? 'text-zinc-400'"
+                            :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-zinc-700'"
+                        />
+                    </div>
+                </div>
+
+                <!-- Submission error banner -->
+                <div
+                    v-if="submissionError"
+                    class="mb-6 rounded-lg bg-red-950/40 border border-red-800/50 p-4"
+                >
+                    <p class="text-sm text-red-400">{{ submissionError }}</p>
+                </div>
+
+                <!-- ============================================================ -->
+                <!-- STATUS: created / uploading — local upload in progress       -->
+                <!-- ============================================================ -->
+                <div v-if="showUploadProgress" class="mb-4">
+                    <ProgressBar
+                        :label="activeUpload!.progress >= 100 ? 'Analyzing...' : 'Uploading...'"
+                        :progress="activeUpload!.progress"
+                        :indeterminate="activeUpload!.progress >= 100"
+                    />
+                    <div class="flex justify-end pt-2">
+                        <button
+                            v-if="activeUpload!.progress < 100"
+                            type="button"
+                            class="rounded-lg border border-zinc-700 px-4 py-1.5 text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+                            @click="cancelUpload"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+
+                <!-- STATUS: upload done, waiting for probe -->
+                <div v-else-if="showUploadDoneWaiting" class="mb-4">
+                    <ProgressBar label="Analyzing..." indeterminate />
+                </div>
+
+                <!-- STATUS: created / uploading — upload started elsewhere -->
+                <div v-else-if="showUploadRemoteMessage" class="mb-4">
+                    <ProgressBar label="Uploading..." indeterminate subtitle="Started elsewhere" />
+                </div>
+
+                <!-- ============================================================ -->
+                <!-- STATUS: uploaded — probe loading spinner                     -->
+                <!-- ============================================================ -->
+                <div v-else-if="currentStatus === 'uploaded' && probeLoading" class="flex flex-col items-center gap-4 py-16">
+                    <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <p class="text-sm text-zinc-400">Fetching probe results...</p>
+                </div>
+
+                <!-- ============================================================ -->
+                <!-- STATUS: uploaded — encode config form                        -->
+                <!-- ============================================================ -->
+                <EncodeConfigForm
+                    v-else-if="showProbeConfig"
+                    :probe-result="probeResult!"
+                    :byte-range="byteRangeEnabled"
+                    @submit="onEncodeSubmit"
+                    @back="onEncodeBack"
+                />
+
+                <!-- ============================================================ -->
+                <!-- Submitting encoding config spinner                           -->
+                <!-- ============================================================ -->
+                <div v-else-if="submitting" class="flex flex-col items-center gap-4 py-16">
+                    <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <p class="text-sm text-zinc-400">Starting encoding...</p>
+                </div>
+
+                <!-- ============================================================ -->
+                <!-- ENCODING PROGRESS (queue, encoding, encrypting, s3 upload)   -->
+                <!-- ============================================================ -->
+                <template v-else-if="showEncoding || isCompleted || currentStatus === 'failed'">
+
+                    <!-- Queue position -->
+                    <div v-if="poller.status.value === 'queued' && poller.queuePosition.value != null" class="mb-4 rounded-lg bg-zinc-900/60 p-4">
+                        <p class="text-sm text-zinc-400">
+                            Queue position: <span class="font-semibold text-amber-400">{{ poller.queuePosition.value }}</span>
+                        </p>
+                    </div>
+
+                    <!-- Progress bar (encoding / encrypting / uploading_to_s3) -->
+                    <div
+                        v-if="poller.status.value === 'encoding' || poller.status.value === 'encrypting' || poller.status.value === 'uploading_to_s3'"
+                        class="mb-4"
+                    >
+                        <ProgressBar
+                            :label="poller.status.value === 'encoding' ? 'Encoding...' : poller.status.value === 'encrypting' ? 'Encrypting...' : 'Uploading to S3...'"
+                            :progress="poller.progress.value"
+                        />
+                    </div>
+
+                    <!-- Failed banner -->
+                    <div v-if="currentStatus === 'failed'" class="mb-4 rounded-lg bg-red-950/40 border border-red-800/50 p-4">
+                        <p class="text-sm font-medium text-red-400">Encoding failed</p>
+                        <p
+                            v-if="poller.error.value || session.error"
+                            class="mt-1 text-sm text-red-300/80"
+                        >
+                            {{ poller.error.value || session.error }}
+                        </p>
+                    </div>
+
+                    <!-- Player, files, encryption key (shown when completed) -->
+                    <div v-if="isCompleted" class="space-y-3">
+                        <!-- Angle switcher -->
+                        <div v-if="showAngleSwitcher" class="flex flex-wrap items-center gap-2">
+                            <span class="text-xs font-medium text-zinc-500">Angle:</span>
+                            <div class="flex flex-wrap gap-1.5">
+                                <button
+                                    v-for="(ap, i) in uniqueAnglePlaylists"
+                                    :key="ap.key"
+                                    type="button"
+                                    class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer"
+                                    :class="i === currentAngleIndex
+                                        ? 'bg-indigo-600 text-white'
+                                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'"
+                                    @click="switchToAngle(i)"
+                                >
+                                    {{ ap.name }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Video player -->
+                        <HlsPlayer
+                            ref="playerRef"
+                            :playback-url="playbackUrl"
+                            :thumbnail-vtt-url="thumbnailVttUrl"
+                            :encoding-type="encodingType"
+                            :is-audio-only="isAudioOnly"
+                            :encryption-key-hex="encryptionKeyHex"
+                        />
+
+                        <!-- Master Playlist URL + Copy -->
+                        <div v-if="displayMasterPlaylist" class="rounded-lg bg-zinc-900/60 p-4">
+                            <div class="mb-1 flex items-center justify-between">
+                                <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Master Playlist</p>
+                                <button
+                                    v-if="s3Url"
+                                    type="button"
+                                    class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer"
+                                    :class="copied
+                                        ? 'bg-emerald-900/60 text-emerald-400'
+                                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'"
+                                    @click="copyPlaybackUrl"
+                                >
+                                    {{ copied ? 'Copied!' : 'Copy URL' }}
+                                </button>
+                            </div>
+                            <p class="break-all font-mono text-sm text-indigo-400">{{ s3Url ?? displayMasterPlaylist }}</p>
+                        </div>
+
+                        <!-- Encryption key display -->
+                        <div v-if="isEncrypted && encryptionKeyHex" class="rounded-lg bg-zinc-900/60 p-4">
+                            <div class="mb-1 flex items-center justify-between">
+                                <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Encryption Key</p>
+                                <button
+                                    type="button"
+                                    class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer"
+                                    :class="copiedKey
+                                        ? 'bg-emerald-900/60 text-emerald-400'
+                                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'"
+                                    @click="copyEncryptionKey"
+                                >
+                                    {{ copiedKey ? 'Copied!' : 'Copy Key' }}
+                                </button>
+                            </div>
+                            <code class="block break-all rounded bg-zinc-800 px-3 py-2 font-mono text-xs text-amber-400">{{ encryptionKeyHex }}</code>
+                        </div>
+
+                        <!-- Output files -->
+                        <div v-if="displayFiles?.length" class="rounded-lg bg-zinc-900/60 p-4">
+                            <template v-if="shouldCollapseFiles">
+                                <button
+                                    type="button"
+                                    class="flex w-full items-center justify-between cursor-pointer"
+                                    @click="showFiles = !showFiles"
+                                >
+                                    <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                                        Output Files ({{ displayFiles.length }})
+                                    </p>
+                                    <svg
+                                        class="h-4 w-4 text-zinc-500 transition-transform"
+                                        :class="{ 'rotate-180': showFiles }"
+                                        fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                                    >
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                </button>
+                                <ul v-if="showFiles" class="mt-3 max-h-60 space-y-1 overflow-y-auto">
+                                    <li v-for="f in displayFiles" :key="f" class="break-all font-mono text-xs text-zinc-400">{{ f }}</li>
+                                </ul>
+                            </template>
+                            <template v-else>
+                                <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Output Files</p>
+                                <ul class="max-h-60 space-y-1 overflow-y-auto">
+                                    <li v-for="f in displayFiles" :key="f" class="break-all font-mono text-xs text-zinc-400">{{ f }}</li>
+                                </ul>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Metadata grid -->
+                    <div class="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div v-if="session.s3Config?.endPoint" class="rounded-lg bg-zinc-900/60 p-3">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">S3 Endpoint</p>
+                            <p class="font-mono text-xs text-zinc-200 break-all">
+                                {{ session.s3Config.endPoint }}{{ session.s3Config.port ? `:${session.s3Config.port}` : '' }}
+                            </p>
+                        </div>
+                        <div v-if="session.s3Config?.bucket" class="rounded-lg bg-zinc-900/60 p-3">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">S3 Bucket</p>
+                            <p class="text-sm text-zinc-200">{{ session.s3Config.bucket }}</p>
+                        </div>
+                        <div class="rounded-lg bg-zinc-900/60 p-3">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Created</p>
+                            <p class="text-sm text-zinc-200">{{ formatDate(session.createdAt) }}</p>
+                        </div>
+                        <div v-if="session.completedAt" class="rounded-lg bg-zinc-900/60 p-3">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Completed</p>
+                            <p class="text-sm text-zinc-200">{{ formatDate(session.completedAt) }}</p>
+                        </div>
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div class="mt-4 flex gap-3">
+                        <button
+                            v-if="showEncoding && (poller.status.value === 'queued' || poller.status.value === 'encoding')"
+                            type="button"
+                            class="flex-1 rounded-lg border border-zinc-700 px-6 py-3 text-sm font-semibold text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+                            @click="onCancelEncode"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            v-if="isTerminal"
+                            type="button"
+                            class="flex-1 rounded-lg bg-zinc-800 px-6 py-3 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer"
+                            @click="router.push('/')"
+                        >
+                            New Session
+                        </button>
+                    </div>
+                </template>
+
+                <!-- ============================================================ -->
+                <!-- Expired / no session token for non-terminal status           -->
+                <!-- ============================================================ -->
+                <div v-else-if="isExpired" class="flex flex-col items-center gap-4 py-16">
+                    <svg class="h-10 w-10 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p class="text-sm text-zinc-400">Session expired</p>
+                    <p class="text-xs text-zinc-500">The encoding session is no longer active and cannot be interacted with.</p>
+
+                    <!-- Metadata grid for expired sessions -->
+                    <div class="mt-4 w-full grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div class="rounded-lg bg-zinc-900/60 p-3">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Status</p>
+                            <p class="text-sm text-zinc-200">{{ statusConfig[session.status]?.label ?? session.status }}</p>
+                        </div>
+                        <div v-if="session.s3Config?.endPoint" class="rounded-lg bg-zinc-900/60 p-3">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">S3 Endpoint</p>
+                            <p class="font-mono text-xs text-zinc-200 break-all">
+                                {{ session.s3Config.endPoint }}{{ session.s3Config.port ? `:${session.s3Config.port}` : '' }}
+                            </p>
+                        </div>
+                        <div class="rounded-lg bg-zinc-900/60 p-3">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Created</p>
+                            <p class="text-sm text-zinc-200">{{ formatDate(session.createdAt) }}</p>
+                        </div>
+                    </div>
+
+                    <button
+                        type="button"
+                        class="mt-4 rounded-lg bg-zinc-800 px-6 py-3 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer"
+                        @click="router.push('/')"
+                    >
+                        New Session
+                    </button>
+                </div>
+            </template>
+        </div>
+    </div>
+</template>

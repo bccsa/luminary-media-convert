@@ -1,0 +1,34 @@
+<script setup lang="ts">
+const props = withDefaults(defineProps<{
+    label: string;
+    progress?: number | null;
+    indeterminate?: boolean;
+    subtitle?: string;
+}>(), {
+    progress: null,
+    indeterminate: false,
+    subtitle: undefined,
+});
+</script>
+
+<template>
+    <div class="space-y-2">
+        <div class="flex items-center justify-between text-sm">
+            <span class="text-zinc-400">{{ label }}</span>
+            <span v-if="subtitle" class="text-xs text-zinc-500">{{ subtitle }}</span>
+            <span v-else-if="progress != null && !indeterminate" class="font-mono text-zinc-300">{{ progress }}%</span>
+        </div>
+        <div class="h-3 overflow-hidden rounded-full bg-zinc-800">
+            <div
+                v-if="indeterminate"
+                class="h-full rounded-full bg-indigo-500 animate-pulse"
+                style="width: 100%"
+            />
+            <div
+                v-else
+                class="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                :style="{ width: `${progress ?? 0}%` }"
+            />
+        </div>
+    </div>
+</template>

@@ -155,7 +155,7 @@ onMounted(fetchSessions);
                     <table class="w-full text-sm">
                         <thead>
                             <tr class="border-b border-zinc-800 text-left text-xs uppercase tracking-wider text-zinc-500">
-                                <th class="pb-3 pr-4">Session ID</th>
+                                <th class="pb-3 pr-4">Name</th>
                                 <th class="pb-3 pr-4">Status</th>
                                 <th class="pb-3 pr-4">Flags</th>
                                 <th class="pb-3 pr-4">Created</th>
@@ -169,8 +169,9 @@ onMounted(fetchSessions);
                                 class="border-b border-zinc-800/50 cursor-pointer transition-colors hover:bg-zinc-800/30"
                                 @click="navigateToSession(session.id || session.sessionId)"
                             >
-                                <td class="py-3 pr-4 font-mono text-xs text-zinc-300" :title="session.id || session.sessionId">
-                                    {{ truncateId(session.id || session.sessionId) }}
+                                <td class="py-3 pr-4">
+                                    <span v-if="session.name" class="text-zinc-200">{{ session.name }}</span>
+                                    <span v-else class="font-mono text-xs text-zinc-500" :title="session.id || session.sessionId">{{ truncateId(session.id || session.sessionId) }}</span>
                                 </td>
                                 <td class="py-3 pr-4">
                                     <span :class="badgeClasses(session.status)">

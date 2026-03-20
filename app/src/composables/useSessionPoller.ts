@@ -29,15 +29,12 @@ export function useSessionPoller() {
     const encoder = ref<AccelMode | undefined>();
     const segmentFormat = ref<SegmentFormat | undefined>();
     const thumbnailsVtt = ref<string | undefined>();
-    const previewBaseUrl = ref<string | undefined>();
-    const previewToken = ref<string | undefined>();
     const polling = ref(false);
 
     let eventSource: EventSource | null = null;
     let fallbackTimer: ReturnType<typeof setInterval> | null = null;
 
     function applyUpdate(data: SessionStatusResponse, force = false) {
-        // Reject stale status updates (e.g. late SSE event for uploading_to_s3 after completed)
         if (
             !force &&
             status.value &&
@@ -56,8 +53,6 @@ export function useSessionPoller() {
         encoder.value = data.encoder;
         segmentFormat.value = data.segmentFormat;
         thumbnailsVtt.value = data.thumbnailsVtt;
-        previewBaseUrl.value = data.previewBaseUrl;
-        previewToken.value = data.sessionToken;
     }
 
     function stop() {
@@ -77,7 +72,6 @@ export function useSessionPoller() {
     ) {
         stop();
 
-        // Reset all state from any previous session
         status.value = null;
         progress.value = undefined;
         queuePosition.value = undefined;
@@ -88,12 +82,9 @@ export function useSessionPoller() {
         encoder.value = undefined;
         segmentFormat.value = undefined;
         thumbnailsVtt.value = undefined;
-        previewBaseUrl.value = undefined;
-        previewToken.value = undefined;
 
         polling.value = true;
 
-        // Initial poll for full state (encoder, previewBaseUrl, etc.)
         getSessionStatus(encodingApiUrl, sessionId, sessionToken)
             .then((data) => {
                 applyUpdate(data);
@@ -105,7 +96,6 @@ export function useSessionPoller() {
                 error.value = e instanceof Error ? e.message : String(e);
             });
 
-        // SSE stream for real-time updates
         eventSource = subscribeSessionEvents(
             encodingApiUrl,
             sessionId,
@@ -113,7 +103,6 @@ export function useSessionPoller() {
             (event) => {
                 applyUpdate(event);
                 if (TERMINAL_STATUSES.includes(event.status)) {
-                    // Do a final poll to get full completed state (previewBaseUrl, etc.)
                     getSessionStatus(encodingApiUrl, sessionId, sessionToken)
                         .then(applyUpdate)
                         .catch(() => {})
@@ -121,7 +110,6 @@ export function useSessionPoller() {
                 }
             },
             () => {
-                // SSE error — fall back to polling
                 if (!polling.value) return;
                 eventSource?.close();
                 eventSource = null;
@@ -161,8 +149,6 @@ export function useSessionPoller() {
         encoder: readonly(encoder),
         segmentFormat: readonly(segmentFormat),
         thumbnailsVtt: readonly(thumbnailsVtt),
-        previewBaseUrl: readonly(previewBaseUrl),
-        previewToken: readonly(previewToken),
         polling: readonly(polling),
         start,
         stop,

@@ -401,6 +401,28 @@ export async function getSessionDetail(
     return res.json();
 }
 
+export async function updateSessionName(
+    accessToken: string,
+    sessionId: string,
+    name: string,
+): Promise<any> {
+    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/name`, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ name }),
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Failed to update session name (${res.status})`);
+    }
+
+    return res.json();
+}
+
 export async function importSession(
     accessToken: string,
     data: {
