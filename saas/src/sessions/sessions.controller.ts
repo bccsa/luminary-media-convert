@@ -2,6 +2,7 @@ import {
     Controller,
     Get,
     Post,
+    Patch,
     Delete,
     Body,
     Param,
@@ -60,6 +61,20 @@ export class SessionsController {
             skip,
             status,
         });
+    }
+
+    @Patch(':sessionId/name')
+    @SkipAdmin()
+    async updateName(
+        @Param('sessionId') sessionId: string,
+        @Body() body: { name: string },
+        @Req() req: { user: { _id: string } },
+    ) {
+        return this.sessionsService.updateSessionName(
+            req.user._id,
+            sessionId,
+            body.name ?? '',
+        );
     }
 
     @Get(':sessionId')

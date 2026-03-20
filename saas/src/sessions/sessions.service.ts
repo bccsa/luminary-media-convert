@@ -111,6 +111,27 @@ export class SessionsService implements OnModuleInit {
             encrypted: dto.encryption?.enabled === true,
         });
 
+        // Create CouchDB document immediately so the session is visible in history
+        const now = new Date().toISOString();
+        const sessionDoc: SessionDocument = {
+            _id: `session:${data.sessionId}`,
+            docType: 'session',
+            userId,
+            sessionId: data.sessionId,
+            status: 'created',
+            s3Config,
+            s3ConfigId: dto.s3ConfigId,
+            encrypted: dto.encryption?.enabled === true || undefined,
+            createdAt: now,
+            updatedAt: now,
+        };
+        if (!sessionDoc.encrypted) delete sessionDoc.encrypted;
+        await this.databaseService.insert(sessionDoc).catch((err) => {
+            this.logger.warn(
+                `Failed to create CouchDB doc for session ${data.sessionId}: ${err}`,
+            );
+        });
+
         this.logger.log(
             `Session ${data.sessionId} created for user ${userId}`,
         );
@@ -153,6 +174,17 @@ export class SessionsService implements OnModuleInit {
         }
 
         this.sessions.delete(sessionId);
+
+        // Remove CouchDB document
+        try {
+            const doc = await this.databaseService.get<SessionDocument>(
+                `session:${sessionId}`,
+            );
+            await this.databaseService.destroy(doc._id, doc._rev!);
+        } catch {
+            // Ignore — document may not exist yet
+        }
+
         this.logger.log(`Session ${sessionId} deleted by user ${userId}`);
     }
 
@@ -315,11 +347,37 @@ export class SessionsService implements OnModuleInit {
     async getSession(
         userId: string,
         sessionId: string,
-    ): Promise<SessionDocument> {
+    ): Promise<SessionDocument & { sessionToken?: string; encodingApiUrl?: string }> {
         const doc = await this.getSessionDoc(sessionId);
         if (doc.userId !== userId) {
             throw new ForbiddenException('Not authorized to view this session');
         }
+
+        // Augment with active session data if available in memory
+        const record = this.sessions.get(sessionId);
+        if (record) {
+            return {
+                ...doc,
+                sessionToken: record.sessionToken,
+                encodingApiUrl: this.encodingApiUrl,
+            };
+        }
+
+        return doc;
+    }
+
+    async updateSessionName(
+        userId: string,
+        sessionId: string,
+        name: string,
+    ): Promise<SessionDocument> {
+        const doc = await this.getSessionDoc(sessionId);
+        if (doc.userId !== userId) {
+            throw new ForbiddenException('Not authorized to update this session');
+        }
+        doc.name = name.trim() || undefined;
+        doc.updatedAt = new Date().toISOString();
+        await this.databaseService.upsert(doc);
         return doc;
     }
 

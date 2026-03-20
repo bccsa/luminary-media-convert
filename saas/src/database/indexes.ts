@@ -7,6 +7,7 @@ export const INDEXES = [
         fields: ['docType', 'userId', 'status'],
     },
     { name: 'sessions-by-created', fields: ['docType', 'createdAt'] },
+    { name: 'sessions-by-user-name', fields: ['docType', 'userId', 'name'] },
     { name: 'sessions-by-expiry', fields: ['docType', 'expiresAt'] },
     {
         name: 'sessions-by-updated',

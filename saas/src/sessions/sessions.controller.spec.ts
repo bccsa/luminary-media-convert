@@ -9,6 +9,8 @@ describe('SessionsController', () => {
         deleteSession: ReturnType<typeof vi.fn>;
         listSessions: ReturnType<typeof vi.fn>;
         getSession: ReturnType<typeof vi.fn>;
+        importSession: ReturnType<typeof vi.fn>;
+        updateSessionName: ReturnType<typeof vi.fn>;
     };
 
     beforeEach(() => {
@@ -17,6 +19,8 @@ describe('SessionsController', () => {
             deleteSession: vi.fn(),
             listSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
             getSession: vi.fn().mockResolvedValue({ sessionId: 's1', status: 'completed' }),
+            importSession: vi.fn(),
+            updateSessionName: vi.fn(),
         };
         controller = new SessionsController(
             sessionsService as unknown as SessionsService,
@@ -75,6 +79,89 @@ describe('SessionsController', () => {
             await controller.remove('sess-123', req);
 
             expect(sessionsService.deleteSession).toHaveBeenCalledWith('user:1', 'sess-123');
+        });
+    });
+
+    describe('importSession', () => {
+        it('should import session and return document', async () => {
+            const importedDoc = {
+                _id: 'session:sess-new',
+                sessionId: 'sess-new',
+                status: 'completed',
+                imported: true,
+            };
+            sessionsService.importSession.mockResolvedValue(importedDoc);
+
+            const dto = {
+                s3ConfigId: 'cfg-1',
+                masterPlaylistKey: 'output/master.m3u8',
+            };
+            const req = { user: { _id: 'user:1' } };
+
+            const result = await controller.importSession(dto as any, req);
+
+            expect(result).toEqual(importedDoc);
+            expect(sessionsService.importSession).toHaveBeenCalledWith('user:1', dto);
+        });
+
+        it('should pass userId from request to service', async () => {
+            sessionsService.importSession.mockResolvedValue({});
+
+            const dto = { s3ConfigId: 'cfg-1', folderPrefix: 'output/' };
+            const req = { user: { _id: 'user:42' } };
+
+            await controller.importSession(dto as any, req);
+
+            expect(sessionsService.importSession).toHaveBeenCalledWith('user:42', dto);
+        });
+    });
+
+    describe('updateName', () => {
+        it('should update session name and return updated document', async () => {
+            const updatedDoc = {
+                _id: 'session:sess-1',
+                sessionId: 'sess-1',
+                name: 'My Encode',
+                status: 'completed',
+            };
+            sessionsService.updateSessionName.mockResolvedValue(updatedDoc);
+
+            const req = { user: { _id: 'user:1' } };
+            const result = await controller.updateName('sess-1', { name: 'My Encode' }, req);
+
+            expect(result).toEqual(updatedDoc);
+            expect(sessionsService.updateSessionName).toHaveBeenCalledWith(
+                'user:1',
+                'sess-1',
+                'My Encode',
+            );
+        });
+
+        it('should pass empty string when name is not provided in body', async () => {
+            sessionsService.updateSessionName.mockResolvedValue({});
+
+            const req = { user: { _id: 'user:1' } };
+            await controller.updateName('sess-1', {} as any, req);
+
+            // The controller does `body.name ?? ''` so undefined name becomes ''
+            expect(sessionsService.updateSessionName).toHaveBeenCalledWith(
+                'user:1',
+                'sess-1',
+                '',
+            );
+        });
+
+        it('should pass userId from request to service', async () => {
+            sessionsService.updateSessionName.mockResolvedValue({});
+
+            const req = { user: { _id: 'user:77' } };
+            await controller.updateName('sess-5', { name: 'Test' }, req);
+
+            expect(sessionsService.updateSessionName).toHaveBeenCalledWith(
+                'user:77',
+                'sess-5',
+                'Test',
+            );
         });
     });
 });

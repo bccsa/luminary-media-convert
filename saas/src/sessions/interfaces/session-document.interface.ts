@@ -4,6 +4,7 @@ export interface SessionDocument {
     docType: 'session';
     userId: string;
     sessionId: string;
+    name?: string;
     status: string;
     progress?: number;
     queuePosition?: number;

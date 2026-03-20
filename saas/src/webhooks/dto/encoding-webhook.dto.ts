@@ -1,5 +1,10 @@
-import { IsString, IsOptional, IsNumber, IsArray } from 'class-validator';
-import { Expose } from 'class-transformer';
+import { IsString, IsOptional, IsNumber, IsArray, ValidateNested } from 'class-validator';
+import { Expose, Type } from 'class-transformer';
+
+class AnglePlaylistDto {
+    @IsString() @Expose() name: string;
+    @IsString() @Expose() key: string;
+}
 
 export class EncodingWebhookDto {
     @IsString() @Expose() sessionId: string;
@@ -11,6 +16,6 @@ export class EncodingWebhookDto {
     @IsArray() @IsOptional() @Expose() files?: string[];
     @IsString() @IsOptional() @Expose() masterPlaylist?: string;
     @IsString() @IsOptional() @Expose() thumbnailsVtt?: string;
-    @IsArray() @IsOptional() @Expose() anglePlaylists?: Array<{ name: string; key: string }>;
+    @IsArray() @IsOptional() @ValidateNested({ each: true }) @Type(() => AnglePlaylistDto) @Expose() anglePlaylists?: AnglePlaylistDto[];
     @IsString() @IsOptional() @Expose() encryptionKeyHex?: string;
 }
