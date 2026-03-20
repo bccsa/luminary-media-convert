@@ -1,13 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
-import videojs from 'video.js';
-import type Player from 'video.js/dist/types/player';
-import 'video.js/dist/video-js.css';
-import { registerQualitySelector } from '../videojs-quality-selector';
-import { registerThumbnailPreview } from '../videojs-thumbnail-preview';
-
-registerQualitySelector();
-registerThumbnailPreview();
+import { computed } from 'vue';
+import SessionReview from './SessionReview.vue';
 import type { AccelMode, SegmentFormat, SessionStatus } from '../types';
 
 const props = defineProps<{
@@ -26,6 +19,7 @@ const props = defineProps<{
     thumbnailsVtt?: string;
     previewBaseUrl?: string;
     previewToken?: string;
+    encryptionKeyHex?: string;
 }>();
 
 const emit = defineEmits<{ reset: []; cancel: [] }>();
@@ -33,176 +27,6 @@ const emit = defineEmits<{ reset: []; cancel: [] }>();
 const isCancellable = computed(
     () => props.status === 'queued' || props.status === 'encoding',
 );
-
-const playerEl = ref<HTMLVideoElement | null>(null);
-const copied = ref(false);
-const currentAngleIndex = ref(0);
-const pendingSeekTime = ref<number | null>(null);
-let player: Player | null = null;
-let copyTimeout: ReturnType<typeof setTimeout> | null = null;
-
-// SVG poster for audio-only playlists (headphone icon on dark background)
-const audioPosterUrl = `data:image/svg+xml,${encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">' +
-    '<rect width="640" height="360" fill="#18181b"/>' +
-    '<g transform="translate(280,130)" fill="none" stroke="#52525b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">' +
-    '<path d="M4 56V34a36 36 0 0 1 72 0v22"/>' +
-    '<rect x="0" y="48" width="16" height="32" rx="4" fill="#52525b"/>' +
-    '<rect x="64" y="48" width="16" height="32" rx="4" fill="#52525b"/>' +
-    '</g></svg>',
-)}`;
-
-const primaryPlaylistKey = computed(() => {
-    const lists = uniqueAnglePlaylists.value;
-    if (lists.length) {
-        return lists[currentAngleIndex.value]?.key ?? lists[0]?.key;
-    }
-    return props.masterPlaylist;
-});
-
-const s3Url = computed(() => {
-    if (!primaryPlaylistKey.value || !props.s3PublicBaseUrl) return null;
-    return `${props.s3PublicBaseUrl}/${primaryPlaylistKey.value}`;
-});
-
-const playbackUrl = computed(() => {
-    if (!primaryPlaylistKey.value) return null;
-    if (props.previewBaseUrl) {
-        const filename = primaryPlaylistKey.value.split('/').pop();
-        return `${props.previewBaseUrl}/${filename}`;
-    }
-    return s3Url.value;
-});
-
-const thumbnailVttUrl = computed(() => {
-    if (!props.thumbnailsVtt || !props.s3PublicBaseUrl) return null;
-    return `${props.s3PublicBaseUrl}/${props.thumbnailsVtt}`;
-});
-
-const uniqueAnglePlaylists = computed(() => {
-    const lists = props.anglePlaylists;
-    if (!lists?.length) return [];
-    const seen = new Set<string>();
-    const result: { name: string; key: string }[] = [];
-    for (const ap of lists) {
-        if (seen.has(ap.name)) continue;
-        seen.add(ap.name);
-        result.push(ap);
-    }
-    return result;
-});
-
-const showAngleSwitcher = computed(
-    () => uniqueAnglePlaylists.value.length > 1,
-);
-
-const currentAngleIsAudioOnly = computed(() => {
-    const lists = uniqueAnglePlaylists.value;
-    if (!lists.length) return false;
-    return lists[currentAngleIndex.value]?.name === 'Audio only';
-});
-
-const isAudioOnly = computed(
-    () => props.encodingType === 'audio' || currentAngleIsAudioOnly.value,
-);
-
-function setupPreviewAuth() {
-    if (!player || !props.previewToken) return;
-    const token = props.previewToken;
-    const hook = () => {
-        try {
-            const tech = player!.tech({ IWillNotUseThisInPlugins: true } as any) as any;
-            tech?.vhs?.xhr?.onRequest?.((options: any) => {
-                if (options.uri?.includes('/api/sessions/')) {
-                    options.headers = options.headers || {};
-                    options.headers['Authorization'] = `Bearer ${token}`;
-                }
-                return options;
-            });
-        } catch { /* tech not ready yet */ }
-    };
-    player.on('xhr-hooks-ready', hook);
-}
-
-function initPlayer() {
-    if (!playerEl.value || !playbackUrl.value) return;
-    if (player) {
-        try { (player as any).audioOnlyMode(false); } catch {}
-        player.fluid(true);
-
-        if (isAudioOnly.value) {
-            player.poster(audioPosterUrl);
-        } else {
-            player.poster('');
-        }
-
-        const wasPaused = player.paused();
-        setupPreviewAuth();
-        player.src({ src: playbackUrl.value, type: 'application/x-mpegURL' });
-        if (pendingSeekTime.value != null) {
-            const seekTo = pendingSeekTime.value;
-            pendingSeekTime.value = null;
-            player.one('loadedmetadata', () => {
-                player!.currentTime(seekTo);
-                if (!wasPaused) player!.play();
-            });
-        }
-        return;
-    }
-
-    try {
-        player = videojs(playerEl.value, {
-            controls: true,
-            fluid: true,
-            responsive: true,
-            poster: isAudioOnly.value ? audioPosterUrl : undefined,
-            html5: { vhs: { overrideNative: true } },
-        });
-
-        setupPreviewAuth();
-        player.src({ src: playbackUrl.value, type: 'application/x-mpegURL' });
-
-        player.ready(() => {
-            try {
-                (player as any).hlsQualitySelector({ displayCurrentQuality: true });
-            } catch (e) {
-                console.warn('HLS quality selector unavailable:', e);
-            }
-            if (thumbnailVttUrl.value) {
-                try {
-                    (player as any).thumbnailPreview({ vttUrl: thumbnailVttUrl.value });
-                } catch (e) {
-                    console.warn('Thumbnail preview unavailable:', e);
-                }
-            }
-        });
-    } catch (e) {
-        console.error('Failed to initialize video player:', e);
-    }
-}
-
-watch(playbackUrl, async (url) => {
-    if (url) {
-        await nextTick();
-        initPlayer();
-    }
-});
-
-onBeforeUnmount(() => {
-    if (player) {
-        player.dispose();
-        player = null;
-    }
-    if (copyTimeout) clearTimeout(copyTimeout);
-});
-
-async function copyPlaybackUrl() {
-    if (!s3Url.value) return;
-    await navigator.clipboard.writeText(s3Url.value);
-    copied.value = true;
-    if (copyTimeout) clearTimeout(copyTimeout);
-    copyTimeout = setTimeout(() => { copied.value = false; }, 2000);
-}
 
 const statusConfig: Record<string, { label: string; color: string }> = {
     created: { label: 'Created', color: 'bg-zinc-800 text-zinc-400' },
@@ -227,13 +51,27 @@ function badgeClasses(s: string | null): string {
     return `inline-block rounded-full px-3 py-1 text-xs font-semibold ${cfg?.color ?? 'bg-zinc-800 text-zinc-400'}`;
 }
 
-function switchToAngle(index: number) {
-    if (index === currentAngleIndex.value) return;
-    if (player) {
-        pendingSeekTime.value = player.currentTime() ?? 0;
-    }
-    currentAngleIndex.value = index;
-}
+// For SessionReview: when previewBaseUrl is set, the encryption key URL
+// and token are derived from it. Otherwise no encryption key handling
+// is needed for the encoding flow (preview auth handles it via
+// the previewBaseUrl prop on SessionReview).
+const reviewEncryptionKeyUrl = computed(() => {
+    // When using preview mode, encryption key is served via preview endpoint.
+    // This is handled by SessionReview's previewBaseUrl prop internally.
+    return null;
+});
+
+const reviewEncryptionKeyToken = computed(() => {
+    // When using preview mode, the preview token is used for auth on
+    // playlist/key requests. Pass it through so SessionReview can use
+    // it for preview auth (both playlist auth and key fetching).
+    return props.previewToken ?? null;
+});
+
+const mutableAnglePlaylists = computed(() => {
+    if (!props.anglePlaylists) return undefined;
+    return props.anglePlaylists.map((ap) => ({ name: ap.name, key: ap.key }));
+});
 </script>
 
 <template>
@@ -302,75 +140,23 @@ function switchToAngle(index: number) {
                 <p class="text-sm font-medium text-emerald-400">Encoding complete</p>
             </div>
 
-            <!-- Angle switcher (multi-angle only; one button per unique track name) -->
-            <div
-                v-if="showAngleSwitcher && uniqueAnglePlaylists.length"
-                class="flex flex-wrap items-center gap-2"
-            >
-                <span class="text-xs font-medium text-zinc-500">Angle:</span>
-                <div class="flex flex-wrap gap-1.5">
-                    <button
-                        v-for="(ap, i) in uniqueAnglePlaylists"
-                        :key="ap.key"
-                        type="button"
-                        class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer"
-                        :class="i === currentAngleIndex
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'"
-                        @click="switchToAngle(i)"
-                    >
-                        {{ ap.name }}
-                    </button>
-                </div>
-            </div>
-
-            <!-- Player -->
-            <div v-if="playbackUrl" class="rounded-lg bg-black [&_.video-js]:overflow-visible [&_.vjs-control-bar]:overflow-visible">
-                <video
-                    ref="playerEl"
-                    class="video-js vjs-big-play-centered"
-                    playsinline
-                />
-            </div>
-
-            <!-- Master Playlist URL + Copy -->
-            <div v-if="masterPlaylist" class="rounded-lg bg-zinc-900/60 p-4">
-                <div class="mb-1 flex items-center justify-between">
-                    <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Master Playlist</p>
-                    <button
-                        v-if="s3Url"
-                        type="button"
-                        class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer"
-                        :class="copied
-                            ? 'bg-emerald-900/60 text-emerald-400'
-                            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'"
-                        @click="copyPlaybackUrl"
-                    >
-                        <svg v-if="!copied" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-                        </svg>
-                        <svg v-else class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                        {{ copied ? 'Copied!' : 'Copy URL' }}
-                    </button>
-                </div>
-                <p class="break-all font-mono text-sm text-indigo-400">{{ s3Url ?? masterPlaylist }}</p>
-            </div>
-
-            <div v-if="files?.length" class="rounded-lg bg-zinc-900/60 p-4">
-                <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Output Files</p>
-                <ul class="max-h-60 space-y-1 overflow-y-auto">
-                    <li
-                        v-for="f in files"
-                        :key="f"
-                        class="break-all font-mono text-xs text-zinc-400"
-                    >
-                        {{ f }}
-                    </li>
-                </ul>
-            </div>
+            <SessionReview
+                :session-id="sessionId"
+                :master-playlist="masterPlaylist"
+                :angle-playlists="mutableAnglePlaylists"
+                :files="files"
+                :thumbnails-vtt="thumbnailsVtt"
+                :encoder="encoder"
+                :segment-format="segmentFormat"
+                :s3-public-base-url="s3PublicBaseUrl"
+                :encoding-type="encodingType"
+                :encryption-key-url="reviewEncryptionKeyUrl"
+                :encryption-key-token="reviewEncryptionKeyToken"
+                :preview-base-url="previewBaseUrl"
+                :preview-token="previewToken"
+                :encrypted="!!previewBaseUrl"
+                :encryption-key-hex="encryptionKeyHex"
+            />
         </div>
 
         <!-- Error -->

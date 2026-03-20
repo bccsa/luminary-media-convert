@@ -352,3 +352,78 @@ export async function deleteS3Config(
         throw new Error(body.message || `S3 config deletion failed (${res.status})`);
     }
 }
+
+// ---------------------------------------------------------------------------
+// SaaS Service — Session History
+// ---------------------------------------------------------------------------
+
+export async function listSessions(
+    accessToken: string,
+    opts?: { limit?: number; skip?: number; status?: string },
+): Promise<{ sessions: any[]; total: number }> {
+    const params = new URLSearchParams();
+    if (opts?.limit != null) params.set('limit', String(opts.limit));
+    if (opts?.skip != null) params.set('skip', String(opts.skip));
+    if (opts?.status) params.set('status', opts.status);
+
+    const qs = params.toString();
+    const url = `${SAAS_URL}/saas/sessions${qs ? `?${qs}` : ''}`;
+
+    const res = await fetch(url, {
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Failed to list sessions (${res.status})`);
+    }
+
+    return res.json();
+}
+
+export async function getSessionDetail(
+    accessToken: string,
+    sessionId: string,
+): Promise<any> {
+    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}`, {
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Failed to get session detail (${res.status})`);
+    }
+
+    return res.json();
+}
+
+export async function importSession(
+    accessToken: string,
+    data: {
+        s3ConfigId: string;
+        masterPlaylistKey?: string;
+        folderPrefix?: string;
+        encryptionKey?: string;
+    },
+): Promise<any> {
+    const res = await fetch(`${SAAS_URL}/saas/sessions/import`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(data),
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Session import failed (${res.status})`);
+    }
+
+    return res.json();
+}
+

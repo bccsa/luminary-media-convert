@@ -45,6 +45,7 @@ export interface CreateSessionRequest {
     s3: S3Config;
     webhook?: WebhookConfig;
     encryption?: EncryptionConfig;
+    s3ConfigId?: string;
 }
 
 export interface SaasSessionResponse {

@@ -77,6 +77,15 @@ watch(isAuthenticated, async (authenticated) => {
                         Encode
                     </router-link>
                     <router-link
+                        to="/sessions"
+                        :class="[
+                            'transition-colors hover:text-zinc-200',
+                            $route.path.startsWith('/sessions') ? 'text-indigo-400 font-medium' : 'text-zinc-400',
+                        ]"
+                    >
+                        Sessions
+                    </router-link>
+                    <router-link
                         to="/keys"
                         :class="[
                             'transition-colors hover:text-zinc-200',

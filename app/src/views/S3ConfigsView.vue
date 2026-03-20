@@ -11,7 +11,6 @@ interface S3ConfigEntry {
     useSSL: boolean;
     bucket: string;
     region?: string;
-    pathPrefix?: string;
     createdAt: string;
 }
 
@@ -22,7 +21,6 @@ interface S3ConfigForm {
     useSSL: boolean;
     bucket: string;
     region: string;
-    pathPrefix: string;
     accessKey: string;
     secretKey: string;
 }
@@ -50,7 +48,6 @@ function emptyForm(): S3ConfigForm {
         useSSL: true,
         bucket: '',
         region: '',
-        pathPrefix: '',
         accessKey: '',
         secretKey: '',
     };
@@ -98,7 +95,6 @@ async function openEditForm(configId: string) {
         form.useSSL = data.useSSL !== false;
         form.bucket = data.bucket || '';
         form.region = data.region || '';
-        form.pathPrefix = data.pathPrefix || '';
         // Credentials are shown as placeholders — only sent if user fills them in
         form.accessKey = '';
         form.secretKey = '';
@@ -136,7 +132,6 @@ async function handleSubmit() {
 
         if (form.port) payload.port = form.port;
         if (form.region.trim()) payload.region = form.region.trim();
-        if (form.pathPrefix.trim()) payload.pathPrefix = form.pathPrefix.trim();
 
         if (editingId.value) {
             // Only send credentials if user entered new values
@@ -239,10 +234,6 @@ onMounted(fetchConfigs);
                         <div>
                             <label class="mb-1 block text-xs text-zinc-500">Region</label>
                             <input v-model="form.region" type="text" class="input" placeholder="us-east-1" />
-                        </div>
-                        <div class="sm:col-span-2">
-                            <label class="mb-1 block text-xs text-zinc-500">Path Prefix</label>
-                            <input v-model="form.pathPrefix" type="text" class="input" placeholder="optional/prefix" />
                         </div>
                     </div>
 

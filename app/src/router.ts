@@ -10,6 +10,21 @@ const router = createRouter({
             component: EncodeView,
         },
         {
+            path: '/sessions',
+            name: 'sessions',
+            component: () => import('./views/SessionHistoryView.vue'),
+        },
+        {
+            path: '/sessions/import',
+            name: 'session-import',
+            component: () => import('./views/SessionImportView.vue'),
+        },
+        {
+            path: '/sessions/:id',
+            name: 'session-detail',
+            component: () => import('./views/SessionDetailView.vue'),
+        },
+        {
             path: '/keys',
             name: 'api-keys',
             component: () => import('./views/ApiKeysView.vue'),

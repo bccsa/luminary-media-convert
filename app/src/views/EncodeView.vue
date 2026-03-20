@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import SessionConfigForm from '../components/SessionConfigForm.vue';
 import type { SavedS3Config } from '../components/SessionConfigForm.vue';
 import { EncodeConfigForm, computeLayoutKey, saveConfig } from '@luminary-media-converter/encode-config';
 import type { ProbeResult, EncodeConfig } from '@luminary-media-converter/encode-config';
 import SessionProgress from '../components/SessionProgress.vue';
-import { createSession, uploadFile, getSessionStatus, subscribeSessionEvents, startEncode, deleteSession, listS3Configs, getS3Config, createS3Config, updateS3Config } from '../api';
+import { createSession, uploadFile, getSessionStatus, subscribeSessionEvents, startEncode, deleteSession, listS3Configs, getS3Config, createS3Config, getSessionDetail } from '../api';
 import { useSessionPoller } from '../composables/useSessionPoller';
 import type { CreateSessionRequest, S3Config } from '../types';
 
@@ -35,6 +35,7 @@ const byteRangeEnabled = ref(true);
 const savedS3Configs = ref<SavedS3Config[]>([]);
 const loadedS3Config = ref<S3Config | null>(null);
 const selectedS3ConfigId = ref('');
+const encryptionKeyHex = ref<string | undefined>();
 
 async function fetchSavedS3Configs() {
     try {
@@ -70,24 +71,21 @@ async function onLoadS3Config(configId: string) {
     }
 }
 
-async function onSaveS3Config(data: Record<string, any>) {
+const creatingConfig = ref(false);
+
+async function onCreateS3Config(data: Record<string, any>) {
+    creatingConfig.value = true;
     try {
         const token = await getAccessTokenSilently();
-        const { _overwriteId, ...payload } = data;
-        let savedId: string;
-
-        if (_overwriteId) {
-            const updated = await updateS3Config(token, _overwriteId, payload);
-            savedId = updated.id;
-        } else {
-            const created = await createS3Config(token, payload);
-            savedId = created.id;
-        }
-
+        const created = await createS3Config(token, data);
         await fetchSavedS3Configs();
-        selectedS3ConfigId.value = savedId;
+        selectedS3ConfigId.value = created.id;
+        // Auto-load the newly created config
+        await onLoadS3Config(created.id);
     } catch {
-        // Non-critical — config was still used inline
+        // Non-critical
+    } finally {
+        creatingConfig.value = false;
     }
 }
 
@@ -100,6 +98,22 @@ function buildS3PublicBaseUrl(s3: S3Config): string {
 }
 
 const poller = useSessionPoller();
+
+// Fetch encryption key when encoding completes with encryption
+watch(
+    [() => poller.status.value, () => poller.previewBaseUrl.value],
+    async ([status, previewBase]) => {
+        if (status === 'completed' && previewBase && sessionId.value && !encryptionKeyHex.value) {
+            try {
+                const token = await getAccessTokenSilently();
+                const detail = await getSessionDetail(token, sessionId.value);
+                encryptionKeyHex.value = detail.encryptionKeyHex;
+            } catch {
+                // Non-critical — key display is informational
+            }
+        }
+    },
+);
 
 let abortUpload: (() => void) | null = null;
 let isCancelling = false;
@@ -146,6 +160,7 @@ async function pollForProbe(
 async function onUploadSubmit(payload: {
     config: CreateSessionRequest;
     file: File;
+    s3ConfigId: string;
 }) {
     view.value = 'uploading';
     submissionError.value = null;
@@ -308,6 +323,7 @@ function reset() {
     probeResult.value = null;
     s3Config.value = null;
     byteRangeEnabled.value = true;
+    encryptionKeyHex.value = undefined;
 }
 </script>
 
@@ -328,9 +344,10 @@ function reset() {
                 :saved-s3-configs="savedS3Configs"
                 :loaded-s3-config="loadedS3Config"
                 :selected-s3-config-id="selectedS3ConfigId"
+                :creating-config="creatingConfig"
                 @submit="onUploadSubmit"
                 @load-s3-config="onLoadS3Config"
-                @save-s3-config="onSaveS3Config"
+                @create-s3-config="onCreateS3Config"
             />
 
             <!-- Upload progress -->
@@ -393,6 +410,7 @@ function reset() {
                 :thumbnails-vtt="poller.thumbnailsVtt.value"
                 :preview-base-url="poller.previewBaseUrl.value"
                 :preview-token="poller.previewToken.value"
+                :encryption-key-hex="encryptionKeyHex"
                 @reset="reset"
                 @cancel="onCancelEncode"
             />
