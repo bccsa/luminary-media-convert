@@ -211,6 +211,127 @@ describe('api client', () => {
         });
     });
 
+    describe('listAllSessions', () => {
+        it('sends GET with query params to /saas/admin/sessions', async () => {
+            const data = { sessions: [], total: 0 };
+            mockFetch.mockResolvedValue(jsonResponse(data));
+
+            await api.listAllSessions(token, {
+                limit: 10,
+                skip: 20,
+                status: 'completed',
+                userId: 'user:1',
+            });
+
+            const url = mockFetch.mock.calls[0][0] as string;
+            expect(url).toContain('/saas/admin/sessions?');
+            expect(url).toContain('limit=10');
+            expect(url).toContain('skip=20');
+            expect(url).toContain('status=completed');
+            expect(url).toContain('userId=user%3A1');
+        });
+
+        it('omits undefined params', async () => {
+            mockFetch.mockResolvedValue(jsonResponse({ sessions: [] }));
+
+            await api.listAllSessions(token);
+
+            const url = mockFetch.mock.calls[0][0] as string;
+            expect(url).toContain('/saas/admin/sessions?');
+            expect(url).not.toContain('limit=');
+        });
+    });
+
+    describe('getSession', () => {
+        it('sends GET to /saas/admin/sessions/:id', async () => {
+            const sessionData = { sessionId: 's1', status: 'completed' };
+            mockFetch.mockResolvedValue(jsonResponse(sessionData));
+
+            const result = await api.getSession(token, 's1');
+
+            expect(result).toEqual(sessionData);
+            const url = mockFetch.mock.calls[0][0] as string;
+            expect(url).toBe('http://localhost:3000/saas/admin/sessions/s1');
+        });
+    });
+
+    describe('subscribeSessionEvents', () => {
+        let esInstances: any[];
+
+        function setupMockEventSource() {
+            esInstances = [];
+            const MockEventSource = vi.fn(function (this: any) {
+                this.onmessage = null;
+                this.onerror = null;
+                this.close = vi.fn();
+                esInstances.push(this);
+            }) as any;
+            vi.stubGlobal('EventSource', MockEventSource);
+            return MockEventSource;
+        }
+
+        function teardownMockEventSource() {
+            vi.unstubAllGlobals();
+            vi.stubEnv('VITE_SAAS_SERVICE_URL', 'http://localhost:3000');
+            vi.stubGlobal('fetch', mockFetch);
+        }
+
+        it('creates EventSource with token query param', () => {
+            const MockES = setupMockEventSource();
+
+            const onEvent = vi.fn();
+            api.subscribeSessionEvents(token, onEvent);
+
+            expect(MockES).toHaveBeenCalledWith(
+                `http://localhost:3000/saas/admin/sessions/events?token=${encodeURIComponent(token)}`,
+            );
+
+            // Simulate receiving a message
+            const event = {
+                sessionId: 's1',
+                userId: 'u1',
+                status: 'encoding',
+                updatedAt: '2026-01-01T00:00:00.000Z',
+            };
+            const instance = esInstances[0];
+            instance.onmessage({ data: JSON.stringify(event) });
+            expect(onEvent).toHaveBeenCalledWith(event);
+
+            teardownMockEventSource();
+        });
+
+        it('ignores parse errors in SSE messages', () => {
+            setupMockEventSource();
+
+            const onEvent = vi.fn();
+            api.subscribeSessionEvents(token, onEvent);
+
+            // Simulate receiving invalid JSON
+            const instance = esInstances[0];
+            instance.onmessage({ data: 'not json' });
+            expect(onEvent).not.toHaveBeenCalled();
+
+            teardownMockEventSource();
+        });
+    });
+
+    describe('getDashboard', () => {
+        it('sends GET to /saas/admin/dashboard', async () => {
+            const data = {
+                userCounts: { total: 5, active: 4, disabled: 1 },
+                sessionCounts: { total: 10, active: 2, completed: 7, failed: 1 },
+                recentActivity: [],
+            };
+            mockFetch.mockResolvedValue(jsonResponse(data));
+
+            const result = await api.getDashboard(token);
+
+            expect(result).toEqual(data);
+            const url = mockFetch.mock.calls[0][0] as string;
+            expect(url).toBe('http://localhost:3000/saas/admin/dashboard');
+        });
+    });
+
     describe('error handling', () => {
         it('throws with server error message', async () => {
             mockFetch.mockResolvedValue(

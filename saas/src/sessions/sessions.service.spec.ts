@@ -134,6 +134,16 @@ describe('SessionsService', () => {
         });
     });
 
+    describe('onModuleInit', () => {
+        it('should warn when env vars are not set', () => {
+            delete process.env.ENCODING_API_URL;
+            delete process.env.ENCODING_API_MASTER_KEY;
+            const warnService = new SessionsService(mockDatabaseService as any);
+            // Should not throw
+            warnService.onModuleInit();
+        });
+    });
+
     describe('listSessions', () => {
         it('should query CouchDB for user sessions', async () => {
             mockDatabaseService.find.mockResolvedValue({ docs: [] });
@@ -143,6 +153,32 @@ describe('SessionsService', () => {
             expect(mockDatabaseService.find).toHaveBeenCalledWith(
                 expect.objectContaining({
                     selector: { docType: 'session', userId: 'user:1' },
+                }),
+            );
+        });
+
+        it('should filter by status when provided', async () => {
+            mockDatabaseService.find.mockResolvedValue({ docs: [] });
+
+            await service.listSessions('user:1', { status: 'completed' });
+
+            expect(mockDatabaseService.find).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    selector: { docType: 'session', userId: 'user:1', status: 'completed' },
+                    use_index: 'sessions-by-user-status',
+                }),
+            );
+        });
+
+        it('should use default limit and skip', async () => {
+            mockDatabaseService.find.mockResolvedValue({ docs: [] });
+
+            await service.listSessions('user:1', {});
+
+            expect(mockDatabaseService.find).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    limit: 25,
+                    skip: 0,
                 }),
             );
         });
@@ -178,6 +214,173 @@ describe('SessionsService', () => {
             await expect(
                 service.getSession('user:1', 'unknown'),
             ).rejects.toThrow(NotFoundException);
+        });
+
+        it('should rethrow non-404 errors', async () => {
+            mockDatabaseService.get.mockRejectedValue(new Error('connection lost'));
+
+            await expect(
+                service.getSession('user:1', 'sess-1'),
+            ).rejects.toThrow('connection lost');
+        });
+    });
+
+    describe('listAllSessions', () => {
+        it('should query all sessions without filters', async () => {
+            mockDatabaseService.find.mockResolvedValue({ docs: [] });
+
+            const result = await service.listAllSessions({});
+
+            expect(mockDatabaseService.find).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    selector: { docType: 'session' },
+                    use_index: 'sessions-by-created',
+                    limit: 25,
+                    skip: 0,
+                }),
+            );
+            expect(result).toEqual({ sessions: [], total: 0 });
+        });
+
+        it('should filter by status and userId', async () => {
+            const docs = [{ sessionId: 's1', status: 'completed' }];
+            mockDatabaseService.find.mockResolvedValue({ docs });
+
+            const result = await service.listAllSessions({
+                status: 'completed',
+                userId: 'user:1',
+                limit: 10,
+                skip: 5,
+            });
+
+            expect(mockDatabaseService.find).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    selector: { docType: 'session', status: 'completed', userId: 'user:1' },
+                    limit: 10,
+                    skip: 5,
+                }),
+            );
+            expect(result).toEqual({ sessions: docs, total: 1 });
+        });
+    });
+
+    describe('getSessionAdmin', () => {
+        it('should return session without ownership check', async () => {
+            mockDatabaseService.get.mockResolvedValue({
+                _id: 'session:sess-1',
+                userId: 'user:other',
+                sessionId: 'sess-1',
+                status: 'completed',
+            });
+
+            const result = await service.getSessionAdmin('sess-1');
+
+            expect(result.sessionId).toBe('sess-1');
+            expect(mockDatabaseService.get).toHaveBeenCalledWith('session:sess-1');
+        });
+
+        it('should throw NotFoundException when not found', async () => {
+            mockDatabaseService.get.mockRejectedValue({ statusCode: 404 });
+
+            await expect(service.getSessionAdmin('unknown')).rejects.toThrow(
+                NotFoundException,
+            );
+        });
+    });
+
+    describe('deleteSession — error handling', () => {
+        it('should throw BadGatewayException when Encoding API delete fails', async () => {
+            await service.createSession('user:1', {
+                s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' },
+            } as any);
+
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Server error' }), { status: 500 }),
+            );
+
+            await expect(
+                service.deleteSession('user:1', 'sess-123'),
+            ).rejects.toThrow(BadGatewayException);
+        });
+
+        it('should succeed when Encoding API returns 404 on delete', async () => {
+            await service.createSession('user:1', {
+                s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' },
+            } as any);
+
+            vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 404 }));
+
+            await expect(
+                service.deleteSession('user:1', 'sess-123'),
+            ).resolves.toBeUndefined();
+        });
+
+        it('should handle non-JSON error response from Encoding API delete', async () => {
+            await service.createSession('user:1', {
+                s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' },
+            } as any);
+
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('not json', {
+                    status: 502,
+                    headers: { 'Content-Type': 'text/plain' },
+                }),
+            );
+
+            await expect(
+                service.deleteSession('user:1', 'sess-123'),
+            ).rejects.toThrow(BadGatewayException);
+        });
+    });
+
+    describe('createSession — error handling', () => {
+        it('should handle non-JSON error response from Encoding API', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('not json', {
+                    status: 500,
+                    headers: { 'Content-Type': 'text/plain' },
+                }),
+            );
+
+            await expect(
+                service.createSession('user:1', { s3: {} } as any),
+            ).rejects.toThrow(BadGatewayException);
+        });
+
+        it('should use default SAAS_SERVICE_URL when env not set', async () => {
+            delete process.env.SAAS_SERVICE_URL;
+            process.env.PORT = '4000';
+
+            const svc = new SessionsService(mockDatabaseService as any);
+            svc.onModuleInit();
+
+            await svc.createSession('user:1', {
+                s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' },
+            } as any);
+
+            const fetchCall = vi.mocked(fetch).mock.calls[0];
+            const body = JSON.parse(fetchCall[1]!.body as string);
+            expect(body.webhook.url).toBe('http://localhost:4000/saas/webhooks/encoding');
+
+            delete process.env.PORT;
+        });
+
+        it('should use default port and empty webhook secret when env not set', async () => {
+            delete process.env.SAAS_SERVICE_URL;
+            delete process.env.PORT;
+            delete process.env.WEBHOOK_SECRET;
+
+            const svc = new SessionsService(mockDatabaseService as any);
+            svc.onModuleInit();
+
+            await svc.createSession('user:1', {
+                s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' },
+            } as any);
+
+            const fetchCall = vi.mocked(fetch).mock.calls[0];
+            const body = JSON.parse(fetchCall[1]!.body as string);
+            expect(body.webhook.url).toBe('http://localhost:3001/saas/webhooks/encoding');
+            expect(body.webhook.sessionToken).toBe('');
         });
     });
 });

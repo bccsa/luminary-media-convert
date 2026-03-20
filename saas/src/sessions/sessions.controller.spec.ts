@@ -7,12 +7,16 @@ describe('SessionsController', () => {
     let sessionsService: {
         createSession: ReturnType<typeof vi.fn>;
         deleteSession: ReturnType<typeof vi.fn>;
+        listSessions: ReturnType<typeof vi.fn>;
+        getSession: ReturnType<typeof vi.fn>;
     };
 
     beforeEach(() => {
         sessionsService = {
             createSession: vi.fn(),
             deleteSession: vi.fn(),
+            listSessions: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
+            getSession: vi.fn().mockResolvedValue({ sessionId: 's1', status: 'completed' }),
         };
         controller = new SessionsController(
             sessionsService as unknown as SessionsService,
@@ -36,6 +40,30 @@ describe('SessionsController', () => {
 
             expect(result).toEqual(response);
             expect(sessionsService.createSession).toHaveBeenCalledWith('user:1', dto);
+        });
+    });
+
+    describe('list', () => {
+        it('should list user sessions', async () => {
+            const req = { user: { _id: 'user:1' } };
+            const result = await controller.list(req, 10, 5, 'completed');
+
+            expect(sessionsService.listSessions).toHaveBeenCalledWith('user:1', {
+                limit: 10,
+                skip: 5,
+                status: 'completed',
+            });
+            expect(result).toEqual({ sessions: [], total: 0 });
+        });
+    });
+
+    describe('detail', () => {
+        it('should return session detail', async () => {
+            const req = { user: { _id: 'user:1' } };
+            const result = await controller.detail('sess-1', req);
+
+            expect(sessionsService.getSession).toHaveBeenCalledWith('user:1', 'sess-1');
+            expect(result.sessionId).toBe('s1');
         });
     });
 

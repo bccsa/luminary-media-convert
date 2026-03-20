@@ -69,6 +69,16 @@ describe('DatabaseService', () => {
             }
         });
 
+        it('should warn and continue when index creation fails', async () => {
+            mockServerDbGet.mockResolvedValueOnce({});
+            mockDb.createIndex.mockRejectedValue(new Error('index error'));
+
+            await service.onModuleInit();
+
+            // Should still complete init despite index failures
+            expect(service.isReady()).toBe(true);
+        });
+
         it('should retry on connection error and succeed when CouchDB becomes available', async () => {
             vi.useFakeTimers();
 
@@ -206,6 +216,23 @@ describe('DatabaseService', () => {
 
             expect(result.rev).toBe('3-new');
             expect(mockDb.get).toHaveBeenCalledTimes(2);
+        });
+
+        it('should rethrow non-409 errors from insert', async () => {
+            mockDb.get.mockRejectedValueOnce({ statusCode: 404 });
+            mockDb.insert.mockRejectedValueOnce(new Error('disk full'));
+
+            await expect(
+                service.upsert({ _id: 'doc:1', name: 'New' } as any),
+            ).rejects.toThrow('disk full');
+        });
+
+        it('should rethrow non-404 errors from get', async () => {
+            mockDb.get.mockRejectedValueOnce(new Error('connection refused'));
+
+            await expect(
+                service.upsert({ _id: 'doc:1', name: 'New' } as any),
+            ).rejects.toThrow('connection refused');
         });
 
         it('should throw after max retries on persistent conflict', async () => {

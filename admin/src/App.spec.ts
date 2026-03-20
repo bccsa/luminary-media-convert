@@ -140,4 +140,145 @@ describe('App.vue', () => {
 
         expect(wrapper.text()).toContain('Access denied');
     });
+
+    it('calls logout from access denied screen', async () => {
+        mockGetCurrentUser.mockResolvedValue({
+            id: 'u2',
+            email: 'user@test.com',
+            role: 'user',
+        });
+        mockUser.value = { email: 'user@test.com' };
+        mockIsAuthenticated.value = true;
+
+        const wrapper = mountApp();
+        await flushPromises();
+
+        expect(wrapper.text()).toContain('Access denied');
+        const signOutBtn = wrapper.findAll('button').find(b => b.text() === 'Sign Out');
+        await signOutBtn!.trigger('click');
+        expect(mockLogout).toHaveBeenCalled();
+    });
+
+    it('calls logout from admin header', async () => {
+        mockGetCurrentUser.mockResolvedValue({
+            id: 'u1',
+            email: 'admin@test.com',
+            role: 'admin',
+        });
+        mockUser.value = { email: 'admin@test.com' };
+        mockIsAuthenticated.value = true;
+
+        const wrapper = mountApp();
+        await flushPromises();
+
+        const signOutBtn = wrapper.findAll('button').find(b => b.text() === 'Sign Out');
+        await signOutBtn!.trigger('click');
+        expect(mockLogout).toHaveBeenCalled();
+    });
+
+    it('shows access denied when /me fails and no Auth0 roles claim', async () => {
+        mockGetCurrentUser.mockRejectedValue(new Error('Not found'));
+        mockUser.value = {
+            email: 'user@test.com',
+        };
+        mockIsAuthenticated.value = true;
+
+        const wrapper = mountApp();
+        await flushPromises();
+
+        expect(wrapper.text()).toContain('Access denied');
+    });
+
+    it('handles me response without id field', async () => {
+        mockGetCurrentUser.mockResolvedValue({
+            email: 'admin@test.com',
+            role: 'admin',
+        });
+        mockUser.value = { email: 'admin@test.com' };
+        mockIsAuthenticated.value = true;
+
+        const wrapper = mountApp();
+        await flushPromises();
+
+        // Should still show admin content even without id
+        expect(wrapper.find('[data-testid="router-view"]').exists()).toBe(true);
+    });
+
+    it('falls back without namespace in Auth0 claims', async () => {
+        mockGetCurrentUser.mockRejectedValue(new Error('Not found'));
+        // When VITE_AUTH0_CLAIM_NAMESPACE is set, the code tries namespace/roles first,
+        // then falls back to the bare 'roles' claim
+        const namespace = import.meta.env.VITE_AUTH0_CLAIM_NAMESPACE;
+        mockUser.value = {
+            email: 'admin@test.com',
+            ...(namespace
+                ? { [`${namespace}/roles`]: undefined }
+                : {}),
+            roles: ['admin'],
+        };
+        mockIsAuthenticated.value = true;
+
+        const wrapper = mountApp();
+        await flushPromises();
+
+        // Falls back to roles directly
+        expect(wrapper.find('[data-testid="router-view"]').exists()).toBe(true);
+    });
+
+    it('uses namespace claim when VITE_AUTH0_CLAIM_NAMESPACE is configured', async () => {
+        const origNamespace = import.meta.env.VITE_AUTH0_CLAIM_NAMESPACE;
+        // Temporarily set a namespace
+        import.meta.env.VITE_AUTH0_CLAIM_NAMESPACE = 'https://test.example.com';
+
+        mockGetCurrentUser.mockRejectedValue(new Error('Not found'));
+        mockUser.value = {
+            email: 'admin@test.com',
+            'https://test.example.com/roles': ['admin'],
+        };
+        mockIsAuthenticated.value = true;
+
+        const wrapper = mountApp();
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="router-view"]').exists()).toBe(true);
+
+        // Restore original
+        if (origNamespace !== undefined) {
+            import.meta.env.VITE_AUTH0_CLAIM_NAMESPACE = origNamespace;
+        } else {
+            delete import.meta.env.VITE_AUTH0_CLAIM_NAMESPACE;
+        }
+    });
+
+    it('handles /me failure with null user value', async () => {
+        mockGetCurrentUser.mockRejectedValue(new Error('Not found'));
+        mockUser.value = undefined;
+        mockIsAuthenticated.value = true;
+
+        const wrapper = mountApp();
+        await flushPromises();
+
+        expect(wrapper.text()).toContain('Access denied');
+    });
+
+    it('resets admin state when user logs out', async () => {
+        mockGetCurrentUser.mockResolvedValue({
+            id: 'u1',
+            email: 'admin@test.com',
+            role: 'admin',
+        });
+        mockUser.value = { email: 'admin@test.com' };
+        mockIsAuthenticated.value = true;
+
+        const wrapper = mountApp();
+        await flushPromises();
+
+        expect(wrapper.find('[data-testid="router-view"]').exists()).toBe(true);
+
+        // Simulate logout
+        mockIsAuthenticated.value = false;
+        await flushPromises();
+
+        expect(wrapper.text()).toContain('Sign In');
+    });
 });

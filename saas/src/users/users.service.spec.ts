@@ -140,6 +140,14 @@ describe('UsersService', () => {
                 NotFoundException,
             );
         });
+
+        it('should rethrow non-404 errors', async () => {
+            dbService.get.mockRejectedValue(new Error('connection lost'));
+
+            await expect(service.findById('user:123')).rejects.toThrow(
+                'connection lost',
+            );
+        });
     });
 
     describe('findAll', () => {
