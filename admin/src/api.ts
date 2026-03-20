@@ -124,6 +124,22 @@ export function subscribeSessionEvents(
     return es;
 }
 
+// --- API Keys ---
+
+export async function listUserKeys(token: string, userId: string) {
+    return fetchApi(`/saas/admin/users/${userId}/keys`, token);
+}
+
+export async function revokeUserKey(
+    token: string,
+    userId: string,
+    keyId: string,
+) {
+    return fetchApi(`/saas/admin/users/${userId}/keys/${keyId}`, token, {
+        method: 'DELETE',
+    });
+}
+
 // --- Dashboard ---
 
 export async function getDashboard(token: string) {

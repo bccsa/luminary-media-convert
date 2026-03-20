@@ -1,7 +1,41 @@
 <script setup lang="ts">
-import { reactive, computed, ref } from 'vue';
+import { reactive, computed, ref, watch } from 'vue';
 import type { S3Config, CreateSessionRequest } from '../types';
 import FileDropZone from './FileDropZone.vue';
+
+export interface SavedS3Config {
+    id: string;
+    name: string;
+    endPoint: string;
+    bucket: string;
+}
+
+const props = withDefaults(defineProps<{
+    savedS3Configs?: SavedS3Config[];
+    loadedS3Config?: S3Config | null;
+    selectedS3ConfigId?: string;
+}>(), {
+    savedS3Configs: () => [],
+    loadedS3Config: null,
+    selectedS3ConfigId: '',
+});
+
+const selectedConfigId = ref(props.selectedS3ConfigId);
+
+watch(() => props.selectedS3ConfigId, (id) => {
+    selectedConfigId.value = id;
+});
+
+let suppressFieldWatch = false;
+
+watch(() => props.loadedS3Config, (config) => {
+    if (config) {
+        suppressFieldWatch = true;
+        Object.assign(s3, config);
+        // Allow Vue reactivity to flush before re-enabling field watch
+        setTimeout(() => { suppressFieldWatch = false; }, 0);
+    }
+});
 
 const S3_STORAGE_KEY = 'luminary_s3_config';
 const BYTE_RANGE_KEY = 'luminary_byte_range';
@@ -12,7 +46,46 @@ const ENCRYPTION_KEY_URL_KEY = 'luminary_encryption_key_url';
 
 const emit = defineEmits<{
     submit: [payload: { config: CreateSessionRequest; file: File }];
+    loadS3Config: [configId: string];
+    saveS3Config: [data: { name: string; endPoint: string; port?: number; useSSL?: boolean; bucket: string; region?: string; pathPrefix?: string; accessKey: string; secretKey: string }];
 }>();
+
+const showSaveDialog = ref(false);
+const saveConfigName = ref('');
+
+function canSaveS3() {
+    return s3.endPoint && s3.bucket && s3.accessKey && s3.secretKey && !selectedConfigId.value;
+}
+
+function findExistingByName(name: string): SavedS3Config | undefined {
+    return props.savedS3Configs.find(
+        (c) => c.name.toLowerCase() === name.toLowerCase(),
+    );
+}
+
+function onSaveS3Config() {
+    if (!saveConfigName.value.trim() || !canSaveS3()) return;
+
+    const existing = findExistingByName(saveConfigName.value.trim());
+    if (existing && !confirm(`A config named "${existing.name}" already exists. Overwrite it?`)) {
+        return;
+    }
+
+    emit('saveS3Config', {
+        name: saveConfigName.value.trim(),
+        endPoint: s3.endPoint,
+        port: s3.port,
+        useSSL: s3.useSSL,
+        bucket: s3.bucket,
+        region: s3.region,
+        pathPrefix: s3.pathPrefix,
+        accessKey: s3.accessKey,
+        secretKey: s3.secretKey,
+        ...(existing ? { _overwriteId: existing.id } : {}),
+    });
+    showSaveDialog.value = false;
+    saveConfigName.value = '';
+}
 
 const file = defineModel<File | null>('file', { default: null });
 
@@ -31,6 +104,13 @@ function loadS3Config(): S3Config {
 }
 
 const s3 = reactive<S3Config>(loadS3Config());
+
+// Reset dropdown to "Enter manually" when user edits any S3 field
+watch(s3, () => {
+    if (!suppressFieldWatch && selectedConfigId.value) {
+        selectedConfigId.value = '';
+    }
+});
 
 function loadByteRange(): boolean {
     try {
@@ -145,7 +225,63 @@ function onSubmit() {
         <fieldset class="space-y-3">
             <div class="flex items-center justify-between">
                 <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">S3 Storage</legend>
-                <button type="button" @click="clearS3Config" class="btn-sm text-red-400 hover:text-red-300">Clear saved</button>
+                <div class="flex gap-2">
+                    <button
+                        v-if="canSaveS3()"
+                        type="button"
+                        @click="showSaveDialog = true"
+                        class="btn-sm text-indigo-400 hover:text-indigo-300"
+                    >
+                        Save config
+                    </button>
+                    <button type="button" @click="clearS3Config" class="btn-sm text-red-400 hover:text-red-300">Clear</button>
+                </div>
+            </div>
+            <!-- Save config dialog -->
+            <div v-if="showSaveDialog" class="mb-2 flex items-end gap-2 rounded-lg border border-indigo-800/40 bg-indigo-950/20 p-3">
+                <div class="flex-1">
+                    <label class="mb-1 block text-xs text-zinc-500">Config name</label>
+                    <input
+                        v-model="saveConfigName"
+                        type="text"
+                        class="input"
+                        placeholder="e.g. Production S3"
+                        @keyup.enter="onSaveS3Config"
+                    />
+                </div>
+                <button
+                    type="button"
+                    :disabled="!saveConfigName.trim()"
+                    @click="onSaveS3Config"
+                    :class="[
+                        'rounded-lg px-3 py-2 text-xs font-semibold transition-colors',
+                        saveConfigName.trim()
+                            ? 'bg-indigo-600 text-white hover:bg-indigo-500 cursor-pointer'
+                            : 'bg-zinc-800 text-zinc-500 cursor-not-allowed',
+                    ]"
+                >
+                    Save
+                </button>
+                <button
+                    type="button"
+                    @click="showSaveDialog = false; saveConfigName = ''"
+                    class="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800 cursor-pointer"
+                >
+                    Cancel
+                </button>
+            </div>
+            <div v-if="savedS3Configs.length > 0" class="mb-2">
+                <label class="mb-1 block text-xs text-zinc-500">Saved Configuration</label>
+                <select
+                    v-model="selectedConfigId"
+                    @change="selectedConfigId && emit('loadS3Config', selectedConfigId)"
+                    class="input w-full"
+                >
+                    <option value="">Enter manually</option>
+                    <option v-for="cfg in savedS3Configs" :key="cfg.id" :value="cfg.id">
+                        {{ cfg.name }} ({{ cfg.endPoint }}/{{ cfg.bucket }})
+                    </option>
+                </select>
             </div>
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div class="sm:col-span-2">

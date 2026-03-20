@@ -13,6 +13,7 @@ export const INDEXES = [
         fields: ['docType', 'updatedAt'],
     },
     { name: 'apikeys-by-user', fields: ['docType', 'userId', 'createdAt'] },
+    { name: 'apikeys-by-hash', fields: ['docType', 'keyHash'] },
     {
         name: 'usage-by-user-period',
         fields: ['docType', 'userId', 'createdAt'],

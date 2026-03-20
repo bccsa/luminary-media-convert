@@ -7,6 +7,8 @@ import {
     disableUser,
     enableUser,
     deleteUser,
+    listUserKeys,
+    revokeUserKey,
 } from '../api';
 
 const currentUserId = inject<Ref<string | null>>('currentUserId');
@@ -80,12 +82,52 @@ async function onDelete() {
     }
 }
 
+interface ApiKey {
+    id: string;
+    name: string;
+    prefix: string;
+    status: 'active' | 'revoked';
+    lastUsedAt: string | null;
+    createdAt: string;
+}
+
+const keys = ref<ApiKey[]>([]);
+const keysLoading = ref(false);
+
+async function fetchKeys() {
+    keysLoading.value = true;
+    try {
+        const token = await getAccessTokenSilently();
+        const result = await listUserKeys(token, userId);
+        keys.value = result.keys ?? [];
+    } catch {
+        // Non-critical — just show empty
+        keys.value = [];
+    } finally {
+        keysLoading.value = false;
+    }
+}
+
+async function onRevokeKey(keyId: string) {
+    if (!confirm('Revoke this API key? This cannot be undone.')) return;
+    try {
+        const token = await getAccessTokenSilently();
+        await revokeUserKey(token, userId, keyId);
+        await fetchKeys();
+    } catch (e) {
+        error.value = e instanceof Error ? e.message : String(e);
+    }
+}
+
 function formatDate(dateStr: string): string {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleString();
 }
 
-onMounted(fetchUser);
+onMounted(() => {
+    fetchUser();
+    fetchKeys();
+});
 </script>
 
 <template>
@@ -231,21 +273,82 @@ onMounted(fetchUser);
                 </dl>
             </div>
 
-            <!-- Placeholder sections -->
-            <div class="mt-8 space-y-4">
-                <div
-                    class="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6 text-center"
+            <!-- Sessions link -->
+            <div class="mt-8">
+                <router-link
+                    :to="`/sessions?userId=${userId}`"
+                    class="block rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-sm text-zinc-400 transition-colors hover:border-zinc-700 hover:text-zinc-200"
                 >
-                    <p class="text-sm text-zinc-500">
-                        Sessions — Coming in a later phase
-                    </p>
+                    View sessions &rarr;
+                </router-link>
+            </div>
+
+            <!-- API Keys -->
+            <div class="mt-6">
+                <h3 class="mb-3 flex items-center gap-2 text-sm font-medium text-zinc-400">
+                    API Keys
+                    <span v-if="keys.length" class="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-500">
+                        {{ keys.length }}
+                    </span>
+                </h3>
+
+                <div v-if="keysLoading" class="flex justify-center py-8">
+                    <svg class="h-5 w-5 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
                 </div>
-                <div
-                    class="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6 text-center"
-                >
-                    <p class="text-sm text-zinc-500">
-                        API Keys — Coming in a later phase
-                    </p>
+
+                <div v-else-if="keys.length === 0" class="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6 text-center">
+                    <p class="text-sm text-zinc-500">No API keys</p>
+                </div>
+
+                <div v-else class="overflow-hidden rounded-lg border border-zinc-800">
+                    <table class="w-full text-sm text-left">
+                        <thead class="border-b border-zinc-800 bg-zinc-900/50 text-xs text-zinc-500">
+                            <tr>
+                                <th class="px-4 py-3">Name</th>
+                                <th class="px-4 py-3">Prefix</th>
+                                <th class="px-4 py-3">Status</th>
+                                <th class="px-4 py-3">Last Used</th>
+                                <th class="px-4 py-3">Created</th>
+                                <th class="px-4 py-3 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-zinc-300">
+                            <tr
+                                v-for="key in keys"
+                                :key="key.id"
+                                class="border-b border-zinc-800/50"
+                            >
+                                <td class="px-4 py-3">{{ key.name }}</td>
+                                <td class="px-4 py-3 font-mono text-xs text-zinc-500">{{ key.prefix }}...</td>
+                                <td class="px-4 py-3">
+                                    <span
+                                        :class="[
+                                            'rounded-full px-2 py-0.5 text-xs font-medium',
+                                            key.status === 'active'
+                                                ? 'bg-green-900/40 text-green-400'
+                                                : 'bg-red-900/40 text-red-400',
+                                        ]"
+                                    >
+                                        {{ key.status }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3 text-zinc-500">{{ formatDate(key.lastUsedAt) }}</td>
+                                <td class="px-4 py-3 text-zinc-500">{{ formatDate(key.createdAt) }}</td>
+                                <td class="px-4 py-3 text-right">
+                                    <button
+                                        v-if="key.status === 'active'"
+                                        @click="onRevokeKey(key.id)"
+                                        class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 transition-colors hover:border-red-700 hover:text-red-400 cursor-pointer"
+                                    >
+                                        Revoke
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>

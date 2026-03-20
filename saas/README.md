@@ -156,6 +156,16 @@ All endpoints require JWT authentication with the `admin` role.
 | GET | `/saas/keys` | JWT | List user's API keys (prefix only) |
 | DELETE | `/saas/keys/:keyId` | JWT | Revoke API key |
 
+### S3 Configs
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/saas/s3-configs` | JWT | Save an S3 config (credentials encrypted with AES-256-GCM) |
+| GET | `/saas/s3-configs` | JWT | List user's S3 configs (credentials masked) |
+| GET | `/saas/s3-configs/:configId` | JWT | Get S3 config with decrypted credentials |
+| PATCH | `/saas/s3-configs/:configId` | JWT | Update S3 config (re-encrypts changed credentials) |
+| DELETE | `/saas/s3-configs/:configId` | JWT | Delete S3 config |
+
 ### Webhook Endpoints (called by Encoding API)
 
 | Method | Path | Auth | Description |

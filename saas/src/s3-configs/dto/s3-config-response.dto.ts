@@ -1,0 +1,18 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+export class S3ConfigResponseDto {
+    @ApiProperty() id: string;
+    @ApiProperty() name: string;
+    @ApiProperty() endPoint: string;
+    @ApiPropertyOptional() port?: number;
+    @ApiPropertyOptional() useSSL?: boolean;
+    @ApiProperty() bucket: string;
+    @ApiPropertyOptional() region?: string;
+    @ApiPropertyOptional() pathPrefix?: string;
+    @ApiProperty({ description: 'Masked in list responses, decrypted in detail' })
+    accessKey: string;
+    @ApiProperty({ description: 'Masked in list responses, decrypted in detail' })
+    secretKey: string;
+    @ApiProperty() createdAt: string;
+    @ApiProperty() updatedAt: string;
+}

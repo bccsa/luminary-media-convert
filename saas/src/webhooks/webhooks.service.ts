@@ -3,10 +3,12 @@ import {
     Logger,
     UnauthorizedException,
 } from '@nestjs/common';
+import { createHash } from 'crypto';
 import { DatabaseService } from '../database/database.service.js';
 import { UsersService } from '../users/users.service.js';
 import { SessionsService } from '../sessions/sessions.service.js';
 import { SessionEventsService } from '../sessions/session-events.service.js';
+import { KeysService } from '../keys/keys.service.js';
 import { SessionDocument } from '../sessions/interfaces/session-document.interface.js';
 import { EncodingWebhookDto } from './dto/encoding-webhook.dto.js';
 
@@ -35,6 +37,7 @@ export class WebhooksService {
         private readonly usersService: UsersService,
         private readonly sessionsService: SessionsService,
         private readonly sessionEvents: SessionEventsService,
+        private readonly keysService: KeysService,
     ) {}
 
     validateWebhookToken(token: string | undefined): void {
@@ -164,5 +167,44 @@ export class WebhooksService {
 
         // Permissive defaults — plan limit checks deferred to Phase 7
         return { allowed: true };
+    }
+
+    async validateApiKey(
+        apiKey: string,
+    ): Promise<{ valid: boolean; metadata?: Record<string, unknown> }> {
+        const keyHash = createHash('sha256').update(apiKey).digest('hex');
+        const keyDoc = await this.keysService.findByHash(keyHash);
+
+        if (!keyDoc || keyDoc.status === 'revoked') {
+            return { valid: false };
+        }
+
+        // Check user status
+        try {
+            const user = await this.usersService.findById(keyDoc.userId);
+            if (user.status === 'disabled') {
+                return { valid: false };
+            }
+        } catch {
+            return { valid: false };
+        }
+
+        // Fire-and-forget: update lastUsedAt on key and lastApiAccessAt on user
+        this.keysService.updateLastUsed(keyDoc._id);
+        this.usersService
+            .update(keyDoc.userId, {
+                lastApiAccessAt: new Date().toISOString(),
+            } as any)
+            .catch(() => {});
+
+        const saasUrl = process.env.SAAS_SERVICE_URL || 'http://localhost:3001';
+        return {
+            valid: true,
+            metadata: {
+                userId: keyDoc.userId,
+                webhookUrl: `${saasUrl}/saas/webhooks/encoding`,
+                authorizationUrl: `${saasUrl}/saas/webhooks/authorize`,
+            },
+        };
     }
 }

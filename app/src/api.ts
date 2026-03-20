@@ -178,3 +178,177 @@ export function subscribeSessionEvents(
     }
     return es;
 }
+
+// ---------------------------------------------------------------------------
+// SaaS Service — API Keys
+// ---------------------------------------------------------------------------
+
+export async function createApiKey(
+    accessToken: string,
+    name: string,
+): Promise<{ id: string; key: string }> {
+    // Generate key client-side — the raw key never leaves the browser
+    const rawBytes = crypto.getRandomValues(new Uint8Array(32));
+    const rawKey = 'lmc_' + btoa(String.fromCharCode(...rawBytes))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const prefix = rawKey.substring(0, 12);
+
+    // SHA-256 hash — only this is sent to the server
+    const hashBuffer = await crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(rawKey),
+    );
+    const keyHash = Array.from(new Uint8Array(hashBuffer))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
+
+    const res = await fetch(`${SAAS_URL}/saas/keys`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ name, keyHash, prefix }),
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `API key creation failed (${res.status})`);
+    }
+
+    const result = await res.json();
+    return { id: result.id, key: rawKey };
+}
+
+export async function listApiKeys(
+    accessToken: string,
+): Promise<any[]> {
+    const res = await fetch(`${SAAS_URL}/saas/keys`, {
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Failed to list API keys (${res.status})`);
+    }
+
+    return res.json();
+}
+
+export async function revokeApiKey(
+    accessToken: string,
+    keyId: string,
+): Promise<void> {
+    const res = await fetch(`${SAAS_URL}/saas/keys/${keyId}`, {
+        method: 'DELETE',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `API key revocation failed (${res.status})`);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SaaS Service — S3 Configurations
+// ---------------------------------------------------------------------------
+
+export async function listS3Configs(
+    accessToken: string,
+): Promise<{ configs: any[] }> {
+    const res = await fetch(`${SAAS_URL}/saas/s3-configs`, {
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Failed to list S3 configs (${res.status})`);
+    }
+
+    return res.json();
+}
+
+export async function createS3Config(
+    accessToken: string,
+    data: Record<string, any>,
+): Promise<any> {
+    const res = await fetch(`${SAAS_URL}/saas/s3-configs`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(data),
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `S3 config creation failed (${res.status})`);
+    }
+
+    return res.json();
+}
+
+export async function getS3Config(
+    accessToken: string,
+    configId: string,
+): Promise<any> {
+    const res = await fetch(`${SAAS_URL}/saas/s3-configs/${configId}`, {
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Failed to get S3 config (${res.status})`);
+    }
+
+    return res.json();
+}
+
+export async function updateS3Config(
+    accessToken: string,
+    configId: string,
+    data: Record<string, any>,
+): Promise<any> {
+    const res = await fetch(`${SAAS_URL}/saas/s3-configs/${configId}`, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(data),
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `S3 config update failed (${res.status})`);
+    }
+
+    return res.json();
+}
+
+export async function deleteS3Config(
+    accessToken: string,
+    configId: string,
+): Promise<void> {
+    const res = await fetch(`${SAAS_URL}/saas/s3-configs/${configId}`, {
+        method: 'DELETE',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `S3 config deletion failed (${res.status})`);
+    }
+}
