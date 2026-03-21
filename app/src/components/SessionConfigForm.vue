@@ -107,7 +107,7 @@ function loadEncryptionEnabled(): boolean {
     return true;
 }
 function loadEncryptionKeyUrl(): string {
-    try { return localStorage.getItem(ENCRYPTION_KEY_URL_KEY) ?? ''; } catch { /* ignore */ }
+    try { return sessionStorage.getItem(ENCRYPTION_KEY_URL_KEY) ?? ''; } catch { /* ignore */ }
     return '';
 }
 
@@ -138,7 +138,7 @@ function savePreferences() {
     localStorage.setItem(MAX_FILE_SIZE_KEY, String(byteRangeMaxFileSizeMB.value || 500));
     localStorage.setItem(THUMBNAILS_KEY, String(thumbnails.value));
     localStorage.setItem(ENCRYPTION_ENABLED_KEY, String(encryptionEnabled.value));
-    localStorage.setItem(ENCRYPTION_KEY_URL_KEY, encryptionKeyUrl.value);
+    sessionStorage.setItem(ENCRYPTION_KEY_URL_KEY, encryptionKeyUrl.value);
     if (selectedConfigId.value) localStorage.setItem(SELECTED_S3_CONFIG_KEY, selectedConfigId.value);
     localStorage.setItem(PATH_PREFIX_KEY, pathPrefix.value);
 }

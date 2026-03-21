@@ -17,6 +17,10 @@ import { ImportSessionDto } from './dto/import-session.dto.js';
 import { SaasSessionResponseDto } from './dto/session-response.dto.js';
 import { SessionDocument } from './interfaces/session-document.interface.js';
 
+function escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export interface SessionRecord {
     sessionId: string;
     userId: string;
@@ -371,18 +375,28 @@ export class SessionsService implements OnModuleInit {
             selector.status = opts.status;
         }
         if (opts.name) {
-            selector.name = { $regex: `(?i)${opts.name}` };
+            selector.name = { $regex: `(?i)${escapeRegex(opts.name)}` };
         }
 
-        const result = await this.databaseService.find<SessionDocument>({
-            selector,
-            use_index: opts.status ? 'sessions-by-user-status' : 'sessions-by-user',
-            sort: [{ createdAt: 'desc' as const }],
-            limit: opts.limit || 25,
-            skip: opts.skip || 0,
-        });
+        const limit = opts.limit || 25;
+        const skip = opts.skip || 0;
 
-        return { sessions: result.docs, total: result.docs.length };
+        const [result, countResult] = await Promise.all([
+            this.databaseService.find<SessionDocument>({
+                selector,
+                use_index: opts.status ? 'sessions-by-user-status' : 'sessions-by-user',
+                sort: [{ createdAt: 'desc' as const }],
+                limit,
+                skip,
+            }),
+            this.databaseService.find<SessionDocument>({
+                selector,
+                fields: ['_id'],
+                limit: 1_000_000,
+            }),
+        ]);
+
+        return { sessions: result.docs, total: countResult.docs.length };
     }
 
     async getSession(
@@ -429,17 +443,27 @@ export class SessionsService implements OnModuleInit {
         if (opts.status) selector.status = opts.status;
         if (opts.userId) selector.userId = opts.userId;
 
-        const result = await this.databaseService.find<SessionDocument>({
-            selector,
-            use_index: 'sessions-by-created',
-            sort: [{ docType: 'desc' as const }, { createdAt: 'desc' as const }],
-            limit: opts.limit || 25,
-            skip: opts.skip || 0,
-        });
+        const limit = opts.limit || 25;
+        const skip = opts.skip || 0;
+
+        const [result, countResult] = await Promise.all([
+            this.databaseService.find<SessionDocument>({
+                selector,
+                use_index: 'sessions-by-created',
+                sort: [{ docType: 'desc' as const }, { createdAt: 'desc' as const }],
+                limit,
+                skip,
+            }),
+            this.databaseService.find<SessionDocument>({
+                selector,
+                fields: ['_id'],
+                limit: 1_000_000,
+            }),
+        ]);
 
         return {
             sessions: result.docs.map((s) => this.stripSensitiveFields(s)),
-            total: result.docs.length,
+            total: countResult.docs.length,
         };
     }
 

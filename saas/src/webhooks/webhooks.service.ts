@@ -3,7 +3,7 @@ import {
     Logger,
     UnauthorizedException,
 } from '@nestjs/common';
-import { createHash } from 'crypto';
+import { createHash, timingSafeEqual } from 'crypto';
 import { DatabaseService } from '../database/database.service.js';
 import { UsersService } from '../users/users.service.js';
 import { SessionsService } from '../sessions/sessions.service.js';
@@ -43,10 +43,14 @@ export class WebhooksService {
     validateWebhookToken(token: string | undefined): void {
         const secret = process.env.WEBHOOK_SECRET;
         if (!secret) {
-            this.logger.warn('WEBHOOK_SECRET not configured — accepting all webhooks');
-            return;
+            this.logger.error('WEBHOOK_SECRET not configured — rejecting all webhooks');
+            throw new UnauthorizedException('Webhook authentication not configured');
         }
-        if (token !== secret) {
+        if (
+            !token ||
+            token.length !== secret.length ||
+            !timingSafeEqual(Buffer.from(token), Buffer.from(secret))
+        ) {
             throw new UnauthorizedException('Invalid webhook token');
         }
     }

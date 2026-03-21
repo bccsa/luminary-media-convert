@@ -9,6 +9,7 @@ import {
     UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Observable, map } from 'rxjs';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { AdminGuard } from '../auth/admin.guard.js';
@@ -47,6 +48,7 @@ export class AdminSessionsController {
         return this.sessionsService.listAllSessions({ limit, skip, status, userId });
     }
 
+    @SkipThrottle()
     @Sse('sessions/events')
     @SkipAdmin()
     streamSessionEvents(

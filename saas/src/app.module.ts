@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { CryptoModule } from './crypto/crypto.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -14,6 +16,12 @@ import { KeysModule } from './keys/keys.module.js';
 @Module({
     imports: [
         ScheduleModule.forRoot(),
+        ThrottlerModule.forRoot({
+            throttlers: [
+                { name: 'short', ttl: 1000, limit: 20 },
+                { name: 'medium', ttl: 60000, limit: 100 },
+            ],
+        }),
         CryptoModule,
         DatabaseModule,
         AuthModule,
@@ -24,6 +32,9 @@ import { KeysModule } from './keys/keys.module.js';
         S3ConfigsModule,
         MeModule,
         KeysModule,
+    ],
+    providers: [
+        { provide: APP_GUARD, useClass: ThrottlerGuard },
     ],
 })
 export class AppModule {}

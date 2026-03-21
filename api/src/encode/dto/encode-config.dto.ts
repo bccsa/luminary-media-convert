@@ -6,6 +6,7 @@ import {
     IsNumber,
     IsOptional,
     IsString,
+    MaxLength,
     Min,
     ValidateNested,
     ValidateIf,
@@ -117,6 +118,21 @@ export class AudioGroupDto {
     vbr?: boolean;
 }
 
+export class VideoTrackNameDto {
+    @ApiProperty({ description: 'Source video track index.', example: 0 })
+    @IsNumber()
+    @Min(0)
+    @Expose()
+    index: number;
+
+    @ApiProperty({ description: 'Display name for the video track.', example: 'Main angle' })
+    @IsString()
+    @IsNotEmpty()
+    @MaxLength(100)
+    @Expose()
+    name: string;
+}
+
 export class EncodeConfigDto {
     @ApiProperty({ description: 'Encoding type.', enum: ['video', 'audio'], example: 'video' })
     @IsString()
@@ -156,9 +172,11 @@ export class EncodeConfigDto {
     })
     @IsArray()
     @IsOptional()
+    @ValidateNested({ each: true })
+    @Type(() => VideoTrackNameDto)
     @ValidateIf(o => o.type === 'video')
     @Expose()
-    videoTrackNames?: { index: number; name: string }[];
+    videoTrackNames?: VideoTrackNameDto[];
 
     @ApiPropertyOptional({
         description:

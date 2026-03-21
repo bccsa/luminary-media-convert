@@ -24,6 +24,7 @@ import {
     ApiSecurity,
     ApiTags,
 } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { Observable, map } from 'rxjs';
 import { rm } from 'fs/promises';
@@ -218,6 +219,7 @@ export class EncodeController {
         };
     }
 
+    @SkipThrottle()
     @Sse(':sessionId/events')
     @ApiOperation({
         summary: 'Stream session events via SSE',

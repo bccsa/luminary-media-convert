@@ -5,6 +5,7 @@ import {
     UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { timingSafeEqual } from 'crypto';
 import type { Request } from 'express';
 import { KeyValidationWebhookService } from './key-validation-webhook.service.js';
 import { SessionService } from '../encode/services/session.service.js';
@@ -42,7 +43,11 @@ export class AuthResolverGuard implements CanActivate {
         if (apiKeyHeader) {
             // Check master key first — always accepted (superkey)
             const masterKey = process.env.MASTER_API_KEY;
-            if (masterKey && apiKeyHeader === masterKey) {
+            if (
+                masterKey &&
+                apiKeyHeader.length === masterKey.length &&
+                timingSafeEqual(Buffer.from(apiKeyHeader), Buffer.from(masterKey))
+            ) {
                 (request as any).authType = 'master';
                 return true;
             }

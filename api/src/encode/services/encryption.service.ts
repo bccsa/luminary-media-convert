@@ -11,17 +11,24 @@ dotenv.config();
 export class EncryptionService {
     private readonly logger = new Logger(EncryptionService.name);
 
-    deriveKey(sessionId: string): Buffer {
+    deriveKey(sessionId: string, salt?: Buffer): Buffer {
         const seed = process.env.HLS_ENCRYPTION_SEED;
         if (!seed) {
             throw new Error(
                 'HLS_ENCRYPTION_SEED environment variable is required for HLS encryption',
             );
         }
+        const input = salt
+            ? Buffer.concat([Buffer.from(sessionId), salt])
+            : Buffer.from(sessionId);
         return createHmac('sha256', seed)
-            .update(sessionId)
+            .update(input)
             .digest()
             .subarray(0, 16);
+    }
+
+    generateSalt(): Buffer {
+        return randomBytes(16);
     }
 
     generateIV(): Buffer {
@@ -41,6 +48,8 @@ export class EncryptionService {
             );
         }
 
+        const salt = this.generateSalt();
+
         const tsPath = join(__dirname, 'encryption.worker.ts');
         const useTsWorker = existsSync(tsPath);
         const workerPath = useTsWorker
@@ -49,7 +58,7 @@ export class EncryptionService {
 
         return new Promise<{ key: Buffer; iv: Buffer }>((resolve, reject) => {
             const worker = new Worker(workerPath, {
-                workerData: { outputDir, sessionId, keyUrl, seed },
+                workerData: { outputDir, sessionId, keyUrl, seed, salt: salt.toString('hex') },
                 ...(useTsWorker
                     ? {
                           execArgv: [

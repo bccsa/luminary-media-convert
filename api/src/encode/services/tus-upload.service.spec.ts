@@ -190,6 +190,36 @@ describe('TusUploadService', () => {
             ).resolves.toBeUndefined();
         });
 
+        it('should reject unsupported file extensions', async () => {
+            const session = sessionService.create(makeConfig());
+            const hook = capturedServerConfig.value.onUploadCreate;
+
+            await expect(
+                hook(makeRequestInfo(), { metadata: { sessionId: session.id, filename: 'malware.exe' } }),
+            ).rejects.toEqual({
+                status_code: 415,
+                body: 'Unsupported file type. Allowed: media files (video/audio).',
+            });
+        });
+
+        it('should allow supported media file extensions', async () => {
+            const session = sessionService.create(makeConfig());
+            const hook = capturedServerConfig.value.onUploadCreate;
+
+            await expect(
+                hook(makeRequestInfo(), { metadata: { sessionId: session.id, filename: 'video.mp4' } }),
+            ).resolves.toBeUndefined();
+        });
+
+        it('should allow uploads without filename metadata', async () => {
+            const session = sessionService.create(makeConfig());
+            const hook = capturedServerConfig.value.onUploadCreate;
+
+            await expect(
+                hook(makeRequestInfo(), { metadata: { sessionId: session.id } }),
+            ).resolves.toBeUndefined();
+        });
+
         it('should allow session in uploading status', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploading');
@@ -294,6 +324,48 @@ describe('TusUploadService', () => {
 
             expect(mockUnlink).toHaveBeenCalledWith(
                 '/tmp/tus-uploads/upload-4.info',
+            );
+        });
+
+        it('should sanitize path traversal in filename', async () => {
+            const session = sessionService.create(makeConfig());
+            (probeService.probe as Mock).mockResolvedValue({
+                format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
+                videoTracks: [],
+                audioTracks: [],
+            });
+
+            const hook = capturedServerConfig.value.onUploadFinish;
+            await hook(makeRequestInfo(), {
+                id: 'upload-traversal',
+                metadata: { sessionId: session.id, filename: '../../etc/passwd' },
+                storage: { path: '/tmp/tus-uploads/upload-traversal' },
+            });
+
+            expect(mockRename).toHaveBeenCalledWith(
+                '/tmp/tus-uploads/upload-traversal',
+                `/tmp/tus-test-work/${session.id}/passwd`,
+            );
+        });
+
+        it('should sanitize filename with directory separators', async () => {
+            const session = sessionService.create(makeConfig());
+            (probeService.probe as Mock).mockResolvedValue({
+                format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
+                videoTracks: [],
+                audioTracks: [],
+            });
+
+            const hook = capturedServerConfig.value.onUploadFinish;
+            await hook(makeRequestInfo(), {
+                id: 'upload-slashes',
+                metadata: { sessionId: session.id, filename: 'subdir/file.mp4' },
+                storage: { path: '/tmp/tus-uploads/upload-slashes' },
+            });
+
+            expect(mockRename).toHaveBeenCalledWith(
+                '/tmp/tus-uploads/upload-slashes',
+                `/tmp/tus-test-work/${session.id}/file.mp4`,
             );
         });
 

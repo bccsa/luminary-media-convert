@@ -79,8 +79,21 @@ describe('AuthorizationWebhookService', () => {
         ).rejects.toThrow('Authorization denied');
     });
 
-    it('should allow on 5xx with fail-open (default)', async () => {
+    it('should throw ForbiddenException on 5xx with fail-closed (default)', async () => {
         process.env.AUTHORIZATION_WEBHOOK_URL = 'https://auth.example.com/check';
+
+        fetchSpy.mockResolvedValue(
+            new Response('Internal Server Error', { status: 500 }),
+        );
+
+        await expect(
+            service.checkAuthorization('create_session', {}),
+        ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should allow on 5xx with fail-open', async () => {
+        process.env.AUTHORIZATION_WEBHOOK_URL = 'https://auth.example.com/check';
+        process.env.AUTHORIZATION_FAIL_MODE = 'open';
 
         fetchSpy.mockResolvedValue(
             new Response('Internal Server Error', { status: 500 }),
@@ -91,13 +104,10 @@ describe('AuthorizationWebhookService', () => {
         ).resolves.toBeUndefined();
     });
 
-    it('should throw ForbiddenException on 5xx with fail-closed', async () => {
+    it('should throw ForbiddenException on network error with fail-closed (default)', async () => {
         process.env.AUTHORIZATION_WEBHOOK_URL = 'https://auth.example.com/check';
-        process.env.AUTHORIZATION_FAIL_MODE = 'closed';
 
-        fetchSpy.mockResolvedValue(
-            new Response('Internal Server Error', { status: 500 }),
-        );
+        fetchSpy.mockRejectedValue(new Error('ECONNREFUSED'));
 
         await expect(
             service.checkAuthorization('create_session', {}),
@@ -106,23 +116,13 @@ describe('AuthorizationWebhookService', () => {
 
     it('should allow on network error with fail-open', async () => {
         process.env.AUTHORIZATION_WEBHOOK_URL = 'https://auth.example.com/check';
+        process.env.AUTHORIZATION_FAIL_MODE = 'open';
 
         fetchSpy.mockRejectedValue(new Error('ECONNREFUSED'));
 
         await expect(
             service.checkAuthorization('create_session', {}),
         ).resolves.toBeUndefined();
-    });
-
-    it('should throw ForbiddenException on network error with fail-closed', async () => {
-        process.env.AUTHORIZATION_WEBHOOK_URL = 'https://auth.example.com/check';
-        process.env.AUTHORIZATION_FAIL_MODE = 'closed';
-
-        fetchSpy.mockRejectedValue(new Error('ECONNREFUSED'));
-
-        await expect(
-            service.checkAuthorization('create_session', {}),
-        ).rejects.toThrow(ForbiddenException);
     });
 
     it('should use per-key authorizationUrl over global env var', async () => {

@@ -24,8 +24,8 @@ interface AuthorizationResponse {
  * 3. No URL → allow (standalone mode)
  *
  * On 5xx or network error, behaviour depends on `AUTHORIZATION_FAIL_MODE`:
- * - 'open' (default): allow with a warning
- * - 'closed': deny with ForbiddenException
+ * - 'closed' (default): deny with ForbiddenException
+ * - 'open': allow with a warning
  */
 @Injectable()
 export class AuthorizationWebhookService {
@@ -44,7 +44,7 @@ export class AuthorizationWebhookService {
             return;
         }
 
-        const failMode = process.env.AUTHORIZATION_FAIL_MODE || 'open';
+        const failMode = process.env.AUTHORIZATION_FAIL_MODE || 'closed';
 
         try {
             const response = await fetch(url, {

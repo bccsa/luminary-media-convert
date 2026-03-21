@@ -1,4 +1,10 @@
 import { type MockInstance } from 'vitest';
+
+const mockLookup = vi.hoisted(() => vi.fn());
+vi.mock('dns/promises', () => ({
+    lookup: mockLookup,
+}));
+
 import { WebhookService } from './webhook.service.js';
 
 describe('WebhookService', () => {
@@ -8,10 +14,12 @@ describe('WebhookService', () => {
     beforeEach(() => {
         service = new WebhookService();
         fetchSpy = vi.spyOn(globalThis, 'fetch');
+        mockLookup.mockResolvedValue({ address: '93.184.216.34', family: 4 });
     });
 
     afterEach(() => {
         fetchSpy.mockRestore();
+        vi.clearAllMocks();
     });
 
     it('should POST payload with correct headers', async () => {
@@ -63,5 +71,42 @@ describe('WebhookService', () => {
                 error: 'boom',
             })
         ).resolves.toBeUndefined();
+    });
+
+    describe('SSRF protection', () => {
+        const payload = { sessionId: 's1', status: 'encoding' as const };
+
+        it('should block 169.254.x.x (cloud metadata) URLs', async () => {
+            await service.send('https://169.254.169.254/latest/meta-data', 'tok', payload);
+            expect(fetchSpy).not.toHaveBeenCalled();
+        });
+
+        it('should block hostnames that resolve to cloud metadata IPs', async () => {
+            mockLookup.mockResolvedValue({ address: '169.254.169.254', family: 4 });
+            await service.send('https://evil.example.com/webhook', 'tok', payload);
+            expect(fetchSpy).not.toHaveBeenCalled();
+        });
+
+        it('should allow localhost URLs (authenticated users may use local services)', async () => {
+            fetchSpy.mockResolvedValue({ ok: true, status: 200 } as Response);
+            mockLookup.mockResolvedValue({ address: '127.0.0.1', family: 4 });
+            await service.send('https://localhost/webhook', 'tok', payload);
+            expect(fetchSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it('should allow private network URLs', async () => {
+            fetchSpy.mockResolvedValue({ ok: true, status: 200 } as Response);
+            mockLookup.mockResolvedValue({ address: '10.0.0.1', family: 4 });
+            await service.send('https://10.0.0.1/webhook', 'tok', payload);
+            expect(fetchSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it('should allow public hostnames', async () => {
+            fetchSpy.mockResolvedValue({ ok: true, status: 200 } as Response);
+            mockLookup.mockResolvedValue({ address: '93.184.216.34', family: 4 });
+
+            await service.send('https://example.com/webhook', 'tok', payload);
+            expect(fetchSpy).toHaveBeenCalledTimes(1);
+        });
     });
 });

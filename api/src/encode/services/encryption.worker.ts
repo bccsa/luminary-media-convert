@@ -17,13 +17,18 @@ interface WorkerData {
     sessionId: string;
     keyUrl: string;
     seed: string;
+    salt?: string;
 }
 
 const CONCURRENCY_LIMIT = 6;
 
-function deriveKey(seed: string, sessionId: string): Buffer {
+function deriveKey(seed: string, sessionId: string, saltHex?: string): Buffer {
+    const salt = saltHex ? Buffer.from(saltHex, 'hex') : undefined;
+    const input = salt
+        ? Buffer.concat([Buffer.from(sessionId), salt])
+        : Buffer.from(sessionId);
     return createHmac('sha256', seed)
-        .update(sessionId)
+        .update(input)
         .digest()
         .subarray(0, 16);
 }
@@ -109,9 +114,9 @@ async function injectKeyTag(
 }
 
 (async () => {
-    const { outputDir, sessionId, keyUrl, seed } = workerData as WorkerData;
+    const { outputDir, sessionId, keyUrl, seed, salt } = workerData as WorkerData;
 
-    const key = deriveKey(seed, sessionId);
+    const key = deriveKey(seed, sessionId, salt);
     const iv = randomBytes(16);
 
     const entries = await readdir(outputDir, { withFileTypes: true });

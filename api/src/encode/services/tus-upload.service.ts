@@ -5,7 +5,7 @@ import {
     type OnModuleInit,
 } from '@nestjs/common';
 import { TusdServer } from 'node-tusd';
-import { join } from 'path';
+import { join, basename } from 'path';
 import { mkdirSync } from 'fs';
 import { rename, copyFile, unlink, mkdir } from 'fs/promises';
 import type { IncomingMessage, ServerResponse } from 'http';
@@ -16,12 +16,24 @@ import { WebhookService } from './webhook.service.js';
 const DEFAULT_MAX_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 const EXPIRATION_MS = 10 * 60 * 1000; // 10 minutes
 
+const ALLOWED_EXTENSIONS = new Set([
+    '.mp4', '.mkv', '.mov', '.avi', '.webm', '.flv', '.wmv', '.m4v', '.ts',
+    '.mts', '.m2ts', '.mpg', '.mpeg', '.3gp', '.3g2', '.mxf', '.ogv',
+    '.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a', '.wma', '.opus', '.aiff',
+]);
+
+function hasAllowedExtension(filename: string): boolean {
+    const ext = filename.slice(filename.lastIndexOf('.')).toLowerCase();
+    return ALLOWED_EXTENSIONS.has(ext);
+}
+
 @Injectable()
 export class TusUploadService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(TusUploadService.name);
     private tusdServer!: TusdServer;
     private readonly tusDir: string;
     private readonly workDir: string;
+    private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
     constructor(
         private readonly sessionService: SessionService,
@@ -37,14 +49,14 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
         const maxSize =
             parseInt(process.env.MAX_UPLOAD_SIZE || '0', 10) ||
             DEFAULT_MAX_SIZE;
-        const corsOrigin = process.env.CORS_ORIGIN;
-
+        // Tusd handles CORS independently. We allow all origins (tusd default)
+        // because the tus endpoint is protected by bearer token auth in
+        // onIncomingRequest — no ambient credentials are used.
         this.tusdServer = new TusdServer({
             path: '/api/tus',
             directory: this.tusDir,
             maxSize,
             expirationMs: EXPIRATION_MS,
-            ...(corsOrigin ? { allowedOrigins: corsOrigin.split(',').map((o) => o.trim()) } : {}),
             allowedHeaders: ['Authorization'],
 
             onIncomingRequest: async (req) => {
@@ -95,6 +107,14 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                     };
                 }
 
+                const filename = upload.metadata?.filename;
+                if (filename && !hasAllowedExtension(filename)) {
+                    throw {
+                        status_code: 415,
+                        body: `Unsupported file type. Allowed: media files (video/audio).`,
+                    };
+                }
+
                 this.sessionService.updateStatus(sessionId, 'uploading');
                 this.sendStatusWebhook(sessionId, 'uploading');
             },
@@ -106,7 +126,8 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                     return;
                 }
 
-                const filename = upload.metadata?.filename || 'input';
+                const rawFilename = upload.metadata?.filename || 'input';
+                const filename = basename(rawFilename) || 'input';
                 const tusFilePath = upload.storage?.path;
                 if (!tusFilePath) {
                     this.logger.error(
@@ -148,12 +169,28 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
 
         await this.tusdServer.start();
 
+        // Schedule periodic cleanup every 30 minutes
+        this.cleanupInterval = setInterval(() => {
+            this.tusdServer.cleanUpExpiredUploads().then((count) => {
+                if (count > 0) {
+                    this.logger.log(`Periodic cleanup: removed ${count} expired upload(s)`);
+                }
+            }).catch((err) => {
+                this.logger.warn(`Periodic cleanup failed: ${(err as Error).message}`);
+            });
+        }, 30 * 60 * 1000);
+
         this.logger.log(
             `TUS server initialised (maxSize: ${maxSize} bytes, expiration: ${EXPIRATION_MS / 1000}s)`,
         );
     }
 
     async onModuleDestroy(): Promise<void> {
+        if (this.cleanupInterval) {
+            clearInterval(this.cleanupInterval);
+            this.cleanupInterval = null;
+        }
+
         try {
             await this.tusdServer.cleanUpExpiredUploads();
             this.logger.log('Cleaned up expired TUS uploads on shutdown');

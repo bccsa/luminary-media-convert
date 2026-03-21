@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from './app.module.js';
 import dotenv from 'dotenv';
 
@@ -10,6 +11,17 @@ async function bootstrap() {
     const app = await NestFactory.create(AppModule, {
         logger: ['log', 'error', 'warn', 'debug', 'verbose'],
     });
+
+    app.use(helmet({
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: ["'self'"],
+                styleSrc: ["'self'", "'unsafe-inline'"],
+                imgSrc: ["'self'", 'data:'],
+            },
+        },
+    }));
 
     app.useGlobalPipes(
         new ValidationPipe({
@@ -45,12 +57,18 @@ async function bootstrap() {
         SwaggerModule.setup('saas/docs', app, document);
     }
 
-    const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
-    app.enableCors({
-        origin: corsOrigin.includes(',')
+    const corsOrigin = process.env.CORS_ORIGIN;
+    if (!corsOrigin) {
+        console.warn(
+            'CORS_ORIGIN not set — defaulting to http://localhost:5173. Set CORS_ORIGIN for production.',
+        );
+    }
+    const origin = corsOrigin
+        ? corsOrigin.includes(',')
             ? corsOrigin.split(',').map((o) => o.trim())
-            : corsOrigin,
-    });
+            : corsOrigin
+        : 'http://localhost:5173';
+    app.enableCors({ origin });
 
     const port = process.env.PORT ?? 3001;
     await app.listen(port);

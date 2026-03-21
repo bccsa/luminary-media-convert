@@ -230,6 +230,33 @@ describe('HookServer', () => {
         );
     });
 
+    it('should reject payloads missing required fields', async () => {
+        hookServer = new HookServer({
+            path: '/api/tus',
+            directory: '/tmp/test-uploads',
+        });
+        port = await hookServer.start();
+
+        // Missing Type and Event
+        const res = await postToHookServer(port, { Type: '', Event: {} } as any);
+        expect(res.status).toBe(400);
+        expect(res.body).toContain('missing required fields');
+    });
+
+    it('should reject payloads missing Upload object', async () => {
+        hookServer = new HookServer({
+            path: '/api/tus',
+            directory: '/tmp/test-uploads',
+        });
+        port = await hookServer.start();
+
+        const res = await postToHookServer(port, {
+            Type: 'pre-create',
+            Event: { HTTPRequest: { Method: 'POST', URI: '/', RemoteAddr: '', Header: {} } },
+        } as any);
+        expect(res.status).toBe(400);
+    });
+
     it('should acknowledge unknown hook types with 200', async () => {
         hookServer = new HookServer({
             path: '/api/tus',

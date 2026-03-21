@@ -205,6 +205,40 @@ describe('UsersService', () => {
                 }),
             );
         });
+
+        it('should escape regex special characters in search', async () => {
+            dbService.find.mockResolvedValue({ docs: [] });
+
+            await service.findAll({ search: 'user+name(test)' });
+
+            expect(dbService.find).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    selector: expect.objectContaining({
+                        $or: [
+                            { email: { $regex: '(?i)user\\+name\\(test\\)' } },
+                            { name: { $regex: '(?i)user\\+name\\(test\\)' } },
+                        ],
+                    }),
+                }),
+            );
+        });
+
+        it('should escape ReDoS patterns in search', async () => {
+            dbService.find.mockResolvedValue({ docs: [] });
+
+            await service.findAll({ search: '(a+)+$' });
+
+            expect(dbService.find).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    selector: expect.objectContaining({
+                        $or: [
+                            { email: { $regex: '(?i)\\(a\\+\\)\\+\\$' } },
+                            { name: { $regex: '(?i)\\(a\\+\\)\\+\\$' } },
+                        ],
+                    }),
+                }),
+            );
+        });
     });
 
     describe('update', () => {

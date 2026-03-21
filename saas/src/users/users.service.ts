@@ -8,6 +8,10 @@ import { DatabaseService } from '../database/database.service.js';
 import { UserDocument } from './interfaces/user-document.interface.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 
+function escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 @Injectable()
 export class UsersService {
     constructor(private readonly databaseService: DatabaseService) {}
@@ -92,19 +96,30 @@ export class UsersService {
             selector.status = opts.status;
         }
         if (opts.search) {
+            const escaped = escapeRegex(opts.search);
             selector['$or'] = [
-                { email: { $regex: `(?i)${opts.search}` } },
-                { name: { $regex: `(?i)${opts.search}` } },
+                { email: { $regex: `(?i)${escaped}` } },
+                { name: { $regex: `(?i)${escaped}` } },
             ];
         }
 
-        const result = await this.databaseService.find<UserDocument>({
-            selector,
-            limit: opts.limit || 25,
-            skip: opts.skip || 0,
-        });
+        const limit = opts.limit || 25;
+        const skip = opts.skip || 0;
 
-        return { docs: result.docs, total: result.docs.length };
+        const [result, countResult] = await Promise.all([
+            this.databaseService.find<UserDocument>({
+                selector,
+                limit,
+                skip,
+            }),
+            this.databaseService.find<UserDocument>({
+                selector,
+                fields: ['_id'],
+                limit: 1_000_000,
+            }),
+        ]);
+
+        return { docs: result.docs, total: countResult.docs.length };
     }
 
     async update(

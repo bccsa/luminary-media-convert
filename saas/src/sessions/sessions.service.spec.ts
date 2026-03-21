@@ -218,6 +218,20 @@ describe('SessionsService', () => {
                 }),
             );
         });
+
+        it('should escape regex special characters in name filter', async () => {
+            mockDatabaseService.find.mockResolvedValue({ docs: [] });
+
+            await service.listSessions('user:1', { name: 'test(.*)+' });
+
+            expect(mockDatabaseService.find).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    selector: expect.objectContaining({
+                        name: { $regex: '(?i)test\\(\\.\\*\\)\\+' },
+                    }),
+                }),
+            );
+        });
     });
 
     describe('getSession', () => {

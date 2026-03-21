@@ -55,9 +55,14 @@ describe('WebhooksService', () => {
             expect(() => service.validateWebhookToken('wrong')).toThrow(UnauthorizedException);
         });
 
-        it('should accept any token when WEBHOOK_SECRET is not set', () => {
+        it('should reject all tokens when WEBHOOK_SECRET is not set', () => {
             delete process.env.WEBHOOK_SECRET;
-            expect(() => service.validateWebhookToken('anything')).not.toThrow();
+            expect(() => service.validateWebhookToken('anything')).toThrow(UnauthorizedException);
+        });
+
+        it('should reject when no token provided and WEBHOOK_SECRET is not set', () => {
+            delete process.env.WEBHOOK_SECRET;
+            expect(() => service.validateWebhookToken(undefined)).toThrow(UnauthorizedException);
         });
     });
 

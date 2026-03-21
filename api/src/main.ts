@@ -1,13 +1,34 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import helmet from 'helmet';
+import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
+const helmetMiddleware = helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", 'data:'],
+        },
+    },
+});
+
 async function bootstrap() {
     const app = await NestFactory.create(AppModule);
+
+    // Skip helmet for /api/tus — tusd manages its own headers.
+    app.use((req: Request, res: Response, next: NextFunction) => {
+        if (req.path.startsWith('/api/tus')) {
+            return next();
+        }
+        helmetMiddleware(req, res, next);
+    });
 
     app.useGlobalPipes(
         new ValidationPipe({
@@ -52,13 +73,40 @@ async function bootstrap() {
     const document = SwaggerModule.createDocument(app, config);
     SwaggerModule.setup('api/docs', app, document);
 
-    const corsOrigin = process.env.CORS_ORIGIN;
+    // CORS: The Encoding API is a public, token-authenticated service
+    // (X-API-Key / Bearer session tokens). No cookies or ambient credentials
+    // are used, so allowing all origins is safe — the same pattern used by
+    // Stripe, GitHub, and other public APIs with bearer auth.
+    //
+    // /api/tus routes are raw Express handlers proxied to the tusd Go binary,
+    // which manages its own CORS (including tus-specific protocol headers).
+    // NestJS CORS middleware also runs on those routes but tusd's response
+    // headers take precedence since it writes them directly.
     app.enableCors({
-        origin: corsOrigin
-            ? corsOrigin.includes(',')
-                ? corsOrigin.split(',').map((o) => o.trim())
-                : corsOrigin
-            : '*',
+        origin: true,
+        credentials: false,
+        allowedHeaders: [
+            'Content-Type',
+            'Authorization',
+            'X-API-Key',
+            // Tus protocol headers — required for resumable uploads via /api/tus
+            'Tus-Resumable',
+            'Upload-Length',
+            'Upload-Offset',
+            'Upload-Metadata',
+            'Upload-Defer-Length',
+            'Upload-Concat',
+        ],
+        exposedHeaders: [
+            'Location',
+            'Tus-Resumable',
+            'Tus-Version',
+            'Tus-Extension',
+            'Tus-Max-Size',
+            'Upload-Length',
+            'Upload-Offset',
+            'Upload-Metadata',
+        ],
         maxAge: 600,
     });
 
