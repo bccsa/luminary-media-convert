@@ -12,13 +12,22 @@ export interface S3UploadResult {
 @Injectable()
 export class S3Service {
     private readonly logger = new Logger(S3Service.name);
+    private readonly defaultConcurrency = parseInt(
+        process.env.S3_UPLOAD_CONCURRENCY ?? '10',
+        10,
+    );
 
     /**
      * Create a MinIO client from the session's S3 configuration.
      */
-    private createClient(config: S3ConfigDto): Minio.Client {
+    createClient(config: S3ConfigDto): Minio.Client {
+        // MinIO client expects a bare hostname — strip any protocol prefix
+        const endPoint = config.endPoint
+            .replace(/^https?:\/\//, '')
+            .replace(/\/+$/, '');
+
         return new Minio.Client({
-            endPoint: config.endPoint,
+            endPoint,
             port: config.port,
             useSSL: config.useSSL ?? true,
             accessKey: config.accessKey,
@@ -63,7 +72,7 @@ export class S3Service {
         const results: string[] = new Array(totalFiles);
         let masterPlaylistKey = '';
         let completedCount = 0;
-        const concurrency = options?.concurrency ?? 5;
+        const concurrency = options?.concurrency ?? this.defaultConcurrency;
 
         const prefix = config.pathPrefix
             ? config.pathPrefix.replace(/\/+$/, '')
@@ -124,7 +133,23 @@ export class S3Service {
         return { keys, masterPlaylistKey };
     }
 
-    private getContentType(filePath: string): string {
+    /**
+     * Upload a single file to S3.
+     */
+    async uploadFile(
+        client: Minio.Client,
+        bucket: string,
+        filePath: string,
+        objectKey: string,
+    ): Promise<void> {
+        const contentType = this.getContentType(filePath);
+        await client.fPutObject(bucket, objectKey, filePath, {
+            'Content-Type': contentType,
+        });
+        this.logger.debug(`Uploaded: ${objectKey}`);
+    }
+
+    getContentType(filePath: string): string {
         if (filePath.endsWith('.m3u8'))
             return 'application/vnd.apple.mpegurl';
         if (filePath.endsWith('.m4s')) return 'video/iso.segment';

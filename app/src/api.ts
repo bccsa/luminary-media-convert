@@ -426,6 +426,71 @@ export async function updateSessionName(
     return res.json();
 }
 
+export async function checkPrefix(
+    accessToken: string,
+    s3ConfigId: string,
+    prefix: string,
+): Promise<{ exists: boolean; count: number }> {
+    const params = new URLSearchParams({ s3ConfigId, prefix });
+    const res = await fetch(`${SAAS_URL}/saas/sessions/check-prefix?${params}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || `Check prefix failed (${res.status})`);
+    }
+
+    return res.json();
+}
+
+export async function moveSessionFiles(
+    accessToken: string,
+    sessionId: string,
+    targetS3ConfigId: string,
+    newPathPrefix: string,
+): Promise<any> {
+    const body = { targetS3ConfigId, newPathPrefix };
+
+    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/move`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || `Move failed (${res.status})`);
+    }
+
+    return res.json();
+}
+
+export async function renameSessionPrefix(
+    accessToken: string,
+    sessionId: string,
+    newPathPrefix: string,
+): Promise<any> {
+    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/rename-prefix`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ newPathPrefix }),
+    });
+
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || `Rename prefix failed (${res.status})`);
+    }
+
+    return res.json();
+}
+
 export async function importSession(
     accessToken: string,
     data: {

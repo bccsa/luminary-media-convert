@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, watch, onMounted } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { useRouter } from 'vue-router';
 import SessionConfigForm from '../components/SessionConfigForm.vue';
 import type { SavedS3Config } from '../components/SessionConfigForm.vue';
-import { createSession, uploadFile, listS3Configs, getS3Config, createS3Config, updateSessionName } from '../api';
+import { createSession, uploadFile, listS3Configs, getS3Config, createS3Config, updateSessionName, checkPrefix } from '../api';
 import { useActiveUploads } from '../composables/useActiveUploads';
 import type { CreateSessionRequest, S3Config } from '../types';
 
@@ -20,11 +20,23 @@ const { register: registerUpload, setProgress } = useActiveUploads();
 
 const submissionError = ref<string | null>(null);
 const submitting = ref(false);
+const validating = ref(false);
+const prefixWarning = ref<string | null>(null);
+const pendingPayload = ref<{ config: CreateSessionRequest; file: File; s3ConfigId: string; sessionName: string } | null>(null);
 
 const savedS3Configs = ref<SavedS3Config[]>([]);
 const loadedS3Config = ref<S3Config | null>(null);
 const selectedS3ConfigId = ref('');
 const creatingConfig = ref(false);
+const formPathPrefix = ref('');
+
+// Dismiss the prefix warning if the user edits the prefix directly
+watch(formPathPrefix, () => {
+    if (prefixWarning.value) {
+        prefixWarning.value = null;
+        pendingPayload.value = null;
+    }
+});
 
 async function fetchSavedS3Configs() {
     try {
@@ -56,6 +68,7 @@ async function onLoadS3Config(configId: string) {
             region: config.region,
             accessKey: config.accessKey,
             secretKey: config.secretKey,
+            publicUrl: config.publicUrl,
         };
     } catch {
         // Non-critical
@@ -78,6 +91,51 @@ async function onCreateS3Config(data: Record<string, any>) {
 }
 
 async function onUploadSubmit(payload: {
+    config: CreateSessionRequest;
+    file: File;
+    s3ConfigId: string;
+    sessionName: string;
+}) {
+    submissionError.value = null;
+    prefixWarning.value = null;
+    pendingPayload.value = null;
+
+    // Check if the prefix already contains files in the target bucket
+    const prefix = payload.config.s3.pathPrefix?.trim();
+    if (prefix && payload.s3ConfigId) {
+        validating.value = true;
+        try {
+            const token = await getAccessTokenSilently();
+            const result = await checkPrefix(token, payload.s3ConfigId, prefix);
+            if (result.exists) {
+                prefixWarning.value = `The prefix "${prefix}" already contains ${result.count} file(s) in this bucket. Encoding will add files alongside them, which may overwrite existing files with the same names.`;
+                pendingPayload.value = payload;
+                return;
+            }
+        } catch {
+            // Non-critical — proceed without warning
+        } finally {
+            validating.value = false;
+        }
+    }
+
+    await startUpload(payload);
+}
+
+function dismissPrefixWarning() {
+    prefixWarning.value = null;
+    pendingPayload.value = null;
+}
+
+async function confirmPrefixOverwrite() {
+    if (!pendingPayload.value) return;
+    const payload = pendingPayload.value;
+    prefixWarning.value = null;
+    pendingPayload.value = null;
+    await startUpload(payload);
+}
+
+async function startUpload(payload: {
     config: CreateSessionRequest;
     file: File;
     s3ConfigId: string;
@@ -136,6 +194,30 @@ onMounted(fetchSavedS3Configs);
 <template>
     <div class="max-w-2xl mx-auto">
         <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 shadow-xl backdrop-blur">
+            <!-- Prefix overwrite warning -->
+            <div
+                v-if="prefixWarning"
+                class="mb-6 rounded-lg bg-amber-950/40 border border-amber-800/50 p-4 space-y-3"
+            >
+                <p class="text-sm text-amber-400">{{ prefixWarning }}</p>
+                <div class="flex gap-2">
+                    <button
+                        type="button"
+                        class="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-500 cursor-pointer"
+                        @click="confirmPrefixOverwrite"
+                    >
+                        Continue Anyway
+                    </button>
+                    <button
+                        type="button"
+                        class="rounded-md border border-zinc-700 px-4 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800 cursor-pointer"
+                        @click="dismissPrefixWarning"
+                    >
+                        Revise Prefix
+                    </button>
+                </div>
+            </div>
+
             <!-- Submission error banner -->
             <div
                 v-if="submissionError"
@@ -144,18 +226,19 @@ onMounted(fetchSavedS3Configs);
                 <p class="text-sm text-red-400">{{ submissionError }}</p>
             </div>
 
-            <!-- Submitting spinner -->
-            <div v-if="submitting" class="flex flex-col items-center gap-4 py-16">
+            <!-- Validating / Submitting spinner -->
+            <div v-if="validating || submitting" class="flex flex-col items-center gap-4 py-16">
                 <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                <p class="text-sm text-zinc-400">Creating session...</p>
+                <p class="text-sm text-zinc-400">{{ validating ? 'Validating...' : 'Creating session...' }}</p>
             </div>
 
-            <!-- Session config form -->
+            <!-- Session config form (kept mounted to preserve file selection) -->
             <SessionConfigForm
-                v-else
+                v-show="!validating && !submitting"
+                v-model:path-prefix="formPathPrefix"
                 :saved-s3-configs="savedS3Configs"
                 :loaded-s3-config="loadedS3Config"
                 :selected-s3-config-id="selectedS3ConfigId"

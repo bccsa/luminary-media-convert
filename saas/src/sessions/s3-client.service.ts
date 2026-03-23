@@ -66,6 +66,34 @@ export class S3ClientService {
         return keys.length;
     }
 
+    async copyObjectSameBucket(
+        userId: string,
+        s3ConfigId: string,
+        sourceKey: string,
+        destKey: string,
+    ): Promise<void> {
+        const { client, bucket } = await this.createClient(userId, s3ConfigId);
+        await client.copyObject(
+            bucket,
+            destKey,
+            `/${bucket}/${sourceKey}`,
+        );
+    }
+
+    async transferObject(
+        userId: string,
+        sourceS3ConfigId: string,
+        sourceKey: string,
+        destS3ConfigId: string,
+        destKey: string,
+    ): Promise<void> {
+        const source = await this.createClient(userId, sourceS3ConfigId);
+        const dest = await this.createClient(userId, destS3ConfigId);
+
+        const stream = await source.client.getObject(source.bucket, sourceKey);
+        await dest.client.putObject(dest.bucket, destKey, stream);
+    }
+
     private async createClient(
         userId: string,
         s3ConfigId: string,
@@ -77,8 +105,13 @@ export class S3ClientService {
         const { accessKey, secretKey } =
             this.s3ConfigsService.decryptCredentials(config);
 
+        // MinIO client expects a bare hostname — strip any protocol prefix
+        const endPoint = config.endPoint
+            .replace(/^https?:\/\//, '')
+            .replace(/\/+$/, '');
+
         const client = new Minio.Client({
-            endPoint: config.endPoint,
+            endPoint,
             port: config.port,
             useSSL: config.useSSL ?? true,
             accessKey,

@@ -5,6 +5,7 @@ import type { SessionStatus } from '../dto/webhook-payload.dto.js';
 import type { ProbeResult } from './probe.service.js';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 import type { SegmentFormat } from './ffmpeg.service.js';
+import type { PipelineProgress } from './segment-pipeline.service.js';
 import { SessionEventsService, type SessionEvent } from './session-events.service.js';
 
 export interface AnglePlaylistInfo {
@@ -17,6 +18,7 @@ export interface Session {
     sessionToken: string;
     status: SessionStatus;
     progress: number;
+    pipelineProgress?: PipelineProgress;
     config: CreateSessionDto;
     probeResult?: ProbeResult;
     encodeConfig?: EncodeConfigDto;
@@ -44,6 +46,7 @@ export class SessionService {
             sessionId: session.id,
             status: session.status,
             progress: session.progress || undefined,
+            pipelineProgress: session.pipelineProgress,
             error: session.error,
             files: session.files,
             masterPlaylist: session.masterPlaylist,
@@ -96,6 +99,15 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.progress = progress;
+            this.emitEvent(session);
+        }
+    }
+
+    updatePipelineProgress(id: string, pipelineProgress: PipelineProgress): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.pipelineProgress = pipelineProgress;
+            session.progress = pipelineProgress.encoding;
             this.emitEvent(session);
         }
     }

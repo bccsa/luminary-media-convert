@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, MinLength, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, IsUrl, MinLength, MaxLength, ValidateIf } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateS3ConfigDto {
@@ -10,4 +10,6 @@ export class CreateS3ConfigDto {
     @ApiPropertyOptional() @IsOptional() @IsString() region?: string;
     @ApiProperty() @IsString() @MinLength(1) accessKey: string;
     @ApiProperty() @IsString() @MinLength(1) secretKey: string;
+    @ApiPropertyOptional({ description: 'Public base URL for accessing objects (e.g. custom domain on R2). Object keys are appended directly.' })
+    @IsOptional() @ValidateIf((_, value) => value !== '') @IsUrl({ require_tld: false }) publicUrl?: string;
 }

@@ -8,7 +8,7 @@ import HlsPlayer from '../components/HlsPlayer.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import InlineConfirm from '../components/InlineConfirm.vue';
-import { getSessionDetail, getSessionStatus, startEncode, deleteSession, updateSessionName } from '../api';
+import { getSessionDetail, getSessionStatus, startEncode, deleteSession, updateSessionName, moveSessionFiles, renameSessionPrefix, listS3Configs, checkPrefix } from '../api';
 import { useSessionPoller } from '../composables/useSessionPoller';
 import { useActiveUploads } from '../composables/useActiveUploads';
 import type { AccelMode, SegmentFormat } from '../types';
@@ -148,10 +148,13 @@ const isExpired = computed(() => {
 
 const s3PublicBaseUrl = computed(() => {
     const s3 = session.value?.s3Config;
+    if (s3?.publicUrl) return s3.publicUrl.replace(/\/+$/, '');
     if (!s3?.endPoint || !s3?.bucket) return undefined;
+    // Strip any protocol prefix from endPoint to avoid double https://
+    const bareHost = s3.endPoint.replace(/^https?:\/\//, '').replace(/\/+$/, '');
     const protocol = s3.useSSL === false ? 'http' : 'https';
     const port = s3.port ? ':' + s3.port : '';
-    return protocol + '://' + s3.endPoint + port + '/' + s3.bucket;
+    return protocol + '://' + bareHost + port + '/' + s3.bucket;
 });
 
 const isEncrypted = computed(() => !!session.value?.encrypted);
@@ -193,6 +196,69 @@ const displayEncoder = computed<AccelMode | string | undefined>(
 
 const displaySegmentFormat = computed<SegmentFormat | string | undefined>(
     () => poller.segmentFormat.value ?? session.value?.segmentFormat,
+);
+
+// ---------------------------------------------------------------------------
+// ETA calculation
+// ---------------------------------------------------------------------------
+
+const etaSamples: { time: number; progress: number }[] = [];
+const etaDisplay = ref<string | undefined>();
+
+watch(
+    () => poller.pipelineProgress.value?.encoding ?? poller.progress.value,
+    (encodingProgress) => {
+        if (encodingProgress == null || encodingProgress <= 0) {
+            etaDisplay.value = undefined;
+            return;
+        }
+
+        const now = Date.now();
+        etaSamples.push({ time: now, progress: encodingProgress });
+
+        // Keep last 30 seconds of samples
+        const cutoff = now - 30_000;
+        while (etaSamples.length > 1 && etaSamples[0].time < cutoff) {
+            etaSamples.shift();
+        }
+
+        if (etaSamples.length < 2) {
+            etaDisplay.value = undefined;
+            return;
+        }
+
+        const oldest = etaSamples[0];
+        const elapsed = (now - oldest.time) / 1000;
+        const progressDelta = encodingProgress - oldest.progress;
+
+        if (progressDelta <= 0 || elapsed <= 0) {
+            etaDisplay.value = undefined;
+            return;
+        }
+
+        const rate = progressDelta / elapsed;
+        const remainingSec = (100 - encodingProgress) / rate;
+
+        if (remainingSec < 0 || !isFinite(remainingSec)) {
+            etaDisplay.value = undefined;
+            return;
+        }
+
+        const remainingLabel =
+            remainingSec >= 3600
+                ? `~${Math.round(remainingSec / 3600)} hr remaining`
+                : remainingSec >= 60
+                  ? `~${Math.round(remainingSec / 60)} min remaining`
+                  : `~${Math.round(remainingSec)} sec remaining`;
+
+        const completionTime = new Date(now + remainingSec * 1000);
+        const timeStr = completionTime.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+
+        etaDisplay.value = `${remainingLabel} \u00B7 Est. completion: ${timeStr}`;
+    },
 );
 
 // ---------------------------------------------------------------------------
@@ -315,6 +381,140 @@ async function onConfirmDelete(withFiles: boolean) {
         error.value = e instanceof Error ? e.message : String(e);
     } finally {
         deleting.value = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Move files
+// ---------------------------------------------------------------------------
+
+const showMoveForm = ref(false);
+const moving = ref(false);
+const moveError = ref<string | null>(null);
+const s3Configs = ref<any[]>([]);
+const selectedTargetConfigId = ref('');
+const moveNewPrefix = ref('');
+const movePrefixWarning = ref<string | null>(null);
+const moveConfirmedOverwrite = ref(false);
+const checkingMovePrefix = ref(false);
+
+async function openMoveForm() {
+    moveError.value = null;
+    movePrefixWarning.value = null;
+    moveConfirmedOverwrite.value = false;
+    try {
+        const token = await getAccessTokenSilently();
+        const result = await listS3Configs(token);
+        s3Configs.value = result.configs ?? result;
+    } catch (e) {
+        moveError.value = e instanceof Error ? e.message : String(e);
+        return;
+    }
+    selectedTargetConfigId.value = '';
+    moveNewPrefix.value = session.value?.s3Config?.pathPrefix ?? '';
+    showMoveForm.value = true;
+}
+
+async function checkMovePrefix() {
+    movePrefixWarning.value = null;
+    moveConfirmedOverwrite.value = false;
+    if (!selectedTargetConfigId.value || !moveNewPrefix.value.trim()) return;
+    checkingMovePrefix.value = true;
+    try {
+        const token = await getAccessTokenSilently();
+        const result = await checkPrefix(token, selectedTargetConfigId.value, moveNewPrefix.value.trim());
+        if (result.exists) {
+            movePrefixWarning.value = `This prefix already contains ${result.count} file(s). Moving here will add files alongside existing ones.`;
+        }
+    } catch {
+        // Non-critical — proceed without warning
+    } finally {
+        checkingMovePrefix.value = false;
+    }
+}
+
+const canMove = computed(() =>
+    !!selectedTargetConfigId.value &&
+    !!moveNewPrefix.value.trim() &&
+    !moving.value &&
+    !checkingMovePrefix.value &&
+    (!movePrefixWarning.value || moveConfirmedOverwrite.value),
+);
+
+async function confirmMove() {
+    if (!canMove.value) return;
+    moving.value = true;
+    moveError.value = null;
+    try {
+        const token = await getAccessTokenSilently();
+        await moveSessionFiles(token, sessionId.value, selectedTargetConfigId.value, moveNewPrefix.value.trim());
+        showMoveForm.value = false;
+        await fetchSession();
+    } catch (e) {
+        moveError.value = e instanceof Error ? e.message : String(e);
+    } finally {
+        moving.value = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rename prefix
+// ---------------------------------------------------------------------------
+
+const showRenameForm = ref(false);
+const renaming = ref(false);
+const renameError = ref<string | null>(null);
+const renameNewPrefix = ref('');
+const renamePrefixWarning = ref<string | null>(null);
+const renameConfirmedOverwrite = ref(false);
+const checkingRenamePrefix = ref(false);
+
+function openRenameForm() {
+    renameError.value = null;
+    renamePrefixWarning.value = null;
+    renameConfirmedOverwrite.value = false;
+    renameNewPrefix.value = session.value?.s3Config?.pathPrefix ?? '';
+    showRenameForm.value = true;
+}
+
+async function checkRenamePrefix() {
+    renamePrefixWarning.value = null;
+    renameConfirmedOverwrite.value = false;
+    if (!renameNewPrefix.value.trim() || !session.value?.s3ConfigId) return;
+    checkingRenamePrefix.value = true;
+    try {
+        const token = await getAccessTokenSilently();
+        const result = await checkPrefix(token, session.value.s3ConfigId, renameNewPrefix.value.trim());
+        if (result.exists) {
+            renamePrefixWarning.value = `This prefix already contains ${result.count} file(s). Renaming here will add files alongside existing ones.`;
+        }
+    } catch {
+        // Non-critical
+    } finally {
+        checkingRenamePrefix.value = false;
+    }
+}
+
+const canRename = computed(() =>
+    !!renameNewPrefix.value.trim() &&
+    !renaming.value &&
+    !checkingRenamePrefix.value &&
+    (!renamePrefixWarning.value || renameConfirmedOverwrite.value),
+);
+
+async function confirmRename() {
+    if (!canRename.value) return;
+    renaming.value = true;
+    renameError.value = null;
+    try {
+        const token = await getAccessTokenSilently();
+        await renameSessionPrefix(token, sessionId.value, renameNewPrefix.value.trim());
+        showRenameForm.value = false;
+        await fetchSession();
+    } catch (e) {
+        renameError.value = e instanceof Error ? e.message : String(e);
+    } finally {
+        renaming.value = false;
     }
 }
 
@@ -495,14 +695,8 @@ async function onEncodeSubmit(config: EncodeConfig) {
     }
 }
 
-async function onEncodeBack() {
-    try {
-        const accessToken = await getAccessTokenSilently();
-        await deleteSession(sessionId.value, accessToken);
-    } catch {
-        // Best-effort cleanup
-    }
-    router.push('/sessions/new');
+function onEncodeBack() {
+    router.push('/sessions');
 }
 
 // ---------------------------------------------------------------------------
@@ -774,15 +968,32 @@ onUnmounted(() => {
                         </p>
                     </div>
 
-                    <!-- Progress bar (encoding / encrypting / uploading_to_s3) -->
+                    <!-- Pipeline progress bars (encoding + encrypting + uploading) -->
                     <div
                         v-if="poller.status.value === 'encoding' || poller.status.value === 'encrypting' || poller.status.value === 'uploading_to_s3'"
-                        class="mb-4"
+                        class="mb-4 space-y-3"
                     >
+                        <!-- Encoding progress -->
                         <ProgressBar
-                            :label="poller.status.value === 'encoding' ? 'Encoding...' : poller.status.value === 'encrypting' ? 'Encrypting...' : 'Uploading to S3...'"
-                            :progress="poller.progress.value"
+                            label="Encoding"
+                            :progress="poller.pipelineProgress.value?.encoding ?? poller.progress.value"
                         />
+                        <!-- Encrypting progress (appears when encryption starts) -->
+                        <ProgressBar
+                            v-if="poller.pipelineProgress.value?.encrypting != null"
+                            label="Encrypting"
+                            :progress="poller.pipelineProgress.value.encrypting"
+                        />
+                        <!-- Uploading progress (appears when uploads start) -->
+                        <ProgressBar
+                            v-if="poller.pipelineProgress.value?.uploading != null"
+                            label="Uploading to S3"
+                            :progress="poller.pipelineProgress.value.uploading"
+                        />
+                        <!-- ETA -->
+                        <p v-if="etaDisplay" class="text-xs text-zinc-500 text-right">
+                            {{ etaDisplay }}
+                        </p>
                     </div>
 
                     <!-- Failed banner -->
@@ -918,8 +1129,104 @@ onUnmounted(() => {
                         </div>
                     </div>
 
+                    <!-- Move / Rename forms -->
+                    <div v-if="showMoveForm && isCompleted && hasS3Files" class="mt-4 rounded-lg border border-zinc-700 bg-zinc-900/80 p-4 space-y-3">
+                        <p class="text-sm font-semibold text-zinc-300">Move Files to Another S3 Config</p>
+                        <div>
+                            <label class="mb-1 block text-xs text-zinc-500">Target S3 Config</label>
+                            <select
+                                v-model="selectedTargetConfigId"
+                                class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                @change="checkMovePrefix"
+                            >
+                                <option value="" disabled>Select a config...</option>
+                                <option v-for="c in s3Configs" :key="c.id" :value="c.id">
+                                    {{ c.name }} ({{ c.bucket }})
+                                </option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="mb-1 block text-xs text-zinc-500">Path Prefix</label>
+                            <input
+                                v-model="moveNewPrefix"
+                                type="text"
+                                placeholder="e.g. videos/project-1/"
+                                class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:border-indigo-500 focus:outline-none"
+                                @blur="checkMovePrefix"
+                            />
+                        </div>
+                        <div v-if="movePrefixWarning" class="rounded-md bg-amber-950/40 border border-amber-800/50 p-3">
+                            <p class="text-xs text-amber-400">{{ movePrefixWarning }}</p>
+                            <label class="mt-2 flex items-center gap-2 text-xs text-amber-300 cursor-pointer">
+                                <input v-model="moveConfirmedOverwrite" type="checkbox" class="rounded border-amber-700" />
+                                I understand, proceed anyway
+                            </label>
+                        </div>
+                        <p v-if="moveError" class="text-xs text-red-400">{{ moveError }}</p>
+                        <div class="flex gap-2">
+                            <button
+                                type="button"
+                                :disabled="!canMove"
+                                class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:opacity-50 cursor-pointer"
+                                @click="confirmMove"
+                            >
+                                <template v-if="moving">Moving...</template>
+                                <template v-else>Move</template>
+                            </button>
+                            <button
+                                type="button"
+                                :disabled="moving"
+                                class="rounded-md border border-zinc-700 px-4 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800 cursor-pointer"
+                                @click="showMoveForm = false"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+
+                    <div v-if="showRenameForm && isCompleted && hasS3Files" class="mt-4 rounded-lg border border-zinc-700 bg-zinc-900/80 p-4 space-y-3">
+                        <p class="text-sm font-semibold text-zinc-300">Rename Path Prefix</p>
+                        <div>
+                            <label class="mb-1 block text-xs text-zinc-500">New Path Prefix</label>
+                            <input
+                                v-model="renameNewPrefix"
+                                type="text"
+                                placeholder="e.g. production/client-x/"
+                                class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:border-indigo-500 focus:outline-none"
+                                @blur="checkRenamePrefix"
+                            />
+                        </div>
+                        <div v-if="renamePrefixWarning" class="rounded-md bg-amber-950/40 border border-amber-800/50 p-3">
+                            <p class="text-xs text-amber-400">{{ renamePrefixWarning }}</p>
+                            <label class="mt-2 flex items-center gap-2 text-xs text-amber-300 cursor-pointer">
+                                <input v-model="renameConfirmedOverwrite" type="checkbox" class="rounded border-amber-700" />
+                                I understand, proceed anyway
+                            </label>
+                        </div>
+                        <p v-if="renameError" class="text-xs text-red-400">{{ renameError }}</p>
+                        <div class="flex gap-2">
+                            <button
+                                type="button"
+                                :disabled="!canRename"
+                                class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:opacity-50 cursor-pointer"
+                                @click="confirmRename"
+                            >
+                                <template v-if="renaming">Renaming...</template>
+                                <template v-else>Rename</template>
+                            </button>
+                            <button
+                                type="button"
+                                :disabled="renaming"
+                                class="rounded-md border border-zinc-700 px-4 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800 cursor-pointer"
+                                @click="showRenameForm = false"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Action buttons -->
-                    <div class="mt-4 flex gap-3">
+                    <div class="mt-4 flex flex-wrap gap-3">
                         <button
                             v-if="showEncoding && (poller.status.value === 'queued' || poller.status.value === 'encoding')"
                             type="button"
@@ -927,6 +1234,22 @@ onUnmounted(() => {
                             @click="onCancelEncode"
                         >
                             Cancel
+                        </button>
+                        <button
+                            v-if="isCompleted && hasS3Files && !showMoveForm && !showRenameForm"
+                            type="button"
+                            class="rounded-lg border border-zinc-700 px-4 py-3 text-sm font-semibold text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+                            @click="openMoveForm"
+                        >
+                            Move Files
+                        </button>
+                        <button
+                            v-if="isCompleted && hasS3Files && !showMoveForm && !showRenameForm"
+                            type="button"
+                            class="rounded-lg border border-zinc-700 px-4 py-3 text-sm font-semibold text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+                            @click="openRenameForm"
+                        >
+                            Rename Prefix
                         </button>
                         <button
                             v-if="isTerminal"

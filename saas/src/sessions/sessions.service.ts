@@ -14,6 +14,8 @@ import { HlsParserService } from './hls-parser.service.js';
 import { S3ClientService } from './s3-client.service.js';
 import { CreateSaasSessionDto } from './dto/create-session.dto.js';
 import { ImportSessionDto } from './dto/import-session.dto.js';
+import { MoveSessionFilesDto } from './dto/move-session-files.dto.js';
+import { RenameSessionPrefixDto } from './dto/rename-session-prefix.dto.js';
 import { SaasSessionResponseDto } from './dto/session-response.dto.js';
 import { SessionDocument } from './interfaces/session-document.interface.js';
 
@@ -34,6 +36,10 @@ export interface SessionRecord {
 export class SessionsService implements OnModuleInit {
     private readonly logger = new Logger(SessionsService.name);
     private readonly sessions = new Map<string, SessionRecord>();
+    private readonly s3Concurrency = parseInt(
+        process.env.S3_UPLOAD_CONCURRENCY ?? '10',
+        10,
+    );
     private encodingApiUrl: string;
     private encodingApiMasterKey: string;
 
@@ -68,6 +74,11 @@ export class SessionsService implements OnModuleInit {
         const webhookSecret = process.env.WEBHOOK_SECRET || '';
 
         const { s3ConfigId: _, ...encodingApiDto } = dto as any;
+        // Strip publicUrl from S3 config — not relevant to the Encoding API
+        if (encodingApiDto.s3) {
+            const { publicUrl: __, ...s3Rest } = encodingApiDto.s3;
+            encodingApiDto.s3 = s3Rest;
+        }
         const payload: Record<string, unknown> = {
             ...encodingApiDto,
             webhook: {
@@ -104,6 +115,7 @@ export class SessionsService implements OnModuleInit {
             pathPrefix: dto.s3.pathPrefix,
             port: dto.s3.port,
             useSSL: dto.s3.useSSL,
+            publicUrl: dto.s3.publicUrl,
         };
 
         this.sessions.set(data.sessionId, {
@@ -339,6 +351,7 @@ export class SessionsService implements OnModuleInit {
                 bucket: s3Config.bucket,
                 port: s3Config.port,
                 useSSL: s3Config.useSSL,
+                publicUrl: s3Config.publicUrl,
             },
             s3ConfigId: dto.s3ConfigId,
             imported: true,
@@ -472,6 +485,181 @@ export class SessionsService implements OnModuleInit {
         return this.stripSensitiveFields(doc);
     }
 
+    async moveSessionFiles(
+        userId: string,
+        sessionId: string,
+        dto: MoveSessionFilesDto,
+    ): Promise<SessionDocument> {
+        const doc = await this.getSessionDoc(sessionId);
+        if (doc.userId !== userId) {
+            throw new ForbiddenException('Not authorized to modify this session');
+        }
+        if (doc.status !== 'completed' && doc.status !== 'imported') {
+            throw new BadRequestException('Only completed or imported sessions can be moved');
+        }
+        if (!doc.files?.length || !doc.s3ConfigId) {
+            throw new BadRequestException('Session has no files or S3 config');
+        }
+
+        // Verify target config exists and belongs to user
+        const targetConfig = await this.s3ConfigsService.getById(userId, dto.targetS3ConfigId);
+
+        const oldPrefix = doc.s3Config?.pathPrefix ?? '';
+        // Ensure prefix always ends with '/'
+        const newPrefix = dto.newPathPrefix.endsWith('/') ? dto.newPathPrefix : dto.newPathPrefix + '/';
+
+        // Build key mapping: old key → new key
+        const keyMap = new Map<string, string>();
+        for (const key of doc.files) {
+            keyMap.set(key, this.rewriteKey(key, oldPrefix, newPrefix));
+        }
+
+        // Transfer all files to destination (parallel with concurrency limit)
+        const transferEntries = [...keyMap.entries()];
+        await this.runParallel(transferEntries, ([sourceKey, destKey]) =>
+            this.s3ClientService.transferObject(
+                userId,
+                doc.s3ConfigId!,
+                sourceKey,
+                dto.targetS3ConfigId,
+                destKey,
+            ),
+        );
+
+        // Delete originals from source
+        await this.s3ClientService.deleteObjects(userId, doc.s3ConfigId, doc.files);
+
+        // Update session document
+        const rewritten = this.rewriteSessionKeys(doc, oldPrefix, newPrefix);
+        doc.files = rewritten.files;
+        doc.masterPlaylist = rewritten.masterPlaylist;
+        doc.anglePlaylists = rewritten.anglePlaylists;
+        doc.thumbnailsVtt = rewritten.thumbnailsVtt;
+        doc.s3ConfigId = dto.targetS3ConfigId;
+        doc.s3Config = {
+            endPoint: targetConfig.endPoint,
+            bucket: targetConfig.bucket,
+            pathPrefix: newPrefix || undefined,
+            port: targetConfig.port,
+            useSSL: targetConfig.useSSL,
+            publicUrl: targetConfig.publicUrl,
+        };
+        doc.updatedAt = new Date().toISOString();
+
+        await this.databaseService.upsert(doc);
+
+        this.logger.log(
+            `Moved ${doc.files.length} file(s) for session ${sessionId} to config ${dto.targetS3ConfigId}`,
+        );
+
+        return doc;
+    }
+
+    async renameSessionPrefix(
+        userId: string,
+        sessionId: string,
+        dto: RenameSessionPrefixDto,
+    ): Promise<SessionDocument> {
+        const doc = await this.getSessionDoc(sessionId);
+        if (doc.userId !== userId) {
+            throw new ForbiddenException('Not authorized to modify this session');
+        }
+        if (doc.status !== 'completed' && doc.status !== 'imported') {
+            throw new BadRequestException('Only completed or imported sessions can be renamed');
+        }
+        if (!doc.files?.length || !doc.s3ConfigId) {
+            throw new BadRequestException('Session has no files or S3 config');
+        }
+
+        const oldPrefix = doc.s3Config?.pathPrefix ?? '';
+        // Ensure non-empty prefix always ends with '/'
+        const rawPrefix = dto.newPathPrefix;
+        const newPrefix = rawPrefix && !rawPrefix.endsWith('/') ? rawPrefix + '/' : rawPrefix;
+
+        if (oldPrefix === newPrefix) {
+            return doc;
+        }
+
+        // Copy all files to new prefix (parallel with concurrency limit)
+        await this.runParallel(doc.files, (key) => {
+            const newKey = this.rewriteKey(key, oldPrefix, newPrefix);
+            return this.s3ClientService.copyObjectSameBucket(
+                userId,
+                doc.s3ConfigId!,
+                key,
+                newKey,
+            );
+        });
+
+        // Delete originals
+        await this.s3ClientService.deleteObjects(userId, doc.s3ConfigId, doc.files);
+
+        // Update session document
+        const rewritten = this.rewriteSessionKeys(doc, oldPrefix, newPrefix);
+        doc.files = rewritten.files;
+        doc.masterPlaylist = rewritten.masterPlaylist;
+        doc.anglePlaylists = rewritten.anglePlaylists;
+        doc.thumbnailsVtt = rewritten.thumbnailsVtt;
+        if (doc.s3Config) {
+            doc.s3Config.pathPrefix = newPrefix || undefined;
+        }
+        doc.updatedAt = new Date().toISOString();
+
+        await this.databaseService.upsert(doc);
+
+        this.logger.log(
+            `Renamed prefix for session ${sessionId}: "${oldPrefix}" → "${newPrefix}"`,
+        );
+
+        return doc;
+    }
+
+    async checkPrefix(
+        userId: string,
+        s3ConfigId: string,
+        prefix: string,
+    ): Promise<{ exists: boolean; count: number }> {
+        // Verify config belongs to user
+        await this.s3ConfigsService.getById(userId, s3ConfigId);
+
+        const normalizedPrefix = prefix && !prefix.endsWith('/') ? prefix + '/' : prefix;
+        const keys = await this.s3ClientService.listObjects(userId, s3ConfigId, normalizedPrefix);
+        return { exists: keys.length > 0, count: keys.length };
+    }
+
+    private rewriteKey(key: string, oldPrefix: string, newPrefix: string): string {
+        if (oldPrefix && key.startsWith(oldPrefix)) {
+            return newPrefix + key.slice(oldPrefix.length);
+        }
+        // If no old prefix or key doesn't match, prepend new prefix
+        return newPrefix ? newPrefix + key : key;
+    }
+
+    private rewriteSessionKeys(
+        doc: SessionDocument,
+        oldPrefix: string,
+        newPrefix: string,
+    ): {
+        files: string[];
+        masterPlaylist?: string;
+        anglePlaylists?: Array<{ name: string; key: string }>;
+        thumbnailsVtt?: string;
+    } {
+        const files = (doc.files ?? []).map((k) => this.rewriteKey(k, oldPrefix, newPrefix));
+        const masterPlaylist = doc.masterPlaylist
+            ? this.rewriteKey(doc.masterPlaylist, oldPrefix, newPrefix)
+            : undefined;
+        const anglePlaylists = doc.anglePlaylists?.map((ap) => ({
+            name: ap.name,
+            key: this.rewriteKey(ap.key, oldPrefix, newPrefix),
+        }));
+        const thumbnailsVtt = doc.thumbnailsVtt
+            ? this.rewriteKey(doc.thumbnailsVtt, oldPrefix, newPrefix)
+            : undefined;
+
+        return { files, masterPlaylist, anglePlaylists, thumbnailsVtt };
+    }
+
     /** Strip fields containing personal data, file locations, and credentials from admin responses. */
     private stripSensitiveFields(session: SessionDocument): Partial<SessionDocument> {
         const {
@@ -486,6 +674,24 @@ export class SessionsService implements OnModuleInit {
             ...safe
         } = session;
         return safe;
+    }
+
+    private async runParallel<T>(
+        items: T[],
+        fn: (item: T) => Promise<void>,
+    ): Promise<void> {
+        let nextIndex = 0;
+        const worker = async () => {
+            while (nextIndex < items.length) {
+                const i = nextIndex++;
+                await fn(items[i]);
+            }
+        };
+        const workers = Array.from(
+            { length: Math.min(this.s3Concurrency, items.length) },
+            () => worker(),
+        );
+        await Promise.all(workers);
     }
 
     private async getSessionDoc(sessionId: string): Promise<SessionDocument> {

@@ -300,6 +300,7 @@ export class EncodeController {
 
         if (session.status === 'encoding' || session.status === 'encrypting' || session.status === 'uploading_to_s3') {
             result.progress = session.progress;
+            result.pipelineProgress = session.pipelineProgress;
         }
 
         if (session.status === 'completed') {

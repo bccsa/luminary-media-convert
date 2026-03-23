@@ -20,7 +20,6 @@ const emit = defineEmits<{
     back: [];
 }>();
 
-const showBackConfirm = ref(false);
 
 const encodingType = reactive<{ value: 'video' | 'audio' }>({
     value: props.probeResult.videoTracks.length > 0 ? 'video' : 'audio',
@@ -874,37 +873,11 @@ function onSubmit() {
             </fieldset>
         </template>
 
-        <!-- Back confirmation banner -->
-        <div
-            v-if="showBackConfirm"
-            class="ecf-confirm-banner"
-        >
-            <p class="ecf-confirm-text">
-                Going back will delete the uploaded file from the server. Are you sure?
-            </p>
-            <div class="ecf-confirm-actions">
-                <button
-                    type="button"
-                    @click="showBackConfirm = false"
-                    class="ecf-btn-secondary"
-                >
-                    Cancel
-                </button>
-                <button
-                    type="button"
-                    @click="emit('back')"
-                    class="ecf-btn-danger"
-                >
-                    Delete &amp; Go Back
-                </button>
-            </div>
-        </div>
-
         <!-- Actions -->
-        <div v-else class="ecf-actions">
+        <div class="ecf-actions">
             <button
                 type="button"
-                @click="showBackConfirm = true"
+                @click="emit('back')"
                 class="ecf-btn-secondary"
             >
                 Back

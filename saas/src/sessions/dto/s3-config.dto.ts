@@ -56,4 +56,13 @@ export class S3ConfigDto {
     @IsOptional()
     @Expose()
     pathPrefix?: string;
+
+    @ApiPropertyOptional({
+        description: 'Public base URL for accessing objects (e.g. custom domain on R2). Object keys are appended directly.',
+        example: 'https://media.example.com',
+    })
+    @IsString()
+    @IsOptional()
+    @Expose()
+    publicUrl?: string;
 }

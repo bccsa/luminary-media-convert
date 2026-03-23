@@ -863,11 +863,21 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const audioGroups = config.audioGroups ?? [];
         if (audioGroups.length === 0) return content;
 
+        // Determine if all audio groups share the same language.
+        // When they do, they represent quality tiers (not language alternatives),
+        // so they must share the same NAME to prevent HLS players from showing
+        // them as separate selectable audio tracks.
+        const uniqueLanguages = new Set(audioGroups.map(g => g.language ?? ''));
+        const isSingleLanguage = uniqueLanguages.size <= 1;
+
         const nameByUri = new Map<string, string>();
         for (const group of audioGroups) {
             const streamName = this.buildAudioStreamName(group);
             const uri = `stream_${streamName}/playlist.m3u8`;
-            nameByUri.set(uri, group.label ?? group.language ?? 'Audio');
+            const name = isSingleLanguage
+                ? (group.language ?? 'Audio')
+                : (group.label ?? group.language ?? 'Audio');
+            nameByUri.set(uri, name);
         }
 
         return content.split('\n').map((line) => {
@@ -1029,13 +1039,20 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         const tiers = [...tierMap.entries()];
 
+        // When all audio groups share one language, use a uniform NAME
+        // so HLS players treat them as quality tiers, not separate tracks.
+        const allLanguages = new Set(audioGroups.map(g => g.language ?? ''));
+        const singleLang = allLanguages.size <= 1;
+
         // EXT-X-MEDIA entries per tier
         for (const [tierId, groups] of tiers) {
             let isFirstInTier = true;
             for (const group of groups) {
                 const streamName = this.buildAudioStreamName(group);
                 const uri = `stream_${streamName}/playlist.m3u8`;
-                const name = group.label ?? group.language ?? 'Audio';
+                const name = singleLang
+                    ? (group.language ?? 'Audio')
+                    : (group.label ?? group.language ?? 'Audio');
                 const lang = group.language ? `,LANGUAGE="${group.language}"` : '';
 
                 parts.push(

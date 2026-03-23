@@ -1,6 +1,6 @@
 import { ref, readonly, onUnmounted } from 'vue';
 import { getSessionStatus, subscribeSessionEvents } from '../api';
-import type { AccelMode, SegmentFormat, SessionStatus, SessionStatusResponse } from '../types';
+import type { AccelMode, PipelineProgress, SegmentFormat, SessionStatus, SessionStatusResponse } from '../types';
 
 const TERMINAL_STATUSES: SessionStatus[] = ['completed', 'failed'];
 const FALLBACK_POLL_INTERVAL_MS = 5000;
@@ -21,6 +21,7 @@ const STATUS_ORDER: Record<string, number> = {
 export function useSessionPoller() {
     const status = ref<SessionStatus | null>(null);
     const progress = ref<number | undefined>();
+    const pipelineProgress = ref<PipelineProgress | undefined>();
     const queuePosition = ref<number | undefined>();
     const files = ref<string[] | undefined>();
     const masterPlaylist = ref<string | undefined>();
@@ -45,6 +46,7 @@ export function useSessionPoller() {
 
         status.value = data.status;
         progress.value = data.progress;
+        pipelineProgress.value = data.pipelineProgress;
         queuePosition.value = data.queuePosition;
         files.value = data.files;
         masterPlaylist.value = data.masterPlaylist;
@@ -74,6 +76,7 @@ export function useSessionPoller() {
 
         status.value = null;
         progress.value = undefined;
+        pipelineProgress.value = undefined;
         queuePosition.value = undefined;
         files.value = undefined;
         masterPlaylist.value = undefined;
@@ -141,6 +144,7 @@ export function useSessionPoller() {
     return {
         status: readonly(status),
         progress: readonly(progress),
+        pipelineProgress: readonly(pipelineProgress),
         queuePosition: readonly(queuePosition),
         files: readonly(files),
         masterPlaylist: readonly(masterPlaylist),

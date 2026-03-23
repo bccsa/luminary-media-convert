@@ -14,6 +14,7 @@ import { EncodingWebhookDto } from './dto/encoding-webhook.dto.js';
 
 const TERMINAL_STATUSES = ['completed', 'failed'];
 const DEFAULT_RETENTION_DAYS = 30;
+const MAX_WEBHOOK_RETRIES = 10;
 
 // Status ordering — higher index = later in pipeline; reject stale updates
 const STATUS_ORDER: Record<string, number> = {
@@ -77,70 +78,92 @@ export class WebhooksService {
             }
         }
 
-        // Upsert session document
-        let doc: SessionDocument;
-        try {
-            const existing = await this.databaseService.get<SessionDocument>(docId);
-            doc = { ...existing };
-        } catch {
-            // First webhook for this session — create new doc
-            const s3Config = memRecord?.s3Config;
-            doc = {
-                _id: docId,
-                docType: 'session',
-                userId,
-                sessionId: dto.sessionId,
-                status: dto.status,
-                createdAt: now,
-                updatedAt: now,
-                ...(s3Config ? { s3Config } : {}),
-                ...(memRecord?.s3ConfigId ? { s3ConfigId: memRecord.s3ConfigId } : {}),
-                ...(memRecord?.encrypted ? { encrypted: true } : {}),
-            };
+        // CAS loop: read doc, check staleness, apply update, write.
+        // Re-reads on conflict to ensure the stale check uses the latest state,
+        // preventing a late progress webhook from overwriting a completed status.
+        let updatedAt = now;
+        let completedAt: string | undefined;
+        for (let attempt = 0; attempt < MAX_WEBHOOK_RETRIES; attempt++) {
+            let doc: SessionDocument;
+            try {
+                const existing = await this.databaseService.get<SessionDocument>(docId);
+                doc = { ...existing };
+            } catch {
+                // First webhook for this session — create new doc
+                const s3Config = memRecord?.s3Config;
+                doc = {
+                    _id: docId,
+                    docType: 'session',
+                    userId,
+                    sessionId: dto.sessionId,
+                    status: dto.status,
+                    createdAt: now,
+                    updatedAt: now,
+                    ...(s3Config ? { s3Config } : {}),
+                    ...(memRecord?.s3ConfigId ? { s3ConfigId: memRecord.s3ConfigId } : {}),
+                    ...(memRecord?.encrypted ? { encrypted: true } : {}),
+                } as SessionDocument;
+            }
+
+            // Reject stale status updates (e.g. late progress after completion).
+            // This check runs on every retry so a progress webhook that originally
+            // passed the check won't overwrite a since-written terminal status.
+            const currentOrder = STATUS_ORDER[doc.status] ?? 0;
+            const incomingOrder = STATUS_ORDER[dto.status] ?? 0;
+            const isStale = incomingOrder < currentOrder
+                || (incomingOrder === currentOrder && dto.status !== doc.status);
+            if (isStale) {
+                this.logger.debug(
+                    `Ignoring stale webhook for ${dto.sessionId}: ${dto.status} (${incomingOrder}) vs current ${doc.status} (${currentOrder})`,
+                );
+                return;
+            }
+
+            // Update fields from webhook
+            doc.status = dto.status;
+            doc.updatedAt = now;
+            doc.progress = dto.progress;
+            doc.queuePosition = dto.queuePosition;
+            doc.error = dto.error;
+
+            if (dto.files) doc.files = dto.files;
+            if (dto.masterPlaylist) doc.masterPlaylist = dto.masterPlaylist;
+            if (dto.anglePlaylists) doc.anglePlaylists = dto.anglePlaylists;
+            if (dto.thumbnailsVtt) doc.thumbnailsVtt = dto.thumbnailsVtt;
+            if (dto.encryptionKeyHex) {
+                doc.encrypted = true;
+                doc.encryptionKeyHex = dto.encryptionKeyHex;
+            }
+
+            // Compact on terminal status
+            if (TERMINAL_STATUSES.includes(dto.status)) {
+                doc.completedAt = now;
+                completedAt = now;
+                delete doc.progress;
+                delete doc.queuePosition;
+
+                const retentionDays = parseInt(process.env.SESSION_RETENTION_DAYS || '', 10) || DEFAULT_RETENTION_DAYS;
+                const expiresAt = new Date(Date.now() + retentionDays * 86400000);
+                doc.expiresAt = expiresAt.toISOString();
+            }
+
+            try {
+                await this.databaseService.insert(doc);
+                updatedAt = doc.updatedAt!;
+                break;
+            } catch (err: any) {
+                if (err.statusCode === 409 && attempt < MAX_WEBHOOK_RETRIES - 1) {
+                    const delay = Math.random() * 100 * (attempt + 1);
+                    this.logger.debug(
+                        `Webhook upsert conflict for ${dto.sessionId}, retry ${attempt + 1}/${MAX_WEBHOOK_RETRIES} after ${Math.round(delay)}ms`,
+                    );
+                    await new Promise((r) => setTimeout(r, delay));
+                    continue;
+                }
+                throw err;
+            }
         }
 
-        // Reject stale status updates (e.g. late encoding progress after encrypting)
-        // Allow same-status updates (progress within a phase) but reject
-        // same-order different-status (e.g. encoding after encrypting during race)
-        const currentOrder = STATUS_ORDER[doc.status] ?? 0;
-        const incomingOrder = STATUS_ORDER[dto.status] ?? 0;
-        const isStale = incomingOrder < currentOrder
-            || (incomingOrder === currentOrder && dto.status !== doc.status);
-        if (isStale) {
-            this.logger.debug(
-                `Ignoring stale webhook for ${dto.sessionId}: ${dto.status} (${incomingOrder}) vs current ${doc.status} (${currentOrder})`,
-            );
-            return;
-        }
-
-        // Update fields from webhook
-        doc.status = dto.status;
-        doc.updatedAt = now;
-        doc.progress = dto.progress;
-        doc.queuePosition = dto.queuePosition;
-        doc.error = dto.error;
-
-        if (dto.files) doc.files = dto.files;
-        if (dto.masterPlaylist) doc.masterPlaylist = dto.masterPlaylist;
-        if (dto.anglePlaylists) doc.anglePlaylists = dto.anglePlaylists;
-        if (dto.thumbnailsVtt) doc.thumbnailsVtt = dto.thumbnailsVtt;
-        if (dto.encryptionKeyHex) {
-            doc.encrypted = true;
-            doc.encryptionKeyHex = dto.encryptionKeyHex;
-        }
-
-        // Compact on terminal status
-        if (TERMINAL_STATUSES.includes(dto.status)) {
-            doc.completedAt = now;
-            delete doc.progress;
-            delete doc.queuePosition;
-
-            const retentionDays = parseInt(process.env.SESSION_RETENTION_DAYS || '', 10) || DEFAULT_RETENTION_DAYS;
-            const expiresAt = new Date(Date.now() + retentionDays * 86400000);
-            doc.expiresAt = expiresAt.toISOString();
-        }
-
-        await this.databaseService.upsert(doc);
         this.logger.debug(`Session ${dto.sessionId} updated to ${dto.status}`);
 
         this.sessionEvents.emit({
@@ -150,8 +173,8 @@ export class WebhooksService {
             progress: dto.progress,
             queuePosition: dto.queuePosition,
             error: dto.error,
-            updatedAt: doc.updatedAt,
-            completedAt: doc.completedAt,
+            updatedAt,
+            completedAt,
         });
     }
 

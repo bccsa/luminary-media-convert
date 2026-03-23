@@ -23,6 +23,7 @@ export interface S3Config {
     accessKey: string;
     secretKey: string;
     pathPrefix?: string;
+    publicUrl?: string;
 }
 
 export interface WebhookConfig {
@@ -75,10 +76,17 @@ export type SessionStatus =
 export type AccelMode = 'cpu' | 'nvidia' | 'apple';
 export type SegmentFormat = 'fmp4' | 'mpegts';
 
+export interface PipelineProgress {
+    encoding: number;
+    encrypting?: number;
+    uploading?: number;
+}
+
 export interface SessionStatusResponse {
     sessionId: string;
     status: SessionStatus;
     progress?: number;
+    pipelineProgress?: PipelineProgress;
     queuePosition?: number;
     probeResult?: ProbeResult;
     files?: string[];

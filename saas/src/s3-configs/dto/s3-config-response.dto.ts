@@ -12,6 +12,8 @@ export class S3ConfigResponseDto {
     accessKey: string;
     @ApiProperty({ description: 'Masked in list responses, decrypted in detail' })
     secretKey: string;
+    @ApiPropertyOptional({ description: 'Public base URL for accessing objects (e.g. custom domain on R2)' })
+    publicUrl?: string;
     @ApiProperty() createdAt: string;
     @ApiProperty() updatedAt: string;
 }

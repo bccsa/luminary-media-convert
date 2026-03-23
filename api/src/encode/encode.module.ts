@@ -13,6 +13,7 @@ import { EncryptionService } from './services/encryption.service.js';
 import { ThumbnailService } from './services/thumbnail.service.js';
 import { ProbeService } from './services/probe.service.js';
 import { TusUploadService } from './services/tus-upload.service.js';
+import { SegmentPipelineService } from './services/segment-pipeline.service.js';
 import { AuthorizationWebhookService } from '../auth/authorization-webhook.service.js';
 
 @Module({
@@ -30,6 +31,7 @@ import { AuthorizationWebhookService } from '../auth/authorization-webhook.servi
         ThumbnailService,
         ProbeService,
         TusUploadService,
+        SegmentPipelineService,
         AuthorizationWebhookService,
     ],
     exports: [SessionService, SessionEventsService],

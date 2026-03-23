@@ -94,6 +94,15 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
+            'Detailed pipeline progress with separate encoding, encrypting, and uploading indicators. ' +
+            'Present when status is "encoding" or "uploading_to_s3".',
+        example: { encoding: 45.5, encrypting: 30, uploading: 10 },
+    })
+    @Expose()
+    pipelineProgress?: { encoding: number; encrypting?: number; uploading?: number };
+
+    @ApiPropertyOptional({
+        description:
             'Position in the encoding queue (1-based). Present when status is "queued".',
         example: 2,
     })

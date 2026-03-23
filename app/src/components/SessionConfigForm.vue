@@ -32,10 +32,10 @@ const emit = defineEmits<{
 }>();
 
 const file = defineModel<File | null>('file', { default: null });
+const pathPrefix = defineModel<string>('pathPrefix', { default: '' });
 
 const sessionName = ref('');
 const selectedConfigId = ref(props.selectedS3ConfigId);
-const pathPrefix = ref('');
 
 watch(() => props.selectedS3ConfigId, (id) => {
     selectedConfigId.value = id;

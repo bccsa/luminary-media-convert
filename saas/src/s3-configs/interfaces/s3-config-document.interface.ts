@@ -11,6 +11,7 @@ export interface S3ConfigDocument {
     useSSL?: boolean;
     bucket: string;
     region?: string;
+    publicUrl?: string;
     accessKey: EncryptedField;
     secretKey: EncryptedField;
     createdAt: string;

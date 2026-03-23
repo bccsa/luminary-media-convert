@@ -1,12 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { rm } from 'fs/promises';
-import { join } from 'path';
+import { join, posix } from 'path';
 import { SessionService, type Session } from './session.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import { EncryptionService } from './encryption.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
 import { S3Service } from './s3.service.js';
 import { WebhookService } from './webhook.service.js';
+import { SegmentPipelineService, type PipelineProgress } from './segment-pipeline.service.js';
 import type { WebhookPayloadDto } from '../dto/webhook-payload.dto.js';
 
 @Injectable()
@@ -22,6 +23,7 @@ export class EncodeService {
         private readonly thumbnailService: ThumbnailService,
         private readonly s3Service: S3Service,
         private readonly webhookService: WebhookService,
+        private readonly segmentPipelineService: SegmentPipelineService,
     ) {}
 
     async processSession(sessionId: string): Promise<void> {
@@ -57,41 +59,61 @@ export class EncodeService {
                 session.config.encryption?.enabled !== false &&
                 !!session.config.encryption?.keyUrl;
 
+            // Pre-compute encryption materials
             let encryptionKey: Buffer | undefined;
+            let encryptionIV: Buffer | undefined;
+            let encryptionSalt: Buffer | undefined;
 
+            if (encryptionEnabled) {
+                encryptionSalt = this.encryptionService.generateSalt();
+                encryptionKey = this.encryptionService.deriveKey(sessionId, encryptionSalt);
+                encryptionIV = this.encryptionService.generateIV();
+            }
+
+            // Set up S3 path prefix
+            const s3PathPrefix = session.config.s3.pathPrefix
+                ? session.config.s3.pathPrefix.replace(/\/+$/, '')
+                : '';
+
+            // Current pipeline progress state (updated by both FFmpeg and pipeline callbacks)
+            const currentProgress: PipelineProgress = { encoding: 0 };
+
+            // Create and start the streaming segment pipeline
+            const pipeline = this.segmentPipelineService.createPipeline({
+                outputDir,
+                s3Config: session.config.s3,
+                s3PathPrefix,
+                encryptionKey,
+                encryptionIV,
+                byteRange: session.config.byteRange !== false,
+                byteRangeMaxFileSizeBytes:
+                    (session.config.byteRangeMaxFileSizeMB ?? 500) * 1024 * 1024,
+                onProgress: (pipelineUpdate) => {
+                    currentProgress.encrypting = pipelineUpdate.encrypting;
+                    currentProgress.uploading = pipelineUpdate.uploading;
+                    this.sessionService.updatePipelineProgress(
+                        sessionId,
+                        { ...currentProgress },
+                    );
+                },
+            });
+
+            pipeline.start();
+
+            // Run FFmpeg — pipeline polls for segments in the background
             const encodeResult = await this.ffmpegService.encode({
                 sessionId,
                 inputPath: session.filePath!,
                 outputDir,
                 encodeConfig: session.encodeConfig,
-                byteRange: session.config.byteRange,
-                byteRangeMaxFileSizeBytes:
-                    (session.config.byteRangeMaxFileSizeMB ?? 500) * 1024 * 1024,
-                preByteRangeHook: encryptionEnabled
-                    ? async (outDir) => {
-                        this.sessionService.updateStatus(sessionId, 'encrypting');
-                        this.sessionService.updateProgress(sessionId, 0);
-                        await this.sendWebhook(session, {
-                            sessionId,
-                            status: 'encrypting',
-                            progress: 0,
-                            message: 'Encrypting HLS segments',
-                        });
-                        const result = await this.encryptionService.encryptHlsOutput(
-                            outDir,
-                            sessionId,
-                            session.config.encryption!.keyUrl!,
-                            (percent) => {
-                                this.sessionService.updateProgress(sessionId, percent);
-                            },
-                        );
-                        encryptionKey = result.key;
-                    }
-                    : undefined,
+                // Pipeline handles byte-range and encryption inline
+                byteRange: false,
+                preByteRangeHook: undefined,
                 onProgress: (percent) => {
-                    this.sessionService.updateProgress(
+                    currentProgress.encoding = percent;
+                    this.sessionService.updatePipelineProgress(
                         sessionId,
-                        percent,
+                        { ...currentProgress },
                     );
                     if (
                         percent % 5 < 1 ||
@@ -107,6 +129,24 @@ export class EncodeService {
                 },
             });
 
+            // Check if pipeline encountered an error during encoding
+            if (pipeline.error) {
+                throw pipeline.error;
+            }
+
+            // Drain remaining segments + finalize byte-range chunks
+            await pipeline.drain();
+
+            // Playlist post-processing (must happen after drain rewrites byte-range playlists)
+            if (encryptionEnabled) {
+                await this.encryptionService.injectKeyTagsIntoPlaylists(
+                    outputDir,
+                    session.config.encryption!.keyUrl!,
+                    encryptionIV!,
+                );
+            }
+
+            // Generate thumbnails
             let thumbnailsVttRelPath: string | undefined;
             if (
                 session.encodeConfig.type === 'video' &&
@@ -139,67 +179,50 @@ export class EncodeService {
                 }
             }
 
-            this.sessionService.updateStatus(
-                sessionId,
-                'uploading_to_s3',
-            );
+            // Upload remaining files (playlists, thumbnails, master.m3u8)
+            this.sessionService.updateStatus(sessionId, 'uploading_to_s3');
             this.sessionService.updateProgress(sessionId, 0);
             await this.sendWebhook(session, {
                 sessionId,
                 status: 'uploading_to_s3',
                 progress: 0,
-                message: 'Uploading encoded files to S3',
+                message: 'Uploading playlists and thumbnails to S3',
             });
 
-            const uploadResult = await this.s3Service.uploadDirectory(
-                session.config.s3,
-                outputDir,
-                encodeResult.masterPlaylist,
-                {
-                    onProgress: (percent) => {
-                        this.sessionService.updateProgress(
-                            sessionId,
-                            percent,
-                        );
-                        if (
-                            percent % 5 < 1 ||
-                            percent >= 99
-                        ) {
-                            this.sendWebhook(session, {
-                                sessionId,
-                                status: 'uploading_to_s3',
-                                progress: percent,
-                                message: `Uploading to S3: ${percent}%`,
-                            }).catch(() => {});
-                        }
-                    },
-                },
-            );
+            await pipeline.uploadRemainingFiles(outputDir);
 
+            // Collect all uploaded keys
+            const allKeys = pipeline.keys;
+
+            // Resolve master playlist and angle playlists
             const anglePlaylistsWithKeys = encodeResult.anglePlaylists.map(
                 (ap) => {
                     const key =
-                        uploadResult.keys.find(
+                        allKeys.find(
                             (k) => k.split('/').pop() === ap.filename,
-                        ) ?? uploadResult.masterPlaylistKey;
+                        ) ?? '';
                     return { name: ap.name, key };
                 },
             );
 
+            const masterPlaylistKey = allKeys.find(
+                (k) => k.split('/').pop() === encodeResult.masterPlaylist,
+            ) ?? '';
+
             const effectiveMasterPlaylist =
                 anglePlaylistsWithKeys.length > 0
                     ? anglePlaylistsWithKeys[0].key
-                    : uploadResult.masterPlaylistKey;
+                    : masterPlaylistKey;
 
             const thumbnailsVttKey = thumbnailsVttRelPath
-                ? uploadResult.keys.find((k) =>
+                ? allKeys.find((k) =>
                       k.endsWith(thumbnailsVttRelPath!),
                   )
                 : undefined;
 
             this.sessionService.setCompleted(
                 sessionId,
-                uploadResult.keys,
+                allKeys,
                 effectiveMasterPlaylist,
                 anglePlaylistsWithKeys.length > 0 ? anglePlaylistsWithKeys : undefined,
                 thumbnailsVttKey,
@@ -210,7 +233,7 @@ export class EncodeService {
                 status: 'completed',
                 progress: 100,
                 message: 'Encoding and upload complete',
-                files: uploadResult.keys,
+                files: allKeys,
                 masterPlaylist: effectiveMasterPlaylist,
                 anglePlaylists:
                     anglePlaylistsWithKeys.length > 0

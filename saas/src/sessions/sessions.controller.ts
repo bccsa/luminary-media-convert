@@ -18,6 +18,8 @@ import { SkipAdmin } from '../auth/skip-admin.decorator.js';
 import { SessionsService } from './sessions.service.js';
 import { CreateSaasSessionDto } from './dto/create-session.dto.js';
 import { ImportSessionDto } from './dto/import-session.dto.js';
+import { MoveSessionFilesDto } from './dto/move-session-files.dto.js';
+import { RenameSessionPrefixDto } from './dto/rename-session-prefix.dto.js';
 import { SaasSessionResponseDto } from './dto/session-response.dto.js';
 
 @ApiTags('Sessions')
@@ -78,6 +80,38 @@ export class SessionsController {
             sessionId,
             body.name ?? '',
         );
+    }
+
+    @Post(':sessionId/move')
+    @SkipAdmin()
+    async moveFiles(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: MoveSessionFilesDto,
+        @Req() req: { user: { _id: string } },
+    ) {
+        return this.sessionsService.moveSessionFiles(req.user._id, sessionId, dto);
+    }
+
+    @Post(':sessionId/rename-prefix')
+    @SkipAdmin()
+    async renamePrefix(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: RenameSessionPrefixDto,
+        @Req() req: { user: { _id: string } },
+    ) {
+        return this.sessionsService.renameSessionPrefix(req.user._id, sessionId, dto);
+    }
+
+    @Get('check-prefix')
+    @SkipAdmin()
+    @ApiQuery({ name: 's3ConfigId', required: true, type: String })
+    @ApiQuery({ name: 'prefix', required: true, type: String })
+    async checkPrefix(
+        @Query('s3ConfigId') s3ConfigId: string,
+        @Query('prefix') prefix: string,
+        @Req() req: { user: { _id: string } },
+    ) {
+        return this.sessionsService.checkPrefix(req.user._id, s3ConfigId, prefix);
     }
 
     @Get(':sessionId')

@@ -22,6 +22,7 @@ export interface SessionDocument {
         pathPrefix?: string;
         port?: number;
         useSSL?: boolean;
+        publicUrl?: string;
     };
     encrypted?: boolean;
     encryptionKeyHex?: string;

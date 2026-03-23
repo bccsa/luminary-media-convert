@@ -12,6 +12,7 @@ interface S3ConfigEntry {
     useSSL: boolean;
     bucket: string;
     region?: string;
+    publicUrl?: string;
     createdAt: string;
 }
 
@@ -24,6 +25,7 @@ interface S3ConfigForm {
     region: string;
     accessKey: string;
     secretKey: string;
+    publicUrl: string;
 }
 
 const { getAccessTokenSilently } = useAuth0();
@@ -51,6 +53,7 @@ function emptyForm(): S3ConfigForm {
         region: '',
         accessKey: '',
         secretKey: '',
+        publicUrl: '',
     };
 }
 
@@ -96,6 +99,7 @@ async function openEditForm(configId: string) {
         form.useSSL = data.useSSL !== false;
         form.bucket = data.bucket || '';
         form.region = data.region || '';
+        form.publicUrl = data.publicUrl || '';
         // Credentials are shown as placeholders — only sent if user fills them in
         form.accessKey = '';
         form.secretKey = '';
@@ -133,6 +137,12 @@ async function handleSubmit() {
 
         if (form.port) payload.port = form.port;
         if (form.region.trim()) payload.region = form.region.trim();
+        if (form.publicUrl.trim()) {
+            payload.publicUrl = form.publicUrl.trim();
+        } else if (editingId.value) {
+            // Explicitly clear publicUrl when editing and field is empty
+            payload.publicUrl = '';
+        }
 
         if (editingId.value) {
             // Only send credentials if user entered new values
@@ -270,6 +280,19 @@ onMounted(fetchConfigs);
                                 :placeholder="editingId ? '***' : ''"
                             />
                         </div>
+                    </div>
+
+                    <div>
+                        <label class="mb-1 block text-xs text-zinc-500">
+                            Public URL
+                            <span class="text-zinc-600">(optional — for custom domains, e.g. Cloudflare R2)</span>
+                        </label>
+                        <input
+                            v-model="form.publicUrl"
+                            type="text"
+                            class="input"
+                            placeholder="https://media.example.com"
+                        />
                     </div>
 
                     <div v-if="formError" class="rounded-lg bg-red-950/40 border border-red-800/50 p-3">

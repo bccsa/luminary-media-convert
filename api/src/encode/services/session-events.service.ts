@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { Subject, Observable } from 'rxjs';
 import { filter } from 'rxjs/operators';
+import type { PipelineProgress } from './segment-pipeline.service.js';
 
 export interface SessionEvent {
     sessionId: string;
     status: string;
     progress?: number;
+    pipelineProgress?: PipelineProgress;
     queuePosition?: number;
     error?: string;
     files?: string[];

@@ -1,0 +1,630 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { createReadStream, createWriteStream, type WriteStream } from 'fs';
+import { readdir, readFile, stat, unlink, writeFile } from 'fs/promises';
+import { pipeline } from 'stream/promises';
+import { join, relative, posix } from 'path';
+import type * as Minio from 'minio';
+import type { S3ConfigDto } from '../dto/s3-config.dto.js';
+import { EncryptionService } from './encryption.service.js';
+import { S3Service } from './s3.service.js';
+
+export interface PipelineProgress {
+    encoding: number;
+    encrypting?: number;
+    uploading?: number;
+}
+
+export interface SegmentPipelineConfig {
+    outputDir: string;
+    s3Config: S3ConfigDto;
+    s3PathPrefix: string;
+    encryptionKey?: Buffer;
+    encryptionIV?: Buffer;
+    byteRange: boolean;
+    byteRangeMaxFileSizeBytes: number;
+    pollIntervalMs?: number;
+    uploadConcurrency?: number;
+    onProgress?: (progress: PipelineProgress) => void;
+}
+
+interface ByteRangeEntry {
+    extinfLine: string;
+    length: number;
+    offset: number;
+    mediaFile: string;
+}
+
+interface StreamState {
+    processedSegments: Set<string>;
+    initUploaded: boolean;
+    currentChunkIndex: number;
+    currentChunkOffset: number;
+    currentChunkStream: WriteStream | null;
+    currentChunkMediaFile: string;
+    byteRangeEntries: ByteRangeEntry[];
+    segExt: string;
+}
+
+interface UploadTask {
+    filePath: string;
+    objectKey: string;
+    deleteAfterUpload: boolean;
+}
+
+@Injectable()
+export class SegmentPipelineService {
+    private readonly logger = new Logger(SegmentPipelineService.name);
+
+    constructor(
+        private readonly encryptionService: EncryptionService,
+        private readonly s3Service: S3Service,
+    ) {}
+
+    /**
+     * Create a pipeline instance for a specific encoding session.
+     */
+    createPipeline(config: SegmentPipelineConfig): SegmentPipeline {
+        return new SegmentPipeline(
+            config,
+            this.encryptionService,
+            this.s3Service,
+            this.logger,
+        );
+    }
+}
+
+export class SegmentPipeline {
+    private readonly pollIntervalMs: number;
+    private readonly uploadConcurrency: number;
+    private readonly streamStates = new Map<string, StreamState>();
+    private readonly uploadedKeys: string[] = [];
+
+    private pollTimer: ReturnType<typeof setInterval> | null = null;
+    private running = false;
+    private aborted = false;
+    private s3Client: Minio.Client;
+    private pipelineError: Error | null = null;
+
+    // Counters for progress reporting
+    private totalSegmentsProduced = 0;
+    private segmentsEncrypted = 0;
+    private totalChunksReady = 0;
+    private chunksUploaded = 0;
+
+    // Upload queue
+    private readonly uploadQueue: UploadTask[] = [];
+    private activeUploads = 0;
+
+    constructor(
+        private readonly config: SegmentPipelineConfig,
+        private readonly encryptionService: EncryptionService,
+        private readonly s3Service: S3Service,
+        private readonly logger: Logger,
+    ) {
+        this.pollIntervalMs = config.pollIntervalMs ?? 2000;
+        this.uploadConcurrency = config.uploadConcurrency ?? 5;
+        this.s3Client = this.s3Service.createClient(config.s3Config);
+    }
+
+    get error(): Error | null {
+        return this.pipelineError;
+    }
+
+    get keys(): string[] {
+        return [...this.uploadedKeys];
+    }
+
+    start(): void {
+        if (this.running) return;
+        this.running = true;
+        this.pollTimer = setInterval(() => {
+            this.poll().catch((err) => {
+                this.pipelineError = err;
+                this.logger.error(
+                    `Pipeline poll error: ${(err as Error).message}`,
+                );
+            });
+        }, this.pollIntervalMs);
+    }
+
+    async drain(): Promise<string[]> {
+        // Stop polling
+        if (this.pollTimer) {
+            clearInterval(this.pollTimer);
+            this.pollTimer = null;
+        }
+
+        if (this.pipelineError) throw this.pipelineError;
+
+        // Final sweep to catch any remaining segments
+        await this.poll();
+
+        if (this.pipelineError) throw this.pipelineError;
+
+        // Finalize all byte-range chunk streams
+        if (this.config.byteRange) {
+            for (const [streamDir, state] of this.streamStates) {
+                await this.finalizeCurrentChunk(streamDir, state);
+            }
+        }
+
+        // Wait for all uploads to complete
+        await this.waitForUploads();
+
+        if (this.pipelineError) throw this.pipelineError;
+
+        // Rewrite playlists with byte-range entries
+        if (this.config.byteRange) {
+            for (const [streamDir, state] of this.streamStates) {
+                await this.rewritePlaylistWithByteRanges(streamDir, state);
+            }
+        }
+
+        this.running = false;
+        return [...this.uploadedKeys];
+    }
+
+    abort(): void {
+        this.aborted = true;
+        this.running = false;
+        if (this.pollTimer) {
+            clearInterval(this.pollTimer);
+            this.pollTimer = null;
+        }
+        // Close any open chunk streams
+        for (const state of this.streamStates.values()) {
+            if (state.currentChunkStream) {
+                state.currentChunkStream.end();
+                state.currentChunkStream = null;
+            }
+        }
+    }
+
+    private async poll(): Promise<void> {
+        if (this.aborted || this.pipelineError) return;
+
+        const { outputDir } = this.config;
+
+        let entries;
+        try {
+            entries = await readdir(outputDir, { withFileTypes: true });
+        } catch {
+            // Output dir may not exist yet at the start of encoding
+            return;
+        }
+
+        const streamDirs = entries
+            .filter((e) => e.isDirectory() && e.name.startsWith('stream_'))
+            .map((e) => e.name)
+            .sort();
+
+        for (const dir of streamDirs) {
+            if (this.aborted || this.pipelineError) return;
+            await this.processStream(dir);
+        }
+    }
+
+    private async processStream(streamDirName: string): Promise<void> {
+        const streamDir = join(this.config.outputDir, streamDirName);
+        let state = this.streamStates.get(streamDir);
+
+        if (!state) {
+            state = {
+                processedSegments: new Set(),
+                initUploaded: false,
+                currentChunkIndex: 0,
+                currentChunkOffset: 0,
+                currentChunkStream: null,
+                currentChunkMediaFile: '',
+                byteRangeEntries: [],
+                segExt: 'm4s',
+            };
+            this.streamStates.set(streamDir, state);
+        }
+
+        // Upload init.mp4 on first encounter
+        if (!state.initUploaded) {
+            const initPath = join(streamDir, 'init.mp4');
+            try {
+                await stat(initPath);
+                const objectKey = this.objectKey(streamDirName, 'init.mp4');
+                this.enqueueUpload({
+                    filePath: initPath,
+                    objectKey,
+                    deleteAfterUpload: false, // init.mp4 may be needed for playlist rewriting
+                });
+                state.initUploaded = true;
+            } catch {
+                // init.mp4 doesn't exist yet or not using fMP4
+            }
+        }
+
+        // Read playlist to discover completed segments
+        const playlistPath = join(streamDir, 'playlist.m3u8');
+        let content: string;
+        try {
+            content = await readFile(playlistPath, 'utf-8');
+        } catch {
+            return; // Playlist not yet created
+        }
+
+        const segments = this.parseSegments(content);
+
+        for (const seg of segments) {
+            if (this.aborted || this.pipelineError) return;
+            if (state.processedSegments.has(seg.filename)) continue;
+
+            state.processedSegments.add(seg.filename);
+            this.totalSegmentsProduced++;
+
+            const segPath = join(streamDir, seg.filename);
+
+            // Detect segment extension from first segment
+            if (seg.filename.endsWith('.ts')) {
+                state.segExt = 'ts';
+            }
+
+            // Encrypt if needed
+            if (this.config.encryptionKey && this.config.encryptionIV) {
+                try {
+                    await this.encryptionService.encryptSegment(
+                        segPath,
+                        this.config.encryptionKey,
+                        this.config.encryptionIV,
+                    );
+                    this.segmentsEncrypted++;
+                } catch (err) {
+                    this.pipelineError = new Error(
+                        `Segment encryption failed for ${seg.filename}: ${(err as Error).message}`,
+                    );
+                    return;
+                }
+            }
+
+            if (this.config.byteRange) {
+                await this.appendToByteRangeChunk(
+                    streamDir,
+                    streamDirName,
+                    state,
+                    seg,
+                    segPath,
+                );
+            } else {
+                // Upload individual segment
+                const objectKey = this.objectKey(
+                    streamDirName,
+                    seg.filename,
+                );
+                this.enqueueUpload({
+                    filePath: segPath,
+                    objectKey,
+                    deleteAfterUpload: true,
+                });
+            }
+
+            this.emitProgress();
+        }
+    }
+
+    private async appendToByteRangeChunk(
+        streamDir: string,
+        streamDirName: string,
+        state: StreamState,
+        seg: { extinfLine: string; filename: string },
+        segPath: string,
+    ): Promise<void> {
+        // Get segment size
+        const segStat = await stat(segPath);
+        const segSize = segStat.size;
+        if (segSize === 0) return;
+
+        // Check if we need to start a new chunk
+        if (
+            state.currentChunkOffset > 0 &&
+            state.currentChunkOffset + segSize >
+                this.config.byteRangeMaxFileSizeBytes
+        ) {
+            // Finalize current chunk — close stream and enqueue for upload
+            await this.finalizeCurrentChunk(streamDir, state);
+
+            // Enqueue the completed chunk for upload
+            const completedChunkFile = state.currentChunkMediaFile;
+            const objectKey = this.objectKey(
+                streamDirName,
+                completedChunkFile,
+            );
+            this.enqueueUpload({
+                filePath: join(streamDir, completedChunkFile),
+                objectKey,
+                deleteAfterUpload: true,
+            });
+            this.totalChunksReady++;
+
+            // Start a new chunk
+            state.currentChunkIndex++;
+            state.currentChunkOffset = 0;
+        }
+
+        // Ensure we have an open write stream
+        if (!state.currentChunkStream) {
+            state.currentChunkMediaFile = `media_${state.currentChunkIndex}.${state.segExt}`;
+            state.currentChunkStream = createWriteStream(
+                join(streamDir, state.currentChunkMediaFile),
+            );
+            state.currentChunkStream.setMaxListeners(0);
+        }
+
+        // Append segment to chunk
+        await pipeline(createReadStream(segPath), state.currentChunkStream, {
+            end: false,
+        });
+
+        state.byteRangeEntries.push({
+            extinfLine: seg.extinfLine,
+            length: segSize,
+            offset: state.currentChunkOffset,
+            mediaFile: state.currentChunkMediaFile,
+        });
+        state.currentChunkOffset += segSize;
+
+        // Delete the original segment file (data now in chunk)
+        await unlink(segPath).catch(() => {});
+    }
+
+    private async finalizeCurrentChunk(
+        streamDir: string,
+        state: StreamState,
+    ): Promise<void> {
+        if (!state.currentChunkStream) return;
+
+        state.currentChunkStream.end();
+        await new Promise<void>((resolve) =>
+            state.currentChunkStream!.on('finish', resolve),
+        );
+        state.currentChunkStream = null;
+    }
+
+    private async rewritePlaylistWithByteRanges(
+        streamDir: string,
+        state: StreamState,
+    ): Promise<void> {
+        if (state.byteRangeEntries.length === 0) return;
+
+        const playlistPath = join(streamDir, 'playlist.m3u8');
+        let content: string;
+        try {
+            content = await readFile(playlistPath, 'utf-8');
+        } catch {
+            return;
+        }
+
+        const lines = content.split('\n');
+        const headerLines: string[] = [];
+        let footerLine = '';
+
+        for (const line of lines) {
+            if (line.startsWith('#EXTINF:')) break;
+            if (line.startsWith('#EXT-X-ENDLIST')) {
+                footerLine = line;
+            } else {
+                headerLines.push(line);
+            }
+        }
+
+        // Check for ENDLIST at the end if not already captured
+        if (!footerLine) {
+            const lastLine = lines[lines.length - 1]?.trim();
+            const secondLastLine = lines[lines.length - 2]?.trim();
+            if (lastLine === '#EXT-X-ENDLIST') footerLine = lastLine;
+            else if (secondLastLine === '#EXT-X-ENDLIST')
+                footerLine = secondLastLine;
+        }
+
+        const newLines: string[] = [...headerLines];
+        for (const br of state.byteRangeEntries) {
+            newLines.push(br.extinfLine);
+            newLines.push(`#EXT-X-BYTERANGE:${br.length}@${br.offset}`);
+            newLines.push(br.mediaFile);
+        }
+        if (footerLine) newLines.push(footerLine);
+        newLines.push('');
+
+        await writeFile(playlistPath, newLines.join('\n'), 'utf-8');
+    }
+
+    private parseSegments(
+        content: string,
+    ): { extinfLine: string; filename: string }[] {
+        const segments: { extinfLine: string; filename: string }[] = [];
+        const lines = content.split('\n');
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.startsWith('#EXTINF:')) {
+                const filename = lines[i + 1]?.trim();
+                if (filename && !filename.startsWith('#')) {
+                    segments.push({ extinfLine: line, filename });
+                    i++;
+                }
+            }
+        }
+
+        return segments;
+    }
+
+    private objectKey(streamDirName: string, filename: string): string {
+        const relativePath = posix.join(streamDirName, filename);
+        return this.config.s3PathPrefix
+            ? posix.join(this.config.s3PathPrefix, relativePath)
+            : relativePath;
+    }
+
+    private enqueueUpload(task: UploadTask): void {
+        this.uploadQueue.push(task);
+        this.processUploadQueue();
+    }
+
+    private processUploadQueue(): void {
+        while (
+            this.activeUploads < this.uploadConcurrency &&
+            this.uploadQueue.length > 0
+        ) {
+            const task = this.uploadQueue.shift()!;
+            this.activeUploads++;
+            this.executeUpload(task)
+                .then(() => {
+                    this.activeUploads--;
+                    this.processUploadQueue();
+                })
+                .catch((err) => {
+                    this.activeUploads--;
+                    this.pipelineError = err;
+                });
+        }
+    }
+
+    private async executeUpload(task: UploadTask): Promise<void> {
+        let lastErr: Error | undefined;
+        for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+                await this.s3Service.uploadFile(
+                    this.s3Client,
+                    this.config.s3Config.bucket,
+                    task.filePath,
+                    task.objectKey,
+                );
+                this.uploadedKeys.push(task.objectKey);
+                this.chunksUploaded++;
+
+                // Delete local file after confirmed upload
+                if (task.deleteAfterUpload) {
+                    await unlink(task.filePath).catch(() => {});
+                }
+
+                this.emitProgress();
+                return;
+            } catch (err) {
+                lastErr = err as Error;
+                if (attempt < 2) {
+                    // Exponential backoff: 1s, 2s
+                    await new Promise((r) =>
+                        setTimeout(r, 1000 * (attempt + 1)),
+                    );
+                }
+            }
+        }
+
+        throw new Error(
+            `S3 upload failed for ${task.objectKey} after 3 attempts: ${lastErr?.message}`,
+        );
+    }
+
+    private async waitForUploads(): Promise<void> {
+        const timeout = 5 * 60 * 1000; // 5 minutes
+        const start = Date.now();
+
+        while (
+            (this.activeUploads > 0 || this.uploadQueue.length > 0) &&
+            !this.pipelineError
+        ) {
+            if (Date.now() - start > timeout) {
+                throw new Error(
+                    'Pipeline drain timeout: uploads did not complete within 5 minutes',
+                );
+            }
+            await new Promise((r) => setTimeout(r, 200));
+        }
+    }
+
+    /**
+     * Upload remaining files from the output directory (playlists, thumbnails, etc.)
+     * that were not handled by the segment pipeline.
+     */
+    async uploadRemainingFiles(
+        outputDir: string,
+        exclude?: Set<string>,
+    ): Promise<string[]> {
+        const additionalKeys: string[] = [];
+        const files = await this.walkDir(outputDir);
+
+        for (const filePath of files) {
+            if (exclude?.has(filePath)) continue;
+            const relativePath = relative(outputDir, filePath)
+                .split(/[\\/]/)
+                .join('/');
+            const objectKey = this.config.s3PathPrefix
+                ? posix.join(this.config.s3PathPrefix, relativePath)
+                : relativePath;
+
+            try {
+                await this.s3Service.uploadFile(
+                    this.s3Client,
+                    this.config.s3Config.bucket,
+                    filePath,
+                    objectKey,
+                );
+                additionalKeys.push(objectKey);
+            } catch (err) {
+                throw new Error(
+                    `S3 upload failed for ${objectKey}: ${(err as Error).message}`,
+                );
+            }
+        }
+
+        this.uploadedKeys.push(...additionalKeys);
+        return additionalKeys;
+    }
+
+    private async walkDir(dir: string): Promise<string[]> {
+        const results: string[] = [];
+        const entries = await readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = join(dir, entry.name);
+            if (entry.isDirectory()) {
+                results.push(...(await this.walkDir(fullPath)));
+            } else {
+                results.push(fullPath);
+            }
+        }
+        return results;
+    }
+
+    private emitProgress(): void {
+        if (!this.config.onProgress) return;
+
+        const progress: PipelineProgress = {
+            encoding: 0, // Set externally by EncodeService via FFmpeg callback
+        };
+
+        if (this.config.encryptionKey) {
+            progress.encrypting =
+                this.totalSegmentsProduced > 0
+                    ? Math.round(
+                          (this.segmentsEncrypted /
+                              this.totalSegmentsProduced) *
+                              100,
+                      )
+                    : undefined;
+        }
+
+        if (this.config.byteRange) {
+            progress.uploading =
+                this.totalChunksReady > 0
+                    ? Math.round(
+                          (this.chunksUploaded / this.totalChunksReady) * 100,
+                      )
+                    : undefined;
+        } else {
+            progress.uploading =
+                this.totalSegmentsProduced > 0
+                    ? Math.round(
+                          (this.chunksUploaded /
+                              this.totalSegmentsProduced) *
+                              100,
+                      )
+                    : undefined;
+        }
+
+        this.config.onProgress(progress);
+    }
+}
