@@ -167,4 +167,37 @@ describe('AuthResolverGuard', () => {
             );
         });
     });
+
+    describe('session token failures', () => {
+        it('should throw when sess_ token is not found', async () => {
+            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
+                'session',
+            ]);
+
+            const ctx = createMockContext(
+                { authorization: 'Bearer sess_nonexistenttoken' },
+                { sessionId: 'some-session-id' },
+            );
+
+            await expect(guard.canActivate(ctx)).rejects.toThrow(
+                'Invalid or expired session token',
+            );
+        });
+
+        it('should throw when session token does not match requested sessionId', async () => {
+            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
+                'session',
+            ]);
+
+            const session = sessionService.create(makeConfig());
+            const ctx = createMockContext(
+                { authorization: `Bearer ${session.sessionToken}` },
+                { sessionId: 'different-session-id' },
+            );
+
+            await expect(guard.canActivate(ctx)).rejects.toThrow(
+                'Token does not match the requested session',
+            );
+        });
+    });
 });

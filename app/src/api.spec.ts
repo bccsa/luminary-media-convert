@@ -34,6 +34,9 @@ import {
     getSessionDetail,
     updateSessionName,
     importSession,
+    checkPrefix,
+    moveSessionFiles,
+    renameSessionPrefix,
 } from './api';
 
 describe('api', () => {
@@ -843,6 +846,137 @@ describe('api', () => {
 
             await expect(updateSessionName('jwt-token', 's1', 'X')).rejects.toThrow(
                 'Failed to update session name (500)',
+            );
+        });
+    });
+
+    describe('checkPrefix', () => {
+        it('sends GET with s3ConfigId and prefix query params', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ exists: true, count: 5 }), { status: 200 }),
+            );
+
+            const result = await checkPrefix('jwt-token', 'cfg-1', 'output/');
+
+            expect(result).toEqual({ exists: true, count: 5 });
+            const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
+            expect(calledUrl).toContain('/saas/sessions/check-prefix');
+            expect(calledUrl).toContain('s3ConfigId=cfg-1');
+            expect(calledUrl).toContain('prefix=output');
+            expect(vi.mocked(fetch).mock.calls[0][1]).toEqual(
+                expect.objectContaining({
+                    headers: expect.objectContaining({
+                        Authorization: 'Bearer jwt-token',
+                    }),
+                }),
+            );
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Forbidden' }), { status: 403 }),
+            );
+
+            await expect(checkPrefix('jwt-token', 'cfg-1', 'x/')).rejects.toThrow('Forbidden');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(checkPrefix('jwt-token', 'cfg-1', 'x/')).rejects.toThrow(
+                'Check prefix failed (500)',
+            );
+        });
+    });
+
+    describe('moveSessionFiles', () => {
+        it('sends POST with targetS3ConfigId and newPathPrefix', async () => {
+            const moved = { sessionId: 's1', status: 'completed', files: ['new/master.m3u8'] };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(moved), { status: 200 }),
+            );
+
+            const result = await moveSessionFiles('jwt-token', 's1', 'cfg-2', 'new/');
+
+            expect(result).toEqual(moved);
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/sessions/s1/move'),
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: expect.objectContaining({
+                        'Content-Type': 'application/json',
+                        Authorization: 'Bearer jwt-token',
+                    }),
+                }),
+            );
+            const callBody = JSON.parse(
+                (vi.mocked(fetch).mock.calls[0][1] as any).body,
+            );
+            expect(callBody).toEqual({ targetS3ConfigId: 'cfg-2', newPathPrefix: 'new/' });
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Not found' }), { status: 404 }),
+            );
+
+            await expect(moveSessionFiles('jwt-token', 's1', 'cfg-2', 'new/')).rejects.toThrow('Not found');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(moveSessionFiles('jwt-token', 's1', 'cfg-2', 'new/')).rejects.toThrow(
+                'Move failed (500)',
+            );
+        });
+    });
+
+    describe('renameSessionPrefix', () => {
+        it('sends POST with newPathPrefix', async () => {
+            const renamed = { sessionId: 's1', status: 'completed' };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(renamed), { status: 200 }),
+            );
+
+            const result = await renameSessionPrefix('jwt-token', 's1', 'renamed/');
+
+            expect(result).toEqual(renamed);
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/sessions/s1/rename-prefix'),
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: expect.objectContaining({
+                        'Content-Type': 'application/json',
+                        Authorization: 'Bearer jwt-token',
+                    }),
+                }),
+            );
+            const callBody = JSON.parse(
+                (vi.mocked(fetch).mock.calls[0][1] as any).body,
+            );
+            expect(callBody).toEqual({ newPathPrefix: 'renamed/' });
+        });
+
+        it('throws on error', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'Bad request' }), { status: 400 }),
+            );
+
+            await expect(renameSessionPrefix('jwt-token', 's1', 'x/')).rejects.toThrow('Bad request');
+        });
+
+        it('throws with status when no message', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response('err', { status: 500 }),
+            );
+
+            await expect(renameSessionPrefix('jwt-token', 's1', 'x/')).rejects.toThrow(
+                'Rename prefix failed (500)',
             );
         });
     });

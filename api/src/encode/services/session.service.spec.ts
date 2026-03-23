@@ -95,6 +95,31 @@ describe('SessionService', () => {
         });
     });
 
+    describe('updatePipelineProgress', () => {
+        it('should set pipelineProgress and update progress from encoding field', () => {
+            const emitSpy = vi.fn();
+            const svc = new SessionService({ emit: emitSpy } as any);
+            const session = svc.create(makeConfig());
+
+            const pipelineProgress = { encoding: 55, encrypting: 30, uploading: 10 };
+            svc.updatePipelineProgress(session.id, pipelineProgress);
+
+            const updated = svc.get(session.id)!;
+            expect(updated.pipelineProgress).toEqual(pipelineProgress);
+            expect(updated.progress).toBe(55);
+            expect(emitSpy).toHaveBeenCalled();
+        });
+
+        it('should be a no-op for unknown session id', () => {
+            const emitSpy = vi.fn();
+            const svc = new SessionService({ emit: emitSpy } as any);
+
+            expect(() => svc.updatePipelineProgress('nonexistent', { encoding: 50 })).not.toThrow();
+            // emit should not have been called (no session created)
+            expect(emitSpy).not.toHaveBeenCalled();
+        });
+    });
+
     describe('setFilePath', () => {
         it('should set the file path on the session', () => {
             const session = service.create(makeConfig());

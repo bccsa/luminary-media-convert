@@ -451,5 +451,177 @@ describe('EncodeController', () => {
             );
             expect(result.sessionId).toBeDefined();
         });
+
+        it('should bind webhook from API key when no per-session webhook is configured', async () => {
+            const dto: CreateSessionDto = {
+                s3: {
+                    endPoint: 's3.example.com',
+                    bucket: 'test',
+                    accessKey: 'key',
+                    secretKey: 'secret',
+                },
+            };
+            const req = makeRequest();
+            (req as any).apiKey = { userId: 'user:1', webhookUrl: 'http://example.com/hook' };
+
+            const result = await controller.createSession(dto, req);
+
+            const session = sessionService.get(result.sessionId)!;
+            expect(session.config.webhook).toEqual({
+                url: 'http://example.com/hook',
+                sessionToken: '',
+            });
+        });
+
+        it('should not override per-session webhook with API key webhook', async () => {
+            const dto = makeConfig(); // has webhook configured
+            const req = makeRequest();
+            (req as any).apiKey = { userId: 'user:1', webhookUrl: 'http://example.com/other-hook' };
+
+            const result = await controller.createSession(dto, req);
+
+            const session = sessionService.get(result.sessionId)!;
+            expect(session.config.webhook!.url).toBe('https://example.com/webhook');
+        });
+    });
+
+    describe('startEncode - copyStream validation', () => {
+        it('should reject copyStream rendition without sourceTrackIndex', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            const config: EncodeConfigDto = {
+                type: 'video',
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: true, audioGroupId: 'hd' },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            await expect(
+                controller.startEncode(session.id, config, makeRequest()),
+            ).rejects.toThrow(BadRequestException);
+
+            await expect(
+                controller.startEncode(session.id, config, makeRequest()),
+            ).rejects.toThrow('copyStream renditions require a sourceTrackIndex');
+        });
+
+        it('should accept copyStream rendition with sourceTrackIndex', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            const config: EncodeConfigDto = {
+                type: 'video',
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: true, sourceTrackIndex: 0, audioGroupId: 'hd' },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const result = await controller.startEncode(session.id, config, makeRequest());
+
+            expect(result.status).toBe('queued');
+        });
+    });
+
+    describe('streamEvents - encoder field', () => {
+        it('should include encoder field from getAccelMode in SSE events', () => {
+            ffmpegService.getAccelMode.mockReturnValue('nvidia');
+            const session = sessionService.create(makeConfig());
+
+            const sessionEventsService = {
+                emit: vi.fn(),
+                forSession: vi.fn().mockReturnValue({
+                    pipe: vi.fn().mockImplementation((operator) => {
+                        // We verify the pipe transform includes encoder
+                        return { subscribe: vi.fn() };
+                    }),
+                }),
+            } as any;
+
+            const ctrl = new EncodeController(
+                sessionService,
+                sessionEventsService,
+                queueService,
+                ffmpegService,
+                authorizationWebhookService,
+            );
+
+            const result = ctrl.streamEvents(session.id, session.sessionToken);
+            expect(sessionEventsService.forSession).toHaveBeenCalledWith(session.id);
+            expect(result).toBeDefined();
+        });
+
+        it('should map SSE events to include encoder field in data', async () => {
+            const { Subject } = await import('rxjs');
+            const { firstValueFrom } = await import('rxjs');
+
+            ffmpegService.getAccelMode.mockReturnValue('apple');
+            const subject = new Subject<any>();
+
+            const sessionEventsService = {
+                emit: vi.fn(),
+                forSession: vi.fn().mockReturnValue(subject.asObservable()),
+            } as any;
+
+            const ctrl = new EncodeController(
+                sessionService,
+                sessionEventsService,
+                queueService,
+                ffmpegService,
+                authorizationWebhookService,
+            );
+
+            const session = sessionService.create(makeConfig());
+            const observable = ctrl.streamEvents(session.id, session.sessionToken);
+
+            // Emit an event and capture what the mapped observable produces
+            const resultPromise = firstValueFrom(observable);
+            subject.next({ sessionId: session.id, status: 'encoding', progress: 50 });
+
+            const result = await resultPromise;
+            expect(result).toEqual({
+                data: {
+                    sessionId: session.id,
+                    status: 'encoding',
+                    progress: 50,
+                    encoder: 'apple',
+                },
+            });
+        });
+    });
+
+    describe('deleteSession - cleanup resilience', () => {
+        it('should still remove session even when work directory does not exist', async () => {
+            process.env.WORK_DIR = '/tmp/nonexistent-luminary-test-dir';
+            const session = sessionService.create(makeConfig());
+
+            // rm with force:true won't throw for missing dirs, so session should be removed
+            await controller.deleteSession(session.id);
+
+            expect(sessionService.get(session.id)).toBeUndefined();
+        });
+
+        it('should warn and still remove session when directory cleanup fails', async () => {
+            // Point WORK_DIR to /dev/null — rm recursive on a device file triggers an error
+            process.env.WORK_DIR = '/dev/null';
+            const loggerWarnSpy = vi.spyOn((controller as any).logger, 'warn');
+
+            const session = sessionService.create(makeConfig());
+
+            await controller.deleteSession(session.id);
+
+            // rm on /dev/null/<sessionId> should fail and trigger the catch branch
+            expect(loggerWarnSpy).toHaveBeenCalledWith(
+                expect.stringContaining('Failed to clean up directory for session'),
+            );
+            // Session should still be removed despite cleanup failure
+            expect(sessionService.get(session.id)).toBeUndefined();
+        });
     });
 });

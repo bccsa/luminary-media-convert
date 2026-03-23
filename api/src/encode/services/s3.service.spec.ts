@@ -63,6 +63,26 @@ describe('S3Service', () => {
         it('should handle full paths', () => {
             expect(getContentType('/tmp/output/v0/playlist.m3u8')).toBe('application/vnd.apple.mpegurl');
         });
+
+        it('should return image/webp for .webp', () => {
+            expect(getContentType('sprite_001.webp')).toBe('image/webp');
+        });
+
+        it('should return image/jpeg for .jpg', () => {
+            expect(getContentType('thumbnail.jpg')).toBe('image/jpeg');
+        });
+
+        it('should return image/jpeg for .jpeg', () => {
+            expect(getContentType('thumbnail.jpeg')).toBe('image/jpeg');
+        });
+
+        it('should return text/vtt for .vtt', () => {
+            expect(getContentType('thumbnails.vtt')).toBe('text/vtt');
+        });
+
+        it('should return video/mp2t for .ts', () => {
+            expect(getContentType('segment_000.ts')).toBe('video/mp2t');
+        });
     });
 
     describe('walkDir (private)', () => {
@@ -264,6 +284,30 @@ describe('S3Service', () => {
                 expect.any(String),
                 expect.any(Object),
             );
+        });
+    });
+
+    describe('uploadFile', () => {
+        it('should upload file with correct content type using fPutObject', async () => {
+            const client = new (MockClient as any)();
+
+            await service.uploadFile(client, 'my-bucket', '/tmp/sprite.webp', 'thumbnails/sprite.webp');
+
+            expect(mockFPutObject).toHaveBeenCalledWith(
+                'my-bucket',
+                'thumbnails/sprite.webp',
+                '/tmp/sprite.webp',
+                { 'Content-Type': 'image/webp' },
+            );
+        });
+
+        it('should log debug message after upload', async () => {
+            const debugSpy = vi.spyOn((service as any).logger, 'debug');
+            const client = new (MockClient as any)();
+
+            await service.uploadFile(client, 'my-bucket', '/tmp/file.m3u8', 'output/file.m3u8');
+
+            expect(debugSpy).toHaveBeenCalledWith('Uploaded: output/file.m3u8');
         });
     });
 });

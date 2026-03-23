@@ -158,6 +158,33 @@ describe('S3ConfigsService', () => {
             expect(mockDatabaseService.upsert).toHaveBeenCalled();
         });
 
+        it('should set publicUrl to undefined when updated with empty string', async () => {
+            mockDatabaseService.get.mockResolvedValueOnce({
+                _id: 's3config:1',
+                _rev: '1-abc',
+                userId: 'user:1',
+                name: 'Test',
+                endPoint: 'minio',
+                bucket: 'bucket',
+                publicUrl: 'https://cdn.example.com',
+                accessKey: { iv: 'x', tag: 'y', ciphertext: 'enc_AK' },
+                secretKey: { iv: 'x', tag: 'y', ciphertext: 'enc_SK' },
+                createdAt: '2026-01-01',
+                updatedAt: '2026-01-01',
+            });
+
+            const doc = await service.update('user:1', 's3config:1', {
+                publicUrl: '',
+            });
+
+            expect(doc.publicUrl).toBeUndefined();
+            expect(mockDatabaseService.upsert).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    publicUrl: undefined,
+                }),
+            );
+        });
+
         it('should update all optional fields', async () => {
             mockDatabaseService.get.mockResolvedValueOnce({
                 _id: 's3config:1',

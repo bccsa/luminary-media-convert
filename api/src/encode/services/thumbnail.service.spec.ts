@@ -1,3 +1,19 @@
+import { mkdtempSync, rmSync, readdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+
+const { mockExecFile } = vi.hoisted(() => ({
+    mockExecFile: vi.fn(),
+}));
+
+vi.mock('child_process', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('child_process')>();
+    return {
+        ...actual,
+        execFile: mockExecFile,
+    };
+});
+
 import { ThumbnailService, formatVttTime } from './thumbnail.service.js';
 
 describe('formatVttTime', () => {
@@ -27,6 +43,12 @@ describe('ThumbnailService', () => {
 
     beforeEach(() => {
         service = new ThumbnailService();
+        mockExecFile.mockReset();
+        // Default mock: detectSpriteFormat resolves with libwebp
+        mockExecFile.mockImplementation((...args: any[]) => {
+            const cb = args[args.length - 1];
+            cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+        });
     });
 
     describe('buildVtt', () => {
@@ -103,6 +125,220 @@ describe('ThumbnailService', () => {
         });
     });
 
+    describe('detectSpriteFormat (via generateThumbnails)', () => {
+        it('should select libwebp when ffmpeg supports it', async () => {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-test-'));
+            try {
+                // First call: detectSpriteFormat runs ffmpeg -encoders
+                // Second call: ffmpeg thumbnail generation
+                let callCount = 0;
+                mockExecFile.mockImplementation((...args: any[]) => {
+                    const cb = args[args.length - 1];
+                    callCount++;
+                    if (callCount === 1) {
+                        // detectSpriteFormat: ffmpeg -encoders
+                        cb(null, { stdout: ' V..... libwebp          libwebp WebP image', stderr: '' });
+                    } else {
+                        // ffmpeg sprite generation — create a sprite file to simulate output
+                        const thumbnailDir = join(tmpDir, 'thumbnails');
+                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        cb(null, { stdout: '', stderr: '' });
+                    }
+                });
+
+                const result = await service.generateThumbnails({
+                    inputPath: '/tmp/test.mp4',
+                    outputDir: tmpDir,
+                    duration: 10,
+                    sourceWidth: 1920,
+                    sourceHeight: 1080,
+                });
+
+                expect(result).toEqual({ vttRelativePath: 'thumbnails/thumbnails.vtt' });
+
+                // Verify the first call was ffmpeg -encoders
+                expect(mockExecFile.mock.calls[0][0]).toBe('ffmpeg');
+                expect(mockExecFile.mock.calls[0][1]).toEqual(['-encoders']);
+
+                // Verify the second call used libwebp encoder
+                const spriteArgs = mockExecFile.mock.calls[1][1];
+                expect(spriteArgs).toContain('libwebp');
+
+                // Verify sprite pattern uses .webp extension
+                const patternArg = spriteArgs[spriteArgs.length - 1];
+                expect(patternArg).toMatch(/sprite_%03d\.webp$/);
+            } finally {
+                rmSync(tmpDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should fall back to mjpeg when libwebp is unavailable', async () => {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-test-'));
+            try {
+                let callCount = 0;
+                mockExecFile.mockImplementation((...args: any[]) => {
+                    const cb = args[args.length - 1];
+                    callCount++;
+                    if (callCount === 1) {
+                        cb(null, { stdout: ' V..... mjpeg            MJPEG encoder', stderr: '' });
+                    } else {
+                        const thumbnailDir = join(tmpDir, 'thumbnails');
+                        writeFileSync(join(thumbnailDir, 'sprite_001.jpg'), 'fake-sprite');
+                        cb(null, { stdout: '', stderr: '' });
+                    }
+                });
+
+                const result = await service.generateThumbnails({
+                    inputPath: '/tmp/test.mp4',
+                    outputDir: tmpDir,
+                    duration: 10,
+                    sourceWidth: 1920,
+                    sourceHeight: 1080,
+                });
+
+                expect(result).toEqual({ vttRelativePath: 'thumbnails/thumbnails.vtt' });
+
+                // Verify mjpeg encoder was used
+                const spriteArgs = mockExecFile.mock.calls[1][1];
+                expect(spriteArgs).toContain('mjpeg');
+
+                // Verify sprite pattern uses .jpg extension
+                const patternArg = spriteArgs[spriteArgs.length - 1];
+                expect(patternArg).toMatch(/sprite_%03d\.jpg$/);
+            } finally {
+                rmSync(tmpDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should return null when no suitable encoder is available', async () => {
+            mockExecFile.mockImplementation((...args: any[]) => {
+                const cb = args[args.length - 1];
+                cb(null, { stdout: ' V..... libx264          H.264 encoder', stderr: '' });
+            });
+
+            const result = await service.generateThumbnails({
+                inputPath: '/tmp/test.mp4',
+                outputDir: '/tmp/output',
+                duration: 10,
+                sourceWidth: 1920,
+                sourceHeight: 1080,
+            });
+
+            expect(result).toBeNull();
+            // Only the encoder detection call should have been made
+            expect(mockExecFile).toHaveBeenCalledTimes(1);
+        });
+
+        it('should return null when ffmpeg is not found (execFile throws)', async () => {
+            mockExecFile.mockImplementation((...args: any[]) => {
+                const cb = args[args.length - 1];
+                cb(new Error('spawn ffmpeg ENOENT'), null, null);
+            });
+
+            const result = await service.generateThumbnails({
+                inputPath: '/tmp/test.mp4',
+                outputDir: '/tmp/output',
+                duration: 10,
+                sourceWidth: 1920,
+                sourceHeight: 1080,
+            });
+
+            expect(result).toBeNull();
+        });
+
+        it('should cache the detected format and not re-run ffmpeg -encoders', async () => {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-test-'));
+            try {
+                let callCount = 0;
+                mockExecFile.mockImplementation((...args: any[]) => {
+                    const cb = args[args.length - 1];
+                    callCount++;
+                    if (callCount === 1) {
+                        // First call: detectSpriteFormat
+                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    } else {
+                        // All subsequent calls: sprite generation — create sprite files
+                        const thumbnailDir = join(tmpDir, 'thumbnails');
+                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        cb(null, { stdout: '', stderr: '' });
+                    }
+                });
+
+                // First call triggers detection + generation
+                await service.generateThumbnails({
+                    inputPath: '/tmp/test.mp4',
+                    outputDir: tmpDir,
+                    duration: 10,
+                    sourceWidth: 1920,
+                    sourceHeight: 1080,
+                });
+
+                expect(mockExecFile).toHaveBeenCalledTimes(2); // detect + generate
+
+                // Reset call count tracking but keep the mock
+                const prevCallCount = mockExecFile.mock.calls.length;
+
+                // Second call on same service instance should skip detection
+                // Need a fresh tmpDir for the second call since thumbnails dir already exists
+                const tmpDir2 = mkdtempSync(join(tmpdir(), 'thumb-test2-'));
+                mockExecFile.mockImplementation((...args: any[]) => {
+                    const cb = args[args.length - 1];
+                    const thumbnailDir = join(tmpDir2, 'thumbnails');
+                    writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                    cb(null, { stdout: '', stderr: '' });
+                });
+
+                await service.generateThumbnails({
+                    inputPath: '/tmp/test.mp4',
+                    outputDir: tmpDir2,
+                    duration: 10,
+                    sourceWidth: 1920,
+                    sourceHeight: 1080,
+                });
+
+                // Should only have 1 additional call (generation only, no detection)
+                expect(mockExecFile).toHaveBeenCalledTimes(prevCallCount + 1);
+
+                // That call should NOT be ffmpeg -encoders
+                const lastCall = mockExecFile.mock.calls[mockExecFile.mock.calls.length - 1];
+                expect(lastCall[1]).not.toEqual(['-encoders']);
+
+                rmSync(tmpDir2, { recursive: true, force: true });
+            } finally {
+                rmSync(tmpDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should cache null result and not retry detection', async () => {
+            mockExecFile.mockImplementation((...args: any[]) => {
+                const cb = args[args.length - 1];
+                cb(new Error('spawn ffmpeg ENOENT'), null, null);
+            });
+
+            // First call — detection fails
+            await service.generateThumbnails({
+                inputPath: '/tmp/test.mp4',
+                outputDir: '/tmp/output',
+                duration: 10,
+                sourceWidth: 1920,
+                sourceHeight: 1080,
+            });
+
+            expect(mockExecFile).toHaveBeenCalledTimes(1);
+
+            // Second call — should use cached null, not call ffmpeg again
+            await service.generateThumbnails({
+                inputPath: '/tmp/test.mp4',
+                outputDir: '/tmp/output',
+                duration: 10,
+                sourceWidth: 1920,
+                sourceHeight: 1080,
+            });
+
+            expect(mockExecFile).toHaveBeenCalledTimes(1);
+        });
+    });
+
     describe('generateThumbnails', () => {
         it('should return null when duration is 0', async () => {
             const result = await service.generateThumbnails({
@@ -124,6 +360,292 @@ describe('ThumbnailService', () => {
                 sourceHeight: 1080,
             });
             expect(result).toBeNull();
+        });
+
+        it('should return null when ffmpeg sprite generation fails', async () => {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-test-'));
+            try {
+                let callCount = 0;
+                mockExecFile.mockImplementation((...args: any[]) => {
+                    const cb = args[args.length - 1];
+                    callCount++;
+                    if (callCount === 1) {
+                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    } else {
+                        cb(new Error('ffmpeg exited with code 1'), null, null);
+                    }
+                });
+
+                const result = await service.generateThumbnails({
+                    inputPath: '/tmp/test.mp4',
+                    outputDir: tmpDir,
+                    duration: 10,
+                    sourceWidth: 1920,
+                    sourceHeight: 1080,
+                });
+
+                expect(result).toBeNull();
+            } finally {
+                rmSync(tmpDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should return null when no sprite files are generated', async () => {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-test-'));
+            try {
+                let callCount = 0;
+                mockExecFile.mockImplementation((...args: any[]) => {
+                    const cb = args[args.length - 1];
+                    callCount++;
+                    if (callCount === 1) {
+                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    } else {
+                        // ffmpeg succeeds but produces no sprite files
+                        cb(null, { stdout: '', stderr: '' });
+                    }
+                });
+
+                const result = await service.generateThumbnails({
+                    inputPath: '/tmp/test.mp4',
+                    outputDir: tmpDir,
+                    duration: 10,
+                    sourceWidth: 1920,
+                    sourceHeight: 1080,
+                });
+
+                expect(result).toBeNull();
+            } finally {
+                rmSync(tmpDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should calculate even thumbnail height from source dimensions', async () => {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-test-'));
+            try {
+                let callCount = 0;
+                mockExecFile.mockImplementation((...args: any[]) => {
+                    const cb = args[args.length - 1];
+                    callCount++;
+                    if (callCount === 1) {
+                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    } else {
+                        const thumbnailDir = join(tmpDir, 'thumbnails');
+                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        cb(null, { stdout: '', stderr: '' });
+                    }
+                });
+
+                // 1920x1080 -> width=160, height = ceil((160/1920)*1080 / 2)*2 = ceil(45)*2 = 90
+                await service.generateThumbnails({
+                    inputPath: '/tmp/test.mp4',
+                    outputDir: tmpDir,
+                    duration: 10,
+                    sourceWidth: 1920,
+                    sourceHeight: 1080,
+                });
+
+                const spriteArgs = mockExecFile.mock.calls[1][1] as string[];
+                const vfArg = spriteArgs[spriteArgs.indexOf('-vf') + 1];
+                expect(vfArg).toContain('scale=160:90');
+            } finally {
+                rmSync(tmpDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should round height to nearest even number for odd aspect ratios', async () => {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-test-'));
+            try {
+                let callCount = 0;
+                mockExecFile.mockImplementation((...args: any[]) => {
+                    const cb = args[args.length - 1];
+                    callCount++;
+                    if (callCount === 1) {
+                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    } else {
+                        const thumbnailDir = join(tmpDir, 'thumbnails');
+                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        cb(null, { stdout: '', stderr: '' });
+                    }
+                });
+
+                // 1280x720: width=160, height = ceil((160/1280)*720 / 2)*2 = ceil(45)*2 = 90
+                await service.generateThumbnails({
+                    inputPath: '/tmp/test.mp4',
+                    outputDir: tmpDir,
+                    duration: 10,
+                    sourceWidth: 1280,
+                    sourceHeight: 720,
+                });
+
+                const spriteArgs = mockExecFile.mock.calls[1][1] as string[];
+                const vfArg = spriteArgs[spriteArgs.indexOf('-vf') + 1];
+                expect(vfArg).toContain('scale=160:90');
+            } finally {
+                rmSync(tmpDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should produce even height for non-standard aspect ratio', async () => {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-test-'));
+            try {
+                let callCount = 0;
+                mockExecFile.mockImplementation((...args: any[]) => {
+                    const cb = args[args.length - 1];
+                    callCount++;
+                    if (callCount === 1) {
+                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    } else {
+                        const thumbnailDir = join(tmpDir, 'thumbnails');
+                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        cb(null, { stdout: '', stderr: '' });
+                    }
+                });
+
+                // 300x200: width=160, rawHeight = (160/300)*200 = 106.666...
+                // height = ceil(106.666.../2)*2 = ceil(53.333)*2 = 54*2 = 108
+                await service.generateThumbnails({
+                    inputPath: '/tmp/test.mp4',
+                    outputDir: tmpDir,
+                    duration: 10,
+                    sourceWidth: 300,
+                    sourceHeight: 200,
+                });
+
+                const spriteArgs = mockExecFile.mock.calls[1][1] as string[];
+                const vfArg = spriteArgs[spriteArgs.indexOf('-vf') + 1];
+                expect(vfArg).toContain('scale=160:108');
+
+                // Height must always be even
+                const heightMatch = vfArg.match(/scale=160:(\d+)/);
+                expect(Number(heightMatch![1]) % 2).toBe(0);
+            } finally {
+                rmSync(tmpDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should create thumbnails dir and write VTT file on success', async () => {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-test-'));
+            try {
+                let callCount = 0;
+                mockExecFile.mockImplementation((...args: any[]) => {
+                    const cb = args[args.length - 1];
+                    callCount++;
+                    if (callCount === 1) {
+                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    } else {
+                        const thumbnailDir = join(tmpDir, 'thumbnails');
+                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        cb(null, { stdout: '', stderr: '' });
+                    }
+                });
+
+                const result = await service.generateThumbnails({
+                    inputPath: '/tmp/test.mp4',
+                    outputDir: tmpDir,
+                    duration: 10,
+                    sourceWidth: 1920,
+                    sourceHeight: 1080,
+                });
+
+                expect(result).toEqual({ vttRelativePath: 'thumbnails/thumbnails.vtt' });
+
+                // Verify thumbnails directory was created
+                const thumbnailDir = join(tmpDir, 'thumbnails');
+                const files = readdirSync(thumbnailDir);
+                expect(files).toContain('thumbnails.vtt');
+
+                // Verify VTT content
+                const { readFileSync } = await import('fs');
+                const vttContent = readFileSync(join(thumbnailDir, 'thumbnails.vtt'), 'utf-8');
+                expect(vttContent).toContain('WEBVTT');
+                expect(vttContent).toContain('sprite_001.webp');
+            } finally {
+                rmSync(tmpDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should pass correct ffmpeg arguments for sprite generation', async () => {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-test-'));
+            try {
+                let callCount = 0;
+                mockExecFile.mockImplementation((...args: any[]) => {
+                    const cb = args[args.length - 1];
+                    callCount++;
+                    if (callCount === 1) {
+                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    } else {
+                        const thumbnailDir = join(tmpDir, 'thumbnails');
+                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        cb(null, { stdout: '', stderr: '' });
+                    }
+                });
+
+                await service.generateThumbnails({
+                    inputPath: '/tmp/test.mp4',
+                    outputDir: tmpDir,
+                    duration: 10,
+                    sourceWidth: 1920,
+                    sourceHeight: 1080,
+                });
+
+                // Verify sprite generation call args
+                const [cmd, args, opts] = mockExecFile.mock.calls[1];
+                expect(cmd).toBe('ffmpeg');
+                expect(args).toContain('-i');
+                expect(args).toContain('/tmp/test.mp4');
+                expect(args).toContain('-c:v');
+                expect(args).toContain('libwebp');
+                expect(args).toContain('-an');
+                expect(args).toContain('-quality');
+                expect(args).toContain('30');
+                expect(args).toContain('-compression_level');
+                expect(args).toContain('6');
+
+                // Verify -vf filter string
+                const vfArg = args[args.indexOf('-vf') + 1];
+                expect(vfArg).toBe('fps=1/5,scale=160:90,tile=5x5');
+
+                // Verify timeout
+                expect(opts).toEqual({ timeout: 300_000 });
+            } finally {
+                rmSync(tmpDir, { recursive: true, force: true });
+            }
+        });
+
+        it('should pass mjpeg-specific args when mjpeg is detected', async () => {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-test-'));
+            try {
+                let callCount = 0;
+                mockExecFile.mockImplementation((...args: any[]) => {
+                    const cb = args[args.length - 1];
+                    callCount++;
+                    if (callCount === 1) {
+                        cb(null, { stdout: ' V..... mjpeg            MJPEG encoder', stderr: '' });
+                    } else {
+                        const thumbnailDir = join(tmpDir, 'thumbnails');
+                        writeFileSync(join(thumbnailDir, 'sprite_001.jpg'), 'fake-sprite');
+                        cb(null, { stdout: '', stderr: '' });
+                    }
+                });
+
+                await service.generateThumbnails({
+                    inputPath: '/tmp/test.mp4',
+                    outputDir: tmpDir,
+                    duration: 10,
+                    sourceWidth: 1920,
+                    sourceHeight: 1080,
+                });
+
+                const spriteArgs = mockExecFile.mock.calls[1][1] as string[];
+                expect(spriteArgs).toContain('mjpeg');
+                expect(spriteArgs).toContain('-q:v');
+                expect(spriteArgs).toContain('8');
+                // Should NOT contain libwebp args
+                expect(spriteArgs).not.toContain('-quality');
+                expect(spriteArgs).not.toContain('-compression_level');
+            } finally {
+                rmSync(tmpDir, { recursive: true, force: true });
+            }
         });
     });
 });

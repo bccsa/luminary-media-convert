@@ -80,7 +80,7 @@ describe('WebhooksService', () => {
                 queuePosition: 1,
             });
 
-            expect(mockDatabaseService.upsert).toHaveBeenCalledWith(
+            expect(mockDatabaseService.insert).toHaveBeenCalledWith(
                 expect.objectContaining({
                     _id: 'session:sess-1',
                     docType: 'session',
@@ -110,7 +110,7 @@ describe('WebhooksService', () => {
                 progress: 45,
             });
 
-            expect(mockDatabaseService.upsert).toHaveBeenCalledWith(
+            expect(mockDatabaseService.insert).toHaveBeenCalledWith(
                 expect.objectContaining({
                     _rev: '1-abc',
                     status: 'encoding',
@@ -130,7 +130,7 @@ describe('WebhooksService', () => {
                 masterPlaylist: 'master.m3u8',
             });
 
-            const doc = mockDatabaseService.upsert.mock.calls[0][0];
+            const doc = mockDatabaseService.insert.mock.calls[0][0];
             expect(doc.completedAt).toBeDefined();
             expect(doc.expiresAt).toBeDefined();
             expect(doc.progress).toBeUndefined();
@@ -157,7 +157,7 @@ describe('WebhooksService', () => {
                 progress: 10,
             });
 
-            expect(mockDatabaseService.upsert).toHaveBeenCalled();
+            expect(mockDatabaseService.insert).toHaveBeenCalled();
         });
 
         it('should reject stale status updates', async () => {
@@ -179,7 +179,7 @@ describe('WebhooksService', () => {
                 progress: 99,
             });
 
-            expect(mockDatabaseService.upsert).not.toHaveBeenCalled();
+            expect(mockDatabaseService.insert).not.toHaveBeenCalled();
             expect(mockSessionEventsService.emit).not.toHaveBeenCalled();
         });
 
@@ -202,7 +202,7 @@ describe('WebhooksService', () => {
                 status: 'failed',
             });
 
-            expect(mockDatabaseService.upsert).not.toHaveBeenCalled();
+            expect(mockDatabaseService.insert).not.toHaveBeenCalled();
         });
 
         it('should allow same-status updates (progress within a phase)', async () => {
@@ -225,7 +225,7 @@ describe('WebhooksService', () => {
                 progress: 50,
             });
 
-            expect(mockDatabaseService.upsert).toHaveBeenCalledWith(
+            expect(mockDatabaseService.insert).toHaveBeenCalledWith(
                 expect.objectContaining({
                     status: 'encoding',
                     progress: 50,
@@ -246,7 +246,7 @@ describe('WebhooksService', () => {
                 thumbnailsVtt: 'thumbs.vtt',
             });
 
-            const doc = mockDatabaseService.upsert.mock.calls[0][0];
+            const doc = mockDatabaseService.insert.mock.calls[0][0];
             expect(doc.anglePlaylists).toEqual([{ name: 'angle1', key: 'angle1.m3u8' }]);
             expect(doc.thumbnailsVtt).toBe('thumbs.vtt');
         });
@@ -271,7 +271,77 @@ describe('WebhooksService', () => {
 
             // Both unknown statuses have order 0, but they're different statuses
             // so isStale = true (same order, different status)
-            expect(mockDatabaseService.upsert).not.toHaveBeenCalled();
+            expect(mockDatabaseService.insert).not.toHaveBeenCalled();
+        });
+
+        it('should set encryptionKeyHex on session doc when webhook includes it', async () => {
+            mockSessionsService.getSessionRecord.mockReturnValue({ userId: 'user:1' });
+            mockDatabaseService.get.mockRejectedValue({ statusCode: 404 });
+
+            await service.processEncodingWebhook({
+                sessionId: 'sess-1',
+                status: 'completed',
+                files: ['master.m3u8'],
+                masterPlaylist: 'master.m3u8',
+                encryptionKeyHex: 'deadbeef1234567890abcdef12345678',
+            });
+
+            const doc = mockDatabaseService.insert.mock.calls[0][0];
+            expect(doc.encrypted).toBe(true);
+            expect(doc.encryptionKeyHex).toBe('deadbeef1234567890abcdef12345678');
+        });
+
+        it('should retry on 409 conflict and succeed', async () => {
+            mockSessionsService.getSessionRecord.mockReturnValue({ userId: 'user:1' });
+            mockDatabaseService.get.mockResolvedValue({
+                _id: 'session:sess-1',
+                _rev: '1-abc',
+                docType: 'session',
+                userId: 'user:1',
+                sessionId: 'sess-1',
+                status: 'queued',
+                createdAt: '2026-01-01T00:00:00.000Z',
+                updatedAt: '2026-01-01T00:00:00.000Z',
+            });
+
+            // First insert fails with 409, second succeeds
+            mockDatabaseService.insert
+                .mockRejectedValueOnce({ statusCode: 409 })
+                .mockResolvedValueOnce({ rev: '3-def' });
+
+            await service.processEncodingWebhook({
+                sessionId: 'sess-1',
+                status: 'encoding',
+                progress: 50,
+            });
+
+            // get is called once for userId resolution, then once per attempt in the CAS loop
+            expect(mockDatabaseService.insert).toHaveBeenCalledTimes(2);
+            expect(mockSessionEventsService.emit).toHaveBeenCalled();
+        });
+
+        it('should throw on non-409 insert error', async () => {
+            mockSessionsService.getSessionRecord.mockReturnValue({ userId: 'user:1' });
+            mockDatabaseService.get.mockResolvedValue({
+                _id: 'session:sess-1',
+                _rev: '1-abc',
+                docType: 'session',
+                userId: 'user:1',
+                sessionId: 'sess-1',
+                status: 'queued',
+                createdAt: '2026-01-01T00:00:00.000Z',
+                updatedAt: '2026-01-01T00:00:00.000Z',
+            });
+
+            mockDatabaseService.insert.mockRejectedValueOnce(new Error('Database unavailable'));
+
+            await expect(
+                service.processEncodingWebhook({
+                    sessionId: 'sess-1',
+                    status: 'encoding',
+                    progress: 50,
+                }),
+            ).rejects.toThrow('Database unavailable');
         });
 
         it('should create doc without s3Config when memRecord has no s3Config', async () => {
@@ -283,7 +353,7 @@ describe('WebhooksService', () => {
                 status: 'queued',
             });
 
-            const doc = mockDatabaseService.upsert.mock.calls[0][0];
+            const doc = mockDatabaseService.insert.mock.calls[0][0];
             expect(doc.s3Config).toBeUndefined();
         });
 
@@ -297,7 +367,7 @@ describe('WebhooksService', () => {
                 error: 'FFmpeg crashed',
             });
 
-            const doc = mockDatabaseService.upsert.mock.calls[0][0];
+            const doc = mockDatabaseService.insert.mock.calls[0][0];
             expect(doc.completedAt).toBeDefined();
             expect(doc.expiresAt).toBeDefined();
             expect(doc.progress).toBeUndefined();
@@ -314,7 +384,7 @@ describe('WebhooksService', () => {
                 status: 'completed',
             });
 
-            const doc = mockDatabaseService.upsert.mock.calls[0][0];
+            const doc = mockDatabaseService.insert.mock.calls[0][0];
             const expiresAt = new Date(doc.expiresAt);
             const now = new Date();
             const diffDays = (expiresAt.getTime() - now.getTime()) / 86400000;
@@ -333,7 +403,7 @@ describe('WebhooksService', () => {
                 status: 'encoding',
             });
 
-            expect(mockDatabaseService.upsert).not.toHaveBeenCalled();
+            expect(mockDatabaseService.insert).not.toHaveBeenCalled();
         });
     });
 

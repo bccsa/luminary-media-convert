@@ -11,6 +11,9 @@ describe('SessionsController', () => {
         getSession: ReturnType<typeof vi.fn>;
         importSession: ReturnType<typeof vi.fn>;
         updateSessionName: ReturnType<typeof vi.fn>;
+        moveSessionFiles: ReturnType<typeof vi.fn>;
+        renameSessionPrefix: ReturnType<typeof vi.fn>;
+        checkPrefix: ReturnType<typeof vi.fn>;
     };
 
     beforeEach(() => {
@@ -21,6 +24,9 @@ describe('SessionsController', () => {
             getSession: vi.fn().mockResolvedValue({ sessionId: 's1', status: 'completed' }),
             importSession: vi.fn(),
             updateSessionName: vi.fn(),
+            moveSessionFiles: vi.fn(),
+            renameSessionPrefix: vi.fn(),
+            checkPrefix: vi.fn(),
         };
         controller = new SessionsController(
             sessionsService as unknown as SessionsService,
@@ -122,6 +128,55 @@ describe('SessionsController', () => {
             await controller.importSession(dto as any, req);
 
             expect(sessionsService.importSession).toHaveBeenCalledWith('user:42', dto);
+        });
+    });
+
+    describe('moveFiles', () => {
+        it('should call sessionsService.moveSessionFiles with correct args', async () => {
+            const updatedDoc = { sessionId: 'sess-1', status: 'completed', files: ['new/master.m3u8'] };
+            sessionsService.moveSessionFiles.mockResolvedValue(updatedDoc);
+
+            const req = { user: { _id: 'user:1' } };
+            const dto = { targetS3ConfigId: 'cfg-2', newPathPrefix: 'new/' };
+            const result = await controller.moveFiles('sess-1', dto as any, req);
+
+            expect(result).toEqual(updatedDoc);
+            expect(sessionsService.moveSessionFiles).toHaveBeenCalledWith('user:1', 'sess-1', dto);
+        });
+    });
+
+    describe('renamePrefix', () => {
+        it('should call sessionsService.renameSessionPrefix with correct args', async () => {
+            const updatedDoc = { sessionId: 'sess-1', status: 'completed' };
+            sessionsService.renameSessionPrefix.mockResolvedValue(updatedDoc);
+
+            const req = { user: { _id: 'user:1' } };
+            const dto = { newPathPrefix: 'renamed/' };
+            const result = await controller.renamePrefix('sess-1', dto as any, req);
+
+            expect(result).toEqual(updatedDoc);
+            expect(sessionsService.renameSessionPrefix).toHaveBeenCalledWith('user:1', 'sess-1', dto);
+        });
+    });
+
+    describe('checkPrefix', () => {
+        it('should call sessionsService.checkPrefix with correct args', async () => {
+            sessionsService.checkPrefix.mockResolvedValue({ exists: true, count: 5 });
+
+            const req = { user: { _id: 'user:1' } };
+            const result = await controller.checkPrefix('cfg-1', 'output/', req);
+
+            expect(result).toEqual({ exists: true, count: 5 });
+            expect(sessionsService.checkPrefix).toHaveBeenCalledWith('user:1', 'cfg-1', 'output/');
+        });
+
+        it('should return exists=false when no objects at prefix', async () => {
+            sessionsService.checkPrefix.mockResolvedValue({ exists: false, count: 0 });
+
+            const req = { user: { _id: 'user:1' } };
+            const result = await controller.checkPrefix('cfg-1', 'empty/', req);
+
+            expect(result).toEqual({ exists: false, count: 0 });
         });
     });
 

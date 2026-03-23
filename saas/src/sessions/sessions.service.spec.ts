@@ -23,6 +23,8 @@ const mockS3ClientService = {
     getObject: vi.fn(),
     listObjects: vi.fn(),
     deleteObjects: vi.fn().mockResolvedValue(0),
+    copyObjectSameBucket: vi.fn().mockResolvedValue(undefined),
+    transferObject: vi.fn().mockResolvedValue(undefined),
 };
 
 describe('SessionsService', () => {
@@ -100,6 +102,7 @@ describe('SessionsService', () => {
                 pathPrefix: 'out',
                 port: undefined,
                 useSSL: undefined,
+                publicUrl: undefined,
             });
             // Ensure secrets are NOT stored
             expect((record?.s3Config as any)?.accessKey).toBeUndefined();
@@ -868,6 +871,7 @@ describe('SessionsService', () => {
                 bucket: 'media',
                 port: 9000,
                 useSSL: false,
+                publicUrl: undefined,
             });
             expect(result.s3ConfigId).toBe('cfg-1');
             expect(result.userId).toBe('user:1');
@@ -1138,6 +1142,280 @@ describe('SessionsService', () => {
             });
 
             expect(mockS3ConfigsService.getById).toHaveBeenCalledWith('user:42', 'cfg-99');
+        });
+    });
+
+    describe('moveSessionFiles', () => {
+        const completedDoc = {
+            _id: 'session:sess-move',
+            _rev: '1-abc',
+            docType: 'session' as const,
+            userId: 'user:1',
+            sessionId: 'sess-move',
+            status: 'completed',
+            files: ['prefix/master.m3u8', 'prefix/v0/seg0.m4s'],
+            masterPlaylist: 'prefix/master.m3u8',
+            anglePlaylists: [{ name: 'Angle 1', key: 'prefix/angle1.m3u8' }],
+            thumbnailsVtt: 'prefix/thumbs.vtt',
+            s3Config: { endPoint: 'minio', bucket: 'src-bucket', pathPrefix: 'prefix/' },
+            s3ConfigId: 'cfg-src',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+        };
+
+        const targetConfig = {
+            _id: 's3config:cfg-dest',
+            endPoint: 's3.amazonaws.com',
+            bucket: 'dest-bucket',
+            port: undefined,
+            useSSL: true,
+            publicUrl: undefined,
+        };
+
+        it('should transfer all files and update session document', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...completedDoc });
+            mockS3ConfigsService.getById.mockResolvedValue(targetConfig);
+
+            const result = await service.moveSessionFiles('user:1', 'sess-move', {
+                targetS3ConfigId: 'cfg-dest',
+                newPathPrefix: 'new/',
+            });
+
+            // Should transfer each file
+            expect(mockS3ClientService.transferObject).toHaveBeenCalledTimes(2);
+            expect(mockS3ClientService.transferObject).toHaveBeenCalledWith(
+                'user:1', 'cfg-src', 'prefix/master.m3u8', 'cfg-dest', 'new/master.m3u8',
+            );
+
+            // Should delete originals
+            expect(mockS3ClientService.deleteObjects).toHaveBeenCalledWith(
+                'user:1', 'cfg-src', completedDoc.files,
+            );
+
+            // Should update session doc
+            expect(result.s3ConfigId).toBe('cfg-dest');
+            expect(result.s3Config?.bucket).toBe('dest-bucket');
+            expect(result.files).toEqual(['new/master.m3u8', 'new/v0/seg0.m4s']);
+            expect(result.masterPlaylist).toBe('new/master.m3u8');
+            expect(mockDatabaseService.upsert).toHaveBeenCalled();
+        });
+
+        it('should reject non-completed sessions', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...completedDoc, status: 'encoding' });
+
+            await expect(
+                service.moveSessionFiles('user:1', 'sess-move', { targetS3ConfigId: 'cfg-dest', newPathPrefix: 'dest/' }),
+            ).rejects.toThrow(BadRequestException);
+        });
+
+        it('should reject if user does not own session', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...completedDoc });
+
+            await expect(
+                service.moveSessionFiles('user:other', 'sess-move', { targetS3ConfigId: 'cfg-dest', newPathPrefix: 'dest/' }),
+            ).rejects.toThrow(ForbiddenException);
+        });
+
+        it('should throw BadRequestException when session has no files', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...completedDoc, files: [] });
+
+            await expect(
+                service.moveSessionFiles('user:1', 'sess-move', { targetS3ConfigId: 'cfg-dest', newPathPrefix: 'dest/' }),
+            ).rejects.toThrow('Session has no files or S3 config');
+        });
+
+        it('should throw BadRequestException when session has no s3ConfigId', async () => {
+            const doc = { ...completedDoc };
+            delete (doc as any).s3ConfigId;
+            mockDatabaseService.get.mockResolvedValue(doc);
+
+            await expect(
+                service.moveSessionFiles('user:1', 'sess-move', { targetS3ConfigId: 'cfg-dest', newPathPrefix: 'dest/' }),
+            ).rejects.toThrow('Session has no files or S3 config');
+        });
+    });
+
+    describe('renameSessionPrefix', () => {
+        function makeRenameDoc() {
+            return {
+                _id: 'session:sess-rename',
+                _rev: '1-abc',
+                docType: 'session' as const,
+                userId: 'user:1',
+                sessionId: 'sess-rename',
+                status: 'completed',
+                files: ['old/master.m3u8', 'old/v0/seg0.m4s'],
+                masterPlaylist: 'old/master.m3u8',
+                thumbnailsVtt: 'old/thumbs.vtt',
+                s3Config: { endPoint: 'minio', bucket: 'bucket', pathPrefix: 'old/' },
+                s3ConfigId: 'cfg-1',
+                createdAt: '2026-01-01T00:00:00Z',
+                updatedAt: '2026-01-01T00:00:00Z',
+            };
+        }
+
+        it('should copy files with new prefix and delete originals', async () => {
+            mockDatabaseService.get.mockResolvedValue(makeRenameDoc());
+
+            const result = await service.renameSessionPrefix('user:1', 'sess-rename', {
+                newPathPrefix: 'new/',
+            });
+
+            // Should copy each file within the same bucket
+            expect(mockS3ClientService.copyObjectSameBucket).toHaveBeenCalledTimes(2);
+            expect(mockS3ClientService.copyObjectSameBucket).toHaveBeenCalledWith(
+                'user:1', 'cfg-1', 'old/master.m3u8', 'new/master.m3u8',
+            );
+            expect(mockS3ClientService.copyObjectSameBucket).toHaveBeenCalledWith(
+                'user:1', 'cfg-1', 'old/v0/seg0.m4s', 'new/v0/seg0.m4s',
+            );
+
+            // Should delete originals
+            expect(mockS3ClientService.deleteObjects).toHaveBeenCalledWith(
+                'user:1', 'cfg-1', ['old/master.m3u8', 'old/v0/seg0.m4s'],
+            );
+
+            // Should update keys
+            expect(result.files).toEqual(['new/master.m3u8', 'new/v0/seg0.m4s']);
+            expect(result.masterPlaylist).toBe('new/master.m3u8');
+            expect(result.thumbnailsVtt).toBe('new/thumbs.vtt');
+            expect(result.s3Config?.pathPrefix).toBe('new/');
+        });
+
+        it('should no-op when prefix is unchanged', async () => {
+            mockDatabaseService.get.mockResolvedValue(makeRenameDoc());
+
+            const result = await service.renameSessionPrefix('user:1', 'sess-rename', {
+                newPathPrefix: 'old/',
+            });
+
+            expect(mockS3ClientService.copyObjectSameBucket).not.toHaveBeenCalled();
+            expect(mockS3ClientService.deleteObjects).not.toHaveBeenCalled();
+            expect(result.files).toEqual(['old/master.m3u8', 'old/v0/seg0.m4s']);
+        });
+
+        it('should reject if user does not own session', async () => {
+            mockDatabaseService.get.mockResolvedValue(makeRenameDoc());
+
+            await expect(
+                service.renameSessionPrefix('user:other', 'sess-rename', { newPathPrefix: 'new/' }),
+            ).rejects.toThrow(ForbiddenException);
+        });
+
+        it('should reject non-completed sessions', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...makeRenameDoc(), status: 'queued' });
+
+            await expect(
+                service.renameSessionPrefix('user:1', 'sess-rename', { newPathPrefix: 'new/' }),
+            ).rejects.toThrow(BadRequestException);
+        });
+
+        it('should throw BadRequestException when session has no files', async () => {
+            mockDatabaseService.get.mockResolvedValue({
+                ...makeRenameDoc(),
+                files: [],
+            });
+
+            await expect(
+                service.renameSessionPrefix('user:1', 'sess-rename', { newPathPrefix: 'new/' }),
+            ).rejects.toThrow('Session has no files or S3 config');
+        });
+
+        it('should throw BadRequestException when session has no s3ConfigId', async () => {
+            const doc = makeRenameDoc();
+            delete (doc as any).s3ConfigId;
+            mockDatabaseService.get.mockResolvedValue(doc);
+
+            await expect(
+                service.renameSessionPrefix('user:1', 'sess-rename', { newPathPrefix: 'new/' }),
+            ).rejects.toThrow('Session has no files or S3 config');
+        });
+
+        it('should prepend new prefix when old prefix is empty', async () => {
+            mockDatabaseService.get.mockResolvedValue({
+                ...makeRenameDoc(),
+                files: ['master.m3u8', 'v0/seg0.m4s'],
+                masterPlaylist: 'master.m3u8',
+                thumbnailsVtt: 'thumbs.vtt',
+                s3Config: { endPoint: 'minio', bucket: 'bucket', pathPrefix: undefined },
+            });
+
+            const result = await service.renameSessionPrefix('user:1', 'sess-rename', {
+                newPathPrefix: 'new/',
+            });
+
+            // When oldPrefix is empty, rewriteKey prepends the new prefix
+            expect(result.files).toEqual(['new/master.m3u8', 'new/v0/seg0.m4s']);
+            expect(result.masterPlaylist).toBe('new/master.m3u8');
+            expect(result.thumbnailsVtt).toBe('new/thumbs.vtt');
+        });
+    });
+
+    describe('checkPrefix', () => {
+        it('should return exists=true with count when objects are found', async () => {
+            mockS3ConfigsService.getById.mockResolvedValue({
+                _id: 's3config:cfg-1',
+                userId: 'user:1',
+            });
+            mockS3ClientService.listObjects.mockResolvedValue([
+                'output/master.m3u8',
+                'output/v0/seg0.m4s',
+                'output/v0/seg1.m4s',
+            ]);
+
+            const result = await service.checkPrefix('user:1', 'cfg-1', 'output/');
+
+            expect(result).toEqual({ exists: true, count: 3 });
+            expect(mockS3ConfigsService.getById).toHaveBeenCalledWith('user:1', 'cfg-1');
+            expect(mockS3ClientService.listObjects).toHaveBeenCalledWith('user:1', 'cfg-1', 'output/');
+        });
+
+        it('should return exists=false with count 0 when no objects found', async () => {
+            mockS3ConfigsService.getById.mockResolvedValue({
+                _id: 's3config:cfg-1',
+                userId: 'user:1',
+            });
+            mockS3ClientService.listObjects.mockResolvedValue([]);
+
+            const result = await service.checkPrefix('user:1', 'cfg-1', 'empty/');
+
+            expect(result).toEqual({ exists: false, count: 0 });
+        });
+
+        it('should normalize prefix by appending trailing slash', async () => {
+            mockS3ConfigsService.getById.mockResolvedValue({
+                _id: 's3config:cfg-1',
+                userId: 'user:1',
+            });
+            mockS3ClientService.listObjects.mockResolvedValue([]);
+
+            await service.checkPrefix('user:1', 'cfg-1', 'no-slash');
+
+            expect(mockS3ClientService.listObjects).toHaveBeenCalledWith('user:1', 'cfg-1', 'no-slash/');
+        });
+
+        it('should not double-append slash when prefix already ends with slash', async () => {
+            mockS3ConfigsService.getById.mockResolvedValue({
+                _id: 's3config:cfg-1',
+                userId: 'user:1',
+            });
+            mockS3ClientService.listObjects.mockResolvedValue([]);
+
+            await service.checkPrefix('user:1', 'cfg-1', 'has-slash/');
+
+            expect(mockS3ClientService.listObjects).toHaveBeenCalledWith('user:1', 'cfg-1', 'has-slash/');
+        });
+
+        it('should pass empty prefix through without modification', async () => {
+            mockS3ConfigsService.getById.mockResolvedValue({
+                _id: 's3config:cfg-1',
+                userId: 'user:1',
+            });
+            mockS3ClientService.listObjects.mockResolvedValue([]);
+
+            await service.checkPrefix('user:1', 'cfg-1', '');
+
+            expect(mockS3ClientService.listObjects).toHaveBeenCalledWith('user:1', 'cfg-1', '');
         });
     });
 });

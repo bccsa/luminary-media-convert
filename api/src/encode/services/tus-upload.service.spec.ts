@@ -424,4 +424,79 @@ describe('TusUploadService', () => {
             expect(mockHandle).toHaveBeenCalledWith(req, res);
         });
     });
+
+    describe('periodic cleanup', () => {
+        it('should run cleanup on interval and log when uploads are removed', async () => {
+            vi.useFakeTimers();
+            vi.clearAllMocks();
+
+            // Create a fresh service with fake timers active
+            const svc2 = new TusUploadService(sessionService, probeService, { send: vi.fn().mockResolvedValue(undefined) } as any);
+            await svc2.onModuleInit();
+            mockCleanUpExpiredUploads.mockResolvedValueOnce(3);
+
+            // Advance past the 30-minute interval
+            await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+
+            // cleanup called once from the interval tick
+            expect(mockCleanUpExpiredUploads).toHaveBeenCalled();
+
+            vi.useRealTimers();
+        });
+
+        it('should not throw when periodic cleanup fails', async () => {
+            vi.useFakeTimers();
+            vi.clearAllMocks();
+
+            const svc2 = new TusUploadService(sessionService, probeService, { send: vi.fn().mockResolvedValue(undefined) } as any);
+            await svc2.onModuleInit();
+            mockCleanUpExpiredUploads.mockRejectedValueOnce(new Error('cleanup failed'));
+
+            await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+
+            // Should not throw — just logs
+            vi.useRealTimers();
+        });
+    });
+
+    describe('sendStatusWebhook', () => {
+        it('should send webhook when session has webhook config', async () => {
+            const config: CreateSessionDto = {
+                s3: {
+                    endPoint: 's3.example.com',
+                    bucket: 'test',
+                    accessKey: 'key',
+                    secretKey: 'secret',
+                },
+                webhook: {
+                    url: 'https://example.com/webhook',
+                    sessionToken: 'tok-123',
+                },
+            };
+            const session = sessionService.create(config);
+            const webhookService = (service as any).webhookService;
+
+            const hook = capturedServerConfig.value.onUploadCreate;
+            await hook(makeRequestInfo(), { metadata: { sessionId: session.id } });
+
+            expect(webhookService.send).toHaveBeenCalledWith(
+                'https://example.com/webhook',
+                'tok-123',
+                expect.objectContaining({
+                    sessionId: session.id,
+                    status: 'uploading',
+                }),
+            );
+        });
+
+        it('should not send webhook when session has no webhook config', async () => {
+            const session = sessionService.create(makeConfig());
+            const webhookService = (service as any).webhookService;
+
+            const hook = capturedServerConfig.value.onUploadCreate;
+            await hook(makeRequestInfo(), { metadata: { sessionId: session.id } });
+
+            expect(webhookService.send).not.toHaveBeenCalled();
+        });
+    });
 });
