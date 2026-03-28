@@ -11,6 +11,7 @@ import { rename, copyFile, unlink, mkdir } from 'fs/promises';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { SessionService } from './session.service.js';
 import { ProbeService } from './probe.service.js';
+import { PreviewService } from './preview.service.js';
 import { WebhookService } from './webhook.service.js';
 
 const DEFAULT_MAX_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
@@ -38,6 +39,7 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
     constructor(
         private readonly sessionService: SessionService,
         private readonly probeService: ProbeService,
+        private readonly previewService: PreviewService,
         private readonly webhookService: WebhookService,
     ) {
         this.workDir = process.env.WORK_DIR || join(process.cwd(), 'work');
@@ -158,6 +160,11 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                 this.sessionService.setProbeResult(sessionId, probeResult);
                 this.sessionService.updateStatus(sessionId, 'uploaded');
                 this.sendStatusWebhook(sessionId, 'uploaded');
+
+                // Initialize preview (non-blocking — runs keyframe scan in background)
+                this.previewService.init(sessionId).catch((err) => {
+                    this.logger.warn(`Preview init failed for ${sessionId}: ${err.message}`);
+                });
 
                 this.logger.log(
                     `Upload complete for session ${sessionId}: ` +

@@ -3,6 +3,7 @@ import {
     Controller,
     Delete,
     Get,
+    Header,
     HttpCode,
     HttpStatus,
     NotFoundException,
@@ -10,12 +11,15 @@ import {
     Post,
     Query,
     Req,
+    Res,
     Sse,
+    StreamableFile,
     UnauthorizedException,
     UseGuards,
     BadRequestException,
     Logger,
 } from '@nestjs/common';
+import type { Response } from 'express';
 
 import {
     ApiOperation,
@@ -36,6 +40,7 @@ import { SessionService } from './services/session.service.js';
 import { SessionEventsService, type SessionEvent } from './services/session-events.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
+import { PreviewService } from './services/preview.service.js';
 import { CreateSessionDto } from './dto/create-session.dto.js';
 import { EncodeConfigDto } from './dto/encode-config.dto.js';
 import {
@@ -64,6 +69,7 @@ export class EncodeController {
         private readonly queueService: QueueService,
         private readonly ffmpegService: FfmpegService,
         private readonly authorizationWebhookService: AuthorizationWebhookService,
+        private readonly previewService: PreviewService,
     ) {}
 
     @Post()
@@ -380,5 +386,81 @@ export class EncodeController {
 
         this.sessionService.remove(sessionId);
         this.logger.log(`Session ${sessionId} deleted by client`);
+    }
+
+    // -----------------------------------------------------------------------
+    // Preview HLS endpoints
+    // -----------------------------------------------------------------------
+
+    @Get(':sessionId/preview/playlist.m3u8')
+    @SkipThrottle()
+    @ApiOperation({ summary: 'Get preview HLS playlist' })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    getPreviewPlaylist(
+        @Param('sessionId') sessionId: string,
+        @Query('token') token: string,
+        @Res() res: Response,
+    ): void {
+        this.validatePreviewToken(sessionId, token);
+
+        const playlist = this.previewService.getPlaylist(sessionId, token);
+        if (!playlist) {
+            throw new NotFoundException('Preview not ready');
+        }
+
+        res.set({
+            'Content-Type': 'application/vnd.apple.mpegurl',
+            'Cache-Control': 'no-cache',
+        });
+        res.send(playlist);
+    }
+
+    @Get(':sessionId/preview/:filename')
+    @SkipThrottle()
+    @ApiOperation({ summary: 'Get preview HLS segment' })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiParam({ name: 'filename', description: 'Segment filename (e.g. segment0.ts)' })
+    async getPreviewSegment(
+        @Param('sessionId') sessionId: string,
+        @Param('filename') filename: string,
+        @Query('token') token: string,
+        @Res() res: Response,
+    ): Promise<void> {
+        this.validatePreviewToken(sessionId, token);
+
+        const segMatch = filename.match(/^segment(\d+)\.ts$/);
+        if (!segMatch) {
+            this.logger.warn(`Preview: invalid filename "${filename}" for ${sessionId}`);
+            throw new NotFoundException('Invalid segment filename');
+        }
+
+        const index = parseInt(segMatch[1], 10);
+        this.logger.debug(`Preview: serving segment ${index} for ${sessionId}, ready=${this.previewService.isReady(sessionId)}`);
+        const result = await this.previewService.getSegmentStream(
+            sessionId,
+            index,
+        );
+
+        if (!result) {
+            this.logger.warn(`Preview: segment ${index} not available for ${sessionId}`);
+            throw new NotFoundException('Segment not available');
+        }
+
+        res.set({
+            'Content-Type': 'video/mp2t',
+            'Content-Length': String(result.size),
+            'Cache-Control': 'public, max-age=3600',
+        });
+        result.stream.pipe(res);
+    }
+
+    private validatePreviewToken(sessionId: string, token: string): void {
+        if (!token) {
+            throw new UnauthorizedException('Missing token query parameter');
+        }
+        const session = this.sessionService.getBySessionToken(token);
+        if (!session || session.id !== sessionId) {
+            throw new UnauthorizedException('Invalid session token');
+        }
     }
 }

@@ -15,6 +15,7 @@ const props = defineProps<{
     encodingType?: 'video' | 'audio';
     isAudioOnly?: boolean;
     encryptionKeyHex?: string | null;
+    preserveStateOnSourceChange?: boolean;
 }>();
 
 const playerEl = ref<HTMLVideoElement | null>(null);
@@ -251,8 +252,26 @@ let pendingSeekTime: number | null = null;
 
 watch(() => props.playbackUrl, async (url) => {
     if (url) {
+        // Preserve playback position and state when swapping sources
+        let savedTime: number | undefined;
+        let wasPlaying = false;
+        if (props.preserveStateOnSourceChange && player) {
+            savedTime = player.currentTime();
+            wasPlaying = !player.paused();
+        }
+
         await nextTick();
         await initPlayer();
+
+        // Restore state after new source loads
+        if (savedTime !== undefined && player) {
+            const restore = () => {
+                player!.currentTime(savedTime!);
+                if (wasPlaying) player!.play();
+                player!.off('loadedmetadata', restore);
+            };
+            player.on('loadedmetadata', restore);
+        }
     }
 });
 

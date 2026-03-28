@@ -189,6 +189,23 @@ const showEncoding = computed(() => {
     return (s === 'queued' || s === 'encoding' || s === 'encrypting' || s === 'uploading_to_s3') && isActiveSession.value;
 });
 
+// Server-side preview — API serves on-demand HLS segments.
+// The preview URL is set once the session has a token and encoding API URL.
+// The API generates segments from the source file (copy or transcode).
+const previewPlaybackUrl = computed(() => {
+    if (!sessionToken.value || !encodingApiUrl.value) return null;
+    const s = currentStatus.value;
+    // Preview available from 'uploaded' through encoding phases
+    if (!s || s === 'created' || s === 'uploading') return null;
+    return `${encodingApiUrl.value}/api/sessions/${sessionId.value}/preview/playlist.m3u8?token=${sessionToken.value}`;
+});
+
+// Active playback URL — preview during encoding, S3 after completion (ABR)
+const activePlaybackUrl = computed(() => {
+    if (isCompleted.value) return playbackUrl.value;
+    return previewPlaybackUrl.value;
+});
+
 // Display metadata from the session detail or poller
 const displayEncoder = computed<AccelMode | string | undefined>(
     () => poller.encoder.value ?? session.value?.encoder,
@@ -884,6 +901,25 @@ onUnmounted(() => {
                     </div>
                 </div>
 
+                <!-- ============================================================ -->
+                <!-- Source file preview (visible throughout lifecycle when File   -->
+                <!-- was registered in this browser session)                       -->
+                <!-- ============================================================ -->
+                <!-- Unified HLS player — shows local preview during upload/encoding,
+                     swaps to S3 output when encoding completes -->
+                <div v-if="activePlaybackUrl" class="mb-4">
+                    <HlsPlayer
+                        ref="playerRef"
+                        :playback-url="activePlaybackUrl"
+                        :thumbnail-vtt-url="isCompleted ? thumbnailVttUrl : undefined"
+                        :encoding-type="encodingType"
+                        :is-audio-only="isAudioOnly"
+                        :encryption-key-hex="isCompleted ? encryptionKeyHex : undefined"
+                        preserve-state-on-source-change
+                    />
+                </div>
+
+
                 <!-- Submission error banner -->
                 <div
                     v-if="submissionError"
@@ -1028,15 +1064,7 @@ onUnmounted(() => {
                             </div>
                         </div>
 
-                        <!-- Video player -->
-                        <HlsPlayer
-                            ref="playerRef"
-                            :playback-url="playbackUrl"
-                            :thumbnail-vtt-url="thumbnailVttUrl"
-                            :encoding-type="encodingType"
-                            :is-audio-only="isAudioOnly"
-                            :encryption-key-hex="encryptionKeyHex"
-                        />
+                        <!-- Video player is now unified at the top of the page -->
 
                         <!-- Master Playlist URL + Copy -->
                         <div v-if="displayMasterPlaylist" class="rounded-lg bg-zinc-900/60 p-4">
@@ -1309,6 +1337,7 @@ onUnmounted(() => {
                         New Session
                     </button>
                 </div>
+
             </template>
         </div>
     </div>
