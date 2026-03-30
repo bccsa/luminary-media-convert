@@ -10,8 +10,8 @@ import { AuthModule } from './auth/auth.module.js';
         EncodeModule,
         ThrottlerModule.forRoot({
             throttlers: [
-                { name: 'short', ttl: 1000, limit: 20 },
-                { name: 'medium', ttl: 60000, limit: 100 },
+                { name: 'short', ttl: 1000, limit: 100 },
+                { name: 'medium', ttl: 60000, limit: 1000 },
             ],
         }),
     ],

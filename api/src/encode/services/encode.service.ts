@@ -8,6 +8,7 @@ import { ThumbnailService } from './thumbnail.service.js';
 import { S3Service } from './s3.service.js';
 import { WebhookService } from './webhook.service.js';
 import { SegmentPipelineService, type PipelineProgress } from './segment-pipeline.service.js';
+import { PreviewService } from './preview.service.js';
 import type { WebhookPayloadDto } from '../dto/webhook-payload.dto.js';
 
 @Injectable()
@@ -24,6 +25,7 @@ export class EncodeService {
         private readonly s3Service: S3Service,
         private readonly webhookService: WebhookService,
         private readonly segmentPipelineService: SegmentPipelineService,
+        private readonly previewService: PreviewService,
     ) {}
 
     async processSession(sessionId: string): Promise<void> {
@@ -259,6 +261,7 @@ export class EncodeService {
                 message: 'Encoding failed',
             });
         } finally {
+            await this.previewService.destroy(sessionId);
             await this.cleanupSessionFiles(sessionId, session);
         }
     }

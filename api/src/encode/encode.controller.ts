@@ -60,6 +60,7 @@ interface MessageEvent {
 
 @ApiTags('Encoding Sessions')
 @Controller('api/sessions')
+@SkipThrottle()
 export class EncodeController {
     private readonly logger = new Logger(EncodeController.name);
 
@@ -384,6 +385,7 @@ export class EncodeController {
             );
         }
 
+        await this.previewService.destroy(sessionId);
         this.sessionService.remove(sessionId);
         this.logger.log(`Session ${sessionId} deleted by client`);
     }
@@ -393,10 +395,8 @@ export class EncodeController {
     // -----------------------------------------------------------------------
 
     @Get(':sessionId/preview/playlist.m3u8')
-    @SkipThrottle()
-    @ApiOperation({ summary: 'Get preview HLS playlist' })
-    @ApiParam({ name: 'sessionId', description: 'Session ID' })
-    getPreviewPlaylist(
+    @ApiOperation({ summary: 'Get preview HLS master playlist' })
+    getPreviewMasterPlaylist(
         @Param('sessionId') sessionId: string,
         @Query('token') token: string,
         @Res() res: Response,
@@ -404,47 +404,49 @@ export class EncodeController {
         this.validatePreviewToken(sessionId, token);
 
         const playlist = this.previewService.getPlaylist(sessionId, token);
-        if (!playlist) {
-            throw new NotFoundException('Preview not ready');
-        }
+        if (!playlist) throw new NotFoundException('Preview not ready');
 
-        res.set({
-            'Content-Type': 'application/vnd.apple.mpegurl',
-            'Cache-Control': 'no-cache',
-        });
+        res.set({ 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' });
         res.send(playlist);
     }
 
-    @Get(':sessionId/preview/:filename')
-    @SkipThrottle()
+    @Get(':sessionId/preview/r:rendition/playlist.m3u8')
+    @ApiOperation({ summary: 'Get preview HLS rendition playlist' })
+    getPreviewRenditionPlaylist(
+        @Param('sessionId') sessionId: string,
+        @Param('rendition') rendition: string,
+        @Query('token') token: string,
+        @Res() res: Response,
+    ): void {
+        this.validatePreviewToken(sessionId, token);
+
+        const renditionIndex = parseInt(rendition, 10);
+        const playlist = this.previewService.getPlaylist(sessionId, token, renditionIndex);
+        if (!playlist) throw new NotFoundException('Rendition not available');
+
+        res.set({ 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' });
+        res.send(playlist);
+    }
+
+    @Get(':sessionId/preview/r:rendition/:filename')
     @ApiOperation({ summary: 'Get preview HLS segment' })
-    @ApiParam({ name: 'sessionId', description: 'Session ID' })
-    @ApiParam({ name: 'filename', description: 'Segment filename (e.g. segment0.ts)' })
     async getPreviewSegment(
         @Param('sessionId') sessionId: string,
+        @Param('rendition') rendition: string,
         @Param('filename') filename: string,
         @Query('token') token: string,
         @Res() res: Response,
     ): Promise<void> {
         this.validatePreviewToken(sessionId, token);
 
+        const renditionIndex = parseInt(rendition, 10);
         const segMatch = filename.match(/^segment(\d+)\.ts$/);
-        if (!segMatch) {
-            this.logger.warn(`Preview: invalid filename "${filename}" for ${sessionId}`);
-            throw new NotFoundException('Invalid segment filename');
-        }
+        if (!segMatch) throw new NotFoundException('Invalid segment filename');
 
-        const index = parseInt(segMatch[1], 10);
-        this.logger.debug(`Preview: serving segment ${index} for ${sessionId}, ready=${this.previewService.isReady(sessionId)}`);
-        const result = await this.previewService.getSegmentStream(
-            sessionId,
-            index,
-        );
+        const segmentIndex = parseInt(segMatch[1], 10);
+        const result = await this.previewService.getSegmentStream(sessionId, renditionIndex, segmentIndex);
 
-        if (!result) {
-            this.logger.warn(`Preview: segment ${index} not available for ${sessionId}`);
-            throw new NotFoundException('Segment not available');
-        }
+        if (!result) throw new NotFoundException('Segment not available');
 
         res.set({
             'Content-Type': 'video/mp2t',
