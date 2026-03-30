@@ -933,7 +933,7 @@ onUnmounted(() => {
                 <!-- ============================================================ -->
                 <div v-if="showUploadProgress" class="mb-4">
                     <ProgressBar
-                        :label="activeUpload!.progress >= 100 ? 'Analyzing...' : 'Uploading...'"
+                        :label="activeUpload!.progress >= 100 ? 'Finalizing upload...' : 'Uploading...'"
                         :progress="activeUpload!.progress"
                         :indeterminate="activeUpload!.progress >= 100"
                     />

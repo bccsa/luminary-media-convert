@@ -166,10 +166,15 @@ export class ProbeService {
         this.logger.log('Stream-level bitrates missing, computing from packet data...');
 
         try {
+            // Sample only the first 10 seconds of packets instead of the
+            // entire file — sufficient for bitrate estimation and avoids
+            // scanning multi-GB files.
+            const sampleDuration = Math.min(10, duration);
             const { stdout: csv } = await execFileAsync('ffprobe', [
                 '-v', 'quiet', '-print_format', 'csv=p=0',
+                '-read_intervals', `%+${sampleDuration}`,
                 '-show_entries', 'packet=stream_index,size', filePath,
-            ], { timeout: 120000, maxBuffer: 200 * 1024 * 1024 });
+            ], { timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
 
             const bytesPerStream = new Map<number, number>();
             for (const line of csv.split('\n')) {
@@ -196,7 +201,7 @@ export class ProbeService {
             for (const [streamIndex, totalBytes] of bytesPerStream) {
                 const mapping = avStreamToType.get(streamIndex);
                 if (!mapping) continue;
-                const bitrateKbps = Math.round((totalBytes * 8) / duration / 1000);
+                const bitrateKbps = Math.round((totalBytes * 8) / sampleDuration / 1000);
                 if (mapping.type === 'video') {
                     const track = videoTracks[mapping.localIndex];
                     if (track && track.bitrateKbps === 0) {
