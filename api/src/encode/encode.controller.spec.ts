@@ -8,6 +8,7 @@ import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
 import { AuthorizationWebhookService } from '../auth/authorization-webhook.service';
+import { PreviewService } from './services/preview.service.js';
 import type { CreateSessionDto } from './dto/create-session.dto.js';
 import type { EncodeConfigDto } from './dto/encode-config.dto.js';
 import type { Response } from 'express';
@@ -57,6 +58,7 @@ describe('EncodeController', () => {
     let queueService: Mocked<QueueService>;
     let ffmpegService: Mocked<FfmpegService>;
     let authorizationWebhookService: Mocked<AuthorizationWebhookService>;
+    let previewService: Mocked<PreviewService>;
     let testWorkDir: string;
 
     beforeEach(() => {
@@ -83,8 +85,16 @@ describe('EncodeController', () => {
             checkAuthorization: vi.fn().mockResolvedValue(undefined),
         } as any;
 
+        previewService = {
+            init: vi.fn(),
+            isReady: vi.fn().mockReturnValue(false),
+            getPlaylist: vi.fn().mockReturnValue(null),
+            getSegmentStream: vi.fn().mockResolvedValue(null),
+            destroy: vi.fn().mockResolvedValue(undefined),
+        } as any;
+
         const sessionEventsService = { emit: vi.fn(), forSession: vi.fn().mockReturnValue({ pipe: vi.fn().mockReturnValue({ subscribe: vi.fn() }) }) } as any;
-        controller = new EncodeController(sessionService, sessionEventsService, queueService, ffmpegService, authorizationWebhookService);
+        controller = new EncodeController(sessionService, sessionEventsService, queueService, ffmpegService, authorizationWebhookService, previewService);
     });
 
     afterEach(() => {
@@ -550,6 +560,7 @@ describe('EncodeController', () => {
                 queueService,
                 ffmpegService,
                 authorizationWebhookService,
+                previewService,
             );
 
             const result = ctrl.streamEvents(session.id, session.sessionToken);
@@ -575,6 +586,7 @@ describe('EncodeController', () => {
                 queueService,
                 ffmpegService,
                 authorizationWebhookService,
+                previewService,
             );
 
             const session = sessionService.create(makeConfig());
@@ -592,6 +604,147 @@ describe('EncodeController', () => {
                     progress: 50,
                     encoder: 'apple',
                 },
+            });
+        });
+    });
+
+    describe('deleteSession - preview cleanup', () => {
+        it('should call previewService.destroy when deleting a session', async () => {
+            const session = sessionService.create(makeConfig());
+
+            await controller.deleteSession(session.id);
+
+            expect(previewService.destroy).toHaveBeenCalledWith(session.id);
+        });
+    });
+
+    describe('preview endpoints', () => {
+        function makeRes(): any {
+            const res: any = {
+                set: vi.fn().mockReturnThis(),
+                send: vi.fn().mockReturnThis(),
+                status: vi.fn().mockReturnThis(),
+            };
+            return res;
+        }
+
+        describe('validatePreviewToken', () => {
+            it('should throw UnauthorizedException when token is missing', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+
+                expect(() =>
+                    controller.getPreviewMasterPlaylist(session.id, '', res),
+                ).toThrow(UnauthorizedException);
+            });
+
+            it('should throw UnauthorizedException for invalid token', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+
+                expect(() =>
+                    controller.getPreviewMasterPlaylist(session.id, 'invalid-token', res),
+                ).toThrow(UnauthorizedException);
+            });
+
+            it('should throw UnauthorizedException when token belongs to different session', () => {
+                const session1 = sessionService.create(makeConfig());
+                const session2 = sessionService.create(makeConfig());
+                const res = makeRes();
+
+                expect(() =>
+                    controller.getPreviewMasterPlaylist(session1.id, session2.sessionToken, res),
+                ).toThrow(UnauthorizedException);
+            });
+        });
+
+        describe('getPreviewMasterPlaylist', () => {
+            it('should return playlist content with correct headers', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue('#EXTM3U\n#EXT-X-STREAM-INF\n');
+
+                controller.getPreviewMasterPlaylist(session.id, session.sessionToken, res);
+
+                expect(res.set).toHaveBeenCalledWith(
+                    expect.objectContaining({ 'Content-Type': 'application/vnd.apple.mpegurl' }),
+                );
+                expect(res.send).toHaveBeenCalledWith('#EXTM3U\n#EXT-X-STREAM-INF\n');
+            });
+
+            it('should throw NotFoundException when preview is not ready', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue(null);
+
+                expect(() =>
+                    controller.getPreviewMasterPlaylist(session.id, session.sessionToken, res),
+                ).toThrow(NotFoundException);
+            });
+        });
+
+        describe('getPreviewRenditionPlaylist', () => {
+            it('should return rendition playlist with correct headers', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue('#EXTM3U\n#EXTINF:6\n');
+
+                controller.getPreviewRenditionPlaylist(session.id, '0', session.sessionToken, res);
+
+                expect(previewService.getPlaylist).toHaveBeenCalledWith(session.id, session.sessionToken, 0);
+                expect(res.set).toHaveBeenCalledWith(
+                    expect.objectContaining({ 'Content-Type': 'application/vnd.apple.mpegurl' }),
+                );
+                expect(res.send).toHaveBeenCalledWith('#EXTM3U\n#EXTINF:6\n');
+            });
+
+            it('should throw NotFoundException when rendition is not available', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue(null);
+
+                expect(() =>
+                    controller.getPreviewRenditionPlaylist(session.id, '0', session.sessionToken, res),
+                ).toThrow(NotFoundException);
+            });
+        });
+
+        describe('getPreviewSegment', () => {
+            it('should pipe segment stream to response', async () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                const mockStream = { pipe: vi.fn() };
+                previewService.getSegmentStream.mockResolvedValue({ stream: mockStream as any, size: 12345 });
+
+                await controller.getPreviewSegment(session.id, '0', 'segment0.ts', session.sessionToken, res);
+
+                expect(previewService.getSegmentStream).toHaveBeenCalledWith(session.id, 0, 0);
+                expect(res.set).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        'Content-Type': 'video/mp2t',
+                        'Content-Length': '12345',
+                    }),
+                );
+                expect(mockStream.pipe).toHaveBeenCalledWith(res);
+            });
+
+            it('should throw NotFoundException for invalid segment filename', async () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+
+                await expect(
+                    controller.getPreviewSegment(session.id, '0', 'invalid.mp4', session.sessionToken, res),
+                ).rejects.toThrow(NotFoundException);
+            });
+
+            it('should throw NotFoundException when segment is not available', async () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getSegmentStream.mockResolvedValue(null);
+
+                await expect(
+                    controller.getPreviewSegment(session.id, '0', 'segment0.ts', session.sessionToken, res),
+                ).rejects.toThrow(NotFoundException);
             });
         });
     });

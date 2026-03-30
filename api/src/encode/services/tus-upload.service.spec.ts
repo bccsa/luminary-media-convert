@@ -84,7 +84,8 @@ describe('TusUploadService', () => {
 
         process.env.WORK_DIR = '/tmp/tus-test-work';
 
-        service = new TusUploadService(sessionService, probeService, webhookService);
+        const previewService = { init: vi.fn().mockResolvedValue(undefined), destroy: vi.fn().mockResolvedValue(undefined) } as any;
+        service = new TusUploadService(sessionService, probeService, previewService, webhookService);
         await service.onModuleInit();
     });
 
@@ -431,7 +432,7 @@ describe('TusUploadService', () => {
             vi.clearAllMocks();
 
             // Create a fresh service with fake timers active
-            const svc2 = new TusUploadService(sessionService, probeService, { send: vi.fn().mockResolvedValue(undefined) } as any);
+            const svc2 = new TusUploadService(sessionService, probeService, { init: vi.fn(), destroy: vi.fn() } as any, { send: vi.fn().mockResolvedValue(undefined) } as any);
             await svc2.onModuleInit();
             mockCleanUpExpiredUploads.mockResolvedValueOnce(3);
 
@@ -448,7 +449,7 @@ describe('TusUploadService', () => {
             vi.useFakeTimers();
             vi.clearAllMocks();
 
-            const svc2 = new TusUploadService(sessionService, probeService, { send: vi.fn().mockResolvedValue(undefined) } as any);
+            const svc2 = new TusUploadService(sessionService, probeService, { init: vi.fn(), destroy: vi.fn() } as any, { send: vi.fn().mockResolvedValue(undefined) } as any);
             await svc2.onModuleInit();
             mockCleanUpExpiredUploads.mockRejectedValueOnce(new Error('cleanup failed'));
 

@@ -169,7 +169,7 @@ export class PreviewService {
             promise = this.extractSegment(state, renditionIndex, segmentIndex, segPath);
             promise.catch(() => {}); // prevent unhandled rejection if cancelled
             this.pending.set(cacheKey, promise);
-            promise.finally(() => this.pending.delete(cacheKey));
+            promise.finally(() => this.pending.delete(cacheKey)).catch(() => {});
         }
 
         try {
@@ -219,7 +219,7 @@ export class PreviewService {
             const promise = this.extractSegment(state, renditionIndex, i, segPath);
             promise.catch(() => {}); // swallow errors from prefetch
             this.pending.set(cacheKey, promise);
-            promise.finally(() => this.pending.delete(cacheKey));
+            promise.finally(() => this.pending.delete(cacheKey)).catch(() => {});
         }
     }
 
@@ -270,20 +270,21 @@ export class PreviewService {
         }
 
         if (canCopyCodec) {
-            // Single-stream copy-compatible — one rendition (copy mode)
             const v = videos[0];
-            const height = Math.min(v.height, MAX_PREVIEW_HEIGHT);
-            return [{
-                videoIndex: v.index,
-                width: height === v.height ? v.width : Math.round(v.width * height / v.height / 2) * 2,
-                height,
-                bitrateKbps: v.bitrateKbps,
-                canCopy: height === v.height, // copy only if no scaling needed
-                scaleFilter: height < v.height ? `${height * v.width / v.height | 0}:-2` : undefined,
-            }];
+            if (v.height <= MAX_PREVIEW_HEIGHT) {
+                // Source fits within preview height — single copy rendition
+                return [{
+                    videoIndex: v.index,
+                    width: v.width,
+                    height: v.height,
+                    bitrateKbps: v.bitrateKbps,
+                    canCopy: true,
+                }];
+            }
+            // Source > 480p — fall through to generate multiple transcode renditions
         }
 
-        // Transcode mode (HEVC, ProRes, etc.) — generate 2-3 renditions
+        // Transcode mode (HEVC, ProRes, >480p H.264, etc.) — generate 2-3 renditions
         const renditions: Rendition[] = [];
         const v = videos[0];
         const heights = [480, 360, 240].filter((h) => h <= Math.max(v.height, 240));
