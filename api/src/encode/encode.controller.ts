@@ -394,16 +394,30 @@ export class EncodeController {
     // Preview HLS endpoints
     // -----------------------------------------------------------------------
 
+    @Get(':sessionId/preview/audio-tracks')
+    @ApiOperation({ summary: 'Get available preview audio tracks' })
+    getPreviewAudioTracks(
+        @Param('sessionId') sessionId: string,
+        @Query('token') token: string,
+    ): any {
+        this.validatePreviewToken(sessionId, token);
+        const tracks = this.previewService.getAudioTracks(sessionId);
+        if (!tracks) throw new NotFoundException('Preview not ready');
+        return tracks;
+    }
+
     @Get(':sessionId/preview/playlist.m3u8')
     @ApiOperation({ summary: 'Get preview HLS master playlist' })
     getPreviewMasterPlaylist(
         @Param('sessionId') sessionId: string,
         @Query('token') token: string,
+        @Query('audio') audio: string | undefined,
         @Res() res: Response,
     ): void {
         this.validatePreviewToken(sessionId, token);
 
-        const playlist = this.previewService.getPlaylist(sessionId, token);
+        const audioTrackIndex = audio !== undefined ? parseInt(audio, 10) : undefined;
+        const playlist = this.previewService.getPlaylist(sessionId, token, undefined, audioTrackIndex);
         if (!playlist) throw new NotFoundException('Preview not ready');
 
         res.set({ 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' });
@@ -416,12 +430,14 @@ export class EncodeController {
         @Param('sessionId') sessionId: string,
         @Param('rendition') rendition: string,
         @Query('token') token: string,
+        @Query('audio') audio: string | undefined,
         @Res() res: Response,
     ): void {
         this.validatePreviewToken(sessionId, token);
 
         const renditionIndex = parseInt(rendition, 10);
-        const playlist = this.previewService.getPlaylist(sessionId, token, renditionIndex);
+        const audioTrackIndex = audio !== undefined ? parseInt(audio, 10) : undefined;
+        const playlist = this.previewService.getPlaylist(sessionId, token, renditionIndex, audioTrackIndex);
         if (!playlist) throw new NotFoundException('Rendition not available');
 
         res.set({ 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' });
@@ -435,6 +451,7 @@ export class EncodeController {
         @Param('rendition') rendition: string,
         @Param('filename') filename: string,
         @Query('token') token: string,
+        @Query('audio') audio: string | undefined,
         @Res() res: Response,
     ): Promise<void> {
         this.validatePreviewToken(sessionId, token);
@@ -444,7 +461,8 @@ export class EncodeController {
         if (!segMatch) throw new NotFoundException('Invalid segment filename');
 
         const segmentIndex = parseInt(segMatch[1], 10);
-        const result = await this.previewService.getSegmentStream(sessionId, renditionIndex, segmentIndex);
+        const audioTrackIndex = audio !== undefined ? parseInt(audio, 10) : undefined;
+        const result = await this.previewService.getSegmentStream(sessionId, renditionIndex, segmentIndex, audioTrackIndex);
 
         if (!result) throw new NotFoundException('Segment not available');
 

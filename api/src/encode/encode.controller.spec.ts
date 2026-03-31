@@ -89,6 +89,7 @@ describe('EncodeController', () => {
             init: vi.fn(),
             isReady: vi.fn().mockReturnValue(false),
             getPlaylist: vi.fn().mockReturnValue(null),
+            getAudioTracks: vi.fn().mockReturnValue(null),
             getSegmentStream: vi.fn().mockResolvedValue(null),
             destroy: vi.fn().mockResolvedValue(undefined),
         } as any;
@@ -634,7 +635,7 @@ describe('EncodeController', () => {
                 const res = makeRes();
 
                 expect(() =>
-                    controller.getPreviewMasterPlaylist(session.id, '', res),
+                    controller.getPreviewMasterPlaylist(session.id, '', undefined, res),
                 ).toThrow(UnauthorizedException);
             });
 
@@ -643,7 +644,7 @@ describe('EncodeController', () => {
                 const res = makeRes();
 
                 expect(() =>
-                    controller.getPreviewMasterPlaylist(session.id, 'invalid-token', res),
+                    controller.getPreviewMasterPlaylist(session.id, 'invalid-token', undefined, res),
                 ).toThrow(UnauthorizedException);
             });
 
@@ -653,7 +654,7 @@ describe('EncodeController', () => {
                 const res = makeRes();
 
                 expect(() =>
-                    controller.getPreviewMasterPlaylist(session1.id, session2.sessionToken, res),
+                    controller.getPreviewMasterPlaylist(session1.id, session2.sessionToken, undefined, res),
                 ).toThrow(UnauthorizedException);
             });
         });
@@ -664,7 +665,7 @@ describe('EncodeController', () => {
                 const res = makeRes();
                 previewService.getPlaylist.mockReturnValue('#EXTM3U\n#EXT-X-STREAM-INF\n');
 
-                controller.getPreviewMasterPlaylist(session.id, session.sessionToken, res);
+                controller.getPreviewMasterPlaylist(session.id, session.sessionToken, undefined, res);
 
                 expect(res.set).toHaveBeenCalledWith(
                     expect.objectContaining({ 'Content-Type': 'application/vnd.apple.mpegurl' }),
@@ -678,7 +679,7 @@ describe('EncodeController', () => {
                 previewService.getPlaylist.mockReturnValue(null);
 
                 expect(() =>
-                    controller.getPreviewMasterPlaylist(session.id, session.sessionToken, res),
+                    controller.getPreviewMasterPlaylist(session.id, session.sessionToken, undefined, res),
                 ).toThrow(NotFoundException);
             });
         });
@@ -689,9 +690,9 @@ describe('EncodeController', () => {
                 const res = makeRes();
                 previewService.getPlaylist.mockReturnValue('#EXTM3U\n#EXTINF:6\n');
 
-                controller.getPreviewRenditionPlaylist(session.id, '0', session.sessionToken, res);
+                controller.getPreviewRenditionPlaylist(session.id, '0', session.sessionToken, undefined, res);
 
-                expect(previewService.getPlaylist).toHaveBeenCalledWith(session.id, session.sessionToken, 0);
+                expect(previewService.getPlaylist).toHaveBeenCalledWith(session.id, session.sessionToken, 0, undefined);
                 expect(res.set).toHaveBeenCalledWith(
                     expect.objectContaining({ 'Content-Type': 'application/vnd.apple.mpegurl' }),
                 );
@@ -704,7 +705,7 @@ describe('EncodeController', () => {
                 previewService.getPlaylist.mockReturnValue(null);
 
                 expect(() =>
-                    controller.getPreviewRenditionPlaylist(session.id, '0', session.sessionToken, res),
+                    controller.getPreviewRenditionPlaylist(session.id, '0', session.sessionToken, undefined, res),
                 ).toThrow(NotFoundException);
             });
         });
@@ -716,9 +717,9 @@ describe('EncodeController', () => {
                 const mockStream = { pipe: vi.fn() };
                 previewService.getSegmentStream.mockResolvedValue({ stream: mockStream as any, size: 12345 });
 
-                await controller.getPreviewSegment(session.id, '0', 'segment0.ts', session.sessionToken, res);
+                await controller.getPreviewSegment(session.id, '0', 'segment0.ts', session.sessionToken, undefined, res);
 
-                expect(previewService.getSegmentStream).toHaveBeenCalledWith(session.id, 0, 0);
+                expect(previewService.getSegmentStream).toHaveBeenCalledWith(session.id, 0, 0, undefined);
                 expect(res.set).toHaveBeenCalledWith(
                     expect.objectContaining({
                         'Content-Type': 'video/mp2t',
@@ -733,7 +734,7 @@ describe('EncodeController', () => {
                 const res = makeRes();
 
                 await expect(
-                    controller.getPreviewSegment(session.id, '0', 'invalid.mp4', session.sessionToken, res),
+                    controller.getPreviewSegment(session.id, '0', 'invalid.mp4', session.sessionToken, undefined, res),
                 ).rejects.toThrow(NotFoundException);
             });
 
@@ -743,8 +744,63 @@ describe('EncodeController', () => {
                 previewService.getSegmentStream.mockResolvedValue(null);
 
                 await expect(
-                    controller.getPreviewSegment(session.id, '0', 'segment0.ts', session.sessionToken, res),
+                    controller.getPreviewSegment(session.id, '0', 'segment0.ts', session.sessionToken, undefined, res),
                 ).rejects.toThrow(NotFoundException);
+            });
+        });
+
+        describe('getPreviewAudioTracks', () => {
+            it('should return audio tracks', () => {
+                const session = sessionService.create(makeConfig());
+                const tracks = [{ index: 0, streamIndex: 0, name: 'English', isDefault: true }];
+                previewService.getAudioTracks.mockReturnValue(tracks);
+
+                const result = controller.getPreviewAudioTracks(session.id, session.sessionToken);
+
+                expect(previewService.getAudioTracks).toHaveBeenCalledWith(session.id);
+                expect(result).toEqual(tracks);
+            });
+
+            it('should throw NotFoundException when preview not ready', () => {
+                const session = sessionService.create(makeConfig());
+                previewService.getAudioTracks.mockReturnValue(null);
+
+                expect(() =>
+                    controller.getPreviewAudioTracks(session.id, session.sessionToken),
+                ).toThrow(NotFoundException);
+            });
+        });
+
+        describe('audio query param forwarding', () => {
+            it('should pass audio param to getPlaylist for master playlist', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue('#EXTM3U\n');
+
+                controller.getPreviewMasterPlaylist(session.id, session.sessionToken, '2', res);
+
+                expect(previewService.getPlaylist).toHaveBeenCalledWith(session.id, session.sessionToken, undefined, 2);
+            });
+
+            it('should pass audio param to getPlaylist for rendition playlist', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue('#EXTM3U\n');
+
+                controller.getPreviewRenditionPlaylist(session.id, '0', session.sessionToken, '3', res);
+
+                expect(previewService.getPlaylist).toHaveBeenCalledWith(session.id, session.sessionToken, 0, 3);
+            });
+
+            it('should pass audio param to getSegmentStream', async () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                const mockStream = { pipe: vi.fn() };
+                previewService.getSegmentStream.mockResolvedValue({ stream: mockStream as any, size: 100 });
+
+                await controller.getPreviewSegment(session.id, '0', 'segment0.ts', session.sessionToken, '4', res);
+
+                expect(previewService.getSegmentStream).toHaveBeenCalledWith(session.id, 0, 0, 4);
             });
         });
     });

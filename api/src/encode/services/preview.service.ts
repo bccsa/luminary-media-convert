@@ -6,7 +6,17 @@ import { createReadStream, existsSync } from 'fs';
 import { mkdir, rm, readFile, writeFile, stat } from 'fs/promises';
 import type { ReadStream } from 'fs';
 import { SessionService } from './session.service.js';
-import type { ProbeResult, VideoTrackInfo } from './probe.service.js';
+import type { ProbeResult, AudioTrackInfo } from './probe.service.js';
+
+const MAX_AUDIO_BITRATE_KBPS = 150;
+
+export interface PreviewAudioTrack {
+    index: number;
+    streamIndex: number;
+    language?: string;
+    name?: string;
+    isDefault: boolean;
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -36,7 +46,7 @@ interface PreviewState {
     filePath: string;
     duration: number;
     segmentBoundaries: SegmentBoundary[];
-    audioStreamIndex: number;
+    audioTracks: PreviewAudioTrack[];
     renditions: Rendition[];
     previewDir: string;
     masterPlaylist: string;
@@ -68,7 +78,7 @@ export class PreviewService {
         await mkdir(previewDir, { recursive: true });
 
         const duration = probeResult.format.duration;
-        const audioIndex = probeResult.audioTracks[0]?.index ?? -1;
+        const audioTracks = this.selectAudioTracks(probeResult);
 
         // Build renditions from available video tracks
         const renditions = this.buildRenditions(probeResult);
@@ -93,7 +103,7 @@ export class PreviewService {
             filePath,
             duration,
             segmentBoundaries: boundaries,
-            audioStreamIndex: audioIndex,
+            audioTracks,
             renditions,
             previewDir,
             masterPlaylist,
@@ -103,8 +113,11 @@ export class PreviewService {
         const renditionSummary = renditions
             .map((r) => `${r.width}x${r.height}(${r.canCopy ? 'copy' : 'transcode'})`)
             .join(', ');
+        const audioSummary = audioTracks.length > 1
+            ? `, ${audioTracks.length} audio track(s) [${audioTracks.map((a) => a.language ?? a.name ?? 'und').join(', ')}]`
+            : '';
         this.logger.log(
-            `Preview initialized for ${sessionId}: ${renditions.length} rendition(s) [${renditionSummary}], ` +
+            `Preview initialized for ${sessionId}: ${renditions.length} rendition(s) [${renditionSummary}]${audioSummary}, ` +
                 `${boundaries.length || Math.ceil(duration / SEGMENT_DURATION)} segments`,
         );
     }
@@ -113,8 +126,14 @@ export class PreviewService {
         return this.states.has(sessionId);
     }
 
+    /** Get available audio tracks for client-side track selector */
+    getAudioTracks(sessionId: string): PreviewAudioTrack[] | null {
+        const state = this.states.get(sessionId);
+        return state ? state.audioTracks : null;
+    }
+
     /** Get master or media playlist */
-    getPlaylist(sessionId: string, token: string, renditionIndex?: number): string | null {
+    getPlaylist(sessionId: string, token: string, renditionIndex?: number, audioTrackIndex?: number): string | null {
         const state = this.states.get(sessionId);
         if (!state) return null;
 
@@ -125,10 +144,12 @@ export class PreviewService {
             playlist = state.masterPlaylist;
         }
 
-        // Append token to all .ts and .m3u8 URLs
+        // Append token (and audio track for cache isolation) to all URLs
+        const audioParam = (audioTrackIndex !== undefined && state.audioTracks.length > 1)
+            ? `&audio=${audioTrackIndex}` : '';
         return playlist.replace(
             /((?:segment\d+\.ts|r\d+\/playlist\.m3u8))/g,
-            `$1?token=${token}`,
+            `$1?token=${token}${audioParam}`,
         );
     }
 
@@ -137,6 +158,7 @@ export class PreviewService {
         sessionId: string,
         renditionIndex: number,
         segmentIndex: number,
+        audioTrackIndex?: number,
     ): Promise<{ stream: ReadStream; size: number } | null> {
         const state = this.states.get(sessionId);
         if (!state) return null;
@@ -147,7 +169,10 @@ export class PreviewService {
             : Math.ceil(state.duration / SEGMENT_DURATION);
         if (segmentIndex < 0 || segmentIndex >= totalSegments) return null;
 
-        const segDir = join(state.previewDir, `r${renditionIndex}`);
+        const ai = audioTrackIndex ?? 0;
+        // Cache segments per (rendition, audioTrack) pair when multi-audio
+        const cacheDir = state.audioTracks.length > 1 ? `r${renditionIndex}a${ai}` : `r${renditionIndex}`;
+        const segDir = join(state.previewDir, cacheDir);
         const segPath = join(segDir, `segment${segmentIndex}.ts`);
 
         // Return cached segment (ignore empty files left by killed FFmpeg processes)
@@ -163,10 +188,10 @@ export class PreviewService {
         // Extract on demand (deduplicate concurrent requests).
         // .catch on the stored promise prevents unhandled rejections
         // when cancelPending kills the process and clears the map.
-        const cacheKey = `${sessionId}:${renditionIndex}:${segmentIndex}`;
+        const cacheKey = `${sessionId}:${cacheDir}:${segmentIndex}`;
         let promise = this.pending.get(cacheKey);
         if (!promise) {
-            promise = this.extractSegment(state, renditionIndex, segmentIndex, segPath);
+            promise = this.extractSegment(state, renditionIndex, segmentIndex, segPath, ai);
             promise.catch(() => {}); // prevent unhandled rejection if cancelled
             this.pending.set(cacheKey, promise);
             promise.finally(() => this.pending.delete(cacheKey)).catch(() => {});
@@ -175,16 +200,14 @@ export class PreviewService {
         try {
             await promise;
         } catch (e: any) {
-            this.logger.warn(`Segment r${renditionIndex}/s${segmentIndex} extraction error: ${e.message}`);
+            this.logger.warn(`Segment ${cacheDir}/s${segmentIndex} extraction error: ${e.message}`);
             return null;
         }
 
         if (existsSync(segPath)) {
             const s = await stat(segPath);
             if (s.size > 0) {
-                // Pre-extract next segments in background so they're
-                // cached when VHS asks (critical for slow transcode mode)
-                this.prefetchSegments(sessionId, state, renditionIndex, segmentIndex + 1, 3);
+                this.prefetchSegments(sessionId, state, cacheDir, renditionIndex, segmentIndex + 1, 3, ai);
                 return { stream: createReadStream(segPath), size: s.size };
             }
             this.logger.warn(`Segment r${renditionIndex}/s${segmentIndex} produced empty file, deleting`);
@@ -200,24 +223,24 @@ export class PreviewService {
     private prefetchSegments(
         sessionId: string,
         state: PreviewState,
+        cacheDir: string,
         renditionIndex: number,
         startIndex: number,
         count: number,
+        audioTrackIndex: number,
     ): void {
         const totalSegments = state.segmentBoundaries.length > 0
             ? state.segmentBoundaries.length
             : Math.ceil(state.duration / SEGMENT_DURATION);
 
         for (let i = startIndex; i < startIndex + count && i < totalSegments; i++) {
-            const segDir = join(state.previewDir, `r${renditionIndex}`);
-            const segPath = join(segDir, `segment${i}.ts`);
-            const cacheKey = `${sessionId}:${renditionIndex}:${i}`;
+            const segPath = join(state.previewDir, cacheDir, `segment${i}.ts`);
+            const cacheKey = `${sessionId}:${cacheDir}:${i}`;
 
-            // Skip if already cached or in progress
             if (existsSync(segPath) || this.pending.has(cacheKey)) continue;
 
-            const promise = this.extractSegment(state, renditionIndex, i, segPath);
-            promise.catch(() => {}); // swallow errors from prefetch
+            const promise = this.extractSegment(state, renditionIndex, i, segPath, audioTrackIndex);
+            promise.catch(() => {});
             this.pending.set(cacheKey, promise);
             promise.finally(() => this.pending.delete(cacheKey)).catch(() => {});
         }
@@ -233,6 +256,67 @@ export class PreviewService {
     // -----------------------------------------------------------------------
     // Private
     // -----------------------------------------------------------------------
+
+    /** Select audio tracks for preview: one per language, or treat each as distinct when no language metadata */
+    private selectAudioTracks(probe: ProbeResult): PreviewAudioTrack[] {
+        const tracks = probe.audioTracks;
+        if (tracks.length <= 1) {
+            return tracks.map((t, i) => ({
+                index: i,
+                streamIndex: t.index,
+                language: t.language,
+                name: t.name,
+                isDefault: i === 0,
+            }));
+        }
+
+        const byLanguage = new Map<string, AudioTrackInfo[]>();
+        for (const t of tracks) {
+            const lang = t.language ?? 'und';
+            if (!byLanguage.has(lang)) byLanguage.set(lang, []);
+            byLanguage.get(lang)!.push(t);
+        }
+
+        const selected: PreviewAudioTrack[] = [];
+        for (const [lang, group] of byLanguage) {
+            if (group.length > 1 && lang === 'und') {
+                const bitrates = group.map((t) => t.bitrateKbps).filter((b) => b > 0);
+                const isQualityTiers = bitrates.length > 1 &&
+                    Math.max(...bitrates) / Math.max(Math.min(...bitrates), 1) > 1.5;
+
+                if (!isQualityTiers) {
+                    for (const t of group) {
+                        selected.push({
+                            index: selected.length,
+                            streamIndex: t.index,
+                            language: t.language,
+                            name: t.name ?? `Track ${selected.length + 1}`,
+                            isDefault: false,
+                        });
+                    }
+                    continue;
+                }
+            }
+
+            const eligible = group.filter((t) => t.bitrateKbps <= MAX_AUDIO_BITRATE_KBPS);
+            let pick: AudioTrackInfo;
+            if (eligible.length > 0) {
+                pick = eligible.reduce((a, b) => a.bitrateKbps >= b.bitrateKbps ? a : b);
+            } else {
+                pick = group.reduce((a, b) => a.bitrateKbps <= b.bitrateKbps ? a : b);
+            }
+            selected.push({
+                index: selected.length,
+                streamIndex: pick.index,
+                language: pick.language,
+                name: pick.name,
+                isDefault: false,
+            });
+        }
+
+        if (selected.length > 0) selected[0].isDefault = true;
+        return selected;
+    }
 
     /** Build ABR renditions from available video tracks, capped at MAX_PREVIEW_HEIGHT */
     private buildRenditions(probe: ProbeResult): Rendition[] {
@@ -408,6 +492,7 @@ export class PreviewService {
         renditionIndex: number,
         segmentIndex: number,
         outputPath: string,
+        audioTrackIndex?: number,
     ): Promise<string> {
         const rendition = state.renditions[renditionIndex];
         const boundary = state.segmentBoundaries[segmentIndex];
@@ -415,11 +500,11 @@ export class PreviewService {
         const segDur = boundary?.duration ?? Math.min(SEGMENT_DURATION, state.duration - start);
 
         // Ensure output directory exists
-        const segDir = join(state.previewDir, `r${renditionIndex}`);
-        await mkdir(segDir, { recursive: true });
+        await mkdir(join(outputPath, '..'), { recursive: true });
 
         const videoMap = `0:v:${rendition.videoIndex}`;
-        const audioMap = state.audioStreamIndex >= 0 ? `0:a:${state.audioStreamIndex}` : null;
+        const audioTrack = state.audioTracks[audioTrackIndex ?? 0] ?? null;
+        const audioMap = audioTrack ? `0:a:${audioTrack.streamIndex}` : null;
 
         const args = [
             '-ss', String(start),

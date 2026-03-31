@@ -192,12 +192,54 @@ const showEncoding = computed(() => {
 // Server-side preview — API serves on-demand HLS segments.
 // The preview URL is set once the session has a token and encoding API URL.
 // The API generates segments from the source file (copy or transcode).
+// ---------------------------------------------------------------------------
+// Preview audio tracks
+// ---------------------------------------------------------------------------
+
+interface PreviewAudioTrack {
+    index: number;
+    streamIndex: number;
+    language?: string;
+    name?: string;
+    isDefault: boolean;
+}
+
+const previewAudioTracks = ref<PreviewAudioTrack[]>([]);
+const selectedAudioTrack = ref(0);
+
+async function fetchPreviewAudioTracks() {
+    if (!sessionToken.value || !encodingApiUrl.value) return;
+    try {
+        const res = await fetch(
+            `${encodingApiUrl.value}/api/sessions/${sessionId.value}/preview/audio-tracks?token=${sessionToken.value}`,
+        );
+        if (res.ok) {
+            const tracks = await res.json();
+            previewAudioTracks.value = tracks;
+            const defaultTrack = tracks.find((t: PreviewAudioTrack) => t.isDefault);
+            if (defaultTrack) selectedAudioTrack.value = defaultTrack.index;
+        }
+    } catch {
+        // Preview audio tracks not available — single track
+    }
+}
+
 const previewPlaybackUrl = computed(() => {
     if (!sessionToken.value || !encodingApiUrl.value) return null;
     const s = currentStatus.value;
-    // Preview available from 'uploaded' through encoding phases
     if (!s || s === 'created' || s === 'uploading') return null;
-    return `${encodingApiUrl.value}/api/sessions/${sessionId.value}/preview/playlist.m3u8?token=${sessionToken.value}`;
+    let url = `${encodingApiUrl.value}/api/sessions/${sessionId.value}/preview/playlist.m3u8?token=${sessionToken.value}`;
+    if (previewAudioTracks.value.length > 1) {
+        url += `&audio=${selectedAudioTrack.value}`;
+    }
+    return url;
+});
+
+// Fetch audio tracks when preview becomes available
+watch(previewPlaybackUrl, (url) => {
+    if (url && previewAudioTracks.value.length === 0) {
+        fetchPreviewAudioTracks();
+    }
 });
 
 // Active playback URL — preview during encoding, S3 after completion (ABR)
@@ -917,6 +959,22 @@ onUnmounted(() => {
                         :encryption-key-hex="isCompleted ? encryptionKeyHex : undefined"
                         preserve-state-on-source-change
                     />
+                    <!-- Audio track selector (preview only, multi-audio files) -->
+                    <div v-if="previewAudioTracks.length > 1 && !isCompleted" class="mt-2 flex items-center gap-2">
+                        <label class="text-xs text-zinc-400">Audio:</label>
+                        <select
+                            v-model.number="selectedAudioTrack"
+                            class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                        >
+                            <option
+                                v-for="track in previewAudioTracks"
+                                :key="track.index"
+                                :value="track.index"
+                            >
+                                {{ track.name ?? track.language ?? `Track ${track.index + 1}` }}
+                            </option>
+                        </select>
+                    </div>
                 </div>
 
 

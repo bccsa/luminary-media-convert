@@ -1277,4 +1277,187 @@ describe('PreviewService', () => {
             expect(master).toContain('BANDWIDTH=2000000'); // original bitrate
         });
     });
+
+    /* ============================================================== */
+    /*  Multi-audio (selectAudioTracks + getAudioTracks)              */
+    /* ============================================================== */
+
+    describe('multi-audio support', () => {
+        describe('selectAudioTracks via init', () => {
+            it('should select single audio track when only one exists', async () => {
+                const probe = makeProbe({
+                    audioTracks: [{ index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000 }],
+                });
+                sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+                service = new PreviewService(sessionService);
+                await service.init('s1');
+
+                const tracks = service.getAudioTracks('s1');
+                expect(tracks).toHaveLength(1);
+                expect(tracks![0].isDefault).toBe(true);
+                expect(tracks![0].streamIndex).toBe(0);
+            });
+
+            it('should select one track per language for multi-language files', async () => {
+                const probe = makeProbe({
+                    audioTracks: [
+                        { index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000, language: 'eng' },
+                        { index: 1, codec: 'aac', bitrateKbps: 256, channels: 2, sampleRate: 48000, language: 'eng' },
+                        { index: 2, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000, language: 'fra' },
+                    ],
+                });
+                sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+                service = new PreviewService(sessionService);
+                await service.init('s1');
+
+                const tracks = service.getAudioTracks('s1');
+                expect(tracks).toHaveLength(2);
+                // eng: picks highest ≤ 150kbps → index 0 (128kbps)
+                expect(tracks![0].language).toBe('eng');
+                expect(tracks![0].streamIndex).toBe(0);
+                expect(tracks![0].isDefault).toBe(true);
+                // fra: single track
+                expect(tracks![1].language).toBe('fra');
+                expect(tracks![1].streamIndex).toBe(2);
+            });
+
+            it('should treat same-bitrate no-language tracks as distinct (not quality tiers)', async () => {
+                const probe = makeProbe({
+                    audioTracks: [
+                        { index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000, name: 'CH_0' },
+                        { index: 1, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000, name: 'CH_1' },
+                        { index: 2, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000, name: 'CH_2' },
+                    ],
+                });
+                sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+                service = new PreviewService(sessionService);
+                await service.init('s1');
+
+                const tracks = service.getAudioTracks('s1');
+                expect(tracks).toHaveLength(3);
+                expect(tracks![0].name).toBe('CH_0');
+                expect(tracks![1].name).toBe('CH_1');
+                expect(tracks![2].name).toBe('CH_2');
+            });
+
+            it('should pick best quality tier when bitrates vary significantly (>1.5x ratio)', async () => {
+                const probe = makeProbe({
+                    audioTracks: [
+                        { index: 0, codec: 'aac', bitrateKbps: 64, channels: 2, sampleRate: 48000 },
+                        { index: 1, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000 },
+                        { index: 2, codec: 'aac', bitrateKbps: 256, channels: 2, sampleRate: 48000 },
+                    ],
+                });
+                sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+                service = new PreviewService(sessionService);
+                await service.init('s1');
+
+                const tracks = service.getAudioTracks('s1');
+                expect(tracks).toHaveLength(1);
+                // Picks highest ≤ 150kbps → 128kbps (index 1)
+                expect(tracks![0].streamIndex).toBe(1);
+            });
+
+            it('should pick lowest bitrate when all tracks > 150kbps', async () => {
+                const probe = makeProbe({
+                    audioTracks: [
+                        { index: 0, codec: 'aac', bitrateKbps: 192, channels: 2, sampleRate: 48000, language: 'eng' },
+                        { index: 1, codec: 'aac', bitrateKbps: 320, channels: 2, sampleRate: 48000, language: 'eng' },
+                    ],
+                });
+                sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+                service = new PreviewService(sessionService);
+                await service.init('s1');
+
+                const tracks = service.getAudioTracks('s1');
+                expect(tracks).toHaveLength(1);
+                expect(tracks![0].streamIndex).toBe(0); // 192kbps (lowest)
+            });
+        });
+
+        describe('getAudioTracks', () => {
+            it('should return null when session not initialized', () => {
+                expect(service.getAudioTracks('nonexistent')).toBeNull();
+            });
+        });
+
+        describe('getPlaylist with audioTrackIndex', () => {
+            it('should append &audio=N to URLs when multi-audio', async () => {
+                const probe = makeProbe({
+                    audioTracks: [
+                        { index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000, name: 'CH_0' },
+                        { index: 1, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000, name: 'CH_1' },
+                    ],
+                });
+                sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+                service = new PreviewService(sessionService);
+                await service.init('s1');
+
+                const master = service.getPlaylist('s1', 'tok', undefined, 1);
+                expect(master).toContain('r0/playlist.m3u8?token=tok&audio=1');
+
+                const media = service.getPlaylist('s1', 'tok', 0, 1);
+                expect(media).toContain('segment0.ts?token=tok&audio=1');
+            });
+
+            it('should not append &audio when single audio track', async () => {
+                const probe = makeProbe({
+                    audioTracks: [{ index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000 }],
+                });
+                sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+                service = new PreviewService(sessionService);
+                await service.init('s1');
+
+                const master = service.getPlaylist('s1', 'tok', undefined, 0);
+                expect(master).toContain('r0/playlist.m3u8?token=tok');
+                expect(master).not.toContain('&audio=');
+            });
+        });
+
+        describe('getSegmentStream with audioTrackIndex', () => {
+            it('should use audio-specific cache dir for multi-audio', async () => {
+                const probe = makeProbe({
+                    audioTracks: [
+                        { index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000, name: 'CH_0' },
+                        { index: 1, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000, name: 'CH_1' },
+                    ],
+                });
+                sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+                service = new PreviewService(sessionService);
+                await service.init('s1');
+
+                mockExecFile.mockReset();
+                mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+                mockStat.mockResolvedValue({ size: 2048 });
+                setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
+                mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+                await service.getSegmentStream('s1', 0, 0, 1);
+
+                // Should extract with audio track 1's stream index
+                const ffmpegArgs = mockExecFile.mock.calls[0][1] as string[];
+                expect(ffmpegArgs).toContain('0:a:1');
+            });
+
+            it('should use default cache dir for single audio', async () => {
+                const probe = makeProbe({
+                    audioTracks: [{ index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000 }],
+                });
+                sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+                service = new PreviewService(sessionService);
+                await service.init('s1');
+
+                mockExecFile.mockReset();
+                mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+                mockStat.mockResolvedValue({ size: 2048 });
+                setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
+                mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+                await service.getSegmentStream('s1', 0, 0);
+
+                const ffmpegArgs = mockExecFile.mock.calls[0][1] as string[];
+                expect(ffmpegArgs).toContain('0:a:0');
+            });
+        });
+    });
 });
