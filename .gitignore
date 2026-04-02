@@ -13,3 +13,4 @@ dispatchQueue.json
 jobQueue.json
 CLAUDE.md
 tusd/bin/
+*.tsbuildinfo
