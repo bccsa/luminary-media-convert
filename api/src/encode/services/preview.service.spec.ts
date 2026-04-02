@@ -56,6 +56,10 @@ function makeSessionService(session: any = null) {
     } as any;
 }
 
+function makeFfmpegService(accelMode: string = 'cpu') {
+    return { getAccelMode: vi.fn().mockReturnValue(accelMode) } as any;
+}
+
 function makeProbeService(probeResult?: ProbeResult) {
     return {
         probe: vi.fn().mockResolvedValue(probeResult ?? makeProbe()),
@@ -155,7 +159,7 @@ describe('PreviewService', () => {
     describe('init()', () => {
         it('should return early when session is not found', async () => {
             sessionService = makeSessionService(null);
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('nonexistent');
 
@@ -165,7 +169,7 @@ describe('PreviewService', () => {
 
         it('should return early when session has no filePath', async () => {
             sessionService = makeSessionService({ filePath: null, probeResult: makeProbe() });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -174,7 +178,7 @@ describe('PreviewService', () => {
 
         it('should return early when session has no probeResult', async () => {
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: null });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -186,7 +190,7 @@ describe('PreviewService', () => {
                 filePath: '/tmp/video.mp4',
                 probeResult: makeProbe({ videoTracks: [] }),
             });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -198,7 +202,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -215,7 +219,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -240,7 +244,7 @@ describe('PreviewService', () => {
                 ],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -260,7 +264,7 @@ describe('PreviewService', () => {
                 ],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -277,7 +281,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -297,7 +301,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'prores', width: 1920, height: 1080, bitrateKbps: 50000, frameRate: 24 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -310,7 +314,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 426, height: 240, bitrateKbps: 500, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -328,7 +332,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -345,7 +349,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -361,7 +365,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -378,7 +382,7 @@ describe('PreviewService', () => {
                 audioTracks: [],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -390,7 +394,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/work/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -408,7 +412,7 @@ describe('PreviewService', () => {
     describe('isReady()', () => {
         it('should return false before init', () => {
             sessionService = makeSessionService(null);
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             expect(service.isReady('s1')).toBe(false);
         });
 
@@ -417,7 +421,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
 
@@ -429,7 +433,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             await service.init('s1');
             await service.destroy('s1');
@@ -452,7 +456,7 @@ describe('PreviewService', () => {
                 ],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
         });
 
@@ -506,7 +510,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             const master = service.getPlaylist('s1', 'tok');
@@ -524,7 +528,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             const media = service.getPlaylist('s1', 'tok', 0);
@@ -538,7 +542,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             const media = service.getPlaylist('s1', 'tok', 0);
@@ -553,7 +557,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             const media = service.getPlaylist('s1', 'tok', 0)!;
@@ -575,7 +579,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             const media = service.getPlaylist('s1', 'tok', 0);
@@ -588,7 +592,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             const media = service.getPlaylist('s1', 'tok', 0);
@@ -608,7 +612,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
             // Reset mocks after init
             mockExecFile.mockReset();
@@ -717,7 +721,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             // Reset for init
             mockExecFile.mockReset();
@@ -783,7 +787,7 @@ describe('PreviewService', () => {
                 audioTracks: [],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             mockExecFile.mockReset();
@@ -885,7 +889,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
 
             mockExecFile.mockReset();
             setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
@@ -979,7 +983,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
             await service.init('s1');
 
@@ -1019,7 +1023,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/work/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             mockRm.mockReset();
@@ -1036,7 +1040,7 @@ describe('PreviewService', () => {
 
         it('should be a no-op when session is not initialized', async () => {
             sessionService = makeSessionService(null);
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             mockRm.mockReset();
 
             await service.destroy('nonexistent');
@@ -1049,7 +1053,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/work/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             mockRm.mockReset();
@@ -1072,7 +1076,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             mockExecFile.mockReset();
@@ -1131,7 +1135,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             mockExecFile.mockReset();
@@ -1188,7 +1192,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'vp8', width: 640, height: 360, bitrateKbps: 1000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             expect(service.isReady('s1')).toBe(true);
@@ -1201,7 +1205,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'vp9', width: 640, height: 360, bitrateKbps: 1000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             expect(service.isReady('s1')).toBe(true);
@@ -1212,7 +1216,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'H264', width: 640, height: 360, bitrateKbps: 1000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             expect(service.isReady('s1')).toBe(true);
@@ -1223,7 +1227,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             const master = service.getPlaylist('s1', 'tok')!;
@@ -1240,7 +1244,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             const master = service.getPlaylist('s1', 'tok')!;
@@ -1261,7 +1265,7 @@ describe('PreviewService', () => {
                 ],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             const master = service.getPlaylist('s1', 'tok')!;
@@ -1276,7 +1280,7 @@ describe('PreviewService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
             });
             sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-            service = new PreviewService(sessionService);
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
             await service.init('s1');
 
             const master = service.getPlaylist('s1', 'tok')!;
@@ -1298,7 +1302,7 @@ describe('PreviewService', () => {
                     audioTracks: [{ index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000 }],
                 });
                 sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-                service = new PreviewService(sessionService);
+                service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
                 await service.init('s1');
 
                 const tracks = service.getAudioTracks('s1');
@@ -1316,7 +1320,7 @@ describe('PreviewService', () => {
                     ],
                 });
                 sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-                service = new PreviewService(sessionService);
+                service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
                 await service.init('s1');
 
                 const tracks = service.getAudioTracks('s1');
@@ -1339,7 +1343,7 @@ describe('PreviewService', () => {
                     ],
                 });
                 sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-                service = new PreviewService(sessionService);
+                service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
                 await service.init('s1');
 
                 const tracks = service.getAudioTracks('s1');
@@ -1358,7 +1362,7 @@ describe('PreviewService', () => {
                     ],
                 });
                 sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-                service = new PreviewService(sessionService);
+                service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
                 await service.init('s1');
 
                 const tracks = service.getAudioTracks('s1');
@@ -1375,7 +1379,7 @@ describe('PreviewService', () => {
                     ],
                 });
                 sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-                service = new PreviewService(sessionService);
+                service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
                 await service.init('s1');
 
                 const tracks = service.getAudioTracks('s1');
@@ -1399,7 +1403,7 @@ describe('PreviewService', () => {
                     ],
                 });
                 sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-                service = new PreviewService(sessionService);
+                service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
                 await service.init('s1');
 
                 const master = service.getPlaylist('s1', 'tok', undefined, 1);
@@ -1414,7 +1418,7 @@ describe('PreviewService', () => {
                     audioTracks: [{ index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000 }],
                 });
                 sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-                service = new PreviewService(sessionService);
+                service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
                 await service.init('s1');
 
                 const master = service.getPlaylist('s1', 'tok', undefined, 0);
@@ -1432,7 +1436,7 @@ describe('PreviewService', () => {
                     ],
                 });
                 sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-                service = new PreviewService(sessionService);
+                service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
                 await service.init('s1');
 
                 mockExecFile.mockReset();
@@ -1453,7 +1457,7 @@ describe('PreviewService', () => {
                     audioTracks: [{ index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000 }],
                 });
                 sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-                service = new PreviewService(sessionService);
+                service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
                 await service.init('s1');
 
                 mockExecFile.mockReset();
@@ -1474,11 +1478,170 @@ describe('PreviewService', () => {
     /*  initFromMoov()                                                 */
     /* ============================================================== */
 
+    /* ============================================================== */
+    /*  GPU transcoding                                                */
+    /* ============================================================== */
+
+    describe('GPU transcoding', () => {
+        async function initHevcService(accelMode: string) {
+            const probe = makeProbe({
+                duration: 12,
+                videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
+            });
+            const ss = makeSessionService({ filePath: '/tmp/video.mkv', probeResult: probe });
+            const svc = new PreviewService(ss, undefined as any, makeFfmpegService(accelMode));
+            await svc.init('s1');
+            // Reset mocks after init
+            mockExecFile.mockReset();
+            mockExistsSync.mockReset();
+            mockStat.mockReset();
+            mockMkdir.mockResolvedValue(undefined);
+            mockWriteFile.mockResolvedValue(undefined);
+            return svc;
+        }
+
+        it('should use h264_nvenc and scale_cuda for nvidia mode', async () => {
+            const svc = await initHevcService('nvidia');
+
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+            await svc.getSegmentStream('s1', 0, 0);
+
+            const args = mockExecFile.mock.calls[0][1] as string[];
+            expect(args).toContain('-hwaccel');
+            expect(args).toContain('cuda');
+            expect(args).toContain('h264_nvenc');
+            expect(args).toContain('-preset');
+            expect(args).toContain('p1');
+            // scale filter should use scale_cuda
+            const vfIdx = args.indexOf('-vf');
+            expect(vfIdx).toBeGreaterThan(-1);
+            expect(args[vfIdx + 1]).toMatch(/^scale_cuda=/);
+        });
+
+        it('should use h264_videotoolbox and scale_vt for apple mode', async () => {
+            const svc = await initHevcService('apple');
+
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+            await svc.getSegmentStream('s1', 0, 0);
+
+            const args = mockExecFile.mock.calls[0][1] as string[];
+            expect(args).toContain('-hwaccel');
+            expect(args).toContain('videotoolbox');
+            expect(args).toContain('h264_videotoolbox');
+            expect(args).toContain('-allow_sw');
+            expect(args).toContain('1');
+            expect(args).toContain('-b:v');
+            expect(args).toContain('1500k');
+            const vfIdx = args.indexOf('-vf');
+            expect(vfIdx).toBeGreaterThan(-1);
+            expect(args[vfIdx + 1]).toMatch(/^scale_vt=/);
+        });
+
+        it('should use libx264 for cpu mode (no GPU flags)', async () => {
+            const svc = await initHevcService('cpu');
+
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+            await svc.getSegmentStream('s1', 0, 0);
+
+            const args = mockExecFile.mock.calls[0][1] as string[];
+            expect(args).toContain('libx264');
+            expect(args).toContain('-preset');
+            expect(args).toContain('ultrafast');
+            expect(args).not.toContain('-hwaccel');
+            expect(args).not.toContain('h264_nvenc');
+            expect(args).not.toContain('h264_videotoolbox');
+        });
+
+        it('should not use GPU for copy-mode renditions even when GPU available', async () => {
+            // H.264 <=480p uses copy mode
+            const probe = makeProbe({
+                duration: 12,
+                videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
+            });
+            const ss = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+            const svc = new PreviewService(ss, undefined as any, makeFfmpegService('nvidia'));
+            await svc.init('s1');
+
+            mockExecFile.mockReset();
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+            await svc.getSegmentStream('s1', 0, 0);
+
+            const args = mockExecFile.mock.calls[0][1] as string[];
+            expect(args).toContain('-c:v');
+            expect(args).toContain('copy');
+            expect(args).not.toContain('-hwaccel');
+        });
+
+        it('should fall back to CPU when GPU encode fails', async () => {
+            const svc = await initHevcService('nvidia');
+
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+            // First call (GPU) fails, second call (CPU fallback) succeeds
+            let callCount = 0;
+            mockExecFile.mockImplementation((...callArgs: any[]) => {
+                const cb = callArgs[callArgs.length - 1];
+                callCount++;
+                if (callCount === 1) {
+                    // GPU failure
+                    cb(new Error('NVENC session limit'), { stdout: '', stderr: '' });
+                } else {
+                    // CPU fallback succeeds
+                    cb(null, { stdout: Buffer.from('cpu-data'), stderr: '' });
+                }
+            });
+
+            const result = await svc.getSegmentStream('s1', 0, 0);
+
+            expect(result).not.toBeNull();
+            expect(callCount).toBe(2);
+
+            // Second call should be CPU args
+            const cpuArgs = mockExecFile.mock.calls[1][1] as string[];
+            expect(cpuArgs).toContain('libx264');
+            expect(cpuArgs).not.toContain('-hwaccel');
+        });
+
+        it('should place -hwaccel flags before -i', async () => {
+            const svc = await initHevcService('nvidia');
+
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+            await svc.getSegmentStream('s1', 0, 0);
+
+            const args = mockExecFile.mock.calls[0][1] as string[];
+            const hwaccelIdx = args.indexOf('-hwaccel');
+            const inputIdx = args.indexOf('-i');
+            expect(hwaccelIdx).toBeLessThan(inputIdx);
+        });
+    });
+
     describe('initFromMoov()', () => {
         it('should return early when session is not found', async () => {
             sessionService = makeSessionService(null);
             const probeService = makeProbeService();
-            service = new PreviewService(sessionService, probeService);
+            service = new PreviewService(sessionService, probeService, makeFfmpegService());
 
             await service.initFromMoov('nonexistent', Buffer.from('x'.repeat(100)), 32);
 
@@ -1491,7 +1654,7 @@ describe('PreviewService', () => {
             sessionService = makeSessionService(session);
             const probe = makeProbe({ duration: 120 });
             const probeService = makeProbeService(probe);
-            service = new PreviewService(sessionService, probeService);
+            service = new PreviewService(sessionService, probeService, makeFfmpegService());
 
             process.env.WORK_DIR = '/tmp/test-work';
 
@@ -1532,7 +1695,7 @@ describe('PreviewService', () => {
         it('should use cwd/work when WORK_DIR is not set', async () => {
             sessionService = makeSessionService({ id: 's1' });
             const probeService = makeProbeService();
-            service = new PreviewService(sessionService, probeService);
+            service = new PreviewService(sessionService, probeService, makeFfmpegService());
 
             delete process.env.WORK_DIR;
 
@@ -1548,7 +1711,7 @@ describe('PreviewService', () => {
         it('should not set up preview playback state (isReady stays false)', async () => {
             sessionService = makeSessionService({ id: 's1' });
             const probeService = makeProbeService();
-            service = new PreviewService(sessionService, probeService);
+            service = new PreviewService(sessionService, probeService, makeFfmpegService());
 
             await service.initFromMoov('s1', Buffer.alloc(100), 32);
 
@@ -1564,7 +1727,7 @@ describe('PreviewService', () => {
         it('should return early when session is not found', async () => {
             sessionService = makeSessionService(null);
             const probeService = makeProbeService();
-            service = new PreviewService(sessionService, probeService);
+            service = new PreviewService(sessionService, probeService, makeFfmpegService());
 
             await service.initFromHeader('nonexistent', Buffer.alloc(1024));
 
@@ -1576,7 +1739,7 @@ describe('PreviewService', () => {
             sessionService = makeSessionService({ id: 's1' });
             const probe = makeProbe({ duration: 60 });
             const probeService = makeProbeService(probe);
-            service = new PreviewService(sessionService, probeService);
+            service = new PreviewService(sessionService, probeService, makeFfmpegService());
 
             process.env.WORK_DIR = '/tmp/test-work';
 
@@ -1604,7 +1767,7 @@ describe('PreviewService', () => {
             sessionService = makeSessionService({ id: 's1' });
             const emptyProbe = makeProbe({ duration: 0 });
             const probeService = makeProbeService(emptyProbe);
-            service = new PreviewService(sessionService, probeService);
+            service = new PreviewService(sessionService, probeService, makeFfmpegService());
 
             await service.initFromHeader('s1', Buffer.alloc(2048));
 
@@ -1615,7 +1778,7 @@ describe('PreviewService', () => {
             sessionService = makeSessionService({ id: 's1' });
             const noTracksProbe = makeProbe({ duration: 60, videoTracks: [], audioTracks: [] });
             const probeService = makeProbeService(noTracksProbe);
-            service = new PreviewService(sessionService, probeService);
+            service = new PreviewService(sessionService, probeService, makeFfmpegService());
 
             await service.initFromHeader('s1', Buffer.alloc(2048));
 
@@ -1625,7 +1788,7 @@ describe('PreviewService', () => {
         it('should handle probe failure gracefully', async () => {
             sessionService = makeSessionService({ id: 's1' });
             const probeService = { probe: vi.fn().mockRejectedValue(new Error('ffprobe failed')) } as any;
-            service = new PreviewService(sessionService, probeService);
+            service = new PreviewService(sessionService, probeService, makeFfmpegService());
 
             // Should not throw
             await service.initFromHeader('s1', Buffer.alloc(2048));
@@ -1641,7 +1804,7 @@ describe('PreviewService', () => {
         it('should not set up preview playback state (isReady stays false)', async () => {
             sessionService = makeSessionService({ id: 's1' });
             const probeService = makeProbeService();
-            service = new PreviewService(sessionService, probeService);
+            service = new PreviewService(sessionService, probeService, makeFfmpegService());
 
             await service.initFromHeader('s1', Buffer.alloc(2048));
 
@@ -1654,7 +1817,7 @@ describe('PreviewService', () => {
                 { index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000 },
             ] });
             const probeService = makeProbeService(audioOnlyProbe);
-            service = new PreviewService(sessionService, probeService);
+            service = new PreviewService(sessionService, probeService, makeFfmpegService());
 
             await service.initFromHeader('s1', Buffer.alloc(2048));
 

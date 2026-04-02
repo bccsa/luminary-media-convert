@@ -7,6 +7,7 @@ import { mkdir, rm, readFile, writeFile, stat } from 'fs/promises';
 import type { ReadStream } from 'fs';
 import { SessionService } from './session.service.js';
 import { ProbeService, type ProbeResult, type AudioTrackInfo } from './probe.service.js';
+import { FfmpegService } from './ffmpeg.service.js';
 
 const MAX_AUDIO_BITRATE_KBPS = 150;
 
@@ -67,6 +68,7 @@ export class PreviewService {
     constructor(
         private readonly sessionService: SessionService,
         private readonly probeService: ProbeService,
+        private readonly ffmpegService: FfmpegService,
     ) {}
 
     async init(sessionId: string): Promise<void> {
@@ -594,6 +596,59 @@ export class PreviewService {
         return lines.join('\n');
     }
 
+    private buildSegmentArgs(
+        filePath: string,
+        start: number,
+        segDur: number,
+        videoMap: string,
+        audioMap: string | null,
+        rendition: Rendition,
+        accelMode: string,
+        useGpu: boolean,
+    ): string[] {
+        const args: string[] = [];
+
+        // HW accel input flags must come before -i
+        if (useGpu && accelMode === 'nvidia') {
+            args.push('-hwaccel', 'cuda');
+        } else if (useGpu && accelMode === 'apple') {
+            args.push('-hwaccel', 'videotoolbox', '-hwaccel_output_format', 'videotoolbox_vld');
+        }
+
+        args.push(
+            '-ss', String(start),
+            '-t', String(segDur),
+            '-i', filePath,
+            '-map', videoMap,
+        );
+        if (audioMap) args.push('-map', audioMap);
+
+        if (rendition.canCopy) {
+            args.push('-c:v', 'copy');
+        } else if (useGpu && accelMode === 'nvidia') {
+            args.push('-c:v', 'h264_nvenc', '-preset', 'p1');
+            if (rendition.scaleFilter) {
+                args.push('-vf', `scale_cuda=${rendition.scaleFilter}`);
+            }
+        } else if (useGpu && accelMode === 'apple') {
+            args.push('-c:v', 'h264_videotoolbox', '-allow_sw', '1', '-realtime', '0', '-b:v', '1500k');
+            if (rendition.scaleFilter) {
+                args.push('-vf', `scale_vt=w=${rendition.scaleFilter.split(':')[0]}:h=-2`);
+            }
+        } else {
+            // CPU fallback
+            args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-tune', 'zerolatency');
+            if (rendition.scaleFilter) {
+                args.push('-vf', `scale=${rendition.scaleFilter}`);
+            }
+        }
+
+        if (audioMap) args.push('-c:a', 'aac', '-b:a', '128k');
+        args.push('-f', 'mpegts', 'pipe:1');
+
+        return args;
+    }
+
     private async extractSegment(
         state: PreviewState,
         renditionIndex: number,
@@ -613,47 +668,39 @@ export class PreviewService {
         const audioTrack = state.audioTracks[audioTrackIndex ?? 0] ?? null;
         const audioMap = audioTrack ? `0:a:${audioTrack.streamIndex}` : null;
 
-        const args = [
-            '-ss', String(start),
-            '-t', String(segDur),
-            '-i', state.filePath,
-            '-map', videoMap,
-        ];
-        if (audioMap) args.push('-map', audioMap);
+        const accelMode = this.ffmpegService.getAccelMode();
+        const useGpu = !rendition.canCopy && accelMode !== 'cpu';
 
-        if (rendition.canCopy) {
-            args.push('-c:v', 'copy');
-        } else {
-            args.push(
-                '-c:v', 'libx264',
-                '-preset', 'ultrafast',
-                '-crf', '28',
-                '-tune', 'zerolatency',
-            );
-            if (rendition.scaleFilter) {
-                args.push('-vf', `scale=${rendition.scaleFilter}`);
-            }
-        }
+        const args = this.buildSegmentArgs(
+            state.filePath, start, segDur, videoMap, audioMap,
+            rendition, accelMode, useGpu,
+        );
 
-        if (audioMap) args.push('-c:a', 'aac', '-b:a', '128k');
-        // Output to stdout (pipe:1) instead of file — avoids race where
-        // execFile callback fires before FFmpeg's file write is fsynced
-        args.push('-f', 'mpegts', 'pipe:1');
-
-        this.logger.debug(`Segment r${renditionIndex}/s${segmentIndex}`);
+        this.logger.debug(`Segment r${renditionIndex}/s${segmentIndex} (${useGpu ? accelMode : rendition.canCopy ? 'copy' : 'cpu'})`);
 
         // Wait for a concurrency slot
         await this.acquireSlot();
 
         try {
             const timeout = rendition.canCopy ? 30_000 : 120_000;
-            const { stdout } = await execFileAsync('ffmpeg', args, {
-                timeout,
-                maxBuffer: 50 * 1024 * 1024,
-                encoding: 'buffer' as BufferEncoding,
-            });
+            const opts = { timeout, maxBuffer: 50 * 1024 * 1024, encoding: 'buffer' as BufferEncoding };
+
+            let result: { stdout: any };
+            try {
+                result = await execFileAsync('ffmpeg', args, opts);
+            } catch (gpuErr: any) {
+                if (!useGpu) throw gpuErr;
+                // GPU failed (e.g. NVENC session limit) — retry with CPU
+                this.logger.warn(`GPU encode failed for r${renditionIndex}/s${segmentIndex}, falling back to CPU: ${gpuErr.message}`);
+                const cpuArgs = this.buildSegmentArgs(
+                    state.filePath, start, segDur, videoMap, audioMap,
+                    rendition, 'cpu', false,
+                );
+                result = await execFileAsync('ffmpeg', cpuArgs, opts);
+            }
+
             // Write segment data ourselves — guaranteed flushed via writeFile
-            await writeFile(outputPath, stdout);
+            await writeFile(outputPath, result.stdout);
         } catch (e: any) {
             this.logger.error(`Segment r${renditionIndex}/s${segmentIndex} failed: ${e.message}`);
             throw e;
