@@ -50,7 +50,16 @@ import type { ProbeResult } from './probe.service.js';
 /* ------------------------------------------------------------------ */
 
 function makeSessionService(session: any = null) {
-    return { get: vi.fn().mockReturnValue(session) } as any;
+    return {
+        get: vi.fn().mockReturnValue(session),
+        setProbeResult: vi.fn(),
+    } as any;
+}
+
+function makeProbeService(probeResult?: ProbeResult) {
+    return {
+        probe: vi.fn().mockResolvedValue(probeResult ?? makeProbe()),
+    } as any;
 }
 
 function makeProbe(overrides: Partial<{
@@ -1458,6 +1467,198 @@ describe('PreviewService', () => {
                 const ffmpegArgs = mockExecFile.mock.calls[0][1] as string[];
                 expect(ffmpegArgs).toContain('0:a:0');
             });
+        });
+    });
+
+    /* ============================================================== */
+    /*  initFromMoov()                                                 */
+    /* ============================================================== */
+
+    describe('initFromMoov()', () => {
+        it('should return early when session is not found', async () => {
+            sessionService = makeSessionService(null);
+            const probeService = makeProbeService();
+            service = new PreviewService(sessionService, probeService);
+
+            await service.initFromMoov('nonexistent', Buffer.from('x'.repeat(100)), 32);
+
+            expect(probeService.probe).not.toHaveBeenCalled();
+            expect(sessionService.setProbeResult).not.toHaveBeenCalled();
+        });
+
+        it('should write ftyp+moov header, probe it, and store result on session', async () => {
+            const session = { id: 's1' };
+            sessionService = makeSessionService(session);
+            const probe = makeProbe({ duration: 120 });
+            const probeService = makeProbeService(probe);
+            service = new PreviewService(sessionService, probeService);
+
+            process.env.WORK_DIR = '/tmp/test-work';
+
+            // Build a fake ftyp(32 bytes) + moov(68 bytes) = 100 bytes
+            const ftyp = Buffer.alloc(32, 0x41); // 'A'
+            const moov = Buffer.alloc(68, 0x42); // 'B'
+            const combined = Buffer.concat([ftyp, moov]);
+
+            await service.initFromMoov('s1', combined, 32);
+
+            // Should have written the header file
+            expect(mockWriteFile).toHaveBeenCalledWith(
+                expect.stringContaining('moov-header.mp4'),
+                expect.any(Buffer),
+            );
+
+            // Written buffer should be ftyp + moov concatenated
+            const writtenBuffer = mockWriteFile.mock.calls[0][1] as Buffer;
+            expect(writtenBuffer.length).toBe(100);
+
+            // Should have probed the header file
+            expect(probeService.probe).toHaveBeenCalledWith(
+                expect.stringContaining('moov-header.mp4'),
+            );
+
+            // Should have stored the probe result on the session
+            expect(sessionService.setProbeResult).toHaveBeenCalledWith('s1', probe);
+
+            // Should have cleaned up the header file
+            expect(mockRm).toHaveBeenCalledWith(
+                expect.stringContaining('moov-header.mp4'),
+                { force: true },
+            );
+
+            delete process.env.WORK_DIR;
+        });
+
+        it('should use cwd/work when WORK_DIR is not set', async () => {
+            sessionService = makeSessionService({ id: 's1' });
+            const probeService = makeProbeService();
+            service = new PreviewService(sessionService, probeService);
+
+            delete process.env.WORK_DIR;
+
+            const buf = Buffer.alloc(100);
+            await service.initFromMoov('s1', buf, 32);
+
+            expect(mockMkdir).toHaveBeenCalledWith(
+                expect.stringContaining('work/s1'),
+                { recursive: true },
+            );
+        });
+
+        it('should not set up preview playback state (isReady stays false)', async () => {
+            sessionService = makeSessionService({ id: 's1' });
+            const probeService = makeProbeService();
+            service = new PreviewService(sessionService, probeService);
+
+            await service.initFromMoov('s1', Buffer.alloc(100), 32);
+
+            expect(service.isReady('s1')).toBe(false);
+        });
+    });
+
+    /* ============================================================== */
+    /*  initFromHeader()                                               */
+    /* ============================================================== */
+
+    describe('initFromHeader()', () => {
+        it('should return early when session is not found', async () => {
+            sessionService = makeSessionService(null);
+            const probeService = makeProbeService();
+            service = new PreviewService(sessionService, probeService);
+
+            await service.initFromHeader('nonexistent', Buffer.alloc(1024));
+
+            expect(probeService.probe).not.toHaveBeenCalled();
+            expect(sessionService.setProbeResult).not.toHaveBeenCalled();
+        });
+
+        it('should write header, probe it, and store result when probe succeeds', async () => {
+            sessionService = makeSessionService({ id: 's1' });
+            const probe = makeProbe({ duration: 60 });
+            const probeService = makeProbeService(probe);
+            service = new PreviewService(sessionService, probeService);
+
+            process.env.WORK_DIR = '/tmp/test-work';
+
+            await service.initFromHeader('s1', Buffer.alloc(2048));
+
+            expect(mockWriteFile).toHaveBeenCalledWith(
+                expect.stringContaining('probe-header.bin'),
+                expect.any(Buffer),
+            );
+            expect(probeService.probe).toHaveBeenCalledWith(
+                expect.stringContaining('probe-header.bin'),
+            );
+            expect(sessionService.setProbeResult).toHaveBeenCalledWith('s1', probe);
+
+            // Should clean up header file
+            expect(mockRm).toHaveBeenCalledWith(
+                expect.stringContaining('probe-header.bin'),
+                { force: true },
+            );
+
+            delete process.env.WORK_DIR;
+        });
+
+        it('should not store result when probe returns no useful data (duration 0)', async () => {
+            sessionService = makeSessionService({ id: 's1' });
+            const emptyProbe = makeProbe({ duration: 0 });
+            const probeService = makeProbeService(emptyProbe);
+            service = new PreviewService(sessionService, probeService);
+
+            await service.initFromHeader('s1', Buffer.alloc(2048));
+
+            expect(sessionService.setProbeResult).not.toHaveBeenCalled();
+        });
+
+        it('should not store result when probe returns no tracks', async () => {
+            sessionService = makeSessionService({ id: 's1' });
+            const noTracksProbe = makeProbe({ duration: 60, videoTracks: [], audioTracks: [] });
+            const probeService = makeProbeService(noTracksProbe);
+            service = new PreviewService(sessionService, probeService);
+
+            await service.initFromHeader('s1', Buffer.alloc(2048));
+
+            expect(sessionService.setProbeResult).not.toHaveBeenCalled();
+        });
+
+        it('should handle probe failure gracefully', async () => {
+            sessionService = makeSessionService({ id: 's1' });
+            const probeService = { probe: vi.fn().mockRejectedValue(new Error('ffprobe failed')) } as any;
+            service = new PreviewService(sessionService, probeService);
+
+            // Should not throw
+            await service.initFromHeader('s1', Buffer.alloc(2048));
+
+            expect(sessionService.setProbeResult).not.toHaveBeenCalled();
+            // Should still clean up
+            expect(mockRm).toHaveBeenCalledWith(
+                expect.stringContaining('probe-header.bin'),
+                { force: true },
+            );
+        });
+
+        it('should not set up preview playback state (isReady stays false)', async () => {
+            sessionService = makeSessionService({ id: 's1' });
+            const probeService = makeProbeService();
+            service = new PreviewService(sessionService, probeService);
+
+            await service.initFromHeader('s1', Buffer.alloc(2048));
+
+            expect(service.isReady('s1')).toBe(false);
+        });
+
+        it('should store result when only audio tracks exist', async () => {
+            sessionService = makeSessionService({ id: 's1' });
+            const audioOnlyProbe = makeProbe({ duration: 120, videoTracks: [], audioTracks: [
+                { index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000 },
+            ] });
+            const probeService = makeProbeService(audioOnlyProbe);
+            service = new PreviewService(sessionService, probeService);
+
+            await service.initFromHeader('s1', Buffer.alloc(2048));
+
+            expect(sessionService.setProbeResult).toHaveBeenCalledWith('s1', audioOnlyProbe);
         });
     });
 });

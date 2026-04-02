@@ -92,6 +92,8 @@ describe('EncodeController', () => {
             getAudioTracks: vi.fn().mockReturnValue(null),
             getSegmentStream: vi.fn().mockResolvedValue(null),
             destroy: vi.fn().mockResolvedValue(undefined),
+            initFromMoov: vi.fn().mockResolvedValue(undefined),
+            initFromHeader: vi.fn().mockResolvedValue(undefined),
         } as any;
 
         const sessionEventsService = { emit: vi.fn(), forSession: vi.fn().mockReturnValue({ pipe: vi.fn().mockReturnValue({ subscribe: vi.fn() }) }) } as any;
@@ -802,6 +804,118 @@ describe('EncodeController', () => {
 
                 expect(previewService.getSegmentStream).toHaveBeenCalledWith(session.id, 0, 0, 4);
             });
+        });
+    });
+
+    describe('uploadMoov', () => {
+        it('should validate token', async () => {
+            const session = sessionService.create(makeConfig());
+            const req = { body: Buffer.alloc(100) } as any;
+
+            await expect(
+                controller.uploadMoov(session.id, 'bad-token', '32', req),
+            ).rejects.toThrow(UnauthorizedException);
+        });
+
+        it('should reject missing ftypSize', async () => {
+            const session = sessionService.create(makeConfig());
+            const req = { body: Buffer.alloc(100) } as any;
+
+            await expect(
+                controller.uploadMoov(session.id, session.sessionToken, '', req),
+            ).rejects.toThrow(BadRequestException);
+        });
+
+        it('should reject body too small for ftyp + moov', async () => {
+            const session = sessionService.create(makeConfig());
+            const req = { body: Buffer.alloc(10) } as any;
+
+            await expect(
+                controller.uploadMoov(session.id, session.sessionToken, '32', req),
+            ).rejects.toThrow(BadRequestException);
+        });
+
+        it('should reject non-buffer body', async () => {
+            const session = sessionService.create(makeConfig());
+            const req = { body: { some: 'json' } } as any;
+
+            await expect(
+                controller.uploadMoov(session.id, session.sessionToken, '32', req),
+            ).rejects.toThrow(BadRequestException);
+        });
+
+        it('should call initFromMoov and return status', async () => {
+            const session = sessionService.create(makeConfig());
+            const buf = Buffer.alloc(100);
+            const req = { body: buf } as any;
+
+            const result = await controller.uploadMoov(session.id, session.sessionToken, '32', req);
+
+            expect(previewService.initFromMoov).toHaveBeenCalledWith(session.id, buf, 32);
+            expect(result).toEqual({ status: 'probing' });
+        });
+    });
+
+    describe('uploadHeader', () => {
+        it('should validate token', async () => {
+            const session = sessionService.create(makeConfig());
+            const req = { body: Buffer.alloc(1024) } as any;
+
+            await expect(
+                controller.uploadHeader(session.id, 'bad-token', req),
+            ).rejects.toThrow(UnauthorizedException);
+        });
+
+        it('should reject body too small', async () => {
+            const session = sessionService.create(makeConfig());
+            const req = { body: Buffer.alloc(10) } as any;
+
+            await expect(
+                controller.uploadHeader(session.id, session.sessionToken, req),
+            ).rejects.toThrow(BadRequestException);
+        });
+
+        it('should reject non-buffer body', async () => {
+            const session = sessionService.create(makeConfig());
+            const req = { body: { some: 'json' } } as any;
+
+            await expect(
+                controller.uploadHeader(session.id, session.sessionToken, req),
+            ).rejects.toThrow(BadRequestException);
+        });
+
+        it('should call initFromHeader and return status', async () => {
+            const session = sessionService.create(makeConfig());
+            const buf = Buffer.alloc(2048);
+            const req = { body: buf } as any;
+
+            const result = await controller.uploadHeader(session.id, session.sessionToken, req);
+
+            expect(previewService.initFromHeader).toHaveBeenCalledWith(session.id, buf);
+            expect(result).toEqual({ status: 'probing' });
+        });
+    });
+
+    describe('getStatus - probeResult availability', () => {
+        it('should include probeResult when session has it regardless of status', () => {
+            const session = sessionService.create(makeConfig());
+            const probeResult = {
+                format: { duration: 60, bitrateKbps: 5000, formatName: 'mp4' },
+                videoTracks: [{ index: 0, codec: 'h264', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
+                audioTracks: [],
+            };
+            sessionService.setProbeResult(session.id, probeResult);
+
+            // Status is still 'created' but probeResult should be returned
+            const result = controller.getStatus(session.id, makeRequest());
+            expect(result.probeResult).toEqual(probeResult);
+        });
+
+        it('should not include probeResult when session does not have it', () => {
+            const session = sessionService.create(makeConfig());
+
+            const result = controller.getStatus(session.id, makeRequest());
+            expect(result.probeResult).toBeUndefined();
         });
     });
 

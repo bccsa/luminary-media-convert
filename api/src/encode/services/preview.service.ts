@@ -6,7 +6,7 @@ import { createReadStream, existsSync } from 'fs';
 import { mkdir, rm, readFile, writeFile, stat } from 'fs/promises';
 import type { ReadStream } from 'fs';
 import { SessionService } from './session.service.js';
-import type { ProbeResult, AudioTrackInfo } from './probe.service.js';
+import { ProbeService, type ProbeResult, type AudioTrackInfo } from './probe.service.js';
 
 const MAX_AUDIO_BITRATE_KBPS = 150;
 
@@ -64,7 +64,10 @@ export class PreviewService {
     private activeCount = 0;
     private readonly waitQueue: Array<() => void> = [];
 
-    constructor(private readonly sessionService: SessionService) {}
+    constructor(
+        private readonly sessionService: SessionService,
+        private readonly probeService: ProbeService,
+    ) {}
 
     async init(sessionId: string): Promise<void> {
         const session = this.sessionService.get(sessionId);
@@ -120,6 +123,102 @@ export class PreviewService {
             `Preview initialized for ${sessionId}: ${renditions.length} rendition(s) [${renditionSummary}]${audioSummary}, ` +
                 `${boundaries.length || Math.ceil(duration / SEGMENT_DURATION)} segments`,
         );
+    }
+
+    /**
+     * Probe metadata from a moov atom received before upload completes.
+     * Writes a faststart header (ftyp + adjusted moov), probes it with ffprobe,
+     * and stores the probe result on the session so the UI can show track info
+     * and encoding config while the file is still uploading.
+     *
+     * Does NOT initialize preview playback state — that happens after upload
+     * completes via init(). This is metadata-only.
+     */
+    async initFromMoov(
+        sessionId: string,
+        moovBuffer: Buffer,
+        ftypSize: number,
+    ): Promise<void> {
+        const session = this.sessionService.get(sessionId);
+        if (!session) {
+            this.logger.warn(`Cannot init from moov for ${sessionId}: session not found`);
+            return;
+        }
+
+        const workDir = process.env.WORK_DIR || join(process.cwd(), 'work');
+        const sessionDir = join(workDir, sessionId);
+        await mkdir(sessionDir, { recursive: true });
+
+        // Client sends ftyp + moov concatenated
+        const ftypBuffer = moovBuffer.subarray(0, ftypSize);
+        const rawMoov = moovBuffer.subarray(ftypSize);
+
+        // Write a minimal faststart file (ftyp + moov) that ffprobe can read
+        // No offset adjustment needed — we only use this for probing metadata,
+        // not for actual media playback
+        const headerPath = join(sessionDir, 'moov-header.mp4');
+        const header = Buffer.concat([ftypBuffer, rawMoov]);
+        await writeFile(headerPath, header);
+
+        // Probe the header file for metadata
+        const probeResult = await this.probeService.probe(headerPath);
+
+        // Store probe result on the session so the UI can show track info early
+        this.sessionService.setProbeResult(sessionId, probeResult);
+
+        this.logger.log(
+            `Early probe from moov for ${sessionId}: ` +
+                `${probeResult.videoTracks.length} video, ${probeResult.audioTracks.length} audio, ` +
+                `duration ${probeResult.format.duration.toFixed(1)}s`,
+        );
+
+        // Clean up header file — no longer needed
+        await rm(headerPath, { force: true }).catch(() => {});
+    }
+
+    /**
+     * Probe metadata from a raw file header (first few MB).
+     * Used for MKV, faststart MP4, and other formats where metadata is at the
+     * start of the file. The client sends the first ~2 MB and we run ffprobe on it.
+     */
+    async initFromHeader(
+        sessionId: string,
+        headerBuffer: Buffer,
+    ): Promise<void> {
+        const session = this.sessionService.get(sessionId);
+        if (!session) {
+            this.logger.warn(`Cannot init from header for ${sessionId}: session not found`);
+            return;
+        }
+
+        const workDir = process.env.WORK_DIR || join(process.cwd(), 'work');
+        const sessionDir = join(workDir, sessionId);
+        await mkdir(sessionDir, { recursive: true });
+
+        const headerPath = join(sessionDir, 'probe-header.bin');
+        await writeFile(headerPath, headerBuffer);
+
+        try {
+            const probeResult = await this.probeService.probe(headerPath);
+
+            // Only store if we got meaningful results
+            if (probeResult.format.duration > 0 &&
+                (probeResult.videoTracks.length > 0 || probeResult.audioTracks.length > 0)) {
+                this.sessionService.setProbeResult(sessionId, probeResult);
+
+                this.logger.log(
+                    `Early probe from header for ${sessionId}: ` +
+                        `${probeResult.videoTracks.length} video, ${probeResult.audioTracks.length} audio, ` +
+                        `duration ${probeResult.format.duration.toFixed(1)}s`,
+                );
+            } else {
+                this.logger.warn(`Header probe for ${sessionId} returned no useful data`);
+            }
+        } catch (e: any) {
+            this.logger.warn(`Header probe failed for ${sessionId}: ${e.message}`);
+        } finally {
+            await rm(headerPath, { force: true }).catch(() => {});
+        }
     }
 
     isReady(sessionId: string): boolean {
@@ -254,7 +353,7 @@ export class PreviewService {
     }
 
     // -----------------------------------------------------------------------
-    // Private
+    // Private: audio track selection
     // -----------------------------------------------------------------------
 
     /** Select audio tracks for preview: one per language, or treat each as distinct when no language metadata */
@@ -317,6 +416,10 @@ export class PreviewService {
         if (selected.length > 0) selected[0].isDefault = true;
         return selected;
     }
+
+    // -----------------------------------------------------------------------
+    // Private: rendition building
+    // -----------------------------------------------------------------------
 
     /** Build ABR renditions from available video tracks, capped at MAX_PREVIEW_HEIGHT */
     private buildRenditions(probe: ProbeResult): Rendition[] {
@@ -387,6 +490,10 @@ export class PreviewService {
 
         return renditions;
     }
+
+    // -----------------------------------------------------------------------
+    // Private: concurrency, keyframe scan, playlists, segment extraction
+    // -----------------------------------------------------------------------
 
     private async acquireSlot(): Promise<void> {
         if (this.activeCount < MAX_CONCURRENT) {

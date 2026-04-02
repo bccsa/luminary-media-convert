@@ -181,7 +181,11 @@ const showUploadRemoteMessage = computed(() => {
 });
 
 const showProbeConfig = computed(() => {
-    return currentStatus.value === 'uploaded' && isActiveSession.value && probeResult.value && !submitting.value;
+    const s = currentStatus.value;
+    // Show encoding config when probe results are available — either after upload
+    // completes ('uploaded') or during upload if early probe succeeded (moov/header extraction).
+    // Include 'created' because SaaS status may lag behind encoding API.
+    return (s === 'uploaded' || s === 'uploading' || s === 'created') && isActiveSession.value && probeResult.value && !submitting.value;
 });
 
 const showEncoding = computed(() => {
@@ -620,6 +624,11 @@ async function fetchSession() {
 
         // Route to appropriate behavior based on status
         await handleStatusAfterLoad(detail.status);
+
+        // If upload is active and we now have session tokens, start early probe poll
+        if (activeUpload.value && !activeUpload.value.done && !probeResult.value) {
+            startEarlyProbePoll();
+        }
     } catch (e) {
         error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -730,6 +739,29 @@ async function onEncodeSubmit(config: EncodeConfig) {
     try {
         encodingType.value = config.type;
 
+        // If upload is still in progress, wait for it to complete
+        if (activeUpload.value && !activeUpload.value.done) {
+            await activeUpload.value.promise;
+        }
+
+        // Wait for status to become 'uploaded' (probe may still be running)
+        if (currentStatus.value !== 'uploaded') {
+            await new Promise<void>((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('Timed out waiting for upload to complete')), 120_000);
+                const unwatch = watch(currentStatus, (s) => {
+                    if (s === 'uploaded') {
+                        clearTimeout(timeout);
+                        unwatch();
+                        resolve();
+                    } else if (s === 'failed') {
+                        clearTimeout(timeout);
+                        unwatch();
+                        reject(new Error('Upload failed'));
+                    }
+                }, { immediate: true });
+            });
+        }
+
         // Strip audioTrackMetadata before sending to API
         const { audioTrackMetadata: _, ...apiConfig } = config;
         await startEncode(
@@ -812,6 +844,62 @@ watch(
     },
 );
 
+// Poll for early probe results during upload (from moov extraction).
+// Once probe results arrive, the encoding config form appears while upload continues.
+let earlyProbePollTimer: ReturnType<typeof setInterval> | null = null;
+
+function startEarlyProbePoll() {
+    if (earlyProbePollTimer || probeResult.value) return;
+    if (!encodingApiUrl.value || !sessionToken.value) return;
+
+    const poll = async () => {
+        if (probeResult.value) {
+            stopEarlyProbePoll();
+            return;
+        }
+        try {
+            const data = await getSessionStatus(
+                encodingApiUrl.value!,
+                sessionId.value,
+                sessionToken.value!,
+            );
+            if (data.probeResult) {
+                probeResult.value = data.probeResult;
+                encodingType.value = data.probeResult.videoTracks.length ? 'video' : 'audio';
+                stopEarlyProbePoll();
+            }
+        } catch {
+            // Non-critical — will retry
+        }
+    };
+
+    // Fire immediately, then every 1s
+    poll();
+    earlyProbePollTimer = setInterval(poll, 1000);
+}
+
+function stopEarlyProbePoll() {
+    if (earlyProbePollTimer) {
+        clearInterval(earlyProbePollTimer);
+        earlyProbePollTimer = null;
+    }
+}
+
+// Start early probe poll when upload is active (regardless of session status —
+// the SaaS status may lag behind the encoding API)
+watch(
+    () => activeUpload.value && !activeUpload.value.done,
+    (uploading) => {
+        if (uploading && isActiveSession.value) {
+            startEarlyProbePoll();
+        }
+        if (!uploading) {
+            stopEarlyProbePoll();
+        }
+    },
+    { immediate: true },
+);
+
 // Watch for the upload completing (if tracked locally)
 // After tus upload finishes, the Encoding API probes the file which takes time.
 // Poll the SaaS until the status advances beyond uploading.
@@ -819,6 +907,7 @@ watch(
     () => activeUpload.value?.done,
     (done) => {
         if (done && !activeUpload.value?.error) {
+            stopEarlyProbePoll();
             startSaasPoll();
         }
     },
@@ -832,6 +921,7 @@ onMounted(fetchSession);
 
 onUnmounted(() => {
     stopSaasPoll();
+    stopEarlyProbePoll();
     poller.stop();
 });
 </script>
@@ -987,9 +1077,11 @@ onUnmounted(() => {
                 </div>
 
                 <!-- ============================================================ -->
-                <!-- STATUS: created / uploading — local upload in progress       -->
+                <!-- Upload progress (shown independently — not exclusive with    -->
+                <!-- the encode config form, which can appear during upload when   -->
+                <!-- early probe results are available from moov extraction)       -->
                 <!-- ============================================================ -->
-                <div v-if="showUploadProgress" class="mb-4">
+                <div v-if="showUploadProgress && !showProbeConfig" class="mb-4">
                     <ProgressBar
                         :label="activeUpload!.progress >= 100 ? 'Finalizing upload...' : 'Uploading...'"
                         :progress="activeUpload!.progress"
@@ -1008,7 +1100,7 @@ onUnmounted(() => {
                 </div>
 
                 <!-- STATUS: upload done, waiting for probe -->
-                <div v-else-if="showUploadDoneWaiting" class="mb-4">
+                <div v-else-if="showUploadDoneWaiting && !showProbeConfig" class="mb-4">
                     <ProgressBar label="Analyzing..." indeterminate />
                 </div>
 
@@ -1029,15 +1121,25 @@ onUnmounted(() => {
                 </div>
 
                 <!-- ============================================================ -->
-                <!-- STATUS: uploaded — encode config form                        -->
+                <!-- Encode config form (shown after probe, including during      -->
+                <!-- upload when early probe results arrived via moov)             -->
                 <!-- ============================================================ -->
-                <EncodeConfigForm
-                    v-else-if="showProbeConfig"
-                    :probe-result="probeResult!"
-                    :byte-range="byteRangeEnabled"
-                    @submit="onEncodeSubmit"
-                    @back="onEncodeBack"
-                />
+                <template v-if="showProbeConfig">
+                    <!-- Compact upload progress bar when config form is visible -->
+                    <div v-if="showUploadProgress" class="mb-4">
+                        <ProgressBar
+                            :label="activeUpload!.progress >= 100 ? 'Finalizing upload...' : 'Uploading...'"
+                            :progress="activeUpload!.progress"
+                            :indeterminate="activeUpload!.progress >= 100"
+                        />
+                    </div>
+                    <EncodeConfigForm
+                        :probe-result="probeResult!"
+                        :byte-range="byteRangeEnabled"
+                        @submit="onEncodeSubmit"
+                        @back="onEncodeBack"
+                    />
+                </template>
 
                 <!-- ============================================================ -->
                 <!-- Submitting encoding config spinner                           -->

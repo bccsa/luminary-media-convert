@@ -296,7 +296,7 @@ export class EncodeController {
             encoder: this.ffmpegService.getAccelMode(),
         };
 
-        if (session.status === 'uploaded') {
+        if (session.probeResult) {
             result.probeResult = session.probeResult as any;
         }
 
@@ -393,6 +393,72 @@ export class EncodeController {
     // -----------------------------------------------------------------------
     // Preview HLS endpoints
     // -----------------------------------------------------------------------
+
+    @Post(':sessionId/preview/moov')
+    @HttpCode(HttpStatus.ACCEPTED)
+    @ApiOperation({
+        summary: 'Upload moov atom for early metadata during upload',
+        description:
+            'Client extracts moov + ftyp atoms from an MP4 file (moov-at-end) and sends them ' +
+            'before the tus upload begins. The API probes the moov for metadata so the UI can ' +
+            'show track info and encoding config while the file is still uploading.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 202, description: 'Moov received, early probe started.' })
+    @ApiResponse({ status: 400, description: 'Missing required parameters.' })
+    @ApiResponse({ status: 401, description: 'Unauthorized.' })
+    async uploadMoov(
+        @Param('sessionId') sessionId: string,
+        @Query('token') token: string,
+        @Query('ftypSize') ftypSizeStr: string,
+        @Req() req: Request,
+    ): Promise<{ status: string }> {
+        this.validatePreviewToken(sessionId, token);
+
+        const ftypSize = parseInt(ftypSizeStr, 10);
+        if (!ftypSize || isNaN(ftypSize)) {
+            throw new BadRequestException('ftypSize query parameter is required');
+        }
+
+        const body = (req as any).body as Buffer;
+        if (!Buffer.isBuffer(body) || body.length < ftypSize + 8) {
+            throw new BadRequestException('Body too small: must contain ftyp + moov atoms');
+        }
+
+        await this.previewService.initFromMoov(sessionId, body, ftypSize);
+
+        this.logger.log(`Moov received for session ${sessionId}: ${body.length} bytes`);
+        return { status: 'probing' };
+    }
+
+    @Post(':sessionId/preview/header')
+    @HttpCode(HttpStatus.ACCEPTED)
+    @ApiOperation({
+        summary: 'Upload file header for early metadata during upload',
+        description:
+            'Client sends the first few MB of the file (for MKV, faststart MP4, etc.) ' +
+            'so the API can probe metadata while the file is still uploading.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 202, description: 'Header received, early probe started.' })
+    @ApiResponse({ status: 401, description: 'Unauthorized.' })
+    async uploadHeader(
+        @Param('sessionId') sessionId: string,
+        @Query('token') token: string,
+        @Req() req: Request,
+    ): Promise<{ status: string }> {
+        this.validatePreviewToken(sessionId, token);
+
+        const body = (req as any).body as Buffer;
+        if (!Buffer.isBuffer(body) || body.length < 64) {
+            throw new BadRequestException('Header data too small');
+        }
+
+        await this.previewService.initFromHeader(sessionId, body);
+
+        this.logger.log(`Header received for session ${sessionId}: ${body.length} bytes`);
+        return { status: 'probing' };
+    }
 
     @Get(':sessionId/preview/audio-tracks')
     @ApiOperation({ summary: 'Get available preview audio tracks' })

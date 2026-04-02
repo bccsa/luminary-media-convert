@@ -22,6 +22,11 @@ const helmetMiddleware = helmet({
 async function bootstrap() {
     const app = await NestFactory.create(AppModule);
 
+    // Parse application/octet-stream bodies for preview moov/header uploads.
+    // Large MP4 moov atoms can be 50+ MB for long multi-track files.
+    const { raw: rawParser } = await import('express');
+    app.use(rawParser({ type: 'application/octet-stream', limit: '100mb' }));
+
     // Skip helmet for /api/tus — tusd manages its own headers.
     app.use((req: Request, res: Response, next: NextFunction) => {
         if (req.path.startsWith('/api/tus')) {

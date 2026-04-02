@@ -4,7 +4,8 @@ import { useAuth0 } from '@auth0/auth0-vue';
 import { useRouter } from 'vue-router';
 import SessionConfigForm from '../components/SessionConfigForm.vue';
 import type { SavedS3Config } from '../components/SessionConfigForm.vue';
-import { createSession, uploadFile, listS3Configs, getS3Config, createS3Config, updateSessionName, checkPrefix } from '../api';
+import { createSession, uploadFile, sendMoov, sendHeader, listS3Configs, getS3Config, createS3Config, updateSessionName, checkPrefix } from '../api';
+import { extractMoov, extractFileHeader } from '../lib/moov-extractor';
 import { useActiveUploads } from '../composables/useActiveUploads';
 import type { CreateSessionRequest, S3Config } from '../types';
 
@@ -165,6 +166,33 @@ async function startUpload(payload: {
             throw new Error(
                 `File size (${formatBytes(payload.file.size)}) exceeds the maximum allowed upload size (${formatBytes(session.maxUploadSize)})`,
             );
+        }
+
+        // Extract metadata for early probing during upload
+        try {
+            const moovResult = await extractMoov(payload.file);
+            if (moovResult) {
+                await sendMoov(
+                    session.encodingApiUrl,
+                    session.sessionId,
+                    session.sessionToken,
+                    moovResult.ftyp,
+                    moovResult.moov,
+                    moovResult.ftypSize,
+                );
+            } else {
+                const header = await extractFileHeader(payload.file);
+                if (header) {
+                    await sendHeader(
+                        session.encodingApiUrl,
+                        session.sessionId,
+                        session.sessionToken,
+                        header,
+                    );
+                }
+            }
+        } catch {
+            // Non-critical — probe will happen after upload completes
         }
 
         // Start upload via tus — registered in singleton store so it survives navigation
