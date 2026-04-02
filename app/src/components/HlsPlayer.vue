@@ -275,6 +275,14 @@ watch(() => props.playbackUrl, async (url) => {
     }
 });
 
+// Re-init when encryption key becomes available (e.g. fetched async after completion)
+watch(() => props.encryptionKeyHex, async (keyHex) => {
+    if (keyHex && props.playbackUrl && player) {
+        await nextTick();
+        await initPlayer();
+    }
+});
+
 onMounted(async () => {
     if (props.playbackUrl) {
         await nextTick();

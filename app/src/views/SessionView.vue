@@ -3,8 +3,9 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { useRoute, useRouter } from 'vue-router';
 import { EncodeConfigForm, computeLayoutKey, saveConfig } from '@luminary-media-converter/encode-config';
-import type { ProbeResult, EncodeConfig } from '@luminary-media-converter/encode-config';
+import type { ProbeResult, EncodeConfig, TrimSegment } from '@luminary-media-converter/encode-config';
 import HlsPlayer from '../components/HlsPlayer.vue';
+import SegmentEditor from '../components/SegmentEditor.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import InlineConfirm from '../components/InlineConfirm.vue';
@@ -36,6 +37,7 @@ const probeLoading = ref(false);
 const encodingType = ref<'video' | 'audio'>('video');
 const byteRangeEnabled = ref(true);
 const submitting = ref(false);
+const trimSegments = ref<TrimSegment[]>([]);
 
 // Session name
 const sessionName = ref('');
@@ -247,8 +249,13 @@ watch(previewPlaybackUrl, (url) => {
 });
 
 // Active playback URL — preview during encoding, S3 after completion (ABR)
+// For encrypted sessions, wait for the encryption key before switching to S3
+// (otherwise the player loads the raw playlist with unrewritten #EXT-X-KEY URIs)
 const activePlaybackUrl = computed(() => {
-    if (isCompleted.value) return playbackUrl.value;
+    if (isCompleted.value) {
+        if (isEncrypted.value && !encryptionKeyHex.value) return previewPlaybackUrl.value;
+        return playbackUrl.value;
+    }
     return previewPlaybackUrl.value;
 });
 
@@ -762,16 +769,19 @@ async function onEncodeSubmit(config: EncodeConfig) {
             });
         }
 
-        // Strip audioTrackMetadata before sending to API
+        // Strip audioTrackMetadata before sending to API, add trim segments
         const { audioTrackMetadata: _, ...apiConfig } = config;
+        const submitConfig = trimSegments.value.length > 0
+            ? { ...apiConfig, trimSegments: trimSegments.value }
+            : apiConfig;
         await startEncode(
             encodingApiUrl.value,
             sessionId.value,
-            apiConfig,
+            submitConfig,
             sessionToken.value,
         );
 
-        // Save config for future reuse
+        // Save config for future reuse (strip trimSegments — session-specific)
         if (probeResult.value) {
             const layoutKey = computeLayoutKey(probeResult.value, config.type);
             saveConfig(layoutKey, config);
@@ -1133,6 +1143,15 @@ onUnmounted(() => {
                             :indeterminate="activeUpload!.progress >= 100"
                         />
                     </div>
+
+                    <!-- Segment editor (trim/cut) -->
+                    <SegmentEditor
+                        v-if="activePlaybackUrl && probeResult?.format?.duration"
+                        v-model="trimSegments"
+                        :duration="probeResult.format.duration"
+                        :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
+                    />
+
                     <EncodeConfigForm
                         :probe-result="probeResult!"
                         :byte-range="byteRangeEnabled"
