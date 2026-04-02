@@ -59,6 +59,13 @@ export interface AudioGroup {
     vbr?: boolean;
 }
 
+export interface TrimSegment {
+    /** In-point in seconds */
+    inSec: number;
+    /** Out-point in seconds */
+    outSec: number;
+}
+
 export interface EncodeConfig {
     type: 'video' | 'audio';
     segmentDuration?: number;
@@ -67,4 +74,6 @@ export interface EncodeConfig {
     videoTrackNames?: { index: number; name: string }[];
     /** Audio track metadata (name, language) for restored configs — persisted in localStorage only */
     audioTrackMetadata?: { index: number; name?: string; language?: string }[];
+    /** Trim segments — when set, only these time ranges are encoded and concatenated */
+    trimSegments?: TrimSegment[];
 }

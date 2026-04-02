@@ -1163,11 +1163,11 @@ describe('FfmpegService', () => {
     });
 
     describe('buildAudioArgs (private, tested via reflection)', () => {
-        const buildAudioArgs = (opts: any): string[] => {
+        const buildAudioArgs = async (opts: any): Promise<string[]> => {
             return (service as any).buildAudioArgs(opts);
         };
 
-        it('should build single-group audio args with master playlist', () => {
+        it('should build single-group audio args with master playlist', async () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 6,
@@ -1176,7 +1176,7 @@ describe('FfmpegService', () => {
                 ],
             };
 
-            const args = buildAudioArgs({
+            const args = await buildAudioArgs({
                 inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
@@ -1196,7 +1196,7 @@ describe('FfmpegService', () => {
             expect(varMap).not.toContain('agroup');
         });
 
-        it('should build multi-group audio args as direct variants without agroup', () => {
+        it('should build multi-group audio args as direct variants without agroup', async () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 4,
@@ -1207,7 +1207,7 @@ describe('FfmpegService', () => {
                 ],
             };
 
-            const args = buildAudioArgs({
+            const args = await buildAudioArgs({
                 inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
@@ -1223,7 +1223,7 @@ describe('FfmpegService', () => {
             expect(varMap).not.toContain('agroup');
         });
 
-        it('should include -threads with default value', () => {
+        it('should include -threads with default value', async () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 6,
@@ -1232,7 +1232,7 @@ describe('FfmpegService', () => {
                 ],
             };
 
-            const args = buildAudioArgs({
+            const args = await buildAudioArgs({
                 inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
@@ -1243,7 +1243,7 @@ describe('FfmpegService', () => {
             expect(args[threadsIdx + 1]).toBe('8');
         });
 
-        it('should use copy codec for copyStream audio groups', () => {
+        it('should use copy codec for copyStream audio groups', async () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 6,
@@ -1252,7 +1252,7 @@ describe('FfmpegService', () => {
                 ],
             };
 
-            const args = buildAudioArgs({
+            const args = await buildAudioArgs({
                 inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
@@ -1262,7 +1262,7 @@ describe('FfmpegService', () => {
             expect(args).not.toContain('aac');
         });
 
-        it('should use configured segment duration for audio regardless of byte-range', () => {
+        it('should use configured segment duration for audio regardless of byte-range', async () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 6,
@@ -1271,7 +1271,7 @@ describe('FfmpegService', () => {
                 ],
             };
 
-            const args = buildAudioArgs({
+            const args = await buildAudioArgs({
                 inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
@@ -1282,7 +1282,7 @@ describe('FfmpegService', () => {
             expect(args[hlsTimeIdx + 1]).toBe('6');
         });
 
-        it('should use default segment duration when none configured', () => {
+        it('should use default segment duration when none configured', async () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 audioGroups: [
@@ -1290,7 +1290,7 @@ describe('FfmpegService', () => {
                 ],
             };
 
-            const args = buildAudioArgs({
+            const args = await buildAudioArgs({
                 inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
@@ -1300,7 +1300,7 @@ describe('FfmpegService', () => {
             expect(args[hlsTimeIdx + 1]).toBe('6');
         });
 
-        it('should use custom segment duration when configured', () => {
+        it('should use custom segment duration when configured', async () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 4,
@@ -1309,7 +1309,7 @@ describe('FfmpegService', () => {
                 ],
             };
 
-            const args = buildAudioArgs({
+            const args = await buildAudioArgs({
                 inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
@@ -1320,7 +1320,7 @@ describe('FfmpegService', () => {
             expect(args[hlsTimeIdx + 1]).toBe('4');
         });
 
-        it('should create direct variants for multi-language audio groups', () => {
+        it('should create direct variants for multi-language audio groups', async () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 6,
@@ -1330,7 +1330,7 @@ describe('FfmpegService', () => {
                 ],
             };
 
-            const args = buildAudioArgs({
+            const args = await buildAudioArgs({
                 inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
@@ -2972,11 +2972,11 @@ describe('FfmpegService', () => {
     });
 
     describe('buildAudioArgs VBR in audio-only mode', () => {
-        const buildAudioArgs = (opts: any): string[] => {
+        const buildAudioArgs = async (opts: any): Promise<string[]> => {
             return (service as any).buildAudioArgs(opts);
         };
 
-        it('should use VBR quality for audio groups with vbr=true', () => {
+        it('should use VBR quality for audio groups with vbr=true', async () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 6,
@@ -2985,7 +2985,7 @@ describe('FfmpegService', () => {
                 ],
             };
 
-            const args = buildAudioArgs({
+            const args = await buildAudioArgs({
                 inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,

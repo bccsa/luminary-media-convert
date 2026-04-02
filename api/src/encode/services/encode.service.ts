@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { existsSync } from 'fs';
 import { rm } from 'fs/promises';
 import { join, posix } from 'path';
 import { SessionService, type Session } from './session.service.js';
@@ -155,18 +156,25 @@ export class EncodeService {
                 session.config.thumbnails !== false
             ) {
                 try {
+                    const concatFilePath = join(outputDir, 'concat.txt');
+                    const hasConcatFile = existsSync(concatFilePath);
+                    const trimmedDuration = session.encodeConfig.trimSegments?.length
+                        ? session.encodeConfig.trimSegments.reduce((sum, s) => sum + (s.outSec - s.inSec), 0)
+                        : undefined;
+
                     const thumbResult =
                         await this.thumbnailService.generateThumbnails({
                             inputPath: session.filePath!,
                             outputDir,
-                            duration:
-                                session.probeResult?.format?.duration ?? 0,
+                            duration: trimmedDuration
+                                ?? session.probeResult?.format?.duration ?? 0,
                             sourceWidth:
                                 session.probeResult?.videoTracks?.[0]?.width ??
                                 1920,
                             sourceHeight:
                                 session.probeResult?.videoTracks?.[0]?.height ??
                                 1080,
+                            concatFilePath: hasConcatFile ? concatFilePath : undefined,
                         });
                     if (thumbResult) {
                         thumbnailsVttRelPath = thumbResult.vttRelativePath;
