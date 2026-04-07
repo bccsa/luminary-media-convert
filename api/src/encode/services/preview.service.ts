@@ -52,6 +52,8 @@ interface PreviewState {
     previewDir: string;
     masterPlaylist: string;
     mediaPlaylists: string[];
+    /** When set, media playlists are filtered to only include overlapping segments */
+    trimSegments?: { inSec: number; outSec: number }[];
 }
 
 const MAX_CONCURRENT = 3;
@@ -231,6 +233,23 @@ export class PreviewService {
     getAudioTracks(sessionId: string): PreviewAudioTrack[] | null {
         const state = this.states.get(sessionId);
         return state ? state.audioTracks : null;
+    }
+
+    /** Store trim segments and regenerate filtered media playlists */
+    setTrimSegments(sessionId: string, segments: { inSec: number; outSec: number }[]): void {
+        const state = this.states.get(sessionId);
+        if (!state) return;
+
+        state.trimSegments = segments;
+
+        // Regenerate media playlists filtered to trim ranges
+        state.mediaPlaylists = state.renditions.map((_, i) =>
+            this.generateFilteredMediaPlaylist(state, i),
+        );
+
+        this.logger.log(
+            `Preview playlists filtered to ${segments.length} trim segment(s) for session ${sessionId}`,
+        );
     }
 
     /** Get master or media playlist */
@@ -590,6 +609,75 @@ export class PreviewService {
                 : Math.min(SEGMENT_DURATION, duration - i * SEGMENT_DURATION);
             lines.push(`#EXTINF:${segDur.toFixed(3)},`);
             lines.push(`segment${i}.ts`);
+        }
+
+        lines.push('#EXT-X-ENDLIST', '');
+        return lines.join('\n');
+    }
+
+    private generateFilteredMediaPlaylist(
+        state: PreviewState,
+        renditionIndex: number,
+    ): string {
+        const trims = state.trimSegments;
+        if (!trims?.length) {
+            return this.generateMediaPlaylist(state.segmentBoundaries, state.duration, renditionIndex);
+        }
+
+        const boundaries = state.segmentBoundaries;
+        const segCount = boundaries.length > 0
+            ? boundaries.length
+            : Math.ceil(state.duration / SEGMENT_DURATION);
+
+        // Find segments that overlap any trim range
+        const included: number[] = [];
+        for (let i = 0; i < segCount; i++) {
+            const segStart = boundaries.length > 0
+                ? boundaries[i].start
+                : i * SEGMENT_DURATION;
+            const segDur = boundaries.length > 0
+                ? boundaries[i].duration
+                : Math.min(SEGMENT_DURATION, state.duration - i * SEGMENT_DURATION);
+            const segEnd = segStart + segDur;
+
+            for (const trim of trims) {
+                if (segStart < trim.outSec && segEnd > trim.inSec) {
+                    included.push(i);
+                    break;
+                }
+            }
+        }
+
+        if (included.length === 0) {
+            return this.generateMediaPlaylist(boundaries, state.duration, renditionIndex);
+        }
+
+        // Compute max duration for #EXT-X-TARGETDURATION
+        let maxDuration = SEGMENT_DURATION;
+        for (const idx of included) {
+            const dur = boundaries.length > 0
+                ? boundaries[idx].duration
+                : Math.min(SEGMENT_DURATION, state.duration - idx * SEGMENT_DURATION);
+            if (dur > maxDuration) maxDuration = dur;
+        }
+
+        const lines = [
+            '#EXTM3U',
+            '#EXT-X-VERSION:3',
+            `#EXT-X-TARGETDURATION:${Math.ceil(maxDuration)}`,
+            '#EXT-X-MEDIA-SEQUENCE:0',
+            '#EXT-X-PLAYLIST-TYPE:VOD',
+        ];
+
+        for (let j = 0; j < included.length; j++) {
+            const idx = included[j];
+            // Each preview segment is independently extracted — timestamps are not continuous
+            if (j > 0) lines.push('#EXT-X-DISCONTINUITY');
+            const segDur = boundaries.length > 0
+                ? boundaries[idx].duration
+                : Math.min(SEGMENT_DURATION, state.duration - idx * SEGMENT_DURATION);
+            lines.push(`#EXTINF:${segDur.toFixed(3)},`);
+            lines.push(`segment${idx}.ts`);
         }
 
         lines.push('#EXT-X-ENDLIST', '');

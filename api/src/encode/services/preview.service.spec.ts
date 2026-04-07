@@ -601,6 +601,164 @@ describe('PreviewService', () => {
     });
 
     /* ============================================================== */
+    /*  setTrimSegments() — filtered preview playlists                 */
+    /* ============================================================== */
+
+    describe('setTrimSegments()', () => {
+        beforeEach(async () => {
+            // HEVC source → no keyframe scan → fixed 4s segments
+            // duration=20 gives 5 segments: 0-4, 4-8, 8-12, 12-16, 16-20
+            const probe = makeProbe({
+                duration: 20,
+                videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
+            });
+            sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
+            await service.init('s1');
+        });
+
+        it('should do nothing for unknown session', () => {
+            service.setTrimSegments('nonexistent', [{ inSec: 0, outSec: 5 }]);
+            // No error thrown
+        });
+
+        it('should filter playlist to segments overlapping trim ranges', () => {
+            // Trim: 5-9 → overlaps segments 1 (4-8) and 2 (8-12)
+            service.setTrimSegments('s1', [{ inSec: 5, outSec: 9 }]);
+            const media = service.getPlaylist('s1', 'tok', 0)!;
+            expect(media).toContain('segment1.ts');
+            expect(media).toContain('segment2.ts');
+            expect(media).not.toContain('segment0.ts');
+            expect(media).not.toContain('segment3.ts');
+            expect(media).not.toContain('segment4.ts');
+        });
+
+        it('should handle multiple trim ranges', () => {
+            // Trim: 0-3 (seg 0), 14-20 (seg 3 and 4)
+            service.setTrimSegments('s1', [
+                { inSec: 0, outSec: 3 },
+                { inSec: 14, outSec: 20 },
+            ]);
+            const media = service.getPlaylist('s1', 'tok', 0)!;
+            expect(media).toContain('segment0.ts');
+            expect(media).toContain('segment3.ts');
+            expect(media).toContain('segment4.ts');
+            expect(media).not.toContain('segment1.ts');
+            expect(media).not.toContain('segment2.ts');
+        });
+
+        it('should include DISCONTINUITY between every segment', () => {
+            service.setTrimSegments('s1', [{ inSec: 0, outSec: 12 }]);
+            const media = service.getPlaylist('s1', 'tok', 0)!;
+            const lines = media.split('\n');
+            const discontinuities = lines.filter(l => l === '#EXT-X-DISCONTINUITY');
+            // 3 segments (0,1,2) → 2 discontinuities
+            expect(discontinuities.length).toBe(2);
+        });
+
+        it('should not insert DISCONTINUITY before first segment', () => {
+            service.setTrimSegments('s1', [{ inSec: 5, outSec: 12 }]);
+            const media = service.getPlaylist('s1', 'tok', 0)!;
+            const lines = media.split('\n');
+            const firstExtinf = lines.findIndex(l => l.startsWith('#EXTINF:'));
+            expect(lines[firstExtinf - 1]).not.toBe('#EXT-X-DISCONTINUITY');
+        });
+
+        it('should preserve correct segment durations', () => {
+            // Segments are 4s each, last one is 4s too (20/4=5 exact)
+            service.setTrimSegments('s1', [{ inSec: 5, outSec: 9 }]);
+            const media = service.getPlaylist('s1', 'tok', 0)!;
+            expect(media).toContain('#EXTINF:4.000,');
+        });
+
+        it('should keep master playlist unchanged', () => {
+            const masterBefore = service.getPlaylist('s1', 'tok');
+            service.setTrimSegments('s1', [{ inSec: 5, outSec: 9 }]);
+            const masterAfter = service.getPlaylist('s1', 'tok');
+            expect(masterAfter).toBe(masterBefore);
+        });
+
+        it('should fall back to full playlist when no segments overlap', () => {
+            // Trim range beyond file duration → no overlap
+            service.setTrimSegments('s1', [{ inSec: 100, outSec: 200 }]);
+            const media = service.getPlaylist('s1', 'tok', 0)!;
+            // Falls back to full playlist with all 5 segments
+            expect(media).toContain('segment0.ts');
+            expect(media).toContain('segment4.ts');
+        });
+
+        it('should return full playlist when empty trim segments provided', () => {
+            service.setTrimSegments('s1', []);
+            const media = service.getPlaylist('s1', 'tok', 0)!;
+            expect(media).toContain('segment0.ts');
+            expect(media).toContain('segment4.ts');
+        });
+
+        it('should work with keyframe-scanned boundaries', async () => {
+            // Set up H.264 copy mode with custom boundaries
+            mockReadFile.mockResolvedValue(
+                'seg0.ts,0.000000,3.500000\nseg1.ts,3.500000,7.200000\nseg2.ts,7.200000,12.000000\n',
+            );
+            const probe = makeProbe({
+                duration: 12,
+                videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
+            });
+            sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
+            await service.init('s2');
+
+            // Trim 4-8 → overlaps seg 1 (3.5-7.2) and seg 2 (7.2-12)
+            service.setTrimSegments('s2', [{ inSec: 4, outSec: 8 }]);
+            const media = service.getPlaylist('s2', 'tok', 0)!;
+            expect(media).toContain('segment1.ts');
+            expect(media).toContain('segment2.ts');
+            expect(media).not.toContain('segment0.ts');
+            // Durations from boundaries
+            expect(media).toContain('#EXTINF:3.700,'); // 7.2 - 3.5
+            expect(media).toContain('#EXTINF:4.800,'); // 12 - 7.2
+        });
+
+        it('should set correct EXT-X-TARGETDURATION for filtered segments', async () => {
+            mockReadFile.mockResolvedValue(
+                'seg0.ts,0.000000,2.000000\nseg1.ts,2.000000,8.500000\nseg2.ts,8.500000,12.000000\n',
+            );
+            const probe = makeProbe({
+                duration: 12,
+                videoTracks: [{ index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 }],
+            });
+            sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
+            await service.init('s3');
+
+            // Trim 3-9 → seg 1 (2-8.5, dur=6.5)
+            service.setTrimSegments('s3', [{ inSec: 3, outSec: 9 }]);
+            const media = service.getPlaylist('s3', 'tok', 0)!;
+            expect(media).toContain('#EXT-X-TARGETDURATION:7'); // ceil(6.5)
+        });
+
+        it('should update all rendition playlists', async () => {
+            // HEVC triggers multiple transcode renditions (480, 360, 240)
+            const probe = makeProbe({
+                duration: 20,
+                videoTracks: [{ index: 0, codec: 'hevc', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
+            });
+            sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
+            service = new PreviewService(sessionService, undefined as any, makeFfmpegService());
+            await service.init('s4');
+
+            service.setTrimSegments('s4', [{ inSec: 5, outSec: 9 }]);
+
+            // All renditions should be filtered
+            for (let r = 0; r < 3; r++) {
+                const media = service.getPlaylist('s4', 'tok', r)!;
+                expect(media).toContain('segment1.ts');
+                expect(media).toContain('segment2.ts');
+                expect(media).not.toContain('segment0.ts');
+            }
+        });
+    });
+
+    /* ============================================================== */
     /*  getSegmentStream()                                             */
     /* ============================================================== */
 

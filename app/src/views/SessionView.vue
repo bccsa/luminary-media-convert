@@ -787,6 +787,11 @@ async function onEncodeSubmit(config: EncodeConfig) {
             saveConfig(layoutKey, config);
         }
 
+        // Reload preview with filtered playlist when trim segments are active
+        if (trimSegments.value.length > 0 && playerRef.value && previewPlaybackUrl.value) {
+            playerRef.value.setSource(previewPlaybackUrl.value);
+        }
+
         // Start polling for encoding progress
         poller.start(sessionId.value, encodingApiUrl.value, sessionToken.value);
     } catch (e) {

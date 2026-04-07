@@ -94,6 +94,7 @@ describe('EncodeController', () => {
             destroy: vi.fn().mockResolvedValue(undefined),
             initFromMoov: vi.fn().mockResolvedValue(undefined),
             initFromHeader: vi.fn().mockResolvedValue(undefined),
+            setTrimSegments: vi.fn(),
         } as any;
 
         const sessionEventsService = { emit: vi.fn(), forSession: vi.fn().mockReturnValue({ pipe: vi.fn().mockReturnValue({ subscribe: vi.fn() }) }) } as any;
@@ -264,6 +265,30 @@ describe('EncodeController', () => {
             expect(result.status).toBe('queued');
             expect(result.queuePosition).toBe(1);
             expect(queueService.enqueue).toHaveBeenCalledWith(session.id);
+        });
+
+        it('should call setTrimSegments when trimSegments are present', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            const config = makeEncodeConfig();
+            config.trimSegments = [{ inSec: 5, outSec: 30 }, { inSec: 60, outSec: 90 }];
+
+            await controller.startEncode(session.id, config, makeRequest());
+
+            expect(previewService.setTrimSegments).toHaveBeenCalledWith(
+                session.id,
+                [{ inSec: 5, outSec: 30 }, { inSec: 60, outSec: 90 }],
+            );
+        });
+
+        it('should not call setTrimSegments when no trimSegments', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            await controller.startEncode(session.id, makeEncodeConfig(), makeRequest());
+
+            expect(previewService.setTrimSegments).not.toHaveBeenCalled();
         });
 
         it('should reject video config without videoRenditions', async () => {

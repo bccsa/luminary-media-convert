@@ -698,6 +698,126 @@ describe('FfmpegService', () => {
 
     });
 
+    describe('buildVideoArgs with trimSegments', () => {
+        const buildVideoArgs = (opts: any): Promise<string[]> => {
+            return (service as any).buildVideoArgs(opts);
+        };
+
+        let tmpDir: string;
+        beforeEach(() => {
+            tmpDir = mkdtempSync(join(tmpdir(), 'ffmpeg-trim-'));
+        });
+        afterEach(() => {
+            rmSync(tmpDir, { recursive: true, force: true });
+        });
+
+        it('should use concat demuxer when trimSegments present', async () => {
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd' },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+                trimSegments: [
+                    { inSec: 10, outSec: 30 },
+                    { inSec: 60, outSec: 90 },
+                ],
+            };
+
+            const args = await buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: tmpDir,
+                encodeConfig,
+            });
+
+            expect(args).toContain('-f');
+            expect(args).toContain('concat');
+            expect(args).toContain('-safe');
+            expect(args).toContain('0');
+            expect(args).not.toContain('/tmp/input.mp4');
+
+            // Verify concat file was written
+            const concatPath = join(tmpDir, 'concat.txt');
+            expect(existsSync(concatPath)).toBe(true);
+            const content = readFileSync(concatPath, 'utf-8');
+            expect(content).toContain('ffconcat version 1.0');
+            expect(content).toContain('inpoint 10');
+            expect(content).toContain('outpoint 30');
+            expect(content).toContain('inpoint 60');
+            expect(content).toContain('outpoint 90');
+        });
+
+        it('should use direct input when no trimSegments', async () => {
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd' },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            };
+
+            const args = await buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: tmpDir,
+                encodeConfig,
+            });
+
+            expect(args).toContain('-i');
+            expect(args).toContain('/tmp/input.mp4');
+            expect(args).not.toContain('concat');
+        });
+    });
+
+    describe('buildAudioArgs with trimSegments', () => {
+        const buildAudioArgs = async (opts: any): Promise<string[]> => {
+            return (service as any).buildAudioArgs(opts);
+        };
+
+        let tmpDir: string;
+        beforeEach(() => {
+            tmpDir = mkdtempSync(join(tmpdir(), 'ffmpeg-trim-audio-'));
+        });
+        afterEach(() => {
+            rmSync(tmpDir, { recursive: true, force: true });
+        });
+
+        it('should use concat demuxer when trimSegments present', async () => {
+            const encodeConfig: EncodeConfigDto = {
+                type: 'audio',
+                segmentDuration: 6,
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+                trimSegments: [
+                    { inSec: 5, outSec: 15 },
+                ],
+            };
+
+            const args = await buildAudioArgs({
+                inputPath: '/tmp/audio.flac',
+                outputDir: tmpDir,
+                encodeConfig,
+            });
+
+            expect(args).toContain('-f');
+            expect(args).toContain('concat');
+            expect(args).toContain('-safe');
+            expect(args).toContain('0');
+
+            const concatPath = join(tmpDir, 'concat.txt');
+            expect(existsSync(concatPath)).toBe(true);
+            const content = readFileSync(concatPath, 'utf-8');
+            expect(content).toContain('inpoint 5');
+            expect(content).toContain('outpoint 15');
+        });
+    });
+
     describe('fixMasterPlaylist (private, tested via reflection)', () => {
         const fixMasterPlaylist = (outputDir: string, config: EncodeConfigDto): Promise<void> => {
             return (service as any).fixMasterPlaylist(outputDir, config);

@@ -213,6 +213,11 @@ export class EncodeController {
         }
 
         this.sessionService.setEncodeConfig(sessionId, dto);
+
+        if (dto.trimSegments?.length) {
+            this.previewService.setTrimSegments(sessionId, dto.trimSegments);
+        }
+
         const position = this.queueService.enqueue(sessionId);
 
         this.logger.log(
