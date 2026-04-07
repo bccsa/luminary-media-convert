@@ -117,65 +117,6 @@ export function uploadFile(
     return { promise, abort: abortFn };
 }
 
-/**
- * Send extracted moov + ftyp atoms to the API for early preview initialization.
- * Called before tus upload begins for MP4 files with moov at the end.
- */
-/**
- * Send extracted moov + ftyp atoms to the API for early probe.
- * Sent as raw binary (application/octet-stream).
- */
-export async function sendMoov(
-    encodingApiUrl: string,
-    sessionId: string,
-    sessionToken: string,
-    ftyp: ArrayBuffer,
-    moov: ArrayBuffer,
-    ftypSize: number,
-): Promise<void> {
-    const combined = new Uint8Array(ftyp.byteLength + moov.byteLength);
-    combined.set(new Uint8Array(ftyp), 0);
-    combined.set(new Uint8Array(moov), ftyp.byteLength);
-
-    const url = `${encodingApiUrl}/api/sessions/${sessionId}/preview/moov` +
-        `?token=${sessionToken}&ftypSize=${ftypSize}`;
-
-    const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: combined,
-    });
-
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || `Moov upload failed (${res.status})`);
-    }
-}
-
-/**
- * Send the first few MB of a file for early probing.
- * Used for MKV, faststart MP4, and other formats with metadata at the start.
- */
-export async function sendHeader(
-    encodingApiUrl: string,
-    sessionId: string,
-    sessionToken: string,
-    header: ArrayBuffer,
-): Promise<void> {
-    const url = `${encodingApiUrl}/api/sessions/${sessionId}/preview/header?token=${sessionToken}`;
-
-    const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: header,
-    });
-
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.message || `Header upload failed (${res.status})`);
-    }
-}
-
 export async function startEncode(
     encodingApiUrl: string,
     sessionId: string,

@@ -215,7 +215,7 @@ export class ProbeService {
                 }
             }
 
-            this.logger.log('Packet-based bitrate computation complete');
+            this.logger.log(`Packet-based bitrate computation complete (sample: ${sampleDuration.toFixed(1)}s)`);
         } catch (err) {
             this.logger.warn(
                 `Packet-based bitrate computation failed: ${(err as Error).message}`,

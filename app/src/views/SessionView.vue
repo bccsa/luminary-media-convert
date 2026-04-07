@@ -184,10 +184,7 @@ const showUploadRemoteMessage = computed(() => {
 
 const showProbeConfig = computed(() => {
     const s = currentStatus.value;
-    // Show encoding config when probe results are available — either after upload
-    // completes ('uploaded') or during upload if early probe succeeded (moov/header extraction).
-    // Include 'created' because SaaS status may lag behind encoding API.
-    return (s === 'uploaded' || s === 'uploading' || s === 'created') && isActiveSession.value && probeResult.value && !submitting.value;
+    return s === 'uploaded' && isActiveSession.value && probeResult.value && !submitting.value;
 });
 
 const showEncoding = computed(() => {
@@ -631,11 +628,6 @@ async function fetchSession() {
 
         // Route to appropriate behavior based on status
         await handleStatusAfterLoad(detail.status);
-
-        // If upload is active and we now have session tokens, start early probe poll
-        if (activeUpload.value && !activeUpload.value.done && !probeResult.value) {
-            startEarlyProbePoll();
-        }
     } catch (e) {
         error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -859,62 +851,6 @@ watch(
     },
 );
 
-// Poll for early probe results during upload (from moov extraction).
-// Once probe results arrive, the encoding config form appears while upload continues.
-let earlyProbePollTimer: ReturnType<typeof setInterval> | null = null;
-
-function startEarlyProbePoll() {
-    if (earlyProbePollTimer || probeResult.value) return;
-    if (!encodingApiUrl.value || !sessionToken.value) return;
-
-    const poll = async () => {
-        if (probeResult.value) {
-            stopEarlyProbePoll();
-            return;
-        }
-        try {
-            const data = await getSessionStatus(
-                encodingApiUrl.value!,
-                sessionId.value,
-                sessionToken.value!,
-            );
-            if (data.probeResult) {
-                probeResult.value = data.probeResult;
-                encodingType.value = data.probeResult.videoTracks.length ? 'video' : 'audio';
-                stopEarlyProbePoll();
-            }
-        } catch {
-            // Non-critical — will retry
-        }
-    };
-
-    // Fire immediately, then every 1s
-    poll();
-    earlyProbePollTimer = setInterval(poll, 1000);
-}
-
-function stopEarlyProbePoll() {
-    if (earlyProbePollTimer) {
-        clearInterval(earlyProbePollTimer);
-        earlyProbePollTimer = null;
-    }
-}
-
-// Start early probe poll when upload is active (regardless of session status —
-// the SaaS status may lag behind the encoding API)
-watch(
-    () => activeUpload.value && !activeUpload.value.done,
-    (uploading) => {
-        if (uploading && isActiveSession.value) {
-            startEarlyProbePoll();
-        }
-        if (!uploading) {
-            stopEarlyProbePoll();
-        }
-    },
-    { immediate: true },
-);
-
 // Watch for the upload completing (if tracked locally)
 // After tus upload finishes, the Encoding API probes the file which takes time.
 // Poll the SaaS until the status advances beyond uploading.
@@ -922,7 +858,6 @@ watch(
     () => activeUpload.value?.done,
     (done) => {
         if (done && !activeUpload.value?.error) {
-            stopEarlyProbePoll();
             startSaasPoll();
         }
     },
@@ -936,7 +871,6 @@ onMounted(fetchSession);
 
 onUnmounted(() => {
     stopSaasPoll();
-    stopEarlyProbePoll();
     poller.stop();
 });
 </script>
