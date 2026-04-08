@@ -79,7 +79,12 @@ export class EncodeService {
                 : '';
 
             // Current pipeline progress state (updated by both FFmpeg and pipeline callbacks)
-            const currentProgress: PipelineProgress = { encoding: 0 };
+            // Initialize all bars so the UI shows them from the start
+            const currentProgress: PipelineProgress = {
+                encoding: 0,
+                ...(encryptionEnabled ? { encrypting: 0 } : {}),
+                uploading: 0,
+            };
 
             // Create and start the streaming segment pipeline
             const pipeline = this.segmentPipelineService.createPipeline({
@@ -92,8 +97,8 @@ export class EncodeService {
                 byteRangeMaxFileSizeBytes:
                     (session.config.byteRangeMaxFileSizeMB ?? 500) * 1024 * 1024,
                 onProgress: (pipelineUpdate) => {
-                    currentProgress.encrypting = pipelineUpdate.encrypting;
-                    currentProgress.uploading = pipelineUpdate.uploading;
+                    if (pipelineUpdate.encrypting != null) currentProgress.encrypting = pipelineUpdate.encrypting;
+                    if (pipelineUpdate.uploading != null) currentProgress.uploading = pipelineUpdate.uploading;
                     this.sessionService.updatePipelineProgress(
                         sessionId,
                         { ...currentProgress },

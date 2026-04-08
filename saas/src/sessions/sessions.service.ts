@@ -188,17 +188,39 @@ export class SessionsService implements OnModuleInit {
             throw new ForbiddenException('Not authorized to delete this session');
         }
 
-        // Delete S3 files if requested
-        if (deleteFiles && doc?.files?.length && doc.s3ConfigId) {
+        // Delete S3 files if requested. When a path prefix exists, list all
+        // objects under that prefix so leftover files from previous sessions
+        // sharing the same folder are also cleaned up. Without a prefix,
+        // fall back to deleting only the tracked file keys.
+        if (deleteFiles && doc?.s3ConfigId) {
             try {
-                const deleted = await this.s3ClientService.deleteObjects(
-                    userId,
-                    doc.s3ConfigId,
-                    doc.files,
-                );
-                this.logger.log(
-                    `Deleted ${deleted} S3 file(s) for session ${sessionId}`,
-                );
+                if (doc.s3Config?.pathPrefix) {
+                    const prefix = doc.s3Config.pathPrefix.replace(/\/+$/, '') + '/';
+                    const allKeys = await this.s3ClientService.listObjects(
+                        userId,
+                        doc.s3ConfigId,
+                        prefix,
+                    );
+                    if (allKeys.length > 0) {
+                        await this.s3ClientService.deleteObjects(
+                            userId,
+                            doc.s3ConfigId,
+                            allKeys,
+                        );
+                        this.logger.log(
+                            `Deleted ${allKeys.length} S3 object(s) under prefix '${prefix}' for session ${sessionId}`,
+                        );
+                    }
+                } else if (doc.files?.length) {
+                    await this.s3ClientService.deleteObjects(
+                        userId,
+                        doc.s3ConfigId,
+                        doc.files,
+                    );
+                    this.logger.log(
+                        `Deleted ${doc.files.length} tracked S3 file(s) for session ${sessionId}`,
+                    );
+                }
             } catch (err) {
                 this.logger.warn(
                     `Failed to delete S3 files for session ${sessionId}: ${(err as Error).message}`,

@@ -435,7 +435,7 @@ async function copyEncryptionKey() {
 const deleting = ref(false);
 
 const hasS3Files = computed(
-    () => !!session.value?.files?.length && !!session.value?.s3ConfigId,
+    () => !!session.value?.s3ConfigId && !!(session.value?.s3Config?.pathPrefix || session.value?.files?.length),
 );
 
 async function onConfirmDelete(withFiles: boolean) {
