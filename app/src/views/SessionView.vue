@@ -1127,6 +1127,10 @@ onUnmounted(() => {
                         v-if="poller.status.value === 'encoding' || poller.status.value === 'encrypting' || poller.status.value === 'uploading_to_s3'"
                         class="mb-4 space-y-3"
                     >
+                        <!-- ETA (based on encoding progress) -->
+                        <p v-if="etaDisplay" class="text-xs text-zinc-500 text-right">
+                            {{ etaDisplay }}
+                        </p>
                         <!-- Encoding progress -->
                         <ProgressBar
                             label="Encoding"
@@ -1144,10 +1148,6 @@ onUnmounted(() => {
                             label="Uploading to S3"
                             :progress="poller.pipelineProgress.value.uploading"
                         />
-                        <!-- ETA -->
-                        <p v-if="etaDisplay" class="text-xs text-zinc-500 text-right">
-                            {{ etaDisplay }}
-                        </p>
                     </div>
 
                     <!-- Failed banner -->
