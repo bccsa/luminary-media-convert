@@ -86,6 +86,18 @@ export class EncodeService {
                 uploading: 0,
             };
 
+            // Estimate total segments for progress calculation:
+            // numStreams * ceil(duration / segmentDuration)
+            const segDur = session.encodeConfig.segmentDuration ?? 6;
+            const duration = session.probeResult?.format?.duration ?? 0;
+            const numStreams =
+                (session.encodeConfig.videoRenditions?.length ?? 0) +
+                (session.encodeConfig.audioGroups?.length ?? 0);
+            const estimatedTotalSegments =
+                numStreams > 0 && duration > 0
+                    ? numStreams * Math.ceil(duration / segDur)
+                    : undefined;
+
             // Create and start the streaming segment pipeline
             const pipeline = this.segmentPipelineService.createPipeline({
                 outputDir,
@@ -96,6 +108,7 @@ export class EncodeService {
                 byteRange: session.config.byteRange !== false,
                 byteRangeMaxFileSizeBytes:
                     (session.config.byteRangeMaxFileSizeMB ?? 500) * 1024 * 1024,
+                estimatedTotalSegments,
                 onProgress: (pipelineUpdate) => {
                     if (pipelineUpdate.encrypting != null) currentProgress.encrypting = pipelineUpdate.encrypting;
                     if (pipelineUpdate.uploading != null) currentProgress.uploading = pipelineUpdate.uploading;
