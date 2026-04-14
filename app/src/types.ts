@@ -93,6 +93,7 @@ export interface SessionStatusResponse {
     masterPlaylist?: string;
     anglePlaylists?: { name: string; key: string }[];
     thumbnailsVtt?: string;
+    encryptionKeyHex?: string;
     error?: string;
     encoder?: AccelMode;
     segmentFormat?: SegmentFormat;

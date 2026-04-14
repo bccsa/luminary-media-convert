@@ -30,6 +30,7 @@ export function useSessionPoller() {
     const encoder = ref<AccelMode | undefined>();
     const segmentFormat = ref<SegmentFormat | undefined>();
     const thumbnailsVtt = ref<string | undefined>();
+    const encryptionKeyHex = ref<string | undefined>();
     const polling = ref(false);
 
     let eventSource: EventSource | null = null;
@@ -55,6 +56,7 @@ export function useSessionPoller() {
         encoder.value = data.encoder;
         segmentFormat.value = data.segmentFormat;
         thumbnailsVtt.value = data.thumbnailsVtt;
+        encryptionKeyHex.value = data.encryptionKeyHex;
     }
 
     function stop() {
@@ -85,6 +87,7 @@ export function useSessionPoller() {
         encoder.value = undefined;
         segmentFormat.value = undefined;
         thumbnailsVtt.value = undefined;
+        encryptionKeyHex.value = undefined;
 
         polling.value = true;
 
@@ -153,6 +156,7 @@ export function useSessionPoller() {
         encoder: readonly(encoder),
         segmentFormat: readonly(segmentFormat),
         thumbnailsVtt: readonly(thumbnailsVtt),
+        encryptionKeyHex: readonly(encryptionKeyHex),
         polling: readonly(polling),
         start,
         stop,

@@ -86,6 +86,7 @@ export class SegmentPipeline {
 
     private pollTimer: ReturnType<typeof setInterval> | null = null;
     private running = false;
+    private polling = false;
     private aborted = false;
     private s3Client: Minio.Client;
     private pipelineError: Error | null = null;
@@ -122,20 +123,29 @@ export class SegmentPipeline {
         if (this.running) return;
         this.running = true;
         this.pollTimer = setInterval(() => {
-            this.poll().catch((err) => {
-                this.pipelineError = err;
-                this.logger.error(
-                    `Pipeline poll error: ${(err as Error).message}`,
-                );
-            });
+            if (this.polling) return; // Skip if previous poll is still running
+            this.polling = true;
+            this.poll()
+                .catch((err) => {
+                    this.pipelineError = err;
+                    this.logger.error(
+                        `Pipeline poll error: ${(err as Error).message}`,
+                    );
+                })
+                .finally(() => {
+                    this.polling = false;
+                });
         }, this.pollIntervalMs);
     }
 
     async drain(): Promise<string[]> {
-        // Stop polling
+        // Stop polling and wait for any in-flight poll to complete
         if (this.pollTimer) {
             clearInterval(this.pollTimer);
             this.pollTimer = null;
+        }
+        while (this.polling) {
+            await new Promise((r) => setTimeout(r, 50));
         }
 
         if (this.pipelineError) throw this.pipelineError;

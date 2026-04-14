@@ -322,6 +322,9 @@ export class EncodeController {
             result.anglePlaylists = session.anglePlaylists;
             result.thumbnailsVtt = session.thumbnailsVtt;
             result.segmentFormat = session.segmentFormat;
+            if (session.encryptionKeyHex) {
+                result.encryptionKeyHex = session.encryptionKeyHex;
+            }
         }
 
         if (session.status === 'failed') {

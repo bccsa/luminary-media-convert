@@ -247,11 +247,12 @@ watch(previewPlaybackUrl, (url) => {
 
 // Active playback URL — preview during encoding, S3 after completion (ABR)
 // For encrypted sessions, wait for the encryption key before switching to S3
-// (otherwise the player loads the raw playlist with unrewritten #EXT-X-KEY URIs)
+// (otherwise the player loads the raw playlist with unrewritten #EXT-X-KEY URIs).
 const activePlaybackUrl = computed(() => {
     if (isCompleted.value) {
-        if (isEncrypted.value && !encryptionKeyHex.value) return previewPlaybackUrl.value;
-        return playbackUrl.value;
+        const hasKey = !!(encryptionKeyHex.value || poller.encryptionKeyHex.value);
+        if (isEncrypted.value && !hasKey) return previewPlaybackUrl.value;
+        return playbackUrl.value ?? previewPlaybackUrl.value;
     }
     return previewPlaybackUrl.value;
 });
@@ -832,22 +833,13 @@ async function onCancelEncode() {
 }
 
 // ---------------------------------------------------------------------------
-// Watch for terminal status from poller (fetch encryption key)
+// Watch for encryption key from poller (included in completion SSE event)
 // ---------------------------------------------------------------------------
 
 watch(
-    () => poller.status.value,
-    async (status) => {
-        if (status === 'completed' && !encryptionKeyHex.value) {
-            try {
-                const token = await getAccessTokenSilently();
-                const detail = await getSessionDetail(token, sessionId.value);
-                encryptionKeyHex.value = detail.encryptionKeyHex;
-                session.value = detail;
-            } catch {
-                // Non-critical -- key display is informational
-            }
-        }
+    () => poller.encryptionKeyHex.value,
+    (key) => {
+        if (key) encryptionKeyHex.value = key;
     },
 );
 
@@ -995,7 +987,7 @@ onUnmounted(() => {
                         :thumbnail-vtt-url="isCompleted ? thumbnailVttUrl : undefined"
                         :encoding-type="encodingType"
                         :is-audio-only="isAudioOnly"
-                        :encryption-key-hex="isCompleted ? encryptionKeyHex : undefined"
+                        :encryption-key-hex="isCompleted ? (encryptionKeyHex || poller.encryptionKeyHex.value) : undefined"
                         preserve-state-on-source-change
                     />
                     <!-- Audio track selector (preview only, multi-audio files) -->

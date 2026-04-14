@@ -187,7 +187,14 @@ async function getEffectivePlaybackUrl(): Promise<string | null> {
 }
 
 async function initPlayer() {
-    if (!playerEl.value || !props.playbackUrl) return;
+    if (!props.playbackUrl) return;
+
+    // Wait for the <video> element to be in the DOM — may not be
+    // available immediately when v-if="playbackUrl" just became truthy.
+    if (!playerEl.value) {
+        await nextTick();
+        if (!playerEl.value) return;
+    }
 
     const effectiveUrl = await getEffectivePlaybackUrl();
     if (!effectiveUrl) return;
@@ -205,6 +212,13 @@ async function initPlayer() {
         const wasPaused = player.paused();
 
         player.src({ src: effectiveUrl, type: 'application/x-mpegURL' });
+
+        // Initialize thumbnail preview if now available (e.g. after switching to S3 playback)
+        if (props.thumbnailVttUrl) {
+            try {
+                (player as any).thumbnailPreview({ vttUrl: props.thumbnailVttUrl });
+            } catch { /* already initialized or unavailable */ }
+        }
 
         if (pendingSeekTime != null) {
             const seekTo = pendingSeekTime;
@@ -250,7 +264,7 @@ async function initPlayer() {
 // Track pending seek for source changes (angle switching)
 let pendingSeekTime: number | null = null;
 
-watch(() => props.playbackUrl, async (url) => {
+watch(() => props.playbackUrl, async (url, oldUrl) => {
     if (url) {
         // Preserve playback position and state when swapping sources
         let savedTime: number | undefined;
@@ -273,7 +287,7 @@ watch(() => props.playbackUrl, async (url) => {
             player.on('loadedmetadata', restore);
         }
     }
-});
+}, { flush: 'post' });
 
 // Re-init when encryption key becomes available (e.g. fetched async after completion)
 watch(() => props.encryptionKeyHex, async (keyHex) => {
@@ -281,7 +295,7 @@ watch(() => props.encryptionKeyHex, async (keyHex) => {
         await nextTick();
         await initPlayer();
     }
-});
+}, { flush: 'post' });
 
 onMounted(async () => {
     if (props.playbackUrl) {
