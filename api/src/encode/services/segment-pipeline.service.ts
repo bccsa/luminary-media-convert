@@ -652,6 +652,8 @@ export class SegmentPipeline {
 
         for (const filePath of files) {
             if (exclude?.has(filePath)) continue;
+            // Skip internal build artifacts
+            if (filePath.endsWith('/concat.txt')) continue;
             const relativePath = relative(outputDir, filePath)
                 .split(/[\\/]/)
                 .join('/');
