@@ -16,6 +16,8 @@ export interface PreviewAudioTrack {
     streamIndex: number;
     language?: string;
     name?: string;
+    bitrateKbps?: number;
+    codec?: string;
     isDefault: boolean;
 }
 
@@ -281,64 +283,17 @@ export class PreviewService {
     // -----------------------------------------------------------------------
 
     /** Select audio tracks for preview: one per language, or treat each as distinct when no language metadata */
+    /** Expose all audio tracks for the preview selector */
     private selectAudioTracks(probe: ProbeResult): PreviewAudioTrack[] {
-        const tracks = probe.audioTracks;
-        if (tracks.length <= 1) {
-            return tracks.map((t, i) => ({
-                index: i,
-                streamIndex: t.index,
-                language: t.language,
-                name: t.name,
-                isDefault: i === 0,
-            }));
-        }
-
-        const byLanguage = new Map<string, AudioTrackInfo[]>();
-        for (const t of tracks) {
-            const lang = t.language ?? 'und';
-            if (!byLanguage.has(lang)) byLanguage.set(lang, []);
-            byLanguage.get(lang)!.push(t);
-        }
-
-        const selected: PreviewAudioTrack[] = [];
-        for (const [lang, group] of byLanguage) {
-            if (group.length > 1 && lang === 'und') {
-                const bitrates = group.map((t) => t.bitrateKbps).filter((b) => b > 0);
-                const isQualityTiers = bitrates.length > 1 &&
-                    Math.max(...bitrates) / Math.max(Math.min(...bitrates), 1) > 1.5;
-
-                if (!isQualityTiers) {
-                    for (const t of group) {
-                        selected.push({
-                            index: selected.length,
-                            streamIndex: t.index,
-                            language: t.language,
-                            name: t.name ?? `Track ${selected.length + 1}`,
-                            isDefault: false,
-                        });
-                    }
-                    continue;
-                }
-            }
-
-            const eligible = group.filter((t) => t.bitrateKbps <= MAX_AUDIO_BITRATE_KBPS);
-            let pick: AudioTrackInfo;
-            if (eligible.length > 0) {
-                pick = eligible.reduce((a, b) => a.bitrateKbps >= b.bitrateKbps ? a : b);
-            } else {
-                pick = group.reduce((a, b) => a.bitrateKbps <= b.bitrateKbps ? a : b);
-            }
-            selected.push({
-                index: selected.length,
-                streamIndex: pick.index,
-                language: pick.language,
-                name: pick.name,
-                isDefault: false,
-            });
-        }
-
-        if (selected.length > 0) selected[0].isDefault = true;
-        return selected;
+        return probe.audioTracks.map((t, i) => ({
+            index: i,
+            streamIndex: t.index,
+            language: t.language,
+            name: t.name,
+            bitrateKbps: t.bitrateKbps,
+            codec: t.codec,
+            isDefault: i === 0,
+        }));
     }
 
     // -----------------------------------------------------------------------

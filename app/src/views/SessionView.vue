@@ -38,6 +38,7 @@ const encodingType = ref<'video' | 'audio'>('video');
 const byteRangeEnabled = ref(true);
 const submitting = ref(false);
 const trimSegments = ref<TrimSegment[]>([]);
+const configFormRef = ref<InstanceType<typeof EncodeConfigForm> | null>(null);
 
 // Session name
 const sessionName = ref('');
@@ -78,8 +79,6 @@ function cancelEditName() {
 const encryptionKeyHex = ref<string | undefined>();
 
 // SaaS polling for non-local uploads
-let saasPollTimer: ReturnType<typeof setInterval> | null = null;
-
 const sessionId = computed(() => route.params.id as string);
 
 const poller = useSessionPoller();
@@ -204,7 +203,22 @@ interface PreviewAudioTrack {
     streamIndex: number;
     language?: string;
     name?: string;
+    bitrateKbps?: number;
+    codec?: string;
     isDefault: boolean;
+}
+
+function audioTrackLabel(track: PreviewAudioTrack): string {
+    // Use editable track metadata from the encode config form when available
+    const formTrack = configFormRef.value?.editableAudioTracks?.[track.index];
+    const name = formTrack?.name ?? track.name;
+    const language = formTrack?.language ?? track.language;
+    const parts: string[] = [String(track.index)];
+    if (name) parts.push(name);
+    if (language && language !== 'und') parts.push(language);
+    if (track.codec) parts.push(track.codec);
+    if (track.bitrateKbps) parts.push(`${track.bitrateKbps}kbps`);
+    return parts.join(' · ');
 }
 
 const previewAudioTracks = ref<PreviewAudioTrack[]>([]);
@@ -641,10 +655,7 @@ async function fetchSession() {
 // ---------------------------------------------------------------------------
 
 async function handleStatusAfterLoad(status: string) {
-    if ((status === 'created' || status === 'uploading') && !activeUpload.value) {
-        // Upload happening elsewhere -- poll SaaS until status changes
-        startSaasPoll();
-    } else if (status === 'uploaded' && isActiveSession.value) {
+    if (status === 'uploaded' && isActiveSession.value) {
         // Fetch probe results from encoding API
         await fetchProbeResults();
     } else if (
@@ -658,35 +669,6 @@ async function handleStatusAfterLoad(status: string) {
 }
 
 // ---------------------------------------------------------------------------
-// SaaS polling (for when upload is happening elsewhere)
-// ---------------------------------------------------------------------------
-
-function startSaasPoll() {
-    stopSaasPoll();
-    saasPollTimer = setInterval(async () => {
-        try {
-            const token = await getAccessTokenSilently();
-            const detail = await getSessionDetail(token, sessionId.value);
-            session.value = detail;
-            sessionToken.value = detail.sessionToken ?? null;
-            encodingApiUrl.value = detail.encodingApiUrl ?? null;
-
-            if (detail.status !== 'created' && detail.status !== 'uploading') {
-                stopSaasPoll();
-                await handleStatusAfterLoad(detail.status);
-            }
-        } catch {
-            // Ignore poll errors, retry on next interval
-        }
-    }, 3000);
-}
-
-function stopSaasPoll() {
-    if (saasPollTimer) {
-        clearInterval(saasPollTimer);
-        saasPollTimer = null;
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Fetch probe results from Encoding API
@@ -720,6 +702,11 @@ async function pollForProbe(
 ): Promise<ProbeResult | null> {
     for (let i = 0; i < 60; i++) {
         const data = await getSessionStatus(apiUrl, sid, token);
+        // Update session status from encoding API so the UI reflects
+        // the actual state (e.g. 'uploaded' after probe completes)
+        if (session.value && data.status) {
+            session.value = { ...session.value, status: data.status };
+        }
         if (data.probeResult) return data.probeResult;
         await new Promise((r) => setTimeout(r, 500));
     }
@@ -850,7 +837,10 @@ watch(
     () => activeUpload.value?.done,
     (done) => {
         if (done && !activeUpload.value?.error) {
-            startSaasPoll();
+            // Poll encoding API for probe results after upload completes
+            if (encodingApiUrl.value && sessionToken.value) {
+                fetchProbeResults();
+            }
         }
     },
 );
@@ -862,7 +852,6 @@ watch(
 onMounted(fetchSession);
 
 onUnmounted(() => {
-    stopSaasPoll();
     poller.stop();
 });
 </script>
@@ -1002,7 +991,7 @@ onUnmounted(() => {
                                 :key="track.index"
                                 :value="track.index"
                             >
-                                {{ track.name ?? track.language ?? `Track ${track.index + 1}` }}
+                                {{ audioTrackLabel(track) }}
                             </option>
                         </select>
                     </div>
@@ -1084,6 +1073,7 @@ onUnmounted(() => {
                     />
 
                     <EncodeConfigForm
+                        ref="configFormRef"
                         :probe-result="probeResult!"
                         :byte-range="byteRangeEnabled"
                         @submit="onEncodeSubmit"

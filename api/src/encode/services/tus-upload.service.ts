@@ -157,14 +157,18 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
 
                 const probeResult = await this.probeService.probe(destPath);
 
+                // Initialize preview before exposing probe result —
+                // clients poll for probeResult and immediately use preview
+                // endpoints, so the preview must be ready first.
                 this.sessionService.setProbeResult(sessionId, probeResult);
+                try {
+                    await this.previewService.init(sessionId);
+                } catch (err) {
+                    this.logger.warn(`Preview init failed for ${sessionId}: ${(err as Error).message}`);
+                }
+
                 this.sessionService.updateStatus(sessionId, 'uploaded');
                 this.sendStatusWebhook(sessionId, 'uploaded');
-
-                // Initialize preview (non-blocking — runs keyframe scan in background)
-                this.previewService.init(sessionId).catch((err) => {
-                    this.logger.warn(`Preview init failed for ${sessionId}: ${err.message}`);
-                });
 
                 this.logger.log(
                     `Upload complete for session ${sessionId}: ` +

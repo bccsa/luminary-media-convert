@@ -301,7 +301,7 @@ export class EncodeController {
             encoder: this.ffmpegService.getAccelMode(),
         };
 
-        if (session.probeResult) {
+        if (session.probeResult && session.status !== 'created' && session.status !== 'uploading') {
             result.probeResult = session.probeResult as any;
         }
 

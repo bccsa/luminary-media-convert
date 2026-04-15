@@ -1469,7 +1469,7 @@ describe('PreviewService', () => {
                 expect(tracks![0].streamIndex).toBe(0);
             });
 
-            it('should select one track per language for multi-language files', async () => {
+            it('should include all audio tracks for multi-language files', async () => {
                 const probe = makeProbe({
                     audioTracks: [
                         { index: 0, codec: 'aac', bitrateKbps: 128, channels: 2, sampleRate: 48000, language: 'eng' },
@@ -1482,14 +1482,12 @@ describe('PreviewService', () => {
                 await service.init('s1');
 
                 const tracks = service.getAudioTracks('s1');
-                expect(tracks).toHaveLength(2);
-                // eng: picks highest ≤ 150kbps → index 0 (128kbps)
-                expect(tracks![0].language).toBe('eng');
+                expect(tracks).toHaveLength(3);
                 expect(tracks![0].streamIndex).toBe(0);
+                expect(tracks![0].bitrateKbps).toBe(128);
                 expect(tracks![0].isDefault).toBe(true);
-                // fra: single track
-                expect(tracks![1].language).toBe('fra');
-                expect(tracks![1].streamIndex).toBe(2);
+                expect(tracks![1].streamIndex).toBe(1);
+                expect(tracks![2].streamIndex).toBe(2);
             });
 
             it('should treat same-bitrate no-language tracks as distinct (not quality tiers)', async () => {
@@ -1511,7 +1509,7 @@ describe('PreviewService', () => {
                 expect(tracks![2].name).toBe('CH_2');
             });
 
-            it('should pick best quality tier when bitrates vary significantly (>1.5x ratio)', async () => {
+            it('should include all tracks with codec and bitrate info', async () => {
                 const probe = makeProbe({
                     audioTracks: [
                         { index: 0, codec: 'aac', bitrateKbps: 64, channels: 2, sampleRate: 48000 },
@@ -1524,25 +1522,11 @@ describe('PreviewService', () => {
                 await service.init('s1');
 
                 const tracks = service.getAudioTracks('s1');
-                expect(tracks).toHaveLength(1);
-                // Picks highest ≤ 150kbps → 128kbps (index 1)
-                expect(tracks![0].streamIndex).toBe(1);
-            });
-
-            it('should pick lowest bitrate when all tracks > 150kbps', async () => {
-                const probe = makeProbe({
-                    audioTracks: [
-                        { index: 0, codec: 'aac', bitrateKbps: 192, channels: 2, sampleRate: 48000, language: 'eng' },
-                        { index: 1, codec: 'aac', bitrateKbps: 320, channels: 2, sampleRate: 48000, language: 'eng' },
-                    ],
-                });
-                sessionService = makeSessionService({ filePath: '/tmp/video.mp4', probeResult: probe });
-                service = new PreviewService(sessionService, makeFfmpegService());
-                await service.init('s1');
-
-                const tracks = service.getAudioTracks('s1');
-                expect(tracks).toHaveLength(1);
-                expect(tracks![0].streamIndex).toBe(0); // 192kbps (lowest)
+                expect(tracks).toHaveLength(3);
+                expect(tracks![0].bitrateKbps).toBe(64);
+                expect(tracks![0].codec).toBe('aac');
+                expect(tracks![1].bitrateKbps).toBe(128);
+                expect(tracks![2].bitrateKbps).toBe(256);
             });
         });
 

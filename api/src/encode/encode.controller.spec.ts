@@ -831,7 +831,7 @@ describe('EncodeController', () => {
     });
 
     describe('getStatus - probeResult availability', () => {
-        it('should include probeResult when session has it regardless of status', () => {
+        it('should include probeResult when status is uploaded', () => {
             const session = sessionService.create(makeConfig());
             const probeResult = {
                 format: { duration: 60, bitrateKbps: 5000, formatName: 'mp4' },
@@ -839,10 +839,39 @@ describe('EncodeController', () => {
                 audioTracks: [],
             };
             sessionService.setProbeResult(session.id, probeResult);
+            sessionService.updateStatus(session.id, 'uploaded');
 
-            // Status is still 'created' but probeResult should be returned
             const result = controller.getStatus(session.id, makeRequest());
             expect(result.probeResult).toEqual(probeResult);
+        });
+
+        it('should not include probeResult when status is still uploading', () => {
+            const session = sessionService.create(makeConfig());
+            const probeResult = {
+                format: { duration: 60, bitrateKbps: 5000, formatName: 'mp4' },
+                videoTracks: [{ index: 0, codec: 'h264', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
+                audioTracks: [],
+            };
+            sessionService.setProbeResult(session.id, probeResult);
+            // Status is still 'created' — probeResult should NOT be returned
+            const result = controller.getStatus(session.id, makeRequest());
+            expect(result.probeResult).toBeUndefined();
+        });
+
+        it('should include encryptionKeyHex when completed with encryption', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.setCompleted(
+                session.id,
+                ['master.m3u8'],
+                'master.m3u8',
+                undefined,
+                undefined,
+                undefined,
+                'abcd1234abcd1234abcd1234abcd1234',
+            );
+
+            const result = controller.getStatus(session.id, makeRequest());
+            expect(result.encryptionKeyHex).toBe('abcd1234abcd1234abcd1234abcd1234');
         });
 
         it('should not include probeResult when session does not have it', () => {
