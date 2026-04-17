@@ -49,6 +49,7 @@ interface FfprobeStream {
     channels?: number;
     sample_rate?: string;
     tags?: Record<string, string>;
+    disposition?: { attached_pic?: number };
 }
 
 interface FfprobeFormat {
@@ -77,6 +78,7 @@ export class ProbeService {
 
         for (const s of data.streams) {
             if (s.codec_type === 'video') {
+                if (s.disposition?.attached_pic === 1) continue;
                 videoTracks.push({
                     index: videoStreamIndex++,
                     codec: s.codec_name ?? 'unknown',
@@ -192,6 +194,7 @@ export class ProbeService {
             let ai = 0;
             for (const s of rawStreams) {
                 if (s.codec_type === 'video') {
+                    if (s.disposition?.attached_pic === 1) continue;
                     avStreamToType.set(s.index, { type: 'video', localIndex: vi++ });
                 } else if (s.codec_type === 'audio') {
                     avStreamToType.set(s.index, { type: 'audio', localIndex: ai++ });
