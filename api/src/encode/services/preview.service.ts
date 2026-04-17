@@ -35,7 +35,7 @@ interface SegmentBoundary {
 }
 
 interface Rendition {
-    /** Type-relative video stream index (for -map 0:v:N) */
+    /** Type-relative video stream index (for -map 0:v:N), -1 when audioOnly */
     videoIndex: number;
     width: number;
     height: number;
@@ -43,6 +43,8 @@ interface Rendition {
     canCopy: boolean;
     /** Scale filter value for transcode mode (e.g. "480:-2") */
     scaleFilter?: string;
+    /** When true, the rendition carries only audio (MP3/FLAC/etc. sources) */
+    audioOnly?: boolean;
 }
 
 interface PreviewState {
@@ -88,14 +90,25 @@ export class PreviewService {
         const duration = probeResult.format.duration;
         const audioTracks = this.selectAudioTracks(probeResult);
 
-        // Build renditions from available video tracks
-        const renditions = this.buildRenditions(probeResult);
+        // Build renditions from available video tracks, or a single
+        // audio-only rendition when the source has no video tracks.
+        let renditions = this.buildRenditions(probeResult);
         if (renditions.length === 0) {
-            this.logger.warn(`No suitable video renditions for ${sessionId}`);
-            return;
+            if (audioTracks.length === 0) {
+                this.logger.warn(`No suitable video renditions for ${sessionId}`);
+                return;
+            }
+            renditions = [{
+                videoIndex: -1,
+                width: 0,
+                height: 0,
+                bitrateKbps: 128,
+                canCopy: false,
+                audioOnly: true,
+            }];
         }
 
-        // Keyframe scan for copy-mode renditions (use first copy-mode rendition)
+        // Keyframe scan for copy-mode renditions (skipped for audio-only)
         const copyRendition = renditions.find((r) => r.canCopy);
         const boundaries = copyRendition
             ? await this.scanKeyframes(filePath, copyRendition.videoIndex)
@@ -119,7 +132,9 @@ export class PreviewService {
         });
 
         const renditionSummary = renditions
-            .map((r) => `${r.width}x${r.height}(${r.canCopy ? 'copy' : 'transcode'})`)
+            .map((r) => r.audioOnly
+                ? 'audio-only(aac)'
+                : `${r.width}x${r.height}(${r.canCopy ? 'copy' : 'transcode'})`)
             .join(', ');
         const audioSummary = audioTracks.length > 1
             ? `, ${audioTracks.length} audio track(s) [${audioTracks.map((a) => a.language ?? a.name ?? 'und').join(', ')}]`
@@ -429,10 +444,17 @@ export class PreviewService {
         for (let i = 0; i < renditions.length; i++) {
             const r = renditions[i];
             const bandwidth = r.bitrateKbps * 1000;
-            lines.push(
-                `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${r.width}x${r.height}`,
-                `r${i}/playlist.m3u8`,
-            );
+            if (r.audioOnly) {
+                lines.push(
+                    `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},CODECS="mp4a.40.2"`,
+                    `r${i}/playlist.m3u8`,
+                );
+            } else {
+                lines.push(
+                    `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${r.width}x${r.height}`,
+                    `r${i}/playlist.m3u8`,
+                );
+            }
         }
         lines.push('');
         return lines.join('\n');
@@ -554,6 +576,18 @@ export class PreviewService {
     ): string[] {
         const args: string[] = [];
 
+        if (rendition.audioOnly) {
+            args.push(
+                '-ss', String(start),
+                '-t', String(segDur),
+                '-i', filePath,
+                '-vn',
+            );
+            if (audioMap) args.push('-map', audioMap);
+            args.push('-c:a', 'aac', '-b:a', '128k', '-f', 'mpegts', 'pipe:1');
+            return args;
+        }
+
         // HW accel input flags must come before -i
         if (useGpu && accelMode === 'nvidia') {
             args.push('-hwaccel', 'cuda');
@@ -610,12 +644,12 @@ export class PreviewService {
         // Ensure output directory exists
         await mkdir(join(outputPath, '..'), { recursive: true });
 
-        const videoMap = `0:v:${rendition.videoIndex}`;
+        const videoMap = rendition.audioOnly ? '' : `0:v:${rendition.videoIndex}`;
         const audioTrack = state.audioTracks[audioTrackIndex ?? 0] ?? null;
         const audioMap = audioTrack ? `0:a:${audioTrack.streamIndex}` : null;
 
         const accelMode = this.ffmpegService.getAccelMode();
-        const useGpu = !rendition.canCopy && accelMode !== 'cpu';
+        const useGpu = !rendition.canCopy && !rendition.audioOnly && accelMode !== 'cpu';
 
         const args = this.buildSegmentArgs(
             state.filePath, start, segDur, videoMap, audioMap,
