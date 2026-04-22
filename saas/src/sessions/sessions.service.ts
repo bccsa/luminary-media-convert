@@ -8,6 +8,7 @@ import {
     OnModuleInit,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { normalizeS3Key, deriveAngleName } from '@luminary-media-converter/hls';
 import { DatabaseService } from '../database/database.service.js';
 import { S3ConfigsService } from '../s3-configs/s3-configs.service.js';
 import { HlsParserService } from './hls-parser.service.js';
@@ -284,7 +285,7 @@ export class SessionsService implements OnModuleInit {
                 'Either masterPlaylistKey or folderPrefix must be provided',
             );
         }
-        const normalized = this.normalizeS3Key(rawInput, s3Config.bucket);
+        const normalized = normalizeS3Key(rawInput, s3Config.bucket);
 
         let folderPrefix: string;
         if (normalized.endsWith('.m3u8')) {
@@ -341,7 +342,7 @@ export class SessionsService implements OnModuleInit {
         const anglePlaylists: Array<{ name: string; key: string }> | undefined =
             playlists.length > 1
                 ? playlists.map((key, i) => ({
-                      name: this.deriveAngleName(key, folderPrefix, i),
+                      name: deriveAngleName(key, folderPrefix, i),
                       key,
                   }))
                 : undefined;
@@ -657,41 +658,6 @@ export class SessionsService implements OnModuleInit {
         const normalizedPrefix = prefix && !prefix.endsWith('/') ? prefix + '/' : prefix;
         const keys = await this.s3ClientService.listObjects(userId, s3ConfigId, normalizedPrefix);
         return { exists: keys.length > 0, count: keys.length };
-    }
-
-    /**
-     * Reduce a user-entered value (which may be a full S3 URL, a
-     * bucket-qualified path, or a bare object key) to an object key
-     * suitable for the S3 API.
-     */
-    private normalizeS3Key(input: string, bucket: string): string {
-        let key = input.trim();
-        if (/^https?:\/\//i.test(key)) {
-            try {
-                key = new URL(key).pathname;
-            } catch {
-                // leave as-is
-            }
-        }
-        key = key.replace(/^\/+/, '');
-        const bucketPrefix = bucket + '/';
-        if (key.startsWith(bucketPrefix)) {
-            key = key.slice(bucketPrefix.length);
-        }
-        return key;
-    }
-
-    /**
-     * Derive a friendly angle name from a master playlist filename.
-     * e.g. "prefix/main.m3u8" → "main", "prefix/audio_only.m3u8" → "audio only".
-     * Falls back to "Angle N" when the filename provides no signal.
-     */
-    private deriveAngleName(key: string, _folderPrefix: string, index: number): string {
-        const lastSlash = key.lastIndexOf('/');
-        const filename = lastSlash >= 0 ? key.slice(lastSlash + 1) : key;
-        const stem = filename.replace(/\.m3u8$/i, '');
-        if (!stem) return `Angle ${index + 1}`;
-        return stem.replace(/_/g, ' ');
     }
 
     private rewriteKey(key: string, oldPrefix: string, newPrefix: string): string {
