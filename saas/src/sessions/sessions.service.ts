@@ -8,7 +8,6 @@ import {
     OnModuleInit,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { normalizeS3Key, deriveAngleName } from '@luminary-media-converter/hls';
 import { DatabaseService } from '../database/database.service.js';
 import { S3ConfigsService } from '../s3-configs/s3-configs.service.js';
 import { HlsParserService } from './hls-parser.service.js';
@@ -271,95 +270,46 @@ export class SessionsService implements OnModuleInit {
         userId: string,
         dto: ImportSessionDto,
     ): Promise<SessionDocument> {
-        // Resolve S3 config (ownership check included)
+        // Resolve S3 config (ownership check included) and decrypt credentials
+        // so we can forward them inline to the API's stateless /api/hls/discover.
         const s3Config = await this.s3ConfigsService.getById(
             userId,
             dto.s3ConfigId,
         );
+        const { accessKey, secretKey } =
+            this.s3ConfigsService.decryptCredentials(s3Config);
 
-        // Accept either masterPlaylistKey or folderPrefix; also tolerate a full
-        // S3 URL pasted into either field. A value ending in .m3u8 is treated
-        // as a master playlist key, anything else as a folder prefix. In both
-        // cases we discover every top-level .m3u8 in the enclosing folder.
-        const rawInput = dto.masterPlaylistKey ?? dto.folderPrefix;
-        if (!rawInput) {
+        if (!dto.masterPlaylistKey && !dto.folderPrefix) {
             throw new BadRequestException(
                 'Either masterPlaylistKey or folderPrefix must be provided',
             );
         }
-        const normalized = normalizeS3Key(rawInput, s3Config.bucket);
 
-        let folderPrefix: string;
-        if (normalized.endsWith('.m3u8')) {
-            const lastSlash = normalized.lastIndexOf('/');
-            folderPrefix = lastSlash >= 0 ? normalized.slice(0, lastSlash + 1) : '';
-        } else {
-            folderPrefix = normalized.endsWith('/') ? normalized : normalized + '/';
-        }
-
-        const keys = await this.s3ClientService.listObjects(
-            userId,
-            dto.s3ConfigId,
-            folderPrefix,
+        // Delegate discovery to the Encoding API. Works identically for
+        // SaaS-initiated imports and for standalone API clients that hit
+        // /api/hls/discover directly with their own credentials.
+        const discovered = await this.hlsEditClient.discover(
+            {
+                endPoint: s3Config.endPoint,
+                port: s3Config.port,
+                useSSL: s3Config.useSSL,
+                bucket: s3Config.bucket,
+                region: s3Config.region,
+                accessKey,
+                secretKey,
+            },
+            {
+                ...(dto.masterPlaylistKey ? { masterPlaylistKey: dto.masterPlaylistKey } : {}),
+                ...(dto.folderPrefix ? { folderPrefix: dto.folderPrefix } : {}),
+            },
         );
 
-        const m3u8Keys = keys.filter((k) => k.endsWith('.m3u8')).sort();
-        if (m3u8Keys.length === 0) {
-            throw new BadRequestException(
-                'No HLS playlist found under the given prefix',
-            );
-        }
+        const masterPlaylistKey = discovered.masterPlaylistKey;
+        const folderPrefix = discovered.folderPrefix;
+        const anglePlaylists = discovered.anglePlaylists;
 
-        // Only master playlists are imported as angles — identified by
-        // presence of #EXT-X-STREAM-INF. Child rendition playlists are
-        // referenced from masters and must not be treated as angles.
-        const playlists: string[] = [];
-        for (const key of m3u8Keys) {
-            const buf = await this.s3ClientService.getObject(
-                userId,
-                dto.s3ConfigId,
-                key,
-            );
-            if (buf.toString('utf-8').includes('#EXT-X-STREAM-INF')) {
-                playlists.push(key);
-            }
-        }
-
-        if (playlists.length === 0) {
-            throw new BadRequestException(
-                'No HLS master playlist found under the given prefix',
-            );
-        }
-
-        // Prefer a file named master.m3u8 as the primary playlist
-        const primaryIdx = playlists.findIndex((k) =>
-            k === 'master.m3u8' || k.endsWith('/master.m3u8'),
-        );
-        if (primaryIdx > 0) {
-            const [primary] = playlists.splice(primaryIdx, 1);
-            playlists.unshift(primary);
-        }
-
-        const masterPlaylistKey = playlists[0];
-        const anglePlaylists: Array<{ name: string; key: string }> | undefined =
-            playlists.length > 1
-                ? playlists.map((key, i) => ({
-                      name: deriveAngleName(key, folderPrefix, i),
-                      key,
-                  }))
-                : undefined;
-
-        // Fetch and parse master playlist (used for validation + log metadata)
-        const playlistBuf = await this.s3ClientService.getObject(
-            userId,
-            dto.s3ConfigId,
-            masterPlaylistKey,
-        );
-        const playlistContent = playlistBuf.toString('utf-8');
-        const parsed =
-            this.hlsParserService.parseMasterPlaylist(playlistContent);
-
-        // List all files under the prefix
+        // List all files under the prefix — still a SaaS concern since we
+        // store the file list on the session document for history.
         const files = await this.s3ClientService.listObjects(
             userId,
             dto.s3ConfigId,
@@ -403,7 +353,7 @@ export class SessionsService implements OnModuleInit {
         await this.databaseService.insert(doc);
 
         this.logger.log(
-            `Session ${sessionId} imported for user ${userId} (${files.length} files, ${parsed.variants.length} variants)`,
+            `Session ${sessionId} imported for user ${userId} (${files.length} files, ${anglePlaylists?.length ?? 1} master playlist${anglePlaylists ? 's' : ''})`,
         );
 
         return doc;
