@@ -274,62 +274,79 @@ export class SessionsService implements OnModuleInit {
             dto.s3ConfigId,
         );
 
-        let masterPlaylistKey = dto.masterPlaylistKey;
-        let folderPrefix = dto.folderPrefix ?? '';
-
-        // If folderPrefix but no masterPlaylistKey: auto-discover master playlist
-        if (folderPrefix && !masterPlaylistKey) {
-            const keys = await this.s3ClientService.listObjects(
-                userId,
-                dto.s3ConfigId,
-                folderPrefix,
-            );
-
-            const m3u8Keys = keys.filter((k) => k.endsWith('.m3u8'));
-
-            // Prefer master.m3u8
-            masterPlaylistKey = m3u8Keys.find((k) =>
-                k.endsWith('master.m3u8'),
-            );
-
-            // If no master.m3u8, check each .m3u8 for #EXT-X-STREAM-INF
-            if (!masterPlaylistKey) {
-                for (const key of m3u8Keys) {
-                    const buf = await this.s3ClientService.getObject(
-                        userId,
-                        dto.s3ConfigId,
-                        key,
-                    );
-                    if (buf.toString('utf-8').includes('#EXT-X-STREAM-INF')) {
-                        masterPlaylistKey = key;
-                        break;
-                    }
-                }
-            }
-
-            if (!masterPlaylistKey) {
-                throw new BadRequestException(
-                    'No master playlist found under the given prefix',
-                );
-            }
-        }
-
-        if (!masterPlaylistKey) {
+        // Accept either masterPlaylistKey or folderPrefix; also tolerate a full
+        // S3 URL pasted into either field. A value ending in .m3u8 is treated
+        // as a master playlist key, anything else as a folder prefix. In both
+        // cases we discover every top-level .m3u8 in the enclosing folder.
+        const rawInput = dto.masterPlaylistKey ?? dto.folderPrefix;
+        if (!rawInput) {
             throw new BadRequestException(
                 'Either masterPlaylistKey or folderPrefix must be provided',
             );
         }
+        const normalized = this.normalizeS3Key(rawInput, s3Config.bucket);
 
-        // Derive folder prefix from master playlist key if not provided
-        if (!folderPrefix) {
-            const lastSlash = masterPlaylistKey.lastIndexOf('/');
-            folderPrefix =
-                lastSlash >= 0
-                    ? masterPlaylistKey.substring(0, lastSlash + 1)
-                    : '';
+        let folderPrefix: string;
+        if (normalized.endsWith('.m3u8')) {
+            const lastSlash = normalized.lastIndexOf('/');
+            folderPrefix = lastSlash >= 0 ? normalized.slice(0, lastSlash + 1) : '';
+        } else {
+            folderPrefix = normalized.endsWith('/') ? normalized : normalized + '/';
         }
 
-        // Fetch and parse master playlist
+        const keys = await this.s3ClientService.listObjects(
+            userId,
+            dto.s3ConfigId,
+            folderPrefix,
+        );
+
+        const m3u8Keys = keys.filter((k) => k.endsWith('.m3u8')).sort();
+        if (m3u8Keys.length === 0) {
+            throw new BadRequestException(
+                'No HLS playlist found under the given prefix',
+            );
+        }
+
+        // Only master playlists are imported as angles — identified by
+        // presence of #EXT-X-STREAM-INF. Child rendition playlists are
+        // referenced from masters and must not be treated as angles.
+        const playlists: string[] = [];
+        for (const key of m3u8Keys) {
+            const buf = await this.s3ClientService.getObject(
+                userId,
+                dto.s3ConfigId,
+                key,
+            );
+            if (buf.toString('utf-8').includes('#EXT-X-STREAM-INF')) {
+                playlists.push(key);
+            }
+        }
+
+        if (playlists.length === 0) {
+            throw new BadRequestException(
+                'No HLS master playlist found under the given prefix',
+            );
+        }
+
+        // Prefer a file named master.m3u8 as the primary playlist
+        const primaryIdx = playlists.findIndex((k) =>
+            k === 'master.m3u8' || k.endsWith('/master.m3u8'),
+        );
+        if (primaryIdx > 0) {
+            const [primary] = playlists.splice(primaryIdx, 1);
+            playlists.unshift(primary);
+        }
+
+        const masterPlaylistKey = playlists[0];
+        const anglePlaylists: Array<{ name: string; key: string }> | undefined =
+            playlists.length > 1
+                ? playlists.map((key, i) => ({
+                      name: this.deriveAngleName(key, folderPrefix, i),
+                      key,
+                  }))
+                : undefined;
+
+        // Fetch and parse master playlist (used for validation + log metadata)
         const playlistBuf = await this.s3ClientService.getObject(
             userId,
             dto.s3ConfigId,
@@ -345,15 +362,6 @@ export class SessionsService implements OnModuleInit {
             dto.s3ConfigId,
             folderPrefix,
         );
-
-        // Build angle playlists from variants
-        const anglePlaylists =
-            parsed.variants.length > 1
-                ? parsed.variants.map((v, i) => ({
-                      name: `Angle ${i + 1}`,
-                      key: folderPrefix + v.uri,
-                  }))
-                : undefined;
 
         const now = new Date().toISOString();
         const sessionId = randomUUID();
@@ -378,6 +386,7 @@ export class SessionsService implements OnModuleInit {
             s3ConfigId: dto.s3ConfigId,
             imported: true,
             encrypted: dto.encryptionKey ? true : undefined,
+            encryptionKeyHex: dto.encryptionKey ? dto.encryptionKey.toLowerCase() : undefined,
             createdAt: now,
             updatedAt: now,
             completedAt: now,
@@ -385,6 +394,7 @@ export class SessionsService implements OnModuleInit {
 
         // Remove undefined fields
         if (doc.encrypted === undefined) delete doc.encrypted;
+        if (doc.encryptionKeyHex === undefined) delete doc.encryptionKeyHex;
         if (!doc.anglePlaylists) delete doc.anglePlaylists;
 
         await this.databaseService.insert(doc);
@@ -649,9 +659,48 @@ export class SessionsService implements OnModuleInit {
         return { exists: keys.length > 0, count: keys.length };
     }
 
+    /**
+     * Reduce a user-entered value (which may be a full S3 URL, a
+     * bucket-qualified path, or a bare object key) to an object key
+     * suitable for the S3 API.
+     */
+    private normalizeS3Key(input: string, bucket: string): string {
+        let key = input.trim();
+        if (/^https?:\/\//i.test(key)) {
+            try {
+                key = new URL(key).pathname;
+            } catch {
+                // leave as-is
+            }
+        }
+        key = key.replace(/^\/+/, '');
+        const bucketPrefix = bucket + '/';
+        if (key.startsWith(bucketPrefix)) {
+            key = key.slice(bucketPrefix.length);
+        }
+        return key;
+    }
+
+    /**
+     * Derive a friendly angle name from a master playlist filename.
+     * e.g. "prefix/main.m3u8" → "main", "prefix/audio_only.m3u8" → "audio only".
+     * Falls back to "Angle N" when the filename provides no signal.
+     */
+    private deriveAngleName(key: string, _folderPrefix: string, index: number): string {
+        const lastSlash = key.lastIndexOf('/');
+        const filename = lastSlash >= 0 ? key.slice(lastSlash + 1) : key;
+        const stem = filename.replace(/\.m3u8$/i, '');
+        if (!stem) return `Angle ${index + 1}`;
+        return stem.replace(/_/g, ' ');
+    }
+
     private rewriteKey(key: string, oldPrefix: string, newPrefix: string): string {
-        if (oldPrefix && key.startsWith(oldPrefix)) {
-            return newPrefix + key.slice(oldPrefix.length);
+        // Stored pathPrefix may or may not carry a trailing slash (s3.service
+        // strips trailing slashes before uploading). Normalize to '/' so
+        // slicing leaves no leading '/' to concatenate with newPrefix.
+        const normalizedOld = oldPrefix && !oldPrefix.endsWith('/') ? oldPrefix + '/' : oldPrefix;
+        if (normalizedOld && key.startsWith(normalizedOld)) {
+            return newPrefix + key.slice(normalizedOld.length);
         }
         // If no old prefix or key doesn't match, prepend new prefix
         return newPrefix ? newPrefix + key : key;

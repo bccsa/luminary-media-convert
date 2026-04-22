@@ -966,25 +966,21 @@ describe('SessionsService', () => {
             expect(result.status).toBe('completed');
         });
 
-        it('should auto-discover master playlist by scanning m3u8 contents when no master.m3u8 exists', async () => {
-            // First call: listObjects for discovery
-            mockS3ClientService.listObjects
-                .mockResolvedValueOnce([
-                    'output/index.m3u8',
-                    'output/v0/media.m3u8',
-                    'output/v0/init.mp4',
-                ])
-                .mockResolvedValueOnce([
-                    'output/index.m3u8',
-                    'output/v0/media.m3u8',
-                    'output/v0/init.mp4',
-                ]);
-
-            // getObject calls: first for index.m3u8 scan (has STREAM-INF so it's master), then for fetching it as master
-            mockS3ClientService.getObject
-                .mockResolvedValueOnce(Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\nv0/media.m3u8'))
-                .mockResolvedValueOnce(Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\nv0/media.m3u8'));
-
+        it('should pick the first master playlist as primary when no master.m3u8 exists', async () => {
+            mockS3ClientService.listObjects.mockResolvedValue([
+                'output/index.m3u8',
+                'output/v0/media.m3u8',
+                'output/v0/init.mp4',
+            ]);
+            // index.m3u8 is a master; v0/media.m3u8 is a rendition (no STREAM-INF)
+            mockS3ClientService.getObject.mockImplementation(
+                async (_u: string, _c: string, key: string) => {
+                    if (key.endsWith('/index.m3u8') || key === 'index.m3u8') {
+                        return Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\nv0/media.m3u8');
+                    }
+                    return Buffer.from('#EXTM3U\n#EXTINF:6.0,\nseg0.ts');
+                },
+            );
             mockHlsParserService.parseMasterPlaylist.mockReturnValue({
                 variants: [{ uri: 'v0/media.m3u8', bandwidth: 500000 }],
             });
@@ -995,6 +991,7 @@ describe('SessionsService', () => {
             });
 
             expect(result.masterPlaylist).toBe('output/index.m3u8');
+            expect(result.anglePlaylists).toBeUndefined();
         });
 
         it('should throw BadRequestException when neither masterPlaylistKey nor folderPrefix is provided', async () => {
@@ -1011,8 +1008,7 @@ describe('SessionsService', () => {
             ).rejects.toThrow('Either masterPlaylistKey or folderPrefix must be provided');
         });
 
-        it('should throw BadRequestException when no master playlist is found under prefix', async () => {
-            // No .m3u8 files in listing
+        it('should throw BadRequestException when no .m3u8 files exist under prefix', async () => {
             mockS3ClientService.listObjects.mockResolvedValueOnce([
                 'output/video.mp4',
                 'output/audio.aac',
@@ -1023,31 +1019,37 @@ describe('SessionsService', () => {
                     s3ConfigId: 'cfg-1',
                     folderPrefix: 'output/',
                 }),
-            ).rejects.toThrow('No master playlist found under the given prefix');
+            ).rejects.toThrow('No HLS playlist found under the given prefix');
         });
 
-        it('should throw BadRequestException when m3u8 files exist but none is a master playlist', async () => {
+        it('should throw when the only .m3u8 files are rendition playlists (no masters)', async () => {
             mockS3ClientService.listObjects.mockResolvedValueOnce([
                 'output/v0/media.m3u8',
                 'output/v1/media.m3u8',
             ]);
-
-            // Neither has #EXT-X-STREAM-INF
-            mockS3ClientService.getObject
-                .mockResolvedValueOnce(Buffer.from('#EXTM3U\n#EXTINF:6.0,\nseg0.ts'))
-                .mockResolvedValueOnce(Buffer.from('#EXTM3U\n#EXTINF:6.0,\nseg0.ts'));
+            // Rendition playlists — no STREAM-INF
+            mockS3ClientService.getObject.mockResolvedValue(
+                Buffer.from('#EXTM3U\n#EXTINF:6.0,\nseg0.ts'),
+            );
 
             await expect(
                 service.importSession('user:1', {
                     s3ConfigId: 'cfg-1',
                     folderPrefix: 'output/',
                 }),
-            ).rejects.toThrow('No master playlist found under the given prefix');
+            ).rejects.toThrow('No HLS master playlist found under the given prefix');
         });
 
-        it('should create angle playlists when multiple variants exist', async () => {
-            mockS3ClientService.getObject.mockResolvedValue(
-                Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2000000\nv1/playlist.m3u8'),
+        it('should not create angle playlists from ABR variants within a single master', async () => {
+            // Multiple variants in one master represent quality renditions,
+            // not angles — no anglePlaylists should be produced.
+            mockS3ClientService.getObject.mockImplementation(
+                async (_u: string, _c: string, key: string) => {
+                    if (key.endsWith('/master.m3u8') || key === 'master.m3u8') {
+                        return Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2000000\nv1/playlist.m3u8');
+                    }
+                    return Buffer.from('#EXTM3U\n#EXTINF:6.0,\nseg0.ts');
+                },
             );
             mockS3ClientService.listObjects.mockResolvedValue([
                 'output/master.m3u8',
@@ -1066,15 +1068,105 @@ describe('SessionsService', () => {
                 masterPlaylistKey: 'output/master.m3u8',
             });
 
+            expect(result.anglePlaylists).toBeUndefined();
+        });
+
+        it('should treat each master playlist under a prefix as a separate angle', async () => {
+            // Listing: three masters with meaningful filenames
+            mockS3ClientService.listObjects
+                .mockResolvedValueOnce([
+                    'output/audio_only.m3u8',
+                    'output/main.m3u8',
+                    'output/pulpit.m3u8',
+                ])
+                .mockResolvedValueOnce([
+                    'output/audio_only.m3u8',
+                    'output/main.m3u8',
+                    'output/pulpit.m3u8',
+                ]);
+
+            mockS3ClientService.getObject.mockResolvedValue(
+                Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8'),
+            );
+            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
+                variants: [{ uri: 'v0/playlist.m3u8', bandwidth: 1000000 }],
+            });
+
+            const result = await service.importSession('user:1', {
+                s3ConfigId: 'cfg-1',
+                folderPrefix: 'output/',
+            });
+
+            // Sorted alphabetically: audio_only, main, pulpit
+            expect(result.masterPlaylist).toBe('output/audio_only.m3u8');
             expect(result.anglePlaylists).toEqual([
-                { name: 'Angle 1', key: 'output/v0/playlist.m3u8' },
-                { name: 'Angle 2', key: 'output/v1/playlist.m3u8' },
+                { name: 'audio only', key: 'output/audio_only.m3u8' },
+                { name: 'main', key: 'output/main.m3u8' },
+                { name: 'pulpit', key: 'output/pulpit.m3u8' },
             ]);
         });
 
-        it('should not create angle playlists for single variant', async () => {
+        it('should promote a top-level master.m3u8 as the primary when multiple masters exist', async () => {
+            mockS3ClientService.listObjects
+                .mockResolvedValueOnce([
+                    'output/alt.m3u8',
+                    'output/master.m3u8',
+                ])
+                .mockResolvedValueOnce([
+                    'output/alt.m3u8',
+                    'output/master.m3u8',
+                ]);
+
             mockS3ClientService.getObject.mockResolvedValue(
                 Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8'),
+            );
+            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
+                variants: [{ uri: 'v0/playlist.m3u8', bandwidth: 1000000 }],
+            });
+
+            const result = await service.importSession('user:1', {
+                s3ConfigId: 'cfg-1',
+                folderPrefix: 'output/',
+            });
+
+            expect(result.masterPlaylist).toBe('output/master.m3u8');
+            expect(result.anglePlaylists?.[0]).toEqual({ name: 'master', key: 'output/master.m3u8' });
+            expect(result.anglePlaylists?.map((a) => a.key)).toContain('output/alt.m3u8');
+        });
+
+        it('should normalize a full S3 URL pasted as masterPlaylistKey to an object key', async () => {
+            mockS3ClientService.getObject.mockResolvedValue(
+                Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8'),
+            );
+            mockS3ClientService.listObjects.mockResolvedValue([
+                'test1234567/main.m3u8',
+                'test1234567/v0/playlist.m3u8',
+            ]);
+            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
+                variants: [{ uri: 'v0/playlist.m3u8', bandwidth: 1000000 }],
+            });
+
+            // Simulate user pasting the full URL from their S3 console
+            const result = await service.importSession('user:1', {
+                s3ConfigId: 'cfg-1',
+                masterPlaylistKey: 'http://localhost:9000/media/test1234567/main.m3u8',
+            });
+
+            // Should strip scheme, host, and bucket → key is "test1234567/main.m3u8"
+            expect(mockS3ClientService.getObject).toHaveBeenCalledWith(
+                'user:1', 'cfg-1', 'test1234567/main.m3u8',
+            );
+            expect(result.masterPlaylist).toBe('test1234567/main.m3u8');
+        });
+
+        it('should not create angle playlists for single variant', async () => {
+            mockS3ClientService.getObject.mockImplementation(
+                async (_u: string, _c: string, key: string) => {
+                    if (key.endsWith('/master.m3u8') || key === 'master.m3u8') {
+                        return Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8');
+                    }
+                    return Buffer.from('#EXTM3U\n#EXTINF:6.0,\nseg0.ts');
+                },
             );
             mockS3ClientService.listObjects.mockResolvedValue([
                 'output/master.m3u8',
@@ -1108,6 +1200,7 @@ describe('SessionsService', () => {
             });
 
             expect(result.encrypted).toBe(true);
+            expect(result.encryptionKeyHex).toBe('aabbccdd11223344aabbccdd11223344');
         });
 
         it('should omit encrypted flag when encryptionKey is not provided', async () => {
@@ -1233,6 +1326,30 @@ describe('SessionsService', () => {
                 service.moveSessionFiles('user:1', 'sess-move', { targetS3ConfigId: 'cfg-dest', newPathPrefix: 'dest/' }),
             ).rejects.toThrow('Session has no files or S3 config');
         });
+
+        it('should not produce double slash when stored pathPrefix has no trailing slash', async () => {
+            // s3.service strips trailing slashes before upload, so the stored
+            // pathPrefix may be "prefix" while the keys are "prefix/..."
+            mockDatabaseService.get.mockResolvedValue({
+                ...completedDoc,
+                s3Config: { endPoint: 'minio', bucket: 'src-bucket', pathPrefix: 'prefix' },
+            });
+            mockS3ConfigsService.getById.mockResolvedValue(targetConfig);
+
+            const result = await service.moveSessionFiles('user:1', 'sess-move', {
+                targetS3ConfigId: 'cfg-dest',
+                newPathPrefix: 'new/',
+            });
+
+            expect(mockS3ClientService.transferObject).toHaveBeenCalledWith(
+                'user:1', 'cfg-src', 'prefix/master.m3u8', 'cfg-dest', 'new/master.m3u8',
+            );
+            expect(mockS3ClientService.transferObject).toHaveBeenCalledWith(
+                'user:1', 'cfg-src', 'prefix/v0/seg0.m4s', 'cfg-dest', 'new/v0/seg0.m4s',
+            );
+            expect(result.files).toEqual(['new/master.m3u8', 'new/v0/seg0.m4s']);
+            expect(result.masterPlaylist).toBe('new/master.m3u8');
+        });
     });
 
     describe('renameSessionPrefix', () => {
@@ -1329,6 +1446,26 @@ describe('SessionsService', () => {
             await expect(
                 service.renameSessionPrefix('user:1', 'sess-rename', { newPathPrefix: 'new/' }),
             ).rejects.toThrow('Session has no files or S3 config');
+        });
+
+        it('should not produce double slash when stored pathPrefix has no trailing slash', async () => {
+            mockDatabaseService.get.mockResolvedValue({
+                ...makeRenameDoc(),
+                s3Config: { endPoint: 'minio', bucket: 'bucket', pathPrefix: 'old' },
+            });
+
+            const result = await service.renameSessionPrefix('user:1', 'sess-rename', {
+                newPathPrefix: 'new/',
+            });
+
+            expect(mockS3ClientService.copyObjectSameBucket).toHaveBeenCalledWith(
+                'user:1', 'cfg-1', 'old/master.m3u8', 'new/master.m3u8',
+            );
+            expect(mockS3ClientService.copyObjectSameBucket).toHaveBeenCalledWith(
+                'user:1', 'cfg-1', 'old/v0/seg0.m4s', 'new/v0/seg0.m4s',
+            );
+            expect(result.files).toEqual(['new/master.m3u8', 'new/v0/seg0.m4s']);
+            expect(result.masterPlaylist).toBe('new/master.m3u8');
         });
 
         it('should prepend new prefix when old prefix is empty', async () => {
