@@ -3,11 +3,13 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { EncodeModule } from './encode/encode.module.js';
 import { AuthModule } from './auth/auth.module.js';
+import { HlsEditModule } from './hls-edit/hls-edit.module.js';
 
 @Module({
     imports: [
         AuthModule,
         EncodeModule,
+        HlsEditModule,
         ThrottlerModule.forRoot({
             throttlers: [
                 { name: 'short', ttl: 1000, limit: 100 },

@@ -185,10 +185,10 @@ describe('PreviewService', () => {
             expect(service.isReady('s1')).toBe(false);
         });
 
-        it('should return early when no video tracks exist', async () => {
+        it('should return early when no video and no audio tracks exist', async () => {
             sessionService = makeSessionService({
                 filePath: '/tmp/video.mp4',
-                probeResult: makeProbe({ videoTracks: [] }),
+                probeResult: makeProbe({ videoTracks: [], audioTracks: [] }),
             });
             service = new PreviewService(sessionService, makeFfmpegService());
 
