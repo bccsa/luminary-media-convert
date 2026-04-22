@@ -33,9 +33,29 @@ const audioPosterUrl = `data:image/svg+xml,${encodeURIComponent(
     '</g></svg>',
 )}`;
 
+// Initial hint from props; refined at runtime via loadedmetadata.
+const detectedAudioOnly = ref(false);
 const audioOnly = computed(
-    () => props.isAudioOnly || props.encodingType === 'audio',
+    () => detectedAudioOnly.value || props.isAudioOnly || props.encodingType === 'audio',
 );
+
+function applyAudioOnlyPoster() {
+    if (!player) return;
+    if (audioOnly.value) {
+        player.poster(audioPosterUrl);
+    } else {
+        player.poster('');
+    }
+}
+
+function detectAudioOnlyFromPlayer() {
+    if (!player) return;
+    // Any loaded rendition with no video track → audio-only playlist
+    const vw = player.videoWidth();
+    const vh = player.videoHeight();
+    detectedAudioOnly.value = vw === 0 && vh === 0;
+    applyAudioOnlyPoster();
+}
 
 function revokeAllBlobs() {
     for (const url of blobUrls) URL.revokeObjectURL(url);
@@ -203,15 +223,14 @@ async function initPlayer() {
         try { (player as any).audioOnlyMode(false); } catch {}
         player.fluid(true);
 
-        if (audioOnly.value) {
-            player.poster(audioPosterUrl);
-        } else {
-            player.poster('');
-        }
+        // Reset detection; will be re-evaluated on loadedmetadata for the new source
+        detectedAudioOnly.value = false;
+        applyAudioOnlyPoster();
 
         const wasPaused = player.paused();
 
         player.src({ src: effectiveUrl, type: 'application/x-mpegURL' });
+        player.one('loadedmetadata', detectAudioOnlyFromPlayer);
 
         // Initialize thumbnail preview if now available (e.g. after switching to S3 playback)
         if (props.thumbnailVttUrl) {
@@ -241,6 +260,7 @@ async function initPlayer() {
         });
 
         player.src({ src: effectiveUrl, type: 'application/x-mpegURL' });
+        player.on('loadedmetadata', detectAudioOnlyFromPlayer);
 
         player.ready(() => {
             try {
