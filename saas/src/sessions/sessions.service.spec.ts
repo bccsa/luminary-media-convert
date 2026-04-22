@@ -27,6 +27,12 @@ const mockS3ClientService = {
     transferObject: vi.fn().mockResolvedValue(undefined),
 };
 
+const mockHlsEditClient = {
+    read: vi.fn(),
+    mutate: vi.fn(),
+    discover: vi.fn(),
+};
+
 describe('SessionsService', () => {
     let service: SessionsService;
 
@@ -42,6 +48,7 @@ describe('SessionsService', () => {
             mockS3ConfigsService as any,
             mockHlsParserService as any,
             mockS3ClientService as any,
+            mockHlsEditClient as any,
         );
         service.onModuleInit();
 
@@ -177,6 +184,7 @@ describe('SessionsService', () => {
                 mockS3ConfigsService as any,
                 mockHlsParserService as any,
                 mockS3ClientService as any,
+                mockHlsEditClient as any,
             );
             // Should not throw
             warnService.onModuleInit();
@@ -515,6 +523,7 @@ describe('SessionsService', () => {
                 mockS3ConfigsService as any,
                 mockHlsParserService as any,
                 mockS3ClientService as any,
+                mockHlsEditClient as any,
             );
             svc.onModuleInit();
 
@@ -539,6 +548,7 @@ describe('SessionsService', () => {
                 mockS3ConfigsService as any,
                 mockHlsParserService as any,
                 mockS3ClientService as any,
+                mockHlsEditClient as any,
             );
             svc.onModuleInit();
 
@@ -1349,6 +1359,126 @@ describe('SessionsService', () => {
             );
             expect(result.files).toEqual(['new/master.m3u8', 'new/v0/seg0.m4s']);
             expect(result.masterPlaylist).toBe('new/master.m3u8');
+        });
+    });
+
+    describe('hlsRead / hlsMutate', () => {
+        const baseDoc = {
+            _id: 'session:sess-hls',
+            _rev: '1-abc',
+            docType: 'session' as const,
+            userId: 'user:1',
+            sessionId: 'sess-hls',
+            status: 'completed',
+            files: ['out/master.m3u8'],
+            masterPlaylist: 'out/master.m3u8',
+            s3Config: { endPoint: 'minio', bucket: 'media', pathPrefix: 'out/' },
+            s3ConfigId: 'cfg-1',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+        };
+
+        beforeEach(() => {
+            mockS3ConfigsService.getById.mockResolvedValue({
+                endPoint: 'minio', port: 9000, useSSL: false, bucket: 'media',
+                accessKey: 'enc', secretKey: 'enc',
+            });
+            mockS3ConfigsService.decryptCredentials.mockReturnValue({
+                accessKey: 'plain-key', secretKey: 'plain-secret',
+            });
+        });
+
+        it('hlsRead forwards the resolved S3 config to the client and returns its result', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            mockHlsEditClient.read.mockResolvedValue({
+                master: { variants: [], media: [], audioGroups: [] },
+                etag: 'etag-1',
+                folderPrefix: 'out/',
+                masterPlaylistKey: 'out/master.m3u8',
+            });
+
+            const result = await service.hlsRead('user:1', 'sess-hls');
+
+            expect(mockHlsEditClient.read).toHaveBeenCalledWith(
+                expect.objectContaining({ bucket: 'media', accessKey: 'plain-key', secretKey: 'plain-secret' }),
+                'out/master.m3u8',
+            );
+            expect(result.etag).toBe('etag-1');
+        });
+
+        it('hlsRead rejects when the session is not owned by the user', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            await expect(service.hlsRead('user:other', 'sess-hls'))
+                .rejects.toThrow(ForbiddenException);
+        });
+
+        it('hlsRead rejects when the session has no master playlist', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc, masterPlaylist: undefined });
+            await expect(service.hlsRead('user:1', 'sess-hls'))
+                .rejects.toThrow(BadRequestException);
+        });
+
+        it('hlsMutate calls the client, increments editVersion, reconciles subtitles, and upserts the doc', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc, editVersion: 2 });
+            mockHlsEditClient.mutate.mockResolvedValue({
+                master: {
+                    variants: [],
+                    media: [
+                        { type: 'SUBTITLES', groupId: 'subs', name: 'English', language: 'en', uri: 'subtitles/en.vtt', default: true },
+                    ],
+                    audioGroups: [],
+                },
+                etag: 'etag-2',
+                writtenKeys: ['out/subtitles/en.vtt', 'out/master.m3u8'],
+            });
+
+            const result = await service.hlsMutate(
+                'user:1', 'sess-hls', 'etag-1',
+                [{ type: 'upsertSubtitle', language: 'en', name: 'English', vttBase64: 'V0VCVlRU' }],
+            );
+
+            expect(mockHlsEditClient.mutate).toHaveBeenCalledWith(
+                expect.objectContaining({ bucket: 'media' }),
+                'out/master.m3u8',
+                'etag-1',
+                expect.any(Array),
+            );
+            expect(result.editVersion).toBe(3);
+            expect(result.subtitles).toEqual([
+                expect.objectContaining({
+                    language: 'en',
+                    name: 'English',
+                    key: 'out/subtitles/en.vtt',
+                    default: true,
+                }),
+            ]);
+            expect(mockDatabaseService.upsert).toHaveBeenCalled();
+        });
+
+        it('hlsMutate removes subtitles from the doc when the master has none', async () => {
+            mockDatabaseService.get.mockResolvedValue({
+                ...baseDoc,
+                subtitles: [{ language: 'en', name: 'English', key: 'out/subtitles/en.vtt', updatedAt: '…' }],
+            });
+            mockHlsEditClient.mutate.mockResolvedValue({
+                master: { variants: [], media: [], audioGroups: [] },
+                etag: 'etag-2',
+                writtenKeys: ['out/master.m3u8'],
+            });
+
+            const result = await service.hlsMutate('user:1', 'sess-hls', 'etag-1', []);
+            expect(result.subtitles).toBeUndefined();
+        });
+
+        it('hlsMutate propagates ConflictException from the client', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            mockHlsEditClient.mutate.mockRejectedValue(
+                new (await import('@nestjs/common')).ConflictException({ code: 'ETAG_MISMATCH' }),
+            );
+
+            await expect(
+                service.hlsMutate('user:1', 'sess-hls', 'stale', []),
+            ).rejects.toBeInstanceOf((await import('@nestjs/common')).ConflictException);
         });
     });
 

@@ -12,6 +12,7 @@ import { normalizeS3Key, deriveAngleName } from '@luminary-media-converter/hls';
 import { DatabaseService } from '../database/database.service.js';
 import { S3ConfigsService } from '../s3-configs/s3-configs.service.js';
 import { HlsParserService } from './hls-parser.service.js';
+import { HlsEditClient, type HlsMutateOperation } from './hls-edit.client.js';
 import { S3ClientService } from './s3-client.service.js';
 import { CreateSaasSessionDto } from './dto/create-session.dto.js';
 import { ImportSessionDto } from './dto/import-session.dto.js';
@@ -49,6 +50,7 @@ export class SessionsService implements OnModuleInit {
         private readonly s3ConfigsService: S3ConfigsService,
         private readonly hlsParserService: HlsParserService,
         private readonly s3ClientService: S3ClientService,
+        private readonly hlsEditClient: HlsEditClient,
     ) {}
 
     onModuleInit() {
@@ -516,6 +518,96 @@ export class SessionsService implements OnModuleInit {
     async getSessionAdmin(sessionId: string): Promise<Partial<SessionDocument>> {
         const doc = await this.getSessionDoc(sessionId);
         return this.stripSensitiveFields(doc);
+    }
+
+    // -----------------------------------------------------------------------
+    // HLS sidecar edits (proxy to Encoding API, mirror results into CouchDB)
+    // -----------------------------------------------------------------------
+
+    async hlsRead(userId: string, sessionId: string) {
+        const { doc, s3Payload } = await this.resolveForHlsEdit(userId, sessionId);
+        if (!doc.masterPlaylist) {
+            throw new BadRequestException('Session has no master playlist');
+        }
+        return this.hlsEditClient.read(s3Payload, doc.masterPlaylist);
+    }
+
+    async hlsMutate(
+        userId: string,
+        sessionId: string,
+        ifMatch: string,
+        operations: HlsMutateOperation[],
+    ): Promise<SessionDocument> {
+        const { doc, s3Payload } = await this.resolveForHlsEdit(userId, sessionId);
+        if (!doc.masterPlaylist) {
+            throw new BadRequestException('Session has no master playlist');
+        }
+
+        const result = await this.hlsEditClient.mutate(
+            s3Payload,
+            doc.masterPlaylist,
+            ifMatch,
+            operations,
+        );
+
+        // Reconcile CouchDB from the post-mutation parsed master.
+        // master.m3u8 on S3 remains the source of truth; we just mirror it.
+        const now = new Date().toISOString();
+        const subtitleMedia = result.master.media.filter((m) => m.type === 'SUBTITLES');
+        if (subtitleMedia.length > 0) {
+            doc.subtitles = subtitleMedia.map((m) => ({
+                language: m.language ?? '',
+                name: m.name,
+                key: m.uri ? this.joinRelative(doc.masterPlaylist!, m.uri) : '',
+                ...(m.default ? { default: true } : {}),
+                ...(m.forced ? { forced: true } : {}),
+                updatedAt: now,
+            }));
+        } else if (doc.subtitles) {
+            delete doc.subtitles;
+        }
+
+        doc.editVersion = (doc.editVersion ?? 0) + 1;
+        doc.updatedAt = now;
+        await this.databaseService.upsert(doc);
+
+        return doc;
+    }
+
+    private async resolveForHlsEdit(
+        userId: string,
+        sessionId: string,
+    ): Promise<{ doc: SessionDocument; s3Payload: Parameters<HlsEditClient['read']>[0] }> {
+        const doc = await this.getSessionDoc(sessionId);
+        if (doc.userId !== userId) {
+            throw new ForbiddenException('Not authorized to modify this session');
+        }
+        if (!doc.s3ConfigId) {
+            throw new BadRequestException('Session is not linked to an S3 config');
+        }
+
+        const s3Config = await this.s3ConfigsService.getById(userId, doc.s3ConfigId);
+        const { accessKey, secretKey } = this.s3ConfigsService.decryptCredentials(s3Config);
+
+        const s3Payload = {
+            endPoint: s3Config.endPoint,
+            port: s3Config.port,
+            useSSL: s3Config.useSSL,
+            bucket: s3Config.bucket,
+            region: s3Config.region,
+            accessKey,
+            secretKey,
+        };
+
+        return { doc, s3Payload };
+    }
+
+    /** Join a relative playlist URI against the master's folder. */
+    private joinRelative(masterKey: string, uri: string): string {
+        if (uri.startsWith('/') || /^https?:\/\//i.test(uri)) return uri;
+        const lastSlash = masterKey.lastIndexOf('/');
+        const folder = lastSlash >= 0 ? masterKey.slice(0, lastSlash + 1) : '';
+        return folder + uri;
     }
 
     async moveSessionFiles(

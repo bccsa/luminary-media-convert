@@ -92,6 +92,32 @@ export class SessionsController {
         return this.sessionsService.moveSessionFiles(req.user._id, sessionId, dto);
     }
 
+    @Post(':sessionId/hls/read')
+    @SkipAdmin()
+    @HttpCode(HttpStatus.OK)
+    async hlsRead(
+        @Param('sessionId') sessionId: string,
+        @Req() req: { user: { _id: string } },
+    ) {
+        return this.sessionsService.hlsRead(req.user._id, sessionId);
+    }
+
+    @Post(':sessionId/hls/mutate')
+    @SkipAdmin()
+    @HttpCode(HttpStatus.OK)
+    async hlsMutate(
+        @Param('sessionId') sessionId: string,
+        @Body() body: { ifMatch: string; operations: Array<{ type: string } & Record<string, unknown>> },
+        @Req() req: { user: { _id: string } },
+    ) {
+        return this.sessionsService.hlsMutate(
+            req.user._id,
+            sessionId,
+            body.ifMatch,
+            body.operations ?? [],
+        );
+    }
+
     @Post(':sessionId/rename-prefix')
     @SkipAdmin()
     async renamePrefix(
