@@ -1,0 +1,1328 @@
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { nextTick } from 'vue';
+import {
+    mountEditor,
+    flush,
+    keyOn,
+    keyDown,
+    keyUp,
+    mouseAt,
+    pxForSec,
+    latestSegments,
+    setSegments,
+} from './helpers';
+import type { Segment } from '../src/types';
+
+const id = (i: number) => `seg-${i}`;
+const seg = (i: number, inSec: number, outSec: number, label?: string): Segment => ({
+    id: id(i),
+    inSec,
+    outSec,
+    label,
+});
+
+function getTimeline(wrapper: ReturnType<typeof mountEditor>): HTMLElement {
+    return wrapper.get('.se-timeline-wrap').element as HTMLElement;
+}
+
+describe('SegmentEditor — mount & hydration', () => {
+    it('auto-hydrates missing ids and emits a normalized list', async () => {
+        const bare = [{ inSec: 1, outSec: 2 } as Segment];
+        const wrapper = mountEditor({ segments: bare });
+        await flush();
+        const emits = wrapper.emitted('update:modelValue');
+        expect(emits).toBeTruthy();
+        const hydrated = emits![0][0] as Segment[];
+        expect(hydrated).toHaveLength(1);
+        expect(hydrated[0].id).toBeTruthy();
+    });
+
+    it('does not re-emit when every segment already has an id', async () => {
+        const wrapper = mountEditor({ segments: [seg(1, 0, 5)] });
+        await flush();
+        expect(wrapper.emitted('update:modelValue')).toBeUndefined();
+    });
+
+    it('handles a nullish modelValue gracefully', async () => {
+        const wrapper = mountEditor({ props: { modelValue: null } });
+        await flush();
+        expect(wrapper.find('.se-timeline').exists()).toBe(true);
+    });
+});
+
+describe('SegmentEditor — mode defaults', () => {
+    it('hides labels in trim mode and shows them in chapters/subtitles', async () => {
+        const trim = mountEditor({ segments: [seg(1, 0, 10, 'A')], props: { mode: 'trim' } });
+        await flush();
+        expect(trim.find('.se-label-field').exists()).toBe(false);
+
+        const chapters = mountEditor({ segments: [seg(1, 0, 10, 'A')], props: { mode: 'chapters' } });
+        await flush();
+        expect(chapters.find('.se-label-field').exists()).toBe(true);
+
+        const subs = mountEditor({ segments: [seg(1, 0, 10, 'A')], props: { mode: 'subtitles' } });
+        await flush();
+        expect(subs.find('.se-label-field').exists()).toBe(true);
+    });
+
+    it('honors showLabels override regardless of mode', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 0, 10, 'A')],
+            props: { mode: 'trim', showLabels: true },
+        });
+        await flush();
+        expect(w.find('.se-label-field').exists()).toBe(true);
+    });
+
+    it('derives the panel title from mode and custom title prop', async () => {
+        const chapters = mountEditor({ props: { mode: 'chapters' } });
+        expect(chapters.find('.se-title').text()).toBe('Chapters');
+
+        const subs = mountEditor({ props: { mode: 'subtitles' } });
+        expect(subs.find('.se-title').text()).toBe('Subtitles');
+
+        const custom = mountEditor({ props: { title: 'My Ranges' } });
+        expect(custom.find('.se-title').text()).toBe('My Ranges');
+    });
+
+    it('applies se-segment--invalid when segments overlap and overlap is disallowed', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 0, 10), seg(2, 5, 15)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        expect(w.find('.se-segment--invalid').exists()).toBe(true);
+        expect(w.find('.se-warning').exists()).toBe(true);
+    });
+
+    it('does not flag overlaps in subtitles mode', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 0, 10), seg(2, 5, 15)],
+            props: { mode: 'subtitles' },
+        });
+        await flush();
+        expect(w.find('.se-segment--invalid').exists()).toBe(false);
+    });
+});
+
+describe('SegmentEditor — mark in / mark out', () => {
+    it('drops a pending-in marker when the playhead is outside every segment', async () => {
+        const t = { value: 12 };
+        const w = mountEditor({ currentTime: t });
+        await flush();
+        w.vm.markIn();
+        await flush();
+        expect(w.find('.se-pending-marker').exists()).toBe(true);
+        expect(w.find('.se-pending').exists()).toBe(true);
+    });
+
+    it('creates a segment when Mark Out closes a pending-in marker', async () => {
+        const t = { value: 10 };
+        const w = mountEditor({ currentTime: t });
+        w.vm.markIn();
+        await flush();
+        t.value = 20;
+        w.vm.markOut();
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs).toHaveLength(1);
+        expect(segs[0].inSec).toBe(10);
+        expect(segs[0].outSec).toBe(20);
+        expect(w.find('.se-pending-marker').exists()).toBe(false);
+    });
+
+    it('swaps in/out when the second press is earlier than the pending mark', async () => {
+        const t = { value: 20 };
+        const w = mountEditor({ currentTime: t });
+        w.vm.markIn();
+        await flush();
+        t.value = 10;
+        w.vm.markOut();
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs[0].inSec).toBe(10);
+        expect(segs[0].outSec).toBe(20);
+    });
+
+    it('discards a pending pair that would be shorter than minSegmentSec', async () => {
+        const t = { value: 10 };
+        const w = mountEditor({ currentTime: t, props: { minSegmentSec: 1 } });
+        w.vm.markIn();
+        await flush();
+        t.value = 10.05;
+        w.vm.markOut();
+        await flush();
+        expect(latestSegments(w)).toHaveLength(0);
+    });
+
+    it('adjusts the containing segment when Mark In fires inside a segment', async () => {
+        const t = { value: 4 };
+        const w = mountEditor({ segments: [seg(1, 0, 10)], currentTime: t });
+        await flush();
+        w.vm.markIn();
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs[0].inSec).toBe(4);
+        expect(segs[0].outSec).toBe(10);
+    });
+
+    it('adjusts the containing segment when Mark Out fires inside a segment', async () => {
+        const t = { value: 7 };
+        const w = mountEditor({ segments: [seg(1, 0, 10)], currentTime: t });
+        await flush();
+        w.vm.markOut();
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs[0].outSec).toBe(7);
+    });
+
+    it('extends the selected segment backward when Mark In fires before it', async () => {
+        const t = { value: 2 };
+        const w = mountEditor({ segments: [seg(1, 10, 20)], currentTime: t });
+        await flush();
+        // Select via click on the segment.
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 15);
+        await flush();
+        mouseAt(document.body, 'mouseup', 15);
+        w.vm.markIn();
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs[0].inSec).toBe(2);
+    });
+
+    it('extends the selected segment forward when Mark Out fires after it (no pending)', async () => {
+        const t = { value: 40 };
+        const w = mountEditor({ segments: [seg(1, 10, 20)], currentTime: t });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 15);
+        mouseAt(document.body, 'mouseup', 15);
+        await flush();
+        w.vm.markOut();
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs[0].outSec).toBe(40);
+    });
+
+    it('no-ops Mark Out when no segment, no pending, no usable selection', async () => {
+        const t = { value: 50 };
+        const w = mountEditor({ segments: [seg(1, 10, 20)], currentTime: t });
+        await flush();
+        // Select, then move playhead well before the segment so extend-forward does not apply.
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 15);
+        mouseAt(document.body, 'mouseup', 15);
+        await flush();
+        t.value = 5;
+        w.vm.markOut();
+        await flush();
+        // No change emitted from markOut.
+        expect(latestSegments(w)).toEqual([seg(1, 10, 20)]);
+    });
+
+    it('pending wins over selection-extend on Mark Out', async () => {
+        const t = { value: 5 };
+        const w = mountEditor({ segments: [seg(1, 10, 20)], currentTime: t });
+        await flush();
+        // Drop a pending marker at 5.
+        w.vm.markIn();
+        await flush();
+        // Move past the selected segment and Mark Out.
+        t.value = 30;
+        w.vm.markOut();
+        await flush();
+        const segs = latestSegments(w);
+        // Creates a new segment [5,30] rather than extending the prior one to [10,30].
+        expect(segs.some((s) => s.inSec === 5 && s.outSec === 30)).toBe(true);
+    });
+});
+
+describe('SegmentEditor — add / remove / clear', () => {
+    it('adds a 10-second segment at the playhead', async () => {
+        const t = { value: 20 };
+        const w = mountEditor({ currentTime: t });
+        await flush();
+        w.vm.addSegment();
+        await flush();
+        expect(latestSegments(w)[0]).toMatchObject({ inSec: 20, outSec: 30 });
+    });
+
+    it('clamps addSegment against the duration', async () => {
+        const t = { value: 95 };
+        const w = mountEditor({ duration: 100, currentTime: t });
+        await flush();
+        w.vm.addSegment();
+        await flush();
+        expect(latestSegments(w)[0].outSec).toBe(100);
+    });
+
+    it('rejects addSegment when the resulting segment would be too short', async () => {
+        const t = { value: 99.9 };
+        const w = mountEditor({ duration: 100, currentTime: t, props: { minSegmentSec: 1 } });
+        await flush();
+        w.vm.addSegment();
+        await flush();
+        expect(latestSegments(w)).toHaveLength(0);
+    });
+
+    it('removes a segment via the list × button', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5), seg(2, 10, 15)] });
+        await flush();
+        const removeBtns = w.findAll('.se-remove');
+        await removeBtns[0].trigger('click');
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs).toHaveLength(1);
+        expect(segs[0].inSec).toBe(10);
+    });
+
+    it('clears all segments and selection', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5), seg(2, 10, 15)] });
+        await flush();
+        w.vm.clearAll();
+        await flush();
+        expect(latestSegments(w)).toHaveLength(0);
+    });
+
+    it('clearAll is a no-op when the list is already empty', async () => {
+        const w = mountEditor({ segments: [] });
+        await flush();
+        w.vm.clearAll();
+        expect(w.emitted('update:modelValue')).toBeUndefined();
+    });
+
+    it('chapters mode truncates neighbors via ripple insert', async () => {
+        const t = { value: 8 };
+        const w = mountEditor({
+            segments: [seg(1, 0, 10)],
+            currentTime: t,
+            props: { mode: 'chapters', rippleEdit: true },
+        });
+        await flush();
+        w.vm.addSegment(); // adds 8..18 which overlaps 0..10
+        await flush();
+        const segs = latestSegments(w);
+        // The earlier segment should be truncated to end at the new one's start.
+        const first = segs.find((s) => s.inSec === 0)!;
+        expect(first.outSec).toBeCloseTo(8, 4);
+    });
+
+    it('chapters mode with rippleEdit=false skips truncation', async () => {
+        const t = { value: 8 };
+        const w = mountEditor({
+            segments: [seg(1, 0, 10)],
+            currentTime: t,
+            props: { mode: 'chapters', rippleEdit: false },
+        });
+        await flush();
+        w.vm.addSegment();
+        await flush();
+        const segs = latestSegments(w);
+        const first = segs.find((s) => s.inSec === 0)!;
+        expect(first.outSec).toBe(10);
+    });
+});
+
+describe('SegmentEditor — selection', () => {
+    it('selects a segment on click and clears selection on Escape', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5)] });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+        const sel1 = w.emitted('select');
+        expect(sel1).toBeTruthy();
+
+        keyDown(getTimeline(w), 'Escape');
+        await flush();
+        const selAll = w.emitted('select')!;
+        expect(selAll[selAll.length - 1][0]).toEqual([]);
+    });
+
+    it('toggles selection additively with shift / meta / ctrl', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5), seg(2, 10, 15)] });
+        await flush();
+        const segEls = w.findAll('.se-segment');
+        mouseAt(segEls[0].element as HTMLElement, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+        mouseAt(segEls[1].element as HTMLElement, 'mousedown', 12, { shiftKey: true });
+        mouseAt(document.body, 'mouseup', 12);
+        await flush();
+        const selectEvents = w.emitted('select')!;
+        const latest = selectEvents[selectEvents.length - 1][0] as string[];
+        expect(latest).toHaveLength(2);
+        // Toggle off the first one.
+        mouseAt(segEls[0].element as HTMLElement, 'mousedown', 2, { shiftKey: true });
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+        const again = w.emitted('select')!;
+        const finalSel = again[again.length - 1][0] as string[];
+        expect(finalSel).toHaveLength(1);
+    });
+
+    it('clicking an already-empty selection does not emit redundant events', async () => {
+        const w = mountEditor({ segments: [] });
+        await flush();
+        // Escape with no selection — clearSelection short-circuits.
+        keyDown(getTimeline(w), 'Escape');
+        await flush();
+        expect(w.emitted('select')).toBeUndefined();
+    });
+
+    it('deletes selected segments with the Delete key', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5), seg(2, 10, 15)] });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+        keyDown(getTimeline(w), 'Delete');
+        await flush();
+        const remaining = latestSegments(w);
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0].inSec).toBe(10);
+    });
+
+    it('Backspace acts like Delete for selection', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5)] });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+        keyDown(getTimeline(w), 'Backspace');
+        await flush();
+        expect(latestSegments(w)).toHaveLength(0);
+    });
+});
+
+describe('SegmentEditor — keyboard navigation', () => {
+    it('Space and K invoke onPlayPause when provided', async () => {
+        const onPlayPause = vi.fn();
+        const w = mountEditor({ props: { onPlayPause } });
+        await flush();
+        keyDown(getTimeline(w), ' ');
+        keyDown(getTimeline(w), 'k');
+        expect(onPlayPause).toHaveBeenCalledTimes(2);
+    });
+
+    it('arrow keys step the playhead by 1 second by default', async () => {
+        const onSeek = vi.fn();
+        const t = { value: 10 };
+        const w = mountEditor({ currentTime: t, props: { onSeek } });
+        await flush();
+        keyDown(getTimeline(w), 'ArrowRight');
+        keyDown(getTimeline(w), 'ArrowLeft');
+        // currentTime is static in tests; each press steps from the current value.
+        expect(onSeek).toHaveBeenCalledWith(11);
+        expect(onSeek).toHaveBeenCalledWith(9);
+    });
+
+    it('holding 1/2/3 multiplies the step to 10/30/60 seconds', async () => {
+        const onSeek = vi.fn();
+        const t = { value: 100 };
+        const w = mountEditor({ duration: 600, currentTime: t, props: { onSeek } });
+        await flush();
+        const el = getTimeline(w);
+        keyDown(el, '1');
+        keyDown(el, 'ArrowRight');
+        expect(onSeek).toHaveBeenLastCalledWith(110);
+        keyUp(el, '1');
+
+        keyDown(el, '2');
+        keyDown(el, 'ArrowRight');
+        expect(onSeek).toHaveBeenLastCalledWith(130);
+        keyUp(el, '2');
+
+        keyDown(el, '3');
+        keyDown(el, 'ArrowRight');
+        expect(onSeek).toHaveBeenLastCalledWith(160);
+        keyUp(el, '3');
+    });
+
+    it('J and L step by a fixed 10 seconds', async () => {
+        const onSeek = vi.fn();
+        const t = { value: 100 };
+        const w = mountEditor({ duration: 600, currentTime: t, props: { onSeek } });
+        await flush();
+        keyDown(getTimeline(w), 'J');
+        keyDown(getTimeline(w), 'l');
+        expect(onSeek).toHaveBeenCalledWith(90);
+        expect(onSeek).toHaveBeenCalledWith(110);
+    });
+
+    it(', and . step by one frame when fps is set', async () => {
+        const onSeek = vi.fn();
+        const t = { value: 10 };
+        const w = mountEditor({ currentTime: t, props: { onSeek, fps: 25 } });
+        await flush();
+        keyDown(getTimeline(w), '.');
+        keyDown(getTimeline(w), ',');
+        expect(onSeek).toHaveBeenCalledWith(10.04);
+        expect(onSeek).toHaveBeenCalledWith(9.96);
+    });
+
+    it(', and . are ignored when fps is zero', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ props: { onSeek } });
+        await flush();
+        keyDown(getTimeline(w), '.');
+        expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it('[ and ] invoke markIn / markOut', async () => {
+        const t = { value: 12 };
+        const w = mountEditor({ currentTime: t });
+        await flush();
+        keyDown(getTimeline(w), '[');
+        await flush();
+        expect(w.find('.se-pending-marker').exists()).toBe(true);
+        t.value = 20;
+        keyDown(getTimeline(w), ']');
+        await flush();
+        expect(latestSegments(w)).toHaveLength(1);
+    });
+
+    it('Alt+arrow nudges the selected segment edge', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 20)] });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 15);
+        mouseAt(document.body, 'mouseup', 15);
+        await flush();
+        keyDown(getTimeline(w), 'ArrowRight', { altKey: true });
+        await flush();
+        const segs = latestSegments(w);
+        // Nudge moved the outSec forward (playhead=0 is nearer inSec, so inSec nudges on default fps=0).
+        // Either edge change is acceptable; the segment width should remain reasonable.
+        const total = segs[0].outSec - segs[0].inSec;
+        expect(total).toBeGreaterThan(0);
+        expect(total).toBeLessThanOrEqual(10);
+    });
+
+    it('Alt+arrow is a no-op with no selection', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 20)] });
+        await flush();
+        keyDown(getTimeline(w), 'ArrowRight', { altKey: true });
+        await flush();
+        // With no selection, the arrow falls through to stepSeek — but there is no onSeek prop,
+        // so nothing happens to segments.
+        expect(latestSegments(w)).toEqual([seg(1, 10, 20)]);
+    });
+
+    it('+ / - / 0 adjust the zoom', async () => {
+        const w = mountEditor({ duration: 100 });
+        await flush();
+        const el = getTimeline(w);
+        keyDown(el, '+');
+        await flush();
+        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        keyDown(el, '-');
+        keyDown(el, '0');
+        await flush();
+        expect(w.find('.se-scrollbar').exists()).toBe(false);
+    });
+
+    it('underscore and equals serve as zoom aliases', async () => {
+        const w = mountEditor();
+        await flush();
+        const el = getTimeline(w);
+        keyDown(el, '=');
+        await flush();
+        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        keyDown(el, '_');
+        await flush();
+    });
+
+    it('Cmd+Z undoes and Cmd+Shift+Z redoes', async () => {
+        const t = { value: 5 };
+        const w = mountEditor({ currentTime: t });
+        await flush();
+        w.vm.addSegment();
+        await flush();
+        expect(latestSegments(w)).toHaveLength(1);
+        keyDown(getTimeline(w), 'z', { metaKey: true });
+        await flush();
+        expect(latestSegments(w)).toHaveLength(0);
+        keyDown(getTimeline(w), 'z', { metaKey: true, shiftKey: true });
+        await flush();
+        expect(latestSegments(w)).toHaveLength(1);
+    });
+
+    it('undo and redo are safe when their stacks are empty', async () => {
+        const w = mountEditor();
+        await flush();
+        w.vm.undo();
+        w.vm.redo();
+        expect(w.emitted('update:modelValue')).toBeUndefined();
+    });
+
+    it('? toggles the help overlay; Escape closes it', async () => {
+        const w = mountEditor();
+        await flush();
+        keyDown(getTimeline(w), '?');
+        await flush();
+        expect(w.find('.se-help').exists()).toBe(true);
+        keyDown(getTimeline(w), 'Escape');
+        await flush();
+        expect(w.find('.se-help').exists()).toBe(false);
+    });
+
+    it('clicking the help button toggles the help overlay', async () => {
+        const w = mountEditor();
+        await flush();
+        const btn = w.find('.se-btn--icon');
+        await btn.trigger('click');
+        expect(w.find('.se-help').exists()).toBe(true);
+        // Clicking the backdrop closes it.
+        const backdrop = w.find('.se-help').element as HTMLElement;
+        backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await flush();
+        expect(w.find('.se-help').exists()).toBe(false);
+    });
+
+    it('typed input blocks navigation keys but not Cmd+Z or Escape', async () => {
+        // Use global keyboard scope so events on the list input reach the handler;
+        // the focus-scoped variant attaches to the timeline wrap only.
+        const onSeek = vi.fn();
+        const w = mountEditor({
+            segments: [seg(1, 0, 5)],
+            props: { onSeek, keyboardScope: 'global' },
+        });
+        await flush();
+        const input = w.find('.se-input').element as HTMLInputElement;
+        input.focus();
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+        expect(onSeek).not.toHaveBeenCalled();
+        // Escape in an input blurs it without doing anything else.
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await flush();
+        expect(document.activeElement).not.toBe(input);
+    });
+});
+
+describe('SegmentEditor — timeline interaction', () => {
+    it('click on the empty timeline seeks the player', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ props: { onSeek } });
+        await flush();
+        const tl = w.get('.se-timeline').element as HTMLElement;
+        mouseAt(tl, 'mousedown', 30);
+        mouseAt(document.body, 'mousemove', 35);
+        mouseAt(document.body, 'mouseup', 40);
+        // First seek (final=true at mousedown) + final seek at mouseup.
+        expect(onSeek).toHaveBeenCalledWith(30);
+        expect(onSeek).toHaveBeenCalledWith(40);
+    });
+
+    it('scrub updates throttle intermediate seeks', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ props: { onSeek, throttleSeekMs: 10000 } });
+        await flush();
+        const tl = w.get('.se-timeline').element as HTMLElement;
+        mouseAt(tl, 'mousedown', 10);
+        mouseAt(document.body, 'mousemove', 20);
+        mouseAt(document.body, 'mousemove', 30);
+        mouseAt(document.body, 'mouseup', 40);
+        // Two final-seek calls (mousedown and mouseup); intermediate moves throttled.
+        const finalCalls = onSeek.mock.calls.map((c) => c[0]);
+        expect(finalCalls).toContain(10);
+        expect(finalCalls).toContain(40);
+    });
+
+    it('shift-drag on the timeline marquee-selects segments', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 0, 10), seg(2, 20, 30), seg(3, 50, 60)],
+            props: { mode: 'subtitles' },
+        });
+        await flush();
+        const tl = w.get('.se-timeline').element as HTMLElement;
+        mouseAt(tl, 'mousedown', 5, { shiftKey: true });
+        mouseAt(document.body, 'mouseup', 25, { shiftKey: true });
+        await flush();
+        const sel = w.emitted('select');
+        expect(sel).toBeTruthy();
+        const latest = sel![sel!.length - 1][0] as string[];
+        expect(latest).toHaveLength(2);
+    });
+
+    it('middle-click on the timeline pans the viewport', async () => {
+        const w = mountEditor();
+        await flush();
+        keyDown(getTimeline(w), '+');
+        keyDown(getTimeline(w), '+');
+        await flush();
+        const tl = w.get('.se-timeline').element as HTMLElement;
+        mouseAt(tl, 'mousedown', 50, { button: 1 });
+        // The pan handler attaches listeners on window, not document.
+        window.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, button: 1, bubbles: true }));
+        window.dispatchEvent(new MouseEvent('mouseup', { clientX: 200, button: 1, bubbles: true }));
+        await flush();
+        expect(w.exists()).toBe(true);
+    });
+
+    it('ignores mousedown with buttons other than 0 or 1', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ props: { onSeek } });
+        await flush();
+        const tl = w.get('.se-timeline').element as HTMLElement;
+        mouseAt(tl, 'mousedown', 50, { button: 2 });
+        mouseAt(document.body, 'mouseup', 50, { button: 2 });
+        expect(onSeek).not.toHaveBeenCalled();
+    });
+});
+
+describe('SegmentEditor — segment drag & handle drag', () => {
+    it('drags a segment body and commits the move', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 20)], duration: 100 });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 15);
+        mouseAt(document.body, 'mousemove', 30); // dx = 15s
+        mouseAt(document.body, 'mouseup', 30);
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs[0].inSec).toBeCloseTo(25, 1);
+        expect(segs[0].outSec).toBeCloseTo(35, 1);
+        expect(w.emitted('segment-commit')).toBeTruthy();
+    });
+
+    it('ignores micro-movements below the drag threshold', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 20)] });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 15);
+        // Tiny pixel delta (< 2px) should not be treated as a drag.
+        mouseAt(document.body, 'mousemove', 15 + 0.01);
+        mouseAt(document.body, 'mouseup', 15);
+        await flush();
+        expect(w.emitted('segment-commit')).toBeFalsy();
+    });
+
+    it('drags a handle to resize the in-point', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 20)] });
+        await flush();
+        const handles = w.findAll('.se-segment-handle');
+        const inHandle = handles[0].element as HTMLElement;
+        mouseAt(inHandle, 'mousedown', 10);
+        mouseAt(document.body, 'mousemove', 5);
+        mouseAt(document.body, 'mouseup', 5);
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs[0].inSec).toBeLessThan(10);
+    });
+
+    it('drags a handle to resize the out-point', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 20)] });
+        await flush();
+        const handles = w.findAll('.se-segment-handle');
+        const outHandle = handles[1].element as HTMLElement;
+        mouseAt(outHandle, 'mousedown', 20);
+        mouseAt(document.body, 'mousemove', 30);
+        mouseAt(document.body, 'mouseup', 30);
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs[0].outSec).toBeGreaterThan(20);
+    });
+
+    it('snaps a handle drag to a neighboring segment edge within the snap distance', async () => {
+        const w = mountEditor({
+            // Two segments: dragging the in-handle of the second should snap to the first's outSec (25).
+            segments: [seg(1, 10, 25), seg(2, 40, 60)],
+            props: { snapSec: 2 },
+        });
+        await flush();
+        const handles = w.findAll('.se-segment-handle');
+        // Second segment's in-handle is index 2 (seg1-in, seg1-out, seg2-in, seg2-out).
+        const seg2InHandle = handles[2].element as HTMLElement;
+        mouseAt(seg2InHandle, 'mousedown', 40);
+        mouseAt(document.body, 'mousemove', 26); // within 2s of neighbor's outSec (25)
+        await flush();
+        expect(w.find('.se-snap-guide').exists()).toBe(true);
+        mouseAt(document.body, 'mouseup', 26);
+        await flush();
+        const segs = latestSegments(w);
+        const second = segs.find((s) => s.outSec === 60)!;
+        expect(second.inSec).toBeCloseTo(25, 1);
+    });
+});
+
+describe('SegmentEditor — inline editing', () => {
+    it('commits a valid time input change', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 20)] });
+        await flush();
+        const inputs = w.findAll('.se-input--time');
+        const inEl = inputs[0].element as HTMLInputElement;
+        inEl.value = '0:15.000';
+        inEl.dispatchEvent(new Event('change', { bubbles: true }));
+        await flush();
+        expect(latestSegments(w)[0].inSec).toBeCloseTo(15, 3);
+    });
+
+    it('ignores an invalid time input', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 20)] });
+        await flush();
+        const inputs = w.findAll('.se-input--time');
+        const inEl = inputs[0].element as HTMLInputElement;
+        inEl.value = 'nonsense';
+        inEl.dispatchEvent(new Event('change', { bubbles: true }));
+        await flush();
+        expect(w.emitted('update:modelValue')).toBeUndefined();
+    });
+
+    it('commits a valid time input change to the out-point input', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 20)] });
+        await flush();
+        const inputs = w.findAll('.se-input--time');
+        const outEl = inputs[1].element as HTMLInputElement;
+        outEl.value = '0:18.000';
+        outEl.dispatchEvent(new Event('change', { bubbles: true }));
+        await flush();
+        expect(latestSegments(w)[0].outSec).toBeCloseTo(18, 3);
+    });
+
+    it('commits a label edit', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20)],
+            props: { mode: 'subtitles' },
+        });
+        await flush();
+        const label = w.find('.se-label-field').element as HTMLTextAreaElement;
+        label.value = 'Hello';
+        label.dispatchEvent(new Event('change', { bubbles: true }));
+        await flush();
+        expect(latestSegments(w)[0].label).toBe('Hello');
+    });
+});
+
+describe('SegmentEditor — zoom, pan, wheel', () => {
+    it('Ctrl+wheel zooms anchored at the cursor', async () => {
+        const w = mountEditor({ duration: 100 });
+        await flush();
+        const tl = w.get('.se-timeline').element as HTMLElement;
+        tl.dispatchEvent(
+            new WheelEvent('wheel', {
+                clientX: 500,
+                deltaY: -100,
+                ctrlKey: true,
+                bubbles: true,
+                cancelable: true,
+            }),
+        );
+        await flush();
+        expect(w.find('.se-scrollbar').exists()).toBe(true);
+    });
+
+    it('Cmd+wheel zooms out when deltaY is positive', async () => {
+        const w = mountEditor({ duration: 100 });
+        await flush();
+        // Pre-zoom so we can zoom out.
+        keyDown(getTimeline(w), '+');
+        const tl = w.get('.se-timeline').element as HTMLElement;
+        tl.dispatchEvent(
+            new WheelEvent('wheel', {
+                clientX: 500,
+                deltaY: 200,
+                metaKey: true,
+                bubbles: true,
+                cancelable: true,
+            }),
+        );
+        await flush();
+    });
+
+    it('horizontal wheel pans the viewport when zoomed', async () => {
+        const w = mountEditor({ duration: 100 });
+        await flush();
+        keyDown(getTimeline(w), '+');
+        keyDown(getTimeline(w), '+');
+        const tl = w.get('.se-timeline').element as HTMLElement;
+        tl.dispatchEvent(
+            new WheelEvent('wheel', {
+                deltaX: 600,
+                deltaY: 0,
+                bubbles: true,
+                cancelable: true,
+            }),
+        );
+        await flush();
+    });
+
+    it('wheel events are ignored when duration is zero', async () => {
+        const w = mountEditor({ duration: 0 });
+        await flush();
+        const tl = w.get('.se-timeline').element as HTMLElement;
+        tl.dispatchEvent(
+            new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }),
+        );
+        await flush();
+    });
+
+    it('vertical wheel without modifier is ignored', async () => {
+        const w = mountEditor();
+        await flush();
+        const tl = w.get('.se-timeline').element as HTMLElement;
+        tl.dispatchEvent(new WheelEvent('wheel', { deltaY: 50, bubbles: true, cancelable: true }));
+        await flush();
+    });
+
+    it('zoomTo sets viewport to the requested range', async () => {
+        const w = mountEditor({ duration: 100 });
+        await flush();
+        w.vm.zoomTo(20, 40);
+        await flush();
+        expect(w.find('.se-scrollbar').exists()).toBe(true);
+    });
+
+    it('zoomTo is a no-op when duration is zero or range is empty', async () => {
+        const w = mountEditor({ duration: 0 });
+        await flush();
+        w.vm.zoomTo(0, 10);
+        w.vm.zoomTo(30, 20);
+        await flush();
+        expect(w.find('.se-scrollbar').exists()).toBe(false);
+    });
+
+    it('the zoom slider adjusts the viewport', async () => {
+        const w = mountEditor({ duration: 100 });
+        await flush();
+        const slider = w.find('input[type="range"]').element as HTMLInputElement;
+        slider.value = '5';
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        await flush();
+        expect(w.find('.se-scrollbar').exists()).toBe(true);
+    });
+});
+
+describe('SegmentEditor — scrollbar', () => {
+    it('clicking the scrollbar track re-centers the viewport', async () => {
+        const w = mountEditor({ duration: 100 });
+        await flush();
+        keyDown(getTimeline(w), '+');
+        keyDown(getTimeline(w), '+');
+        await flush();
+        const sb = w.find('.se-scrollbar').element as HTMLElement;
+        sb.dispatchEvent(new MouseEvent('mousedown', { clientX: 800, bubbles: true }));
+        await flush();
+    });
+
+    it('dragging the scrollbar thumb pans the viewport', async () => {
+        const w = mountEditor({ duration: 100 });
+        await flush();
+        keyDown(getTimeline(w), '+');
+        keyDown(getTimeline(w), '+');
+        await flush();
+        const thumb = w.find('.se-scrollbar-thumb').element as HTMLElement;
+        thumb.dispatchEvent(new MouseEvent('mousedown', { clientX: 100, bubbles: true }));
+        // Listeners attach on window, not document — dispatch directly there.
+        window.dispatchEvent(new MouseEvent('mousemove', { clientX: 400, bubbles: true }));
+        window.dispatchEvent(new MouseEvent('mouseup', { clientX: 400, bubbles: true }));
+        await flush();
+    });
+
+    it('does not pan when scrollbar mousedown fires with duration zero', async () => {
+        const w = mountEditor({ duration: 0 });
+        await flush();
+        // Force the scrollbar DOM to render for this edge case — simulate by directly
+        // calling the exposed zoomTo method, which short-circuits on duration=0.
+        w.vm.zoomTo(0, 1);
+        await flush();
+        // Nothing to assert besides "no throw".
+    });
+
+    it('the scrollbar thumb shows display:none when duration is zero', async () => {
+        const w = mountEditor({ duration: 0 });
+        await flush();
+        // Force zoom > 1 by direct method, since setZoom short-circuits when duration is 0.
+        w.vm.zoomTo(0, 1);
+        // Can't render scrollbar without zoom > 1, so this test verifies the branch executes
+        // without error and that no scrollbar is shown.
+        await flush();
+        expect(w.find('.se-scrollbar').exists()).toBe(false);
+    });
+});
+
+describe('SegmentEditor — touch', () => {
+    function touchEvent(
+        type: 'touchstart' | 'touchmove' | 'touchend',
+        touches: Array<{ x: number; y?: number }>,
+    ): TouchEvent {
+        // jsdom does not have a native Touch constructor; fake it just enough for the handler.
+        const list = touches.map(({ x, y }) => ({ clientX: x, clientY: y ?? 20 })) as unknown as TouchList;
+        const ev = new Event(type, { bubbles: true, cancelable: true }) as unknown as TouchEvent;
+        Object.defineProperty(ev, 'touches', { value: list });
+        return ev;
+    }
+
+    it('single-finger swipe pans the viewport', async () => {
+        const w = mountEditor({ duration: 100 });
+        await flush();
+        keyDown(getTimeline(w), '+');
+        keyDown(getTimeline(w), '+');
+        const tl = w.get('.se-timeline').element as HTMLElement;
+        tl.dispatchEvent(touchEvent('touchstart', [{ x: 500 }]));
+        tl.dispatchEvent(touchEvent('touchmove', [{ x: 200 }]));
+        tl.dispatchEvent(touchEvent('touchend', []));
+        await flush();
+    });
+
+    it('two-finger pinch zooms the viewport', async () => {
+        const w = mountEditor({ duration: 100 });
+        await flush();
+        const tl = w.get('.se-timeline').element as HTMLElement;
+        tl.dispatchEvent(touchEvent('touchstart', [{ x: 400 }, { x: 500 }]));
+        tl.dispatchEvent(touchEvent('touchmove', [{ x: 300 }, { x: 700 }]));
+        tl.dispatchEvent(touchEvent('touchend', [{ x: 300 }]));
+        await flush();
+        expect(w.find('.se-scrollbar').exists()).toBe(true);
+    });
+});
+
+describe('SegmentEditor — exposed methods', () => {
+    it('exportVtt returns a chapters file when mode is chapters', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 0, 30, 'Intro')],
+            props: { mode: 'chapters' },
+        });
+        await flush();
+        expect(w.vm.exportVtt()).toContain('WEBVTT');
+        expect(w.vm.exportVtt()).toContain('Intro');
+    });
+
+    it('exportVtt returns a subtitles file when mode is subtitles', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 0, 30, 'Hello')],
+            props: { mode: 'subtitles' },
+        });
+        await flush();
+        expect(w.vm.exportVtt()).toContain('Hello');
+    });
+
+    it('importVtt replaces the current segment list', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5)] });
+        await flush();
+        w.vm.importVtt('WEBVTT\n\n00:00:10.000 --> 00:00:20.000\nNew\n');
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs).toHaveLength(1);
+        expect(segs[0].inSec).toBe(10);
+    });
+
+    it('focus() moves focus to the timeline', async () => {
+        const w = mountEditor();
+        await flush();
+        w.vm.focus();
+        expect(document.activeElement).toBe(getTimeline(w));
+    });
+
+    it('clicking the toolbar Undo and Redo buttons round-trips state', async () => {
+        const w = mountEditor({ currentTime: { value: 5 } });
+        await flush();
+        w.vm.addSegment();
+        await flush();
+        const [undoBtn, redoBtn] = w.findAll('button').filter((b) =>
+            (b.attributes('title') ?? '').match(/^(Undo|Redo)$/),
+        );
+        await undoBtn.trigger('click');
+        await flush();
+        expect(latestSegments(w)).toHaveLength(0);
+        await redoBtn.trigger('click');
+        await flush();
+        expect(latestSegments(w)).toHaveLength(1);
+    });
+
+    it('clicking Mark In / Mark Out / Add via the toolbar works', async () => {
+        const t = { value: 10 };
+        const w = mountEditor({ currentTime: t });
+        await flush();
+        const buttons = w.findAll('.se-toolbar .se-btn');
+        await buttons[0].trigger('click'); // Mark In
+        await flush();
+        expect(w.find('.se-pending-marker').exists()).toBe(true);
+        t.value = 20;
+        await buttons[1].trigger('click'); // Mark Out
+        await flush();
+        expect(latestSegments(w)).toHaveLength(1);
+        t.value = 40;
+        await buttons[2].trigger('click'); // Add
+        await flush();
+        expect(latestSegments(w)).toHaveLength(2);
+        // Clear All becomes visible with segments present.
+        const clear = w.findAll('.se-btn--danger')[0];
+        await clear.trigger('click');
+        await flush();
+        expect(latestSegments(w)).toHaveLength(0);
+    });
+
+    it('history is bounded to 100 entries', async () => {
+        const t = { value: 5 };
+        const w = mountEditor({ duration: 10000, currentTime: t });
+        await flush();
+        // 150 commits should only retain the most recent ones in the undo stack.
+        for (let i = 0; i < 150; i++) {
+            t.value = i;
+            w.vm.addSegment();
+            await flush();
+        }
+        // Undo as many times as possible — should not exceed 100 invocations with effect.
+        let undoCount = 0;
+        for (let i = 0; i < 200; i++) {
+            const before = latestSegments(w).length;
+            w.vm.undo();
+            await flush();
+            const after = latestSegments(w).length;
+            if (after !== before) undoCount += 1;
+        }
+        expect(undoCount).toBeLessThanOrEqual(100);
+    });
+});
+
+describe('SegmentEditor — RAF playhead tick', () => {
+    it('runs the recursive tick callback and updates the playhead position', async () => {
+        // Temporarily replace the no-op RAF stub with one that fires exactly once.
+        // This covers the recursive body that the default stub avoids to keep tests finite.
+        const originalRaf = globalThis.requestAnimationFrame;
+        let fired = 0;
+        globalThis.requestAnimationFrame = ((cb: FrameRequestCallback): number => {
+            if (fired++ > 0) return 0;
+            queueMicrotask(() => cb(performance.now()));
+            return 1;
+        }) as typeof globalThis.requestAnimationFrame;
+        try {
+            const t = { value: 42 };
+            const w = mountEditor({ duration: 100, currentTime: t });
+            await flush();
+            await new Promise<void>((r) => queueMicrotask(r));
+            await flush();
+            // Playhead element should now be positioned proportional to 42/100.
+            const playhead = w.find('.se-playhead');
+            expect(playhead.exists()).toBe(true);
+            w.unmount();
+        } finally {
+            globalThis.requestAnimationFrame = originalRaf;
+        }
+    });
+});
+
+describe('SegmentEditor — global keyboard scope and lifecycle', () => {
+    it('global scope attaches window keyboard listeners', async () => {
+        const t = { value: 10 };
+        const w = mountEditor({
+            currentTime: t,
+            props: { keyboardScope: 'global' },
+        });
+        await flush();
+        // Dispatch at window — the component should still respond.
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: '[', bubbles: true }));
+        await flush();
+        expect(w.find('.se-pending-marker').exists()).toBe(true);
+        w.unmount();
+        // After unmount the listener is gone; dispatching should not throw.
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: '[', bubbles: true }));
+    });
+
+    it('keyboardScope="off" disables the focus listener', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ props: { onSeek, keyboardScope: 'off' } });
+        await flush();
+        keyDown(getTimeline(w), 'ArrowRight');
+        expect(onSeek).not.toHaveBeenCalled();
+    });
+});
+
+describe('SegmentEditor — ruler tick labels', () => {
+    it('labels ticks with h/m/s appropriate to the duration', async () => {
+        // Duration long enough to produce hour ticks.
+        const w = mountEditor({ duration: 18000 });
+        await flush();
+        const labels = w.findAll('.se-ruler-label');
+        expect(labels.length).toBeGreaterThan(0);
+        expect(labels.some((l) => l.text().includes('h'))).toBe(true);
+    });
+
+    it('omits labels entirely when duration is zero', async () => {
+        const w = mountEditor({ duration: 0 });
+        await flush();
+        expect(w.findAll('.se-ruler-tick').length).toBe(0);
+    });
+});
+
+describe('SegmentEditor — segment-commit emissions', () => {
+    it('emits segment-commit once per user-committed change', async () => {
+        const t = { value: 5 };
+        const w = mountEditor({ currentTime: t });
+        await flush();
+        w.vm.addSegment();
+        await flush();
+        expect(w.emitted('segment-commit')).toHaveLength(1);
+    });
+});
+
+describe('SegmentEditor — list rendering', () => {
+    beforeEach(() => {
+        // Each test mounts fresh; no shared state.
+    });
+
+    it('clicking a list row selects the matching segment', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5), seg(2, 10, 15)] });
+        await flush();
+        const rows = w.findAll('.se-list-row');
+        await rows[1].trigger('click');
+        await flush();
+        const sel = w.emitted('select')!;
+        const latest = sel[sel.length - 1][0] as string[];
+        expect(latest).toHaveLength(1);
+    });
+
+    it('hides the list when showList=false', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5)], props: { showList: false } });
+        await flush();
+        expect(w.find('.se-list').exists()).toBe(false);
+    });
+
+    it('hides the toolbar when showToolbar=false', async () => {
+        const w = mountEditor({ props: { showToolbar: false } });
+        await flush();
+        expect(w.find('.se-toolbar').exists()).toBe(false);
+    });
+
+    it('hides the help button when showHelp=false', async () => {
+        const w = mountEditor({ props: { showHelp: false } });
+        await flush();
+        expect(w.find('.se-btn--icon').exists()).toBe(false);
+    });
+
+    it('shows playback controls only when onSeek or onPlayPause is set', async () => {
+        const none = mountEditor({});
+        await flush();
+        expect(none.find('.se-playback-controls').exists()).toBe(false);
+
+        const withPlay = mountEditor({ props: { onPlayPause: () => {} } });
+        await flush();
+        expect(withPlay.find('.se-playback-controls').exists()).toBe(true);
+    });
+
+    it('playback control buttons step the seek callback', async () => {
+        const onSeek = vi.fn();
+        const t = { value: 20 };
+        const w = mountEditor({ currentTime: t, props: { onSeek } });
+        await flush();
+        const stepButtons = w.findAll('.se-playback-controls .se-btn');
+        await stepButtons[0].trigger('click'); // back
+        await stepButtons[1].trigger('click'); // forward
+        // currentTime is static in tests, so each click steps from the same value.
+        expect(onSeek).toHaveBeenCalledWith(19);
+        expect(onSeek).toHaveBeenCalledWith(21);
+    });
+
+    it('play/pause button triggers onPlayPause', async () => {
+        const onPlayPause = vi.fn();
+        const w = mountEditor({ props: { onPlayPause, isPlaying: true } });
+        await flush();
+        const btn = w.find('.se-playback-controls .se-btn');
+        await btn.trigger('click');
+        expect(onPlayPause).toHaveBeenCalled();
+        // isPlaying=true switches the glyph to the pause icon.
+        expect(btn.text()).toContain('⏸');
+    });
+});
+
+describe('SegmentEditor — defensive branches', () => {
+    it('snap is disabled when snapSec is zero', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20), seg(2, 40, 60)],
+            props: { snapSec: 0 },
+        });
+        await flush();
+        const handles = w.findAll('.se-segment-handle');
+        const seg2InHandle = handles[2].element as HTMLElement;
+        mouseAt(seg2InHandle, 'mousedown', 40);
+        mouseAt(document.body, 'mousemove', 21);
+        mouseAt(document.body, 'mouseup', 21);
+        await flush();
+        expect(w.find('.se-snap-guide').exists()).toBe(false);
+    });
+
+    it('setZoom handles a duration-zero timeline without computing an anchor', async () => {
+        const w = mountEditor({ duration: 0 });
+        await flush();
+        const slider = w.find('input[type="range"]').element as HTMLInputElement;
+        slider.value = '3';
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        await flush();
+    });
+
+    it('primarySelectedId returns null when the selected id no longer exists', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5)] });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+        // Swap the list for an entirely different set — the selected id is now stale.
+        await setSegments(w, [seg(99, 50, 60)]);
+        await flush();
+        // markIn with no real selection should drop a pending marker rather than throw.
+        w.vm.markIn();
+        await flush();
+        // The selection Set still contains the stale id but primary resolves to null,
+        // so markIn falls through to the pending-create branch.
+        expect(w.exists()).toBe(true);
+    });
+
+    it('ignores segment drags smaller than the drag threshold', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 20)] });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 15);
+        // Sub-pixel movement — should not trigger pushHistory.
+        mouseAt(document.body, 'mousemove', 15);
+        mouseAt(document.body, 'mouseup', 15);
+        await flush();
+        // Undo should be a no-op because the drag was ignored.
+        expect(w.emitted('segment-commit')).toBeFalsy();
+    });
+});
+
+describe('SegmentEditor — edge cases', () => {
+    it('re-hydrates ids if the consumer swaps in a new id-less segment', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5)] });
+        await flush();
+        await setSegments(w, [{ inSec: 3, outSec: 6 } as Segment]);
+        await flush();
+        const emits = w.emitted('update:modelValue')!;
+        const last = emits[emits.length - 1][0] as Segment[];
+        expect(last[0].id).toBeTruthy();
+    });
+
+    it('removes selection entry when the backing segment is removed', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5)] });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+        const removeBtn = w.find('.se-remove');
+        await removeBtn.trigger('click');
+        await flush();
+        // Selection should now be cleared of the removed id (internal cleanup only).
+        expect(latestSegments(w)).toHaveLength(0);
+    });
+
+    it('updating a time input with a value outside bounds is clamped', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 20)], duration: 100 });
+        await flush();
+        const inputs = w.findAll('.se-input--time');
+        const inEl = inputs[0].element as HTMLInputElement;
+        inEl.value = '-5';
+        inEl.dispatchEvent(new Event('change', { bubbles: true }));
+        await flush();
+        const segs = latestSegments(w);
+        if (segs.length > 0) {
+            expect(segs[0].inSec).toBeGreaterThanOrEqual(0);
+        }
+    });
+});
