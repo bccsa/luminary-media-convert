@@ -356,7 +356,22 @@ function setPendingSeek(time: number) {
     pendingSeekTime = time;
 }
 
-defineExpose({ setSource, getCurrentTime, setPendingSeek });
+function seek(time: number) {
+    if (!player) { pendingSeekTime = time; return; }
+    player.currentTime(Math.max(0, time));
+}
+
+function togglePlay() {
+    if (!player) return;
+    if (player.paused()) void player.play();
+    else player.pause();
+}
+
+function isPlaying(): boolean {
+    return !!player && !player.paused();
+}
+
+defineExpose({ setSource, getCurrentTime, setPendingSeek, seek, togglePlay, isPlaying });
 </script>
 
 <template>

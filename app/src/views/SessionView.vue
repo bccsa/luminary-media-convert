@@ -4,8 +4,9 @@ import { useAuth0 } from '@auth0/auth0-vue';
 import { useRoute, useRouter } from 'vue-router';
 import { EncodeConfigForm, computeLayoutKey, saveConfig } from '@luminary-media-converter/encode-config';
 import type { ProbeResult, EncodeConfig, TrimSegment } from '@luminary-media-converter/encode-config';
+import { SegmentEditor } from '@luminary-media-converter/segment-editor';
+import type { Segment } from '@luminary-media-converter/segment-editor';
 import HlsPlayer from '../components/HlsPlayer.vue';
-import SegmentEditor from '../components/SegmentEditor.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import InlineConfirm from '../components/InlineConfirm.vue';
@@ -37,7 +38,10 @@ const probeLoading = ref(false);
 const encodingType = ref<'video' | 'audio'>('video');
 const byteRangeEnabled = ref(true);
 const submitting = ref(false);
-const trimSegments = ref<TrimSegment[]>([]);
+const editorSegments = ref<Segment[]>([]);
+const trimSegments = computed<TrimSegment[]>(() =>
+    editorSegments.value.map((s) => ({ inSec: s.inSec, outSec: s.outSec })),
+);
 const configFormRef = ref<InstanceType<typeof EncodeConfigForm> | null>(null);
 
 // Session name
@@ -1067,9 +1071,12 @@ onUnmounted(() => {
                     <!-- Segment editor (trim/cut) -->
                     <SegmentEditor
                         v-if="activePlaybackUrl && probeResult?.format?.duration"
-                        v-model="trimSegments"
+                        v-model="editorSegments"
+                        mode="trim"
                         :duration="probeResult.format.duration"
                         :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
+                        :on-seek="(t) => playerRef?.seek(t)"
+                        :on-play-pause="() => playerRef?.togglePlay()"
                     />
 
                     <EncodeConfigForm
