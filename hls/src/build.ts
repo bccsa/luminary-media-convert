@@ -1,4 +1,4 @@
-import type { HlsMedia, HlsParsedMaster, HlsVariant } from './parse.js';
+import type { HlsMedia, HlsParsedMaster, HlsVariant } from './parse';
 
 /**
  * Serialize a parsed master playlist back to HLS text.

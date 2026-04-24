@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseMasterPlaylist } from './parse.js';
+import { parseMasterPlaylist } from './parse';
 
 describe('parseMasterPlaylist', () => {
     it('parses variants with BANDWIDTH, RESOLUTION, CODECS', () => {

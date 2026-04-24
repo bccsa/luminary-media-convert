@@ -2,14 +2,13 @@
     "name": "@luminary-media-converter/hls",
     "version": "0.0.1",
     "private": true,
-    "type": "module",
     "license": "Apache-2.0",
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts",
     "exports": {
         ".": {
-            "import": "./dist/index.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
         }
     },
     "files": [

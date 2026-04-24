@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sidecarPath } from './sidecar.js';
+import { sidecarPath } from './sidecar';
 
 describe('sidecarPath', () => {
     it('places subtitle VTTs under subtitles/ next to the master', () => {

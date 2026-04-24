@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeS3Key, deriveAngleName } from './keys.js';
+import { normalizeS3Key, deriveAngleName } from './keys';
 
 describe('normalizeS3Key', () => {
     it('returns bare keys unchanged', () => {
