@@ -314,6 +314,7 @@
 
 .se-playback-controls {
     display: flex;
+    justify-content: space-between;
     align-items: center;
     gap: 0.5rem;
     margin-bottom: 0.75rem;
@@ -321,9 +322,30 @@
     color: var(--se-text-dim);
 }
 
-.se-time-display {
+.se-playback-controls__center {
+    display: inline-flex;
+    gap: 0.25rem;
+    align-items: center;
+}
+
+.se-playback-controls__slot {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-width: 0;
+    flex: 1 1 0;
+}
+
+.se-playback-controls__slot--end {
+    justify-content: flex-end;
+}
+
+.se-time-above {
     font-family: var(--se-font-mono);
+    font-size: 0.75rem;
     color: var(--se-text);
+    margin-bottom: 0.25rem;
+    text-align: center;
 }
 
 .se-list {

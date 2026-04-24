@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { nextTick } from 'vue';
+import { mount } from '@vue/test-utils';
 import {
     mountEditor,
     flush,
@@ -11,6 +12,7 @@ import {
     latestSegments,
     setSegments,
 } from './helpers';
+import SegmentEditor from '../src/SegmentEditor.vue';
 import type { Segment } from '../src/types';
 
 const id = (i: number) => `seg-${i}`;
@@ -1227,6 +1229,81 @@ describe('SegmentEditor — list rendering', () => {
         expect(onPlayPause).toHaveBeenCalled();
         // isPlaying=true switches the glyph to the pause icon.
         expect(btn.text()).toContain('⏸');
+    });
+
+    it('playback-start and playback-end slots render in the left and right cells', async () => {
+        const w = mount(SegmentEditor, {
+            props: {
+                modelValue: [],
+                duration: 100,
+                getCurrentTime: () => 0,
+                onSeek: () => {},
+                onPlayPause: () => {},
+            },
+            slots: {
+                'playback-start': '<span class="mock-audio">Audio</span>',
+                'playback-end': '<span class="mock-quality">Quality</span>',
+            },
+            attachTo: document.body,
+        });
+        await flush();
+        expect(w.find('.se-playback-controls__slot--start .mock-audio').exists()).toBe(true);
+        expect(w.find('.se-playback-controls__slot--end .mock-quality').exists()).toBe(true);
+    });
+
+    it('center group renders back, play/pause, forward in that order when both callbacks are set', async () => {
+        const w = mountEditor({
+            props: { onSeek: () => {}, onPlayPause: () => {} },
+        });
+        await flush();
+        const buttons = w.findAll('.se-playback-controls__center .se-btn');
+        expect(buttons).toHaveLength(3);
+        expect(buttons[0].text()).toContain('1s');
+        expect(buttons[1].text()).toMatch(/[▶⏸]/);
+        expect(buttons[2].text()).toContain('1s');
+    });
+
+    it('renders the current-time display above the timeline, not inside playback controls', async () => {
+        const w = mountEditor({ props: { onPlayPause: () => {} } });
+        await flush();
+        expect(w.find('.se-time-above').exists()).toBe(true);
+        expect(w.find('.se-playback-controls .se-time-above').exists()).toBe(false);
+    });
+
+    it('still hides the playback row when showPlaybackControls is false even with slot content', async () => {
+        const w = mount(SegmentEditor, {
+            props: {
+                modelValue: [],
+                duration: 100,
+                getCurrentTime: () => 0,
+                onPlayPause: () => {},
+                showPlaybackControls: false,
+            },
+            slots: {
+                'playback-start': '<span class="mock-audio">Audio</span>',
+            },
+            attachTo: document.body,
+        });
+        await flush();
+        expect(w.find('.se-playback-controls').exists()).toBe(false);
+        expect(w.find('.se-time-above').exists()).toBe(false);
+    });
+
+    it('renders the playback row when only slot content is provided (no callbacks)', async () => {
+        const w = mount(SegmentEditor, {
+            props: {
+                modelValue: [],
+                duration: 100,
+                getCurrentTime: () => 0,
+            },
+            slots: {
+                'playback-start': '<span class="mock-audio">Audio</span>',
+            },
+            attachTo: document.body,
+        });
+        await flush();
+        expect(w.find('.se-playback-controls').exists()).toBe(true);
+        expect(w.find('.se-playback-controls__center').exists()).toBe(false);
     });
 });
 

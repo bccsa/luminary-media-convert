@@ -884,6 +884,10 @@ defineExpose({
             </label>
         </div>
 
+        <div v-if="showPlaybackControls" class="se-time-above">
+            {{ formatTime(playheadSec) }} / {{ formatTime(duration) }}
+        </div>
+
         <div
             ref="timelineRef"
             class="se-timeline-wrap"
@@ -975,13 +979,35 @@ defineExpose({
             </div>
         </div>
 
-        <div v-if="showPlaybackControls && (onPlayPause || onSeek)" class="se-playback-controls">
-            <button v-if="onPlayPause" type="button" class="se-btn" @click="onPlayPause">
-                {{ isPlaying ? '⏸' : '▶' }}
-            </button>
-            <button v-if="onSeek" type="button" class="se-btn" @click="stepSeek(-1)" title="Back (←)">⟵ 1s</button>
-            <button v-if="onSeek" type="button" class="se-btn" @click="stepSeek(1)" title="Forward (→)">1s ⟶</button>
-            <span class="se-time-display">{{ formatTime(playheadSec) }} / {{ formatTime(duration) }}</span>
+        <div
+            v-if="showPlaybackControls && (onPlayPause || onSeek || $slots['playback-start'] || $slots['playback-end'])"
+            class="se-playback-controls"
+        >
+            <div class="se-playback-controls__slot se-playback-controls__slot--start">
+                <slot name="playback-start" />
+            </div>
+            <div v-if="onPlayPause || onSeek" class="se-playback-controls__center">
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn"
+                    @click="stepSeek(-1)"
+                    title="Back (←)"
+                >⟵ 1s</button>
+                <button v-if="onPlayPause" type="button" class="se-btn" @click="onPlayPause">
+                    {{ isPlaying ? '⏸' : '▶' }}
+                </button>
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn"
+                    @click="stepSeek(1)"
+                    title="Forward (→)"
+                >1s ⟶</button>
+            </div>
+            <div class="se-playback-controls__slot se-playback-controls__slot--end">
+                <slot name="playback-end" />
+            </div>
         </div>
 
         <div v-if="showList && segments.length > 0" class="se-list">

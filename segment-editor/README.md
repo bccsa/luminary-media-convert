@@ -87,6 +87,15 @@ Override the mode-derived defaults with `show-labels`, `allow-overlap`, or `ripp
 | `seek`             | `number`           | The editor wants the player to seek. Also delivered via `onSeek` prop. |
 | `segment-commit`   | `Segment[]`        | After a drag, mark in/out, add, or remove — i.e., a user-intentioned commit (not every keystroke). |
 
+## Slots
+
+| Slot              | Position                                                              |
+|-------------------|-----------------------------------------------------------------------|
+| `playback-start`  | Left cell of the playback-controls row. Ideal for an audio-track selector or other player-adjacent UI. |
+| `playback-end`    | Right cell of the playback-controls row. Ideal for a quality selector. |
+
+The center cell of the playback row always holds the `[← back] [▶/⏸] [→ forward]` group. Current time is rendered on its own line above the timeline.
+
 ## Exposed methods
 
 ```ts
