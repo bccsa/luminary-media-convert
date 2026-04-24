@@ -7,6 +7,7 @@ import type { ProbeResult, EncodeConfig, TrimSegment } from '@luminary-media-con
 import { SegmentEditor } from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
 import HlsPlayer from '../components/HlsPlayer.vue';
+import type { QualityLevelInfo } from '../components/HlsPlayer.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import InlineConfirm from '../components/InlineConfirm.vue';
@@ -227,6 +228,18 @@ function audioTrackLabel(track: PreviewAudioTrack): string {
 
 const previewAudioTracks = ref<PreviewAudioTrack[]>([]);
 const selectedAudioTrack = ref(0);
+const previewQualityLevels = ref<QualityLevelInfo[]>([]);
+const selectedQualityId = ref<string | null>(null);
+const isPreviewPlaying = ref(false);
+
+function onPreviewQualityLevels(levels: QualityLevelInfo[]) {
+    previewQualityLevels.value = levels;
+}
+
+function onQualityChange(id: string | null) {
+    selectedQualityId.value = id;
+    playerRef.value?.setQuality(id);
+}
 
 async function fetchPreviewAudioTracks() {
     if (!sessionToken.value || !encodingApiUrl.value) return;
@@ -981,24 +994,11 @@ onUnmounted(() => {
                         :encoding-type="encodingType"
                         :is-audio-only="isAudioOnly"
                         :encryption-key-hex="isCompleted ? (encryptionKeyHex || poller.encryptionKeyHex.value) : undefined"
+                        :show-controls="!showProbeConfig"
                         preserve-state-on-source-change
+                        @quality-levels="onPreviewQualityLevels"
+                        @playing-change="isPreviewPlaying = $event"
                     />
-                    <!-- Audio track selector (preview only, multi-audio files) -->
-                    <div v-if="previewAudioTracks.length > 1 && !isCompleted" class="mt-2 flex items-center gap-2">
-                        <label class="text-xs text-zinc-400">Audio:</label>
-                        <select
-                            v-model.number="selectedAudioTrack"
-                            class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
-                        >
-                            <option
-                                v-for="track in previewAudioTracks"
-                                :key="track.index"
-                                :value="track.index"
-                            >
-                                {{ audioTrackLabel(track) }}
-                            </option>
-                        </select>
-                    </div>
                 </div>
 
 
@@ -1077,7 +1077,42 @@ onUnmounted(() => {
                         :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
                         :on-seek="(t) => playerRef?.seek(t)"
                         :on-play-pause="() => playerRef?.togglePlay()"
-                    />
+                        :is-playing="isPreviewPlaying"
+                    >
+                        <template v-if="previewAudioTracks.length > 1" #playback-start>
+                            <label class="text-xs text-zinc-400">Audio:</label>
+                            <select
+                                v-model.number="selectedAudioTrack"
+                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                            >
+                                <option
+                                    v-for="track in previewAudioTracks"
+                                    :key="track.index"
+                                    :value="track.index"
+                                >{{ audioTrackLabel(track) }}</option>
+                            </select>
+                        </template>
+                        <template
+                            v-if="previewQualityLevels.length > 1 && encodingType !== 'audio'"
+                            #playback-end
+                        >
+                            <label class="text-xs text-zinc-400">Quality:</label>
+                            <select
+                                :value="selectedQualityId"
+                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                @change="onQualityChange(($event.target as HTMLSelectElement).value || null)"
+                            >
+                                <option :value="''">Auto</option>
+                                <option
+                                    v-for="level in previewQualityLevels"
+                                    :key="level.id"
+                                    :value="level.id"
+                                >
+                                    {{ level.height > 0 ? `${level.height}p` : `${Math.round(level.bitrate / 1000)}kbps` }}
+                                </option>
+                            </select>
+                        </template>
+                    </SegmentEditor>
 
                     <EncodeConfigForm
                         ref="configFormRef"

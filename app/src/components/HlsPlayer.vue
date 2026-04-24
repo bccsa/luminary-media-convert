@@ -9,13 +9,31 @@ import { registerThumbnailPreview } from '../videojs-thumbnail-preview';
 registerQualitySelector();
 registerThumbnailPreview();
 
-const props = defineProps<{
-    playbackUrl: string | null;
-    thumbnailVttUrl?: string | null;
-    encodingType?: 'video' | 'audio';
-    isAudioOnly?: boolean;
-    encryptionKeyHex?: string | null;
-    preserveStateOnSourceChange?: boolean;
+const props = withDefaults(
+    defineProps<{
+        playbackUrl: string | null;
+        thumbnailVttUrl?: string | null;
+        encodingType?: 'video' | 'audio';
+        isAudioOnly?: boolean;
+        encryptionKeyHex?: string | null;
+        preserveStateOnSourceChange?: boolean;
+        /** Show the built-in Video.js control bar + custom plugin chrome. Default true. */
+        showControls?: boolean;
+    }>(),
+    { showControls: true },
+);
+
+export interface QualityLevelInfo {
+    /** Stable key used when calling `setQuality(id)`; matches the rendition height (or bandwidth for audio-only). */
+    id: string;
+    height: number;
+    width: number;
+    bitrate: number;
+}
+
+const emit = defineEmits<{
+    'quality-levels': [levels: QualityLevelInfo[]];
+    'playing-change': [playing: boolean];
 }>();
 
 const playerEl = ref<HTMLVideoElement | null>(null);
@@ -252,7 +270,8 @@ async function initPlayer() {
 
     try {
         player = videojs(playerEl.value, {
-            controls: true,
+            controls: props.showControls,
+            bigPlayButton: props.showControls,
             fluid: true,
             responsive: true,
             poster: audioOnly.value ? audioPosterUrl : undefined,
@@ -261,24 +280,54 @@ async function initPlayer() {
 
         player.src({ src: effectiveUrl, type: 'application/x-mpegURL' });
         player.on('loadedmetadata', detectAudioOnlyFromPlayer);
+        player.on('play', () => emit('playing-change', true));
+        player.on('pause', () => emit('playing-change', false));
 
         player.ready(() => {
-            try {
-                (player as any).hlsQualitySelector({ displayCurrentQuality: true });
-            } catch (e) {
-                console.warn('HLS quality selector unavailable:', e);
-            }
-            if (props.thumbnailVttUrl) {
+            if (props.showControls) {
                 try {
-                    (player as any).thumbnailPreview({ vttUrl: props.thumbnailVttUrl });
+                    (player as any).hlsQualitySelector({ displayCurrentQuality: true });
                 } catch (e) {
-                    console.warn('Thumbnail preview unavailable:', e);
+                    console.warn('HLS quality selector unavailable:', e);
                 }
+                if (props.thumbnailVttUrl) {
+                    try {
+                        (player as any).thumbnailPreview({ vttUrl: props.thumbnailVttUrl });
+                    } catch (e) {
+                        console.warn('Thumbnail preview unavailable:', e);
+                    }
+                }
+            }
+            // Surface quality levels to consumers regardless of control visibility —
+            // the segment editor hosts its own selector when controls are hidden.
+            try {
+                const ql = (player as any).qualityLevels?.();
+                if (ql) {
+                    const publish = () => emit('quality-levels', snapshotQualityLevels(ql));
+                    ql.on('addqualitylevel', publish);
+                    ql.on('removequalitylevel', publish);
+                    publish();
+                }
+            } catch (e) {
+                console.warn('Quality levels unavailable:', e);
             }
         });
     } catch (e) {
         console.error('Failed to initialize video player:', e);
     }
+}
+
+function snapshotQualityLevels(ql: { levels_?: Array<Record<string, number>>; length: number }): QualityLevelInfo[] {
+    const raw: Array<Record<string, number>> = ql.levels_ ?? [];
+    const seen = new Map<string, QualityLevelInfo>();
+    for (const level of raw) {
+        const height = Number(level.height) || 0;
+        const width = Number(level.width) || 0;
+        const bitrate = Number(level.bitrate) || 0;
+        const id = height > 0 ? `${height}` : `b${bitrate}`;
+        if (!seen.has(id)) seen.set(id, { id, height, width, bitrate });
+    }
+    return Array.from(seen.values()).sort((a, b) => b.bitrate - a.bitrate);
 }
 
 // Track pending seek for source changes (angle switching)
@@ -371,7 +420,25 @@ function isPlaying(): boolean {
     return !!player && !player.paused();
 }
 
-defineExpose({ setSource, getCurrentTime, setPendingSeek, seek, togglePlay, isPlaying });
+/**
+ * Enable a specific rendition by id (matches the `id` from the `quality-levels` event)
+ * or pass `null` to re-enable all levels (auto/ABR). Mirrors the behavior of the
+ * in-player custom quality selector.
+ */
+function setQuality(id: string | null) {
+    if (!player) return;
+    const ql = (player as unknown as { qualityLevels?: () => { length: number; [i: number]: { enabled: boolean; height?: number; bitrate?: number } } }).qualityLevels?.();
+    if (!ql) return;
+    for (let i = 0; i < ql.length; i++) {
+        const level = ql[i];
+        const height = Number(level.height) || 0;
+        const bitrate = Number(level.bitrate) || 0;
+        const levelId = height > 0 ? `${height}` : `b${bitrate}`;
+        level.enabled = id === null || levelId === id;
+    }
+}
+
+defineExpose({ setSource, getCurrentTime, setPendingSeek, seek, togglePlay, isPlaying, setQuality });
 </script>
 
 <template>
