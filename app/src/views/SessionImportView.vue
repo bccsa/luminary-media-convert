@@ -23,6 +23,7 @@ const encryptionKey = ref('');
 
 const submitting = ref(false);
 const error = ref<string | null>(null);
+const successMessage = ref<string | null>(null);
 
 async function fetchS3Configs() {
     loadingConfigs.value = true;
@@ -74,6 +75,12 @@ async function handleSubmit() {
 
         const result = await importSession(token, data);
         const sessionId = result.id || result.sessionId;
+        const langs: string[] = Array.isArray(result.chaptersLanguages) ? result.chaptersLanguages : [];
+        if (langs.length > 0) {
+            successMessage.value = `Chapters detected: ${langs.join(', ')}`;
+            // Brief pause so the message is visible before navigation.
+            await new Promise((r) => setTimeout(r, 900));
+        }
         router.push(`/sessions/${sessionId}`);
     } catch (e) {
         error.value = e instanceof Error ? e.message : String(e);
@@ -166,6 +173,11 @@ onMounted(fetchS3Configs);
                 <!-- Error -->
                 <div v-if="error" class="rounded-lg bg-red-950/40 border border-red-800/50 p-3">
                     <p class="text-sm text-red-400">{{ error }}</p>
+                </div>
+
+                <!-- Success hint (shown briefly before navigating) -->
+                <div v-if="successMessage" class="rounded-lg bg-emerald-950/40 border border-emerald-800/50 p-3">
+                    <p class="text-sm text-emerald-300">{{ successMessage }}</p>
                 </div>
 
                 <!-- Actions -->

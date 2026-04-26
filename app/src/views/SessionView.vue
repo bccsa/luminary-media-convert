@@ -6,6 +6,7 @@ import { EncodeConfigForm, computeLayoutKey, saveConfig } from '@luminary-media-
 import type { ProbeResult, EncodeConfig, TrimSegment } from '@luminary-media-converter/encode-config';
 import { SegmentEditor } from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
+import { useChapters } from '../composables/useChapters';
 import HlsPlayer from '../components/HlsPlayer.vue';
 import type { QualityLevelInfo } from '../components/HlsPlayer.vue';
 import ProgressBar from '../components/ProgressBar.vue';
@@ -44,6 +45,11 @@ const trimSegments = computed<TrimSegment[]>(() =>
     editorSegments.value.map((s) => ({ inSec: s.inSec, outSec: s.outSec })),
 );
 const configFormRef = ref<InstanceType<typeof EncodeConfigForm> | null>(null);
+
+// Chapter editor — sidecar VTT in S3, autosaves to localStorage, explicit save to S3.
+const chapters = useChapters({ getAccessToken: () => getAccessTokenSilently() });
+const chapterSegments = chapters.segments;
+const chaptersSaveError = ref<string | null>(null);
 
 // Session name
 const sessionName = ref('');
@@ -863,6 +869,50 @@ watch(
 );
 
 // ---------------------------------------------------------------------------
+// Chapter editor — load / save / discard
+// ---------------------------------------------------------------------------
+
+// Load chapters once a post-submit state is reached (preview is then live).
+// Uploaded / uploading / created phases use the trim editor on a separate branch.
+const isPostSubmit = computed(() => {
+    const s = currentStatus.value;
+    return s === 'queued' || s === 'encoding' || s === 'encrypting'
+        || s === 'uploading_to_s3' || s === 'completed';
+});
+
+watch(
+    [isPostSubmit, () => sessionId.value],
+    async ([active, id]) => {
+        if (!active || !id) return;
+        if (chapters.isLoaded.value) return;
+        try {
+            await chapters.load(id);
+        } catch (err) {
+            chaptersSaveError.value = err instanceof Error ? err.message : String(err);
+        }
+    },
+    { immediate: true },
+);
+
+async function onSaveChapters() {
+    chaptersSaveError.value = null;
+    try {
+        await chapters.saveRemote();
+    } catch (err) {
+        chaptersSaveError.value = err instanceof Error ? err.message : String(err);
+    }
+}
+
+async function onDiscardChapters() {
+    chaptersSaveError.value = null;
+    try {
+        await chapters.discardLocal();
+    } catch (err) {
+        chaptersSaveError.value = err instanceof Error ? err.message : String(err);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
@@ -870,6 +920,7 @@ onMounted(fetchSession);
 
 onUnmounted(() => {
     poller.stop();
+    chapters.unload();
 });
 </script>
 
@@ -1138,6 +1189,44 @@ onUnmounted(() => {
                 <!-- ENCODING PROGRESS (queue, encoding, encrypting, s3 upload)   -->
                 <!-- ============================================================ -->
                 <template v-else-if="showEncoding || isCompleted || currentStatus === 'failed'">
+
+                    <!-- Chapter editor (sidecar). Available throughout encoding and after completion. -->
+                    <SegmentEditor
+                        v-if="activePlaybackUrl && probeResult?.format?.duration && currentStatus !== 'failed'"
+                        v-model="chapterSegments"
+                        mode="chapters"
+                        :duration="probeResult.format.duration"
+                        :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
+                        :on-seek="(t) => playerRef?.seek(t)"
+                        :on-play-pause="() => playerRef?.togglePlay()"
+                        :is-playing="isPreviewPlaying"
+                        :ripple-edit="false"
+                        title="Chapters"
+                        class="mb-4"
+                    >
+                        <template #toolbar-end>
+                            <span
+                                v-if="chapters.isDirty.value"
+                                class="rounded bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-300"
+                                title="Unsaved changes are stored locally; click Save to commit to S3."
+                            >Unsaved</span>
+                            <button
+                                v-if="chapters.isDirty.value"
+                                type="button"
+                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                :disabled="chapters.isSaving.value"
+                                @click="onDiscardChapters"
+                            >Discard</button>
+                            <button
+                                type="button"
+                                class="rounded border border-indigo-600 bg-indigo-600/30 px-3 py-1 text-xs font-medium text-indigo-200 transition-colors hover:bg-indigo-600/50 disabled:cursor-not-allowed disabled:opacity-50"
+                                :disabled="!chapters.isDirty.value || chapters.isSaving.value"
+                                @click="onSaveChapters"
+                            >{{ chapters.isSaving.value ? 'Saving…' : 'Save' }}</button>
+                        </template>
+                    </SegmentEditor>
+
+                    <p v-if="chaptersSaveError" class="mb-3 text-xs text-red-400">{{ chaptersSaveError }}</p>
 
                     <!-- Queue position -->
                     <div v-if="poller.status.value === 'queued' && poller.queuePosition.value != null" class="mb-4 rounded-lg bg-zinc-900/60 p-4">

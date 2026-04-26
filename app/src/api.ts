@@ -605,3 +605,51 @@ export async function hlsMutate(
     return res.json();
 }
 
+// --- Chapter sidecar bindings ------------------------------------------
+
+/**
+ * Fetch the chapter VTT for a session. Returns null when no file exists.
+ */
+export async function getSessionChapters(
+    accessToken: string,
+    sessionId: string,
+    lang: string = 'en',
+): Promise<{ vtt: string } | null> {
+    const res = await fetch(
+        `${SAAS_URL}/saas/sessions/${sessionId}/chapters?lang=${encodeURIComponent(lang)}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Get chapters failed (${res.status})`);
+    }
+    return res.json();
+}
+
+/**
+ * Persist the chapter VTT to S3. Server validates BCP-47 lang + WEBVTT body.
+ */
+export async function putSessionChapters(
+    accessToken: string,
+    sessionId: string,
+    vtt: string,
+    lang: string = 'en',
+): Promise<void> {
+    const res = await fetch(
+        `${SAAS_URL}/saas/sessions/${sessionId}/chapters?lang=${encodeURIComponent(lang)}`,
+        {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ vtt }),
+        },
+    );
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Save chapters failed (${res.status})`);
+    }
+}
+
