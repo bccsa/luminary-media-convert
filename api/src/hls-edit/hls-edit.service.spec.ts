@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { BadRequestException, ConflictException, NotImplementedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotImplementedException, PayloadTooLargeException } from '@nestjs/common';
 import { HlsEditService } from './hls-edit.service.js';
 import type { S3ConfigDto } from '../encode/dto/s3-config.dto.js';
 
@@ -178,6 +178,107 @@ describe('HlsEditService', () => {
             await expect(service.discover({ s3, folderPrefix: 'output/' })).rejects.toThrow(
                 /No HLS master playlist/,
             );
+        });
+
+        it('reports chapters/<lang>.vtt sidecars from the same listing', async () => {
+            const listMock = vi.fn().mockResolvedValue({
+                Contents: [
+                    { Key: 'output/master.m3u8' },
+                    { Key: 'output/chapters/en.vtt' },
+                    { Key: 'output/chapters/fr.vtt' },
+                    { Key: 'output/chapters/something-else.txt' },
+                ],
+                IsTruncated: false,
+            });
+            etag.createClient.mockReturnValue({ send: listMock } as any);
+            etag.getObjectWithEtag.mockResolvedValue({ body: Buffer.from(MASTER), etag: 'e' });
+
+            const result = await service.discover({ s3, folderPrefix: 'output/' });
+
+            expect(result.chaptersLanguages).toEqual(['en', 'fr']);
+        });
+
+        it('omits chaptersLanguages when no chapter files exist', async () => {
+            const listMock = vi.fn().mockResolvedValue({
+                Contents: [{ Key: 'output/master.m3u8' }],
+                IsTruncated: false,
+            });
+            etag.createClient.mockReturnValue({ send: listMock } as any);
+            etag.getObjectWithEtag.mockResolvedValue({ body: Buffer.from(MASTER), etag: 'e' });
+
+            const result = await service.discover({ s3, folderPrefix: 'output/' });
+
+            expect(result.chaptersLanguages).toBeUndefined();
+        });
+    });
+
+    describe('readChapters', () => {
+        it('returns the VTT body when the file exists', async () => {
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from('WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nIntro'),
+                etag: 'x',
+            });
+
+            const result = await service.readChapters(s3, 'output/', 'en');
+
+            expect(etag.getObjectWithEtag).toHaveBeenCalledWith(s3, 'output/chapters/en.vtt');
+            expect(result?.vtt).toMatch(/^WEBVTT/);
+        });
+
+        it('handles a folder prefix without a trailing slash', async () => {
+            etag.getObjectWithEtag.mockResolvedValue({ body: Buffer.from('WEBVTT'), etag: 'x' });
+            await service.readChapters(s3, 'output', 'en');
+            expect(etag.getObjectWithEtag).toHaveBeenCalledWith(s3, 'output/chapters/en.vtt');
+        });
+
+        it('returns null on NoSuchKey', async () => {
+            const err: any = new Error('not found');
+            err.name = 'NoSuchKey';
+            etag.getObjectWithEtag.mockRejectedValue(err);
+
+            const result = await service.readChapters(s3, 'output/', 'en');
+            expect(result).toBeNull();
+        });
+
+        it('rejects malformed lang codes', async () => {
+            await expect(service.readChapters(s3, 'output/', 'EN')).rejects.toBeInstanceOf(BadRequestException);
+            await expect(service.readChapters(s3, 'output/', 'english')).rejects.toBeInstanceOf(BadRequestException);
+            await expect(service.readChapters(s3, 'output/', '../etc')).rejects.toBeInstanceOf(BadRequestException);
+        });
+    });
+
+    describe('writeChapters', () => {
+        it('puts the VTT body with the right key, body, and content-type', async () => {
+            etag.putObject.mockResolvedValue({ etag: 'y' });
+
+            await service.writeChapters(s3, 'output/', 'en', 'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nIntro');
+
+            expect(etag.putObject).toHaveBeenCalledWith(
+                s3,
+                'output/chapters/en.vtt',
+                expect.stringMatching(/^WEBVTT/),
+                'text/vtt',
+            );
+        });
+
+        it('rejects bodies that do not start with WEBVTT', async () => {
+            await expect(
+                service.writeChapters(s3, 'output/', 'en', 'not vtt'),
+            ).rejects.toBeInstanceOf(BadRequestException);
+            expect(etag.putObject).not.toHaveBeenCalled();
+        });
+
+        it('rejects malformed lang codes', async () => {
+            await expect(
+                service.writeChapters(s3, 'output/', 'en_US', 'WEBVTT'),
+            ).rejects.toBeInstanceOf(BadRequestException);
+        });
+
+        it('rejects bodies larger than 1 MiB', async () => {
+            const big = 'WEBVTT\n' + 'x'.repeat(1024 * 1024 + 100);
+            await expect(
+                service.writeChapters(s3, 'output/', 'en', big),
+            ).rejects.toBeInstanceOf(PayloadTooLargeException);
         });
     });
 });

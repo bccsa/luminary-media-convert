@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Logger, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Logger, NotFoundException, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { AuthResolverGuard } from '../auth/auth-resolver.guard.js';
@@ -7,6 +7,8 @@ import { HlsEditService, type HlsDiscoverResult, type HlsMutateResult, type HlsR
 import { HlsReadRequestDto } from './dto/read.dto.js';
 import { HlsMutateRequestDto } from './dto/mutate.dto.js';
 import { HlsDiscoverRequestDto } from './dto/discover.dto.js';
+import { HlsChaptersReadRequestDto, type HlsChaptersReadResult } from './dto/chapters-read.dto.js';
+import { HlsChaptersWriteRequestDto } from './dto/chapters-write.dto.js';
 
 @ApiTags('HLS Edit')
 @Controller('api/hls')
@@ -64,5 +66,41 @@ export class HlsEditController {
     @ApiResponse({ status: 401, description: 'Unauthorized.' })
     async discover(@Body() dto: HlsDiscoverRequestDto): Promise<HlsDiscoverResult> {
         return this.service.discover(dto);
+    }
+
+    @Post('chapters/read')
+    @HttpCode(HttpStatus.OK)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('master', 'apikey')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'Read the chapter sidecar VTT for a session prefix',
+        description: 'Stateless — takes inline S3 credentials and a folder prefix. Returns the WebVTT body or 404 when the file does not exist.',
+    })
+    @ApiResponse({ status: 200, description: 'Chapter VTT body.' })
+    @ApiResponse({ status: 400, description: 'Invalid request (e.g. malformed lang).' })
+    @ApiResponse({ status: 401, description: 'Unauthorized.' })
+    @ApiResponse({ status: 404, description: 'No chapter file at chapters/<lang>.vtt under the prefix.' })
+    async chaptersRead(@Body() dto: HlsChaptersReadRequestDto): Promise<HlsChaptersReadResult> {
+        const result = await this.service.readChapters(dto.s3, dto.folderPrefix, dto.lang);
+        if (!result) throw new NotFoundException('No chapter file for this language');
+        return result;
+    }
+
+    @Post('chapters/write')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('master', 'apikey')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'Write the chapter sidecar VTT for a session prefix',
+        description: 'Stateless — takes inline S3 credentials, a folder prefix, language code, and the WebVTT body. Stores the file at chapters/<lang>.vtt with Content-Type: text/vtt.',
+    })
+    @ApiResponse({ status: 204, description: 'Chapter VTT stored.' })
+    @ApiResponse({ status: 400, description: 'Invalid request (lang or VTT body).' })
+    @ApiResponse({ status: 401, description: 'Unauthorized.' })
+    @ApiResponse({ status: 413, description: 'VTT body exceeds 1 MiB.' })
+    async chaptersWrite(@Body() dto: HlsChaptersWriteRequestDto): Promise<void> {
+        await this.service.writeChapters(dto.s3, dto.folderPrefix, dto.lang, dto.vtt);
     }
 }

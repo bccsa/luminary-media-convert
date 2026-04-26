@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
 import {
     S3Client,
     ListObjectsV2Command,
@@ -35,7 +35,13 @@ export interface HlsDiscoverResult {
     masterPlaylistKey: string;
     folderPrefix: string;
     anglePlaylists?: Array<{ name: string; key: string }>;
+    /** BCP-47 language codes detected as chapters/<lang>.vtt sidecar files. */
+    chaptersLanguages?: string[];
 }
+
+/** Validate a relaxed BCP-47 form: 2–3 char primary subtag, optional region. */
+const LANG_PATTERN = /^[a-z]{2,3}(?:-[A-Z]{2})?$/;
+const MAX_VTT_BYTES = 1024 * 1024;
 
 @Injectable()
 export class HlsEditService {
@@ -151,7 +157,61 @@ export class HlsEditService {
                 key,
             }));
         }
+
+        const chaptersLanguages = collectChaptersLanguages(keys, folderPrefix);
+        if (chaptersLanguages.length > 0) {
+            result.chaptersLanguages = chaptersLanguages;
+        }
         return result;
+    }
+
+    /**
+     * Read the chapter sidecar at `{folderPrefix}chapters/{lang}.vtt`.
+     * Returns null when the object does not exist.
+     */
+    async readChapters(
+        s3: S3ConfigDto,
+        folderPrefix: string,
+        lang: string,
+    ): Promise<{ vtt: string } | null> {
+        if (!LANG_PATTERN.test(lang)) {
+            throw new BadRequestException('lang must be a BCP-47 language code');
+        }
+        const key = chaptersKey(folderPrefix, lang);
+        try {
+            const { body } = await this.s3EtagService.getObjectWithEtag(s3, key);
+            return { vtt: body.toString('utf-8') };
+        } catch (err) {
+            if (isNoSuchKey(err)) return null;
+            throw err;
+        }
+    }
+
+    /**
+     * Write a WebVTT chapter sidecar to `{folderPrefix}chapters/{lang}.vtt`.
+     * Validates language code, body size, and `WEBVTT` magic before uploading.
+     */
+    async writeChapters(
+        s3: S3ConfigDto,
+        folderPrefix: string,
+        lang: string,
+        vtt: string,
+    ): Promise<void> {
+        if (!LANG_PATTERN.test(lang)) {
+            throw new BadRequestException('lang must be a BCP-47 language code');
+        }
+        const trimmedHead = vtt.slice(0, 16).trimStart();
+        if (!/^WEBVTT(\b|$)/.test(trimmedHead)) {
+            throw new BadRequestException('Body must be a WebVTT document (start with WEBVTT)');
+        }
+        const byteLength = Buffer.byteLength(vtt, 'utf-8');
+        if (byteLength > MAX_VTT_BYTES) {
+            throw new PayloadTooLargeException(
+                `Chapter VTT body exceeds ${MAX_VTT_BYTES} bytes`,
+            );
+        }
+        const key = chaptersKey(folderPrefix, lang);
+        await this.s3EtagService.putObject(s3, key, vtt, 'text/vtt');
     }
 
     private async listObjects(config: S3ConfigDto, prefix: string): Promise<string[]> {
@@ -178,4 +238,36 @@ export class HlsEditService {
 function folderOf(key: string): string {
     const lastSlash = key.lastIndexOf('/');
     return lastSlash >= 0 ? key.slice(0, lastSlash + 1) : '';
+}
+
+function chaptersKey(folderPrefix: string, lang: string): string {
+    const prefix = folderPrefix.endsWith('/') ? folderPrefix : folderPrefix + '/';
+    return `${prefix}chapters/${lang}.vtt`;
+}
+
+function collectChaptersLanguages(keys: string[], folderPrefix: string): string[] {
+    const prefix = folderPrefix.endsWith('/') ? folderPrefix : folderPrefix + '/';
+    const matcher = new RegExp(
+        `^${escapeRegExp(prefix)}chapters/([a-z]{2,3}(?:-[A-Z]{2})?)\\.vtt$`,
+    );
+    const langs = new Set<string>();
+    for (const key of keys) {
+        const m = matcher.exec(key);
+        if (m) langs.add(m[1]);
+    }
+    return Array.from(langs).sort();
+}
+
+function escapeRegExp(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isNoSuchKey(err: unknown): boolean {
+    if (!err || typeof err !== 'object') return false;
+    const e = err as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
+    return (
+        e.name === 'NoSuchKey' ||
+        e.Code === 'NoSuchKey' ||
+        e.$metadata?.httpStatusCode === 404
+    );
 }
