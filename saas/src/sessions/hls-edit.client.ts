@@ -44,6 +44,11 @@ export interface HlsDiscoverResult {
     masterPlaylistKey: string;
     folderPrefix: string;
     anglePlaylists?: Array<{ name: string; key: string }>;
+    chaptersLanguages?: string[];
+}
+
+export interface HlsChaptersReadResult {
+    vtt: string;
 }
 
 /**
@@ -83,6 +88,33 @@ export class HlsEditClient {
         return this.post<HlsDiscoverResult>('/api/hls/discover', { s3, ...opts });
     }
 
+    /**
+     * Returns null when the chapter file is not present (Encoding API responds 404).
+     */
+    async readChapters(
+        s3: S3ConfigPayload,
+        folderPrefix: string,
+        lang: string,
+    ): Promise<HlsChaptersReadResult | null> {
+        try {
+            return await this.post<HlsChaptersReadResult>('/api/hls/chapters/read', {
+                s3, folderPrefix, lang,
+            });
+        } catch (err) {
+            if (err instanceof HttpException && err.getStatus() === 404) return null;
+            throw err;
+        }
+    }
+
+    async writeChapters(
+        s3: S3ConfigPayload,
+        folderPrefix: string,
+        lang: string,
+        vtt: string,
+    ): Promise<void> {
+        await this.post<void>('/api/hls/chapters/write', { s3, folderPrefix, lang, vtt });
+    }
+
     private async post<T>(path: string, body: unknown): Promise<T> {
         if (!this.baseUrl || !this.masterKey) {
             throw new BadGatewayException(
@@ -115,6 +147,9 @@ export class HlsEditClient {
             throw new BadGatewayException(message);
         }
 
+        if (res.status === 204 || res.headers.get('content-length') === '0') {
+            return undefined as unknown as T;
+        }
         return res.json() as Promise<T>;
     }
 }

@@ -2,6 +2,7 @@ import {
     Controller,
     Get,
     Post,
+    Put,
     Patch,
     Delete,
     Body,
@@ -11,6 +12,7 @@ import {
     UseGuards,
     HttpCode,
     HttpStatus,
+    NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
@@ -115,6 +117,41 @@ export class SessionsController {
             sessionId,
             body.ifMatch,
             body.operations ?? [],
+        );
+    }
+
+    @Get(':sessionId/chapters')
+    @SkipAdmin()
+    @ApiQuery({ name: 'lang', required: false, type: String, description: 'BCP-47 language code (default `en`)' })
+    async readChapters(
+        @Param('sessionId') sessionId: string,
+        @Query('lang') lang: string | undefined,
+        @Req() req: { user: { _id: string } },
+    ): Promise<{ vtt: string }> {
+        const result = await this.sessionsService.readChapters(
+            req.user._id,
+            sessionId,
+            lang ?? 'en',
+        );
+        if (!result) throw new NotFoundException('No chapter file for this language');
+        return result;
+    }
+
+    @Put(':sessionId/chapters')
+    @SkipAdmin()
+    @HttpCode(HttpStatus.NO_CONTENT)
+    @ApiQuery({ name: 'lang', required: false, type: String, description: 'BCP-47 language code (default `en`)' })
+    async writeChapters(
+        @Param('sessionId') sessionId: string,
+        @Query('lang') lang: string | undefined,
+        @Body() body: { vtt: string },
+        @Req() req: { user: { _id: string } },
+    ): Promise<void> {
+        await this.sessionsService.writeChapters(
+            req.user._id,
+            sessionId,
+            lang ?? 'en',
+            body?.vtt ?? '',
         );
     }
 

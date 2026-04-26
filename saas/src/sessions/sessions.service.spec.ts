@@ -31,6 +31,8 @@ const mockHlsEditClient = {
     read: vi.fn(),
     mutate: vi.fn(),
     discover: vi.fn(),
+    readChapters: vi.fn(),
+    writeChapters: vi.fn(),
 };
 
 describe('SessionsService', () => {
@@ -988,6 +990,33 @@ describe('SessionsService', () => {
             });
             expect(mockS3ConfigsService.getById).toHaveBeenCalledWith('user:42', 'cfg-99');
         });
+
+        it('surfaces chaptersLanguages from discover without persisting them', async () => {
+            mockHlsEditClient.discover.mockResolvedValue({
+                masterPlaylistKey: 'output/master.m3u8',
+                folderPrefix: 'output/',
+                chaptersLanguages: ['en', 'fr'],
+            });
+
+            const result = await service.importSession('user:1', {
+                s3ConfigId: 'cfg-1',
+                folderPrefix: 'output/',
+            });
+
+            expect(result.chaptersLanguages).toEqual(['en', 'fr']);
+            // The persisted document (the value handed to insert) must not include this field.
+            const persisted = mockDatabaseService.insert.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+            expect(persisted).toBeDefined();
+            expect(persisted!.chaptersLanguages).toBeUndefined();
+        });
+
+        it('does not include chaptersLanguages when discover finds none', async () => {
+            const result = await service.importSession('user:1', {
+                s3ConfigId: 'cfg-1',
+                masterPlaylistKey: 'output/master.m3u8',
+            });
+            expect(result.chaptersLanguages).toBeUndefined();
+        });
     });
 
 
@@ -1222,6 +1251,77 @@ describe('SessionsService', () => {
             await expect(
                 service.hlsMutate('user:1', 'sess-hls', 'stale', []),
             ).rejects.toBeInstanceOf((await import('@nestjs/common')).ConflictException);
+        });
+
+        it('readChapters forwards the resolved S3 config and the master folder prefix', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            mockHlsEditClient.readChapters.mockResolvedValue({ vtt: 'WEBVTT\n' });
+
+            const result = await service.readChapters('user:1', 'sess-hls', 'en');
+
+            expect(mockHlsEditClient.readChapters).toHaveBeenCalledWith(
+                expect.objectContaining({ bucket: 'media', accessKey: 'plain-key' }),
+                'out/',
+                'en',
+            );
+            expect(result?.vtt).toMatch(/^WEBVTT/);
+        });
+
+        it('readChapters returns null when the client reports no file', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            mockHlsEditClient.readChapters.mockResolvedValue(null);
+            await expect(service.readChapters('user:1', 'sess-hls', 'en')).resolves.toBeNull();
+        });
+
+        it('readChapters falls back to s3Config.pathPrefix when the session has no master playlist', async () => {
+            mockDatabaseService.get.mockResolvedValue({
+                ...baseDoc,
+                masterPlaylist: undefined,
+                s3Config: { ...baseDoc.s3Config, pathPrefix: 'imported/abc' },
+            });
+            mockHlsEditClient.readChapters.mockResolvedValue(null);
+            await service.readChapters('user:1', 'sess-hls', 'en');
+            expect(mockHlsEditClient.readChapters).toHaveBeenCalledWith(
+                expect.anything(),
+                'imported/abc/',
+                'en',
+            );
+        });
+
+        it('readChapters rejects when the session has neither a master playlist nor a path prefix', async () => {
+            mockDatabaseService.get.mockResolvedValue({
+                ...baseDoc,
+                masterPlaylist: undefined,
+                s3Config: { endPoint: 'minio', bucket: 'media' },
+            });
+            await expect(service.readChapters('user:1', 'sess-hls', 'en'))
+                .rejects.toBeInstanceOf(BadRequestException);
+        });
+
+        it('readChapters rejects when the session is not owned by the user', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            await expect(service.readChapters('user:other', 'sess-hls', 'en'))
+                .rejects.toThrow(ForbiddenException);
+        });
+
+        it('writeChapters forwards lang + body to the client', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            mockHlsEditClient.writeChapters.mockResolvedValue(undefined);
+
+            await service.writeChapters('user:1', 'sess-hls', 'en', 'WEBVTT\n');
+
+            expect(mockHlsEditClient.writeChapters).toHaveBeenCalledWith(
+                expect.objectContaining({ bucket: 'media' }),
+                'out/',
+                'en',
+                'WEBVTT\n',
+            );
+        });
+
+        it('writeChapters rejects ownership-mismatch sessions', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            await expect(service.writeChapters('user:other', 'sess-hls', 'en', 'WEBVTT'))
+                .rejects.toThrow(ForbiddenException);
         });
     });
 

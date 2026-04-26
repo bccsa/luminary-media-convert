@@ -269,7 +269,7 @@ export class SessionsService implements OnModuleInit {
     async importSession(
         userId: string,
         dto: ImportSessionDto,
-    ): Promise<SessionDocument> {
+    ): Promise<SessionDocument & { chaptersLanguages?: string[] }> {
         // Resolve S3 config (ownership check included) and decrypt credentials
         // so we can forward them inline to the API's stateless /api/hls/discover.
         const s3Config = await this.s3ConfigsService.getById(
@@ -356,7 +356,11 @@ export class SessionsService implements OnModuleInit {
             `Session ${sessionId} imported for user ${userId} (${files.length} files, ${anglePlaylists?.length ?? 1} master playlist${anglePlaylists ? 's' : ''})`,
         );
 
-        return doc;
+        // chaptersLanguages is transient telemetry for the import view; never
+        // persisted to CouchDB (we already inserted `doc` above without it).
+        return discovered.chaptersLanguages?.length
+            ? { ...doc, chaptersLanguages: discovered.chaptersLanguages }
+            : doc;
     }
 
     // --- CouchDB session history queries ---
@@ -522,6 +526,54 @@ export class SessionsService implements OnModuleInit {
         await this.databaseService.upsert(doc);
 
         return doc;
+    }
+
+    /**
+     * Read the chapter VTT for a session via the Encoding API.
+     * Returns null when no file exists.
+     */
+    async readChapters(
+        userId: string,
+        sessionId: string,
+        lang: string,
+    ): Promise<{ vtt: string } | null> {
+        const { doc, s3Payload } = await this.resolveForHlsEdit(userId, sessionId);
+        const folderPrefix = this.deriveFolderPrefix(doc);
+        return this.hlsEditClient.readChapters(s3Payload, folderPrefix, lang);
+    }
+
+    /**
+     * Write the chapter VTT for a session via the Encoding API. The Encoding
+     * API enforces VTT and lang validation; we just forward.
+     */
+    async writeChapters(
+        userId: string,
+        sessionId: string,
+        lang: string,
+        vtt: string,
+    ): Promise<void> {
+        const { doc, s3Payload } = await this.resolveForHlsEdit(userId, sessionId);
+        const folderPrefix = this.deriveFolderPrefix(doc);
+        await this.hlsEditClient.writeChapters(s3Payload, folderPrefix, lang, vtt);
+    }
+
+    /**
+     * Best-effort folder prefix for a session.
+     * Prefer the master playlist's folder; fall back to the s3 path prefix.
+     */
+    private deriveFolderPrefix(doc: SessionDocument): string {
+        if (doc.masterPlaylist) {
+            const lastSlash = doc.masterPlaylist.lastIndexOf('/');
+            return lastSlash >= 0 ? doc.masterPlaylist.slice(0, lastSlash + 1) : '';
+        }
+        if (doc.s3Config?.pathPrefix) {
+            return doc.s3Config.pathPrefix.endsWith('/')
+                ? doc.s3Config.pathPrefix
+                : doc.s3Config.pathPrefix + '/';
+        }
+        throw new BadRequestException(
+            'Session has no folder prefix to read/write chapters under',
+        );
     }
 
     private async resolveForHlsEdit(
