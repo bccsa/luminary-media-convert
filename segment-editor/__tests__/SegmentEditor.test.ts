@@ -1305,6 +1305,22 @@ describe('SegmentEditor — list rendering', () => {
         expect(w.find('.se-playback-controls').exists()).toBe(true);
         expect(w.find('.se-playback-controls__center').exists()).toBe(false);
     });
+
+    it('renders the toolbar-end slot at the end of the toolbar row', async () => {
+        const w = mount(SegmentEditor, {
+            props: {
+                modelValue: [],
+                duration: 100,
+                getCurrentTime: () => 0,
+            },
+            slots: {
+                'toolbar-end': '<button class="mock-save">Save</button>',
+            },
+            attachTo: document.body,
+        });
+        await flush();
+        expect(w.find('.se-toolbar .mock-save').exists()).toBe(true);
+    });
 });
 
 describe('SegmentEditor — defensive branches', () => {

@@ -882,6 +882,7 @@ defineExpose({
                 />
                 <span>{{ zoom.toFixed(1) }}×</span>
             </label>
+            <slot name="toolbar-end" />
         </div>
 
         <div v-if="showPlaybackControls" class="se-time-above">

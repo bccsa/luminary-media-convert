@@ -93,6 +93,7 @@ Override the mode-derived defaults with `show-labels`, `allow-overlap`, or `ripp
 |-------------------|-----------------------------------------------------------------------|
 | `playback-start`  | Left cell of the playback-controls row. Ideal for an audio-track selector or other player-adjacent UI. |
 | `playback-end`    | Right cell of the playback-controls row. Ideal for a quality selector. |
+| `toolbar-end`     | After the zoom slider on the toolbar row. Use it for save / dirty / discard UI tied to your persistence layer. |
 
 The center cell of the playback row always holds the `[← back] [▶/⏸] [→ forward]` group. Current time is rendered on its own line above the timeline.
 
