@@ -165,6 +165,74 @@ describe('SessionsService', () => {
         });
     });
 
+    describe('startUrlUpload', () => {
+        async function createOwnedSession(userId = 'user:1') {
+            await service.createSession(userId, {
+                s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' },
+            } as any);
+        }
+
+        it('proxies the URL upload to the Encoding API with master key auth', async () => {
+            await createOwnedSession();
+            vi.mocked(fetch).mockResolvedValueOnce(
+                new Response(JSON.stringify({ sessionId: 'sess-123', status: 'uploading' }), {
+                    status: 202,
+                }),
+            );
+
+            const result = await service.startUrlUpload('user:1', 'sess-123', {
+                url: 'https://example.com/clip.mp4',
+                filename: 'meeting.mp4',
+            } as any);
+
+            expect(result).toEqual({ sessionId: 'sess-123', status: 'uploading' });
+            expect(fetch).toHaveBeenLastCalledWith(
+                'http://localhost:3000/api/sessions/sess-123/url-upload',
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: expect.objectContaining({
+                        'X-API-Key': 'test-master-key',
+                        'Content-Type': 'application/json',
+                    }),
+                    body: JSON.stringify({
+                        url: 'https://example.com/clip.mp4',
+                        filename: 'meeting.mp4',
+                    }),
+                }),
+            );
+        });
+
+        it('throws NotFoundException for unknown session', async () => {
+            await expect(
+                service.startUrlUpload('user:1', 'nonexistent', {
+                    url: 'https://example.com/x.mp4',
+                } as any),
+            ).rejects.toThrow(NotFoundException);
+        });
+
+        it('throws ForbiddenException for sessions owned by a different user', async () => {
+            await createOwnedSession('user:1');
+            await expect(
+                service.startUrlUpload('user:other', 'sess-123', {
+                    url: 'https://example.com/x.mp4',
+                } as any),
+            ).rejects.toThrow(ForbiddenException);
+        });
+
+        it('surfaces non-2xx Encoding API responses as BadGatewayException', async () => {
+            await createOwnedSession();
+            vi.mocked(fetch).mockResolvedValueOnce(
+                new Response(JSON.stringify({ message: 'invalid url' }), { status: 400 }),
+            );
+
+            await expect(
+                service.startUrlUpload('user:1', 'sess-123', {
+                    url: 'http://169.254.169.254/',
+                } as any),
+            ).rejects.toThrow(BadGatewayException);
+        });
+    });
+
     describe('getSessionRecord', () => {
         it('should return session record from memory', async () => {
             await service.createSession('user:1', { s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' } } as any);

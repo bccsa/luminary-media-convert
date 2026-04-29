@@ -14,6 +14,7 @@ import { HlsParserService } from './hls-parser.service.js';
 import { HlsEditClient, type HlsMutateOperation } from './hls-edit.client.js';
 import { S3ClientService } from './s3-client.service.js';
 import { CreateSaasSessionDto } from './dto/create-session.dto.js';
+import { UrlUploadDto } from './dto/url-upload.dto.js';
 import { ImportSessionDto } from './dto/import-session.dto.js';
 import { MoveSessionFilesDto } from './dto/move-session-files.dto.js';
 import { RenameSessionPrefixDto } from './dto/rename-session-prefix.dto.js';
@@ -160,6 +161,44 @@ export class SessionsService implements OnModuleInit {
             sessionToken: data.sessionToken,
             maxUploadSize: data.maxUploadSize,
         };
+    }
+
+    async startUrlUpload(
+        userId: string,
+        sessionId: string,
+        dto: UrlUploadDto,
+    ): Promise<{ sessionId: string; status: 'uploading' }> {
+        const record = this.sessions.get(sessionId);
+        if (!record) {
+            throw new NotFoundException(`Session '${sessionId}' not found`);
+        }
+        if (record.userId !== userId) {
+            throw new ForbiddenException('Not authorized to modify this session');
+        }
+
+        const res = await fetch(
+            `${this.encodingApiUrl}/api/sessions/${sessionId}/url-upload`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': this.encodingApiMasterKey,
+                },
+                body: JSON.stringify({ url: dto.url, filename: dto.filename }),
+            },
+        );
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            this.logger.error(
+                `Encoding API URL upload failed (${res.status}): ${body.message ?? JSON.stringify(body)}`,
+            );
+            throw new BadGatewayException(
+                body.message ?? `Encoding API returned ${res.status}`,
+            );
+        }
+
+        return { sessionId, status: 'uploading' };
     }
 
     async deleteSession(

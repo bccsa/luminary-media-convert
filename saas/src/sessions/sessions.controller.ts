@@ -19,6 +19,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { SkipAdmin } from '../auth/skip-admin.decorator.js';
 import { SessionsService } from './sessions.service.js';
 import { CreateSaasSessionDto } from './dto/create-session.dto.js';
+import { UrlUploadDto } from './dto/url-upload.dto.js';
 import { ImportSessionDto } from './dto/import-session.dto.js';
 import { MoveSessionFilesDto } from './dto/move-session-files.dto.js';
 import { RenameSessionPrefixDto } from './dto/rename-session-prefix.dto.js';
@@ -48,6 +49,17 @@ export class SessionsController {
         @Req() req: { user: { _id: string } },
     ): Promise<SaasSessionResponseDto> {
         return this.sessionsService.createSession(req.user._id, dto);
+    }
+
+    @Post(':sessionId/url-upload')
+    @SkipAdmin()
+    @HttpCode(HttpStatus.ACCEPTED)
+    async startUrlUpload(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: UrlUploadDto,
+        @Req() req: { user: { _id: string } },
+    ): Promise<{ sessionId: string; status: 'uploading' }> {
+        return this.sessionsService.startUrlUpload(req.user._id, sessionId, dto);
     }
 
     @Get()
