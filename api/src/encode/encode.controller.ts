@@ -43,6 +43,8 @@ import { FfmpegService } from './services/ffmpeg.service.js';
 import { PreviewService } from './services/preview.service.js';
 import { CreateSessionDto } from './dto/create-session.dto.js';
 import { EncodeConfigDto } from './dto/encode-config.dto.js';
+import { UrlUploadDto } from './dto/url-upload.dto.js';
+import { UrlFetchService } from './services/url-fetch.service.js';
 import {
     SessionResponseDto,
     EncodeStartResponseDto,
@@ -71,6 +73,7 @@ export class EncodeController {
         private readonly ffmpegService: FfmpegService,
         private readonly authorizationWebhookService: AuthorizationWebhookService,
         private readonly previewService: PreviewService,
+        private readonly urlFetchService: UrlFetchService,
     ) {}
 
     @Post()
@@ -127,6 +130,60 @@ export class EncodeController {
             sessionToken: session.sessionToken,
             maxUploadSize,
         };
+    }
+
+    @Post(':sessionId/url-upload')
+    @HttpCode(HttpStatus.ACCEPTED)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('master', 'apikey', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'Ingest the source file from an HTTP/S URL',
+        description:
+            'Alternative to tus upload: the API server fetches the file directly from a public HTTP/S URL ' +
+            '(e.g. a Google Drive direct-download link or an S3 presigned URL). ' +
+            'Uses parallel HTTP Range requests when the source supports them. ' +
+            'The session must be in "created" or "uploading" status. ' +
+            'Returns 202 immediately; clients track progress via SSE or polling.',
+    })
+    @ApiParam({
+        name: 'sessionId',
+        description: 'Session ID returned from POST /api/sessions',
+    })
+    @ApiResponse({
+        status: 202,
+        description: 'URL ingestion started in the background.',
+    })
+    @ApiResponse({ status: 400, description: 'Invalid URL or session state.' })
+    @ApiResponse({
+        status: 401,
+        description: 'Unauthorized — invalid or missing credentials.',
+    })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    async startUrlUpload(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: UrlUploadDto,
+    ): Promise<{ sessionId: string; status: 'uploading' }> {
+        const session = this.sessionService.get(sessionId);
+        if (!session) {
+            throw new NotFoundException(`Session ${sessionId} not found`);
+        }
+
+        if (session.status !== 'created' && session.status !== 'uploading') {
+            throw new BadRequestException(
+                `Session is not accepting uploads (current status: ${session.status})`,
+            );
+        }
+
+        // Kick off the download in the background — return 202 immediately.
+        // UrlFetchService handles status transitions and webhook delivery.
+        void this.urlFetchService.fetchToSession(
+            sessionId,
+            dto.url,
+            dto.filename,
+        );
+
+        return { sessionId, status: 'uploading' };
     }
 
     @Post(':sessionId/encode')
@@ -310,6 +367,13 @@ export class EncodeController {
                 this.queueService.getPosition(sessionId) ?? undefined;
         }
 
+        if (session.status === 'uploading') {
+            result.progress = session.progress;
+            if (session.ingestTotalBytes != null) {
+                result.ingestTotalBytes = session.ingestTotalBytes;
+            }
+        }
+
         if (session.status === 'encoding' || session.status === 'encrypting' || session.status === 'uploading_to_s3') {
             result.progress = session.progress;
             result.pipelineProgress = session.pipelineProgress;
@@ -376,6 +440,10 @@ export class EncodeController {
 
         if (session.status === 'queued') {
             this.queueService.dequeue(sessionId);
+        }
+
+        if (session.status === 'uploading') {
+            this.urlFetchService.abort(sessionId);
         }
 
         if (session.status === 'encoding') {

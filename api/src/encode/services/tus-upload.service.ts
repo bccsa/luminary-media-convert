@@ -13,20 +13,10 @@ import { SessionService } from './session.service.js';
 import { ProbeService } from './probe.service.js';
 import { PreviewService } from './preview.service.js';
 import { WebhookService } from './webhook.service.js';
+import { hasAllowedExtension } from './media-extensions.js';
 
 const DEFAULT_MAX_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 const EXPIRATION_MS = 10 * 60 * 1000; // 10 minutes
-
-const ALLOWED_EXTENSIONS = new Set([
-    '.mp4', '.mkv', '.mov', '.avi', '.webm', '.flv', '.wmv', '.m4v', '.ts',
-    '.mts', '.m2ts', '.mpg', '.mpeg', '.3gp', '.3g2', '.mxf', '.ogv',
-    '.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a', '.wma', '.opus', '.aiff',
-]);
-
-function hasAllowedExtension(filename: string): boolean {
-    const ext = filename.slice(filename.lastIndexOf('.')).toLowerCase();
-    return ALLOWED_EXTENSIONS.has(ext);
-}
 
 @Injectable()
 export class TusUploadService implements OnModuleInit, OnModuleDestroy {
@@ -153,28 +143,7 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                 // Clean up tusd metadata sidecar (.info file)
                 await unlink(`${tusFilePath}.info`).catch(() => {});
 
-                this.sessionService.setFilePath(sessionId, destPath);
-
-                const probeResult = await this.probeService.probe(destPath);
-
-                // Initialize preview before exposing probe result —
-                // clients poll for probeResult and immediately use preview
-                // endpoints, so the preview must be ready first.
-                this.sessionService.setProbeResult(sessionId, probeResult);
-                try {
-                    await this.previewService.init(sessionId);
-                } catch (err) {
-                    this.logger.warn(`Preview init failed for ${sessionId}: ${(err as Error).message}`);
-                }
-
-                this.sessionService.updateStatus(sessionId, 'uploaded');
-                this.sendStatusWebhook(sessionId, 'uploaded');
-
-                this.logger.log(
-                    `Upload complete for session ${sessionId}: ` +
-                        `${probeResult.videoTracks.length} video, ` +
-                        `${probeResult.audioTracks.length} audio track(s)`,
-                );
+                await this.finalizeUpload(sessionId, destPath);
             },
         });
 
@@ -222,6 +191,39 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
 
     handle(req: IncomingMessage, res: ServerResponse): void {
         this.tusdServer.handle(req, res);
+    }
+
+    /**
+     * Run the post-ingest pipeline once a source file is in place at destPath:
+     * record file path, probe metadata, init preview, transition session to
+     * 'uploaded', and webhook the status.
+     *
+     * Shared between tus uploads and URL ingestion so both paths converge on
+     * identical post-ingest behaviour.
+     */
+    async finalizeUpload(sessionId: string, destPath: string): Promise<void> {
+        this.sessionService.setFilePath(sessionId, destPath);
+
+        const probeResult = await this.probeService.probe(destPath);
+
+        // Initialize preview before exposing probe result —
+        // clients poll for probeResult and immediately use preview
+        // endpoints, so the preview must be ready first.
+        this.sessionService.setProbeResult(sessionId, probeResult);
+        try {
+            await this.previewService.init(sessionId);
+        } catch (err) {
+            this.logger.warn(`Preview init failed for ${sessionId}: ${(err as Error).message}`);
+        }
+
+        this.sessionService.updateStatus(sessionId, 'uploaded');
+        this.sendStatusWebhook(sessionId, 'uploaded');
+
+        this.logger.log(
+            `Ingest complete for session ${sessionId}: ` +
+                `${probeResult.videoTracks.length} video, ` +
+                `${probeResult.audioTracks.length} audio track(s)`,
+        );
     }
 
     private sendStatusWebhook(sessionId: string, status: string): void {

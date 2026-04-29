@@ -194,4 +194,12 @@ export class SessionStatusDto {
     @Expose()
     segmentFormat?: string;
 
+    @ApiPropertyOptional({
+        description:
+            'Total bytes for the source being ingested. Present during URL ingestion ' +
+            'when the source server reported a Content-Length.',
+        example: 524288000,
+    })
+    @Expose()
+    ingestTotalBytes?: number;
 }

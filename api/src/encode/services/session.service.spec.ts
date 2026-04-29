@@ -153,6 +153,43 @@ describe('SessionService', () => {
         });
     });
 
+    describe('setIngestTotal', () => {
+        it('stores the total bytes and emits an event', () => {
+            const emitSpy = vi.fn();
+            const svc = new SessionService({ emit: emitSpy } as any);
+            const session = svc.create(makeConfig());
+            emitSpy.mockClear();
+
+            svc.setIngestTotal(session.id, 524_288_000);
+
+            expect(svc.get(session.id)!.ingestTotalBytes).toBe(524_288_000);
+            expect(emitSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    sessionId: session.id,
+                    ingestTotalBytes: 524_288_000,
+                }),
+            );
+        });
+
+        it('is a no-op for unknown session ids', () => {
+            expect(() => service.setIngestTotal('does-not-exist', 100)).not.toThrow();
+        });
+
+        it('subsequent events include the total once set', () => {
+            const emitSpy = vi.fn();
+            const svc = new SessionService({ emit: emitSpy } as any);
+            const session = svc.create(makeConfig());
+            svc.setIngestTotal(session.id, 1000);
+            emitSpy.mockClear();
+
+            svc.updateProgress(session.id, 50);
+
+            expect(emitSpy).toHaveBeenCalledWith(
+                expect.objectContaining({ ingestTotalBytes: 1000, progress: 50 }),
+            );
+        });
+    });
+
     describe('setEncodeConfig', () => {
         it('should store encode config', () => {
             const session = service.create(makeConfig());

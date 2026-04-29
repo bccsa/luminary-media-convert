@@ -31,6 +31,7 @@ export interface Session {
     encryptionKeyHex?: string;
     error?: string;
     segmentFormat?: SegmentFormat;
+    ingestTotalBytes?: number;
     createdAt: number;
 }
 
@@ -55,6 +56,7 @@ export class SessionService {
             thumbnailsVtt: session.thumbnailsVtt,
             encryptionKeyHex: session.encryptionKeyHex,
             segmentFormat: session.segmentFormat,
+            ingestTotalBytes: session.ingestTotalBytes,
             ...extra,
         });
     }
@@ -118,6 +120,14 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.filePath = filePath;
+        }
+    }
+
+    setIngestTotal(id: string, bytes: number): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.ingestTotalBytes = bytes;
+            this.emitEvent(session);
         }
     }
 

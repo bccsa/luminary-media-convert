@@ -9,6 +9,7 @@ import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
 import { AuthorizationWebhookService } from '../auth/authorization-webhook.service';
 import { PreviewService } from './services/preview.service.js';
+import { UrlFetchService } from './services/url-fetch.service.js';
 import type { CreateSessionDto } from './dto/create-session.dto.js';
 import type { EncodeConfigDto } from './dto/encode-config.dto.js';
 import type { Response } from 'express';
@@ -59,6 +60,7 @@ describe('EncodeController', () => {
     let ffmpegService: Mocked<FfmpegService>;
     let authorizationWebhookService: Mocked<AuthorizationWebhookService>;
     let previewService: Mocked<PreviewService>;
+    let urlFetchService: Mocked<UrlFetchService>;
     let testWorkDir: string;
 
     beforeEach(() => {
@@ -95,8 +97,13 @@ describe('EncodeController', () => {
             setTrimSegments: vi.fn(),
         } as any;
 
+        urlFetchService = {
+            fetchToSession: vi.fn().mockResolvedValue(undefined),
+            abort: vi.fn().mockReturnValue(false),
+        } as any;
+
         const sessionEventsService = { emit: vi.fn(), forSession: vi.fn().mockReturnValue({ pipe: vi.fn().mockReturnValue({ subscribe: vi.fn() }) }) } as any;
-        controller = new EncodeController(sessionService, sessionEventsService, queueService, ffmpegService, authorizationWebhookService, previewService);
+        controller = new EncodeController(sessionService, sessionEventsService, queueService, ffmpegService, authorizationWebhookService, previewService, urlFetchService);
     });
 
     afterEach(() => {
@@ -587,6 +594,7 @@ describe('EncodeController', () => {
                 ffmpegService,
                 authorizationWebhookService,
                 previewService,
+                urlFetchService,
             );
 
             const result = ctrl.streamEvents(session.id, session.sessionToken);
@@ -613,6 +621,7 @@ describe('EncodeController', () => {
                 ffmpegService,
                 authorizationWebhookService,
                 previewService,
+                urlFetchService,
             );
 
             const session = sessionService.create(makeConfig());
@@ -879,6 +888,128 @@ describe('EncodeController', () => {
 
             const result = controller.getStatus(session.id, makeRequest());
             expect(result.probeResult).toBeUndefined();
+        });
+    });
+
+    describe('startUrlUpload', () => {
+        it('should kick off the URL fetch and return 202-style response', async () => {
+            const session = sessionService.create(makeConfig());
+
+            const result = await controller.startUrlUpload(session.id, {
+                url: 'https://example.com/file.mp4',
+            });
+
+            expect(result).toEqual({ sessionId: session.id, status: 'uploading' });
+            expect(urlFetchService.fetchToSession).toHaveBeenCalledWith(
+                session.id,
+                'https://example.com/file.mp4',
+                undefined,
+            );
+        });
+
+        it('should pass filename override through to UrlFetchService', async () => {
+            const session = sessionService.create(makeConfig());
+
+            await controller.startUrlUpload(session.id, {
+                url: 'https://example.com/opaque',
+                filename: 'meeting.mp4',
+            });
+
+            expect(urlFetchService.fetchToSession).toHaveBeenCalledWith(
+                session.id,
+                'https://example.com/opaque',
+                'meeting.mp4',
+            );
+        });
+
+        it('should accept session in uploading status (idempotent retry)', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+
+            await expect(
+                controller.startUrlUpload(session.id, { url: 'https://example.com/file.mp4' }),
+            ).resolves.toEqual({ sessionId: session.id, status: 'uploading' });
+        });
+
+        it('should reject when session does not exist', async () => {
+            await expect(
+                controller.startUrlUpload('nonexistent', { url: 'https://example.com/file.mp4' }),
+            ).rejects.toThrow(NotFoundException);
+            expect(urlFetchService.fetchToSession).not.toHaveBeenCalled();
+        });
+
+        it('should reject when session is past the upload phase', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'encoding');
+
+            await expect(
+                controller.startUrlUpload(session.id, { url: 'https://example.com/file.mp4' }),
+            ).rejects.toThrow(BadRequestException);
+            expect(urlFetchService.fetchToSession).not.toHaveBeenCalled();
+        });
+
+        it('should not await the background fetch (fire-and-forget)', async () => {
+            const session = sessionService.create(makeConfig());
+            // Make fetchToSession hang — controller must still resolve quickly.
+            urlFetchService.fetchToSession.mockImplementation(
+                () => new Promise(() => {}),
+            );
+
+            await expect(
+                controller.startUrlUpload(session.id, { url: 'https://example.com/file.mp4' }),
+            ).resolves.toBeDefined();
+        });
+    });
+
+    describe('deleteSession - URL ingest abort', () => {
+        it('should abort an in-flight URL download', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+
+            await controller.deleteSession(session.id);
+
+            expect(urlFetchService.abort).toHaveBeenCalledWith(session.id);
+        });
+
+        it('should not call abort for non-uploading statuses', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'queued');
+
+            await controller.deleteSession(session.id);
+
+            expect(urlFetchService.abort).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('getStatus - uploading phase fields', () => {
+        it('should expose progress during URL ingestion', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            sessionService.updateProgress(session.id, 42);
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.status).toBe('uploading');
+            expect(result.progress).toBe(42);
+        });
+
+        it('should expose ingestTotalBytes once the probe reports it', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            sessionService.setIngestTotal(session.id, 524_288_000);
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.ingestTotalBytes).toBe(524_288_000);
+        });
+
+        it('should not include ingestTotalBytes when not set', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.ingestTotalBytes).toBeUndefined();
         });
     });
 

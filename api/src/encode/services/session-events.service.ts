@@ -18,6 +18,7 @@ export interface SessionEvent {
     segmentFormat?: string;
     encoder?: string;
     probeResult?: unknown;
+    ingestTotalBytes?: number;
 }
 
 @Injectable()

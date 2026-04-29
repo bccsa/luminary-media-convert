@@ -415,6 +415,53 @@ describe('TusUploadService', () => {
         });
     });
 
+    describe('finalizeUpload', () => {
+        it('runs probe, preview init, status flip, and webhook', async () => {
+            const config: CreateSessionDto = {
+                ...makeConfig(),
+                webhook: { url: 'https://example.com/webhook', sessionToken: 'tok' },
+            };
+            const session = sessionService.create(config);
+            const probeResult = {
+                format: { duration: 60, bitrateKbps: 5000, formatName: 'mp4' },
+                videoTracks: [{ index: 0, codec: 'h264', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
+                audioTracks: [{ index: 0, codec: 'aac', bitrateKbps: 192, channels: 2, sampleRate: 48000 }],
+            };
+            (probeService.probe as Mock).mockResolvedValue(probeResult);
+            const previewService = (service as any).previewService;
+            const webhookService = (service as any).webhookService;
+
+            await service.finalizeUpload(session.id, '/tmp/destination/video.mp4');
+
+            expect(probeService.probe).toHaveBeenCalledWith('/tmp/destination/video.mp4');
+            expect(previewService.init).toHaveBeenCalledWith(session.id);
+            const updated = sessionService.get(session.id)!;
+            expect(updated.status).toBe('uploaded');
+            expect(updated.filePath).toBe('/tmp/destination/video.mp4');
+            expect(updated.probeResult).toEqual(probeResult);
+            expect(webhookService.send).toHaveBeenCalledWith(
+                'https://example.com/webhook',
+                'tok',
+                expect.objectContaining({ sessionId: session.id, status: 'uploaded' }),
+            );
+        });
+
+        it('still flips to uploaded when preview init throws', async () => {
+            const session = sessionService.create(makeConfig());
+            (probeService.probe as Mock).mockResolvedValue({
+                format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
+                videoTracks: [],
+                audioTracks: [],
+            });
+            const previewService = (service as any).previewService;
+            previewService.init.mockRejectedValueOnce(new Error('preview boom'));
+
+            await service.finalizeUpload(session.id, '/tmp/destination/audio.mp3');
+
+            expect(sessionService.get(session.id)!.status).toBe('uploaded');
+        });
+    });
+
     describe('handle', () => {
         it('should delegate to tusdServer.handle', () => {
             const req = {} as any;
