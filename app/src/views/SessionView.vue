@@ -51,6 +51,14 @@ const chapters = useChapters({ getAccessToken: () => getAccessTokenSilently() })
 const chapterSegments = chapters.segments;
 const chaptersSaveError = ref<string | null>(null);
 
+// Playback duration as reported by the player — the only correct source for
+// the chapter timeline since it reflects trim cuts on encoded output and is
+// the only signal available for imported sessions (which never run probe).
+const playerDuration = ref<number | null>(null);
+const chapterTimelineDuration = computed(
+    () => playerDuration.value ?? probeResult.value?.format?.duration ?? 0,
+);
+
 // Session name
 const sessionName = ref('');
 const editingName = ref(false);
@@ -1143,6 +1151,7 @@ onUnmounted(() => {
                         preserve-state-on-source-change
                         @quality-levels="onPreviewQualityLevels"
                         @playing-change="isPreviewPlaying = $event"
+                        @duration-change="playerDuration = $event"
                     />
                 </div>
 
@@ -1303,12 +1312,14 @@ onUnmounted(() => {
                 <!-- ============================================================ -->
                 <template v-else-if="showEncoding || isCompleted || currentStatus === 'failed'">
 
-                    <!-- Chapter editor (sidecar). Available throughout encoding and after completion. -->
+                    <!-- Chapter editor (sidecar). Available throughout encoding and after completion.
+                         Uses player-reported duration so trimmed encodes and imported sessions both
+                         render with the correct timeline length. -->
                     <SegmentEditor
-                        v-if="activePlaybackUrl && probeResult?.format?.duration && currentStatus !== 'failed'"
+                        v-if="activePlaybackUrl && chapterTimelineDuration > 0 && currentStatus !== 'failed'"
                         v-model="chapterSegments"
                         mode="chapters"
-                        :duration="probeResult.format.duration"
+                        :duration="chapterTimelineDuration"
                         :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
                         :on-seek="(t) => playerRef?.seek(t)"
                         :on-play-pause="() => playerRef?.togglePlay()"

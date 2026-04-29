@@ -34,6 +34,13 @@ export interface QualityLevelInfo {
 const emit = defineEmits<{
     'quality-levels': [levels: QualityLevelInfo[]];
     'playing-change': [playing: boolean];
+    /**
+     * Fires whenever the player learns the playable duration. For trimmed
+     * encodes and imported sessions this is the only correct duration source;
+     * the source probe (when available) reflects the *original* file.
+     * Emits `null` when duration is unknown (e.g. just before a source swap).
+     */
+    'duration-change': [seconds: number | null];
 }>();
 
 const playerEl = ref<HTMLVideoElement | null>(null);
@@ -282,6 +289,12 @@ async function initPlayer() {
         player.on('loadedmetadata', detectAudioOnlyFromPlayer);
         player.on('play', () => emit('playing-change', true));
         player.on('pause', () => emit('playing-change', false));
+        const publishDuration = () => {
+            const d = player?.duration();
+            emit('duration-change', Number.isFinite(d) && d! > 0 ? (d as number) : null);
+        };
+        player.on('loadedmetadata', publishDuration);
+        player.on('durationchange', publishDuration);
 
         player.ready(() => {
             if (props.showControls) {
@@ -401,6 +414,11 @@ function getCurrentTime(): number {
     return player?.currentTime() ?? 0;
 }
 
+function getDuration(): number | null {
+    const d = player?.duration();
+    return Number.isFinite(d) && (d as number) > 0 ? (d as number) : null;
+}
+
 function setPendingSeek(time: number) {
     pendingSeekTime = time;
 }
@@ -438,7 +456,7 @@ function setQuality(id: string | null) {
     }
 }
 
-defineExpose({ setSource, getCurrentTime, setPendingSeek, seek, togglePlay, isPlaying, setQuality });
+defineExpose({ setSource, getCurrentTime, getDuration, setPendingSeek, seek, togglePlay, isPlaying, setQuality });
 </script>
 
 <template>
