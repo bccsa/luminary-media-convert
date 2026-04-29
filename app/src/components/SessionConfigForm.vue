@@ -25,8 +25,12 @@ const props = withDefaults(defineProps<{
     creatingConfig: false,
 });
 
+export type SubmitPayload =
+    | { source: 'file'; config: CreateSessionRequest; file: File; s3ConfigId: string; sessionName: string }
+    | { source: 'url'; config: CreateSessionRequest; url: string; filename?: string; s3ConfigId: string; sessionName: string };
+
 const emit = defineEmits<{
-    submit: [payload: { config: CreateSessionRequest; file: File; s3ConfigId: string; sessionName: string }];
+    submit: [payload: SubmitPayload];
     loadS3Config: [configId: string];
     createS3Config: [data: { name: string; endPoint: string; port?: number; useSSL?: boolean; bucket: string; region?: string; accessKey: string; secretKey: string }];
 }>();
@@ -36,6 +40,23 @@ const pathPrefix = defineModel<string>('pathPrefix', { default: '' });
 
 const sessionName = ref('');
 const selectedConfigId = ref(props.selectedS3ConfigId);
+
+// Source mode: file (tus upload) or url (server-side fetch)
+const SOURCE_MODE_KEY = 'luminary_source_mode';
+function loadSourceMode(): 'file' | 'url' {
+    try {
+        const raw = localStorage.getItem(SOURCE_MODE_KEY);
+        if (raw === 'url' || raw === 'file') return raw;
+    } catch { /* ignore */ }
+    return 'file';
+}
+const sourceMode = ref<'file' | 'url'>(loadSourceMode());
+const sourceUrl = ref('');
+const urlFilename = ref('');
+
+watch(sourceMode, (mode) => {
+    try { localStorage.setItem(SOURCE_MODE_KEY, mode); } catch { /* ignore */ }
+});
 
 watch(() => props.selectedS3ConfigId, (id) => {
     selectedConfigId.value = id;
@@ -145,15 +166,30 @@ function savePreferences() {
 
 const hasS3Config = computed(() => !!selectedConfigId.value && !!props.loadedS3Config);
 
+const isValidUrl = computed(() => {
+    const raw = sourceUrl.value.trim();
+    if (!raw) return false;
+    try {
+        const u = new URL(raw);
+        return u.protocol === 'http:' || u.protocol === 'https:';
+    } catch {
+        return false;
+    }
+});
+
 const canSubmit = computed(() => {
-    if (!file.value) return false;
     if (!hasS3Config.value) return false;
     if (encryptionEnabled.value && !encryptionKeyUrl.value.trim()) return false;
+    if (sourceMode.value === 'file') {
+        if (!file.value) return false;
+    } else {
+        if (!isValidUrl.value) return false;
+    }
     return true;
 });
 
 function onSubmit() {
-    if (!canSubmit.value || !file.value || !props.loadedS3Config) return;
+    if (!canSubmit.value || !props.loadedS3Config) return;
     savePreferences();
 
     const s3: S3Config = {
@@ -173,7 +209,24 @@ function onSubmit() {
         },
     };
 
-    emit('submit', { config, file: file.value, s3ConfigId: selectedConfigId.value, sessionName: sessionName.value.trim() });
+    if (sourceMode.value === 'file' && file.value) {
+        emit('submit', {
+            source: 'file',
+            config,
+            file: file.value,
+            s3ConfigId: selectedConfigId.value,
+            sessionName: sessionName.value.trim(),
+        });
+    } else if (sourceMode.value === 'url') {
+        emit('submit', {
+            source: 'url',
+            config,
+            url: sourceUrl.value.trim(),
+            filename: urlFilename.value.trim() || undefined,
+            s3ConfigId: selectedConfigId.value,
+            sessionName: sessionName.value.trim(),
+        });
+    }
 }
 
 function onSelectConfig() {
@@ -202,10 +255,52 @@ const canCreateConfig = computed(() =>
             />
         </fieldset>
 
-        <!-- File -->
+        <!-- Source: file or URL -->
         <fieldset class="space-y-3">
-            <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Source File</legend>
-            <FileDropZone @update:file="f => (file = f)" />
+            <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Source</legend>
+            <div class="inline-flex rounded-lg border border-zinc-800 bg-zinc-900/40 p-1 text-sm">
+                <button
+                    type="button"
+                    :class="[
+                        'rounded-md px-4 py-1.5 transition-colors cursor-pointer',
+                        sourceMode === 'file' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200',
+                    ]"
+                    @click="sourceMode = 'file'"
+                >
+                    From disk
+                </button>
+                <button
+                    type="button"
+                    :class="[
+                        'rounded-md px-4 py-1.5 transition-colors cursor-pointer',
+                        sourceMode === 'url' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200',
+                    ]"
+                    @click="sourceMode = 'url'"
+                >
+                    From URL
+                </button>
+            </div>
+
+            <FileDropZone v-if="sourceMode === 'file'" @update:file="f => (file = f)" />
+
+            <div v-else class="space-y-2">
+                <input
+                    v-model="sourceUrl"
+                    type="url"
+                    class="input"
+                    placeholder="https://example.com/recording.mp4"
+                />
+                <input
+                    v-model="urlFilename"
+                    type="text"
+                    class="input"
+                    placeholder="Optional filename override (e.g. meeting.mp4)"
+                />
+                <p class="text-xs text-zinc-500">
+                    The server downloads from this URL using parallel HTTP range requests when supported.
+                    Use a direct-download URL — public file URLs, S3 presigned links, or Google Drive direct download links.
+                </p>
+            </div>
         </fieldset>
 
         <!-- S3 Configuration -->

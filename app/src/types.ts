@@ -97,4 +97,5 @@ export interface SessionStatusResponse {
     error?: string;
     encoder?: AccelMode;
     segmentFormat?: SegmentFormat;
+    ingestTotalBytes?: number;
 }

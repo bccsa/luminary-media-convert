@@ -3,8 +3,8 @@ import { ref, watch, onMounted } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { useRouter } from 'vue-router';
 import SessionConfigForm from '../components/SessionConfigForm.vue';
-import type { SavedS3Config } from '../components/SessionConfigForm.vue';
-import { createSession, uploadFile, listS3Configs, getS3Config, createS3Config, updateSessionName, checkPrefix } from '../api';
+import type { SavedS3Config, SubmitPayload } from '../components/SessionConfigForm.vue';
+import { createSession, uploadFile, startUrlUpload, listS3Configs, getS3Config, createS3Config, updateSessionName, checkPrefix } from '../api';
 import { useActiveUploads } from '../composables/useActiveUploads';
 import type { CreateSessionRequest, S3Config } from '../types';
 
@@ -22,7 +22,7 @@ const submissionError = ref<string | null>(null);
 const submitting = ref(false);
 const validating = ref(false);
 const prefixWarning = ref<string | null>(null);
-const pendingPayload = ref<{ config: CreateSessionRequest; file: File; s3ConfigId: string; sessionName: string } | null>(null);
+const pendingPayload = ref<SubmitPayload | null>(null);
 
 const savedS3Configs = ref<SavedS3Config[]>([]);
 const loadedS3Config = ref<S3Config | null>(null);
@@ -90,12 +90,7 @@ async function onCreateS3Config(data: Record<string, any>) {
     }
 }
 
-async function onUploadSubmit(payload: {
-    config: CreateSessionRequest;
-    file: File;
-    s3ConfigId: string;
-    sessionName: string;
-}) {
+async function onUploadSubmit(payload: SubmitPayload) {
     submissionError.value = null;
     prefixWarning.value = null;
     pendingPayload.value = null;
@@ -135,19 +130,14 @@ async function confirmPrefixOverwrite() {
     await startUpload(payload);
 }
 
-async function startUpload(payload: {
-    config: CreateSessionRequest;
-    file: File;
-    s3ConfigId: string;
-    sessionName: string;
-}) {
+async function startUpload(payload: SubmitPayload) {
     submitting.value = true;
     submissionError.value = null;
 
     try {
         const accessToken = await getAccessTokenSilently();
 
-        if (payload.file.size > 10 * 1024 * 1024 * 1024) {
+        if (payload.source === 'file' && payload.file.size > 10 * 1024 * 1024 * 1024) {
             throw new Error(
                 `File size (${formatBytes(payload.file.size)}) exceeds the maximum allowed upload size (${formatBytes(10 * 1024 * 1024 * 1024)})`,
             );
@@ -161,25 +151,28 @@ async function startUpload(payload: {
             updateSessionName(accessToken, session.sessionId, payload.sessionName).catch(() => {});
         }
 
-        if (payload.file.size > session.maxUploadSize) {
-            throw new Error(
-                `File size (${formatBytes(payload.file.size)}) exceeds the maximum allowed upload size (${formatBytes(session.maxUploadSize)})`,
+        if (payload.source === 'file') {
+            if (payload.file.size > session.maxUploadSize) {
+                throw new Error(
+                    `File size (${formatBytes(payload.file.size)}) exceeds the maximum allowed upload size (${formatBytes(session.maxUploadSize)})`,
+                );
+            }
+
+            // Start upload via tus — registered in singleton store so it survives navigation
+            const tusEndpoint = `${session.encodingApiUrl}/api/tus`;
+            const { promise, abort } = uploadFile(
+                tusEndpoint,
+                session.sessionId,
+                session.sessionToken,
+                payload.file,
+                (percent) => setProgress(session.sessionId, percent),
             );
+
+            registerUpload(session.sessionId, abort, promise);
+        } else {
+            // URL ingestion — server-side download. Progress arrives via SSE/poll.
+            await startUrlUpload(session.sessionId, payload.url, accessToken, payload.filename);
         }
-
-
-
-        // Start upload via tus — registered in singleton store so it survives navigation
-        const tusEndpoint = `${session.encodingApiUrl}/api/tus`;
-        const { promise, abort } = uploadFile(
-            tusEndpoint,
-            session.sessionId,
-            session.sessionToken,
-            payload.file,
-            (percent) => setProgress(session.sessionId, percent),
-        );
-
-        registerUpload(session.sessionId, abort, promise);
 
         // Navigate to unified session view — upload continues in background
         router.push(`/sessions/${session.sessionId}`);

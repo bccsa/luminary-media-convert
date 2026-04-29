@@ -52,6 +52,27 @@ export async function createSession(
     return res.json();
 }
 
+export async function startUrlUpload(
+    sessionId: string,
+    url: string,
+    accessToken: string,
+    filename?: string,
+): Promise<void> {
+    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/url-upload`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ url, filename }),
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `URL ingestion failed (${res.status})`);
+    }
+}
+
 export async function deleteSession(
     sessionId: string,
     accessToken: string,

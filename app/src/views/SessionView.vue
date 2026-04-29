@@ -192,6 +192,29 @@ const showUploadRemoteMessage = computed(() => {
     return (s === 'created' || s === 'uploading') && !activeUpload.value;
 });
 
+// Server-side ingest (URL download): show poller-driven progress when there
+// is no client-side tus upload in flight. progress=0 means total length is
+// unknown — fall back to indeterminate display.
+const remoteIngestProgress = computed<number | undefined>(() => {
+    const p = poller.progress.value;
+    if (typeof p !== 'number' || p <= 0) return undefined;
+    return p;
+});
+
+function formatBytes(bytes: number): string {
+    if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${bytes} B`;
+}
+
+const remoteIngestLabel = computed<string>(() => {
+    const total = poller.ingestTotalBytes.value;
+    return total != null
+        ? `Uploading from URL... (${formatBytes(total)})`
+        : 'Uploading from URL...';
+});
+
 const showProbeConfig = computed(() => {
     const s = currentStatus.value;
     return s === 'uploaded' && isActiveSession.value && probeResult.value && !submitting.value;
@@ -307,6 +330,22 @@ const displaySegmentFormat = computed<SegmentFormat | string | undefined>(
 // ETA calculation
 // ---------------------------------------------------------------------------
 
+function computeEtaFromSamples(
+    samples: { time: number; progress: number }[],
+    currentProgress: number,
+    now: number,
+): { remainingSec: number } | undefined {
+    if (samples.length < 2) return undefined;
+    const oldest = samples[0];
+    const elapsed = (now - oldest.time) / 1000;
+    const progressDelta = currentProgress - oldest.progress;
+    if (progressDelta <= 0 || elapsed <= 0) return undefined;
+    const rate = progressDelta / elapsed;
+    const remainingSec = (100 - currentProgress) / rate;
+    if (remainingSec < 0 || !isFinite(remainingSec)) return undefined;
+    return { remainingSec };
+}
+
 const etaSamples: { time: number; progress: number }[] = [];
 const etaDisplay = ref<string | undefined>();
 
@@ -327,27 +366,12 @@ watch(
             etaSamples.shift();
         }
 
-        if (etaSamples.length < 2) {
+        const eta = computeEtaFromSamples(etaSamples, encodingProgress, now);
+        if (!eta) {
             etaDisplay.value = undefined;
             return;
         }
-
-        const oldest = etaSamples[0];
-        const elapsed = (now - oldest.time) / 1000;
-        const progressDelta = encodingProgress - oldest.progress;
-
-        if (progressDelta <= 0 || elapsed <= 0) {
-            etaDisplay.value = undefined;
-            return;
-        }
-
-        const rate = progressDelta / elapsed;
-        const remainingSec = (100 - encodingProgress) / rate;
-
-        if (remainingSec < 0 || !isFinite(remainingSec)) {
-            etaDisplay.value = undefined;
-            return;
-        }
+        const { remainingSec } = eta;
 
         const remainingLabel =
             remainingSec >= 3600
@@ -365,6 +389,53 @@ watch(
         etaDisplay.value = `${remainingLabel} \u00B7 Est. completion: ${timeStr}`;
     },
 );
+
+// URL ingest ETA — separate sample buffer from the encoding ETA so the two
+// phases don't pollute each other (rates differ by orders of magnitude).
+const ingestEtaSamples: { time: number; progress: number }[] = [];
+const ingestEtaDisplay = ref<string | undefined>();
+
+watch(
+    () => ({ status: currentStatus.value, progress: poller.progress.value }),
+    ({ status, progress }) => {
+        if (status !== 'uploading' || progress == null || progress <= 0) {
+            ingestEtaSamples.length = 0;
+            ingestEtaDisplay.value = undefined;
+            return;
+        }
+
+        const now = Date.now();
+        ingestEtaSamples.push({ time: now, progress });
+
+        const cutoff = now - 30_000;
+        while (ingestEtaSamples.length > 1 && ingestEtaSamples[0].time < cutoff) {
+            ingestEtaSamples.shift();
+        }
+
+        const eta = computeEtaFromSamples(ingestEtaSamples, progress, now);
+        if (!eta) {
+            ingestEtaDisplay.value = undefined;
+            return;
+        }
+        const { remainingSec } = eta;
+
+        const remainingLabel =
+            remainingSec >= 3600
+                ? `~${Math.round(remainingSec / 3600)} hr remaining`
+                : remainingSec >= 60
+                  ? `~${Math.round(remainingSec / 60)} min remaining`
+                  : `~${Math.round(remainingSec)} sec remaining`;
+
+        const completionTime = new Date(now + remainingSec * 1000);
+        const timeStr = completionTime.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+
+        ingestEtaDisplay.value = `${remainingLabel} \u00B7 Est. completion: ${timeStr}`;
+    },
+);
+
 
 // ---------------------------------------------------------------------------
 // Player — angle switching, playback URL, copy, files
@@ -687,6 +758,15 @@ async function handleStatusAfterLoad(status: string) {
     ) {
         // Start poller for encoding progress
         poller.start(sessionId.value, encodingApiUrl.value!, sessionToken.value!);
+    } else if (
+        (status === 'created' || status === 'uploading') &&
+        isActiveSession.value &&
+        !activeUploads.uploads.value[sessionId.value]
+    ) {
+        // No client-side upload tracked — ingest is happening server-side
+        // (URL download or initiated from another tab). Poller delivers the
+        // server-emitted progress events and the eventual flip to 'uploaded'.
+        poller.start(sessionId.value, encodingApiUrl.value!, sessionToken.value!);
     }
     // completed / failed / imported / expired => no additional setup needed
 }
@@ -861,6 +941,20 @@ watch(
     (done) => {
         if (done && !activeUpload.value?.error) {
             // Poll encoding API for probe results after upload completes
+            if (encodingApiUrl.value && sessionToken.value) {
+                fetchProbeResults();
+            }
+        }
+    },
+);
+
+// URL-ingest path: no client-side upload entry exists, so the tus-completion
+// watch above never fires. Watch the poller's status flip to 'uploaded' and
+// fetch probe results from the same handler.
+watch(
+    () => poller.status.value,
+    (status, prev) => {
+        if (status === 'uploaded' && prev !== 'uploaded' && !probeResult.value) {
             if (encodingApiUrl.value && sessionToken.value) {
                 fetchProbeResults();
             }
@@ -1089,9 +1183,28 @@ onUnmounted(() => {
                     <ProgressBar label="Analyzing..." indeterminate />
                 </div>
 
-                <!-- STATUS: created / uploading — upload started elsewhere -->
+                <!-- STATUS: created / uploading — upload happening server-side
+                     (URL ingest) or initiated from another browser tab -->
                 <div v-else-if="showUploadRemoteMessage" class="mb-4">
-                    <ProgressBar label="Uploading..." indeterminate subtitle="Started elsewhere" />
+                    <p v-if="ingestEtaDisplay" class="mb-2 text-xs text-zinc-500 text-right">
+                        {{ ingestEtaDisplay }}
+                    </p>
+                    <ProgressBar
+                        v-if="remoteIngestProgress !== undefined"
+                        :label="remoteIngestLabel"
+                        :progress="remoteIngestProgress"
+                    />
+                    <ProgressBar
+                        v-else-if="poller.ingestTotalBytes.value != null"
+                        :label="remoteIngestLabel"
+                        indeterminate
+                    />
+                    <ProgressBar
+                        v-else
+                        label="Uploading..."
+                        indeterminate
+                        subtitle="Started elsewhere"
+                    />
                 </div>
 
                 <!-- ============================================================ -->
