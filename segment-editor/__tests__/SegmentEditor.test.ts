@@ -786,17 +786,40 @@ describe('SegmentEditor — inline editing', () => {
         expect(latestSegments(w)[0].outSec).toBeCloseTo(18, 3);
     });
 
-    it('commits a label edit', async () => {
+    it('commits a label edit on every keystroke (so Vue does not wipe DOM during reactive churn)', async () => {
         const w = mountEditor({
             segments: [seg(1, 10, 20)],
             props: { mode: 'subtitles' },
         });
         await flush();
         const label = w.find('.se-label-field').element as HTMLTextAreaElement;
+        label.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
         label.value = 'Hello';
-        label.dispatchEvent(new Event('change', { bubbles: true }));
+        label.dispatchEvent(new Event('input', { bubbles: true }));
         await flush();
         expect(latestSegments(w)[0].label).toBe('Hello');
+    });
+
+    it('records one undoable history entry per label-edit session, not per keystroke', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20, 'orig')],
+            props: { mode: 'subtitles' },
+        });
+        await flush();
+        const label = w.find('.se-label-field').element as HTMLTextAreaElement;
+        label.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+        for (const c of 'XYZ') {
+            label.value += c;
+            label.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        label.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
+        await flush();
+        expect(latestSegments(w)[0].label).toBe('origXYZ');
+
+        // One undo should jump back to the pre-edit value, not strip a single char.
+        w.vm.undo();
+        await flush();
+        expect(latestSegments(w)[0].label).toBe('orig');
     });
 });
 

@@ -561,8 +561,22 @@ function updateTimeInput(id: string, field: 'inSec' | 'outSec', value: string) {
     emit('segment-commit', segments.value);
 }
 
+/**
+ * Push a single history snapshot when the user focuses a label, before any
+ * keystrokes mutate it. Per-keystroke history would make Undo roll back one
+ * character at a time, which is unusable.
+ */
+function onLabelFocus() {
+    pushHistory(cloneSegments());
+}
+
 function updateLabel(id: string, value: string) {
-    commitSegmentChange(id, { label: value });
+    // History is pushed once on focus; per-keystroke commits skip it.
+    commitSegmentChange(id, { label: value }, { history: false });
+}
+
+/** Fire the user-intentioned commit signal once when a label edit ends. */
+function onLabelBlur() {
     emit('segment-commit', segments.value);
 }
 
@@ -1041,7 +1055,9 @@ defineExpose({
                     :value="seg.label || ''"
                     :placeholder="mode === 'chapters' ? 'Chapter title…' : 'Subtitle text…'"
                     rows="1"
-                    @change="updateLabel(seg.id, ($event.target as HTMLTextAreaElement).value)"
+                    @focus="onLabelFocus"
+                    @input="updateLabel(seg.id, ($event.target as HTMLTextAreaElement).value)"
+                    @blur="onLabelBlur"
                     @click.stop
                 />
                 <span class="se-list-duration">{{ formatDuration(seg.outSec - seg.inSec) }}</span>
