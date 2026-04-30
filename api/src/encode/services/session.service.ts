@@ -5,6 +5,8 @@ import type { SessionStatus } from '../dto/webhook-payload.dto.js';
 import type { ProbeResult } from './probe.service.js';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 import type { SegmentFormat } from './ffmpeg.service.js';
+import type { PipelineProgress } from './segment-pipeline.service.js';
+import { SessionEventsService, type SessionEvent } from './session-events.service.js';
 
 export interface AnglePlaylistInfo {
     name: string;
@@ -13,9 +15,10 @@ export interface AnglePlaylistInfo {
 
 export interface Session {
     id: string;
-    uploadToken: string;
+    sessionToken: string;
     status: SessionStatus;
     progress: number;
+    pipelineProgress?: PipelineProgress;
     config: CreateSessionDto;
     probeResult?: ProbeResult;
     encodeConfig?: EncodeConfigDto;
@@ -25,11 +28,11 @@ export interface Session {
     masterPlaylist?: string;
     anglePlaylists?: AnglePlaylistInfo[];
     thumbnailsVtt?: string;
+    encryptionKeyHex?: string;
     error?: string;
     segmentFormat?: SegmentFormat;
+    ingestTotalBytes?: number;
     createdAt: number;
-    encryptionKey?: Buffer;
-    previewPlaylists?: Record<string, string>;
 }
 
 @Injectable()
@@ -38,13 +41,33 @@ export class SessionService {
     private readonly sessions = new Map<string, Session>();
     private readonly tokenIndex = new Map<string, string>();
 
+    constructor(private readonly sessionEvents: SessionEventsService) {}
+
+    private emitEvent(session: Session, extra?: Partial<SessionEvent>): void {
+        this.sessionEvents.emit({
+            sessionId: session.id,
+            status: session.status,
+            progress: session.progress || undefined,
+            pipelineProgress: session.pipelineProgress,
+            error: session.error,
+            files: session.files,
+            masterPlaylist: session.masterPlaylist,
+            anglePlaylists: session.anglePlaylists,
+            thumbnailsVtt: session.thumbnailsVtt,
+            encryptionKeyHex: session.encryptionKeyHex,
+            segmentFormat: session.segmentFormat,
+            ingestTotalBytes: session.ingestTotalBytes,
+            ...extra,
+        });
+    }
+
     create(config: CreateSessionDto): Session {
         const id = randomUUID();
-        const uploadToken = `tok_${randomUUID().replace(/-/g, '')}`;
+        const sessionToken = `sess_${randomUUID().replace(/-/g, '')}`;
 
         const session: Session = {
             id,
-            uploadToken,
+            sessionToken,
             status: 'created',
             progress: 0,
             config,
@@ -52,7 +75,7 @@ export class SessionService {
         };
 
         this.sessions.set(id, session);
-        this.tokenIndex.set(uploadToken, id);
+        this.tokenIndex.set(sessionToken, id);
         this.logger.log(`Session created: ${id}`);
 
         return session;
@@ -62,7 +85,7 @@ export class SessionService {
         return this.sessions.get(id);
     }
 
-    getByUploadToken(token: string): Session | undefined {
+    getBySessionToken(token: string): Session | undefined {
         const id = this.tokenIndex.get(token);
         if (!id) return undefined;
         return this.sessions.get(id);
@@ -72,6 +95,7 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.status = status;
+            this.emitEvent(session);
         }
     }
 
@@ -79,6 +103,16 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.progress = progress;
+            this.emitEvent(session);
+        }
+    }
+
+    updatePipelineProgress(id: string, pipelineProgress: PipelineProgress): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.pipelineProgress = pipelineProgress;
+            session.progress = pipelineProgress.encoding;
+            this.emitEvent(session);
         }
     }
 
@@ -89,10 +123,19 @@ export class SessionService {
         }
     }
 
+    setIngestTotal(id: string, bytes: number): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.ingestTotalBytes = bytes;
+            this.emitEvent(session);
+        }
+    }
+
     setProbeResult(id: string, probeResult: ProbeResult): void {
         const session = this.sessions.get(id);
         if (session) {
             session.probeResult = probeResult;
+            this.emitEvent(session, { probeResult });
         }
     }
 
@@ -117,6 +160,7 @@ export class SessionService {
         anglePlaylists?: AnglePlaylistInfo[],
         thumbnailsVtt?: string,
         segmentFormat?: SegmentFormat,
+        encryptionKeyHex?: string,
     ): void {
         const session = this.sessions.get(id);
         if (session) {
@@ -127,6 +171,8 @@ export class SessionService {
             session.anglePlaylists = anglePlaylists;
             session.thumbnailsVtt = thumbnailsVtt;
             session.segmentFormat = segmentFormat;
+            session.encryptionKeyHex = encryptionKeyHex;
+            this.emitEvent(session);
         }
     }
 
@@ -135,6 +181,7 @@ export class SessionService {
         if (session) {
             session.status = 'failed';
             session.error = error;
+            this.emitEvent(session);
         }
     }
 
@@ -142,7 +189,7 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (!session) return undefined;
 
-        this.tokenIndex.delete(session.uploadToken);
+        this.tokenIndex.delete(session.sessionToken);
         this.sessions.delete(id);
         this.logger.log(`Session removed: ${id}`);
         return session;
@@ -161,7 +208,7 @@ export class SessionService {
                 session.createdAt < cutoff &&
                 (session.status === 'completed' || session.status === 'failed')
             ) {
-                this.tokenIndex.delete(session.uploadToken);
+                this.tokenIndex.delete(session.sessionToken);
                 this.sessions.delete(id);
                 removed++;
             }

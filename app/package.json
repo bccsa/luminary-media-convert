@@ -12,9 +12,12 @@
     "dependencies": {
         "@auth0/auth0-vue": "^2.5.0",
         "@luminary-media-converter/encode-config": "file:../encode-config",
+        "@luminary-media-converter/hls": "file:../hls",
+        "@luminary-media-converter/segment-editor": "file:../segment-editor",
         "tus-js-client": "^4.3.1",
         "video.js": "^8.23.7",
-        "vue": "^3.5.0"
+        "vue": "^3.5.0",
+        "vue-router": "^4.6.4"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",

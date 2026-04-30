@@ -84,6 +84,12 @@ export class HookServer {
             return;
         }
 
+        if (!payload?.Type || !payload?.Event?.Upload || !payload?.Event?.HTTPRequest) {
+            res.writeHead(400, { 'Content-Type': 'text/plain' });
+            res.end('Invalid hook payload: missing required fields');
+            return;
+        }
+
         const hookType = payload.Type as HookType;
         const upload = this.mapUploadInfo(payload);
         const requestInfo = this.mapRequestInfo(payload);

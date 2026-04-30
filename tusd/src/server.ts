@@ -102,6 +102,13 @@ export class TusdServer {
             return;
         }
 
+        // Skip auth for CORS preflight — OPTIONS requests carry no credentials
+        // and must reach tusd so it can respond with CORS headers.
+        if (req.method === 'OPTIONS') {
+            proxyToTusd(req, res, this.tusdPort, this.config.path);
+            return;
+        }
+
         // Run auth check before proxying
         if (this.config.onIncomingRequest) {
             const headers: Record<string, string> = {};

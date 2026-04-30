@@ -23,6 +23,7 @@ export interface S3Config {
     accessKey: string;
     secretKey: string;
     pathPrefix?: string;
+    publicUrl?: string;
 }
 
 export interface WebhookConfig {
@@ -45,12 +46,13 @@ export interface CreateSessionRequest {
     s3: S3Config;
     webhook?: WebhookConfig;
     encryption?: EncryptionConfig;
+    s3ConfigId?: string;
 }
 
-export interface SessionResponse {
+export interface SaasSessionResponse {
     sessionId: string;
-    tusEndpoint: string;
-    uploadToken: string;
+    encodingApiUrl: string;
+    sessionToken: string;
     maxUploadSize: number;
 }
 
@@ -74,19 +76,26 @@ export type SessionStatus =
 export type AccelMode = 'cpu' | 'nvidia' | 'apple';
 export type SegmentFormat = 'fmp4' | 'mpegts';
 
+export interface PipelineProgress {
+    encoding: number;
+    encrypting?: number;
+    uploading?: number;
+}
+
 export interface SessionStatusResponse {
     sessionId: string;
     status: SessionStatus;
     progress?: number;
+    pipelineProgress?: PipelineProgress;
     queuePosition?: number;
     probeResult?: ProbeResult;
     files?: string[];
     masterPlaylist?: string;
     anglePlaylists?: { name: string; key: string }[];
     thumbnailsVtt?: string;
+    encryptionKeyHex?: string;
     error?: string;
     encoder?: AccelMode;
     segmentFormat?: SegmentFormat;
-    previewBaseUrl?: string;
-    previewToken?: string;
+    ingestTotalBytes?: number;
 }

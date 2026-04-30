@@ -1,41 +1,51 @@
+import { type Mock } from 'vitest';
 import { SessionService } from './session.service.js';
 import { ProbeService } from './probe.service.js';
 
-let capturedServerConfig: any;
-const mockCleanUpExpiredUploads = jest.fn().mockResolvedValue(0);
-const mockStart = jest.fn().mockResolvedValue(undefined);
-const mockStop = jest.fn().mockResolvedValue(undefined);
-const mockHandle = jest.fn();
+const {
+    mockStart,
+    mockStop,
+    mockCleanUpExpiredUploads,
+    mockHandle,
+    capturedServerConfig,
+    mockRename,
+    mockCopyFile,
+    mockUnlink,
+    mockMkdir,
+} = vi.hoisted(() => ({
+    mockStart: vi.fn().mockResolvedValue(undefined),
+    mockStop: vi.fn().mockResolvedValue(undefined),
+    mockCleanUpExpiredUploads: vi.fn().mockResolvedValue(0),
+    mockHandle: vi.fn(),
+    capturedServerConfig: { value: null as any },
+    mockRename: vi.fn().mockResolvedValue(undefined),
+    mockCopyFile: vi.fn().mockResolvedValue(undefined),
+    mockUnlink: vi.fn().mockResolvedValue(undefined),
+    mockMkdir: vi.fn().mockResolvedValue(undefined),
+}));
 
-jest.mock('node-tusd', () => ({
-    TusdServer: jest.fn().mockImplementation((config: any) => {
-        capturedServerConfig = config;
-        return {
-            start: mockStart,
-            stop: mockStop,
-            cleanUpExpiredUploads: mockCleanUpExpiredUploads,
-            handle: mockHandle,
-        };
+vi.mock('node-tusd', () => ({
+    TusdServer: vi.fn().mockImplementation(function (this: any, config: any) {
+        capturedServerConfig.value = config;
+        this.start = mockStart;
+        this.stop = mockStop;
+        this.cleanUpExpiredUploads = mockCleanUpExpiredUploads;
+        this.handle = mockHandle;
     }),
 }));
 
-const mockRename = jest.fn().mockResolvedValue(undefined);
-const mockCopyFile = jest.fn().mockResolvedValue(undefined);
-const mockUnlink = jest.fn().mockResolvedValue(undefined);
-const mockMkdir = jest.fn().mockResolvedValue(undefined);
-
-jest.mock('fs/promises', () => ({
+vi.mock('fs/promises', () => ({
     rename: (...args: any[]) => mockRename(...args),
     copyFile: (...args: any[]) => mockCopyFile(...args),
     unlink: (...args: any[]) => mockUnlink(...args),
     mkdir: (...args: any[]) => mockMkdir(...args),
 }));
 
-jest.mock('fs', () => {
-    const actual = jest.requireActual('fs');
+vi.mock('fs', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('fs')>();
     return {
         ...actual,
-        mkdirSync: jest.fn(),
+        mkdirSync: vi.fn(),
     };
 });
 
@@ -65,15 +75,17 @@ describe('TusUploadService', () => {
     let probeService: ProbeService;
 
     beforeEach(async () => {
-        capturedServerConfig = undefined;
-        jest.clearAllMocks();
+        capturedServerConfig.value = undefined;
+        vi.clearAllMocks();
 
-        sessionService = new SessionService();
-        probeService = { probe: jest.fn() } as any;
+        sessionService = new SessionService({ emit: () => {} } as any);
+        probeService = { probe: vi.fn() } as any;
+        const webhookService = { send: vi.fn().mockResolvedValue(undefined) } as any;
 
         process.env.WORK_DIR = '/tmp/tus-test-work';
 
-        service = new TusUploadService(sessionService, probeService);
+        const previewService = { init: vi.fn().mockResolvedValue(undefined), destroy: vi.fn().mockResolvedValue(undefined) } as any;
+        service = new TusUploadService(sessionService, probeService, previewService, webhookService);
         await service.onModuleInit();
     });
 
@@ -89,7 +101,7 @@ describe('TusUploadService', () => {
 
     describe('onIncomingRequest', () => {
         it('should reject missing Authorization header', async () => {
-            const hook = capturedServerConfig.onIncomingRequest;
+            const hook = capturedServerConfig.value.onIncomingRequest;
             const req = makeRequestInfo();
 
             await expect(hook(req)).rejects.toEqual({
@@ -99,7 +111,7 @@ describe('TusUploadService', () => {
         });
 
         it('should reject non-Bearer scheme', async () => {
-            const hook = capturedServerConfig.onIncomingRequest;
+            const hook = capturedServerConfig.value.onIncomingRequest;
             const req = makeRequestInfo('Basic abc123');
 
             await expect(hook(req)).rejects.toEqual({
@@ -109,7 +121,7 @@ describe('TusUploadService', () => {
         });
 
         it('should reject empty Bearer token', async () => {
-            const hook = capturedServerConfig.onIncomingRequest;
+            const hook = capturedServerConfig.value.onIncomingRequest;
             const req = makeRequestInfo('Bearer ');
 
             await expect(hook(req)).rejects.toEqual({
@@ -118,20 +130,20 @@ describe('TusUploadService', () => {
             });
         });
 
-        it('should reject unknown upload token', async () => {
-            const hook = capturedServerConfig.onIncomingRequest;
+        it('should reject unknown session token', async () => {
+            const hook = capturedServerConfig.value.onIncomingRequest;
             const req = makeRequestInfo('Bearer bad_token');
 
             await expect(hook(req)).rejects.toEqual({
                 status_code: 401,
-                body: 'Invalid or expired upload token',
+                body: 'Invalid or expired session token',
             });
         });
 
         it('should allow valid Bearer token', async () => {
             const session = sessionService.create(makeConfig());
-            const hook = capturedServerConfig.onIncomingRequest;
-            const req = makeRequestInfo(`Bearer ${session.uploadToken}`);
+            const hook = capturedServerConfig.value.onIncomingRequest;
+            const req = makeRequestInfo(`Bearer ${session.sessionToken}`);
 
             await expect(hook(req)).resolves.toBeUndefined();
         });
@@ -140,7 +152,7 @@ describe('TusUploadService', () => {
     describe('onUploadCreate', () => {
         it('should set session status to uploading', async () => {
             const session = sessionService.create(makeConfig());
-            const hook = capturedServerConfig.onUploadCreate;
+            const hook = capturedServerConfig.value.onUploadCreate;
 
             await hook(makeRequestInfo(), { metadata: { sessionId: session.id } });
 
@@ -148,7 +160,7 @@ describe('TusUploadService', () => {
         });
 
         it('should reject unknown session', async () => {
-            const hook = capturedServerConfig.onUploadCreate;
+            const hook = capturedServerConfig.value.onUploadCreate;
 
             await expect(
                 hook(makeRequestInfo(), { metadata: { sessionId: 'nonexistent' } }),
@@ -161,7 +173,7 @@ describe('TusUploadService', () => {
         it('should reject session not in created/uploading status', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'encoding');
-            const hook = capturedServerConfig.onUploadCreate;
+            const hook = capturedServerConfig.value.onUploadCreate;
 
             await expect(
                 hook(makeRequestInfo(), { metadata: { sessionId: session.id } }),
@@ -172,17 +184,47 @@ describe('TusUploadService', () => {
         });
 
         it('should allow partial uploads without metadata', async () => {
-            const hook = capturedServerConfig.onUploadCreate;
+            const hook = capturedServerConfig.value.onUploadCreate;
 
             await expect(
                 hook(makeRequestInfo(), { metadata: {} }),
             ).resolves.toBeUndefined();
         });
 
+        it('should reject unsupported file extensions', async () => {
+            const session = sessionService.create(makeConfig());
+            const hook = capturedServerConfig.value.onUploadCreate;
+
+            await expect(
+                hook(makeRequestInfo(), { metadata: { sessionId: session.id, filename: 'malware.exe' } }),
+            ).rejects.toEqual({
+                status_code: 415,
+                body: 'Unsupported file type. Allowed: media files (video/audio).',
+            });
+        });
+
+        it('should allow supported media file extensions', async () => {
+            const session = sessionService.create(makeConfig());
+            const hook = capturedServerConfig.value.onUploadCreate;
+
+            await expect(
+                hook(makeRequestInfo(), { metadata: { sessionId: session.id, filename: 'video.mp4' } }),
+            ).resolves.toBeUndefined();
+        });
+
+        it('should allow uploads without filename metadata', async () => {
+            const session = sessionService.create(makeConfig());
+            const hook = capturedServerConfig.value.onUploadCreate;
+
+            await expect(
+                hook(makeRequestInfo(), { metadata: { sessionId: session.id } }),
+            ).resolves.toBeUndefined();
+        });
+
         it('should allow session in uploading status', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploading');
-            const hook = capturedServerConfig.onUploadCreate;
+            const hook = capturedServerConfig.value.onUploadCreate;
 
             await hook(makeRequestInfo(), { metadata: { sessionId: session.id } });
 
@@ -198,9 +240,9 @@ describe('TusUploadService', () => {
                 videoTracks: [{ index: 0, codec: 'h264', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
                 audioTracks: [{ index: 0, codec: 'aac', bitrateKbps: 192, channels: 2, sampleRate: 48000 }],
             };
-            (probeService.probe as jest.Mock).mockResolvedValue(probeResult);
+            (probeService.probe as Mock).mockResolvedValue(probeResult);
 
-            const hook = capturedServerConfig.onUploadFinish;
+            const hook = capturedServerConfig.value.onUploadFinish;
             const upload = {
                 id: 'upload-1',
                 metadata: { sessionId: session.id, filename: 'video.mp4' },
@@ -225,13 +267,13 @@ describe('TusUploadService', () => {
 
         it('should use "input" as default filename when metadata lacks filename', async () => {
             const session = sessionService.create(makeConfig());
-            (probeService.probe as jest.Mock).mockResolvedValue({
+            (probeService.probe as Mock).mockResolvedValue({
                 format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
                 videoTracks: [],
                 audioTracks: [],
             });
 
-            const hook = capturedServerConfig.onUploadFinish;
+            const hook = capturedServerConfig.value.onUploadFinish;
             const upload = {
                 id: 'upload-2',
                 metadata: { sessionId: session.id },
@@ -247,7 +289,7 @@ describe('TusUploadService', () => {
         });
 
         it('should handle partial upload completion (no sessionId)', async () => {
-            const hook = capturedServerConfig.onUploadFinish;
+            const hook = capturedServerConfig.value.onUploadFinish;
 
             await hook(makeRequestInfo(), { metadata: {}, storage: { path: '/tmp/x' } });
 
@@ -256,7 +298,7 @@ describe('TusUploadService', () => {
 
         it('should return early when storage path is missing', async () => {
             const session = sessionService.create(makeConfig());
-            const hook = capturedServerConfig.onUploadFinish;
+            const hook = capturedServerConfig.value.onUploadFinish;
 
             await hook(makeRequestInfo(), {
                 id: 'upload-3',
@@ -268,13 +310,13 @@ describe('TusUploadService', () => {
 
         it('should clean up tusd metadata sidecar (.info)', async () => {
             const session = sessionService.create(makeConfig());
-            (probeService.probe as jest.Mock).mockResolvedValue({
+            (probeService.probe as Mock).mockResolvedValue({
                 format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
                 videoTracks: [],
                 audioTracks: [],
             });
 
-            const hook = capturedServerConfig.onUploadFinish;
+            const hook = capturedServerConfig.value.onUploadFinish;
             await hook(makeRequestInfo(), {
                 id: 'upload-4',
                 metadata: { sessionId: session.id, filename: 'test.mp4' },
@@ -286,16 +328,58 @@ describe('TusUploadService', () => {
             );
         });
 
+        it('should sanitize path traversal in filename', async () => {
+            const session = sessionService.create(makeConfig());
+            (probeService.probe as Mock).mockResolvedValue({
+                format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
+                videoTracks: [],
+                audioTracks: [],
+            });
+
+            const hook = capturedServerConfig.value.onUploadFinish;
+            await hook(makeRequestInfo(), {
+                id: 'upload-traversal',
+                metadata: { sessionId: session.id, filename: '../../etc/passwd' },
+                storage: { path: '/tmp/tus-uploads/upload-traversal' },
+            });
+
+            expect(mockRename).toHaveBeenCalledWith(
+                '/tmp/tus-uploads/upload-traversal',
+                `/tmp/tus-test-work/${session.id}/passwd`,
+            );
+        });
+
+        it('should sanitize filename with directory separators', async () => {
+            const session = sessionService.create(makeConfig());
+            (probeService.probe as Mock).mockResolvedValue({
+                format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
+                videoTracks: [],
+                audioTracks: [],
+            });
+
+            const hook = capturedServerConfig.value.onUploadFinish;
+            await hook(makeRequestInfo(), {
+                id: 'upload-slashes',
+                metadata: { sessionId: session.id, filename: 'subdir/file.mp4' },
+                storage: { path: '/tmp/tus-uploads/upload-slashes' },
+            });
+
+            expect(mockRename).toHaveBeenCalledWith(
+                '/tmp/tus-uploads/upload-slashes',
+                `/tmp/tus-test-work/${session.id}/file.mp4`,
+            );
+        });
+
         it('should fall back to copyFile when rename fails', async () => {
             const session = sessionService.create(makeConfig());
-            (probeService.probe as jest.Mock).mockResolvedValue({
+            (probeService.probe as Mock).mockResolvedValue({
                 format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
                 videoTracks: [],
                 audioTracks: [],
             });
             mockRename.mockRejectedValueOnce(new Error('EXDEV: cross-device link'));
 
-            const hook = capturedServerConfig.onUploadFinish;
+            const hook = capturedServerConfig.value.onUploadFinish;
             await hook(makeRequestInfo(), {
                 id: 'upload-5',
                 metadata: { sessionId: session.id, filename: 'test.mp4' },
@@ -331,6 +415,53 @@ describe('TusUploadService', () => {
         });
     });
 
+    describe('finalizeUpload', () => {
+        it('runs probe, preview init, status flip, and webhook', async () => {
+            const config: CreateSessionDto = {
+                ...makeConfig(),
+                webhook: { url: 'https://example.com/webhook', sessionToken: 'tok' },
+            };
+            const session = sessionService.create(config);
+            const probeResult = {
+                format: { duration: 60, bitrateKbps: 5000, formatName: 'mp4' },
+                videoTracks: [{ index: 0, codec: 'h264', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
+                audioTracks: [{ index: 0, codec: 'aac', bitrateKbps: 192, channels: 2, sampleRate: 48000 }],
+            };
+            (probeService.probe as Mock).mockResolvedValue(probeResult);
+            const previewService = (service as any).previewService;
+            const webhookService = (service as any).webhookService;
+
+            await service.finalizeUpload(session.id, '/tmp/destination/video.mp4');
+
+            expect(probeService.probe).toHaveBeenCalledWith('/tmp/destination/video.mp4');
+            expect(previewService.init).toHaveBeenCalledWith(session.id);
+            const updated = sessionService.get(session.id)!;
+            expect(updated.status).toBe('uploaded');
+            expect(updated.filePath).toBe('/tmp/destination/video.mp4');
+            expect(updated.probeResult).toEqual(probeResult);
+            expect(webhookService.send).toHaveBeenCalledWith(
+                'https://example.com/webhook',
+                'tok',
+                expect.objectContaining({ sessionId: session.id, status: 'uploaded' }),
+            );
+        });
+
+        it('still flips to uploaded when preview init throws', async () => {
+            const session = sessionService.create(makeConfig());
+            (probeService.probe as Mock).mockResolvedValue({
+                format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
+                videoTracks: [],
+                audioTracks: [],
+            });
+            const previewService = (service as any).previewService;
+            previewService.init.mockRejectedValueOnce(new Error('preview boom'));
+
+            await service.finalizeUpload(session.id, '/tmp/destination/audio.mp3');
+
+            expect(sessionService.get(session.id)!.status).toBe('uploaded');
+        });
+    });
+
     describe('handle', () => {
         it('should delegate to tusdServer.handle', () => {
             const req = {} as any;
@@ -339,6 +470,81 @@ describe('TusUploadService', () => {
             service.handle(req, res);
 
             expect(mockHandle).toHaveBeenCalledWith(req, res);
+        });
+    });
+
+    describe('periodic cleanup', () => {
+        it('should run cleanup on interval and log when uploads are removed', async () => {
+            vi.useFakeTimers();
+            vi.clearAllMocks();
+
+            // Create a fresh service with fake timers active
+            const svc2 = new TusUploadService(sessionService, probeService, { init: vi.fn(), destroy: vi.fn() } as any, { send: vi.fn().mockResolvedValue(undefined) } as any);
+            await svc2.onModuleInit();
+            mockCleanUpExpiredUploads.mockResolvedValueOnce(3);
+
+            // Advance past the 30-minute interval
+            await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+
+            // cleanup called once from the interval tick
+            expect(mockCleanUpExpiredUploads).toHaveBeenCalled();
+
+            vi.useRealTimers();
+        });
+
+        it('should not throw when periodic cleanup fails', async () => {
+            vi.useFakeTimers();
+            vi.clearAllMocks();
+
+            const svc2 = new TusUploadService(sessionService, probeService, { init: vi.fn(), destroy: vi.fn() } as any, { send: vi.fn().mockResolvedValue(undefined) } as any);
+            await svc2.onModuleInit();
+            mockCleanUpExpiredUploads.mockRejectedValueOnce(new Error('cleanup failed'));
+
+            await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+
+            // Should not throw — just logs
+            vi.useRealTimers();
+        });
+    });
+
+    describe('sendStatusWebhook', () => {
+        it('should send webhook when session has webhook config', async () => {
+            const config: CreateSessionDto = {
+                s3: {
+                    endPoint: 's3.example.com',
+                    bucket: 'test',
+                    accessKey: 'key',
+                    secretKey: 'secret',
+                },
+                webhook: {
+                    url: 'https://example.com/webhook',
+                    sessionToken: 'tok-123',
+                },
+            };
+            const session = sessionService.create(config);
+            const webhookService = (service as any).webhookService;
+
+            const hook = capturedServerConfig.value.onUploadCreate;
+            await hook(makeRequestInfo(), { metadata: { sessionId: session.id } });
+
+            expect(webhookService.send).toHaveBeenCalledWith(
+                'https://example.com/webhook',
+                'tok-123',
+                expect.objectContaining({
+                    sessionId: session.id,
+                    status: 'uploading',
+                }),
+            );
+        });
+
+        it('should not send webhook when session has no webhook config', async () => {
+            const session = sessionService.create(makeConfig());
+            const webhookService = (service as any).webhookService;
+
+            const hook = capturedServerConfig.value.onUploadCreate;
+            await hook(makeRequestInfo(), { metadata: { sessionId: session.id } });
+
+            expect(webhookService.send).not.toHaveBeenCalled();
         });
     });
 });

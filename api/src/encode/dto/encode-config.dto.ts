@@ -6,6 +6,7 @@ import {
     IsNumber,
     IsOptional,
     IsString,
+    MaxLength,
     Min,
     ValidateNested,
     ValidateIf,
@@ -117,6 +118,35 @@ export class AudioGroupDto {
     vbr?: boolean;
 }
 
+export class VideoTrackNameDto {
+    @ApiProperty({ description: 'Source video track index.', example: 0 })
+    @IsNumber()
+    @Min(0)
+    @Expose()
+    index: number;
+
+    @ApiProperty({ description: 'Display name for the video track.', example: 'Main angle' })
+    @IsString()
+    @IsNotEmpty()
+    @MaxLength(100)
+    @Expose()
+    name: string;
+}
+
+export class TrimSegmentDto {
+    @ApiProperty({ description: 'In-point in seconds.', example: 11.954 })
+    @IsNumber()
+    @Min(0)
+    @Expose()
+    inSec: number;
+
+    @ApiProperty({ description: 'Out-point in seconds.', example: 130.048 })
+    @IsNumber()
+    @Min(0)
+    @Expose()
+    outSec: number;
+}
+
 export class EncodeConfigDto {
     @ApiProperty({ description: 'Encoding type.', enum: ['video', 'audio'], example: 'video' })
     @IsString()
@@ -156,9 +186,11 @@ export class EncodeConfigDto {
     })
     @IsArray()
     @IsOptional()
+    @ValidateNested({ each: true })
+    @Type(() => VideoTrackNameDto)
     @ValidateIf(o => o.type === 'video')
     @Expose()
-    videoTrackNames?: { index: number; name: string }[];
+    videoTrackNames?: VideoTrackNameDto[];
 
     @ApiPropertyOptional({
         description:
@@ -169,4 +201,16 @@ export class EncodeConfigDto {
     @IsOptional()
     @Expose()
     byteRange?: boolean;
+
+    @ApiPropertyOptional({
+        description:
+            'Trim segments — when set, only these time ranges are encoded and concatenated in order. Each segment must be at least 0.5s and segments must not overlap.',
+        type: [TrimSegmentDto],
+    })
+    @IsArray()
+    @IsOptional()
+    @ValidateNested({ each: true })
+    @Type(() => TrimSegmentDto)
+    @Expose()
+    trimSegments?: TrimSegmentDto[];
 }

@@ -4,6 +4,8 @@ import {
     IsNumber,
     IsOptional,
     IsString,
+    Max,
+    Min,
 } from 'class-validator';
 import { Expose } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -25,6 +27,8 @@ export class S3ConfigDto {
     })
     @IsNumber()
     @IsOptional()
+    @Min(1)
+    @Max(65535)
     @Expose()
     port?: number;
 

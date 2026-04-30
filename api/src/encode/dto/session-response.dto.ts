@@ -20,11 +20,11 @@ export class SessionResponseDto {
 
     @ApiProperty({
         description:
-            'Bearer token to authenticate tus upload requests. Send as "Authorization: Bearer <token>".',
-        example: 'tok_f8e7d6c5b4a3291087654321',
+            'Bearer token to authenticate session requests (tus uploads, polling, preview). Send as "Authorization: Bearer <token>".',
+        example: 'sess_f8e7d6c5b4a3291087654321',
     })
     @Expose()
-    uploadToken: string;
+    sessionToken: string;
 
     @ApiProperty({
         description:
@@ -94,6 +94,15 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
+            'Detailed pipeline progress with separate encoding, encrypting, and uploading indicators. ' +
+            'Present when status is "encoding" or "uploading_to_s3".',
+        example: { encoding: 45.5, encrypting: 30, uploading: 10 },
+    })
+    @Expose()
+    pipelineProgress?: { encoding: number; encrypting?: number; uploading?: number };
+
+    @ApiPropertyOptional({
+        description:
             'Position in the encoding queue (1-based). Present when status is "queued".',
         example: 2,
     })
@@ -150,6 +159,14 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
+            'Hex-encoded AES-128 encryption key. Present when status is "completed" and encryption was enabled.',
+        example: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
+    })
+    @Expose()
+    encryptionKeyHex?: string;
+
+    @ApiPropertyOptional({
+        description:
             'Error message. Present when status is "failed".',
         example: 'FFmpeg exited with code 1: Invalid input file',
     })
@@ -179,19 +196,10 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
-            'Base URL for preview playlist endpoints with rewritten key URIs. ' +
-            'Present when status is "completed" and HLS encryption is enabled.',
-        example: 'http://localhost:3000/api/sessions/abc123/preview',
+            'Total bytes for the source being ingested. Present during URL ingestion ' +
+            'when the source server reported a Content-Length.',
+        example: 524288000,
     })
     @Expose()
-    previewBaseUrl?: string;
-
-    @ApiPropertyOptional({
-        description:
-            'Bearer token for authenticating preview playlist/key requests. ' +
-            'Present when previewBaseUrl is set.',
-        example: 'tok_f8e7d6c5b4a3291087654321',
-    })
-    @Expose()
-    previewToken?: string;
+    ingestTotalBytes?: number;
 }

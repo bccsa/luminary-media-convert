@@ -21,26 +21,12 @@
         "build": "tsc",
         "dev": "tsc --watch",
         "download-tusd": "bash scripts/download-tusd.sh",
-        "test": "NODE_OPTIONS='--experimental-vm-modules' jest --forceExit"
+        "test": "vitest run"
     },
     "devDependencies": {
-        "@types/jest": "^30.0.0",
         "@types/node": "^22.10.7",
-        "jest": "^30.0.0",
-        "ts-jest": "^29.2.5",
-        "typescript": "^5.7.3"
-    },
-    "jest": {
-        "extensionsToTreatAsEsm": [".ts"],
-        "moduleFileExtensions": ["js", "json", "ts"],
-        "rootDir": ".",
-        "testRegex": ".*\\.spec\\.ts$",
-        "transform": {
-            "^.+\\.ts$": ["ts-jest", { "useESM": true }]
-        },
-        "moduleNameMapper": {
-            "^(\\.{1,2}/.*)\\.js$": "$1"
-        },
-        "testEnvironment": "node"
+        "@vitest/coverage-v8": "^4.1.0",
+        "typescript": "^5.7.3",
+        "vitest": "^4.1.0"
     }
 }

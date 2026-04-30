@@ -1,11 +1,11 @@
-import { Module } from '@nestjs/common';
-import { PassportModule } from '@nestjs/passport';
-import { JwtStrategy } from './jwt.strategy.js';
-import { JwtAuthGuard } from './jwt-auth.guard.js';
+import { Module, forwardRef } from '@nestjs/common';
+import { AuthResolverGuard } from './auth-resolver.guard.js';
+import { KeyValidationWebhookService } from './key-validation-webhook.service.js';
+import { EncodeModule } from '../encode/encode.module.js';
 
 @Module({
-    imports: [PassportModule.register({ defaultStrategy: 'jwt' })],
-    providers: [JwtStrategy, JwtAuthGuard],
-    exports: [JwtAuthGuard],
+    imports: [forwardRef(() => EncodeModule)],
+    providers: [AuthResolverGuard, KeyValidationWebhookService],
+    exports: [AuthResolverGuard, KeyValidationWebhookService],
 })
 export class AuthModule {}

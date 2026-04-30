@@ -10,7 +10,7 @@ import { readFile, writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import { promisify } from 'util';
 import { Worker } from 'worker_threads';
-import type { EncodeConfigDto, VideoRenditionDto, AudioGroupDto } from '../dto/encode-config.dto.js';
+import type { EncodeConfigDto, VideoRenditionDto, AudioGroupDto, TrimSegmentDto } from '../dto/encode-config.dto.js';
 import dotenv from 'dotenv';
 
 const execFileAsync = promisify(execFile);
@@ -280,6 +280,24 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
+    private async buildConcatFile(
+        inputPath: string,
+        segments: TrimSegmentDto[],
+        outputDir: string,
+    ): Promise<string> {
+        const lines = ['ffconcat version 1.0'];
+        for (const seg of segments) {
+            // Escape single quotes in path for ffconcat format
+            const escapedPath = inputPath.replace(/'/g, "'\\''");
+            lines.push(`file '${escapedPath}'`);
+            lines.push(`inpoint ${seg.inSec}`);
+            lines.push(`outpoint ${seg.outSec}`);
+        }
+        const concatPath = join(outputDir, 'concat.txt');
+        await writeFile(concatPath, lines.join('\n'), 'utf-8');
+        return concatPath;
+    }
+
     private getX264Preset(height: number): string {
         if (height >= 1080) return 'veryfast';
         if (height >= 720) return 'faster';
@@ -342,7 +360,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         } else if (hasReencode && this.accelMode === 'apple') {
             args.push('-hwaccel', 'videotoolbox', '-hwaccel_output_format', 'videotoolbox_vld');
         }
-        args.push('-i', inputPath);
+
+        if (encodeConfig.trimSegments?.length) {
+            const concatPath = await this.buildConcatFile(inputPath, encodeConfig.trimSegments, outputDir);
+            args.push('-f', 'concat', '-safe', '0', '-i', concatPath);
+        } else {
+            args.push('-i', inputPath);
+        }
         args.push('-threads', String(this.threads));
         args.push('-progress', 'pipe:2', '-stats_period', '1');
 
@@ -530,11 +554,18 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return args;
     }
 
-    private buildAudioArgs(opts: EncodeOptions, useFmp4 = true): string[] {
+    private async buildAudioArgs(opts: EncodeOptions, useFmp4 = true): Promise<string[]> {
         const { inputPath, outputDir, encodeConfig } = opts;
         const audioGroups = encodeConfig.audioGroups!;
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
-        const args: string[] = ['-i', inputPath];
+        const args: string[] = [];
+
+        if (encodeConfig.trimSegments?.length) {
+            const concatPath = await this.buildConcatFile(inputPath, encodeConfig.trimSegments, outputDir);
+            args.push('-f', 'concat', '-safe', '0', '-i', concatPath);
+        } else {
+            args.push('-i', inputPath);
+        }
         args.push('-threads', String(this.threads));
 
         args.push('-progress', 'pipe:2', '-stats_period', '1');
@@ -638,11 +669,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         // Fall back to MPEG-TS when misaligned — hls.js's transmuxer fixes sync for TS.
         const useFmp4 = await this.areStreamStartTimesAligned(opts.inputPath, encodeConfig);
 
-        const totalDuration = await this.probeDuration(opts.inputPath);
+        const totalDuration = encodeConfig.trimSegments?.length
+            ? encodeConfig.trimSegments.reduce((sum, s) => sum + (s.outSec - s.inSec), 0)
+            : await this.probeDuration(opts.inputPath);
         const args =
             type === 'video'
                 ? await this.buildVideoArgs(opts, useFmp4)
-                : this.buildAudioArgs(opts, useFmp4);
+                : await this.buildAudioArgs(opts, useFmp4);
 
         this.logger.debug(`FFmpeg args: ffmpeg ${args.join(' ')}`);
 
@@ -863,11 +896,21 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const audioGroups = config.audioGroups ?? [];
         if (audioGroups.length === 0) return content;
 
+        // Determine if all audio groups share the same language.
+        // When they do, they represent quality tiers (not language alternatives),
+        // so they must share the same NAME to prevent HLS players from showing
+        // them as separate selectable audio tracks.
+        const uniqueLanguages = new Set(audioGroups.map(g => g.language ?? ''));
+        const isSingleLanguage = uniqueLanguages.size <= 1;
+
         const nameByUri = new Map<string, string>();
         for (const group of audioGroups) {
             const streamName = this.buildAudioStreamName(group);
             const uri = `stream_${streamName}/playlist.m3u8`;
-            nameByUri.set(uri, group.label ?? group.language ?? 'Audio');
+            const name = isSingleLanguage
+                ? (group.language ?? 'Audio')
+                : (group.label ?? group.language ?? 'Audio');
+            nameByUri.set(uri, name);
         }
 
         return content.split('\n').map((line) => {
@@ -1029,13 +1072,20 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         const tiers = [...tierMap.entries()];
 
+        // When all audio groups share one language, use a uniform NAME
+        // so HLS players treat them as quality tiers, not separate tracks.
+        const allLanguages = new Set(audioGroups.map(g => g.language ?? ''));
+        const singleLang = allLanguages.size <= 1;
+
         // EXT-X-MEDIA entries per tier
         for (const [tierId, groups] of tiers) {
             let isFirstInTier = true;
             for (const group of groups) {
                 const streamName = this.buildAudioStreamName(group);
                 const uri = `stream_${streamName}/playlist.m3u8`;
-                const name = group.label ?? group.language ?? 'Audio';
+                const name = singleLang
+                    ? (group.language ?? 'Audio')
+                    : (group.label ?? group.language ?? 'Audio');
                 const lang = group.language ? `,LANGUAGE="${group.language}"` : '';
 
                 parts.push(

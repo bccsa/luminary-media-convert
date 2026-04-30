@@ -21,7 +21,7 @@ describe('SessionService', () => {
     let service: SessionService;
 
     beforeEach(() => {
-        service = new SessionService();
+        service = new SessionService({ emit: () => {} } as any);
     });
 
     describe('create', () => {
@@ -29,7 +29,7 @@ describe('SessionService', () => {
             const session = service.create(makeConfig());
 
             expect(session.id).toBeDefined();
-            expect(session.uploadToken).toMatch(/^tok_/);
+            expect(session.sessionToken).toMatch(/^sess_/);
             expect(session.status).toBe('created');
             expect(session.progress).toBe(0);
             expect(session.config.s3.endPoint).toBe('s3.example.com');
@@ -41,7 +41,7 @@ describe('SessionService', () => {
             const s2 = service.create(makeConfig());
 
             expect(s1.id).not.toBe(s2.id);
-            expect(s1.uploadToken).not.toBe(s2.uploadToken);
+            expect(s1.sessionToken).not.toBe(s2.sessionToken);
         });
     });
 
@@ -59,17 +59,17 @@ describe('SessionService', () => {
         });
     });
 
-    describe('getByUploadToken', () => {
+    describe('getBySessionToken', () => {
         it('should return a session by upload token', () => {
             const created = service.create(makeConfig());
-            const found = service.getByUploadToken(created.uploadToken);
+            const found = service.getBySessionToken(created.sessionToken);
 
             expect(found).toBeDefined();
             expect(found!.id).toBe(created.id);
         });
 
         it('should return undefined for unknown token', () => {
-            expect(service.getByUploadToken('bad_token')).toBeUndefined();
+            expect(service.getBySessionToken('bad_token')).toBeUndefined();
         });
     });
 
@@ -92,6 +92,31 @@ describe('SessionService', () => {
             service.updateProgress(session.id, 42.5);
 
             expect(service.get(session.id)!.progress).toBe(42.5);
+        });
+    });
+
+    describe('updatePipelineProgress', () => {
+        it('should set pipelineProgress and update progress from encoding field', () => {
+            const emitSpy = vi.fn();
+            const svc = new SessionService({ emit: emitSpy } as any);
+            const session = svc.create(makeConfig());
+
+            const pipelineProgress = { encoding: 55, encrypting: 30, uploading: 10 };
+            svc.updatePipelineProgress(session.id, pipelineProgress);
+
+            const updated = svc.get(session.id)!;
+            expect(updated.pipelineProgress).toEqual(pipelineProgress);
+            expect(updated.progress).toBe(55);
+            expect(emitSpy).toHaveBeenCalled();
+        });
+
+        it('should be a no-op for unknown session id', () => {
+            const emitSpy = vi.fn();
+            const svc = new SessionService({ emit: emitSpy } as any);
+
+            expect(() => svc.updatePipelineProgress('nonexistent', { encoding: 50 })).not.toThrow();
+            // emit should not have been called (no session created)
+            expect(emitSpy).not.toHaveBeenCalled();
         });
     });
 
@@ -125,6 +150,43 @@ describe('SessionService', () => {
 
             const updated = service.get(session.id)!;
             expect(updated.probeResult).toEqual(probeResult);
+        });
+    });
+
+    describe('setIngestTotal', () => {
+        it('stores the total bytes and emits an event', () => {
+            const emitSpy = vi.fn();
+            const svc = new SessionService({ emit: emitSpy } as any);
+            const session = svc.create(makeConfig());
+            emitSpy.mockClear();
+
+            svc.setIngestTotal(session.id, 524_288_000);
+
+            expect(svc.get(session.id)!.ingestTotalBytes).toBe(524_288_000);
+            expect(emitSpy).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    sessionId: session.id,
+                    ingestTotalBytes: 524_288_000,
+                }),
+            );
+        });
+
+        it('is a no-op for unknown session ids', () => {
+            expect(() => service.setIngestTotal('does-not-exist', 100)).not.toThrow();
+        });
+
+        it('subsequent events include the total once set', () => {
+            const emitSpy = vi.fn();
+            const svc = new SessionService({ emit: emitSpy } as any);
+            const session = svc.create(makeConfig());
+            svc.setIngestTotal(session.id, 1000);
+            emitSpy.mockClear();
+
+            svc.updateProgress(session.id, 50);
+
+            expect(emitSpy).toHaveBeenCalledWith(
+                expect.objectContaining({ ingestTotalBytes: 1000, progress: 50 }),
+            );
         });
     });
 
@@ -203,7 +265,7 @@ describe('SessionService', () => {
             (service.get(session.id) as any).createdAt = 0;
 
             service.cleanup(1000);
-            expect(service.getByUploadToken(session.uploadToken)).toBeUndefined();
+            expect(service.getBySessionToken(session.sessionToken)).toBeUndefined();
         });
     });
 });

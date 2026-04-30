@@ -1,4 +1,3 @@
-import { jest } from '@jest/globals';
 import { TusdServer } from '../src/server.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -36,8 +35,8 @@ describe('TusdServer integration', () => {
     beforeAll(async () => {
         uploadDir = mkdtempSync(join(tmpdir(), 'tusd-test-'));
 
-        const onUploadCreate = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-        const onUploadFinish = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+        const onUploadCreate = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+        const onUploadFinish = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
         server = new TusdServer({
             path: '/files/',
