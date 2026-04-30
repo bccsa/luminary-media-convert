@@ -1,102 +1,93 @@
-# luminary-media-convert
+# Luminary Media Convert
 
-Media converter for the luminary project
+Monorepo containing an open-source HLS/ABR encoding API and a closed-source SaaS platform for multi-user media encoding. The Encoding API runs standalone on GPU-equipped hardware, while the SaaS layer adds user management, API key management, session history, and billing interfaces via a separate service backed by CouchDB.
+
+## System Architecture
+
+```
+                  Web App (SPA)              Admin Panel (SPA)
+                  app/                       admin/
+                  port 5173                  port 5174
+                       |                          |
+            Session token                    JWT (admin-only)
+            (from SaaS)                           |
+                       |   JWT (Auth0)            |
+                       |   for SaaS ──────────────|
+                       v                          v
+                  Encoding API              SaaS Service
+                  api/                      saas/
+                  port 3000                 port 3001
+                  (open source)             (closed source)
+                       ^                     |         ^
+                       |                     |         |
+                  API key (validated    Creates sessions   Key validation
+                  via SaaS webhook)     via master key     webhook
+                       |
+              Third-Party Services
+```
+
+**Encoding API** -- Stateless, open-source encoding service. Accepts master key or webhook-validated API key authentication. Creates sessions, receives file uploads via tus, probes media, encodes to HLS/ABR with FFmpeg (GPU-accelerated when available), uploads output to S3-compatible storage, and delivers status updates via webhooks and SSE. Encrypted HLS playback is handled entirely client-side (no server-side key serving). Has no key store and no `/api/keys` endpoints.
+
+**SaaS Service** -- Closed-source management layer. Manages users, API keys (client-side generated, hash-only storage), S3 configs (AES-256-GCM encrypted credentials), creates sessions on behalf of web app users (master key), validates API keys via webhook endpoint, stores session history in CouchDB, and exposes admin endpoints. Sessions are tracked from creation through completion with real-time SSE updates. Does not proxy encoding -- clients talk to the Encoding API directly using session tokens.
+
+## Monorepo Structure
+
+| Workspace | Description | License | README |
+|-----------|-------------|---------|--------|
+| `api/` | Encoding API -- HLS/ABR encoding service | Apache 2.0 | [api/README.md](api/README.md) |
+| `app/` | Web Application -- Vue 3 SPA for uploading and encoding | Proprietary | [app/README.md](app/README.md) |
+| `admin/` | Admin Panel -- Vue 3 SPA for system administration | Proprietary | [admin/README.md](admin/README.md) |
+| `saas/` | SaaS Service -- User management, API keys, session history | Proprietary | [saas/README.md](saas/README.md) |
+| `encode-config/` | Shared encoding config component and types | Apache 2.0 | [encode-config/README.md](encode-config/README.md) |
+| `tusd/` | Node.js wrapper for the Go tusd binary | MIT | [tusd/README.md](tusd/README.md) |
 
 ## Prerequisites
 
-This project uses GStreamer via GObject Introspection. You must install GStreamer and the appropriate plugins on your system (macOS in this example):
+- **Node.js** >= 18
+- **FFmpeg** (with `libx264` and `aac`; optional GPU encoders: `h264_nvenc` for NVIDIA, `h264_videotoolbox` for Apple Silicon)
+- **CouchDB** (required for the SaaS Service)
+- **Auth0 account** (required for the web app, admin panel, and SaaS Service)
 
-- Core runtime: gstreamer, gst-plugins-base
-- Additional codecs/containers used by pipelines:
-    - x264enc: typically in gst-plugins-ugly or system package providing x264
-    - avenc_aac: provided by gst-libav (FFmpeg-based)
-    - lamemp3enc: in gst-plugins-ugly
-    - vp8enc/vorbisenc/webmmux: in gst-plugins-good/bad
-    - wavenc, flacenc: in base/good
-
-On macOS (Homebrew), common installs are:
+## Quick Start
 
 ```bash
-brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
+# Install all dependencies (hoisted via npm workspaces)
+npm install
+
+# Start all services in development mode
+npm run dev
 ```
 
-Ensure the `gst-inspect-1.0` command lists the encoders/muxers used in the pipeline (x264enc, avenc_aac, lamemp3enc, vp8enc, vorbisenc, wavenc, flacenc, mp4mux, webmmux, matroskamux).
+This starts:
 
-## Environment variables
+| Service | URL |
+|---------|-----|
+| Encoding API | `http://localhost:3000` (docs at `/api/docs`) |
+| SaaS Service | `http://localhost:3001` (docs at `/saas/docs`) |
+| Web Application | `http://localhost:5173` |
+| Admin Panel | `http://localhost:5174` |
+| encode-config | Watch build (library mode) |
+
+## Auth0 Post Login Action
+
+Auth0 does not include the user's email in access tokens by default. The SaaS Service needs the email to match Auth0 accounts to CouchDB user documents. You must configure a Post Login Action in Auth0 — see [SaaS Service README](saas/README.md#auth0-post-login-action-required) for full setup instructions.
+
+## Seed Admin User
+
+Before using the admin panel, seed an initial admin user in CouchDB:
 
 ```bash
-QUEUE_FILE_PATH="queue.json" # path to the queue file
+npm run seed:admin -- --email admin@example.com --name "Admin User"
 ```
 
-## Uploading files via multipart/form-data
+The admin user's Auth0 account is linked automatically on first login via email matching.
 
-Endpoint: `POST /api/convert/:dispatchId`
+## Documentation
 
-Form fields:
-
-- `file`: the binary file to convert
-- `metadata`: JSON string with details. Example: `{"originalName":"video.mp4","title":"My Video","format":"mp4"}`
-
-Example request using curl (macOS zsh):
-
-```bash
-curl -X POST "http://localhost:3000/api/convert/your-dispatch-id" \
-  -F "file=@/path/to/file.mp4" \
-  -F 'metadata={"originalName":"file.mp4","title":"My File","convertedFormat":"mp4"}'
-```
-
-Notes:
-
-- `metadata` is parsed from JSON and validated against `MetadataDto`.
-    - Required: `convertedFormat` must be one of `mp4|mov|avi|mkv|flv|wmv|webm|mp3|wav|aac|ogg|opus|flac`.
-        - Optional: `originalName`, `title`, `description`, `author`, `copyright`, `bitrate`.
-        - Unknown fields are ignored.
-        - On validation errors, the API responds with 400 Bad Request and a message like `Invalid metadata: convertedFormat must be one of the following values: mp4, mov, ...`.
-- Max upload size defaults to 1GB; adjust the limit in `src/modules/convert/convert.controller.ts` if needed.
-
-## Supported output formats
-
-The converter supports these output targets:
-
-- Video containers/codecs:
-    - mp4 (H.264 + AAC)
-    - mov (H.264 + AAC)
-    - avi (MPEG-4 Part 2 + MP3)
-    - mkv (H.264 + AAC)
-    - flv (H.264 + AAC)
-    - wmv (WMV2 + WMA2 in ASF)
-    - webm (VP8 + Vorbis)
-- Audio:
-    - mp3 (LAME)
-    - wav (PCM)
-    - aac (ADTS)
-    - ogg (Vorbis)
-    - opus (Opus in Ogg)
-    - flac (FLAC)
-
-Notes:
-
-- Bitrate (if provided) is applied to the encoders that support it.
-
-## API-run conversion flow
-
-1. POST the file with metadata to `/api/convert/:dispatchId` to queue the job.
-
-- Example metadata: `{ "originalName": "input.mov", "convertedFormat": "mp4", "bitrate": 1800 }`
-
-2. Poll `GET /api/convert/:dispatchId?status=all|pending|processing|completed|failed`.
-3. When status=completed, call `GET /api/convert/:dispatchId?status=completed` to fetch completed items.
-
-- The response will include the converted file bytes (Buffer) and the item will be removed from the queue and the file deleted from disk.
-
-## Local usage notes
-
-- Input files are stored under `files/` and converted outputs under `processed/`.
-- Temporary source files are removed once conversion succeeds.
-- Errors during conversion will mark the job as `failed`.
-
-## Env file
-
-```bash
-PORT=3001
-```
+- [Encoding API Reference](api/README.md) -- Full API documentation, authentication, webhooks, encoding workflow
+- [Web Application](app/README.md) -- Client setup and environment variables
+- [Admin Panel](admin/README.md) -- Admin features and role setup
+- [SaaS Service](saas/README.md) -- CouchDB setup, admin endpoints, seed commands
+- [User Requirements Specification](docs/URS-saas-adaptation.md)
+- [Functional Design Specification](docs/FDS-saas-adaptation.md)
+- [Implementation Plan](docs/implementation-plan.md)

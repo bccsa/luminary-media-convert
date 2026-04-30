@@ -1,10 +1,16 @@
 node_modules
 dist
+coverage
 files
 processed
 temp
+work
 .env
 .DS_Store
 .vscode
+.cursor/**/*.log
 dispatchQueue.json
 jobQueue.json
+tusd/bin/
+*.tsbuildinfo
+docs/todo.md
