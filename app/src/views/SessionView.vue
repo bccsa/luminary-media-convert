@@ -8,7 +8,7 @@ import { SegmentEditor } from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
 import { useChapters } from '../composables/useChapters';
 import HlsPlayer from '../components/HlsPlayer.vue';
-import type { QualityLevelInfo } from '../components/HlsPlayer.vue';
+import type { AudioTrackInfo, QualityLevelInfo } from '../components/HlsPlayer.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import InlineConfirm from '../components/InlineConfirm.vue';
@@ -268,6 +268,13 @@ const selectedAudioTrack = ref(0);
 const previewQualityLevels = ref<QualityLevelInfo[]>([]);
 const selectedQualityId = ref<string | null>(null);
 const isPreviewPlaying = ref(false);
+// Native HLS audio tracks (post-encode). Driven via player.audioTracks() so
+// we leverage VHS's built-in track switching rather than re-fetching playlists.
+const nativeAudioTracks = ref<AudioTrackInfo[]>([]);
+const selectedNativeAudioId = computed(() => {
+    const enabled = nativeAudioTracks.value.find((t) => t.enabled);
+    return enabled?.id ?? null;
+});
 
 function onPreviewQualityLevels(levels: QualityLevelInfo[]) {
     previewQualityLevels.value = levels;
@@ -276,6 +283,21 @@ function onPreviewQualityLevels(levels: QualityLevelInfo[]) {
 function onQualityChange(id: string | null) {
     selectedQualityId.value = id;
     playerRef.value?.setQuality(id);
+}
+
+function onNativeAudioTracks(tracks: AudioTrackInfo[]) {
+    nativeAudioTracks.value = tracks;
+}
+
+function onNativeAudioChange(id: string) {
+    playerRef.value?.setAudioTrack(id);
+}
+
+function nativeAudioLabel(t: AudioTrackInfo): string {
+    const parts: string[] = [];
+    if (t.label) parts.push(t.label);
+    if (t.language && t.language !== t.label) parts.push(`(${t.language})`);
+    return parts.join(' ') || t.id;
 }
 
 async function fetchPreviewAudioTracks() {
@@ -1147,11 +1169,12 @@ onUnmounted(() => {
                         :encoding-type="encodingType"
                         :is-audio-only="isAudioOnly"
                         :encryption-key-hex="isCompleted ? (encryptionKeyHex || poller.encryptionKeyHex.value) : undefined"
-                        :show-controls="!showProbeConfig"
+                        :show-controls="false"
                         preserve-state-on-source-change
                         @quality-levels="onPreviewQualityLevels"
                         @playing-change="isPreviewPlaying = $event"
                         @duration-change="playerDuration = $event"
+                        @audio-tracks="onNativeAudioTracks"
                     />
                 </div>
 
@@ -1328,6 +1351,63 @@ onUnmounted(() => {
                         title="Chapters"
                         class="mb-4"
                     >
+                        <!-- Audio track selector.
+                             During preview the on-demand HLS bakes one audio track in per
+                             playlist URL, so we still drive it via the existing URL-based
+                             selectedAudioTrack. After encoding completes the final HLS master
+                             carries every track natively, so we drive Video.js directly. -->
+                        <template
+                            v-if="(isCompleted && nativeAudioTracks.length > 1) || (!isCompleted && previewAudioTracks.length > 1)"
+                            #playback-start
+                        >
+                            <label class="text-xs text-zinc-400">Audio:</label>
+                            <select
+                                v-if="isCompleted"
+                                :value="selectedNativeAudioId ?? ''"
+                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                @change="onNativeAudioChange(($event.target as HTMLSelectElement).value)"
+                            >
+                                <option
+                                    v-for="track in nativeAudioTracks"
+                                    :key="track.id"
+                                    :value="track.id"
+                                >{{ nativeAudioLabel(track) }}</option>
+                            </select>
+                            <select
+                                v-else
+                                v-model.number="selectedAudioTrack"
+                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                            >
+                                <option
+                                    v-for="track in previewAudioTracks"
+                                    :key="track.index"
+                                    :value="track.index"
+                                >{{ audioTrackLabel(track) }}</option>
+                            </select>
+                        </template>
+
+                        <!-- Video quality selector (drives VHS qualityLevel.enabled directly). -->
+                        <template
+                            v-if="previewQualityLevels.length > 1 && encodingType !== 'audio'"
+                            #playback-end
+                        >
+                            <label class="text-xs text-zinc-400">Quality:</label>
+                            <select
+                                :value="selectedQualityId ?? ''"
+                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                @change="onQualityChange(($event.target as HTMLSelectElement).value || null)"
+                            >
+                                <option :value="''">Auto</option>
+                                <option
+                                    v-for="level in previewQualityLevels"
+                                    :key="level.id"
+                                    :value="level.id"
+                                >
+                                    {{ level.height > 0 ? `${level.height}p` : `${Math.round(level.bitrate / 1000)}kbps` }}
+                                </option>
+                            </select>
+                        </template>
+
                         <template #toolbar-end>
                             <span
                                 v-if="chapters.isDirty.value"

@@ -31,6 +31,14 @@ export interface QualityLevelInfo {
     bitrate: number;
 }
 
+export interface AudioTrackInfo {
+    /** Native track id; pass to `setAudioTrack(id)` to switch. */
+    id: string;
+    label: string;
+    language: string;
+    enabled: boolean;
+}
+
 const emit = defineEmits<{
     'quality-levels': [levels: QualityLevelInfo[]];
     'playing-change': [playing: boolean];
@@ -41,6 +49,12 @@ const emit = defineEmits<{
      * Emits `null` when duration is unknown (e.g. just before a source swap).
      */
     'duration-change': [seconds: number | null];
+    /**
+     * Fires whenever VHS populates / changes the native HLS audio track list.
+     * For post-encode HLS this exposes every EXT-X-MEDIA:TYPE=AUDIO rendition
+     * so consumer UI can switch tracks via player.audioTracks() directly.
+     */
+    'audio-tracks': [tracks: AudioTrackInfo[]];
 }>();
 
 const playerEl = ref<HTMLVideoElement | null>(null);
@@ -324,10 +338,44 @@ async function initPlayer() {
             } catch (e) {
                 console.warn('Quality levels unavailable:', e);
             }
+
+            // Surface native HLS audio tracks (EXT-X-MEDIA:TYPE=AUDIO) so the
+            // chapter editor can drive them via player.audioTracks() directly.
+            try {
+                const tracks = player?.audioTracks?.() as unknown as RawAudioTrackList & {
+                    on: (e: string, cb: () => void) => void;
+                };
+                if (tracks) {
+                    const publish = () => emit('audio-tracks', snapshotAudioTracks(tracks));
+                    tracks.on('addtrack', publish);
+                    tracks.on('removetrack', publish);
+                    tracks.on('change', publish);
+                    publish();
+                }
+            } catch (e) {
+                console.warn('Audio tracks unavailable:', e);
+            }
         });
     } catch (e) {
         console.error('Failed to initialize video player:', e);
     }
+}
+
+interface RawAudioTrack { id?: string; label?: string; language?: string; enabled?: boolean }
+interface RawAudioTrackList { length: number; [i: number]: RawAudioTrack }
+
+function snapshotAudioTracks(list: RawAudioTrackList): AudioTrackInfo[] {
+    const out: AudioTrackInfo[] = [];
+    for (let i = 0; i < list.length; i++) {
+        const t = list[i];
+        out.push({
+            id: t.id ?? String(i),
+            label: t.label ?? '',
+            language: t.language ?? '',
+            enabled: !!t.enabled,
+        });
+    }
+    return out;
 }
 
 function snapshotQualityLevels(ql: { levels_?: Array<Record<string, number>>; length: number }): QualityLevelInfo[] {
@@ -439,6 +487,21 @@ function isPlaying(): boolean {
 }
 
 /**
+ * Switch the active native audio track. Pass an id from the `audio-tracks`
+ * event payload. VHS observes the `enabled` flag and rebuilds the audio
+ * segment loader transparently.
+ */
+function setAudioTrack(id: string) {
+    const tracks = player?.audioTracks?.() as RawAudioTrackList | undefined;
+    if (!tracks) return;
+    for (let i = 0; i < tracks.length; i++) {
+        const t = tracks[i];
+        const tid = t.id ?? String(i);
+        t.enabled = tid === id;
+    }
+}
+
+/**
  * Enable a specific rendition by id (matches the `id` from the `quality-levels` event)
  * or pass `null` to re-enable all levels (auto/ABR). Mirrors the behavior of the
  * in-player custom quality selector.
@@ -456,7 +519,7 @@ function setQuality(id: string | null) {
     }
 }
 
-defineExpose({ setSource, getCurrentTime, getDuration, setPendingSeek, seek, togglePlay, isPlaying, setQuality });
+defineExpose({ setSource, getCurrentTime, getDuration, setPendingSeek, seek, togglePlay, isPlaying, setQuality, setAudioTrack });
 </script>
 
 <template>
