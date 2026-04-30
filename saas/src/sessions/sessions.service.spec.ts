@@ -27,6 +27,14 @@ const mockS3ClientService = {
     transferObject: vi.fn().mockResolvedValue(undefined),
 };
 
+const mockHlsEditClient = {
+    read: vi.fn(),
+    mutate: vi.fn(),
+    discover: vi.fn(),
+    readChapters: vi.fn(),
+    writeChapters: vi.fn(),
+};
+
 describe('SessionsService', () => {
     let service: SessionsService;
 
@@ -42,6 +50,7 @@ describe('SessionsService', () => {
             mockS3ConfigsService as any,
             mockHlsParserService as any,
             mockS3ClientService as any,
+            mockHlsEditClient as any,
         );
         service.onModuleInit();
 
@@ -156,6 +165,74 @@ describe('SessionsService', () => {
         });
     });
 
+    describe('startUrlUpload', () => {
+        async function createOwnedSession(userId = 'user:1') {
+            await service.createSession(userId, {
+                s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' },
+            } as any);
+        }
+
+        it('proxies the URL upload to the Encoding API with master key auth', async () => {
+            await createOwnedSession();
+            vi.mocked(fetch).mockResolvedValueOnce(
+                new Response(JSON.stringify({ sessionId: 'sess-123', status: 'uploading' }), {
+                    status: 202,
+                }),
+            );
+
+            const result = await service.startUrlUpload('user:1', 'sess-123', {
+                url: 'https://example.com/clip.mp4',
+                filename: 'meeting.mp4',
+            } as any);
+
+            expect(result).toEqual({ sessionId: 'sess-123', status: 'uploading' });
+            expect(fetch).toHaveBeenLastCalledWith(
+                'http://localhost:3000/api/sessions/sess-123/url-upload',
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: expect.objectContaining({
+                        'X-API-Key': 'test-master-key',
+                        'Content-Type': 'application/json',
+                    }),
+                    body: JSON.stringify({
+                        url: 'https://example.com/clip.mp4',
+                        filename: 'meeting.mp4',
+                    }),
+                }),
+            );
+        });
+
+        it('throws NotFoundException for unknown session', async () => {
+            await expect(
+                service.startUrlUpload('user:1', 'nonexistent', {
+                    url: 'https://example.com/x.mp4',
+                } as any),
+            ).rejects.toThrow(NotFoundException);
+        });
+
+        it('throws ForbiddenException for sessions owned by a different user', async () => {
+            await createOwnedSession('user:1');
+            await expect(
+                service.startUrlUpload('user:other', 'sess-123', {
+                    url: 'https://example.com/x.mp4',
+                } as any),
+            ).rejects.toThrow(ForbiddenException);
+        });
+
+        it('surfaces non-2xx Encoding API responses as BadGatewayException', async () => {
+            await createOwnedSession();
+            vi.mocked(fetch).mockResolvedValueOnce(
+                new Response(JSON.stringify({ message: 'invalid url' }), { status: 400 }),
+            );
+
+            await expect(
+                service.startUrlUpload('user:1', 'sess-123', {
+                    url: 'http://169.254.169.254/',
+                } as any),
+            ).rejects.toThrow(BadGatewayException);
+        });
+    });
+
     describe('getSessionRecord', () => {
         it('should return session record from memory', async () => {
             await service.createSession('user:1', { s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' } } as any);
@@ -177,6 +254,7 @@ describe('SessionsService', () => {
                 mockS3ConfigsService as any,
                 mockHlsParserService as any,
                 mockS3ClientService as any,
+                mockHlsEditClient as any,
             );
             // Should not throw
             warnService.onModuleInit();
@@ -515,6 +593,7 @@ describe('SessionsService', () => {
                 mockS3ConfigsService as any,
                 mockHlsParserService as any,
                 mockS3ClientService as any,
+                mockHlsEditClient as any,
             );
             svc.onModuleInit();
 
@@ -539,6 +618,7 @@ describe('SessionsService', () => {
                 mockS3ConfigsService as any,
                 mockHlsParserService as any,
                 mockS3ClientService as any,
+                mockHlsEditClient as any,
             );
             svc.onModuleInit();
 
@@ -834,316 +914,179 @@ describe('SessionsService', () => {
 
         beforeEach(() => {
             mockS3ConfigsService.getById.mockResolvedValue(baseS3Config);
-        });
-
-        it('should import session with explicit masterPlaylistKey', async () => {
-            const masterContent = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8';
-            mockS3ClientService.getObject.mockResolvedValue(Buffer.from(masterContent));
-            mockS3ClientService.listObjects.mockResolvedValue([
-                'output/master.m3u8',
-                'output/v0/playlist.m3u8',
-                'output/v0/init.mp4',
-                'output/v0/seg0.m4s',
-            ]);
-            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
-                variants: [{ uri: 'v0/playlist.m3u8', bandwidth: 1000000 }],
+            mockS3ConfigsService.decryptCredentials.mockReturnValue({
+                accessKey: 'plain-key',
+                secretKey: 'plain-secret',
             });
-
-            const dto = {
-                s3ConfigId: 'cfg-1',
+            mockHlsEditClient.discover.mockResolvedValue({
                 masterPlaylistKey: 'output/master.m3u8',
-            };
-
-            const result = await service.importSession('user:1', dto);
-
-            expect(result.status).toBe('completed');
-            expect(result.progress).toBe(100);
-            expect(result.imported).toBe(true);
-            expect(result.masterPlaylist).toBe('output/master.m3u8');
-            expect(result.files).toEqual([
+                folderPrefix: 'output/',
+            });
+            mockS3ClientService.listObjects.mockResolvedValue([
                 'output/master.m3u8',
                 'output/v0/playlist.m3u8',
-                'output/v0/init.mp4',
-                'output/v0/seg0.m4s',
             ]);
-            expect(result.s3Config).toEqual({
-                endPoint: 'minio.example.com',
+        });
+
+        it('forwards decrypted credentials and input to the API /api/hls/discover', async () => {
+            await service.importSession('user:1', {
+                s3ConfigId: 'cfg-1',
+                masterPlaylistKey: 'http://localhost:9000/media/output/master.m3u8',
+            });
+
+            expect(mockHlsEditClient.discover).toHaveBeenCalledTimes(1);
+            const [s3, input] = mockHlsEditClient.discover.mock.calls[0];
+            expect(s3).toMatchObject({
                 bucket: 'media',
-                port: 9000,
-                useSSL: false,
-                publicUrl: undefined,
+                accessKey: 'plain-key',
+                secretKey: 'plain-secret',
             });
-            expect(result.s3ConfigId).toBe('cfg-1');
-            expect(result.userId).toBe('user:1');
-            expect(result.docType).toBe('session');
-            expect(result.completedAt).toBeDefined();
-            expect(mockDatabaseService.insert).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    status: 'completed',
-                    imported: true,
-                }),
-            );
+            expect(input).toEqual({
+                masterPlaylistKey: 'http://localhost:9000/media/output/master.m3u8',
+            });
         });
 
-        it('should derive folderPrefix from masterPlaylistKey when not provided', async () => {
-            mockS3ClientService.getObject.mockResolvedValue(
-                Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\nv0/index.m3u8'),
-            );
-            mockS3ClientService.listObjects.mockResolvedValue([
-                'my/path/master.m3u8',
-                'my/path/v0/index.m3u8',
-            ]);
-            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
-                variants: [{ uri: 'v0/index.m3u8', bandwidth: 500000 }],
-            });
-
-            const result = await service.importSession('user:1', {
-                s3ConfigId: 'cfg-1',
-                masterPlaylistKey: 'my/path/master.m3u8',
-            });
-
-            // listObjects should be called with derived prefix 'my/path/'
-            expect(mockS3ClientService.listObjects).toHaveBeenCalledWith(
-                'user:1',
-                'cfg-1',
-                'my/path/',
-            );
-            expect(result.masterPlaylist).toBe('my/path/master.m3u8');
-        });
-
-        it('should handle masterPlaylistKey with no directory (root level)', async () => {
-            mockS3ClientService.getObject.mockResolvedValue(
-                Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\nv0/index.m3u8'),
-            );
-            mockS3ClientService.listObjects.mockResolvedValue([
-                'master.m3u8',
-                'v0/index.m3u8',
-            ]);
-            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
-                variants: [{ uri: 'v0/index.m3u8', bandwidth: 500000 }],
-            });
-
-            const result = await service.importSession('user:1', {
-                s3ConfigId: 'cfg-1',
-                masterPlaylistKey: 'master.m3u8',
-            });
-
-            // Derived prefix should be empty string
-            expect(mockS3ClientService.listObjects).toHaveBeenCalledWith(
-                'user:1',
-                'cfg-1',
-                '',
-            );
-            expect(result.masterPlaylist).toBe('master.m3u8');
-        });
-
-        it('should auto-discover master.m3u8 when folderPrefix provided but no masterPlaylistKey', async () => {
-            // listObjects called first for discovery, then again for file listing
-            mockS3ClientService.listObjects
-                .mockResolvedValueOnce([
-                    'output/master.m3u8',
-                    'output/v0/playlist.m3u8',
-                    'output/v0/init.mp4',
-                ])
-                .mockResolvedValueOnce([
-                    'output/master.m3u8',
-                    'output/v0/playlist.m3u8',
-                    'output/v0/init.mp4',
-                ]);
-            mockS3ClientService.getObject.mockResolvedValue(
-                Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8'),
-            );
-            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
-                variants: [{ uri: 'v0/playlist.m3u8', bandwidth: 1000000 }],
-            });
-
-            const result = await service.importSession('user:1', {
+        it('forwards folderPrefix when that is what the caller provided', async () => {
+            await service.importSession('user:1', {
                 s3ConfigId: 'cfg-1',
                 folderPrefix: 'output/',
             });
 
-            expect(result.masterPlaylist).toBe('output/master.m3u8');
-            expect(result.status).toBe('completed');
+            const [, input] = mockHlsEditClient.discover.mock.calls[0];
+            expect(input).toEqual({ folderPrefix: 'output/' });
         });
 
-        it('should auto-discover master playlist by scanning m3u8 contents when no master.m3u8 exists', async () => {
-            // First call: listObjects for discovery
-            mockS3ClientService.listObjects
-                .mockResolvedValueOnce([
-                    'output/index.m3u8',
-                    'output/v0/media.m3u8',
-                    'output/v0/init.mp4',
-                ])
-                .mockResolvedValueOnce([
-                    'output/index.m3u8',
-                    'output/v0/media.m3u8',
-                    'output/v0/init.mp4',
-                ]);
-
-            // getObject calls: first for index.m3u8 scan (has STREAM-INF so it's master), then for fetching it as master
-            mockS3ClientService.getObject
-                .mockResolvedValueOnce(Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\nv0/media.m3u8'))
-                .mockResolvedValueOnce(Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000\nv0/media.m3u8'));
-
-            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
-                variants: [{ uri: 'v0/media.m3u8', bandwidth: 500000 }],
-            });
-
-            const result = await service.importSession('user:1', {
-                s3ConfigId: 'cfg-1',
+        it('stores the discovered master + angles on the session document', async () => {
+            mockHlsEditClient.discover.mockResolvedValue({
+                masterPlaylistKey: 'output/main.m3u8',
                 folderPrefix: 'output/',
-            });
-
-            expect(result.masterPlaylist).toBe('output/index.m3u8');
-        });
-
-        it('should throw BadRequestException when neither masterPlaylistKey nor folderPrefix is provided', async () => {
-            await expect(
-                service.importSession('user:1', {
-                    s3ConfigId: 'cfg-1',
-                }),
-            ).rejects.toThrow(BadRequestException);
-
-            await expect(
-                service.importSession('user:1', {
-                    s3ConfigId: 'cfg-1',
-                }),
-            ).rejects.toThrow('Either masterPlaylistKey or folderPrefix must be provided');
-        });
-
-        it('should throw BadRequestException when no master playlist is found under prefix', async () => {
-            // No .m3u8 files in listing
-            mockS3ClientService.listObjects.mockResolvedValueOnce([
-                'output/video.mp4',
-                'output/audio.aac',
-            ]);
-
-            await expect(
-                service.importSession('user:1', {
-                    s3ConfigId: 'cfg-1',
-                    folderPrefix: 'output/',
-                }),
-            ).rejects.toThrow('No master playlist found under the given prefix');
-        });
-
-        it('should throw BadRequestException when m3u8 files exist but none is a master playlist', async () => {
-            mockS3ClientService.listObjects.mockResolvedValueOnce([
-                'output/v0/media.m3u8',
-                'output/v1/media.m3u8',
-            ]);
-
-            // Neither has #EXT-X-STREAM-INF
-            mockS3ClientService.getObject
-                .mockResolvedValueOnce(Buffer.from('#EXTM3U\n#EXTINF:6.0,\nseg0.ts'))
-                .mockResolvedValueOnce(Buffer.from('#EXTM3U\n#EXTINF:6.0,\nseg0.ts'));
-
-            await expect(
-                service.importSession('user:1', {
-                    s3ConfigId: 'cfg-1',
-                    folderPrefix: 'output/',
-                }),
-            ).rejects.toThrow('No master playlist found under the given prefix');
-        });
-
-        it('should create angle playlists when multiple variants exist', async () => {
-            mockS3ClientService.getObject.mockResolvedValue(
-                Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2000000\nv1/playlist.m3u8'),
-            );
-            mockS3ClientService.listObjects.mockResolvedValue([
-                'output/master.m3u8',
-                'output/v0/playlist.m3u8',
-                'output/v1/playlist.m3u8',
-            ]);
-            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
-                variants: [
-                    { uri: 'v0/playlist.m3u8', bandwidth: 1000000 },
-                    { uri: 'v1/playlist.m3u8', bandwidth: 2000000 },
+                anglePlaylists: [
+                    { name: 'main', key: 'output/main.m3u8' },
+                    { name: 'pulpit', key: 'output/pulpit.m3u8' },
                 ],
             });
 
             const result = await service.importSession('user:1', {
                 s3ConfigId: 'cfg-1',
-                masterPlaylistKey: 'output/master.m3u8',
+                folderPrefix: 'output/',
             });
 
+            expect(result.masterPlaylist).toBe('output/main.m3u8');
             expect(result.anglePlaylists).toEqual([
-                { name: 'Angle 1', key: 'output/v0/playlist.m3u8' },
-                { name: 'Angle 2', key: 'output/v1/playlist.m3u8' },
+                { name: 'main', key: 'output/main.m3u8' },
+                { name: 'pulpit', key: 'output/pulpit.m3u8' },
             ]);
         });
 
-        it('should not create angle playlists for single variant', async () => {
-            mockS3ClientService.getObject.mockResolvedValue(
-                Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8'),
-            );
+        it('stores the full file list (via SaaS S3ClientService) on the document', async () => {
             mockS3ClientService.listObjects.mockResolvedValue([
                 'output/master.m3u8',
                 'output/v0/playlist.m3u8',
+                'output/v0/seg0.m4s',
             ]);
-            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
-                variants: [{ uri: 'v0/playlist.m3u8', bandwidth: 1000000 }],
-            });
 
             const result = await service.importSession('user:1', {
                 s3ConfigId: 'cfg-1',
                 masterPlaylistKey: 'output/master.m3u8',
             });
 
-            expect(result.anglePlaylists).toBeUndefined();
+            expect(mockS3ClientService.listObjects).toHaveBeenCalledWith(
+                'user:1', 'cfg-1', 'output/',
+            );
+            expect(result.files).toEqual([
+                'output/master.m3u8',
+                'output/v0/playlist.m3u8',
+                'output/v0/seg0.m4s',
+            ]);
         });
 
-        it('should set encrypted flag when encryptionKey is provided', async () => {
-            mockS3ClientService.getObject.mockResolvedValue(
-                Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8'),
-            );
-            mockS3ClientService.listObjects.mockResolvedValue(['output/master.m3u8']);
-            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
-                variants: [{ uri: 'v0/playlist.m3u8', bandwidth: 1000000 }],
-            });
-
+        it('sets status=completed and imported=true', async () => {
             const result = await service.importSession('user:1', {
                 s3ConfigId: 'cfg-1',
                 masterPlaylistKey: 'output/master.m3u8',
-                encryptionKey: 'aabbccdd11223344aabbccdd11223344',
+            });
+            expect(result.status).toBe('completed');
+            expect(result.imported).toBe(true);
+            expect(result.progress).toBe(100);
+        });
+
+        it('throws BadRequestException when neither masterPlaylistKey nor folderPrefix is provided', async () => {
+            await expect(
+                service.importSession('user:1', { s3ConfigId: 'cfg-1' }),
+            ).rejects.toThrow(BadRequestException);
+            expect(mockHlsEditClient.discover).not.toHaveBeenCalled();
+        });
+
+        it('propagates errors from the discover call', async () => {
+            mockHlsEditClient.discover.mockRejectedValue(
+                new BadRequestException('No HLS master playlist found under the given prefix'),
+            );
+
+            await expect(
+                service.importSession('user:1', {
+                    s3ConfigId: 'cfg-1',
+                    folderPrefix: 'output/',
+                }),
+            ).rejects.toThrow('No HLS master playlist');
+        });
+
+        it('persists encryptionKeyHex when an encryption key is supplied', async () => {
+            const result = await service.importSession('user:1', {
+                s3ConfigId: 'cfg-1',
+                masterPlaylistKey: 'output/master.m3u8',
+                encryptionKey: 'AABBCCDD11223344AABBCCDD11223344',
             });
 
             expect(result.encrypted).toBe(true);
+            expect(result.encryptionKeyHex).toBe('aabbccdd11223344aabbccdd11223344');
         });
 
-        it('should omit encrypted flag when encryptionKey is not provided', async () => {
-            mockS3ClientService.getObject.mockResolvedValue(
-                Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8'),
-            );
-            mockS3ClientService.listObjects.mockResolvedValue(['output/master.m3u8']);
-            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
-                variants: [{ uri: 'v0/playlist.m3u8', bandwidth: 1000000 }],
-            });
-
+        it('omits encryptionKeyHex when no key is supplied', async () => {
             const result = await service.importSession('user:1', {
                 s3ConfigId: 'cfg-1',
                 masterPlaylistKey: 'output/master.m3u8',
             });
 
-            expect(result).not.toHaveProperty('encrypted');
+            expect(result.encrypted).toBeUndefined();
+            expect(result.encryptionKeyHex).toBeUndefined();
         });
 
-        it('should pass userId and s3ConfigId to s3ConfigsService.getById for ownership check', async () => {
-            mockS3ClientService.getObject.mockResolvedValue(
-                Buffer.from('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nv0/playlist.m3u8'),
-            );
-            mockS3ClientService.listObjects.mockResolvedValue(['output/master.m3u8']);
-            mockHlsParserService.parseMasterPlaylist.mockReturnValue({
-                variants: [{ uri: 'v0/playlist.m3u8', bandwidth: 1000000 }],
-            });
-
+        it('passes userId and s3ConfigId to s3ConfigsService.getById (ownership check)', async () => {
             await service.importSession('user:42', {
                 s3ConfigId: 'cfg-99',
                 masterPlaylistKey: 'output/master.m3u8',
             });
-
             expect(mockS3ConfigsService.getById).toHaveBeenCalledWith('user:42', 'cfg-99');
         });
+
+        it('surfaces chaptersLanguages from discover without persisting them', async () => {
+            mockHlsEditClient.discover.mockResolvedValue({
+                masterPlaylistKey: 'output/master.m3u8',
+                folderPrefix: 'output/',
+                chaptersLanguages: ['en', 'fr'],
+            });
+
+            const result = await service.importSession('user:1', {
+                s3ConfigId: 'cfg-1',
+                folderPrefix: 'output/',
+            });
+
+            expect(result.chaptersLanguages).toEqual(['en', 'fr']);
+            // The persisted document (the value handed to insert) must not include this field.
+            const persisted = mockDatabaseService.insert.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+            expect(persisted).toBeDefined();
+            expect(persisted!.chaptersLanguages).toBeUndefined();
+        });
+
+        it('does not include chaptersLanguages when discover finds none', async () => {
+            const result = await service.importSession('user:1', {
+                s3ConfigId: 'cfg-1',
+                masterPlaylistKey: 'output/master.m3u8',
+            });
+            expect(result.chaptersLanguages).toBeUndefined();
+        });
     });
+
 
     describe('moveSessionFiles', () => {
         const completedDoc = {
@@ -1232,6 +1175,221 @@ describe('SessionsService', () => {
             await expect(
                 service.moveSessionFiles('user:1', 'sess-move', { targetS3ConfigId: 'cfg-dest', newPathPrefix: 'dest/' }),
             ).rejects.toThrow('Session has no files or S3 config');
+        });
+
+        it('should not produce double slash when stored pathPrefix has no trailing slash', async () => {
+            // s3.service strips trailing slashes before upload, so the stored
+            // pathPrefix may be "prefix" while the keys are "prefix/..."
+            mockDatabaseService.get.mockResolvedValue({
+                ...completedDoc,
+                s3Config: { endPoint: 'minio', bucket: 'src-bucket', pathPrefix: 'prefix' },
+            });
+            mockS3ConfigsService.getById.mockResolvedValue(targetConfig);
+
+            const result = await service.moveSessionFiles('user:1', 'sess-move', {
+                targetS3ConfigId: 'cfg-dest',
+                newPathPrefix: 'new/',
+            });
+
+            expect(mockS3ClientService.transferObject).toHaveBeenCalledWith(
+                'user:1', 'cfg-src', 'prefix/master.m3u8', 'cfg-dest', 'new/master.m3u8',
+            );
+            expect(mockS3ClientService.transferObject).toHaveBeenCalledWith(
+                'user:1', 'cfg-src', 'prefix/v0/seg0.m4s', 'cfg-dest', 'new/v0/seg0.m4s',
+            );
+            expect(result.files).toEqual(['new/master.m3u8', 'new/v0/seg0.m4s']);
+            expect(result.masterPlaylist).toBe('new/master.m3u8');
+        });
+    });
+
+    describe('hlsRead / hlsMutate', () => {
+        const baseDoc = {
+            _id: 'session:sess-hls',
+            _rev: '1-abc',
+            docType: 'session' as const,
+            userId: 'user:1',
+            sessionId: 'sess-hls',
+            status: 'completed',
+            files: ['out/master.m3u8'],
+            masterPlaylist: 'out/master.m3u8',
+            s3Config: { endPoint: 'minio', bucket: 'media', pathPrefix: 'out/' },
+            s3ConfigId: 'cfg-1',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+        };
+
+        beforeEach(() => {
+            mockS3ConfigsService.getById.mockResolvedValue({
+                endPoint: 'minio', port: 9000, useSSL: false, bucket: 'media',
+                accessKey: 'enc', secretKey: 'enc',
+            });
+            mockS3ConfigsService.decryptCredentials.mockReturnValue({
+                accessKey: 'plain-key', secretKey: 'plain-secret',
+            });
+        });
+
+        it('hlsRead forwards the resolved S3 config to the client and returns its result', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            mockHlsEditClient.read.mockResolvedValue({
+                master: { variants: [], media: [], audioGroups: [] },
+                etag: 'etag-1',
+                folderPrefix: 'out/',
+                masterPlaylistKey: 'out/master.m3u8',
+            });
+
+            const result = await service.hlsRead('user:1', 'sess-hls');
+
+            expect(mockHlsEditClient.read).toHaveBeenCalledWith(
+                expect.objectContaining({ bucket: 'media', accessKey: 'plain-key', secretKey: 'plain-secret' }),
+                'out/master.m3u8',
+            );
+            expect(result.etag).toBe('etag-1');
+        });
+
+        it('hlsRead rejects when the session is not owned by the user', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            await expect(service.hlsRead('user:other', 'sess-hls'))
+                .rejects.toThrow(ForbiddenException);
+        });
+
+        it('hlsRead rejects when the session has no master playlist', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc, masterPlaylist: undefined });
+            await expect(service.hlsRead('user:1', 'sess-hls'))
+                .rejects.toThrow(BadRequestException);
+        });
+
+        it('hlsMutate calls the client, increments editVersion, reconciles subtitles, and upserts the doc', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc, editVersion: 2 });
+            mockHlsEditClient.mutate.mockResolvedValue({
+                master: {
+                    variants: [],
+                    media: [
+                        { type: 'SUBTITLES', groupId: 'subs', name: 'English', language: 'en', uri: 'subtitles/en.vtt', default: true },
+                    ],
+                    audioGroups: [],
+                },
+                etag: 'etag-2',
+                writtenKeys: ['out/subtitles/en.vtt', 'out/master.m3u8'],
+            });
+
+            const result = await service.hlsMutate(
+                'user:1', 'sess-hls', 'etag-1',
+                [{ type: 'upsertSubtitle', language: 'en', name: 'English', vttBase64: 'V0VCVlRU' }],
+            );
+
+            expect(mockHlsEditClient.mutate).toHaveBeenCalledWith(
+                expect.objectContaining({ bucket: 'media' }),
+                'out/master.m3u8',
+                'etag-1',
+                expect.any(Array),
+            );
+            expect(result.editVersion).toBe(3);
+            expect(result.subtitles).toEqual([
+                expect.objectContaining({
+                    language: 'en',
+                    name: 'English',
+                    key: 'out/subtitles/en.vtt',
+                    default: true,
+                }),
+            ]);
+            expect(mockDatabaseService.upsert).toHaveBeenCalled();
+        });
+
+        it('hlsMutate removes subtitles from the doc when the master has none', async () => {
+            mockDatabaseService.get.mockResolvedValue({
+                ...baseDoc,
+                subtitles: [{ language: 'en', name: 'English', key: 'out/subtitles/en.vtt', updatedAt: '…' }],
+            });
+            mockHlsEditClient.mutate.mockResolvedValue({
+                master: { variants: [], media: [], audioGroups: [] },
+                etag: 'etag-2',
+                writtenKeys: ['out/master.m3u8'],
+            });
+
+            const result = await service.hlsMutate('user:1', 'sess-hls', 'etag-1', []);
+            expect(result.subtitles).toBeUndefined();
+        });
+
+        it('hlsMutate propagates ConflictException from the client', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            mockHlsEditClient.mutate.mockRejectedValue(
+                new (await import('@nestjs/common')).ConflictException({ code: 'ETAG_MISMATCH' }),
+            );
+
+            await expect(
+                service.hlsMutate('user:1', 'sess-hls', 'stale', []),
+            ).rejects.toBeInstanceOf((await import('@nestjs/common')).ConflictException);
+        });
+
+        it('readChapters forwards the resolved S3 config and the master folder prefix', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            mockHlsEditClient.readChapters.mockResolvedValue({ vtt: 'WEBVTT\n' });
+
+            const result = await service.readChapters('user:1', 'sess-hls', 'en');
+
+            expect(mockHlsEditClient.readChapters).toHaveBeenCalledWith(
+                expect.objectContaining({ bucket: 'media', accessKey: 'plain-key' }),
+                'out/',
+                'en',
+            );
+            expect(result?.vtt).toMatch(/^WEBVTT/);
+        });
+
+        it('readChapters returns null when the client reports no file', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            mockHlsEditClient.readChapters.mockResolvedValue(null);
+            await expect(service.readChapters('user:1', 'sess-hls', 'en')).resolves.toBeNull();
+        });
+
+        it('readChapters falls back to s3Config.pathPrefix when the session has no master playlist', async () => {
+            mockDatabaseService.get.mockResolvedValue({
+                ...baseDoc,
+                masterPlaylist: undefined,
+                s3Config: { ...baseDoc.s3Config, pathPrefix: 'imported/abc' },
+            });
+            mockHlsEditClient.readChapters.mockResolvedValue(null);
+            await service.readChapters('user:1', 'sess-hls', 'en');
+            expect(mockHlsEditClient.readChapters).toHaveBeenCalledWith(
+                expect.anything(),
+                'imported/abc/',
+                'en',
+            );
+        });
+
+        it('readChapters rejects when the session has neither a master playlist nor a path prefix', async () => {
+            mockDatabaseService.get.mockResolvedValue({
+                ...baseDoc,
+                masterPlaylist: undefined,
+                s3Config: { endPoint: 'minio', bucket: 'media' },
+            });
+            await expect(service.readChapters('user:1', 'sess-hls', 'en'))
+                .rejects.toBeInstanceOf(BadRequestException);
+        });
+
+        it('readChapters rejects when the session is not owned by the user', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            await expect(service.readChapters('user:other', 'sess-hls', 'en'))
+                .rejects.toThrow(ForbiddenException);
+        });
+
+        it('writeChapters forwards lang + body to the client', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            mockHlsEditClient.writeChapters.mockResolvedValue(undefined);
+
+            await service.writeChapters('user:1', 'sess-hls', 'en', 'WEBVTT\n');
+
+            expect(mockHlsEditClient.writeChapters).toHaveBeenCalledWith(
+                expect.objectContaining({ bucket: 'media' }),
+                'out/',
+                'en',
+                'WEBVTT\n',
+            );
+        });
+
+        it('writeChapters rejects ownership-mismatch sessions', async () => {
+            mockDatabaseService.get.mockResolvedValue({ ...baseDoc });
+            await expect(service.writeChapters('user:other', 'sess-hls', 'en', 'WEBVTT'))
+                .rejects.toThrow(ForbiddenException);
         });
     });
 
@@ -1329,6 +1487,26 @@ describe('SessionsService', () => {
             await expect(
                 service.renameSessionPrefix('user:1', 'sess-rename', { newPathPrefix: 'new/' }),
             ).rejects.toThrow('Session has no files or S3 config');
+        });
+
+        it('should not produce double slash when stored pathPrefix has no trailing slash', async () => {
+            mockDatabaseService.get.mockResolvedValue({
+                ...makeRenameDoc(),
+                s3Config: { endPoint: 'minio', bucket: 'bucket', pathPrefix: 'old' },
+            });
+
+            const result = await service.renameSessionPrefix('user:1', 'sess-rename', {
+                newPathPrefix: 'new/',
+            });
+
+            expect(mockS3ClientService.copyObjectSameBucket).toHaveBeenCalledWith(
+                'user:1', 'cfg-1', 'old/master.m3u8', 'new/master.m3u8',
+            );
+            expect(mockS3ClientService.copyObjectSameBucket).toHaveBeenCalledWith(
+                'user:1', 'cfg-1', 'old/v0/seg0.m4s', 'new/v0/seg0.m4s',
+            );
+            expect(result.files).toEqual(['new/master.m3u8', 'new/v0/seg0.m4s']);
+            expect(result.masterPlaylist).toBe('new/master.m3u8');
         });
 
         it('should prepend new prefix when old prefix is empty', async () => {

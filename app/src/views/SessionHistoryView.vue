@@ -244,7 +244,7 @@ onMounted(fetchSessions);
                                         <InlineConfirm
                                             label="Delete"
                                             prompt="Delete?"
-                                            :secondary-prompt="(session.files?.length && session.s3ConfigId) ? 'Also delete S3 files?' : undefined"
+                                            :secondary-prompt="(session.s3ConfigId && (session.s3Config?.pathPrefix || session.files?.length)) ? 'Also delete S3 files?' : undefined"
                                             secondary-confirm-label="Yes"
                                             secondary-decline-label="No"
                                             :loading="deletingId === (session.id || session.sessionId)"

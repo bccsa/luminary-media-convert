@@ -133,6 +133,20 @@ export class VideoTrackNameDto {
     name: string;
 }
 
+export class TrimSegmentDto {
+    @ApiProperty({ description: 'In-point in seconds.', example: 11.954 })
+    @IsNumber()
+    @Min(0)
+    @Expose()
+    inSec: number;
+
+    @ApiProperty({ description: 'Out-point in seconds.', example: 130.048 })
+    @IsNumber()
+    @Min(0)
+    @Expose()
+    outSec: number;
+}
+
 export class EncodeConfigDto {
     @ApiProperty({ description: 'Encoding type.', enum: ['video', 'audio'], example: 'video' })
     @IsString()
@@ -187,4 +201,16 @@ export class EncodeConfigDto {
     @IsOptional()
     @Expose()
     byteRange?: boolean;
+
+    @ApiPropertyOptional({
+        description:
+            'Trim segments — when set, only these time ranges are encoded and concatenated in order. Each segment must be at least 0.5s and segments must not overlap.',
+        type: [TrimSegmentDto],
+    })
+    @IsArray()
+    @IsOptional()
+    @ValidateNested({ each: true })
+    @Type(() => TrimSegmentDto)
+    @Expose()
+    trimSegments?: TrimSegmentDto[];
 }

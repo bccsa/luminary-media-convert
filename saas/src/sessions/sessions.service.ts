@@ -11,8 +11,10 @@ import { randomUUID } from 'crypto';
 import { DatabaseService } from '../database/database.service.js';
 import { S3ConfigsService } from '../s3-configs/s3-configs.service.js';
 import { HlsParserService } from './hls-parser.service.js';
+import { HlsEditClient, type HlsMutateOperation } from './hls-edit.client.js';
 import { S3ClientService } from './s3-client.service.js';
 import { CreateSaasSessionDto } from './dto/create-session.dto.js';
+import { UrlUploadDto } from './dto/url-upload.dto.js';
 import { ImportSessionDto } from './dto/import-session.dto.js';
 import { MoveSessionFilesDto } from './dto/move-session-files.dto.js';
 import { RenameSessionPrefixDto } from './dto/rename-session-prefix.dto.js';
@@ -48,6 +50,7 @@ export class SessionsService implements OnModuleInit {
         private readonly s3ConfigsService: S3ConfigsService,
         private readonly hlsParserService: HlsParserService,
         private readonly s3ClientService: S3ClientService,
+        private readonly hlsEditClient: HlsEditClient,
     ) {}
 
     onModuleInit() {
@@ -160,6 +163,44 @@ export class SessionsService implements OnModuleInit {
         };
     }
 
+    async startUrlUpload(
+        userId: string,
+        sessionId: string,
+        dto: UrlUploadDto,
+    ): Promise<{ sessionId: string; status: 'uploading' }> {
+        const record = this.sessions.get(sessionId);
+        if (!record) {
+            throw new NotFoundException(`Session '${sessionId}' not found`);
+        }
+        if (record.userId !== userId) {
+            throw new ForbiddenException('Not authorized to modify this session');
+        }
+
+        const res = await fetch(
+            `${this.encodingApiUrl}/api/sessions/${sessionId}/url-upload`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': this.encodingApiMasterKey,
+                },
+                body: JSON.stringify({ url: dto.url, filename: dto.filename }),
+            },
+        );
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            this.logger.error(
+                `Encoding API URL upload failed (${res.status}): ${body.message ?? JSON.stringify(body)}`,
+            );
+            throw new BadGatewayException(
+                body.message ?? `Encoding API returned ${res.status}`,
+            );
+        }
+
+        return { sessionId, status: 'uploading' };
+    }
+
     async deleteSession(
         userId: string,
         sessionId: string,
@@ -188,17 +229,39 @@ export class SessionsService implements OnModuleInit {
             throw new ForbiddenException('Not authorized to delete this session');
         }
 
-        // Delete S3 files if requested
-        if (deleteFiles && doc?.files?.length && doc.s3ConfigId) {
+        // Delete S3 files if requested. When a path prefix exists, list all
+        // objects under that prefix so leftover files from previous sessions
+        // sharing the same folder are also cleaned up. Without a prefix,
+        // fall back to deleting only the tracked file keys.
+        if (deleteFiles && doc?.s3ConfigId) {
             try {
-                const deleted = await this.s3ClientService.deleteObjects(
-                    userId,
-                    doc.s3ConfigId,
-                    doc.files,
-                );
-                this.logger.log(
-                    `Deleted ${deleted} S3 file(s) for session ${sessionId}`,
-                );
+                if (doc.s3Config?.pathPrefix) {
+                    const prefix = doc.s3Config.pathPrefix.replace(/\/+$/, '') + '/';
+                    const allKeys = await this.s3ClientService.listObjects(
+                        userId,
+                        doc.s3ConfigId,
+                        prefix,
+                    );
+                    if (allKeys.length > 0) {
+                        await this.s3ClientService.deleteObjects(
+                            userId,
+                            doc.s3ConfigId,
+                            allKeys,
+                        );
+                        this.logger.log(
+                            `Deleted ${allKeys.length} S3 object(s) under prefix '${prefix}' for session ${sessionId}`,
+                        );
+                    }
+                } else if (doc.files?.length) {
+                    await this.s3ClientService.deleteObjects(
+                        userId,
+                        doc.s3ConfigId,
+                        doc.files,
+                    );
+                    this.logger.log(
+                        `Deleted ${doc.files.length} tracked S3 file(s) for session ${sessionId}`,
+                    );
+                }
             } catch (err) {
                 this.logger.warn(
                     `Failed to delete S3 files for session ${sessionId}: ${(err as Error).message}`,
@@ -245,93 +308,52 @@ export class SessionsService implements OnModuleInit {
     async importSession(
         userId: string,
         dto: ImportSessionDto,
-    ): Promise<SessionDocument> {
-        // Resolve S3 config (ownership check included)
+    ): Promise<SessionDocument & { chaptersLanguages?: string[] }> {
+        // Resolve S3 config (ownership check included) and decrypt credentials
+        // so we can forward them inline to the API's stateless /api/hls/discover.
         const s3Config = await this.s3ConfigsService.getById(
             userId,
             dto.s3ConfigId,
         );
+        const { accessKey, secretKey } =
+            this.s3ConfigsService.decryptCredentials(s3Config);
 
-        let masterPlaylistKey = dto.masterPlaylistKey;
-        let folderPrefix = dto.folderPrefix ?? '';
-
-        // If folderPrefix but no masterPlaylistKey: auto-discover master playlist
-        if (folderPrefix && !masterPlaylistKey) {
-            const keys = await this.s3ClientService.listObjects(
-                userId,
-                dto.s3ConfigId,
-                folderPrefix,
-            );
-
-            const m3u8Keys = keys.filter((k) => k.endsWith('.m3u8'));
-
-            // Prefer master.m3u8
-            masterPlaylistKey = m3u8Keys.find((k) =>
-                k.endsWith('master.m3u8'),
-            );
-
-            // If no master.m3u8, check each .m3u8 for #EXT-X-STREAM-INF
-            if (!masterPlaylistKey) {
-                for (const key of m3u8Keys) {
-                    const buf = await this.s3ClientService.getObject(
-                        userId,
-                        dto.s3ConfigId,
-                        key,
-                    );
-                    if (buf.toString('utf-8').includes('#EXT-X-STREAM-INF')) {
-                        masterPlaylistKey = key;
-                        break;
-                    }
-                }
-            }
-
-            if (!masterPlaylistKey) {
-                throw new BadRequestException(
-                    'No master playlist found under the given prefix',
-                );
-            }
-        }
-
-        if (!masterPlaylistKey) {
+        if (!dto.masterPlaylistKey && !dto.folderPrefix) {
             throw new BadRequestException(
                 'Either masterPlaylistKey or folderPrefix must be provided',
             );
         }
 
-        // Derive folder prefix from master playlist key if not provided
-        if (!folderPrefix) {
-            const lastSlash = masterPlaylistKey.lastIndexOf('/');
-            folderPrefix =
-                lastSlash >= 0
-                    ? masterPlaylistKey.substring(0, lastSlash + 1)
-                    : '';
-        }
-
-        // Fetch and parse master playlist
-        const playlistBuf = await this.s3ClientService.getObject(
-            userId,
-            dto.s3ConfigId,
-            masterPlaylistKey,
+        // Delegate discovery to the Encoding API. Works identically for
+        // SaaS-initiated imports and for standalone API clients that hit
+        // /api/hls/discover directly with their own credentials.
+        const discovered = await this.hlsEditClient.discover(
+            {
+                endPoint: s3Config.endPoint,
+                port: s3Config.port,
+                useSSL: s3Config.useSSL,
+                bucket: s3Config.bucket,
+                region: s3Config.region,
+                accessKey,
+                secretKey,
+            },
+            {
+                ...(dto.masterPlaylistKey ? { masterPlaylistKey: dto.masterPlaylistKey } : {}),
+                ...(dto.folderPrefix ? { folderPrefix: dto.folderPrefix } : {}),
+            },
         );
-        const playlistContent = playlistBuf.toString('utf-8');
-        const parsed =
-            this.hlsParserService.parseMasterPlaylist(playlistContent);
 
-        // List all files under the prefix
+        const masterPlaylistKey = discovered.masterPlaylistKey;
+        const folderPrefix = discovered.folderPrefix;
+        const anglePlaylists = discovered.anglePlaylists;
+
+        // List all files under the prefix — still a SaaS concern since we
+        // store the file list on the session document for history.
         const files = await this.s3ClientService.listObjects(
             userId,
             dto.s3ConfigId,
             folderPrefix,
         );
-
-        // Build angle playlists from variants
-        const anglePlaylists =
-            parsed.variants.length > 1
-                ? parsed.variants.map((v, i) => ({
-                      name: `Angle ${i + 1}`,
-                      key: folderPrefix + v.uri,
-                  }))
-                : undefined;
 
         const now = new Date().toISOString();
         const sessionId = randomUUID();
@@ -356,6 +378,7 @@ export class SessionsService implements OnModuleInit {
             s3ConfigId: dto.s3ConfigId,
             imported: true,
             encrypted: dto.encryptionKey ? true : undefined,
+            encryptionKeyHex: dto.encryptionKey ? dto.encryptionKey.toLowerCase() : undefined,
             createdAt: now,
             updatedAt: now,
             completedAt: now,
@@ -363,15 +386,20 @@ export class SessionsService implements OnModuleInit {
 
         // Remove undefined fields
         if (doc.encrypted === undefined) delete doc.encrypted;
+        if (doc.encryptionKeyHex === undefined) delete doc.encryptionKeyHex;
         if (!doc.anglePlaylists) delete doc.anglePlaylists;
 
         await this.databaseService.insert(doc);
 
         this.logger.log(
-            `Session ${sessionId} imported for user ${userId} (${files.length} files, ${parsed.variants.length} variants)`,
+            `Session ${sessionId} imported for user ${userId} (${files.length} files, ${anglePlaylists?.length ?? 1} master playlist${anglePlaylists ? 's' : ''})`,
         );
 
-        return doc;
+        // chaptersLanguages is transient telemetry for the import view; never
+        // persisted to CouchDB (we already inserted `doc` above without it).
+        return discovered.chaptersLanguages?.length
+            ? { ...doc, chaptersLanguages: discovered.chaptersLanguages }
+            : doc;
     }
 
     // --- CouchDB session history queries ---
@@ -483,6 +511,144 @@ export class SessionsService implements OnModuleInit {
     async getSessionAdmin(sessionId: string): Promise<Partial<SessionDocument>> {
         const doc = await this.getSessionDoc(sessionId);
         return this.stripSensitiveFields(doc);
+    }
+
+    // -----------------------------------------------------------------------
+    // HLS sidecar edits (proxy to Encoding API, mirror results into CouchDB)
+    // -----------------------------------------------------------------------
+
+    async hlsRead(userId: string, sessionId: string) {
+        const { doc, s3Payload } = await this.resolveForHlsEdit(userId, sessionId);
+        if (!doc.masterPlaylist) {
+            throw new BadRequestException('Session has no master playlist');
+        }
+        return this.hlsEditClient.read(s3Payload, doc.masterPlaylist);
+    }
+
+    async hlsMutate(
+        userId: string,
+        sessionId: string,
+        ifMatch: string,
+        operations: HlsMutateOperation[],
+    ): Promise<SessionDocument> {
+        const { doc, s3Payload } = await this.resolveForHlsEdit(userId, sessionId);
+        if (!doc.masterPlaylist) {
+            throw new BadRequestException('Session has no master playlist');
+        }
+
+        const result = await this.hlsEditClient.mutate(
+            s3Payload,
+            doc.masterPlaylist,
+            ifMatch,
+            operations,
+        );
+
+        // Reconcile CouchDB from the post-mutation parsed master.
+        // master.m3u8 on S3 remains the source of truth; we just mirror it.
+        const now = new Date().toISOString();
+        const subtitleMedia = result.master.media.filter((m) => m.type === 'SUBTITLES');
+        if (subtitleMedia.length > 0) {
+            doc.subtitles = subtitleMedia.map((m) => ({
+                language: m.language ?? '',
+                name: m.name,
+                key: m.uri ? this.joinRelative(doc.masterPlaylist!, m.uri) : '',
+                ...(m.default ? { default: true } : {}),
+                ...(m.forced ? { forced: true } : {}),
+                updatedAt: now,
+            }));
+        } else if (doc.subtitles) {
+            delete doc.subtitles;
+        }
+
+        doc.editVersion = (doc.editVersion ?? 0) + 1;
+        doc.updatedAt = now;
+        await this.databaseService.upsert(doc);
+
+        return doc;
+    }
+
+    /**
+     * Read the chapter VTT for a session via the Encoding API.
+     * Returns null when no file exists.
+     */
+    async readChapters(
+        userId: string,
+        sessionId: string,
+        lang: string,
+    ): Promise<{ vtt: string } | null> {
+        const { doc, s3Payload } = await this.resolveForHlsEdit(userId, sessionId);
+        const folderPrefix = this.deriveFolderPrefix(doc);
+        return this.hlsEditClient.readChapters(s3Payload, folderPrefix, lang);
+    }
+
+    /**
+     * Write the chapter VTT for a session via the Encoding API. The Encoding
+     * API enforces VTT and lang validation; we just forward.
+     */
+    async writeChapters(
+        userId: string,
+        sessionId: string,
+        lang: string,
+        vtt: string,
+    ): Promise<void> {
+        const { doc, s3Payload } = await this.resolveForHlsEdit(userId, sessionId);
+        const folderPrefix = this.deriveFolderPrefix(doc);
+        await this.hlsEditClient.writeChapters(s3Payload, folderPrefix, lang, vtt);
+    }
+
+    /**
+     * Best-effort folder prefix for a session.
+     * Prefer the master playlist's folder; fall back to the s3 path prefix.
+     */
+    private deriveFolderPrefix(doc: SessionDocument): string {
+        if (doc.masterPlaylist) {
+            const lastSlash = doc.masterPlaylist.lastIndexOf('/');
+            return lastSlash >= 0 ? doc.masterPlaylist.slice(0, lastSlash + 1) : '';
+        }
+        if (doc.s3Config?.pathPrefix) {
+            return doc.s3Config.pathPrefix.endsWith('/')
+                ? doc.s3Config.pathPrefix
+                : doc.s3Config.pathPrefix + '/';
+        }
+        throw new BadRequestException(
+            'Session has no folder prefix to read/write chapters under',
+        );
+    }
+
+    private async resolveForHlsEdit(
+        userId: string,
+        sessionId: string,
+    ): Promise<{ doc: SessionDocument; s3Payload: Parameters<HlsEditClient['read']>[0] }> {
+        const doc = await this.getSessionDoc(sessionId);
+        if (doc.userId !== userId) {
+            throw new ForbiddenException('Not authorized to modify this session');
+        }
+        if (!doc.s3ConfigId) {
+            throw new BadRequestException('Session is not linked to an S3 config');
+        }
+
+        const s3Config = await this.s3ConfigsService.getById(userId, doc.s3ConfigId);
+        const { accessKey, secretKey } = this.s3ConfigsService.decryptCredentials(s3Config);
+
+        const s3Payload = {
+            endPoint: s3Config.endPoint,
+            port: s3Config.port,
+            useSSL: s3Config.useSSL,
+            bucket: s3Config.bucket,
+            region: s3Config.region,
+            accessKey,
+            secretKey,
+        };
+
+        return { doc, s3Payload };
+    }
+
+    /** Join a relative playlist URI against the master's folder. */
+    private joinRelative(masterKey: string, uri: string): string {
+        if (uri.startsWith('/') || /^https?:\/\//i.test(uri)) return uri;
+        const lastSlash = masterKey.lastIndexOf('/');
+        const folder = lastSlash >= 0 ? masterKey.slice(0, lastSlash + 1) : '';
+        return folder + uri;
     }
 
     async moveSessionFiles(
@@ -628,8 +794,12 @@ export class SessionsService implements OnModuleInit {
     }
 
     private rewriteKey(key: string, oldPrefix: string, newPrefix: string): string {
-        if (oldPrefix && key.startsWith(oldPrefix)) {
-            return newPrefix + key.slice(oldPrefix.length);
+        // Stored pathPrefix may or may not carry a trailing slash (s3.service
+        // strips trailing slashes before uploading). Normalize to '/' so
+        // slicing leaves no leading '/' to concatenate with newPrefix.
+        const normalizedOld = oldPrefix && !oldPrefix.endsWith('/') ? oldPrefix + '/' : oldPrefix;
+        if (normalizedOld && key.startsWith(normalizedOld)) {
+            return newPrefix + key.slice(normalizedOld.length);
         }
         // If no old prefix or key doesn't match, prepend new prefix
         return newPrefix ? newPrefix + key : key;

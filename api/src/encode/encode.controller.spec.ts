@@ -8,6 +8,8 @@ import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
 import { AuthorizationWebhookService } from '../auth/authorization-webhook.service';
+import { PreviewService } from './services/preview.service.js';
+import { UrlFetchService } from './services/url-fetch.service.js';
 import type { CreateSessionDto } from './dto/create-session.dto.js';
 import type { EncodeConfigDto } from './dto/encode-config.dto.js';
 import type { Response } from 'express';
@@ -57,6 +59,8 @@ describe('EncodeController', () => {
     let queueService: Mocked<QueueService>;
     let ffmpegService: Mocked<FfmpegService>;
     let authorizationWebhookService: Mocked<AuthorizationWebhookService>;
+    let previewService: Mocked<PreviewService>;
+    let urlFetchService: Mocked<UrlFetchService>;
     let testWorkDir: string;
 
     beforeEach(() => {
@@ -83,8 +87,23 @@ describe('EncodeController', () => {
             checkAuthorization: vi.fn().mockResolvedValue(undefined),
         } as any;
 
+        previewService = {
+            init: vi.fn(),
+            isReady: vi.fn().mockReturnValue(false),
+            getPlaylist: vi.fn().mockReturnValue(null),
+            getAudioTracks: vi.fn().mockReturnValue(null),
+            getSegmentStream: vi.fn().mockResolvedValue(null),
+            destroy: vi.fn().mockResolvedValue(undefined),
+            setTrimSegments: vi.fn(),
+        } as any;
+
+        urlFetchService = {
+            fetchToSession: vi.fn().mockResolvedValue(undefined),
+            abort: vi.fn().mockReturnValue(false),
+        } as any;
+
         const sessionEventsService = { emit: vi.fn(), forSession: vi.fn().mockReturnValue({ pipe: vi.fn().mockReturnValue({ subscribe: vi.fn() }) }) } as any;
-        controller = new EncodeController(sessionService, sessionEventsService, queueService, ffmpegService, authorizationWebhookService);
+        controller = new EncodeController(sessionService, sessionEventsService, queueService, ffmpegService, authorizationWebhookService, previewService, urlFetchService);
     });
 
     afterEach(() => {
@@ -251,6 +270,30 @@ describe('EncodeController', () => {
             expect(result.status).toBe('queued');
             expect(result.queuePosition).toBe(1);
             expect(queueService.enqueue).toHaveBeenCalledWith(session.id);
+        });
+
+        it('should call setTrimSegments when trimSegments are present', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            const config = makeEncodeConfig();
+            config.trimSegments = [{ inSec: 5, outSec: 30 }, { inSec: 60, outSec: 90 }];
+
+            await controller.startEncode(session.id, config, makeRequest());
+
+            expect(previewService.setTrimSegments).toHaveBeenCalledWith(
+                session.id,
+                [{ inSec: 5, outSec: 30 }, { inSec: 60, outSec: 90 }],
+            );
+        });
+
+        it('should not call setTrimSegments when no trimSegments', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            await controller.startEncode(session.id, makeEncodeConfig(), makeRequest());
+
+            expect(previewService.setTrimSegments).not.toHaveBeenCalled();
         });
 
         it('should reject video config without videoRenditions', async () => {
@@ -550,6 +593,8 @@ describe('EncodeController', () => {
                 queueService,
                 ffmpegService,
                 authorizationWebhookService,
+                previewService,
+                urlFetchService,
             );
 
             const result = ctrl.streamEvents(session.id, session.sessionToken);
@@ -575,6 +620,8 @@ describe('EncodeController', () => {
                 queueService,
                 ffmpegService,
                 authorizationWebhookService,
+                previewService,
+                urlFetchService,
             );
 
             const session = sessionService.create(makeConfig());
@@ -593,6 +640,376 @@ describe('EncodeController', () => {
                     encoder: 'apple',
                 },
             });
+        });
+    });
+
+    describe('deleteSession - preview cleanup', () => {
+        it('should call previewService.destroy when deleting a session', async () => {
+            const session = sessionService.create(makeConfig());
+
+            await controller.deleteSession(session.id);
+
+            expect(previewService.destroy).toHaveBeenCalledWith(session.id);
+        });
+    });
+
+    describe('preview endpoints', () => {
+        function makeRes(): any {
+            const res: any = {
+                set: vi.fn().mockReturnThis(),
+                send: vi.fn().mockReturnThis(),
+                status: vi.fn().mockReturnThis(),
+            };
+            return res;
+        }
+
+        describe('validatePreviewToken', () => {
+            it('should throw UnauthorizedException when token is missing', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+
+                expect(() =>
+                    controller.getPreviewMasterPlaylist(session.id, '', undefined, res),
+                ).toThrow(UnauthorizedException);
+            });
+
+            it('should throw UnauthorizedException for invalid token', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+
+                expect(() =>
+                    controller.getPreviewMasterPlaylist(session.id, 'invalid-token', undefined, res),
+                ).toThrow(UnauthorizedException);
+            });
+
+            it('should throw UnauthorizedException when token belongs to different session', () => {
+                const session1 = sessionService.create(makeConfig());
+                const session2 = sessionService.create(makeConfig());
+                const res = makeRes();
+
+                expect(() =>
+                    controller.getPreviewMasterPlaylist(session1.id, session2.sessionToken, undefined, res),
+                ).toThrow(UnauthorizedException);
+            });
+        });
+
+        describe('getPreviewMasterPlaylist', () => {
+            it('should return playlist content with correct headers', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue('#EXTM3U\n#EXT-X-STREAM-INF\n');
+
+                controller.getPreviewMasterPlaylist(session.id, session.sessionToken, undefined, res);
+
+                expect(res.set).toHaveBeenCalledWith(
+                    expect.objectContaining({ 'Content-Type': 'application/vnd.apple.mpegurl' }),
+                );
+                expect(res.send).toHaveBeenCalledWith('#EXTM3U\n#EXT-X-STREAM-INF\n');
+            });
+
+            it('should throw NotFoundException when preview is not ready', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue(null);
+
+                expect(() =>
+                    controller.getPreviewMasterPlaylist(session.id, session.sessionToken, undefined, res),
+                ).toThrow(NotFoundException);
+            });
+        });
+
+        describe('getPreviewRenditionPlaylist', () => {
+            it('should return rendition playlist with correct headers', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue('#EXTM3U\n#EXTINF:6\n');
+
+                controller.getPreviewRenditionPlaylist(session.id, '0', session.sessionToken, undefined, res);
+
+                expect(previewService.getPlaylist).toHaveBeenCalledWith(session.id, session.sessionToken, 0, undefined);
+                expect(res.set).toHaveBeenCalledWith(
+                    expect.objectContaining({ 'Content-Type': 'application/vnd.apple.mpegurl' }),
+                );
+                expect(res.send).toHaveBeenCalledWith('#EXTM3U\n#EXTINF:6\n');
+            });
+
+            it('should throw NotFoundException when rendition is not available', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue(null);
+
+                expect(() =>
+                    controller.getPreviewRenditionPlaylist(session.id, '0', session.sessionToken, undefined, res),
+                ).toThrow(NotFoundException);
+            });
+        });
+
+        describe('getPreviewSegment', () => {
+            it('should pipe segment stream to response', async () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                const mockStream = { pipe: vi.fn() };
+                previewService.getSegmentStream.mockResolvedValue({ stream: mockStream as any, size: 12345 });
+
+                await controller.getPreviewSegment(session.id, '0', 'segment0.ts', session.sessionToken, undefined, res);
+
+                expect(previewService.getSegmentStream).toHaveBeenCalledWith(session.id, 0, 0, undefined);
+                expect(res.set).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        'Content-Type': 'video/mp2t',
+                        'Content-Length': '12345',
+                    }),
+                );
+                expect(mockStream.pipe).toHaveBeenCalledWith(res);
+            });
+
+            it('should throw NotFoundException for invalid segment filename', async () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+
+                await expect(
+                    controller.getPreviewSegment(session.id, '0', 'invalid.mp4', session.sessionToken, undefined, res),
+                ).rejects.toThrow(NotFoundException);
+            });
+
+            it('should throw NotFoundException when segment is not available', async () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getSegmentStream.mockResolvedValue(null);
+
+                await expect(
+                    controller.getPreviewSegment(session.id, '0', 'segment0.ts', session.sessionToken, undefined, res),
+                ).rejects.toThrow(NotFoundException);
+            });
+        });
+
+        describe('getPreviewAudioTracks', () => {
+            it('should return audio tracks', () => {
+                const session = sessionService.create(makeConfig());
+                const tracks = [{ index: 0, streamIndex: 0, name: 'English', isDefault: true }];
+                previewService.getAudioTracks.mockReturnValue(tracks);
+
+                const result = controller.getPreviewAudioTracks(session.id, session.sessionToken);
+
+                expect(previewService.getAudioTracks).toHaveBeenCalledWith(session.id);
+                expect(result).toEqual(tracks);
+            });
+
+            it('should throw NotFoundException when preview not ready', () => {
+                const session = sessionService.create(makeConfig());
+                previewService.getAudioTracks.mockReturnValue(null);
+
+                expect(() =>
+                    controller.getPreviewAudioTracks(session.id, session.sessionToken),
+                ).toThrow(NotFoundException);
+            });
+        });
+
+        describe('audio query param forwarding', () => {
+            it('should pass audio param to getPlaylist for master playlist', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue('#EXTM3U\n');
+
+                controller.getPreviewMasterPlaylist(session.id, session.sessionToken, '2', res);
+
+                expect(previewService.getPlaylist).toHaveBeenCalledWith(session.id, session.sessionToken, undefined, 2);
+            });
+
+            it('should pass audio param to getPlaylist for rendition playlist', () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                previewService.getPlaylist.mockReturnValue('#EXTM3U\n');
+
+                controller.getPreviewRenditionPlaylist(session.id, '0', session.sessionToken, '3', res);
+
+                expect(previewService.getPlaylist).toHaveBeenCalledWith(session.id, session.sessionToken, 0, 3);
+            });
+
+            it('should pass audio param to getSegmentStream', async () => {
+                const session = sessionService.create(makeConfig());
+                const res = makeRes();
+                const mockStream = { pipe: vi.fn() };
+                previewService.getSegmentStream.mockResolvedValue({ stream: mockStream as any, size: 100 });
+
+                await controller.getPreviewSegment(session.id, '0', 'segment0.ts', session.sessionToken, '4', res);
+
+                expect(previewService.getSegmentStream).toHaveBeenCalledWith(session.id, 0, 0, 4);
+            });
+        });
+    });
+
+    describe('getStatus - probeResult availability', () => {
+        it('should include probeResult when status is uploaded', () => {
+            const session = sessionService.create(makeConfig());
+            const probeResult = {
+                format: { duration: 60, bitrateKbps: 5000, formatName: 'mp4' },
+                videoTracks: [{ index: 0, codec: 'h264', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
+                audioTracks: [],
+            };
+            sessionService.setProbeResult(session.id, probeResult);
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            const result = controller.getStatus(session.id, makeRequest());
+            expect(result.probeResult).toEqual(probeResult);
+        });
+
+        it('should not include probeResult when status is still uploading', () => {
+            const session = sessionService.create(makeConfig());
+            const probeResult = {
+                format: { duration: 60, bitrateKbps: 5000, formatName: 'mp4' },
+                videoTracks: [{ index: 0, codec: 'h264', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 30 }],
+                audioTracks: [],
+            };
+            sessionService.setProbeResult(session.id, probeResult);
+            // Status is still 'created' — probeResult should NOT be returned
+            const result = controller.getStatus(session.id, makeRequest());
+            expect(result.probeResult).toBeUndefined();
+        });
+
+        it('should include encryptionKeyHex when completed with encryption', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.setCompleted(
+                session.id,
+                ['master.m3u8'],
+                'master.m3u8',
+                undefined,
+                undefined,
+                undefined,
+                'abcd1234abcd1234abcd1234abcd1234',
+            );
+
+            const result = controller.getStatus(session.id, makeRequest());
+            expect(result.encryptionKeyHex).toBe('abcd1234abcd1234abcd1234abcd1234');
+        });
+
+        it('should not include probeResult when session does not have it', () => {
+            const session = sessionService.create(makeConfig());
+
+            const result = controller.getStatus(session.id, makeRequest());
+            expect(result.probeResult).toBeUndefined();
+        });
+    });
+
+    describe('startUrlUpload', () => {
+        it('should kick off the URL fetch and return 202-style response', async () => {
+            const session = sessionService.create(makeConfig());
+
+            const result = await controller.startUrlUpload(session.id, {
+                url: 'https://example.com/file.mp4',
+            });
+
+            expect(result).toEqual({ sessionId: session.id, status: 'uploading' });
+            expect(urlFetchService.fetchToSession).toHaveBeenCalledWith(
+                session.id,
+                'https://example.com/file.mp4',
+                undefined,
+            );
+        });
+
+        it('should pass filename override through to UrlFetchService', async () => {
+            const session = sessionService.create(makeConfig());
+
+            await controller.startUrlUpload(session.id, {
+                url: 'https://example.com/opaque',
+                filename: 'meeting.mp4',
+            });
+
+            expect(urlFetchService.fetchToSession).toHaveBeenCalledWith(
+                session.id,
+                'https://example.com/opaque',
+                'meeting.mp4',
+            );
+        });
+
+        it('should accept session in uploading status (idempotent retry)', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+
+            await expect(
+                controller.startUrlUpload(session.id, { url: 'https://example.com/file.mp4' }),
+            ).resolves.toEqual({ sessionId: session.id, status: 'uploading' });
+        });
+
+        it('should reject when session does not exist', async () => {
+            await expect(
+                controller.startUrlUpload('nonexistent', { url: 'https://example.com/file.mp4' }),
+            ).rejects.toThrow(NotFoundException);
+            expect(urlFetchService.fetchToSession).not.toHaveBeenCalled();
+        });
+
+        it('should reject when session is past the upload phase', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'encoding');
+
+            await expect(
+                controller.startUrlUpload(session.id, { url: 'https://example.com/file.mp4' }),
+            ).rejects.toThrow(BadRequestException);
+            expect(urlFetchService.fetchToSession).not.toHaveBeenCalled();
+        });
+
+        it('should not await the background fetch (fire-and-forget)', async () => {
+            const session = sessionService.create(makeConfig());
+            // Make fetchToSession hang — controller must still resolve quickly.
+            urlFetchService.fetchToSession.mockImplementation(
+                () => new Promise(() => {}),
+            );
+
+            await expect(
+                controller.startUrlUpload(session.id, { url: 'https://example.com/file.mp4' }),
+            ).resolves.toBeDefined();
+        });
+    });
+
+    describe('deleteSession - URL ingest abort', () => {
+        it('should abort an in-flight URL download', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+
+            await controller.deleteSession(session.id);
+
+            expect(urlFetchService.abort).toHaveBeenCalledWith(session.id);
+        });
+
+        it('should not call abort for non-uploading statuses', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'queued');
+
+            await controller.deleteSession(session.id);
+
+            expect(urlFetchService.abort).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('getStatus - uploading phase fields', () => {
+        it('should expose progress during URL ingestion', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            sessionService.updateProgress(session.id, 42);
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.status).toBe('uploading');
+            expect(result.progress).toBe(42);
+        });
+
+        it('should expose ingestTotalBytes once the probe reports it', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            sessionService.setIngestTotal(session.id, 524_288_000);
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.ingestTotalBytes).toBe(524_288_000);
+        });
+
+        it('should not include ingestTotalBytes when not set', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.ingestTotalBytes).toBeUndefined();
         });
     });
 

@@ -121,6 +121,7 @@ describe('EncodeService', () => {
             s3Service,
             webhookService,
             segmentPipelineService,
+            { destroy: vi.fn().mockResolvedValue(undefined) } as any,
         );
     });
 
@@ -614,6 +615,7 @@ describe('EncodeService', () => {
             s3Service,
             webhookService,
             segmentPipelineService,
+            { destroy: vi.fn().mockResolvedValue(undefined) } as any,
         );
 
         const session = sessionService.create(makeConfig());
@@ -729,6 +731,7 @@ describe('EncodeService', () => {
             s3Service,
             webhookService,
             segmentPipelineService,
+            { destroy: vi.fn().mockResolvedValue(undefined) } as any,
         );
 
         const loggerWarnSpy = vi.spyOn((service as any).logger, 'warn');

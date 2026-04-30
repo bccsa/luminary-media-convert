@@ -2,6 +2,7 @@ import {
     Controller,
     Get,
     Post,
+    Put,
     Patch,
     Delete,
     Body,
@@ -11,12 +12,14 @@ import {
     UseGuards,
     HttpCode,
     HttpStatus,
+    NotFoundException,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { SkipAdmin } from '../auth/skip-admin.decorator.js';
 import { SessionsService } from './sessions.service.js';
 import { CreateSaasSessionDto } from './dto/create-session.dto.js';
+import { UrlUploadDto } from './dto/url-upload.dto.js';
 import { ImportSessionDto } from './dto/import-session.dto.js';
 import { MoveSessionFilesDto } from './dto/move-session-files.dto.js';
 import { RenameSessionPrefixDto } from './dto/rename-session-prefix.dto.js';
@@ -46,6 +49,17 @@ export class SessionsController {
         @Req() req: { user: { _id: string } },
     ): Promise<SaasSessionResponseDto> {
         return this.sessionsService.createSession(req.user._id, dto);
+    }
+
+    @Post(':sessionId/url-upload')
+    @SkipAdmin()
+    @HttpCode(HttpStatus.ACCEPTED)
+    async startUrlUpload(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: UrlUploadDto,
+        @Req() req: { user: { _id: string } },
+    ): Promise<{ sessionId: string; status: 'uploading' }> {
+        return this.sessionsService.startUrlUpload(req.user._id, sessionId, dto);
     }
 
     @Get()
@@ -90,6 +104,67 @@ export class SessionsController {
         @Req() req: { user: { _id: string } },
     ) {
         return this.sessionsService.moveSessionFiles(req.user._id, sessionId, dto);
+    }
+
+    @Post(':sessionId/hls/read')
+    @SkipAdmin()
+    @HttpCode(HttpStatus.OK)
+    async hlsRead(
+        @Param('sessionId') sessionId: string,
+        @Req() req: { user: { _id: string } },
+    ) {
+        return this.sessionsService.hlsRead(req.user._id, sessionId);
+    }
+
+    @Post(':sessionId/hls/mutate')
+    @SkipAdmin()
+    @HttpCode(HttpStatus.OK)
+    async hlsMutate(
+        @Param('sessionId') sessionId: string,
+        @Body() body: { ifMatch: string; operations: Array<{ type: string } & Record<string, unknown>> },
+        @Req() req: { user: { _id: string } },
+    ) {
+        return this.sessionsService.hlsMutate(
+            req.user._id,
+            sessionId,
+            body.ifMatch,
+            body.operations ?? [],
+        );
+    }
+
+    @Get(':sessionId/chapters')
+    @SkipAdmin()
+    @ApiQuery({ name: 'lang', required: false, type: String, description: 'BCP-47 language code (default `en`)' })
+    async readChapters(
+        @Param('sessionId') sessionId: string,
+        @Query('lang') lang: string | undefined,
+        @Req() req: { user: { _id: string } },
+    ): Promise<{ vtt: string }> {
+        const result = await this.sessionsService.readChapters(
+            req.user._id,
+            sessionId,
+            lang ?? 'en',
+        );
+        if (!result) throw new NotFoundException('No chapter file for this language');
+        return result;
+    }
+
+    @Put(':sessionId/chapters')
+    @SkipAdmin()
+    @HttpCode(HttpStatus.NO_CONTENT)
+    @ApiQuery({ name: 'lang', required: false, type: String, description: 'BCP-47 language code (default `en`)' })
+    async writeChapters(
+        @Param('sessionId') sessionId: string,
+        @Query('lang') lang: string | undefined,
+        @Body() body: { vtt: string },
+        @Req() req: { user: { _id: string } },
+    ): Promise<void> {
+        await this.sessionsService.writeChapters(
+            req.user._id,
+            sessionId,
+            lang ?? 'en',
+            body?.vtt ?? '',
+        );
     }
 
     @Post(':sessionId/rename-prefix')

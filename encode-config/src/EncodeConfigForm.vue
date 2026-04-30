@@ -469,6 +469,8 @@ function onSubmit() {
 
     emit('submit', config);
 }
+
+defineExpose({ editableAudioTracks });
 </script>
 
 <template>

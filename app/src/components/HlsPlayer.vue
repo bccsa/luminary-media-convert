@@ -9,12 +9,52 @@ import { registerThumbnailPreview } from '../videojs-thumbnail-preview';
 registerQualitySelector();
 registerThumbnailPreview();
 
-const props = defineProps<{
-    playbackUrl: string | null;
-    thumbnailVttUrl?: string | null;
-    encodingType?: 'video' | 'audio';
-    isAudioOnly?: boolean;
-    encryptionKeyHex?: string | null;
+const props = withDefaults(
+    defineProps<{
+        playbackUrl: string | null;
+        thumbnailVttUrl?: string | null;
+        encodingType?: 'video' | 'audio';
+        isAudioOnly?: boolean;
+        encryptionKeyHex?: string | null;
+        preserveStateOnSourceChange?: boolean;
+        /** Show the built-in Video.js control bar + custom plugin chrome. Default true. */
+        showControls?: boolean;
+    }>(),
+    { showControls: true },
+);
+
+export interface QualityLevelInfo {
+    /** Stable key used when calling `setQuality(id)`; matches the rendition height (or bandwidth for audio-only). */
+    id: string;
+    height: number;
+    width: number;
+    bitrate: number;
+}
+
+export interface AudioTrackInfo {
+    /** Native track id; pass to `setAudioTrack(id)` to switch. */
+    id: string;
+    label: string;
+    language: string;
+    enabled: boolean;
+}
+
+const emit = defineEmits<{
+    'quality-levels': [levels: QualityLevelInfo[]];
+    'playing-change': [playing: boolean];
+    /**
+     * Fires whenever the player learns the playable duration. For trimmed
+     * encodes and imported sessions this is the only correct duration source;
+     * the source probe (when available) reflects the *original* file.
+     * Emits `null` when duration is unknown (e.g. just before a source swap).
+     */
+    'duration-change': [seconds: number | null];
+    /**
+     * Fires whenever VHS populates / changes the native HLS audio track list.
+     * For post-encode HLS this exposes every EXT-X-MEDIA:TYPE=AUDIO rendition
+     * so consumer UI can switch tracks via player.audioTracks() directly.
+     */
+    'audio-tracks': [tracks: AudioTrackInfo[]];
 }>();
 
 const playerEl = ref<HTMLVideoElement | null>(null);
@@ -32,9 +72,29 @@ const audioPosterUrl = `data:image/svg+xml,${encodeURIComponent(
     '</g></svg>',
 )}`;
 
+// Initial hint from props; refined at runtime via loadedmetadata.
+const detectedAudioOnly = ref(false);
 const audioOnly = computed(
-    () => props.isAudioOnly || props.encodingType === 'audio',
+    () => detectedAudioOnly.value || props.isAudioOnly || props.encodingType === 'audio',
 );
+
+function applyAudioOnlyPoster() {
+    if (!player) return;
+    if (audioOnly.value) {
+        player.poster(audioPosterUrl);
+    } else {
+        player.poster('');
+    }
+}
+
+function detectAudioOnlyFromPlayer() {
+    if (!player) return;
+    // Any loaded rendition with no video track → audio-only playlist
+    const vw = player.videoWidth();
+    const vh = player.videoHeight();
+    detectedAudioOnly.value = vw === 0 && vh === 0;
+    applyAudioOnlyPoster();
+}
 
 function revokeAllBlobs() {
     for (const url of blobUrls) URL.revokeObjectURL(url);
@@ -186,7 +246,14 @@ async function getEffectivePlaybackUrl(): Promise<string | null> {
 }
 
 async function initPlayer() {
-    if (!playerEl.value || !props.playbackUrl) return;
+    if (!props.playbackUrl) return;
+
+    // Wait for the <video> element to be in the DOM — may not be
+    // available immediately when v-if="playbackUrl" just became truthy.
+    if (!playerEl.value) {
+        await nextTick();
+        if (!playerEl.value) return;
+    }
 
     const effectiveUrl = await getEffectivePlaybackUrl();
     if (!effectiveUrl) return;
@@ -195,15 +262,21 @@ async function initPlayer() {
         try { (player as any).audioOnlyMode(false); } catch {}
         player.fluid(true);
 
-        if (audioOnly.value) {
-            player.poster(audioPosterUrl);
-        } else {
-            player.poster('');
-        }
+        // Reset detection; will be re-evaluated on loadedmetadata for the new source
+        detectedAudioOnly.value = false;
+        applyAudioOnlyPoster();
 
         const wasPaused = player.paused();
 
         player.src({ src: effectiveUrl, type: 'application/x-mpegURL' });
+        player.one('loadedmetadata', detectAudioOnlyFromPlayer);
+
+        // Initialize thumbnail preview if now available (e.g. after switching to S3 playback)
+        if (props.thumbnailVttUrl) {
+            try {
+                (player as any).thumbnailPreview({ vttUrl: props.thumbnailVttUrl });
+            } catch { /* already initialized or unavailable */ }
+        }
 
         if (pendingSeekTime != null) {
             const seekTo = pendingSeekTime;
@@ -218,7 +291,8 @@ async function initPlayer() {
 
     try {
         player = videojs(playerEl.value, {
-            controls: true,
+            controls: props.showControls,
+            bigPlayButton: props.showControls,
             fluid: true,
             responsive: true,
             poster: audioOnly.value ? audioPosterUrl : undefined,
@@ -226,19 +300,60 @@ async function initPlayer() {
         });
 
         player.src({ src: effectiveUrl, type: 'application/x-mpegURL' });
+        player.on('loadedmetadata', detectAudioOnlyFromPlayer);
+        player.on('play', () => emit('playing-change', true));
+        player.on('pause', () => emit('playing-change', false));
+        const publishDuration = () => {
+            const d = player?.duration();
+            emit('duration-change', Number.isFinite(d) && d! > 0 ? (d as number) : null);
+        };
+        player.on('loadedmetadata', publishDuration);
+        player.on('durationchange', publishDuration);
 
         player.ready(() => {
-            try {
-                (player as any).hlsQualitySelector({ displayCurrentQuality: true });
-            } catch (e) {
-                console.warn('HLS quality selector unavailable:', e);
-            }
-            if (props.thumbnailVttUrl) {
+            if (props.showControls) {
                 try {
-                    (player as any).thumbnailPreview({ vttUrl: props.thumbnailVttUrl });
+                    (player as any).hlsQualitySelector({ displayCurrentQuality: true });
                 } catch (e) {
-                    console.warn('Thumbnail preview unavailable:', e);
+                    console.warn('HLS quality selector unavailable:', e);
                 }
+                if (props.thumbnailVttUrl) {
+                    try {
+                        (player as any).thumbnailPreview({ vttUrl: props.thumbnailVttUrl });
+                    } catch (e) {
+                        console.warn('Thumbnail preview unavailable:', e);
+                    }
+                }
+            }
+            // Surface quality levels to consumers regardless of control visibility —
+            // the segment editor hosts its own selector when controls are hidden.
+            try {
+                const ql = (player as any).qualityLevels?.();
+                if (ql) {
+                    const publish = () => emit('quality-levels', snapshotQualityLevels(ql));
+                    ql.on('addqualitylevel', publish);
+                    ql.on('removequalitylevel', publish);
+                    publish();
+                }
+            } catch (e) {
+                console.warn('Quality levels unavailable:', e);
+            }
+
+            // Surface native HLS audio tracks (EXT-X-MEDIA:TYPE=AUDIO) so the
+            // chapter editor can drive them via player.audioTracks() directly.
+            try {
+                const tracks = player?.audioTracks?.() as unknown as RawAudioTrackList & {
+                    on: (e: string, cb: () => void) => void;
+                };
+                if (tracks) {
+                    const publish = () => emit('audio-tracks', snapshotAudioTracks(tracks));
+                    tracks.on('addtrack', publish);
+                    tracks.on('removetrack', publish);
+                    tracks.on('change', publish);
+                    publish();
+                }
+            } catch (e) {
+                console.warn('Audio tracks unavailable:', e);
             }
         });
     } catch (e) {
@@ -246,15 +361,71 @@ async function initPlayer() {
     }
 }
 
+interface RawAudioTrack { id?: string; label?: string; language?: string; enabled?: boolean }
+interface RawAudioTrackList { length: number; [i: number]: RawAudioTrack }
+
+function snapshotAudioTracks(list: RawAudioTrackList): AudioTrackInfo[] {
+    const out: AudioTrackInfo[] = [];
+    for (let i = 0; i < list.length; i++) {
+        const t = list[i];
+        out.push({
+            id: t.id ?? String(i),
+            label: t.label ?? '',
+            language: t.language ?? '',
+            enabled: !!t.enabled,
+        });
+    }
+    return out;
+}
+
+function snapshotQualityLevels(ql: { levels_?: Array<Record<string, number>>; length: number }): QualityLevelInfo[] {
+    const raw: Array<Record<string, number>> = ql.levels_ ?? [];
+    const seen = new Map<string, QualityLevelInfo>();
+    for (const level of raw) {
+        const height = Number(level.height) || 0;
+        const width = Number(level.width) || 0;
+        const bitrate = Number(level.bitrate) || 0;
+        const id = height > 0 ? `${height}` : `b${bitrate}`;
+        if (!seen.has(id)) seen.set(id, { id, height, width, bitrate });
+    }
+    return Array.from(seen.values()).sort((a, b) => b.bitrate - a.bitrate);
+}
+
 // Track pending seek for source changes (angle switching)
 let pendingSeekTime: number | null = null;
 
-watch(() => props.playbackUrl, async (url) => {
+watch(() => props.playbackUrl, async (url, oldUrl) => {
     if (url) {
+        // Preserve playback position and state when swapping sources
+        let savedTime: number | undefined;
+        let wasPlaying = false;
+        if (props.preserveStateOnSourceChange && player) {
+            savedTime = player.currentTime();
+            wasPlaying = !player.paused();
+        }
+
+        await nextTick();
+        await initPlayer();
+
+        // Restore state after new source loads
+        if (savedTime !== undefined && player) {
+            const restore = () => {
+                player!.currentTime(savedTime!);
+                if (wasPlaying) player!.play();
+                player!.off('loadedmetadata', restore);
+            };
+            player.on('loadedmetadata', restore);
+        }
+    }
+}, { flush: 'post' });
+
+// Re-init when encryption key becomes available (e.g. fetched async after completion)
+watch(() => props.encryptionKeyHex, async (keyHex) => {
+    if (keyHex && props.playbackUrl && player) {
         await nextTick();
         await initPlayer();
     }
-});
+}, { flush: 'post' });
 
 onMounted(async () => {
     if (props.playbackUrl) {
@@ -291,11 +462,64 @@ function getCurrentTime(): number {
     return player?.currentTime() ?? 0;
 }
 
+function getDuration(): number | null {
+    const d = player?.duration();
+    return Number.isFinite(d) && (d as number) > 0 ? (d as number) : null;
+}
+
 function setPendingSeek(time: number) {
     pendingSeekTime = time;
 }
 
-defineExpose({ setSource, getCurrentTime, setPendingSeek });
+function seek(time: number) {
+    if (!player) { pendingSeekTime = time; return; }
+    player.currentTime(Math.max(0, time));
+}
+
+function togglePlay() {
+    if (!player) return;
+    if (player.paused()) void player.play();
+    else player.pause();
+}
+
+function isPlaying(): boolean {
+    return !!player && !player.paused();
+}
+
+/**
+ * Switch the active native audio track. Pass an id from the `audio-tracks`
+ * event payload. VHS observes the `enabled` flag and rebuilds the audio
+ * segment loader transparently.
+ */
+function setAudioTrack(id: string) {
+    const tracks = player?.audioTracks?.() as RawAudioTrackList | undefined;
+    if (!tracks) return;
+    for (let i = 0; i < tracks.length; i++) {
+        const t = tracks[i];
+        const tid = t.id ?? String(i);
+        t.enabled = tid === id;
+    }
+}
+
+/**
+ * Enable a specific rendition by id (matches the `id` from the `quality-levels` event)
+ * or pass `null` to re-enable all levels (auto/ABR). Mirrors the behavior of the
+ * in-player custom quality selector.
+ */
+function setQuality(id: string | null) {
+    if (!player) return;
+    const ql = (player as unknown as { qualityLevels?: () => { length: number; [i: number]: { enabled: boolean; height?: number; bitrate?: number } } }).qualityLevels?.();
+    if (!ql) return;
+    for (let i = 0; i < ql.length; i++) {
+        const level = ql[i];
+        const height = Number(level.height) || 0;
+        const bitrate = Number(level.bitrate) || 0;
+        const levelId = height > 0 ? `${height}` : `b${bitrate}`;
+        level.enabled = id === null || levelId === id;
+    }
+}
+
+defineExpose({ setSource, getCurrentTime, getDuration, setPendingSeek, seek, togglePlay, isPlaying, setQuality, setAudioTrack });
 </script>
 
 <template>

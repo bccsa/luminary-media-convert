@@ -14,9 +14,11 @@ export interface SessionEvent {
     masterPlaylist?: string;
     anglePlaylists?: { name: string; key: string }[];
     thumbnailsVtt?: string;
+    encryptionKeyHex?: string;
     segmentFormat?: string;
     encoder?: string;
     probeResult?: unknown;
+    ingestTotalBytes?: number;
 }
 
 @Injectable()

@@ -28,8 +28,10 @@ export interface Session {
     masterPlaylist?: string;
     anglePlaylists?: AnglePlaylistInfo[];
     thumbnailsVtt?: string;
+    encryptionKeyHex?: string;
     error?: string;
     segmentFormat?: SegmentFormat;
+    ingestTotalBytes?: number;
     createdAt: number;
 }
 
@@ -52,7 +54,9 @@ export class SessionService {
             masterPlaylist: session.masterPlaylist,
             anglePlaylists: session.anglePlaylists,
             thumbnailsVtt: session.thumbnailsVtt,
+            encryptionKeyHex: session.encryptionKeyHex,
             segmentFormat: session.segmentFormat,
+            ingestTotalBytes: session.ingestTotalBytes,
             ...extra,
         });
     }
@@ -119,6 +123,14 @@ export class SessionService {
         }
     }
 
+    setIngestTotal(id: string, bytes: number): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.ingestTotalBytes = bytes;
+            this.emitEvent(session);
+        }
+    }
+
     setProbeResult(id: string, probeResult: ProbeResult): void {
         const session = this.sessions.get(id);
         if (session) {
@@ -148,6 +160,7 @@ export class SessionService {
         anglePlaylists?: AnglePlaylistInfo[],
         thumbnailsVtt?: string,
         segmentFormat?: SegmentFormat,
+        encryptionKeyHex?: string,
     ): void {
         const session = this.sessions.get(id);
         if (session) {
@@ -158,6 +171,7 @@ export class SessionService {
             session.anglePlaylists = anglePlaylists;
             session.thumbnailsVtt = thumbnailsVtt;
             session.segmentFormat = segmentFormat;
+            session.encryptionKeyHex = encryptionKeyHex;
             this.emitEvent(session);
         }
     }

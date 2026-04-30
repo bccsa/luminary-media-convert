@@ -159,6 +159,14 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
+            'Hex-encoded AES-128 encryption key. Present when status is "completed" and encryption was enabled.',
+        example: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
+    })
+    @Expose()
+    encryptionKeyHex?: string;
+
+    @ApiPropertyOptional({
+        description:
             'Error message. Present when status is "failed".',
         example: 'FFmpeg exited with code 1: Invalid input file',
     })
@@ -186,4 +194,12 @@ export class SessionStatusDto {
     @Expose()
     segmentFormat?: string;
 
+    @ApiPropertyOptional({
+        description:
+            'Total bytes for the source being ingested. Present during URL ingestion ' +
+            'when the source server reported a Content-Length.',
+        example: 524288000,
+    })
+    @Expose()
+    ingestTotalBytes?: number;
 }

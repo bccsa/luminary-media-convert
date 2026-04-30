@@ -14,6 +14,7 @@ describe('SessionsController', () => {
         moveSessionFiles: ReturnType<typeof vi.fn>;
         renameSessionPrefix: ReturnType<typeof vi.fn>;
         checkPrefix: ReturnType<typeof vi.fn>;
+        startUrlUpload: ReturnType<typeof vi.fn>;
     };
 
     beforeEach(() => {
@@ -27,10 +28,32 @@ describe('SessionsController', () => {
             moveSessionFiles: vi.fn(),
             renameSessionPrefix: vi.fn(),
             checkPrefix: vi.fn(),
+            startUrlUpload: vi.fn(),
         };
         controller = new SessionsController(
             sessionsService as unknown as SessionsService,
         );
+    });
+
+    describe('startUrlUpload', () => {
+        it('forwards the URL upload to the service with the JWT user id', async () => {
+            sessionsService.startUrlUpload.mockResolvedValue({
+                sessionId: 'sess-1',
+                status: 'uploading',
+            });
+
+            const dto = { url: 'https://example.com/clip.mp4', filename: 'meeting.mp4' };
+            const req = { user: { _id: 'user:1' } };
+
+            const result = await controller.startUrlUpload('sess-1', dto as any, req);
+
+            expect(sessionsService.startUrlUpload).toHaveBeenCalledWith(
+                'user:1',
+                'sess-1',
+                dto,
+            );
+            expect(result).toEqual({ sessionId: 'sess-1', status: 'uploading' });
+        });
     });
 
     describe('create', () => {

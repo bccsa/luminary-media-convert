@@ -3,6 +3,7 @@ import {
     Controller,
     Delete,
     Get,
+    Header,
     HttpCode,
     HttpStatus,
     NotFoundException,
@@ -10,12 +11,15 @@ import {
     Post,
     Query,
     Req,
+    Res,
     Sse,
+    StreamableFile,
     UnauthorizedException,
     UseGuards,
     BadRequestException,
     Logger,
 } from '@nestjs/common';
+import type { Response } from 'express';
 
 import {
     ApiOperation,
@@ -36,8 +40,11 @@ import { SessionService } from './services/session.service.js';
 import { SessionEventsService, type SessionEvent } from './services/session-events.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
+import { PreviewService } from './services/preview.service.js';
 import { CreateSessionDto } from './dto/create-session.dto.js';
 import { EncodeConfigDto } from './dto/encode-config.dto.js';
+import { UrlUploadDto } from './dto/url-upload.dto.js';
+import { UrlFetchService } from './services/url-fetch.service.js';
 import {
     SessionResponseDto,
     EncodeStartResponseDto,
@@ -55,6 +62,7 @@ interface MessageEvent {
 
 @ApiTags('Encoding Sessions')
 @Controller('api/sessions')
+@SkipThrottle()
 export class EncodeController {
     private readonly logger = new Logger(EncodeController.name);
 
@@ -64,6 +72,8 @@ export class EncodeController {
         private readonly queueService: QueueService,
         private readonly ffmpegService: FfmpegService,
         private readonly authorizationWebhookService: AuthorizationWebhookService,
+        private readonly previewService: PreviewService,
+        private readonly urlFetchService: UrlFetchService,
     ) {}
 
     @Post()
@@ -120,6 +130,60 @@ export class EncodeController {
             sessionToken: session.sessionToken,
             maxUploadSize,
         };
+    }
+
+    @Post(':sessionId/url-upload')
+    @HttpCode(HttpStatus.ACCEPTED)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('master', 'apikey', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'Ingest the source file from an HTTP/S URL',
+        description:
+            'Alternative to tus upload: the API server fetches the file directly from a public HTTP/S URL ' +
+            '(e.g. a Google Drive direct-download link or an S3 presigned URL). ' +
+            'Uses parallel HTTP Range requests when the source supports them. ' +
+            'The session must be in "created" or "uploading" status. ' +
+            'Returns 202 immediately; clients track progress via SSE or polling.',
+    })
+    @ApiParam({
+        name: 'sessionId',
+        description: 'Session ID returned from POST /api/sessions',
+    })
+    @ApiResponse({
+        status: 202,
+        description: 'URL ingestion started in the background.',
+    })
+    @ApiResponse({ status: 400, description: 'Invalid URL or session state.' })
+    @ApiResponse({
+        status: 401,
+        description: 'Unauthorized — invalid or missing credentials.',
+    })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    async startUrlUpload(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: UrlUploadDto,
+    ): Promise<{ sessionId: string; status: 'uploading' }> {
+        const session = this.sessionService.get(sessionId);
+        if (!session) {
+            throw new NotFoundException(`Session ${sessionId} not found`);
+        }
+
+        if (session.status !== 'created' && session.status !== 'uploading') {
+            throw new BadRequestException(
+                `Session is not accepting uploads (current status: ${session.status})`,
+            );
+        }
+
+        // Kick off the download in the background — return 202 immediately.
+        // UrlFetchService handles status transitions and webhook delivery.
+        void this.urlFetchService.fetchToSession(
+            sessionId,
+            dto.url,
+            dto.filename,
+        );
+
+        return { sessionId, status: 'uploading' };
     }
 
     @Post(':sessionId/encode')
@@ -206,6 +270,11 @@ export class EncodeController {
         }
 
         this.sessionService.setEncodeConfig(sessionId, dto);
+
+        if (dto.trimSegments?.length) {
+            this.previewService.setTrimSegments(sessionId, dto.trimSegments);
+        }
+
         const position = this.queueService.enqueue(sessionId);
 
         this.logger.log(
@@ -289,13 +358,20 @@ export class EncodeController {
             encoder: this.ffmpegService.getAccelMode(),
         };
 
-        if (session.status === 'uploaded') {
+        if (session.probeResult && session.status !== 'created' && session.status !== 'uploading') {
             result.probeResult = session.probeResult as any;
         }
 
         if (session.status === 'queued') {
             result.queuePosition =
                 this.queueService.getPosition(sessionId) ?? undefined;
+        }
+
+        if (session.status === 'uploading') {
+            result.progress = session.progress;
+            if (session.ingestTotalBytes != null) {
+                result.ingestTotalBytes = session.ingestTotalBytes;
+            }
         }
 
         if (session.status === 'encoding' || session.status === 'encrypting' || session.status === 'uploading_to_s3') {
@@ -310,6 +386,9 @@ export class EncodeController {
             result.anglePlaylists = session.anglePlaylists;
             result.thumbnailsVtt = session.thumbnailsVtt;
             result.segmentFormat = session.segmentFormat;
+            if (session.encryptionKeyHex) {
+                result.encryptionKeyHex = session.encryptionKeyHex;
+            }
         }
 
         if (session.status === 'failed') {
@@ -363,6 +442,10 @@ export class EncodeController {
             this.queueService.dequeue(sessionId);
         }
 
+        if (session.status === 'uploading') {
+            this.urlFetchService.abort(sessionId);
+        }
+
         if (session.status === 'encoding') {
             this.ffmpegService.killActiveProcess();
         }
@@ -378,7 +461,102 @@ export class EncodeController {
             );
         }
 
+        await this.previewService.destroy(sessionId);
         this.sessionService.remove(sessionId);
         this.logger.log(`Session ${sessionId} deleted by client`);
+    }
+
+    // -----------------------------------------------------------------------
+    // Preview HLS endpoints
+    // -----------------------------------------------------------------------
+
+    @Get(':sessionId/preview/audio-tracks')
+    @ApiOperation({ summary: 'Get available preview audio tracks' })
+    getPreviewAudioTracks(
+        @Param('sessionId') sessionId: string,
+        @Query('token') token: string,
+    ): any {
+        this.validatePreviewToken(sessionId, token);
+        const tracks = this.previewService.getAudioTracks(sessionId);
+        if (!tracks) throw new NotFoundException('Preview not ready');
+        return tracks;
+    }
+
+    @Get(':sessionId/preview/playlist.m3u8')
+    @ApiOperation({ summary: 'Get preview HLS master playlist' })
+    getPreviewMasterPlaylist(
+        @Param('sessionId') sessionId: string,
+        @Query('token') token: string,
+        @Query('audio') audio: string | undefined,
+        @Res() res: Response,
+    ): void {
+        this.validatePreviewToken(sessionId, token);
+
+        const audioTrackIndex = audio !== undefined ? parseInt(audio, 10) : undefined;
+        const playlist = this.previewService.getPlaylist(sessionId, token, undefined, audioTrackIndex);
+        if (!playlist) throw new NotFoundException('Preview not ready');
+
+        res.set({ 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' });
+        res.send(playlist);
+    }
+
+    @Get(':sessionId/preview/r:rendition/playlist.m3u8')
+    @ApiOperation({ summary: 'Get preview HLS rendition playlist' })
+    getPreviewRenditionPlaylist(
+        @Param('sessionId') sessionId: string,
+        @Param('rendition') rendition: string,
+        @Query('token') token: string,
+        @Query('audio') audio: string | undefined,
+        @Res() res: Response,
+    ): void {
+        this.validatePreviewToken(sessionId, token);
+
+        const renditionIndex = parseInt(rendition, 10);
+        const audioTrackIndex = audio !== undefined ? parseInt(audio, 10) : undefined;
+        const playlist = this.previewService.getPlaylist(sessionId, token, renditionIndex, audioTrackIndex);
+        if (!playlist) throw new NotFoundException('Rendition not available');
+
+        res.set({ 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' });
+        res.send(playlist);
+    }
+
+    @Get(':sessionId/preview/r:rendition/:filename')
+    @ApiOperation({ summary: 'Get preview HLS segment' })
+    async getPreviewSegment(
+        @Param('sessionId') sessionId: string,
+        @Param('rendition') rendition: string,
+        @Param('filename') filename: string,
+        @Query('token') token: string,
+        @Query('audio') audio: string | undefined,
+        @Res() res: Response,
+    ): Promise<void> {
+        this.validatePreviewToken(sessionId, token);
+
+        const renditionIndex = parseInt(rendition, 10);
+        const segMatch = filename.match(/^segment(\d+)\.ts$/);
+        if (!segMatch) throw new NotFoundException('Invalid segment filename');
+
+        const segmentIndex = parseInt(segMatch[1], 10);
+        const audioTrackIndex = audio !== undefined ? parseInt(audio, 10) : undefined;
+        const result = await this.previewService.getSegmentStream(sessionId, renditionIndex, segmentIndex, audioTrackIndex);
+
+        if (!result) throw new NotFoundException('Segment not available');
+
+        res.set({
+            'Content-Type': 'video/mp2t',
+            'Content-Length': String(result.size),
+            'Cache-Control': 'public, max-age=3600',
+        });
+        result.stream.pipe(res);
+    }
+
+    private validatePreviewToken(sessionId: string, token: string): void {
+        if (!token) {
+            throw new UnauthorizedException('Missing token query parameter');
+        }
+        const session = this.sessionService.getBySessionToken(token);
+        if (!session || session.id !== sessionId) {
+            throw new UnauthorizedException('Invalid session token');
+        }
     }
 }

@@ -3,8 +3,12 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { useRoute, useRouter } from 'vue-router';
 import { EncodeConfigForm, computeLayoutKey, saveConfig } from '@luminary-media-converter/encode-config';
-import type { ProbeResult, EncodeConfig } from '@luminary-media-converter/encode-config';
+import type { ProbeResult, EncodeConfig, TrimSegment } from '@luminary-media-converter/encode-config';
+import { SegmentEditor } from '@luminary-media-converter/segment-editor';
+import type { Segment } from '@luminary-media-converter/segment-editor';
+import { useChapters } from '../composables/useChapters';
 import HlsPlayer from '../components/HlsPlayer.vue';
+import type { AudioTrackInfo, QualityLevelInfo } from '../components/HlsPlayer.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import InlineConfirm from '../components/InlineConfirm.vue';
@@ -36,6 +40,24 @@ const probeLoading = ref(false);
 const encodingType = ref<'video' | 'audio'>('video');
 const byteRangeEnabled = ref(true);
 const submitting = ref(false);
+const editorSegments = ref<Segment[]>([]);
+const trimSegments = computed<TrimSegment[]>(() =>
+    editorSegments.value.map((s) => ({ inSec: s.inSec, outSec: s.outSec })),
+);
+const configFormRef = ref<InstanceType<typeof EncodeConfigForm> | null>(null);
+
+// Chapter editor — sidecar VTT in S3, autosaves to localStorage, explicit save to S3.
+const chapters = useChapters({ getAccessToken: () => getAccessTokenSilently() });
+const chapterSegments = chapters.segments;
+const chaptersSaveError = ref<string | null>(null);
+
+// Playback duration as reported by the player — the only correct source for
+// the chapter timeline since it reflects trim cuts on encoded output and is
+// the only signal available for imported sessions (which never run probe).
+const playerDuration = ref<number | null>(null);
+const chapterTimelineDuration = computed(
+    () => playerDuration.value ?? probeResult.value?.format?.duration ?? 0,
+);
 
 // Session name
 const sessionName = ref('');
@@ -76,8 +98,6 @@ function cancelEditName() {
 const encryptionKeyHex = ref<string | undefined>();
 
 // SaaS polling for non-local uploads
-let saasPollTimer: ReturnType<typeof setInterval> | null = null;
-
 const sessionId = computed(() => route.params.id as string);
 
 const poller = useSessionPoller();
@@ -180,13 +200,151 @@ const showUploadRemoteMessage = computed(() => {
     return (s === 'created' || s === 'uploading') && !activeUpload.value;
 });
 
+// Server-side ingest (URL download): show poller-driven progress when there
+// is no client-side tus upload in flight. progress=0 means total length is
+// unknown — fall back to indeterminate display.
+const remoteIngestProgress = computed<number | undefined>(() => {
+    const p = poller.progress.value;
+    if (typeof p !== 'number' || p <= 0) return undefined;
+    return p;
+});
+
+function formatBytes(bytes: number): string {
+    if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${bytes} B`;
+}
+
+const remoteIngestLabel = computed<string>(() => {
+    const total = poller.ingestTotalBytes.value;
+    return total != null
+        ? `Uploading from URL... (${formatBytes(total)})`
+        : 'Uploading from URL...';
+});
+
 const showProbeConfig = computed(() => {
-    return currentStatus.value === 'uploaded' && isActiveSession.value && probeResult.value && !submitting.value;
+    const s = currentStatus.value;
+    return s === 'uploaded' && isActiveSession.value && probeResult.value && !submitting.value;
 });
 
 const showEncoding = computed(() => {
     const s = currentStatus.value;
     return (s === 'queued' || s === 'encoding' || s === 'encrypting' || s === 'uploading_to_s3') && isActiveSession.value;
+});
+
+// Server-side preview — API serves on-demand HLS segments.
+// The preview URL is set once the session has a token and encoding API URL.
+// The API generates segments from the source file (copy or transcode).
+// ---------------------------------------------------------------------------
+// Preview audio tracks
+// ---------------------------------------------------------------------------
+
+interface PreviewAudioTrack {
+    index: number;
+    streamIndex: number;
+    language?: string;
+    name?: string;
+    bitrateKbps?: number;
+    codec?: string;
+    isDefault: boolean;
+}
+
+function audioTrackLabel(track: PreviewAudioTrack): string {
+    // Use editable track metadata from the encode config form when available
+    const formTrack = configFormRef.value?.editableAudioTracks?.[track.index];
+    const name = formTrack?.name ?? track.name;
+    const language = formTrack?.language ?? track.language;
+    const parts: string[] = [String(track.index)];
+    if (name) parts.push(name);
+    if (language && language !== 'und') parts.push(language);
+    if (track.codec) parts.push(track.codec);
+    if (track.bitrateKbps) parts.push(`${track.bitrateKbps}kbps`);
+    return parts.join(' · ');
+}
+
+const previewAudioTracks = ref<PreviewAudioTrack[]>([]);
+const selectedAudioTrack = ref(0);
+const previewQualityLevels = ref<QualityLevelInfo[]>([]);
+const selectedQualityId = ref<string | null>(null);
+const isPreviewPlaying = ref(false);
+// Native HLS audio tracks (post-encode). Driven via player.audioTracks() so
+// we leverage VHS's built-in track switching rather than re-fetching playlists.
+const nativeAudioTracks = ref<AudioTrackInfo[]>([]);
+const selectedNativeAudioId = computed(() => {
+    const enabled = nativeAudioTracks.value.find((t) => t.enabled);
+    return enabled?.id ?? null;
+});
+
+function onPreviewQualityLevels(levels: QualityLevelInfo[]) {
+    previewQualityLevels.value = levels;
+}
+
+function onQualityChange(id: string | null) {
+    selectedQualityId.value = id;
+    playerRef.value?.setQuality(id);
+}
+
+function onNativeAudioTracks(tracks: AudioTrackInfo[]) {
+    nativeAudioTracks.value = tracks;
+}
+
+function onNativeAudioChange(id: string) {
+    playerRef.value?.setAudioTrack(id);
+}
+
+function nativeAudioLabel(t: AudioTrackInfo): string {
+    const parts: string[] = [];
+    if (t.label) parts.push(t.label);
+    if (t.language && t.language !== t.label) parts.push(`(${t.language})`);
+    return parts.join(' ') || t.id;
+}
+
+async function fetchPreviewAudioTracks() {
+    if (!sessionToken.value || !encodingApiUrl.value) return;
+    try {
+        const res = await fetch(
+            `${encodingApiUrl.value}/api/sessions/${sessionId.value}/preview/audio-tracks?token=${sessionToken.value}`,
+        );
+        if (res.ok) {
+            const tracks = await res.json();
+            previewAudioTracks.value = tracks;
+            const defaultTrack = tracks.find((t: PreviewAudioTrack) => t.isDefault);
+            if (defaultTrack) selectedAudioTrack.value = defaultTrack.index;
+        }
+    } catch {
+        // Preview audio tracks not available — single track
+    }
+}
+
+const previewPlaybackUrl = computed(() => {
+    if (!sessionToken.value || !encodingApiUrl.value) return null;
+    const s = currentStatus.value;
+    if (!s || s === 'created' || s === 'uploading') return null;
+    let url = `${encodingApiUrl.value}/api/sessions/${sessionId.value}/preview/playlist.m3u8?token=${sessionToken.value}`;
+    if (previewAudioTracks.value.length > 1) {
+        url += `&audio=${selectedAudioTrack.value}`;
+    }
+    return url;
+});
+
+// Fetch audio tracks when preview becomes available
+watch(previewPlaybackUrl, (url) => {
+    if (url && previewAudioTracks.value.length === 0) {
+        fetchPreviewAudioTracks();
+    }
+});
+
+// Active playback URL — preview during encoding, S3 after completion (ABR)
+// For encrypted sessions, wait for the encryption key before switching to S3
+// (otherwise the player loads the raw playlist with unrewritten #EXT-X-KEY URIs).
+const activePlaybackUrl = computed(() => {
+    if (isCompleted.value) {
+        const hasKey = !!(encryptionKeyHex.value || poller.encryptionKeyHex.value);
+        if (isEncrypted.value && !hasKey) return previewPlaybackUrl.value;
+        return playbackUrl.value ?? previewPlaybackUrl.value;
+    }
+    return previewPlaybackUrl.value;
 });
 
 // Display metadata from the session detail or poller
@@ -201,6 +359,22 @@ const displaySegmentFormat = computed<SegmentFormat | string | undefined>(
 // ---------------------------------------------------------------------------
 // ETA calculation
 // ---------------------------------------------------------------------------
+
+function computeEtaFromSamples(
+    samples: { time: number; progress: number }[],
+    currentProgress: number,
+    now: number,
+): { remainingSec: number } | undefined {
+    if (samples.length < 2) return undefined;
+    const oldest = samples[0];
+    const elapsed = (now - oldest.time) / 1000;
+    const progressDelta = currentProgress - oldest.progress;
+    if (progressDelta <= 0 || elapsed <= 0) return undefined;
+    const rate = progressDelta / elapsed;
+    const remainingSec = (100 - currentProgress) / rate;
+    if (remainingSec < 0 || !isFinite(remainingSec)) return undefined;
+    return { remainingSec };
+}
 
 const etaSamples: { time: number; progress: number }[] = [];
 const etaDisplay = ref<string | undefined>();
@@ -222,27 +396,12 @@ watch(
             etaSamples.shift();
         }
 
-        if (etaSamples.length < 2) {
+        const eta = computeEtaFromSamples(etaSamples, encodingProgress, now);
+        if (!eta) {
             etaDisplay.value = undefined;
             return;
         }
-
-        const oldest = etaSamples[0];
-        const elapsed = (now - oldest.time) / 1000;
-        const progressDelta = encodingProgress - oldest.progress;
-
-        if (progressDelta <= 0 || elapsed <= 0) {
-            etaDisplay.value = undefined;
-            return;
-        }
-
-        const rate = progressDelta / elapsed;
-        const remainingSec = (100 - encodingProgress) / rate;
-
-        if (remainingSec < 0 || !isFinite(remainingSec)) {
-            etaDisplay.value = undefined;
-            return;
-        }
+        const { remainingSec } = eta;
 
         const remainingLabel =
             remainingSec >= 3600
@@ -260,6 +419,53 @@ watch(
         etaDisplay.value = `${remainingLabel} \u00B7 Est. completion: ${timeStr}`;
     },
 );
+
+// URL ingest ETA — separate sample buffer from the encoding ETA so the two
+// phases don't pollute each other (rates differ by orders of magnitude).
+const ingestEtaSamples: { time: number; progress: number }[] = [];
+const ingestEtaDisplay = ref<string | undefined>();
+
+watch(
+    () => ({ status: currentStatus.value, progress: poller.progress.value }),
+    ({ status, progress }) => {
+        if (status !== 'uploading' || progress == null || progress <= 0) {
+            ingestEtaSamples.length = 0;
+            ingestEtaDisplay.value = undefined;
+            return;
+        }
+
+        const now = Date.now();
+        ingestEtaSamples.push({ time: now, progress });
+
+        const cutoff = now - 30_000;
+        while (ingestEtaSamples.length > 1 && ingestEtaSamples[0].time < cutoff) {
+            ingestEtaSamples.shift();
+        }
+
+        const eta = computeEtaFromSamples(ingestEtaSamples, progress, now);
+        if (!eta) {
+            ingestEtaDisplay.value = undefined;
+            return;
+        }
+        const { remainingSec } = eta;
+
+        const remainingLabel =
+            remainingSec >= 3600
+                ? `~${Math.round(remainingSec / 3600)} hr remaining`
+                : remainingSec >= 60
+                  ? `~${Math.round(remainingSec / 60)} min remaining`
+                  : `~${Math.round(remainingSec)} sec remaining`;
+
+        const completionTime = new Date(now + remainingSec * 1000);
+        const timeStr = completionTime.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+
+        ingestEtaDisplay.value = `${remainingLabel} \u00B7 Est. completion: ${timeStr}`;
+    },
+);
+
 
 // ---------------------------------------------------------------------------
 // Player — angle switching, playback URL, copy, files
@@ -368,7 +574,7 @@ async function copyEncryptionKey() {
 const deleting = ref(false);
 
 const hasS3Files = computed(
-    () => !!session.value?.files?.length && !!session.value?.s3ConfigId,
+    () => !!session.value?.s3ConfigId && !!(session.value?.s3Config?.pathPrefix || session.value?.files?.length),
 );
 
 async function onConfirmDelete(withFiles: boolean) {
@@ -573,10 +779,7 @@ async function fetchSession() {
 // ---------------------------------------------------------------------------
 
 async function handleStatusAfterLoad(status: string) {
-    if ((status === 'created' || status === 'uploading') && !activeUpload.value) {
-        // Upload happening elsewhere -- poll SaaS until status changes
-        startSaasPoll();
-    } else if (status === 'uploaded' && isActiveSession.value) {
+    if (status === 'uploaded' && isActiveSession.value) {
         // Fetch probe results from encoding API
         await fetchProbeResults();
     } else if (
@@ -585,40 +788,20 @@ async function handleStatusAfterLoad(status: string) {
     ) {
         // Start poller for encoding progress
         poller.start(sessionId.value, encodingApiUrl.value!, sessionToken.value!);
+    } else if (
+        (status === 'created' || status === 'uploading') &&
+        isActiveSession.value &&
+        !activeUploads.uploads.value[sessionId.value]
+    ) {
+        // No client-side upload tracked — ingest is happening server-side
+        // (URL download or initiated from another tab). Poller delivers the
+        // server-emitted progress events and the eventual flip to 'uploaded'.
+        poller.start(sessionId.value, encodingApiUrl.value!, sessionToken.value!);
     }
     // completed / failed / imported / expired => no additional setup needed
 }
 
 // ---------------------------------------------------------------------------
-// SaaS polling (for when upload is happening elsewhere)
-// ---------------------------------------------------------------------------
-
-function startSaasPoll() {
-    stopSaasPoll();
-    saasPollTimer = setInterval(async () => {
-        try {
-            const token = await getAccessTokenSilently();
-            const detail = await getSessionDetail(token, sessionId.value);
-            session.value = detail;
-            sessionToken.value = detail.sessionToken ?? null;
-            encodingApiUrl.value = detail.encodingApiUrl ?? null;
-
-            if (detail.status !== 'created' && detail.status !== 'uploading') {
-                stopSaasPoll();
-                await handleStatusAfterLoad(detail.status);
-            }
-        } catch {
-            // Ignore poll errors, retry on next interval
-        }
-    }, 3000);
-}
-
-function stopSaasPoll() {
-    if (saasPollTimer) {
-        clearInterval(saasPollTimer);
-        saasPollTimer = null;
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Fetch probe results from Encoding API
@@ -652,6 +835,11 @@ async function pollForProbe(
 ): Promise<ProbeResult | null> {
     for (let i = 0; i < 60; i++) {
         const data = await getSessionStatus(apiUrl, sid, token);
+        // Update session status from encoding API so the UI reflects
+        // the actual state (e.g. 'uploaded' after probe completes)
+        if (session.value && data.status) {
+            session.value = { ...session.value, status: data.status };
+        }
         if (data.probeResult) return data.probeResult;
         await new Promise((r) => setTimeout(r, 500));
     }
@@ -671,19 +859,50 @@ async function onEncodeSubmit(config: EncodeConfig) {
     try {
         encodingType.value = config.type;
 
-        // Strip audioTrackMetadata before sending to API
+        // If upload is still in progress, wait for it to complete
+        if (activeUpload.value && !activeUpload.value.done) {
+            await activeUpload.value.promise;
+        }
+
+        // Wait for status to become 'uploaded' (probe may still be running)
+        if (currentStatus.value !== 'uploaded') {
+            await new Promise<void>((resolve, reject) => {
+                const timeout = setTimeout(() => reject(new Error('Timed out waiting for upload to complete')), 120_000);
+                const unwatch = watch(currentStatus, (s) => {
+                    if (s === 'uploaded') {
+                        clearTimeout(timeout);
+                        unwatch();
+                        resolve();
+                    } else if (s === 'failed') {
+                        clearTimeout(timeout);
+                        unwatch();
+                        reject(new Error('Upload failed'));
+                    }
+                }, { immediate: true });
+            });
+        }
+
+        // Strip audioTrackMetadata before sending to API, add trim segments
         const { audioTrackMetadata: _, ...apiConfig } = config;
+        const submitConfig = trimSegments.value.length > 0
+            ? { ...apiConfig, trimSegments: trimSegments.value }
+            : apiConfig;
         await startEncode(
             encodingApiUrl.value,
             sessionId.value,
-            apiConfig,
+            submitConfig,
             sessionToken.value,
         );
 
-        // Save config for future reuse
+        // Save config for future reuse (strip trimSegments — session-specific)
         if (probeResult.value) {
             const layoutKey = computeLayoutKey(probeResult.value, config.type);
             saveConfig(layoutKey, config);
+        }
+
+        // Reload preview with filtered playlist when trim segments are active
+        if (trimSegments.value.length > 0 && playerRef.value && previewPlaybackUrl.value) {
+            playerRef.value.setSource(previewPlaybackUrl.value);
         }
 
         // Start polling for encoding progress
@@ -734,22 +953,13 @@ async function onCancelEncode() {
 }
 
 // ---------------------------------------------------------------------------
-// Watch for terminal status from poller (fetch encryption key)
+// Watch for encryption key from poller (included in completion SSE event)
 // ---------------------------------------------------------------------------
 
 watch(
-    () => poller.status.value,
-    async (status) => {
-        if (status === 'completed' && !encryptionKeyHex.value) {
-            try {
-                const token = await getAccessTokenSilently();
-                const detail = await getSessionDetail(token, sessionId.value);
-                encryptionKeyHex.value = detail.encryptionKeyHex;
-                session.value = detail;
-            } catch {
-                // Non-critical -- key display is informational
-            }
-        }
+    () => poller.encryptionKeyHex.value,
+    (key) => {
+        if (key) encryptionKeyHex.value = key;
     },
 );
 
@@ -760,10 +970,71 @@ watch(
     () => activeUpload.value?.done,
     (done) => {
         if (done && !activeUpload.value?.error) {
-            startSaasPoll();
+            // Poll encoding API for probe results after upload completes
+            if (encodingApiUrl.value && sessionToken.value) {
+                fetchProbeResults();
+            }
         }
     },
 );
+
+// URL-ingest path: no client-side upload entry exists, so the tus-completion
+// watch above never fires. Watch the poller's status flip to 'uploaded' and
+// fetch probe results from the same handler.
+watch(
+    () => poller.status.value,
+    (status, prev) => {
+        if (status === 'uploaded' && prev !== 'uploaded' && !probeResult.value) {
+            if (encodingApiUrl.value && sessionToken.value) {
+                fetchProbeResults();
+            }
+        }
+    },
+);
+
+// ---------------------------------------------------------------------------
+// Chapter editor — load / save / discard
+// ---------------------------------------------------------------------------
+
+// Load chapters once a post-submit state is reached (preview is then live).
+// Uploaded / uploading / created phases use the trim editor on a separate branch.
+const isPostSubmit = computed(() => {
+    const s = currentStatus.value;
+    return s === 'queued' || s === 'encoding' || s === 'encrypting'
+        || s === 'uploading_to_s3' || s === 'completed';
+});
+
+watch(
+    [isPostSubmit, () => sessionId.value],
+    async ([active, id]) => {
+        if (!active || !id) return;
+        if (chapters.isLoaded.value) return;
+        try {
+            await chapters.load(id);
+        } catch (err) {
+            chaptersSaveError.value = err instanceof Error ? err.message : String(err);
+        }
+    },
+    { immediate: true },
+);
+
+async function onSaveChapters() {
+    chaptersSaveError.value = null;
+    try {
+        await chapters.saveRemote();
+    } catch (err) {
+        chaptersSaveError.value = err instanceof Error ? err.message : String(err);
+    }
+}
+
+async function onDiscardChapters() {
+    chaptersSaveError.value = null;
+    try {
+        await chapters.discardLocal();
+    } catch (err) {
+        chaptersSaveError.value = err instanceof Error ? err.message : String(err);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Lifecycle
@@ -772,8 +1043,8 @@ watch(
 onMounted(fetchSession);
 
 onUnmounted(() => {
-    stopSaasPoll();
     poller.stop();
+    chapters.unload();
 });
 </script>
 
@@ -884,6 +1155,30 @@ onUnmounted(() => {
                     </div>
                 </div>
 
+                <!-- ============================================================ -->
+                <!-- Source file preview (visible throughout lifecycle when File   -->
+                <!-- was registered in this browser session)                       -->
+                <!-- ============================================================ -->
+                <!-- Unified HLS player — shows local preview during upload/encoding,
+                     swaps to S3 output when encoding completes -->
+                <div v-if="activePlaybackUrl" class="mb-4">
+                    <HlsPlayer
+                        ref="playerRef"
+                        :playback-url="activePlaybackUrl"
+                        :thumbnail-vtt-url="isCompleted ? thumbnailVttUrl : undefined"
+                        :encoding-type="encodingType"
+                        :is-audio-only="isAudioOnly"
+                        :encryption-key-hex="isCompleted ? (encryptionKeyHex || poller.encryptionKeyHex.value) : undefined"
+                        :show-controls="false"
+                        preserve-state-on-source-change
+                        @quality-levels="onPreviewQualityLevels"
+                        @playing-change="isPreviewPlaying = $event"
+                        @duration-change="playerDuration = $event"
+                        @audio-tracks="onNativeAudioTracks"
+                    />
+                </div>
+
+
                 <!-- Submission error banner -->
                 <div
                     v-if="submissionError"
@@ -893,11 +1188,13 @@ onUnmounted(() => {
                 </div>
 
                 <!-- ============================================================ -->
-                <!-- STATUS: created / uploading — local upload in progress       -->
+                <!-- Upload progress (shown independently — not exclusive with    -->
+                <!-- the encode config form, which can appear during upload when   -->
+                <!-- early probe results are available from moov extraction)       -->
                 <!-- ============================================================ -->
-                <div v-if="showUploadProgress" class="mb-4">
+                <div v-if="showUploadProgress && !showProbeConfig" class="mb-4">
                     <ProgressBar
-                        :label="activeUpload!.progress >= 100 ? 'Analyzing...' : 'Uploading...'"
+                        :label="activeUpload!.progress >= 100 ? 'Finalizing upload...' : 'Uploading...'"
                         :progress="activeUpload!.progress"
                         :indeterminate="activeUpload!.progress >= 100"
                     />
@@ -914,13 +1211,32 @@ onUnmounted(() => {
                 </div>
 
                 <!-- STATUS: upload done, waiting for probe -->
-                <div v-else-if="showUploadDoneWaiting" class="mb-4">
+                <div v-else-if="showUploadDoneWaiting && !showProbeConfig" class="mb-4">
                     <ProgressBar label="Analyzing..." indeterminate />
                 </div>
 
-                <!-- STATUS: created / uploading — upload started elsewhere -->
+                <!-- STATUS: created / uploading — upload happening server-side
+                     (URL ingest) or initiated from another browser tab -->
                 <div v-else-if="showUploadRemoteMessage" class="mb-4">
-                    <ProgressBar label="Uploading..." indeterminate subtitle="Started elsewhere" />
+                    <p v-if="ingestEtaDisplay" class="mb-2 text-xs text-zinc-500 text-right">
+                        {{ ingestEtaDisplay }}
+                    </p>
+                    <ProgressBar
+                        v-if="remoteIngestProgress !== undefined"
+                        :label="remoteIngestLabel"
+                        :progress="remoteIngestProgress"
+                    />
+                    <ProgressBar
+                        v-else-if="poller.ingestTotalBytes.value != null"
+                        :label="remoteIngestLabel"
+                        indeterminate
+                    />
+                    <ProgressBar
+                        v-else
+                        label="Uploading..."
+                        indeterminate
+                        subtitle="Started elsewhere"
+                    />
                 </div>
 
                 <!-- ============================================================ -->
@@ -935,15 +1251,73 @@ onUnmounted(() => {
                 </div>
 
                 <!-- ============================================================ -->
-                <!-- STATUS: uploaded — encode config form                        -->
+                <!-- Encode config form (shown after probe, including during      -->
+                <!-- upload when early probe results arrived via moov)             -->
                 <!-- ============================================================ -->
-                <EncodeConfigForm
-                    v-else-if="showProbeConfig"
-                    :probe-result="probeResult!"
-                    :byte-range="byteRangeEnabled"
-                    @submit="onEncodeSubmit"
-                    @back="onEncodeBack"
-                />
+                <template v-if="showProbeConfig">
+                    <!-- Compact upload progress bar when config form is visible -->
+                    <div v-if="showUploadProgress" class="mb-4">
+                        <ProgressBar
+                            :label="activeUpload!.progress >= 100 ? 'Finalizing upload...' : 'Uploading...'"
+                            :progress="activeUpload!.progress"
+                            :indeterminate="activeUpload!.progress >= 100"
+                        />
+                    </div>
+
+                    <!-- Segment editor (trim/cut) -->
+                    <SegmentEditor
+                        v-if="activePlaybackUrl && probeResult?.format?.duration"
+                        v-model="editorSegments"
+                        mode="trim"
+                        :duration="probeResult.format.duration"
+                        :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
+                        :on-seek="(t) => playerRef?.seek(t)"
+                        :on-play-pause="() => playerRef?.togglePlay()"
+                        :is-playing="isPreviewPlaying"
+                    >
+                        <template v-if="previewAudioTracks.length > 1" #playback-start>
+                            <label class="text-xs text-zinc-400">Audio:</label>
+                            <select
+                                v-model.number="selectedAudioTrack"
+                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                            >
+                                <option
+                                    v-for="track in previewAudioTracks"
+                                    :key="track.index"
+                                    :value="track.index"
+                                >{{ audioTrackLabel(track) }}</option>
+                            </select>
+                        </template>
+                        <template
+                            v-if="previewQualityLevels.length > 1 && encodingType !== 'audio'"
+                            #playback-end
+                        >
+                            <label class="text-xs text-zinc-400">Quality:</label>
+                            <select
+                                :value="selectedQualityId"
+                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                @change="onQualityChange(($event.target as HTMLSelectElement).value || null)"
+                            >
+                                <option :value="''">Auto</option>
+                                <option
+                                    v-for="level in previewQualityLevels"
+                                    :key="level.id"
+                                    :value="level.id"
+                                >
+                                    {{ level.height > 0 ? `${level.height}p` : `${Math.round(level.bitrate / 1000)}kbps` }}
+                                </option>
+                            </select>
+                        </template>
+                    </SegmentEditor>
+
+                    <EncodeConfigForm
+                        ref="configFormRef"
+                        :probe-result="probeResult!"
+                        :byte-range="byteRangeEnabled"
+                        @submit="onEncodeSubmit"
+                        @back="onEncodeBack"
+                    />
+                </template>
 
                 <!-- ============================================================ -->
                 <!-- Submitting encoding config spinner                           -->
@@ -961,6 +1335,103 @@ onUnmounted(() => {
                 <!-- ============================================================ -->
                 <template v-else-if="showEncoding || isCompleted || currentStatus === 'failed'">
 
+                    <!-- Chapter editor (sidecar). Available throughout encoding and after completion.
+                         Uses player-reported duration so trimmed encodes and imported sessions both
+                         render with the correct timeline length. -->
+                    <SegmentEditor
+                        v-if="activePlaybackUrl && chapterTimelineDuration > 0 && currentStatus !== 'failed'"
+                        v-model="chapterSegments"
+                        mode="chapters"
+                        :duration="chapterTimelineDuration"
+                        :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
+                        :on-seek="(t) => playerRef?.seek(t)"
+                        :on-play-pause="() => playerRef?.togglePlay()"
+                        :is-playing="isPreviewPlaying"
+                        :ripple-edit="false"
+                        title="Chapters"
+                        class="mb-4"
+                    >
+                        <!-- Audio track selector.
+                             During preview the on-demand HLS bakes one audio track in per
+                             playlist URL, so we still drive it via the existing URL-based
+                             selectedAudioTrack. After encoding completes the final HLS master
+                             carries every track natively, so we drive Video.js directly. -->
+                        <template
+                            v-if="(isCompleted && nativeAudioTracks.length > 1) || (!isCompleted && previewAudioTracks.length > 1)"
+                            #playback-start
+                        >
+                            <label class="text-xs text-zinc-400">Audio:</label>
+                            <select
+                                v-if="isCompleted"
+                                :value="selectedNativeAudioId ?? ''"
+                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                @change="onNativeAudioChange(($event.target as HTMLSelectElement).value)"
+                            >
+                                <option
+                                    v-for="track in nativeAudioTracks"
+                                    :key="track.id"
+                                    :value="track.id"
+                                >{{ nativeAudioLabel(track) }}</option>
+                            </select>
+                            <select
+                                v-else
+                                v-model.number="selectedAudioTrack"
+                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                            >
+                                <option
+                                    v-for="track in previewAudioTracks"
+                                    :key="track.index"
+                                    :value="track.index"
+                                >{{ audioTrackLabel(track) }}</option>
+                            </select>
+                        </template>
+
+                        <!-- Video quality selector (drives VHS qualityLevel.enabled directly). -->
+                        <template
+                            v-if="previewQualityLevels.length > 1 && encodingType !== 'audio'"
+                            #playback-end
+                        >
+                            <label class="text-xs text-zinc-400">Quality:</label>
+                            <select
+                                :value="selectedQualityId ?? ''"
+                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                @change="onQualityChange(($event.target as HTMLSelectElement).value || null)"
+                            >
+                                <option :value="''">Auto</option>
+                                <option
+                                    v-for="level in previewQualityLevels"
+                                    :key="level.id"
+                                    :value="level.id"
+                                >
+                                    {{ level.height > 0 ? `${level.height}p` : `${Math.round(level.bitrate / 1000)}kbps` }}
+                                </option>
+                            </select>
+                        </template>
+
+                        <template #toolbar-end>
+                            <span
+                                v-if="chapters.isDirty.value"
+                                class="rounded bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-300"
+                                title="Unsaved changes are stored locally; click Save to commit to S3."
+                            >Unsaved</span>
+                            <button
+                                v-if="chapters.isDirty.value"
+                                type="button"
+                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                :disabled="chapters.isSaving.value"
+                                @click="onDiscardChapters"
+                            >Discard</button>
+                            <button
+                                type="button"
+                                class="rounded border border-indigo-600 bg-indigo-600/30 px-3 py-1 text-xs font-medium text-indigo-200 transition-colors hover:bg-indigo-600/50 disabled:cursor-not-allowed disabled:opacity-50"
+                                :disabled="!chapters.isDirty.value || chapters.isSaving.value"
+                                @click="onSaveChapters"
+                            >{{ chapters.isSaving.value ? 'Saving…' : 'Save' }}</button>
+                        </template>
+                    </SegmentEditor>
+
+                    <p v-if="chaptersSaveError" class="mb-3 text-xs text-red-400">{{ chaptersSaveError }}</p>
+
                     <!-- Queue position -->
                     <div v-if="poller.status.value === 'queued' && poller.queuePosition.value != null" class="mb-4 rounded-lg bg-zinc-900/60 p-4">
                         <p class="text-sm text-zinc-400">
@@ -973,6 +1444,10 @@ onUnmounted(() => {
                         v-if="poller.status.value === 'encoding' || poller.status.value === 'encrypting' || poller.status.value === 'uploading_to_s3'"
                         class="mb-4 space-y-3"
                     >
+                        <!-- ETA (based on encoding progress) -->
+                        <p v-if="etaDisplay" class="text-xs text-zinc-500 text-right">
+                            {{ etaDisplay }}
+                        </p>
                         <!-- Encoding progress -->
                         <ProgressBar
                             label="Encoding"
@@ -990,10 +1465,6 @@ onUnmounted(() => {
                             label="Uploading to S3"
                             :progress="poller.pipelineProgress.value.uploading"
                         />
-                        <!-- ETA -->
-                        <p v-if="etaDisplay" class="text-xs text-zinc-500 text-right">
-                            {{ etaDisplay }}
-                        </p>
                     </div>
 
                     <!-- Failed banner -->
@@ -1028,15 +1499,7 @@ onUnmounted(() => {
                             </div>
                         </div>
 
-                        <!-- Video player -->
-                        <HlsPlayer
-                            ref="playerRef"
-                            :playback-url="playbackUrl"
-                            :thumbnail-vtt-url="thumbnailVttUrl"
-                            :encoding-type="encodingType"
-                            :is-audio-only="isAudioOnly"
-                            :encryption-key-hex="encryptionKeyHex"
-                        />
+                        <!-- Video player is now unified at the top of the page -->
 
                         <!-- Master Playlist URL + Copy -->
                         <div v-if="displayMasterPlaylist" class="rounded-lg bg-zinc-900/60 p-4">
@@ -1309,6 +1772,7 @@ onUnmounted(() => {
                         New Session
                     </button>
                 </div>
+
             </template>
         </div>
     </div>

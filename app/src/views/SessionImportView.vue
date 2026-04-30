@@ -18,13 +18,12 @@ const s3Configs = ref<S3ConfigOption[]>([]);
 const loadingConfigs = ref(true);
 
 const selectedS3ConfigId = ref('');
-const importMode = ref<'masterPlaylist' | 'folderPrefix'>('masterPlaylist');
-const masterPlaylistKey = ref('');
-const folderPrefix = ref('');
+const location = ref('');
 const encryptionKey = ref('');
 
 const submitting = ref(false);
 const error = ref<string | null>(null);
+const successMessage = ref<string | null>(null);
 
 async function fetchS3Configs() {
     loadingConfigs.value = true;
@@ -46,8 +45,7 @@ async function fetchS3Configs() {
 
 function isValid(): boolean {
     if (!selectedS3ConfigId.value) return false;
-    if (importMode.value === 'masterPlaylist' && !masterPlaylistKey.value.trim()) return false;
-    if (importMode.value === 'folderPrefix' && !folderPrefix.value.trim()) return false;
+    if (!location.value.trim()) return false;
     return true;
 }
 
@@ -62,10 +60,13 @@ async function handleSubmit() {
             s3ConfigId: selectedS3ConfigId.value,
         };
 
-        if (importMode.value === 'masterPlaylist') {
-            data.masterPlaylistKey = masterPlaylistKey.value.trim();
+        // Single field — server detects whether it's a master playlist key
+        // (ends with .m3u8) or a folder prefix.
+        const value = location.value.trim();
+        if (value.endsWith('.m3u8')) {
+            data.masterPlaylistKey = value;
         } else {
-            data.folderPrefix = folderPrefix.value.trim();
+            data.folderPrefix = value;
         }
 
         if (encryptionKey.value.trim()) {
@@ -74,6 +75,12 @@ async function handleSubmit() {
 
         const result = await importSession(token, data);
         const sessionId = result.id || result.sessionId;
+        const langs: string[] = Array.isArray(result.chaptersLanguages) ? result.chaptersLanguages : [];
+        if (langs.length > 0) {
+            successMessage.value = `Chapters detected: ${langs.join(', ')}`;
+            // Brief pause so the message is visible before navigation.
+            await new Promise((r) => setTimeout(r, 900));
+        }
         router.push(`/sessions/${sessionId}`);
     } catch (e) {
         error.value = e instanceof Error ? e.message : String(e);
@@ -134,51 +141,19 @@ onMounted(fetchS3Configs);
                     </p>
                 </div>
 
-                <!-- Import mode radio -->
+                <!-- Location: either a master playlist key or a folder prefix -->
                 <div>
-                    <label class="mb-2 block text-xs text-zinc-500">Import By</label>
-                    <div class="flex items-center gap-6">
-                        <label class="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
-                            <input
-                                type="radio"
-                                v-model="importMode"
-                                value="masterPlaylist"
-                                class="accent-indigo-500"
-                            />
-                            Master playlist key
-                        </label>
-                        <label class="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
-                            <input
-                                type="radio"
-                                v-model="importMode"
-                                value="folderPrefix"
-                                class="accent-indigo-500"
-                            />
-                            Folder prefix
-                        </label>
-                    </div>
-                </div>
-
-                <!-- Master playlist key input -->
-                <div v-if="importMode === 'masterPlaylist'">
-                    <label class="mb-1 block text-xs text-zinc-500">Master Playlist Key</label>
+                    <label class="mb-1 block text-xs text-zinc-500">Location</label>
                     <input
-                        v-model="masterPlaylistKey"
+                        v-model="location"
                         type="text"
                         class="input"
-                        placeholder="path/to/master.m3u8"
+                        placeholder="path/to/master.m3u8 or path/to/folder/"
                     />
-                </div>
-
-                <!-- Folder prefix input -->
-                <div v-if="importMode === 'folderPrefix'">
-                    <label class="mb-1 block text-xs text-zinc-500">Folder Prefix</label>
-                    <input
-                        v-model="folderPrefix"
-                        type="text"
-                        class="input"
-                        placeholder="path/to/output/"
-                    />
+                    <p class="mt-1 text-xs text-zinc-500">
+                        Paste a playlist URL or folder path. The folder will be scanned for
+                        all top-level HLS playlists, each imported as a separate angle.
+                    </p>
                 </div>
 
                 <!-- Encryption key (optional) -->
@@ -198,6 +173,11 @@ onMounted(fetchS3Configs);
                 <!-- Error -->
                 <div v-if="error" class="rounded-lg bg-red-950/40 border border-red-800/50 p-3">
                     <p class="text-sm text-red-400">{{ error }}</p>
+                </div>
+
+                <!-- Success hint (shown briefly before navigating) -->
+                <div v-if="successMessage" class="rounded-lg bg-emerald-950/40 border border-emerald-800/50 p-3">
+                    <p class="text-sm text-emerald-300">{{ successMessage }}</p>
                 </div>
 
                 <!-- Actions -->

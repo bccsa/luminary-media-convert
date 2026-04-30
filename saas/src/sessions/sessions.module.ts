@@ -6,6 +6,7 @@ import { AdminSessionsController } from './admin-sessions.controller.js';
 import { SessionCleanupService } from './session-cleanup.service.js';
 import { SessionEventsService } from './session-events.service.js';
 import { HlsParserService } from './hls-parser.service.js';
+import { HlsEditClient } from './hls-edit.client.js';
 import { S3ClientService } from './s3-client.service.js';
 
 @Module({
@@ -15,6 +16,7 @@ import { S3ClientService } from './s3-client.service.js';
         SessionCleanupService,
         SessionEventsService,
         HlsParserService,
+        HlsEditClient,
         S3ClientService,
     ],
     controllers: [SessionsController, AdminSessionsController],

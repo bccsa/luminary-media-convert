@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { existsSync } from 'fs';
 import { rm } from 'fs/promises';
 import { join, posix } from 'path';
 import { SessionService, type Session } from './session.service.js';
@@ -8,6 +9,7 @@ import { ThumbnailService } from './thumbnail.service.js';
 import { S3Service } from './s3.service.js';
 import { WebhookService } from './webhook.service.js';
 import { SegmentPipelineService, type PipelineProgress } from './segment-pipeline.service.js';
+
 import type { WebhookPayloadDto } from '../dto/webhook-payload.dto.js';
 
 @Injectable()
@@ -76,7 +78,24 @@ export class EncodeService {
                 : '';
 
             // Current pipeline progress state (updated by both FFmpeg and pipeline callbacks)
-            const currentProgress: PipelineProgress = { encoding: 0 };
+            // Initialize all bars so the UI shows them from the start
+            const currentProgress: PipelineProgress = {
+                encoding: 0,
+                ...(encryptionEnabled ? { encrypting: 0 } : {}),
+                uploading: 0,
+            };
+
+            // Estimate total segments for progress calculation:
+            // numStreams * ceil(duration / segmentDuration)
+            const segDur = session.encodeConfig.segmentDuration ?? 6;
+            const duration = session.probeResult?.format?.duration ?? 0;
+            const numStreams =
+                (session.encodeConfig.videoRenditions?.length ?? 0) +
+                (session.encodeConfig.audioGroups?.length ?? 0);
+            const estimatedTotalSegments =
+                numStreams > 0 && duration > 0
+                    ? numStreams * Math.ceil(duration / segDur)
+                    : undefined;
 
             // Create and start the streaming segment pipeline
             const pipeline = this.segmentPipelineService.createPipeline({
@@ -88,9 +107,10 @@ export class EncodeService {
                 byteRange: session.config.byteRange !== false,
                 byteRangeMaxFileSizeBytes:
                     (session.config.byteRangeMaxFileSizeMB ?? 500) * 1024 * 1024,
+                estimatedTotalSegments,
                 onProgress: (pipelineUpdate) => {
-                    currentProgress.encrypting = pipelineUpdate.encrypting;
-                    currentProgress.uploading = pipelineUpdate.uploading;
+                    if (pipelineUpdate.encrypting != null) currentProgress.encrypting = pipelineUpdate.encrypting;
+                    if (pipelineUpdate.uploading != null) currentProgress.uploading = pipelineUpdate.uploading;
                     this.sessionService.updatePipelineProgress(
                         sessionId,
                         { ...currentProgress },
@@ -153,18 +173,25 @@ export class EncodeService {
                 session.config.thumbnails !== false
             ) {
                 try {
+                    const concatFilePath = join(outputDir, 'concat.txt');
+                    const hasConcatFile = existsSync(concatFilePath);
+                    const trimmedDuration = session.encodeConfig.trimSegments?.length
+                        ? session.encodeConfig.trimSegments.reduce((sum, s) => sum + (s.outSec - s.inSec), 0)
+                        : undefined;
+
                     const thumbResult =
                         await this.thumbnailService.generateThumbnails({
                             inputPath: session.filePath!,
                             outputDir,
-                            duration:
-                                session.probeResult?.format?.duration ?? 0,
+                            duration: trimmedDuration
+                                ?? session.probeResult?.format?.duration ?? 0,
                             sourceWidth:
                                 session.probeResult?.videoTracks?.[0]?.width ??
                                 1920,
                             sourceHeight:
                                 session.probeResult?.videoTracks?.[0]?.height ??
                                 1080,
+                            concatFilePath: hasConcatFile ? concatFilePath : undefined,
                         });
                     if (thumbResult) {
                         thumbnailsVttRelPath = thumbResult.vttRelativePath;
@@ -227,6 +254,7 @@ export class EncodeService {
                 anglePlaylistsWithKeys.length > 0 ? anglePlaylistsWithKeys : undefined,
                 thumbnailsVttKey,
                 encodeResult.segmentFormat,
+                encryptionKey ? encryptionKey.toString('hex') : undefined,
             );
             await this.sendWebhook(session, {
                 sessionId,
@@ -259,6 +287,9 @@ export class EncodeService {
                 message: 'Encoding failed',
             });
         } finally {
+            // Don't destroy preview here — the client may still be
+            // transitioning from the preview URL to S3 playback.
+            // Preview state is cleaned up on session deletion.
             await this.cleanupSessionFiles(sessionId, session);
         }
     }

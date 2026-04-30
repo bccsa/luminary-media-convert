@@ -180,10 +180,54 @@ describe('ProbeService', () => {
             const result = await service.probe('/tmp/test.mkv');
 
             expect(mockExecFile).toHaveBeenCalledTimes(2);
-            // 300000 bytes * 8 / 60s / 1000 = 40 kbps for video
-            expect(result.videoTracks[0].bitrateKbps).toBe(40);
-            // 20000 bytes * 8 / 60s / 1000 ≈ 3 kbps for audio
-            expect(result.audioTracks[0].bitrateKbps).toBe(3);
+            // sampleDuration = Math.min(10, 60) = 10
+            // 300000 bytes * 8 / 10s / 1000 = 240 kbps for video
+            expect(result.videoTracks[0].bitrateKbps).toBe(240);
+            // 20000 bytes * 8 / 10s / 1000 = 16 kbps for audio
+            expect(result.audioTracks[0].bitrateKbps).toBe(16);
+        });
+
+        it('should pass -read_intervals flag to ffprobe for packet-based computation', async () => {
+            mockExecFileSequence([
+                makeFfprobeOutput({
+                    streams: [
+                        { index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, avg_frame_rate: '30/1' },
+                    ],
+                    format: { duration: '60.0', bit_rate: '5000000', format_name: 'matroska,webm' },
+                }),
+                '0,500000\n',
+            ]);
+
+            await service.probe('/tmp/test.mkv');
+
+            expect(mockExecFile).toHaveBeenCalledTimes(2);
+            const secondCallArgs = mockExecFile.mock.calls[1][1] as string[];
+            expect(secondCallArgs).toContain('-read_intervals');
+            expect(secondCallArgs).toContain('%+10');
+        });
+
+        it('should use actual duration as sampleDuration when duration < 10', async () => {
+            mockExecFileSequence([
+                makeFfprobeOutput({
+                    streams: [
+                        { index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, avg_frame_rate: '30/1' },
+                        { index: 1, codec_type: 'audio', codec_name: 'aac', channels: 2, sample_rate: '48000' },
+                    ],
+                    format: { duration: '5.0', bit_rate: '5000000', format_name: 'matroska,webm' },
+                }),
+                '0,100000\n0,100000\n0,100000\n1,10000\n1,10000\n',
+            ]);
+
+            const result = await service.probe('/tmp/short.mkv');
+
+            // sampleDuration = Math.min(10, 5) = 5
+            const secondCallArgs = mockExecFile.mock.calls[1][1] as string[];
+            expect(secondCallArgs).toContain('-read_intervals');
+            expect(secondCallArgs).toContain('%+5');
+            // 300000 bytes * 8 / 5s / 1000 = 480 kbps for video
+            expect(result.videoTracks[0].bitrateKbps).toBe(480);
+            // 20000 bytes * 8 / 5s / 1000 = 32 kbps for audio
+            expect(result.audioTracks[0].bitrateKbps).toBe(32);
         });
 
         it('should skip packet computation when duration is zero', async () => {

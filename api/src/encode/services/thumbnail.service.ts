@@ -69,6 +69,7 @@ export class ThumbnailService {
         duration: number;
         sourceWidth: number;
         sourceHeight: number;
+        concatFilePath?: string;
     }): Promise<ThumbnailResult | null> {
         const format = await this.detectSpriteFormat();
         if (!format) return null;
@@ -82,11 +83,15 @@ export class ThumbnailService {
 
         const spritePattern = join(thumbnailDir, `sprite_%03d.${format.ext}`);
 
+        const inputArgs = opts.concatFilePath
+            ? ['-f', 'concat', '-safe', '0', '-i', opts.concatFilePath]
+            : ['-i', opts.inputPath];
+
         try {
             await execFileAsync(
                 'ffmpeg',
                 [
-                    '-i', opts.inputPath,
+                    ...inputArgs,
                     '-vf', `fps=1/${INTERVAL_SECONDS},scale=${THUMB_WIDTH}:${thumbHeight},tile=${COLUMNS}x${ROWS}`,
                     '-c:v', format.encoder,
                     ...format.args,

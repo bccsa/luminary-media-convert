@@ -34,6 +34,8 @@ import {
     getSessionDetail,
     updateSessionName,
     importSession,
+    hlsRead,
+    hlsMutate,
     checkPrefix,
     moveSessionFiles,
     renameSessionPrefix,
@@ -978,6 +980,66 @@ describe('api', () => {
             await expect(renameSessionPrefix('jwt-token', 's1', 'x/')).rejects.toThrow(
                 'Rename prefix failed (500)',
             );
+        });
+    });
+
+    describe('hlsRead / hlsMutate', () => {
+        it('hlsRead POSTs to the saas wrapper and returns the result', async () => {
+            const payload = {
+                master: { variants: [], media: [], audioGroups: [] },
+                etag: 'abc',
+                folderPrefix: 'out/',
+                masterPlaylistKey: 'out/master.m3u8',
+            };
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify(payload), { status: 200 }),
+            );
+
+            const result = await hlsRead('jwt', 'sess-1');
+            expect(result).toEqual(payload);
+            expect(fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/saas/sessions/sess-1/hls/read'),
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: expect.objectContaining({ Authorization: 'Bearer jwt' }),
+                }),
+            );
+        });
+
+        it('hlsMutate sends ifMatch and operations in the body', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ editVersion: 3 }), { status: 200 }),
+            );
+
+            await hlsMutate('jwt', 'sess-1', 'etag-abc', [
+                { type: 'upsertSubtitle', language: 'en', name: 'English', vttBase64: 'WEBVTT' },
+            ]);
+
+            const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as any).body);
+            expect(body.ifMatch).toBe('etag-abc');
+            expect(body.operations).toHaveLength(1);
+            expect(body.operations[0].type).toBe('upsertSubtitle');
+        });
+
+        it('hlsMutate throws HlsConflictError on 409 and exposes currentEtag', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(
+                    JSON.stringify({ message: 'mismatch', currentEtag: 'live-etag' }),
+                    { status: 409 },
+                ),
+            );
+
+            await expect(hlsMutate('jwt', 'sess-1', 'stale', [])).rejects.toMatchObject({
+                name: 'HlsConflictError',
+                currentEtag: 'live-etag',
+            });
+        });
+
+        it('hlsRead throws a generic Error on non-ok non-409 responses', async () => {
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(JSON.stringify({ message: 'nope' }), { status: 400 }),
+            );
+            await expect(hlsRead('jwt', 'sess-1')).rejects.toThrow('nope');
         });
     });
 

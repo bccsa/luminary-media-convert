@@ -22,6 +22,8 @@ export interface SegmentPipelineConfig {
     encryptionIV?: Buffer;
     byteRange: boolean;
     byteRangeMaxFileSizeBytes: number;
+    /** Estimated total segments across all streams (for progress calculation) */
+    estimatedTotalSegments?: number;
     pollIntervalMs?: number;
     uploadConcurrency?: number;
     onProgress?: (progress: PipelineProgress) => void;
@@ -41,6 +43,7 @@ interface StreamState {
     currentChunkOffset: number;
     currentChunkStream: WriteStream | null;
     currentChunkMediaFile: string;
+    currentChunkSegmentCount: number;
     byteRangeEntries: ByteRangeEntry[];
     segExt: string;
 }
@@ -49,6 +52,8 @@ interface UploadTask {
     filePath: string;
     objectKey: string;
     deleteAfterUpload: boolean;
+    /** Number of segments this upload represents (for byte-range chunks) */
+    segmentCount?: number;
 }
 
 @Injectable()
@@ -81,6 +86,7 @@ export class SegmentPipeline {
 
     private pollTimer: ReturnType<typeof setInterval> | null = null;
     private running = false;
+    private polling = false;
     private aborted = false;
     private s3Client: Minio.Client;
     private pipelineError: Error | null = null;
@@ -88,8 +94,7 @@ export class SegmentPipeline {
     // Counters for progress reporting
     private totalSegmentsProduced = 0;
     private segmentsEncrypted = 0;
-    private totalChunksReady = 0;
-    private chunksUploaded = 0;
+    private segmentsUploaded = 0;
 
     // Upload queue
     private readonly uploadQueue: UploadTask[] = [];
@@ -118,20 +123,29 @@ export class SegmentPipeline {
         if (this.running) return;
         this.running = true;
         this.pollTimer = setInterval(() => {
-            this.poll().catch((err) => {
-                this.pipelineError = err;
-                this.logger.error(
-                    `Pipeline poll error: ${(err as Error).message}`,
-                );
-            });
+            if (this.polling) return; // Skip if previous poll is still running
+            this.polling = true;
+            this.poll()
+                .catch((err) => {
+                    this.pipelineError = err;
+                    this.logger.error(
+                        `Pipeline poll error: ${(err as Error).message}`,
+                    );
+                })
+                .finally(() => {
+                    this.polling = false;
+                });
         }, this.pollIntervalMs);
     }
 
     async drain(): Promise<string[]> {
-        // Stop polling
+        // Stop polling and wait for any in-flight poll to complete
         if (this.pollTimer) {
             clearInterval(this.pollTimer);
             this.pollTimer = null;
+        }
+        while (this.polling) {
+            await new Promise((r) => setTimeout(r, 50));
         }
 
         if (this.pipelineError) throw this.pipelineError;
@@ -141,10 +155,27 @@ export class SegmentPipeline {
 
         if (this.pipelineError) throw this.pipelineError;
 
-        // Finalize all byte-range chunk streams
+        // Finalize all byte-range chunk streams and enqueue for upload
         if (this.config.byteRange) {
             for (const [streamDir, state] of this.streamStates) {
-                await this.finalizeCurrentChunk(streamDir, state);
+                if (state.currentChunkStream) {
+                    await this.finalizeCurrentChunk(streamDir, state);
+                    // Enqueue the finalized last chunk for upload
+                    const streamDirName = relative(
+                        this.config.outputDir,
+                        streamDir
+                    );
+                    const objectKey = this.objectKey(
+                        streamDirName,
+                        state.currentChunkMediaFile
+                    );
+                    this.enqueueUpload({
+                        filePath: join(streamDir, state.currentChunkMediaFile),
+                        objectKey,
+                        deleteAfterUpload: true,
+                        segmentCount: state.currentChunkSegmentCount,
+                    });
+                }
             }
         }
 
@@ -155,7 +186,9 @@ export class SegmentPipeline {
 
         // Rewrite playlists with byte-range entries
         if (this.config.byteRange) {
+            // Backfill #EXTINF lines from the now-complete playlist
             for (const [streamDir, state] of this.streamStates) {
+                await this.backfillExtinfLines(streamDir, state);
                 await this.rewritePlaylistWithByteRanges(streamDir, state);
             }
         }
@@ -216,6 +249,7 @@ export class SegmentPipeline {
                 currentChunkOffset: 0,
                 currentChunkStream: null,
                 currentChunkMediaFile: '',
+                currentChunkSegmentCount: 0,
                 byteRangeEntries: [],
                 segExt: 'm4s',
             };
@@ -239,28 +273,49 @@ export class SegmentPipeline {
             }
         }
 
-        // Read playlist to discover completed segments
-        const playlistPath = join(streamDir, 'playlist.m3u8');
-        let content: string;
+        // Discover segments from disk (not from playlist — FFmpeg with
+        // -hls_playlist_type vod only writes the playlist at the end).
+        // Scan for segment files that FFmpeg writes as encoding progresses.
+        let files: string[];
         try {
-            content = await readFile(playlistPath, 'utf-8');
+            files = await readdir(streamDir);
         } catch {
-            return; // Playlist not yet created
+            return;
         }
 
-        const segments = this.parseSegments(content);
+        const segmentFiles = files
+            .filter(
+                (f) =>
+                    f.startsWith('segment_') &&
+                    (f.endsWith('.m4s') || f.endsWith('.ts'))
+            )
+            .filter((f) => !state.processedSegments.has(f))
+            .sort();
 
-        for (const seg of segments) {
+        if (segmentFiles.length > 0) {
+            this.logger.debug(
+                `[pipeline] ${streamDirName}: found ${segmentFiles.length} new segment(s) (processed: ${state.processedSegments.size})`,
+            );
+        }
+
+        for (const filename of segmentFiles) {
             if (this.aborted || this.pipelineError) return;
-            if (state.processedSegments.has(seg.filename)) continue;
 
-            state.processedSegments.add(seg.filename);
+            const segPath = join(streamDir, filename);
+
+            // Verify the file is complete (non-zero size)
+            try {
+                const s = await stat(segPath);
+                if (s.size === 0) continue;
+            } catch {
+                continue;
+            }
+
+            state.processedSegments.add(filename);
             this.totalSegmentsProduced++;
 
-            const segPath = join(streamDir, seg.filename);
-
             // Detect segment extension from first segment
-            if (seg.filename.endsWith('.ts')) {
+            if (filename.endsWith('.ts')) {
                 state.segExt = 'ts';
             }
 
@@ -275,7 +330,7 @@ export class SegmentPipeline {
                     this.segmentsEncrypted++;
                 } catch (err) {
                     this.pipelineError = new Error(
-                        `Segment encryption failed for ${seg.filename}: ${(err as Error).message}`,
+                        `Segment encryption failed for ${filename}: ${(err as Error).message}`
                     );
                     return;
                 }
@@ -286,15 +341,12 @@ export class SegmentPipeline {
                     streamDir,
                     streamDirName,
                     state,
-                    seg,
+                    { extinfLine: '', filename },
                     segPath,
                 );
             } else {
                 // Upload individual segment
-                const objectKey = this.objectKey(
-                    streamDirName,
-                    seg.filename,
-                );
+                const objectKey = this.objectKey(streamDirName, filename);
                 this.enqueueUpload({
                     filePath: segPath,
                     objectKey,
@@ -337,12 +389,13 @@ export class SegmentPipeline {
                 filePath: join(streamDir, completedChunkFile),
                 objectKey,
                 deleteAfterUpload: true,
+                segmentCount: state.currentChunkSegmentCount,
             });
-            this.totalChunksReady++;
 
             // Start a new chunk
             state.currentChunkIndex++;
             state.currentChunkOffset = 0;
+            state.currentChunkSegmentCount = 0;
         }
 
         // Ensure we have an open write stream
@@ -366,6 +419,7 @@ export class SegmentPipeline {
             mediaFile: state.currentChunkMediaFile,
         });
         state.currentChunkOffset += segSize;
+        state.currentChunkSegmentCount++;
 
         // Delete the original segment file (data now in chunk)
         await unlink(segPath).catch(() => {});
@@ -382,6 +436,55 @@ export class SegmentPipeline {
             state.currentChunkStream!.on('finish', resolve),
         );
         state.currentChunkStream = null;
+    }
+
+    /**
+     * Read the now-complete playlist and fill in empty extinfLine values
+     * in byteRangeEntries. During encoding, segments are discovered from
+     * disk before the playlist exists, so extinfLine is stored as ''.
+     */
+    private async backfillExtinfLines(
+        streamDir: string,
+        state: StreamState
+    ): Promise<void> {
+        const playlistPath = join(streamDir, 'playlist.m3u8');
+        let content: string;
+        try {
+            content = await readFile(playlistPath, 'utf-8');
+        } catch {
+            return;
+        }
+
+        // Build a map: segment filename → #EXTINF line
+        const extinfMap = new Map<string, string>();
+        const lines = content.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].startsWith('#EXTINF:')) {
+                const filename = lines[i + 1]?.trim();
+                if (filename && !filename.startsWith('#')) {
+                    extinfMap.set(filename, lines[i]);
+                }
+            }
+        }
+
+        for (const entry of state.byteRangeEntries) {
+            if (!entry.extinfLine) {
+                entry.extinfLine = extinfMap.get(entry.mediaFile) ?? '';
+                // mediaFile is the chunk name, but the playlist has the
+                // original segment filename. Match by index instead.
+            }
+        }
+
+        // The above won't match because mediaFile is 'media_0.m4s' not
+        // 'segment_00000.m4s'. Match by order: entries are in the same
+        // order as segments in the playlist.
+        const playlistSegments = this.parseSegments(content);
+        for (let i = 0; i < state.byteRangeEntries.length; i++) {
+            if (!state.byteRangeEntries[i].extinfLine && playlistSegments[i]) {
+                state.byteRangeEntries[i].extinfLine =
+                    playlistSegments[i].extinfLine;
+            }
+        }
     }
 
     private async rewritePlaylistWithByteRanges(
@@ -494,7 +597,7 @@ export class SegmentPipeline {
                     task.objectKey,
                 );
                 this.uploadedKeys.push(task.objectKey);
-                this.chunksUploaded++;
+                this.segmentsUploaded += task.segmentCount ?? 1;
 
                 // Delete local file after confirmed upload
                 if (task.deleteAfterUpload) {
@@ -549,6 +652,8 @@ export class SegmentPipeline {
 
         for (const filePath of files) {
             if (exclude?.has(filePath)) continue;
+            // Skip internal build artifacts
+            if (filePath.endsWith('/concat.txt')) continue;
             const relativePath = relative(outputDir, filePath)
                 .split(/[\\/]/)
                 .join('/');
@@ -592,37 +697,28 @@ export class SegmentPipeline {
     private emitProgress(): void {
         if (!this.config.onProgress) return;
 
+        // Use the estimated total when available (doesn't grow mid-encode),
+        // fall back to discovered count (which causes progress to jump).
+        const expectedSegments =
+            this.config.estimatedTotalSegments ?? this.totalSegmentsProduced;
+
         const progress: PipelineProgress = {
             encoding: 0, // Set externally by EncodeService via FFmpeg callback
         };
 
         if (this.config.encryptionKey) {
             progress.encrypting =
-                this.totalSegmentsProduced > 0
+                expectedSegments > 0
                     ? Math.round(
-                          (this.segmentsEncrypted /
-                              this.totalSegmentsProduced) *
-                              100,
+                          (this.segmentsEncrypted / expectedSegments) * 100
                       )
                     : undefined;
         }
 
-        if (this.config.byteRange) {
-            progress.uploading =
-                this.totalChunksReady > 0
-                    ? Math.round(
-                          (this.chunksUploaded / this.totalChunksReady) * 100,
-                      )
-                    : undefined;
-        } else {
-            progress.uploading =
-                this.totalSegmentsProduced > 0
-                    ? Math.round(
-                          (this.chunksUploaded /
-                              this.totalSegmentsProduced) *
-                              100,
-                      )
-                    : undefined;
+        if (expectedSegments > 0) {
+            progress.uploading = Math.round(
+                (this.segmentsUploaded / expectedSegments) * 100
+            );
         }
 
         this.config.onProgress(progress);

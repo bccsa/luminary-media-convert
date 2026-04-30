@@ -52,6 +52,27 @@ export async function createSession(
     return res.json();
 }
 
+export async function startUrlUpload(
+    sessionId: string,
+    url: string,
+    accessToken: string,
+    filename?: string,
+): Promise<void> {
+    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/url-upload`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ url, filename }),
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `URL ingestion failed (${res.status})`);
+    }
+}
+
 export async function deleteSession(
     sessionId: string,
     accessToken: string,
@@ -515,5 +536,141 @@ export async function importSession(
     }
 
     return res.json();
+}
+
+// --- HLS sidecar edit bindings -----------------------------------------
+
+import type { HlsParsedMaster } from '@luminary-media-converter/hls';
+
+export interface HlsReadResult {
+    master: HlsParsedMaster;
+    etag: string;
+    folderPrefix: string;
+    masterPlaylistKey: string;
+}
+
+export interface HlsMutateOperation {
+    type: 'upsertSubtitle' | 'removeSubtitle' | 'upsertChapters' | 'removeChapters';
+    language?: string;
+    name?: string;
+    vttBase64?: string;
+    default?: boolean;
+    forced?: boolean;
+}
+
+/**
+ * Signalled by the SaaS wrapper (pass-through from /api/hls/mutate) when
+ * master.m3u8 was modified between the caller's /read and /mutate. The
+ * current ETag is included in `currentEtag` so the caller can refetch
+ * and retry.
+ */
+export class HlsConflictError extends Error {
+    readonly status = 409;
+    constructor(
+        message: string,
+        public readonly currentEtag: string | undefined,
+    ) {
+        super(message);
+        this.name = 'HlsConflictError';
+    }
+}
+
+export async function hlsRead(
+    accessToken: string,
+    sessionId: string,
+): Promise<HlsReadResult> {
+    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/hls/read`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+    });
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `HLS read failed (${res.status})`);
+    }
+
+    return res.json();
+}
+
+export async function hlsMutate(
+    accessToken: string,
+    sessionId: string,
+    ifMatch: string,
+    operations: HlsMutateOperation[],
+): Promise<any> {
+    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/hls/mutate`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ ifMatch, operations }),
+    });
+
+    if (res.status === 409) {
+        const body = await res.json().catch(() => ({} as { currentEtag?: string; message?: string }));
+        throw new HlsConflictError(
+            body.message || 'Master playlist was modified since last read',
+            body.currentEtag,
+        );
+    }
+
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `HLS mutate failed (${res.status})`);
+    }
+
+    return res.json();
+}
+
+// --- Chapter sidecar bindings ------------------------------------------
+
+/**
+ * Fetch the chapter VTT for a session. Returns null when no file exists.
+ */
+export async function getSessionChapters(
+    accessToken: string,
+    sessionId: string,
+    lang: string = 'en',
+): Promise<{ vtt: string } | null> {
+    const res = await fetch(
+        `${SAAS_URL}/saas/sessions/${sessionId}/chapters?lang=${encodeURIComponent(lang)}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Get chapters failed (${res.status})`);
+    }
+    return res.json();
+}
+
+/**
+ * Persist the chapter VTT to S3. Server validates BCP-47 lang + WEBVTT body.
+ */
+export async function putSessionChapters(
+    accessToken: string,
+    sessionId: string,
+    vtt: string,
+    lang: string = 'en',
+): Promise<void> {
+    const res = await fetch(
+        `${SAAS_URL}/saas/sessions/${sessionId}/chapters?lang=${encodeURIComponent(lang)}`,
+        {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ vtt }),
+        },
+    );
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Save chapters failed (${res.status})`);
+    }
 }
 
