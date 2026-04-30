@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { useRouter } from 'vue-router';
 import { listSessions, deleteSession } from '../api';
@@ -20,16 +20,55 @@ const nameSearch = ref('');
 let nameSearchTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const statusConfig: Record<string, { label: string; color: string }> = {
-    created: { label: 'Created', color: 'bg-zinc-800 text-zinc-400' },
-    uploading: { label: 'Uploading', color: 'bg-cyan-900/40 text-cyan-400' },
-    uploaded: { label: 'Uploaded', color: 'bg-zinc-800 text-zinc-400' },
-    queued: { label: 'Queued', color: 'bg-amber-900/40 text-amber-400' },
-    encoding: { label: 'Encoding', color: 'bg-indigo-900/40 text-indigo-400' },
-    encrypting: { label: 'Encrypting', color: 'bg-amber-900/40 text-amber-400' },
-    uploading_to_s3: { label: 'Uploading to S3', color: 'bg-cyan-900/40 text-cyan-400' },
-    completed: { label: 'Completed', color: 'bg-emerald-900/40 text-emerald-400' },
-    failed: { label: 'Failed', color: 'bg-red-900/40 text-red-400' },
-    imported: { label: 'Imported', color: 'bg-violet-900/40 text-violet-400' },
+    created: {
+        label: 'Created',
+        color:
+            'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400',
+    },
+    uploading: {
+        label: 'Uploading',
+        color:
+            'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-400',
+    },
+    uploaded: {
+        label: 'Uploaded',
+        color:
+            'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400',
+    },
+    queued: {
+        label: 'Queued',
+        color:
+            'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-400',
+    },
+    encoding: {
+        label: 'Encoding',
+        color:
+            'bg-indigo-100 text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-400',
+    },
+    encrypting: {
+        label: 'Encrypting',
+        color:
+            'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-400',
+    },
+    uploading_to_s3: {
+        label: 'Uploading to S3',
+        color:
+            'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-400',
+    },
+    completed: {
+        label: 'Completed',
+        color:
+            'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/40 dark:text-emerald-400',
+    },
+    failed: {
+        label: 'Failed',
+        color: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400',
+    },
+    imported: {
+        label: 'Imported',
+        color:
+            'bg-violet-100 text-violet-900 dark:bg-violet-900/40 dark:text-violet-400',
+    },
 };
 
 const statusOptions = [
@@ -47,6 +86,7 @@ const statusOptions = [
 ];
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
+const hasSessions = computed(() => total.value > 0);
 
 async function fetchSessions() {
     loading.value = true;
@@ -116,7 +156,7 @@ function truncateId(id: string): string {
 }
 
 function formatDate(dateStr: string | null | undefined): string {
-    if (!dateStr) return '--';
+    if (!dateStr) return '—';
     return new Date(dateStr).toLocaleDateString(undefined, {
         year: 'numeric',
         month: 'short',
@@ -128,175 +168,254 @@ function formatDate(dateStr: string | null | undefined): string {
 
 function badgeClasses(status: string): string {
     const cfg = statusConfig[status];
-    return `inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${cfg?.color ?? 'bg-zinc-800 text-zinc-400'}`;
+    return `inline-flex shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${cfg?.color ?? 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400'}`;
 }
 
 onMounted(fetchSessions);
 </script>
 
 <template>
-    <div class="max-w-4xl mx-auto">
-        <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 shadow-xl backdrop-blur">
-            <!-- Header -->
-            <div class="flex items-center justify-between mb-6">
-                <h2 class="text-lg font-semibold text-zinc-100">Sessions</h2>
-                <div class="flex items-center gap-2">
-                    <button
-                        @click="router.push('/sessions/new')"
-                        class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 cursor-pointer"
-                    >
-                        New
-                    </button>
-                    <button
-                        @click="navigateToImport"
-                        class="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer"
-                    >
-                        Import
-                    </button>
+    <div class="space-y-8">
+        <!-- Page header -->
+        <div class="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+            <div class="min-w-0 space-y-1">
+                <h1 class="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                    Sessions
+                </h1>
+                <p class="max-w-xl text-sm text-zinc-500 dark:text-zinc-400">
+                    Browse encoding jobs, open a session for details, or start something new.
+                </p>
+            </div>
+            <div v-if="hasSessions" class="flex shrink-0 flex-wrap items-center gap-2">
+                <button
+                    type="button"
+                    @click="router.push('/sessions/new')"
+                    class="inline-flex cursor-pointer items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500"
+                >
+                    New session
+                </button>
+                <button
+                    type="button"
+                    @click="navigateToImport"
+                    class="inline-flex cursor-pointer items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                >
+                    Import HLS
+                </button>
+            </div>
+        </div>
+
+        <!-- Main card -->
+        <section
+            class="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white/90 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-900/60 dark:shadow-black/20 dark:ring-white/10"
+        >
+            <!-- Filters -->
+            <div
+                class="border-b border-zinc-200/80 bg-zinc-50/90 px-4 py-4 dark:border-zinc-800 dark:bg-zinc-950/40 sm:px-6"
+            >
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <div class="min-w-0 flex-1">
+                        <label class="sr-only" for="session-search">Search by name</label>
+                        <input
+                            id="session-search"
+                            v-model="nameSearch"
+                            type="search"
+                            placeholder="Search by name…"
+                            autocomplete="off"
+                            class="input"
+                            @input="onNameSearch"
+                        />
+                    </div>
+                    <div class="flex shrink-0 items-center gap-2 sm:w-auto">
+                        <label for="session-status" class="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                            Status
+                        </label>
+                        <select
+                            id="session-status"
+                            v-model="statusFilter"
+                            class="input w-full min-w-[10rem] sm:w-44"
+                            @change="onStatusChange"
+                        >
+                            <option value="">All statuses</option>
+                            <option v-for="s in statusOptions.filter((v) => v)" :key="s" :value="s">
+                                {{ statusConfig[s]?.label ?? s }}
+                            </option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
-            <!-- Filters -->
-            <div class="mb-4 flex items-center gap-3">
-                <input
-                    v-model="nameSearch"
-                    @input="onNameSearch"
-                    type="text"
-                    placeholder="Search by name..."
-                    class="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 flex-1 min-w-0"
-                />
-                <label class="text-xs text-zinc-500">Status:</label>
-                <select
-                    v-model="statusFilter"
-                    @change="onStatusChange"
-                    class="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none transition-colors focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+            <div class="px-4 py-6 sm:px-6">
+                <!-- Loading -->
+                <div v-if="loading" class="flex justify-center py-16">
+                    <svg class="h-8 w-8 animate-spin text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                </div>
+
+                <!-- Error -->
+                <div
+                    v-else-if="error"
+                    class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/50 dark:bg-red-950/40"
                 >
-                    <option value="">All</option>
-                    <option v-for="s in statusOptions.filter(v => v)" :key="s" :value="s">
-                        {{ statusConfig[s]?.label ?? s }}
-                    </option>
-                </select>
-            </div>
+                    <p class="text-sm text-red-800 dark:text-red-400">{{ error }}</p>
+                </div>
 
-            <!-- Loading -->
-            <div v-if="loading" class="flex justify-center py-8">
-                <svg class="h-6 w-6 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-            </div>
-
-            <!-- Error -->
-            <div v-else-if="error" class="rounded-lg bg-red-950/40 border border-red-800/50 p-4">
-                <p class="text-sm text-red-400">{{ error }}</p>
-            </div>
-
-            <!-- Table -->
-            <div v-else-if="sessions.length > 0">
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
-                        <thead>
-                            <tr class="border-b border-zinc-800 text-left text-xs uppercase tracking-wider text-zinc-500">
-                                <th class="pb-3 pr-4">Name</th>
-                                <th class="pb-3 pr-4">Status</th>
-                                <th class="pb-3 pr-4">Flags</th>
-                                <th class="pb-3 pr-4">Created</th>
-                                <th class="pb-3 pr-4">Completed</th>
-                                <th class="pb-3"></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr
-                                v-for="session in sessions"
-                                :key="session.id || session.sessionId"
-                                class="border-b border-zinc-800/50 cursor-pointer transition-colors hover:bg-zinc-800/30"
-                                @click="navigateToSession(session.id || session.sessionId)"
-                            >
-                                <td class="py-3 pr-4">
-                                    <span v-if="session.name" class="text-zinc-200">{{ session.name }}</span>
-                                    <span v-else class="font-mono text-xs text-zinc-500" :title="session.id || session.sessionId">{{ truncateId(session.id || session.sessionId) }}</span>
-                                </td>
-                                <td class="py-3 pr-4">
-                                    <span :class="badgeClasses(session.status)">
-                                        {{ statusConfig[session.status]?.label ?? session.status }}
-                                    </span>
-                                </td>
-                                <td class="py-3 pr-4">
-                                    <div class="flex items-center gap-1.5">
-                                        <span
-                                            v-if="session.encrypted"
-                                            class="inline-block rounded-full border border-amber-700/60 px-2 py-0.5 text-xs font-medium text-amber-400"
-                                        >
-                                            Encrypted
+                <!-- Table -->
+                <div v-else-if="sessions.length > 0" class="space-y-4">
+                    <div class="-mx-4 overflow-x-auto sm:mx-0">
+                        <table class="w-full min-w-[640px] text-sm">
+                            <thead>
+                                <tr
+                                    class="border-b border-zinc-200 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:border-zinc-800 dark:text-zinc-400"
+                                >
+                                    <th class="pb-3 pl-4 pr-4 sm:pl-0">Name</th>
+                                    <th class="pb-3 pr-4">Status</th>
+                                    <th class="pb-3 pr-4">Flags</th>
+                                    <th class="pb-3 pr-4">Created</th>
+                                    <th class="pb-3 pr-4">Completed</th>
+                                    <th class="pb-3 pr-4 text-right sm:pr-0"></th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                                <tr
+                                    v-for="session in sessions"
+                                    :key="session.id || session.sessionId"
+                                    class="cursor-pointer transition-colors hover:bg-zinc-50/90 dark:hover:bg-zinc-800/40"
+                                    @click="navigateToSession(session.id || session.sessionId)"
+                                >
+                                    <td class="py-3.5 pl-4 pr-4 sm:pl-0">
+                                        <span v-if="session.name" class="font-medium text-zinc-900 dark:text-zinc-100">
+                                            {{ session.name }}
                                         </span>
                                         <span
-                                            v-if="session.imported"
-                                            class="inline-block rounded-full border border-violet-700/60 px-2 py-0.5 text-xs font-medium text-violet-400"
+                                            v-else
+                                            class="font-mono text-xs text-zinc-500 dark:text-zinc-400"
+                                            :title="session.id || session.sessionId"
                                         >
-                                            Imported
+                                            {{ truncateId(session.id || session.sessionId) }}
                                         </span>
-                                    </div>
-                                </td>
-                                <td class="py-3 pr-4 text-zinc-400">{{ formatDate(session.createdAt) }}</td>
-                                <td class="py-3 pr-4 text-zinc-400">{{ formatDate(session.completedAt) }}</td>
-                                <td class="py-3 text-right" @click.stop>
-                                    <div class="flex items-center justify-end gap-2">
+                                    </td>
+                                    <td class="py-3.5 pr-4 align-middle">
+                                        <span :class="badgeClasses(session.status)">
+                                            {{ statusConfig[session.status]?.label ?? session.status }}
+                                        </span>
+                                    </td>
+                                    <td class="py-3.5 pr-4 align-middle">
+                                        <div class="flex flex-wrap items-center gap-1.5">
+                                            <span
+                                                v-if="session.encrypted"
+                                                class="inline-flex rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-900 dark:border-amber-700/60 dark:bg-transparent dark:text-amber-400"
+                                            >
+                                                Encrypted
+                                            </span>
+                                            <span
+                                                v-if="session.imported"
+                                                class="inline-flex rounded-full border border-violet-300 bg-violet-50 px-2 py-0.5 text-xs font-medium text-violet-900 dark:border-violet-700/60 dark:bg-transparent dark:text-violet-400"
+                                            >
+                                                Imported
+                                            </span>
+                                            <span
+                                                v-if="!session.encrypted && !session.imported"
+                                                class="text-xs text-zinc-400 dark:text-zinc-600"
+                                            >
+                                                —
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td class="py-3.5 pr-4 text-zinc-600 dark:text-zinc-400">
+                                        {{ formatDate(session.createdAt) }}
+                                    </td>
+                                    <td class="py-3.5 pr-4 text-zinc-600 dark:text-zinc-400">
+                                        {{ formatDate(session.completedAt) }}
+                                    </td>
+                                    <td class="py-3.5 pr-4 text-right align-middle sm:pr-0" @click.stop>
                                         <InlineConfirm
                                             label="Delete"
                                             prompt="Delete?"
-                                            :secondary-prompt="(session.s3ConfigId && (session.s3Config?.pathPrefix || session.files?.length)) ? 'Also delete S3 files?' : undefined"
+                                            :secondary-prompt="
+                                                session.s3ConfigId && (session.s3Config?.pathPrefix || session.files?.length)
+                                                    ? 'Also delete S3 files?'
+                                                    : undefined
+                                            "
                                             secondary-confirm-label="Yes"
                                             secondary-decline-label="No"
                                             :loading="deletingId === (session.id || session.sessionId)"
                                             loading-label="..."
                                             @confirm="(withFiles: boolean) => onConfirmDeleteSession(session.id || session.sessionId, withFiles)"
                                         />
-                                    </div>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Pagination -->
+                    <div
+                        v-if="totalPages > 1"
+                        class="flex flex-col gap-3 border-t border-zinc-100 pt-4 text-sm text-zinc-600 dark:border-zinc-800 dark:text-zinc-400 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                        <span>
+                            {{ total }} session{{ total === 1 ? '' : 's' }}
+                        </span>
+                        <div class="flex items-center gap-2">
+                            <button
+                                type="button"
+                                :disabled="currentPage <= 1"
+                                @click="goToPage(currentPage - 1)"
+                                :class="[
+                                    'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
+                                    currentPage <= 1
+                                        ? 'cursor-not-allowed border-zinc-200 text-zinc-300 dark:border-zinc-800 dark:text-zinc-600'
+                                        : 'cursor-pointer border-zinc-300 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800',
+                                ]"
+                            >
+                                Previous
+                            </button>
+                            <span class="text-xs tabular-nums text-zinc-500 dark:text-zinc-500">
+                                Page {{ currentPage }} / {{ totalPages }}
+                            </span>
+                            <button
+                                type="button"
+                                :disabled="currentPage >= totalPages"
+                                @click="goToPage(currentPage + 1)"
+                                :class="[
+                                    'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
+                                    currentPage >= totalPages
+                                        ? 'cursor-not-allowed border-zinc-200 text-zinc-300 dark:border-zinc-800 dark:text-zinc-600'
+                                        : 'cursor-pointer border-zinc-300 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800',
+                                ]"
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Pagination -->
-                <div v-if="totalPages > 1" class="mt-4 flex items-center justify-between text-sm text-zinc-400">
-                    <span>{{ total }} session{{ total === 1 ? '' : 's' }} total</span>
-                    <div class="flex items-center gap-2">
+                <!-- Empty state -->
+                <div v-else class="py-14 text-center">
+                    <p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">No sessions yet</p>
+                    <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                        Create a new encode or import an existing HLS output.
+                    </p>
+                    <div class="mt-6 flex flex-wrap items-center justify-center gap-2">
                         <button
-                            :disabled="currentPage <= 1"
-                            @click="goToPage(currentPage - 1)"
-                            :class="[
-                                'rounded border border-zinc-700 px-3 py-1 text-xs transition-colors',
-                                currentPage <= 1
-                                    ? 'text-zinc-600 cursor-not-allowed'
-                                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer',
-                            ]"
+                            type="button"
+                            @click="router.push('/sessions/new')"
+                            class="inline-flex cursor-pointer items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-500"
                         >
-                            Previous
+                            New session
                         </button>
-                        <span class="text-xs text-zinc-500">
-                            Page {{ currentPage }} of {{ totalPages }}
-                        </span>
                         <button
-                            :disabled="currentPage >= totalPages"
-                            @click="goToPage(currentPage + 1)"
-                            :class="[
-                                'rounded border border-zinc-700 px-3 py-1 text-xs transition-colors',
-                                currentPage >= totalPages
-                                    ? 'text-zinc-600 cursor-not-allowed'
-                                    : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer',
-                            ]"
+                            type="button"
+                            @click="navigateToImport"
+                            class="inline-flex cursor-pointer items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
                         >
-                            Next
+                            Import HLS
                         </button>
                     </div>
                 </div>
             </div>
-
-            <!-- Empty state -->
-            <div v-else class="py-8 text-center text-sm text-zinc-500">
-                No sessions found.
-            </div>
-        </div>
+        </section>
     </div>
 </template>

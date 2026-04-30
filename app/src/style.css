@@ -1,12 +1,28 @@
 @import 'tailwindcss';
 
+/* Class-based dark mode (toggle via `dark` on <html>) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@keyframes loading-slide {
+    0% {
+        transform: translateX(-140%);
+    }
+    100% {
+        transform: translateX(360%);
+    }
+}
+
+.loading-bar {
+    animation: loading-slide 1.2s ease-in-out infinite;
+}
+
 @layer components {
     .input {
-        @apply w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-500;
+        @apply w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 outline-none transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-50 disabled:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500 dark:focus:ring-indigo-500/30 dark:disabled:border-zinc-800 dark:disabled:bg-zinc-900 dark:disabled:text-zinc-500;
     }
 
     .btn-sm {
-        @apply rounded-md border border-zinc-700 px-3 py-1 text-xs font-medium text-zinc-400 transition-colors hover:border-zinc-500 hover:text-zinc-200 cursor-pointer;
+        @apply cursor-pointer rounded-md border border-zinc-300 bg-white px-3 py-1 text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-400 hover:text-zinc-900 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-400 dark:hover:border-zinc-500 dark:hover:text-zinc-200;
     }
 
     /* ── encode-config component: Tailwind overrides for ecf-* classes ── */
