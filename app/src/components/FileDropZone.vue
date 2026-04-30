@@ -48,8 +48,8 @@ function clear() {
         :class="[
             'relative rounded-lg border-2 border-dashed p-8 text-center transition-colors',
             dragging
-                ? 'border-indigo-400 bg-indigo-950/30'
-                : 'border-zinc-700 bg-zinc-900/50 hover:border-zinc-500',
+                ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-950/30'
+                : 'border-zinc-300 bg-zinc-50/80 hover:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900/40 dark:hover:border-zinc-500',
         ]"
     >
         <input
@@ -61,16 +61,16 @@ function clear() {
         />
 
         <template v-if="!selectedFile">
-            <div class="mb-3 text-zinc-400">
+            <div class="mb-3 text-zinc-500 dark:text-zinc-400">
                 <svg class="mx-auto h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
                 </svg>
             </div>
-            <p class="text-sm text-zinc-400">
+            <p class="text-sm text-zinc-600 dark:text-zinc-400">
                 Drag and drop your media file here, or
                 <button
                     type="button"
-                    class="font-medium text-indigo-400 underline underline-offset-2 hover:text-indigo-300"
+                    class="font-medium text-indigo-600 underline underline-offset-2 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
                     @click="onBrowse"
                 >
                     browse
@@ -84,12 +84,12 @@ function clear() {
                     <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
                 </svg>
                 <div class="text-left text-sm">
-                    <p class="font-medium text-zinc-100">{{ selectedFile.name }}</p>
-                    <p class="text-zinc-500">{{ formatSize(selectedFile.size) }}</p>
+                    <p class="font-medium text-zinc-900 dark:text-zinc-100">{{ selectedFile.name }}</p>
+                    <p class="text-zinc-500 dark:text-zinc-400">{{ formatSize(selectedFile.size) }}</p>
                 </div>
                 <button
                     type="button"
-                    class="ml-2 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                    class="ml-2 rounded p-1 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
                     @click="clear"
                 >
                     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

@@ -243,10 +243,10 @@ const canCreateConfig = computed(() =>
 </script>
 
 <template>
-    <form @submit.prevent="onSubmit" class="space-y-6">
+    <form @submit.prevent="onSubmit" class="space-y-5">
         <!-- Session name -->
-        <fieldset class="space-y-3">
-            <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Session Name</legend>
+        <fieldset class="space-y-1 rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/30">
+            <legend class="px-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Session Name</legend>
             <input
                 v-model="sessionName"
                 type="text"
@@ -256,14 +256,17 @@ const canCreateConfig = computed(() =>
         </fieldset>
 
         <!-- Source: file or URL -->
-        <fieldset class="space-y-3">
-            <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Source</legend>
-            <div class="inline-flex rounded-lg border border-zinc-800 bg-zinc-900/40 p-1 text-sm">
+        <fieldset class="space-y-1 rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/30">
+            <legend class="px-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Source</legend>
+            <p class="text-xs text-zinc-500 dark:text-zinc-400">Choose a local upload or let the server ingest from URL.</p>
+            <div class="inline-flex rounded-lg border border-zinc-300 bg-white p-1 text-sm dark:border-zinc-700 dark:bg-zinc-900/40">
                 <button
                     type="button"
                     :class="[
-                        'rounded-md px-4 py-1.5 transition-colors cursor-pointer',
-                        sourceMode === 'file' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200',
+                        'rounded-md px-4  py-1.5 transition-colors cursor-pointer',
+                        sourceMode === 'file'
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200',
                     ]"
                     @click="sourceMode = 'file'"
                 >
@@ -273,7 +276,9 @@ const canCreateConfig = computed(() =>
                     type="button"
                     :class="[
                         'rounded-md px-4 py-1.5 transition-colors cursor-pointer',
-                        sourceMode === 'url' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200',
+                        sourceMode === 'url'
+                            ? 'bg-indigo-600 text-white'
+                            : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200',
                     ]"
                     @click="sourceMode = 'url'"
                 >
@@ -296,7 +301,7 @@ const canCreateConfig = computed(() =>
                     class="input"
                     placeholder="Optional filename override (e.g. meeting.mp4)"
                 />
-                <p class="text-xs text-zinc-500">
+                <p class="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
                     The server downloads from this URL using parallel HTTP range requests when supported.
                     Use a direct-download URL — public file URLs, S3 presigned links, or Google Drive direct download links.
                 </p>
@@ -304,55 +309,55 @@ const canCreateConfig = computed(() =>
         </fieldset>
 
         <!-- S3 Configuration -->
-        <fieldset class="space-y-3">
+        <fieldset class="space-y-2 rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/30">
             <div class="flex items-center justify-between">
-                <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">S3 Storage</legend>
+                <legend class="px-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">S3 Storage</legend>
                 <button
                     v-if="!showNewConfigForm"
                     type="button"
                     @click="showNewConfigForm = true"
-                    class="text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer"
+                    class="cursor-pointer rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 >
-                    + New config
+                    New config
                 </button>
             </div>
 
             <!-- Inline new config form -->
-            <div v-if="showNewConfigForm" class="rounded-lg border border-indigo-800/40 bg-indigo-950/20 p-4 space-y-3">
-                <h4 class="text-sm font-medium text-zinc-300">New S3 Configuration</h4>
+            <div v-if="showNewConfigForm" class="space-y-3 rounded-xl border border-indigo-200 bg-indigo-50/70 p-4 dark:border-indigo-800/40 dark:bg-indigo-950/20">
+                <h4 class="text-sm font-medium text-zinc-900 dark:text-zinc-200">New S3 Configuration</h4>
                 <div>
-                    <label class="mb-1 block text-xs text-zinc-500">Name</label>
+                    <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Name</label>
                     <input v-model="newConfig.name" type="text" class="input" placeholder="e.g. Production S3" />
                 </div>
                 <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div class="sm:col-span-2">
-                        <label class="mb-1 block text-xs text-zinc-500">Endpoint</label>
+                        <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Endpoint</label>
                         <input v-model="newConfig.endPoint" type="text" class="input" placeholder="s3.amazonaws.com" />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs text-zinc-500">Port</label>
+                        <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Port</label>
                         <input v-model.number="newConfig.port" type="number" class="input" placeholder="443" />
                     </div>
                     <div class="flex items-end pb-1">
-                        <label class="flex items-center gap-2 text-sm">
+                        <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
                             <input type="checkbox" v-model="newConfig.useSSL" class="accent-indigo-500" />
                             Use SSL
                         </label>
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs text-zinc-500">Bucket</label>
+                        <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Bucket</label>
                         <input v-model="newConfig.bucket" type="text" class="input" />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs text-zinc-500">Region</label>
+                        <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Region</label>
                         <input v-model="newConfig.region" type="text" class="input" placeholder="us-east-1" />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs text-zinc-500">Access Key</label>
+                        <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Access Key</label>
                         <input v-model="newConfig.accessKey" type="text" autocomplete="new-password" data-1p-ignore data-lpignore="true" class="input" />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs text-zinc-500">Secret Key</label>
+                        <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Secret Key</label>
                         <input v-model="newConfig.secretKey" type="text" autocomplete="new-password" data-1p-ignore data-lpignore="true" class="input" />
                     </div>
                 </div>
@@ -365,7 +370,7 @@ const canCreateConfig = computed(() =>
                             'rounded-lg px-4 py-2 text-xs font-semibold transition-colors',
                             canCreateConfig
                                 ? 'bg-indigo-600 text-white hover:bg-indigo-500 cursor-pointer'
-                                : 'bg-zinc-800 text-zinc-500 cursor-not-allowed',
+                                : 'bg-zinc-200 text-zinc-500 cursor-not-allowed dark:bg-zinc-800 dark:text-zinc-500',
                         ]"
                     >
                         {{ creatingConfig ? 'Saving...' : 'Save Config' }}
@@ -373,7 +378,7 @@ const canCreateConfig = computed(() =>
                     <button
                         type="button"
                         @click="showNewConfigForm = false; resetNewConfig()"
-                        class="rounded-lg border border-zinc-700 px-4 py-2 text-xs text-zinc-400 hover:bg-zinc-800 cursor-pointer"
+                        class="cursor-pointer rounded-lg border border-zinc-300 px-4 py-2 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                     >
                         Cancel
                     </button>
@@ -394,12 +399,12 @@ const canCreateConfig = computed(() =>
                 </select>
             </div>
 
-            <div v-if="savedS3Configs.length === 0 && !showNewConfigForm" class="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4 text-center">
-                <p class="text-sm text-zinc-500">No S3 configurations saved yet.</p>
+            <div v-if="savedS3Configs.length === 0 && !showNewConfigForm" class="rounded-lg border border-zinc-200 bg-zinc-100/70 p-4 text-center dark:border-zinc-800 dark:bg-zinc-900/60">
+                <p class="text-sm text-zinc-600 dark:text-zinc-400">No S3 configurations saved yet.</p>
                 <button
                     type="button"
                     @click="showNewConfigForm = true"
-                    class="mt-2 text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer"
+                    class="mt-2 text-xs font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300 cursor-pointer"
                 >
                     Create one now
                 </button>
@@ -407,21 +412,21 @@ const canCreateConfig = computed(() =>
 
             <!-- Path prefix (per-upload) -->
             <div v-if="hasS3Config">
-                <label class="mb-1 block text-xs text-zinc-500">Path Prefix (per upload)</label>
+                <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Path Prefix (per upload)</label>
                 <input v-model="pathPrefix" type="text" class="input" placeholder="optional/prefix" />
             </div>
 
             <!-- Encoding options -->
-            <div v-if="hasS3Config" class="flex flex-wrap items-center gap-4">
-                <label class="flex items-center gap-2 text-sm">
+            <div v-if="hasS3Config" class="flex flex-wrap items-center gap-4 rounded-lg border border-zinc-200 bg-white/80 p-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+                <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
                     <input type="checkbox" v-model="byteRange" class="accent-indigo-500" />
                     Byte-range segments
                 </label>
                 <div v-if="byteRange" class="flex items-center gap-2">
-                    <label class="text-xs text-zinc-500">Max file size (MB)</label>
+                    <label class="text-xs text-zinc-500 dark:text-zinc-400">Max file size (MB)</label>
                     <input v-model.number="byteRangeMaxFileSizeMB" type="number" min="1" class="input w-24" placeholder="500" />
                 </div>
-                <label class="flex items-center gap-2 text-sm">
+                <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
                     <input type="checkbox" v-model="thumbnails" class="accent-indigo-500" />
                     Scrubbing thumbnails
                 </label>
@@ -429,14 +434,14 @@ const canCreateConfig = computed(() =>
         </fieldset>
 
         <!-- HLS Encryption -->
-        <fieldset v-if="hasS3Config" class="space-y-3">
-            <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">HLS Encryption</legend>
-            <label class="flex items-center gap-2 text-sm">
+        <fieldset v-if="hasS3Config" class="space-y-2 rounded-xl border border-zinc-200/80 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/30">
+            <legend class="px-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">HLS Encryption</legend>
+            <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
                 <input type="checkbox" v-model="encryptionEnabled" class="accent-indigo-500" />
                 Enable AES-128 encryption
             </label>
             <div v-if="encryptionEnabled">
-                <label class="mb-1 block text-xs text-zinc-500">Key URL (production key-serving endpoint)</label>
+                <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Key URL (production key-serving endpoint)</label>
                 <input
                     v-model="encryptionKeyUrl"
                     type="text"
@@ -454,7 +459,7 @@ const canCreateConfig = computed(() =>
                 'w-full rounded-lg px-6 py-3 text-sm font-semibold transition-colors',
                 canSubmit
                     ? 'bg-indigo-600 text-white hover:bg-indigo-500 cursor-pointer'
-                    : 'bg-zinc-800 text-zinc-500 cursor-not-allowed',
+                    : 'bg-zinc-200 text-zinc-500 cursor-not-allowed dark:bg-zinc-800 dark:text-zinc-500',
             ]"
         >
             Upload &amp; Analyze

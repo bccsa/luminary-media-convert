@@ -187,14 +187,23 @@ onMounted(fetchSavedS3Configs);
 </script>
 
 <template>
-    <div class="max-w-2xl mx-auto">
-        <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 shadow-xl backdrop-blur">
+    <div class="mx-auto max-w-5xl space-y-6">
+        <header class="space-y-2">
+            <h1 class="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">New session</h1>
+            <p class="text-sm text-zinc-600 dark:text-zinc-400">
+                Configure your source and storage, then upload and analyze media.
+            </p>
+        </header>
+
+        <div
+            class="rounded-2xl border border-zinc-200/90 bg-white/90 p-5 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10 sm:p-6"
+        >
             <!-- Prefix overwrite warning -->
             <div
                 v-if="prefixWarning"
-                class="mb-6 rounded-lg bg-amber-950/40 border border-amber-800/50 p-4 space-y-3"
+                class="mb-6 space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800/50 dark:bg-amber-950/30"
             >
-                <p class="text-sm text-amber-400">{{ prefixWarning }}</p>
+                <p class="text-sm text-amber-900 dark:text-amber-300">{{ prefixWarning }}</p>
                 <div class="flex gap-2">
                     <button
                         type="button"
@@ -205,7 +214,7 @@ onMounted(fetchSavedS3Configs);
                     </button>
                     <button
                         type="button"
-                        class="rounded-md border border-zinc-700 px-4 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800 cursor-pointer"
+                        class="cursor-pointer rounded-md border border-zinc-300 px-4 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                         @click="dismissPrefixWarning"
                     >
                         Revise Prefix
@@ -216,18 +225,18 @@ onMounted(fetchSavedS3Configs);
             <!-- Submission error banner -->
             <div
                 v-if="submissionError"
-                class="mb-6 rounded-lg bg-red-950/40 border border-red-800/50 p-4"
+                class="mb-6 rounded-xl border border-red-300 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/30"
             >
-                <p class="text-sm text-red-400">{{ submissionError }}</p>
+                <p class="text-sm text-red-800 dark:text-red-300">{{ submissionError }}</p>
             </div>
 
             <!-- Validating / Submitting spinner -->
             <div v-if="validating || submitting" class="flex flex-col items-center gap-4 py-16">
-                <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                <svg class="h-8 w-8 animate-spin text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                <p class="text-sm text-zinc-400">{{ validating ? 'Validating...' : 'Creating session...' }}</p>
+                <p class="text-sm text-zinc-600 dark:text-zinc-400">{{ validating ? 'Validating...' : 'Creating session...' }}</p>
             </div>
 
             <!-- Session config form (kept mounted to preserve file selection) -->
