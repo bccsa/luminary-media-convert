@@ -11,7 +11,6 @@ work
 .cursor/**/*.log
 dispatchQueue.json
 jobQueue.json
-CLAUDE.md
 tusd/bin/
 *.tsbuildinfo
 docs/todo.md
