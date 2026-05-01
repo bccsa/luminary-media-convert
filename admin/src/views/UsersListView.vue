@@ -1,15 +1,11 @@
 <script setup lang="ts">
-import { ref, inject, onMounted, watch, type Ref } from 'vue';
+import { ref, inject, onMounted, watch, computed, type Ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuth0 } from '@auth0/auth0-vue';
-import {
-    listUsers,
-    disableUser,
-    enableUser,
-    deleteUser,
-} from '../api';
+import { listUsers, disableUser, enableUser, deleteUser } from '../api';
 
 const currentUserId = inject<Ref<string | null>>('currentUserId');
+const currentUserIdValue = computed(() => currentUserId?.value ?? null);
 
 const router = useRouter();
 const { getAccessTokenSilently } = useAuth0();
@@ -167,10 +163,7 @@ onMounted(fetchUsers);
         </div>
 
         <!-- Table -->
-        <div
-            v-else
-            class="overflow-hidden rounded-lg border border-zinc-800"
-        >
+        <div v-else class="overflow-hidden rounded-lg border border-zinc-800">
             <table class="w-full text-sm text-left">
                 <thead
                     class="border-b border-zinc-800 bg-zinc-900/50 text-xs text-zinc-500"
@@ -228,13 +221,13 @@ onMounted(fetchUsers);
                         <td class="px-4 py-3 text-zinc-500">
                             {{ formatDate(u.createdAt) }}
                         </td>
-                        <td
-                            class="px-4 py-3 text-right"
-                            @click.stop
-                        >
+                        <td class="px-4 py-3 text-right" @click.stop>
                             <div class="flex justify-end gap-2">
                                 <button
-                                    v-if="u.status === 'active' && u.id !== currentUserId"
+                                    v-if="
+                                        u.status === 'active' &&
+                                        u.id !== currentUserIdValue
+                                    "
                                     @click="onDisable(u.id)"
                                     class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 transition-colors hover:border-amber-700 hover:text-amber-400 cursor-pointer"
                                 >
@@ -248,7 +241,7 @@ onMounted(fetchUsers);
                                     Enable
                                 </button>
                                 <button
-                                    v-if="u.id !== currentUserId"
+                                    v-if="u.id !== currentUserIdValue"
                                     @click="onDelete(u.id)"
                                     class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 transition-colors hover:border-red-700 hover:text-red-400 cursor-pointer"
                                 >

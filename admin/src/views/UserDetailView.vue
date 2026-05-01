@@ -212,9 +212,7 @@ onMounted(() => {
                 </div>
             </div>
 
-            <div
-                class="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6"
-            >
+            <div class="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6">
                 <dl class="grid grid-cols-2 gap-4 text-sm">
                     <div>
                         <dt class="text-zinc-500">Role</dt>
@@ -285,27 +283,55 @@ onMounted(() => {
 
             <!-- API Keys -->
             <div class="mt-6">
-                <h3 class="mb-3 flex items-center gap-2 text-sm font-medium text-zinc-400">
+                <h3
+                    class="mb-3 flex items-center gap-2 text-sm font-medium text-zinc-400"
+                >
                     API Keys
-                    <span v-if="keys.length" class="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-500">
+                    <span
+                        v-if="keys.length"
+                        class="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-500"
+                    >
                         {{ keys.length }}
                     </span>
                 </h3>
 
                 <div v-if="keysLoading" class="flex justify-center py-8">
-                    <svg class="h-5 w-5 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    <svg
+                        class="h-5 w-5 animate-spin text-indigo-400"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                    >
+                        <circle
+                            class="opacity-25"
+                            cx="12"
+                            cy="12"
+                            r="10"
+                            stroke="currentColor"
+                            stroke-width="4"
+                        />
+                        <path
+                            class="opacity-75"
+                            fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
                     </svg>
                 </div>
 
-                <div v-else-if="keys.length === 0" class="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6 text-center">
+                <div
+                    v-else-if="keys.length === 0"
+                    class="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6 text-center"
+                >
                     <p class="text-sm text-zinc-500">No API keys</p>
                 </div>
 
-                <div v-else class="overflow-hidden rounded-lg border border-zinc-800">
+                <div
+                    v-else
+                    class="overflow-hidden rounded-lg border border-zinc-800"
+                >
                     <table class="w-full text-sm text-left">
-                        <thead class="border-b border-zinc-800 bg-zinc-900/50 text-xs text-zinc-500">
+                        <thead
+                            class="border-b border-zinc-800 bg-zinc-900/50 text-xs text-zinc-500"
+                        >
                             <tr>
                                 <th class="px-4 py-3">Name</th>
                                 <th class="px-4 py-3">Prefix</th>
@@ -322,7 +348,11 @@ onMounted(() => {
                                 class="border-b border-zinc-800/50"
                             >
                                 <td class="px-4 py-3">{{ key.name }}</td>
-                                <td class="px-4 py-3 font-mono text-xs text-zinc-500">{{ key.prefix }}...</td>
+                                <td
+                                    class="px-4 py-3 font-mono text-xs text-zinc-500"
+                                >
+                                    {{ key.prefix }}...
+                                </td>
                                 <td class="px-4 py-3">
                                     <span
                                         :class="[
@@ -335,8 +365,12 @@ onMounted(() => {
                                         {{ key.status }}
                                     </span>
                                 </td>
-                                <td class="px-4 py-3 text-zinc-500">{{ formatDate(key.lastUsedAt) }}</td>
-                                <td class="px-4 py-3 text-zinc-500">{{ formatDate(key.createdAt) }}</td>
+                                <td class="px-4 py-3 text-zinc-500">
+                                    {{ formatDate(key.lastUsedAt) }}
+                                </td>
+                                <td class="px-4 py-3 text-zinc-500">
+                                    {{ formatDate(key.createdAt) }}
+                                </td>
                                 <td class="px-4 py-3 text-right">
                                     <button
                                         v-if="key.status === 'active'"

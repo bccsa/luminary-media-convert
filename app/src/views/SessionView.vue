@@ -108,16 +108,16 @@ const activeUploads = useActiveUploads();
 // ---------------------------------------------------------------------------
 
 const statusConfig: Record<string, { label: string; color: string; borderColor: string }> = {
-    created: { label: 'Created', color: 'text-zinc-400', borderColor: 'border-zinc-700' },
-    uploading: { label: 'Uploading', color: 'text-cyan-400', borderColor: 'border-cyan-700/60' },
-    uploaded: { label: 'Uploaded', color: 'text-zinc-400', borderColor: 'border-zinc-700' },
-    queued: { label: 'Queued', color: 'text-amber-400', borderColor: 'border-amber-700/60' },
-    encoding: { label: 'Encoding', color: 'text-indigo-400', borderColor: 'border-indigo-700/60' },
-    encrypting: { label: 'Encrypting', color: 'text-amber-400', borderColor: 'border-amber-700/60' },
-    uploading_to_s3: { label: 'Uploading to S3', color: 'text-cyan-400', borderColor: 'border-cyan-700/60' },
-    completed: { label: 'Completed', color: 'text-emerald-400', borderColor: 'border-emerald-700/60' },
-    failed: { label: 'Failed', color: 'text-red-400', borderColor: 'border-red-700/60' },
-    imported: { label: 'Imported', color: 'text-violet-400', borderColor: 'border-violet-700/60' },
+    created: { label: 'Created', color: 'text-zinc-700 dark:text-zinc-400', borderColor: 'border-zinc-300 dark:border-zinc-700' },
+    uploading: { label: 'Uploading', color: 'text-cyan-700 dark:text-cyan-400', borderColor: 'border-cyan-300 dark:border-cyan-700/60' },
+    uploaded: { label: 'Uploaded', color: 'text-zinc-700 dark:text-zinc-400', borderColor: 'border-zinc-300 dark:border-zinc-700' },
+    queued: { label: 'Queued', color: 'text-amber-700 dark:text-amber-400', borderColor: 'border-amber-300 dark:border-amber-700/60' },
+    encoding: { label: 'Encoding', color: 'text-indigo-700 dark:text-indigo-400', borderColor: 'border-indigo-300 dark:border-indigo-700/60' },
+    encrypting: { label: 'Encrypting', color: 'text-amber-700 dark:text-amber-400', borderColor: 'border-amber-300 dark:border-amber-700/60' },
+    uploading_to_s3: { label: 'Uploading to S3', color: 'text-cyan-700 dark:text-cyan-400', borderColor: 'border-cyan-300 dark:border-cyan-700/60' },
+    completed: { label: 'Completed', color: 'text-emerald-700 dark:text-emerald-400', borderColor: 'border-emerald-300 dark:border-emerald-700/60' },
+    failed: { label: 'Failed', color: 'text-red-700 dark:text-red-400', borderColor: 'border-red-300 dark:border-red-700/60' },
+    imported: { label: 'Imported', color: 'text-violet-700 dark:text-violet-400', borderColor: 'border-violet-300 dark:border-violet-700/60' },
 };
 
 const ICON_PATHS = {
@@ -1049,13 +1049,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div :class="['mx-auto transition-all duration-300', showProbeConfig ? 'max-w-fit' : 'max-w-2xl']">
-        <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 shadow-xl backdrop-blur">
+    <div :class="['mx-auto transition-all duration-300', showProbeConfig ? 'max-w-fit' : 'max-w-3xl']">
+        <div class="rounded-2xl border border-zinc-200/90 bg-white/90 p-6 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10">
             <!-- Back link -->
             <div class="mb-4">
                 <router-link
                     to="/sessions"
-                    class="inline-flex items-center gap-1.5 text-sm text-zinc-400 transition-colors hover:text-zinc-200"
+                    class="inline-flex items-center gap-1.5 text-sm text-zinc-600 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
                 >
                     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
@@ -1066,15 +1066,15 @@ onUnmounted(() => {
 
             <!-- Loading -->
             <div v-if="loading" class="flex justify-center py-16">
-                <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                <svg class="h-8 w-8 animate-spin text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
             </div>
 
             <!-- Load error -->
-            <div v-else-if="error" class="rounded-lg bg-red-950/40 border border-red-800/50 p-4">
-                <p class="text-sm text-red-400">{{ error }}</p>
+            <div v-else-if="error" class="rounded-xl border border-red-300 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/30">
+                <p class="text-sm text-red-800 dark:text-red-300">{{ error }}</p>
             </div>
 
             <!-- Session loaded -->
@@ -1096,61 +1096,61 @@ onUnmounted(() => {
                                 type="button"
                                 :disabled="savingName"
                                 @click="saveName"
-                                class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                                class="cursor-pointer rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                             >
                                 {{ savingName ? '...' : 'Save' }}
                             </button>
                             <button
                                 type="button"
                                 @click="cancelEditName"
-                                class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                                class="cursor-pointer rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                             >
                                 Cancel
                             </button>
                         </div>
                         <h2
                             v-else
-                            class="text-lg font-semibold text-zinc-100 cursor-pointer hover:text-indigo-400 transition-colors"
+                            class="cursor-pointer text-xl font-semibold text-zinc-900 transition-colors hover:text-indigo-600 dark:text-zinc-100 dark:hover:text-indigo-400"
                             @click="startEditName"
                             :title="sessionName ? 'Click to rename' : 'Click to add a name'"
                         >
                             {{ sessionName || 'Untitled session' }}
                         </h2>
-                        <p class="mt-0.5 font-mono text-xs text-zinc-500">{{ sessionId }}</p>
+                        <p class="mt-1 font-mono text-xs text-zinc-500 dark:text-zinc-400">{{ sessionId }}</p>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
                         <StatusBadge
                             v-if="displayEncoder && encoderConfig[displayEncoder]"
                             :label="encoderConfig[displayEncoder].label"
                             :icon="encoderConfig[displayEncoder].icon"
-                            :color="displayEncoder === 'cpu' ? 'text-zinc-400' : 'text-violet-400'"
-                            :border-color="displayEncoder === 'cpu' ? 'border-zinc-700' : 'border-violet-700/60'"
+                            :color="displayEncoder === 'cpu' ? 'text-zinc-700 dark:text-zinc-400' : 'text-violet-700 dark:text-violet-400'"
+                            :border-color="displayEncoder === 'cpu' ? 'border-zinc-300 dark:border-zinc-700' : 'border-violet-300 dark:border-violet-700/60'"
                         />
                         <StatusBadge
                             v-if="displaySegmentFormat === 'mpegts'"
                             label="MPEG-TS"
-                            color="text-amber-400"
-                            border-color="border-amber-700/60"
+                            color="text-amber-700 dark:text-amber-400"
+                            border-color="border-amber-300 dark:border-amber-700/60"
                             :icon="ICON_PATHS.warning"
                             title="MPEG-TS segments used because source streams have misaligned start times."
                         />
                         <StatusBadge
                             v-if="isEncrypted"
                             label="Encrypted"
-                            color="text-amber-400"
-                            border-color="border-amber-700/60"
+                            color="text-amber-700 dark:text-amber-400"
+                            border-color="border-amber-300 dark:border-amber-700/60"
                             :icon="ICON_PATHS.lock"
                         />
                         <StatusBadge
                             v-if="session.imported"
                             label="Imported"
-                            color="text-violet-400"
-                            border-color="border-violet-700/60"
+                            color="text-violet-700 dark:text-violet-400"
+                            border-color="border-violet-300 dark:border-violet-700/60"
                         />
                         <StatusBadge
                             :label="currentStatus ? statusConfig[currentStatus]?.label ?? currentStatus : '--'"
-                            :color="statusConfig[currentStatus ?? '']?.color ?? 'text-zinc-400'"
-                            :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-zinc-700'"
+                            :color="statusConfig[currentStatus ?? '']?.color ?? 'text-zinc-700 dark:text-zinc-400'"
+                            :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-zinc-300 dark:border-zinc-700'"
                         />
                     </div>
                 </div>
