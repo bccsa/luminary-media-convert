@@ -13,7 +13,8 @@
         "admin"
     ],
     "scripts": {
-        "dev": "concurrently -k -n ecfg,segd,hls,api,saas,app,admin -c green,gray,white,blue,yellow,magenta,cyan \"npm -w encode-config run dev\" \"npm -w segment-editor run dev\" \"npm -w hls run dev\" \"npm -w api run dev\" \"npm -w saas run dev\" \"npm -w app run dev\" \"npm -w admin run dev\"",
+        "predev": "npm -w encode-config run build && npm -w segment-editor run build",
+        "dev": "npm run predev && concurrently -k -n ecfg,segd,hls,api,saas,app,admin -c green,gray,white,blue,yellow,magenta,cyan \"npm -w encode-config run dev\" \"npm -w segment-editor run dev\" \"npm -w hls run dev\" \"npm -w api run dev\" \"npm -w saas run dev\" \"npm -w app run dev\" \"npm -w admin run dev\"",
         "seed:admin": "npm -w saas run seed:admin --"
     },
     "devDependencies": {
