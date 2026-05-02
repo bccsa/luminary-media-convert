@@ -4,6 +4,7 @@ import { useAuth0 } from '@auth0/auth0-vue';
 import { useRouter } from 'vue-router';
 import { listSessions, deleteSession } from '../api';
 import InlineConfirm from '../components/InlineConfirm.vue';
+import FormSelect from '../components/FormSelect.vue';
 
 const { getAccessTokenSilently } = useAuth0();
 const router = useRouter();
@@ -87,6 +88,15 @@ const statusOptions = [
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
 const hasSessions = computed(() => total.value > 0);
+
+const statusFilterOptions = computed(() =>
+    statusOptions
+        .filter((s): s is string => s !== '')
+        .map((s) => ({
+            value: s,
+            label: statusConfig[s]?.label ?? s,
+        })),
+);
 
 async function fetchSessions() {
     loading.value = true;
@@ -229,17 +239,14 @@ onMounted(fetchSessions);
                         <label for="session-status" class="text-xs font-medium text-zinc-500 dark:text-zinc-400">
                             Status
                         </label>
-                        <select
+                        <FormSelect
                             id="session-status"
                             v-model="statusFilter"
-                            class="input w-full min-w-[10rem] sm:w-44"
+                            :options="statusFilterOptions"
+                            placeholder="All statuses"
+                            select-class="min-w-[10rem] sm:w-44"
                             @change="onStatusChange"
-                        >
-                            <option value="">All statuses</option>
-                            <option v-for="s in statusOptions.filter((v) => v)" :key="s" :value="s">
-                                {{ statusConfig[s]?.label ?? s }}
-                            </option>
-                        </select>
+                        />
                     </div>
                 </div>
             </div>

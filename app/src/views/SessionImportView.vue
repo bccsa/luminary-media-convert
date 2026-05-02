@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { useRouter } from 'vue-router';
 import { listS3Configs, importSession } from '../api';
+import FormSelect from '../components/FormSelect.vue';
 
 const { getAccessTokenSilently } = useAuth0();
 const router = useRouter();
@@ -20,6 +21,13 @@ const loadingConfigs = ref(true);
 const selectedS3ConfigId = ref('');
 const location = ref('');
 const encryptionKey = ref('');
+
+const s3ImportConfigOptions = computed(() =>
+    s3Configs.value.map((c) => ({
+        value: c.id,
+        label: `${c.name} (${c.endPoint}/${c.bucket})`,
+    })),
+);
 
 const submitting = ref(false);
 const error = ref<string | null>(null);
@@ -122,19 +130,12 @@ onMounted(fetchS3Configs);
                 <!-- S3 Config selection -->
                 <div>
                     <label class="mb-1 block text-xs text-zinc-500">S3 Configuration</label>
-                    <select
+                    <FormSelect
+                        variant="admin"
                         v-model="selectedS3ConfigId"
-                        class="input"
-                    >
-                        <option value="" disabled>Select an S3 configuration</option>
-                        <option
-                            v-for="config in s3Configs"
-                            :key="config.id"
-                            :value="config.id"
-                        >
-                            {{ config.name }} ({{ config.endPoint }}/{{ config.bucket }})
-                        </option>
-                    </select>
+                        :options="s3ImportConfigOptions"
+                        placeholder="Select an S3 configuration"
+                    />
                     <p v-if="s3Configs.length === 0" class="mt-1 text-xs text-zinc-500">
                         No S3 configurations found.
                         <router-link to="/s3-configs" class="text-indigo-400 hover:text-indigo-300">Create one first.</router-link>

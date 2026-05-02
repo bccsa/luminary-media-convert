@@ -2,6 +2,7 @@
 import { reactive, computed, ref, watch } from 'vue';
 import type { S3Config, CreateSessionRequest } from '../types';
 import FileDropZone from './FileDropZone.vue';
+import FormSelect from './FormSelect.vue';
 
 export interface SavedS3Config {
     id: string;
@@ -165,6 +166,13 @@ function savePreferences() {
 }
 
 const hasS3Config = computed(() => !!selectedConfigId.value && !!props.loadedS3Config);
+
+const savedS3ConfigOptions = computed(() =>
+    props.savedS3Configs.map((cfg) => ({
+        value: cfg.id,
+        label: `${cfg.name} (${cfg.endPoint}/${cfg.bucket})`,
+    })),
+);
 
 const isValidUrl = computed(() => {
     const raw = sourceUrl.value.trim();
@@ -387,16 +395,12 @@ const canCreateConfig = computed(() =>
 
             <!-- Config selector -->
             <div v-if="savedS3Configs.length > 0 && !showNewConfigForm">
-                <select
+                <FormSelect
                     v-model="selectedConfigId"
+                    :options="savedS3ConfigOptions"
+                    placeholder="Select an S3 configuration..."
                     @change="onSelectConfig"
-                    class="input w-full"
-                >
-                    <option value="">Select an S3 configuration...</option>
-                    <option v-for="cfg in savedS3Configs" :key="cfg.id" :value="cfg.id">
-                        {{ cfg.name }} ({{ cfg.endPoint }}/{{ cfg.bucket }})
-                    </option>
-                </select>
+                />
             </div>
 
             <div v-if="savedS3Configs.length === 0 && !showNewConfigForm" class="rounded-lg border border-zinc-200 bg-zinc-100/70 p-4 text-center dark:border-zinc-800 dark:bg-zinc-900/60">

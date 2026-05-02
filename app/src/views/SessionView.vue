@@ -12,6 +12,7 @@ import type { AudioTrackInfo, QualityLevelInfo } from '../components/HlsPlayer.v
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import InlineConfirm from '../components/InlineConfirm.vue';
+import FormSelect from '../components/FormSelect.vue';
 import { getSessionDetail, getSessionStatus, startEncode, deleteSession, updateSessionName, moveSessionFiles, renameSessionPrefix, listS3Configs, checkPrefix } from '../api';
 import { useSessionPoller } from '../composables/useSessionPoller';
 import { useActiveUploads } from '../composables/useActiveUploads';
@@ -307,6 +308,31 @@ function nativeAudioLabel(t: AudioTrackInfo): string {
     if (t.language && t.language !== t.label) parts.push(`(${t.language})`);
     return parts.join(' ') || t.id;
 }
+
+const previewAudioSelectOptions = computed(() =>
+    previewAudioTracks.value.map((t) => ({
+        value: t.index,
+        label: audioTrackLabel(t),
+    })),
+);
+
+const previewQualitySelectOptions = computed(() => [
+    { value: '', label: 'Auto' },
+    ...previewQualityLevels.value.map((level) => ({
+        value: level.id,
+        label:
+            level.height > 0
+                ? `${level.height}p`
+                : `${Math.round(level.bitrate / 1000)}kbps`,
+    })),
+]);
+
+const nativeAudioSelectOptions = computed(() =>
+    nativeAudioTracks.value.map((t) => ({
+        value: t.id,
+        label: nativeAudioLabel(t),
+    })),
+);
 
 async function fetchPreviewAudioTracks() {
     if (!sessionToken.value || !encodingApiUrl.value) return;
@@ -611,6 +637,13 @@ const moveNewPrefix = ref('');
 const movePrefixWarning = ref<string | null>(null);
 const moveConfirmedOverwrite = ref(false);
 const checkingMovePrefix = ref(false);
+
+const moveTargetS3SelectOptions = computed(() =>
+    s3Configs.value.map((c: any) => ({
+        value: c.id,
+        label: `${c.name} (${c.bucket})`,
+    }))
+);
 
 async function openMoveForm() {
     moveError.value = null;
@@ -1288,36 +1321,24 @@ onUnmounted(() => {
                     >
                         <template v-if="previewAudioTracks.length > 1" #playback-start>
                             <label class="playback-slot-label">Audio:</label>
-                            <select
-                                v-model.number="selectedAudioTrack"
-                                class="playback-slot-select"
-                            >
-                                <option
-                                    v-for="track in previewAudioTracks"
-                                    :key="track.index"
-                                    :value="track.index"
-                                >{{ audioTrackLabel(track) }}</option>
-                            </select>
+                            <FormSelect
+                                variant="playback"
+                                numeric
+                                v-model="selectedAudioTrack"
+                                :options="previewAudioSelectOptions"
+                            />
                         </template>
                         <template
                             v-if="previewQualityLevels.length > 1 && encodingType !== 'audio'"
                             #playback-end
                         >
                             <label class="playback-slot-label">Quality:</label>
-                            <select
-                                :value="selectedQualityId"
-                                class="playback-slot-select"
-                                @change="onQualityChange(($event.target as HTMLSelectElement).value || null)"
-                            >
-                                <option :value="''">Auto</option>
-                                <option
-                                    v-for="level in previewQualityLevels"
-                                    :key="level.id"
-                                    :value="level.id"
-                                >
-                                    {{ level.height > 0 ? `${level.height}p` : `${Math.round(level.bitrate / 1000)}kbps` }}
-                                </option>
-                            </select>
+                            <FormSelect
+                                variant="playback"
+                                :model-value="selectedQualityId ?? ''"
+                                :options="previewQualitySelectOptions"
+                                @update:model-value="onQualityChange($event === '' ? null : String($event))"
+                            />
                         </template>
                     </SegmentEditor>
 
@@ -1374,29 +1395,20 @@ onUnmounted(() => {
                             #playback-start
                         >
                             <label class="playback-slot-label">Audio:</label>
-                            <select
+                            <FormSelect
                                 v-if="isCompleted"
-                                :value="selectedNativeAudioId ?? ''"
-                                class="playback-slot-select"
-                                @change="onNativeAudioChange(($event.target as HTMLSelectElement).value)"
-                            >
-                                <option
-                                    v-for="track in nativeAudioTracks"
-                                    :key="track.id"
-                                    :value="track.id"
-                                >{{ nativeAudioLabel(track) }}</option>
-                            </select>
-                            <select
+                                variant="playback"
+                                :model-value="selectedNativeAudioId ?? ''"
+                                :options="nativeAudioSelectOptions"
+                                @update:model-value="onNativeAudioChange(String($event))"
+                            />
+                            <FormSelect
                                 v-else
-                                v-model.number="selectedAudioTrack"
-                                class="playback-slot-select"
-                            >
-                                <option
-                                    v-for="track in previewAudioTracks"
-                                    :key="track.index"
-                                    :value="track.index"
-                                >{{ audioTrackLabel(track) }}</option>
-                            </select>
+                                variant="playback"
+                                numeric
+                                v-model="selectedAudioTrack"
+                                :options="previewAudioSelectOptions"
+                            />
                         </template>
 
                         <!-- Video quality selector (drives VHS qualityLevel.enabled directly). -->
@@ -1405,20 +1417,12 @@ onUnmounted(() => {
                             #playback-end
                         >
                             <label class="playback-slot-label">Quality:</label>
-                            <select
-                                :value="selectedQualityId ?? ''"
-                                class="playback-slot-select"
-                                @change="onQualityChange(($event.target as HTMLSelectElement).value || null)"
-                            >
-                                <option :value="''">Auto</option>
-                                <option
-                                    v-for="level in previewQualityLevels"
-                                    :key="level.id"
-                                    :value="level.id"
-                                >
-                                    {{ level.height > 0 ? `${level.height}p` : `${Math.round(level.bitrate / 1000)}kbps` }}
-                                </option>
-                            </select>
+                            <FormSelect
+                                variant="playback"
+                                :model-value="selectedQualityId ?? ''"
+                                :options="previewQualitySelectOptions"
+                                @update:model-value="onQualityChange($event === '' ? null : String($event))"
+                            />
                         </template>
 
                         <template #toolbar-end>
@@ -1610,16 +1614,12 @@ onUnmounted(() => {
                         <p class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Move Files to Another S3 Config</p>
                         <div>
                             <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Target S3 Config</label>
-                            <select
+                            <FormSelect
                                 v-model="selectedTargetConfigId"
-                                class="input"
+                                :options="moveTargetS3SelectOptions"
+                                placeholder="Select a config..."
                                 @change="checkMovePrefix"
-                            >
-                                <option value="" disabled>Select a config...</option>
-                                <option v-for="c in s3Configs" :key="c.id" :value="c.id">
-                                    {{ c.name }} ({{ c.bucket }})
-                                </option>
-                            </select>
+                            />
                         </div>
                         <div>
                             <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Path Prefix</label>
