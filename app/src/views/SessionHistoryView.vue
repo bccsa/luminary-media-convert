@@ -269,12 +269,14 @@ onMounted(fetchSessions);
                                 <tr
                                     class="border-b border-zinc-200 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:border-zinc-800 dark:text-zinc-400"
                                 >
-                                    <th class="pb-3 pl-4 pr-4 sm:pl-0">Name</th>
+                                    <th class="pb-3 pl-4 pr-4">Name</th>
                                     <th class="pb-3 pr-4">Status</th>
                                     <th class="pb-3 pr-4">Flags</th>
                                     <th class="pb-3 pr-4">Created</th>
                                     <th class="pb-3 pr-4">Completed</th>
-                                    <th class="pb-3 pr-4 text-right sm:pr-0"></th>
+                                    <th class="pb-3 pl-4 pr-4 text-right" scope="col">
+                                        <span class="sr-only">Actions</span>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
@@ -284,7 +286,7 @@ onMounted(fetchSessions);
                                     class="cursor-pointer transition-colors hover:bg-zinc-50/90 dark:hover:bg-zinc-800/40"
                                     @click="navigateToSession(session.id || session.sessionId)"
                                 >
-                                    <td class="py-3.5 pl-4 pr-4 sm:pl-0">
+                                    <td class="py-3.5 pl-4 pr-4">
                                         <span v-if="session.name" class="font-medium text-zinc-900 dark:text-zinc-100">
                                             {{ session.name }}
                                         </span>
@@ -329,7 +331,7 @@ onMounted(fetchSessions);
                                     <td class="py-3.5 pr-4 text-zinc-600 dark:text-zinc-400">
                                         {{ formatDate(session.completedAt) }}
                                     </td>
-                                    <td class="py-3.5 pr-4 text-right align-middle sm:pr-0" @click.stop>
+                                    <td class="py-3.5 pl-4 pr-4 text-right align-middle" @click.stop>
                                         <InlineConfirm
                                             label="Delete"
                                             prompt="Delete?"
