@@ -93,7 +93,7 @@ onMounted(fetchS3Configs);
 </script>
 
 <template>
-    <div class="max-w-2xl mx-auto">
+    <div class="app-view">
         <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 shadow-xl backdrop-blur">
             <!-- Back link -->
             <div class="mb-4">

@@ -187,7 +187,7 @@ onMounted(fetchSavedS3Configs);
 </script>
 
 <template>
-    <div class="mx-auto max-w-5xl space-y-6">
+    <div class="app-view space-y-6">
         <header class="space-y-2">
             <h1 class="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">New session</h1>
             <p class="text-sm text-zinc-600 dark:text-zinc-400">

@@ -175,7 +175,7 @@ onMounted(fetchSessions);
 </script>
 
 <template>
-    <div class="space-y-8">
+    <div class="app-view space-y-8">
         <!-- Page header -->
         <div class="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
             <div class="min-w-0 space-y-1">

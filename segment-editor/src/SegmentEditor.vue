@@ -1119,48 +1119,56 @@ defineExpose({
             </span>
         </div>
 
-        <div v-if="showList && segments.length > 0" class="se-list">
-            <div
-                v-for="(seg, i) in segments"
-                :key="seg.id"
-                class="se-list-row"
-                :class="{ 'se-list-row--selected': isSelected(seg.id) }"
-                @click="setSelection([seg.id])"
+        <div v-if="showList && segments.length > 0" class="se-list-section">
+            <p
+                v-if="labelsVisible && (mode === 'chapters' || mode === 'subtitles')"
+                class="se-list-heading"
             >
-                <span class="se-list-index">{{ i + 1 }}</span>
-                <input
-                    type="text"
-                    class="se-input se-input--time"
-                    :value="formatTime(seg.inSec)"
-                    @change="updateTimeInput(seg.id, 'inSec', ($event.target as HTMLInputElement).value)"
-                    @click.stop
-                />
-                <span class="se-list-sep">—</span>
-                <input
-                    type="text"
-                    class="se-input se-input--time"
-                    :value="formatTime(seg.outSec)"
-                    @change="updateTimeInput(seg.id, 'outSec', ($event.target as HTMLInputElement).value)"
-                    @click.stop
-                />
-                <textarea
-                    v-if="labelsVisible"
-                    class="se-label-field"
-                    :value="seg.label || ''"
-                    :placeholder="mode === 'chapters' ? 'Chapter title…' : 'Subtitle text…'"
-                    rows="1"
-                    @focus="onLabelFocus"
-                    @input="updateLabel(seg.id, ($event.target as HTMLTextAreaElement).value)"
-                    @blur="onLabelBlur"
-                    @click.stop
-                />
-                <span class="se-list-duration">{{ formatDuration(seg.outSec - seg.inSec) }}</span>
-                <button
-                    type="button"
-                    class="se-remove"
-                    title="Remove segment"
-                    @click.stop="removeSegment(seg.id)"
-                >×</button>
+                {{ mode === 'chapters' ? 'Chapter list' : 'Subtitle cues' }}
+            </p>
+            <div class="se-list">
+                <div
+                    v-for="(seg, i) in segments"
+                    :key="seg.id"
+                    class="se-list-row"
+                    :class="{ 'se-list-row--selected': isSelected(seg.id) }"
+                    @click="setSelection([seg.id])"
+                >
+                    <span class="se-list-index">{{ i + 1 }}</span>
+                    <input
+                        type="text"
+                        class="se-input se-input--time"
+                        :value="formatTime(seg.inSec)"
+                        @change="updateTimeInput(seg.id, 'inSec', ($event.target as HTMLInputElement).value)"
+                        @click.stop
+                    />
+                    <span class="se-list-sep">—</span>
+                    <input
+                        type="text"
+                        class="se-input se-input--time"
+                        :value="formatTime(seg.outSec)"
+                        @change="updateTimeInput(seg.id, 'outSec', ($event.target as HTMLInputElement).value)"
+                        @click.stop
+                    />
+                    <textarea
+                        v-if="labelsVisible"
+                        class="se-label-field"
+                        :value="seg.label || ''"
+                        :placeholder="mode === 'chapters' ? 'Chapter title…' : 'Subtitle text…'"
+                        rows="1"
+                        @focus="onLabelFocus"
+                        @input="updateLabel(seg.id, ($event.target as HTMLTextAreaElement).value)"
+                        @blur="onLabelBlur"
+                        @click.stop
+                    />
+                    <span class="se-list-duration">{{ formatDuration(seg.outSec - seg.inSec) }}</span>
+                    <button
+                        type="button"
+                        class="se-remove"
+                        title="Remove segment"
+                        @click.stop="removeSegment(seg.id)"
+                    >×</button>
+                </div>
             </div>
         </div>
 

@@ -1057,7 +1057,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div :class="['mx-auto transition-all duration-300', showProbeConfig ? 'max-w-fit' : 'max-w-3xl']">
+    <div class="app-view transition-all duration-300">
         <div class="rounded-2xl border border-zinc-200/90 bg-white/90 p-6 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10">
             <!-- Back link -->
             <div class="mb-4">
@@ -1362,7 +1362,7 @@ onUnmounted(() => {
                         title="Chapters"
                         keyboard-scope="global"
                         :fps="segmentEditorProbeFps"
-                        class="mb-4"
+                        class="mb-6"
                     >
                         <!-- Audio track selector.
                              During preview the on-demand HLS bakes one audio track in per
@@ -1443,7 +1443,7 @@ onUnmounted(() => {
                         </template>
                     </SegmentEditor>
 
-                    <p v-if="chaptersSaveError" class="mb-3 text-xs text-red-600 dark:text-red-400">{{ chaptersSaveError }}</p>
+                    <p v-if="chaptersSaveError" class="mb-4 text-xs text-red-600 dark:text-red-400">{{ chaptersSaveError }}</p>
 
                     <!-- Queue position -->
                     <div v-if="poller.status.value === 'queued' && poller.queuePosition.value != null" class="mb-4 rounded-xl border border-zinc-200 bg-zinc-50/95 p-4 dark:border-transparent dark:bg-zinc-900/60">

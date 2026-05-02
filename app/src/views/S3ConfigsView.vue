@@ -192,7 +192,7 @@ onMounted(fetchConfigs);
 </script>
 
 <template>
-    <div class="max-w-4xl mx-auto">
+    <div class="app-view">
         <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 shadow-xl backdrop-blur">
             <div class="flex items-center justify-between mb-6">
                 <h2 class="text-lg font-semibold text-zinc-100">S3 Configurations</h2>
