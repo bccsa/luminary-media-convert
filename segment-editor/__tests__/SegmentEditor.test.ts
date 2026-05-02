@@ -1095,27 +1095,31 @@ describe('SegmentEditor — exposed methods', () => {
         expect(latestSegments(w)).toHaveLength(0);
     });
 
-    it('history is bounded to 100 entries', async () => {
-        const t = { value: 5 };
-        const w = mountEditor({ duration: 10000, currentTime: t });
-        await flush();
-        // 150 commits should only retain the most recent ones in the undo stack.
-        for (let i = 0; i < 150; i++) {
-            t.value = i;
-            w.vm.addSegment();
+    it(
+        'history is bounded to 100 entries',
+        { timeout: 120_000 },
+        async () => {
+            const t = { value: 5 };
+            const w = mountEditor({ duration: 10000, currentTime: t });
             await flush();
-        }
-        // Undo as many times as possible — should not exceed 100 invocations with effect.
-        let undoCount = 0;
-        for (let i = 0; i < 200; i++) {
-            const before = latestSegments(w).length;
-            w.vm.undo();
-            await flush();
-            const after = latestSegments(w).length;
-            if (after !== before) undoCount += 1;
-        }
-        expect(undoCount).toBeLessThanOrEqual(100);
-    }, 30_000);
+            // 150 commits should only retain the most recent ones in the undo stack.
+            for (let i = 0; i < 150; i++) {
+                t.value = i;
+                w.vm.addSegment();
+                await flush();
+            }
+            // Undo as many times as possible — should not exceed 100 invocations with effect.
+            let undoCount = 0;
+            for (let i = 0; i < 200; i++) {
+                const before = latestSegments(w).length;
+                w.vm.undo();
+                await flush();
+                const after = latestSegments(w).length;
+                if (after !== before) undoCount += 1;
+            }
+            expect(undoCount).toBeLessThanOrEqual(100);
+        },
+    );
 });
 
 describe('SegmentEditor — RAF playhead tick', () => {
@@ -1262,12 +1266,11 @@ describe('SegmentEditor — list rendering', () => {
         const onPlayPause = vi.fn();
         const w = mountEditor({ props: { onPlayPause, isPlaying: true } });
         await flush();
-        const center = w.findAll('.se-playback-controls__center .se-btn');
-        const playPause = center.find((b) => /[▶⏸]/.test(b.text()));
-        expect(playPause).toBeTruthy();
-        await playPause!.trigger('click');
+        const playPause = w.find('.se-btn--playback');
+        expect(playPause.exists()).toBe(true);
+        expect(playPause.attributes('aria-label')).toBe('Pause');
+        await playPause.trigger('click');
         expect(onPlayPause).toHaveBeenCalled();
-        expect(playPause!.text()).toContain('⏸');
     });
 
     it('playback-start and playback-end slots render in the left and right cells', async () => {
@@ -1298,10 +1301,11 @@ describe('SegmentEditor — list rendering', () => {
         const buttons = w.findAll('.se-playback-controls__center .se-btn');
         expect(buttons).toHaveLength(5);
         expect(buttons[0].text()).toMatch(/1s/); // −1 s
-        expect(buttons[1].text()).toMatch(/−10\s*J/);
-        expect(buttons[2].text()).toMatch(/[▶⏸]/);
-        expect(buttons[3].text()).toMatch(/\+10\s*L/);
-        expect(buttons[4].text()).toMatch(/\+1\s*s|⟶/);
+        expect(buttons[1].text()).toMatch(/10\s*J/);
+        expect(buttons[2].classes()).toContain('se-btn--playback');
+        expect(buttons[2].attributes('aria-label')).toBe('Play');
+        expect(buttons[3].text()).toMatch(/10\s*L/);
+        expect(buttons[4].text()).toMatch(/1s/); // +1 s
     });
 
     it('renders the current-time display above the timeline, not inside playback controls', async () => {

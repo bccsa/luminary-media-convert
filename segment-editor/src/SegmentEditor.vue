@@ -870,40 +870,46 @@ defineExpose({
                     class="se-btn se-btn--icon"
                     title="Keyboard shortcuts (?)"
                     @click="helpOpen = !helpOpen"
-                >?</button>
+                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
             </div>
         </div>
 
         <div v-if="showToolbar" class="se-toolbar">
             <button type="button" class="se-btn se-btn--io" @click="markIn" title="Mark In at playhead ( I or [ )">
+                <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7v10M8 9h6M8 15h6"/></svg>
                 <span class="se-btn__label">Mark In</span><span class="se-kbd" aria-hidden="true">I</span><span class="se-kbd" aria-hidden="true">[</span>
             </button>
             <button type="button" class="se-btn se-btn--io" @click="markOut" title="Mark Out at playhead ( O or ] )">
+                <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 7v10M16 9h-6M16 15h-6"/></svg>
                 <span class="se-btn__label">Mark Out</span><span class="se-kbd" aria-hidden="true">O</span><span class="se-kbd" aria-hidden="true">]</span>
             </button>
             <button type="button" class="se-btn" @click="addSegmentAtPlayhead" title="Add a 10-second segment at playhead">
-                + Add
+                <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                Add
             </button>
             <button
                 type="button"
-                class="se-btn"
+                class="se-btn se-btn--squish"
                 :disabled="history.length === 0"
                 @click="undo"
                 title="Undo"
-            >↶</button>
+            ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></button>
             <button
                 type="button"
-                class="se-btn"
+                class="se-btn se-btn--squish"
                 :disabled="redoStack.length === 0"
                 @click="redo"
                 title="Redo"
-            >↷</button>
+            ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 9a9 9 0 1 1-2.12 9.36L23 10"/></svg></button>
             <button
                 v-if="segments.length > 0"
                 type="button"
                 class="se-btn se-btn--danger"
                 @click="clearAll"
-            >Clear All</button>
+            >
+                <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
+                Clear All
+            </button>
             <span v-if="pendingInSec !== null" class="se-pending">
                 In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
                 · <span class="se-pending-cancel">Esc cancels</span>
@@ -1034,7 +1040,8 @@ defineExpose({
                     @click="stepSeek(-1)"
                     title="−1 second (←). Hold 1 / 2 / 3 before ← for −10 / −30 / −60."
                 >
-                    <span aria-hidden="true">⟵</span> 1s
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12H8"/><polyline points="13 7 8 12 13 17"/></svg>
+                    <span>1s</span>
                 </button>
                 <button
                     v-if="onSeek"
@@ -1043,16 +1050,31 @@ defineExpose({
                     title="−10 seconds (J)"
                     @click="stepSeek(-1, 10)"
                 >
-                    −10<span class="se-kbd se-kbd--inline">J</span>
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 7 10 12 15 17"/><polyline points="21 7 16 12 21 17"/></svg>
+                    <span>10<span class="se-kbd se-kbd--inline">J</span></span>
                 </button>
                 <button
                     v-if="onPlayPause"
                     type="button"
                     class="se-btn se-btn--playback"
                     :title="'Play / pause · Space · K'"
+                    :aria-label="isPlaying ? 'Pause' : 'Play'"
                     @click="onPlayPause"
                 >
-                    {{ isPlaying ? '⏸' : '▶' }}
+                    <svg
+                        v-if="!isPlaying"
+                        class="se-icon"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    ><path d="M10 8.125v7.75L17.625 12 10 8.125z"/></svg>
+                    <svg
+                        v-else
+                        class="se-icon"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    ><path d="M9 9h3v6H9V9Zm5 0h3v6h-3V9z"/></svg>
                 </button>
                 <button
                     v-if="onSeek"
@@ -1061,7 +1083,8 @@ defineExpose({
                     title="+10 seconds (L)"
                     @click="stepSeek(1, 10)"
                 >
-                    +10<span class="se-kbd se-kbd--inline">L</span>
+                    <span>10<span class="se-kbd se-kbd--inline">L</span></span>
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 7 14 12 9 17"/><polyline points="15 7 20 12 15 17"/></svg>
                 </button>
                 <button
                     v-if="onSeek"
@@ -1070,7 +1093,8 @@ defineExpose({
                     @click="stepSeek(1)"
                     title="+1 second (→). Hold 1 / 2 / 3 before → for +10 / +30 / +60."
                 >
-                    +1s<span aria-hidden="true"> ⟶</span>
+                    <span>1s</span>
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="11 7 16 12 11 17"/><path d="M4 12h12"/></svg>
                 </button>
             </div>
             <div class="se-playback-controls__slot se-playback-controls__slot--end">
@@ -1166,8 +1190,19 @@ defineExpose({
                         type="button"
                         class="se-remove"
                         title="Remove segment"
+                        aria-label="Remove segment"
                         @click.stop="removeSegment(seg.id)"
-                    >×</button>
+                    >
+                        <svg
+                            class="se-icon"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            aria-hidden="true"
+                        ><path d="M8 8l8 8M16 8l-8 8"/></svg>
+                    </button>
                 </div>
             </div>
         </div>
