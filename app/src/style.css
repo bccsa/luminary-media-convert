@@ -107,6 +107,34 @@
 
     /* Actions bar */
     .ecf-actions { @apply flex gap-3; }
+
+    /* SegmentEditor playback row — matches light/dark shell */
+    .playback-slot-label {
+        @apply text-xs font-medium text-zinc-600 whitespace-nowrap dark:text-zinc-400;
+    }
+
+    .playback-slot-select {
+        @apply max-w-[11rem] rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-900 shadow-sm
+            focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/25
+            dark:max-w-none dark:border-zinc-600 dark:bg-zinc-900/90 dark:text-zinc-100 dark:shadow-none dark:focus:ring-indigo-400/30;
+    }
+
+    .chapter-toolbar-muted {
+        @apply rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 transition-colors
+            hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50
+            dark:border-zinc-600 dark:bg-zinc-900/80 dark:text-zinc-200 dark:hover:bg-zinc-800;
+    }
+
+    .chapter-unsaved-pill {
+        @apply rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900 ring-1 ring-amber-200/90
+            dark:bg-amber-500/15 dark:text-amber-100 dark:ring-amber-500/35;
+    }
+
+    .chapter-save-btn {
+        @apply rounded-md border border-indigo-600 bg-indigo-600 px-3 py-1 text-xs font-medium text-white
+            transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50
+            dark:border-indigo-500 dark:bg-indigo-600/90 dark:hover:bg-indigo-500;
+    }
 }
 
 

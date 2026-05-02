@@ -59,6 +59,14 @@ const chapterTimelineDuration = computed(
     () => playerDuration.value ?? probeResult.value?.format?.duration ?? 0,
 );
 
+/** Probe video FPS for SegmentEditor comma/period frame steps (same source as EncodeConfigForm). */
+const segmentEditorProbeFps = computed(() => {
+    const v = probeResult.value?.videoTracks?.[0];
+    const f = v?.frameRate;
+    if (typeof f !== 'number' || f <= 0 || f > 120) return 0;
+    return Math.round(f);
+});
+
 // Session name
 const sessionName = ref('');
 const editingName = ref(false);
@@ -1161,7 +1169,7 @@ onUnmounted(() => {
                 <!-- ============================================================ -->
                 <!-- Unified HLS player — shows local preview during upload/encoding,
                      swaps to S3 output when encoding completes -->
-                <div v-if="activePlaybackUrl" class="mb-4">
+                <div v-if="activePlaybackUrl" class="mb-5 overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5">
                     <HlsPlayer
                         ref="playerRef"
                         :playback-url="activePlaybackUrl"
@@ -1182,9 +1190,9 @@ onUnmounted(() => {
                 <!-- Submission error banner -->
                 <div
                     v-if="submissionError"
-                    class="mb-6 rounded-lg bg-red-950/40 border border-red-800/50 p-4"
+                    class="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/40"
                 >
-                    <p class="text-sm text-red-400">{{ submissionError }}</p>
+                    <p class="text-sm text-red-800 dark:text-red-300">{{ submissionError }}</p>
                 </div>
 
                 <!-- ============================================================ -->
@@ -1202,7 +1210,7 @@ onUnmounted(() => {
                         <button
                             v-if="activeUpload!.progress < 100"
                             type="button"
-                            class="rounded-lg border border-zinc-700 px-4 py-1.5 text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+                            class="rounded-lg border border-zinc-300 px-4 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
                             @click="cancelUpload"
                         >
                             Cancel
@@ -1274,12 +1282,15 @@ onUnmounted(() => {
                         :on-seek="(t) => playerRef?.seek(t)"
                         :on-play-pause="() => playerRef?.togglePlay()"
                         :is-playing="isPreviewPlaying"
+                        keyboard-scope="global"
+                        :fps="segmentEditorProbeFps"
+                        class="mb-4"
                     >
                         <template v-if="previewAudioTracks.length > 1" #playback-start>
-                            <label class="text-xs text-zinc-400">Audio:</label>
+                            <label class="playback-slot-label">Audio:</label>
                             <select
                                 v-model.number="selectedAudioTrack"
-                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                class="playback-slot-select"
                             >
                                 <option
                                     v-for="track in previewAudioTracks"
@@ -1292,10 +1303,10 @@ onUnmounted(() => {
                             v-if="previewQualityLevels.length > 1 && encodingType !== 'audio'"
                             #playback-end
                         >
-                            <label class="text-xs text-zinc-400">Quality:</label>
+                            <label class="playback-slot-label">Quality:</label>
                             <select
                                 :value="selectedQualityId"
-                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                class="playback-slot-select"
                                 @change="onQualityChange(($event.target as HTMLSelectElement).value || null)"
                             >
                                 <option :value="''">Auto</option>
@@ -1349,6 +1360,8 @@ onUnmounted(() => {
                         :is-playing="isPreviewPlaying"
                         :ripple-edit="false"
                         title="Chapters"
+                        keyboard-scope="global"
+                        :fps="segmentEditorProbeFps"
                         class="mb-4"
                     >
                         <!-- Audio track selector.
@@ -1360,11 +1373,11 @@ onUnmounted(() => {
                             v-if="(isCompleted && nativeAudioTracks.length > 1) || (!isCompleted && previewAudioTracks.length > 1)"
                             #playback-start
                         >
-                            <label class="text-xs text-zinc-400">Audio:</label>
+                            <label class="playback-slot-label">Audio:</label>
                             <select
                                 v-if="isCompleted"
                                 :value="selectedNativeAudioId ?? ''"
-                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                class="playback-slot-select"
                                 @change="onNativeAudioChange(($event.target as HTMLSelectElement).value)"
                             >
                                 <option
@@ -1376,7 +1389,7 @@ onUnmounted(() => {
                             <select
                                 v-else
                                 v-model.number="selectedAudioTrack"
-                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                class="playback-slot-select"
                             >
                                 <option
                                     v-for="track in previewAudioTracks"
@@ -1391,10 +1404,10 @@ onUnmounted(() => {
                             v-if="previewQualityLevels.length > 1 && encodingType !== 'audio'"
                             #playback-end
                         >
-                            <label class="text-xs text-zinc-400">Quality:</label>
+                            <label class="playback-slot-label">Quality:</label>
                             <select
                                 :value="selectedQualityId ?? ''"
-                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                class="playback-slot-select"
                                 @change="onQualityChange(($event.target as HTMLSelectElement).value || null)"
                             >
                                 <option :value="''">Auto</option>
@@ -1411,31 +1424,31 @@ onUnmounted(() => {
                         <template #toolbar-end>
                             <span
                                 v-if="chapters.isDirty.value"
-                                class="rounded bg-amber-500/20 px-2 py-0.5 text-[11px] font-medium text-amber-300"
+                                class="chapter-unsaved-pill"
                                 title="Unsaved changes are stored locally; click Save to commit to S3."
                             >Unsaved</span>
                             <button
                                 v-if="chapters.isDirty.value"
                                 type="button"
-                                class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                class="chapter-toolbar-muted"
                                 :disabled="chapters.isSaving.value"
                                 @click="onDiscardChapters"
                             >Discard</button>
                             <button
                                 type="button"
-                                class="rounded border border-indigo-600 bg-indigo-600/30 px-3 py-1 text-xs font-medium text-indigo-200 transition-colors hover:bg-indigo-600/50 disabled:cursor-not-allowed disabled:opacity-50"
+                                class="chapter-save-btn"
                                 :disabled="!chapters.isDirty.value || chapters.isSaving.value"
                                 @click="onSaveChapters"
                             >{{ chapters.isSaving.value ? 'Saving…' : 'Save' }}</button>
                         </template>
                     </SegmentEditor>
 
-                    <p v-if="chaptersSaveError" class="mb-3 text-xs text-red-400">{{ chaptersSaveError }}</p>
+                    <p v-if="chaptersSaveError" class="mb-3 text-xs text-red-600 dark:text-red-400">{{ chaptersSaveError }}</p>
 
                     <!-- Queue position -->
-                    <div v-if="poller.status.value === 'queued' && poller.queuePosition.value != null" class="mb-4 rounded-lg bg-zinc-900/60 p-4">
-                        <p class="text-sm text-zinc-400">
-                            Queue position: <span class="font-semibold text-amber-400">{{ poller.queuePosition.value }}</span>
+                    <div v-if="poller.status.value === 'queued' && poller.queuePosition.value != null" class="mb-4 rounded-xl border border-zinc-200 bg-zinc-50/95 p-4 dark:border-transparent dark:bg-zinc-900/60">
+                        <p class="text-sm text-zinc-600 dark:text-zinc-400">
+                            Queue position: <span class="font-semibold text-amber-700 dark:text-amber-400">{{ poller.queuePosition.value }}</span>
                         </p>
                     </div>
 
@@ -1468,11 +1481,11 @@ onUnmounted(() => {
                     </div>
 
                     <!-- Failed banner -->
-                    <div v-if="currentStatus === 'failed'" class="mb-4 rounded-lg bg-red-950/40 border border-red-800/50 p-4">
-                        <p class="text-sm font-medium text-red-400">Encoding failed</p>
+                    <div v-if="currentStatus === 'failed'" class="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/40">
+                        <p class="text-sm font-medium text-red-900 dark:text-red-400">Encoding failed</p>
                         <p
                             v-if="poller.error.value || session.error"
-                            class="mt-1 text-sm text-red-300/80"
+                            class="mt-1 text-sm text-red-700/90 dark:text-red-300/80"
                         >
                             {{ poller.error.value || session.error }}
                         </p>
@@ -1482,7 +1495,7 @@ onUnmounted(() => {
                     <div v-if="isCompleted" class="space-y-3">
                         <!-- Angle switcher -->
                         <div v-if="showAngleSwitcher" class="flex flex-wrap items-center gap-2">
-                            <span class="text-xs font-medium text-zinc-500">Angle:</span>
+                            <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Angle:</span>
                             <div class="flex flex-wrap gap-1.5">
                                 <button
                                     v-for="(ap, i) in uniqueAnglePlaylists"
@@ -1490,8 +1503,8 @@ onUnmounted(() => {
                                     type="button"
                                     class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer"
                                     :class="i === currentAngleIndex
-                                        ? 'bg-indigo-600 text-white'
-                                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'"
+                                        ? 'bg-indigo-600 text-white dark:bg-indigo-600 dark:text-white'
+                                        : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 hover:text-zinc-900 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-300'"
                                     @click="switchToAngle(i)"
                                 >
                                     {{ ap.name }}
@@ -1502,51 +1515,51 @@ onUnmounted(() => {
                         <!-- Video player is now unified at the top of the page -->
 
                         <!-- Master Playlist URL + Copy -->
-                        <div v-if="displayMasterPlaylist" class="rounded-lg bg-zinc-900/60 p-4">
-                            <div class="mb-1 flex items-center justify-between">
-                                <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Master Playlist</p>
+                        <div v-if="displayMasterPlaylist" class="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+                            <div class="mb-2 flex items-center justify-between">
+                                <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Master Playlist</p>
                                 <button
                                     v-if="s3Url"
                                     type="button"
                                     class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer"
                                     :class="copied
-                                        ? 'bg-emerald-900/60 text-emerald-400'
-                                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'"
+                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-400'
+                                        : 'bg-white border border-zinc-300 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-300'"
                                     @click="copyPlaybackUrl"
                                 >
                                     {{ copied ? 'Copied!' : 'Copy URL' }}
                                 </button>
                             </div>
-                            <p class="break-all font-mono text-sm text-indigo-400">{{ s3Url ?? displayMasterPlaylist }}</p>
+                            <p class="break-all font-mono text-sm text-indigo-700 dark:text-indigo-400">{{ s3Url ?? displayMasterPlaylist }}</p>
                         </div>
 
                         <!-- Encryption key display -->
-                        <div v-if="isEncrypted && encryptionKeyHex" class="rounded-lg bg-zinc-900/60 p-4">
-                            <div class="mb-1 flex items-center justify-between">
-                                <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Encryption Key</p>
+                        <div v-if="isEncrypted && encryptionKeyHex" class="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+                            <div class="mb-2 flex items-center justify-between">
+                                <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Encryption Key</p>
                                 <button
                                     type="button"
                                     class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer"
                                     :class="copiedKey
-                                        ? 'bg-emerald-900/60 text-emerald-400'
-                                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300'"
+                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-400'
+                                        : 'bg-white border border-zinc-300 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-300'"
                                     @click="copyEncryptionKey"
                                 >
                                     {{ copiedKey ? 'Copied!' : 'Copy Key' }}
                                 </button>
                             </div>
-                            <code class="block break-all rounded bg-zinc-800 px-3 py-2 font-mono text-xs text-amber-400">{{ encryptionKeyHex }}</code>
+                            <code class="block break-all rounded-lg bg-zinc-100 px-3 py-2 font-mono text-xs text-amber-800 dark:bg-zinc-800 dark:text-amber-400">{{ encryptionKeyHex }}</code>
                         </div>
 
                         <!-- Output files -->
-                        <div v-if="displayFiles?.length" class="rounded-lg bg-zinc-900/60 p-4">
+                        <div v-if="displayFiles?.length" class="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
                             <template v-if="shouldCollapseFiles">
                                 <button
                                     type="button"
                                     class="flex w-full items-center justify-between cursor-pointer"
                                     @click="showFiles = !showFiles"
                                 >
-                                    <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                                    <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">
                                         Output Files ({{ displayFiles.length }})
                                     </p>
                                     <svg
@@ -1558,13 +1571,13 @@ onUnmounted(() => {
                                     </svg>
                                 </button>
                                 <ul v-if="showFiles" class="mt-3 max-h-60 space-y-1 overflow-y-auto">
-                                    <li v-for="f in displayFiles" :key="f" class="break-all font-mono text-xs text-zinc-400">{{ f }}</li>
+                                    <li v-for="f in displayFiles" :key="f" class="break-all font-mono text-xs text-zinc-600 dark:text-zinc-400">{{ f }}</li>
                                 </ul>
                             </template>
                             <template v-else>
-                                <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Output Files</p>
+                                <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Output Files</p>
                                 <ul class="max-h-60 space-y-1 overflow-y-auto">
-                                    <li v-for="f in displayFiles" :key="f" class="break-all font-mono text-xs text-zinc-400">{{ f }}</li>
+                                    <li v-for="f in displayFiles" :key="f" class="break-all font-mono text-xs text-zinc-600 dark:text-zinc-400">{{ f }}</li>
                                 </ul>
                             </template>
                         </div>
@@ -1572,34 +1585,34 @@ onUnmounted(() => {
 
                     <!-- Metadata grid -->
                     <div class="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div v-if="session.s3Config?.endPoint" class="rounded-lg bg-zinc-900/60 p-3">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">S3 Endpoint</p>
-                            <p class="font-mono text-xs text-zinc-200 break-all">
+                        <div v-if="session.s3Config?.endPoint" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">S3 Endpoint</p>
+                            <p class="font-mono text-xs text-zinc-800 break-all dark:text-zinc-200">
                                 {{ session.s3Config.endPoint }}{{ session.s3Config.port ? `:${session.s3Config.port}` : '' }}
                             </p>
                         </div>
-                        <div v-if="session.s3Config?.bucket" class="rounded-lg bg-zinc-900/60 p-3">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">S3 Bucket</p>
-                            <p class="text-sm text-zinc-200">{{ session.s3Config.bucket }}</p>
+                        <div v-if="session.s3Config?.bucket" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">S3 Bucket</p>
+                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ session.s3Config.bucket }}</p>
                         </div>
-                        <div class="rounded-lg bg-zinc-900/60 p-3">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Created</p>
-                            <p class="text-sm text-zinc-200">{{ formatDate(session.createdAt) }}</p>
+                        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Created</p>
+                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ formatDate(session.createdAt) }}</p>
                         </div>
-                        <div v-if="session.completedAt" class="rounded-lg bg-zinc-900/60 p-3">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Completed</p>
-                            <p class="text-sm text-zinc-200">{{ formatDate(session.completedAt) }}</p>
+                        <div v-if="session.completedAt" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Completed</p>
+                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ formatDate(session.completedAt) }}</p>
                         </div>
                     </div>
 
                     <!-- Move / Rename forms -->
-                    <div v-if="showMoveForm && isCompleted && hasS3Files" class="mt-4 rounded-lg border border-zinc-700 bg-zinc-900/80 p-4 space-y-3">
-                        <p class="text-sm font-semibold text-zinc-300">Move Files to Another S3 Config</p>
+                    <div v-if="showMoveForm && isCompleted && hasS3Files" class="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4 space-y-3 dark:border-zinc-700 dark:bg-zinc-900/80">
+                        <p class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Move Files to Another S3 Config</p>
                         <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Target S3 Config</label>
+                            <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Target S3 Config</label>
                             <select
                                 v-model="selectedTargetConfigId"
-                                class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-indigo-500 focus:outline-none"
+                                class="input"
                                 @change="checkMovePrefix"
                             >
                                 <option value="" disabled>Select a config...</option>
@@ -1609,28 +1622,28 @@ onUnmounted(() => {
                             </select>
                         </div>
                         <div>
-                            <label class="mb-1 block text-xs text-zinc-500">Path Prefix</label>
+                            <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Path Prefix</label>
                             <input
                                 v-model="moveNewPrefix"
                                 type="text"
                                 placeholder="e.g. videos/project-1/"
-                                class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:border-indigo-500 focus:outline-none"
+                                class="input"
                                 @blur="checkMovePrefix"
                             />
                         </div>
-                        <div v-if="movePrefixWarning" class="rounded-md bg-amber-950/40 border border-amber-800/50 p-3">
-                            <p class="text-xs text-amber-400">{{ movePrefixWarning }}</p>
-                            <label class="mt-2 flex items-center gap-2 text-xs text-amber-300 cursor-pointer">
-                                <input v-model="moveConfirmedOverwrite" type="checkbox" class="rounded border-amber-700" />
+                        <div v-if="movePrefixWarning" class="rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/50 dark:bg-amber-950/40">
+                            <p class="text-xs text-amber-800 dark:text-amber-400">{{ movePrefixWarning }}</p>
+                            <label class="mt-2 flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 cursor-pointer">
+                                <input v-model="moveConfirmedOverwrite" type="checkbox" class="rounded accent-amber-600" />
                                 I understand, proceed anyway
                             </label>
                         </div>
-                        <p v-if="moveError" class="text-xs text-red-400">{{ moveError }}</p>
+                        <p v-if="moveError" class="text-xs text-red-700 dark:text-red-400">{{ moveError }}</p>
                         <div class="flex gap-2">
                             <button
                                 type="button"
                                 :disabled="!canMove"
-                                class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:opacity-50 cursor-pointer"
+                                class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:opacity-50 cursor-pointer"
                                 @click="confirmMove"
                             >
                                 <template v-if="moving">Moving...</template>
@@ -1639,7 +1652,7 @@ onUnmounted(() => {
                             <button
                                 type="button"
                                 :disabled="moving"
-                                class="rounded-md border border-zinc-700 px-4 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800 cursor-pointer"
+                                class="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 cursor-pointer"
                                 @click="showMoveForm = false"
                             >
                                 Cancel
@@ -1647,31 +1660,31 @@ onUnmounted(() => {
                         </div>
                     </div>
 
-                    <div v-if="showRenameForm && isCompleted && hasS3Files" class="mt-4 rounded-lg border border-zinc-700 bg-zinc-900/80 p-4 space-y-3">
-                        <p class="text-sm font-semibold text-zinc-300">Rename Path Prefix</p>
+                    <div v-if="showRenameForm && isCompleted && hasS3Files" class="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4 space-y-3 dark:border-zinc-700 dark:bg-zinc-900/80">
+                        <p class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Rename Path Prefix</p>
                         <div>
-                            <label class="mb-1 block text-xs text-zinc-500">New Path Prefix</label>
+                            <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">New Path Prefix</label>
                             <input
                                 v-model="renameNewPrefix"
                                 type="text"
                                 placeholder="e.g. production/client-x/"
-                                class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:border-indigo-500 focus:outline-none"
+                                class="input"
                                 @blur="checkRenamePrefix"
                             />
                         </div>
-                        <div v-if="renamePrefixWarning" class="rounded-md bg-amber-950/40 border border-amber-800/50 p-3">
-                            <p class="text-xs text-amber-400">{{ renamePrefixWarning }}</p>
-                            <label class="mt-2 flex items-center gap-2 text-xs text-amber-300 cursor-pointer">
-                                <input v-model="renameConfirmedOverwrite" type="checkbox" class="rounded border-amber-700" />
+                        <div v-if="renamePrefixWarning" class="rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/50 dark:bg-amber-950/40">
+                            <p class="text-xs text-amber-800 dark:text-amber-400">{{ renamePrefixWarning }}</p>
+                            <label class="mt-2 flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 cursor-pointer">
+                                <input v-model="renameConfirmedOverwrite" type="checkbox" class="rounded accent-amber-600" />
                                 I understand, proceed anyway
                             </label>
                         </div>
-                        <p v-if="renameError" class="text-xs text-red-400">{{ renameError }}</p>
+                        <p v-if="renameError" class="text-xs text-red-700 dark:text-red-400">{{ renameError }}</p>
                         <div class="flex gap-2">
                             <button
                                 type="button"
                                 :disabled="!canRename"
-                                class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:opacity-50 cursor-pointer"
+                                class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:opacity-50 cursor-pointer"
                                 @click="confirmRename"
                             >
                                 <template v-if="renaming">Renaming...</template>
@@ -1680,7 +1693,7 @@ onUnmounted(() => {
                             <button
                                 type="button"
                                 :disabled="renaming"
-                                class="rounded-md border border-zinc-700 px-4 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800 cursor-pointer"
+                                class="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 cursor-pointer"
                                 @click="showRenameForm = false"
                             >
                                 Cancel
@@ -1693,7 +1706,7 @@ onUnmounted(() => {
                         <button
                             v-if="showEncoding && (poller.status.value === 'queued' || poller.status.value === 'encoding')"
                             type="button"
-                            class="flex-1 rounded-lg border border-zinc-700 px-6 py-3 text-sm font-semibold text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+                            class="flex-1 rounded-lg border border-zinc-300 px-6 py-3 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
                             @click="onCancelEncode"
                         >
                             Cancel
@@ -1701,7 +1714,7 @@ onUnmounted(() => {
                         <button
                             v-if="isCompleted && hasS3Files && !showMoveForm && !showRenameForm"
                             type="button"
-                            class="rounded-lg border border-zinc-700 px-4 py-3 text-sm font-semibold text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+                            class="rounded-lg border border-zinc-300 px-4 py-3 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
                             @click="openMoveForm"
                         >
                             Move Files
@@ -1709,7 +1722,7 @@ onUnmounted(() => {
                         <button
                             v-if="isCompleted && hasS3Files && !showMoveForm && !showRenameForm"
                             type="button"
-                            class="rounded-lg border border-zinc-700 px-4 py-3 text-sm font-semibold text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 cursor-pointer"
+                            class="rounded-lg border border-zinc-300 px-4 py-3 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
                             @click="openRenameForm"
                         >
                             Rename Prefix
@@ -1717,7 +1730,7 @@ onUnmounted(() => {
                         <button
                             v-if="isTerminal"
                             type="button"
-                            class="flex-1 rounded-lg bg-zinc-800 px-6 py-3 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer"
+                            class="flex-1 rounded-lg border border-zinc-300 bg-zinc-100 px-6 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-200 hover:text-zinc-900 dark:border-transparent dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 cursor-pointer"
                             @click="router.push('/sessions/new')"
                         >
                             New Session
@@ -1748,25 +1761,25 @@ onUnmounted(() => {
 
                     <!-- Metadata grid for expired sessions -->
                     <div class="mt-4 w-full grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div class="rounded-lg bg-zinc-900/60 p-3">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Status</p>
-                            <p class="text-sm text-zinc-200">{{ statusConfig[session.status]?.label ?? session.status }}</p>
+                        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Status</p>
+                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ statusConfig[session.status]?.label ?? session.status }}</p>
                         </div>
-                        <div v-if="session.s3Config?.endPoint" class="rounded-lg bg-zinc-900/60 p-3">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">S3 Endpoint</p>
-                            <p class="font-mono text-xs text-zinc-200 break-all">
+                        <div v-if="session.s3Config?.endPoint" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">S3 Endpoint</p>
+                            <p class="font-mono text-xs text-zinc-800 break-all dark:text-zinc-200">
                                 {{ session.s3Config.endPoint }}{{ session.s3Config.port ? `:${session.s3Config.port}` : '' }}
                             </p>
                         </div>
-                        <div class="rounded-lg bg-zinc-900/60 p-3">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Created</p>
-                            <p class="text-sm text-zinc-200">{{ formatDate(session.createdAt) }}</p>
+                        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Created</p>
+                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ formatDate(session.createdAt) }}</p>
                         </div>
                     </div>
 
                     <button
                         type="button"
-                        class="mt-4 rounded-lg bg-zinc-800 px-6 py-3 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-700 cursor-pointer"
+                        class="mt-4 rounded-lg border border-zinc-300 bg-zinc-100 px-6 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-200 dark:border-transparent dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 cursor-pointer"
                         @click="router.push('/sessions/new')"
                     >
                         New Session

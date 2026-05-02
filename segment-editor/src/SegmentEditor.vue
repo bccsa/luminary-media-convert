@@ -42,6 +42,8 @@ interface Props {
     showHelp?: boolean;
     /** Max/min zoom (1 = fit to duration, 2 = 2× zoom, ...). */
     maxZoom?: number;
+    /** Compact NLE-style hint row below playback controls (In/Out keys, jog, zoom). */
+    showShortcutsStrip?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -57,6 +59,7 @@ const props = withDefaults(defineProps<Props>(), {
     showList: true,
     showHelp: true,
     maxZoom: 40,
+    showShortcutsStrip: true,
     isPlaying: false,
     rippleEdit: true,
     showLabels: undefined,
@@ -587,7 +590,12 @@ const helpOpen = ref(false);
 
 function onKeyDown(e: KeyboardEvent) {
     const target = e.target as HTMLElement | null;
-    const isTyping = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+    const isTyping =
+        target
+        && (target.tagName === 'INPUT'
+            || target.tagName === 'TEXTAREA'
+            || target.tagName === 'SELECT'
+            || target.isContentEditable);
     if (isTyping) {
         // Allow Cmd+Z / Esc even when typing; otherwise let the input handle it.
         if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) { /* fall through */ } else if (e.key === 'Escape') { (target as HTMLElement).blur(); return; } else return;
@@ -605,6 +613,15 @@ function onKeyDown(e: KeyboardEvent) {
         }
         case '[': { e.preventDefault(); markIn(); return; }
         case ']': { e.preventDefault(); markOut(); return; }
+        // NLE convention (DaVinci Resolve-style) alongside brackets.
+        case 'i': case 'I': {
+            if (e.altKey || e.ctrlKey || e.metaKey) return;
+            e.preventDefault(); markIn(); return;
+        }
+        case 'o': case 'O': {
+            if (e.altKey || e.ctrlKey || e.metaKey) return;
+            e.preventDefault(); markOut(); return;
+        }
         case 'ArrowLeft': {
             e.preventDefault();
             if (e.altKey && primarySelectedId.value) return nudgeEdge(-1);
@@ -786,19 +803,26 @@ function formatTickLabel(sec: number): string {
 
 // -------------- lifecycle --------------
 
+watch(
+    () => props.keyboardScope,
+    (scope) => {
+        window.removeEventListener('keydown', onKeyDown);
+        window.removeEventListener('keyup', onKeyUp);
+        if (scope === 'global') {
+            window.addEventListener('keydown', onKeyDown);
+            window.addEventListener('keyup', onKeyUp);
+        }
+    },
+    { immediate: true },
+);
+
 onMounted(() => {
     rafId = requestAnimationFrame(tick);
-    if (props.keyboardScope === 'global') {
-        window.addEventListener('keydown', onKeyDown);
-        window.addEventListener('keyup', onKeyUp);
-    }
 });
 onBeforeUnmount(() => {
     cancelAnimationFrame(rafId);
-    if (props.keyboardScope === 'global') {
-        window.removeEventListener('keydown', onKeyDown);
-        window.removeEventListener('keyup', onKeyUp);
-    }
+    window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('keyup', onKeyUp);
 });
 
 // -------------- VTT helpers --------------
@@ -851,11 +875,11 @@ defineExpose({
         </div>
 
         <div v-if="showToolbar" class="se-toolbar">
-            <button type="button" class="se-btn" @click="markIn" title="Set in-point at playhead">
-                Mark In<span class="se-kbd">[</span>
+            <button type="button" class="se-btn se-btn--io" @click="markIn" title="Mark In at playhead ( I or [ )">
+                <span class="se-btn__label">Mark In</span><span class="se-kbd" aria-hidden="true">I</span><span class="se-kbd" aria-hidden="true">[</span>
             </button>
-            <button type="button" class="se-btn" @click="markOut" title="Set out-point at playhead">
-                Mark Out<span class="se-kbd">]</span>
+            <button type="button" class="se-btn se-btn--io" @click="markOut" title="Mark Out at playhead ( O or ] )">
+                <span class="se-btn__label">Mark Out</span><span class="se-kbd" aria-hidden="true">O</span><span class="se-kbd" aria-hidden="true">]</span>
             </button>
             <button type="button" class="se-btn" @click="addSegmentAtPlayhead" title="Add a 10-second segment at playhead">
                 + Add
@@ -881,7 +905,8 @@ defineExpose({
                 @click="clearAll"
             >Clear All</button>
             <span v-if="pendingInSec !== null" class="se-pending">
-                In: {{ formatTime(pendingInSec) }} — press <span class="se-kbd">]</span> to close (Esc to cancel)
+                In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
+                · <span class="se-pending-cancel">Esc cancels</span>
             </span>
             <div class="se-spacer" />
             <label class="se-zoom">
@@ -980,7 +1005,7 @@ defineExpose({
                     v-if="pendingInSec !== null"
                     class="se-pending-marker"
                     :style="{ left: `${timeToPercent(pendingInSec)}%` }"
-                    :title="`Pending In: ${formatTime(pendingInSec)} — press ] to close`"
+                    :title="`In at ${formatTime(pendingInSec)} — Mark Out with O or ]`"
                 />
             </div>
 
@@ -1007,22 +1032,91 @@ defineExpose({
                     type="button"
                     class="se-btn"
                     @click="stepSeek(-1)"
-                    title="Back (←)"
-                >⟵ 1s</button>
-                <button v-if="onPlayPause" type="button" class="se-btn" @click="onPlayPause">
+                    title="−1 second (←). Hold 1 / 2 / 3 before ← for −10 / −30 / −60."
+                >
+                    <span aria-hidden="true">⟵</span> 1s
+                </button>
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn"
+                    title="−10 seconds (J)"
+                    @click="stepSeek(-1, 10)"
+                >
+                    −10<span class="se-kbd se-kbd--inline">J</span>
+                </button>
+                <button
+                    v-if="onPlayPause"
+                    type="button"
+                    class="se-btn se-btn--playback"
+                    :title="'Play / pause · Space · K'"
+                    @click="onPlayPause"
+                >
                     {{ isPlaying ? '⏸' : '▶' }}
                 </button>
                 <button
                     v-if="onSeek"
                     type="button"
                     class="se-btn"
+                    title="+10 seconds (L)"
+                    @click="stepSeek(1, 10)"
+                >
+                    +10<span class="se-kbd se-kbd--inline">L</span>
+                </button>
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn"
                     @click="stepSeek(1)"
-                    title="Forward (→)"
-                >1s ⟶</button>
+                    title="+1 second (→). Hold 1 / 2 / 3 before → for +10 / +30 / +60."
+                >
+                    +1s<span aria-hidden="true"> ⟶</span>
+                </button>
             </div>
             <div class="se-playback-controls__slot se-playback-controls__slot--end">
                 <slot name="playback-end" />
             </div>
+        </div>
+
+        <div
+            v-if="showShortcutsStrip && showPlaybackControls && (onPlayPause || onSeek)"
+            class="se-shortcuts-strip"
+            role="note"
+            aria-label="Keyboard shortcuts"
+        >
+            <span class="se-shortcuts-strip__group">
+                <strong class="se-shortcuts-strip__title">In / Out</strong>
+                <span class="se-kbd">I</span><span class="se-kbd">[</span>
+                <span class="se-shortcuts-strip__sep">·</span>
+                <span class="se-kbd">O</span><span class="se-kbd">]</span>
+            </span>
+            <span class="se-shortcuts-strip__group">
+                <strong class="se-shortcuts-strip__title">Play</strong>
+                <span class="se-kbd">Space</span><span class="se-kbd">K</span>
+            </span>
+            <span class="se-shortcuts-strip__group">
+                <strong class="se-shortcuts-strip__title">Jog</strong>
+                <span class="se-kbd">←</span><span class="se-kbd">→</span>
+                <span class="se-shortcuts-strip__dim">1 s</span>
+                <span class="se-shortcuts-strip__sep">·</span>
+                <span class="se-kbd">J</span><span class="se-kbd">L</span>
+                <span class="se-shortcuts-strip__dim">10 s</span>
+                <span v-if="fps > 0" class="se-shortcuts-strip__frame-hint">
+                    <span class="se-shortcuts-strip__sep">·</span>
+                    <span class="se-kbd">,</span><span class="se-kbd">.</span>
+                    <span class="se-shortcuts-strip__dim">frame ({{ fps }}&nbsp;fps)</span>
+                </span>
+            </span>
+            <span class="se-shortcuts-strip__group">
+                <strong class="se-shortcuts-strip__title">Zoom</strong>
+                <span class="se-kbd">+</span><span class="se-kbd">−</span>
+                <span class="se-shortcuts-strip__sep">·</span>
+                <span class="se-kbd">0</span>
+                <span class="se-shortcuts-strip__dim">fit</span>
+            </span>
+            <span class="se-shortcuts-strip__more">
+                <button type="button" class="se-shortcuts-strip__help-link" @click="helpOpen = true">All shortcuts (?)</button>
+            </span>
         </div>
 
         <div v-if="showList && segments.length > 0" class="se-list">
@@ -1083,8 +1177,9 @@ defineExpose({
                     <dt>1 / 2 / 3 + arrow</dt><dd>Step 10s / 30s / 60s</dd>
                     <dt>J / L</dt><dd>Step 10s back / forward</dd>
                     <dt v-if="fps > 0">, / .</dt><dd v-if="fps > 0">Step one frame ({{ fps }} fps)</dd>
-                    <dt>[</dt><dd>Mark In at playhead</dd>
-                    <dt>]</dt><dd>Mark Out at playhead</dd>
+                    <dt>I</dt><dd>Mark In at playhead (Resolve-style)</dd>
+                    <dt>O</dt><dd>Mark Out at playhead</dd>
+                    <dt>[ / ]</dt><dd>Mark In / Mark Out (alternate)</dd>
                     <dt>Alt + ← / →</dt><dd>Nudge nearest edge of selected segment</dd>
                     <dt>Delete</dt><dd>Remove selected segment(s)</dd>
                     <dt>⌘ / Ctrl + Z</dt><dd>Undo</dd>

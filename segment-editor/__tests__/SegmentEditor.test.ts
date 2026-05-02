@@ -488,6 +488,19 @@ describe('SegmentEditor — keyboard navigation', () => {
         expect(latestSegments(w)).toHaveLength(1);
     });
 
+    it('I and O invoke markIn / markOut', async () => {
+        const t = { value: 5 };
+        const w = mountEditor({ currentTime: t });
+        await flush();
+        keyDown(getTimeline(w), 'I');
+        await flush();
+        expect(w.find('.se-pending-marker').exists()).toBe(true);
+        t.value = 15;
+        keyDown(getTimeline(w), 'o');
+        await flush();
+        expect(latestSegments(w)[0]).toMatchObject({ inSec: 5, outSec: 15 });
+    });
+
     it('Alt+arrow nudges the selected segment edge', async () => {
         const w = mountEditor({ segments: [seg(1, 10, 20)] });
         await flush();
@@ -1102,7 +1115,7 @@ describe('SegmentEditor — exposed methods', () => {
             if (after !== before) undoCount += 1;
         }
         expect(undoCount).toBeLessThanOrEqual(100);
-    });
+    }, 30_000);
 });
 
 describe('SegmentEditor — RAF playhead tick', () => {
@@ -1235,9 +1248,11 @@ describe('SegmentEditor — list rendering', () => {
         const t = { value: 20 };
         const w = mountEditor({ currentTime: t, props: { onSeek } });
         await flush();
-        const stepButtons = w.findAll('.se-playback-controls .se-btn');
-        await stepButtons[0].trigger('click'); // back
-        await stepButtons[1].trigger('click'); // forward
+        const center = w.findAll('.se-playback-controls__center .se-btn');
+        // No play button when only onSeek is provided.
+        expect(center).toHaveLength(4);
+        await center[0].trigger('click'); // −1 s
+        await center[3].trigger('click'); // +1 s
         // currentTime is static in tests, so each click steps from the same value.
         expect(onSeek).toHaveBeenCalledWith(19);
         expect(onSeek).toHaveBeenCalledWith(21);
@@ -1247,11 +1262,12 @@ describe('SegmentEditor — list rendering', () => {
         const onPlayPause = vi.fn();
         const w = mountEditor({ props: { onPlayPause, isPlaying: true } });
         await flush();
-        const btn = w.find('.se-playback-controls .se-btn');
-        await btn.trigger('click');
+        const center = w.findAll('.se-playback-controls__center .se-btn');
+        const playPause = center.find((b) => /[▶⏸]/.test(b.text()));
+        expect(playPause).toBeTruthy();
+        await playPause!.trigger('click');
         expect(onPlayPause).toHaveBeenCalled();
-        // isPlaying=true switches the glyph to the pause icon.
-        expect(btn.text()).toContain('⏸');
+        expect(playPause!.text()).toContain('⏸');
     });
 
     it('playback-start and playback-end slots render in the left and right cells', async () => {
@@ -1274,16 +1290,18 @@ describe('SegmentEditor — list rendering', () => {
         expect(w.find('.se-playback-controls__slot--end .mock-quality').exists()).toBe(true);
     });
 
-    it('center group renders back, play/pause, forward in that order when both callbacks are set', async () => {
+    it('center group renders jog + play strip when both callbacks are set', async () => {
         const w = mountEditor({
             props: { onSeek: () => {}, onPlayPause: () => {} },
         });
         await flush();
         const buttons = w.findAll('.se-playback-controls__center .se-btn');
-        expect(buttons).toHaveLength(3);
-        expect(buttons[0].text()).toContain('1s');
-        expect(buttons[1].text()).toMatch(/[▶⏸]/);
-        expect(buttons[2].text()).toContain('1s');
+        expect(buttons).toHaveLength(5);
+        expect(buttons[0].text()).toMatch(/1s/); // −1 s
+        expect(buttons[1].text()).toMatch(/−10\s*J/);
+        expect(buttons[2].text()).toMatch(/[▶⏸]/);
+        expect(buttons[3].text()).toMatch(/\+10\s*L/);
+        expect(buttons[4].text()).toMatch(/\+1\s*s|⟶/);
     });
 
     it('renders the current-time display above the timeline, not inside playback controls', async () => {

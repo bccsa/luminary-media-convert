@@ -76,6 +76,7 @@ Override the mode-derived defaults with `show-labels`, `allow-overlap`, or `ripp
 | `showList`            | `boolean`                               | `true`    | |
 | `showHelp`            | `boolean`                               | `true`    | |
 | `maxZoom`             | `number`                                | `40`      | |
+| `showShortcutsStrip`  | `boolean`                               | `true`    | NLE-style hint row under playback (In/Out, jog, zoom). |
 | `title`               | `string`                                | —         | Override the panel heading. |
 
 ## Emits
@@ -125,8 +126,8 @@ Active when the timeline has focus (or globally if `keyboardScope="global"`).
 | hold 1 / 2 / 3 + arrow | Step 10 s / 30 s / 60 s                             |
 | J / L                  | Step 10 s back / forward                            |
 | , / .                  | Step one frame (when `fps` is set)                  |
-| [                      | Mark In at playhead                                 |
-| ]                      | Mark Out at playhead                                |
+| [ / ]                  | Mark In / Mark Out at playhead                      |
+| I / O                  | Mark In / Mark Out (DaVinci Resolve–style)          |
 | Alt + ← / →            | Nudge the selected segment's nearest edge           |
 | Delete / Backspace     | Remove selected segment(s)                          |
 | ⌘ / Ctrl + Z           | Undo                                                |
@@ -158,13 +159,17 @@ All colors come from CSS custom properties on `.se-root`. Override them in your 
 
 ```css
 .se-root {
-  --se-accent: #10b981;
-  --se-bg: #0a0a0a;
-  --se-track: #1f2937;
+  --se-accent: #4f46e5;
+  ...
+}
+html.dark .se-root {
+  ...
 }
 ```
 
-See [`src/styles.css`](src/styles.css) for the full list.
+Dark mode follows the same `html` class your app already uses (`dark` on `<html>` from the theme toggle).
+
+See [`src/styles.css`](src/styles.css) for the full token list (`--se-bg`, `--se-panel`, `--se-strip-bg`, `--se-accent`, `--se-help-surface`, etc.).
 
 ## Touch
 
