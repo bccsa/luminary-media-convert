@@ -628,16 +628,18 @@ html.dark .se-root {
     border-radius: var(--se-radius-sm);
     outline: none;
     resize: none;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    min-height: 1.5rem;
+    max-height: 9rem;
     height: 1.5rem;
     line-height: 1.25rem;
-    transition: border-color 0.12s ease, height 0.12s ease;
+    transition: border-color 0.12s ease;
     white-space: nowrap;
 }
 
 .se-label-field:focus {
     border-color: var(--se-accent);
-    height: 4.5rem;
     white-space: pre-wrap;
 }
 
@@ -852,6 +854,7 @@ html.dark .se-root {
 .se-root[data-mode='subtitles'] .se-label-field {
     padding: 6px 10px;
     min-height: 1.75rem;
+    height: 1.75rem;
 }
 
 .se-root[data-mode='chapters'] .se-list-index,

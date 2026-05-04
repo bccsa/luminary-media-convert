@@ -564,22 +564,39 @@ function updateTimeInput(id: string, field: 'inSec' | 'outSec', value: string) {
     emit('segment-commit', segments.value);
 }
 
+function syncLabelFieldHeight(el: HTMLTextAreaElement) {
+    const styles = getComputedStyle(el);
+    const minPx = Math.ceil(parseFloat(styles.minHeight) || 0);
+    const maxRaw = parseFloat(styles.maxHeight);
+    const maxPx =
+        Number.isFinite(maxRaw) && maxRaw > 0 ? Math.floor(maxRaw) : Number.POSITIVE_INFINITY;
+
+    el.style.height = '0';
+    const contentPx = el.scrollHeight;
+    const targetPx = Math.min(Math.max(contentPx, minPx || 0), maxPx);
+    el.style.height = `${targetPx}px`;
+    el.style.overflowY = contentPx > targetPx + 1 ? 'auto' : 'hidden';
+}
+
 /**
  * Push a single history snapshot when the user focuses a label, before any
  * keystrokes mutate it. Per-keystroke history would make Undo roll back one
  * character at a time, which is unusable.
  */
-function onLabelFocus() {
+function onLabelFocus(e: FocusEvent) {
     pushHistory(cloneSegments());
+    syncLabelFieldHeight(e.target as HTMLTextAreaElement);
 }
 
-function updateLabel(id: string, value: string) {
-    // History is pushed once on focus; per-keystroke commits skip it.
-    commitSegmentChange(id, { label: value }, { history: false });
+function onLabelInput(e: Event, id: string) {
+    const el = e.target as HTMLTextAreaElement;
+    commitSegmentChange(id, { label: el.value }, { history: false });
+    syncLabelFieldHeight(el);
 }
 
 /** Fire the user-intentioned commit signal once when a label edit ends. */
-function onLabelBlur() {
+function onLabelBlur(e: FocusEvent) {
+    syncLabelFieldHeight(e.target as HTMLTextAreaElement);
     emit('segment-commit', segments.value);
 }
 
@@ -1181,7 +1198,7 @@ defineExpose({
                         :placeholder="mode === 'chapters' ? 'Chapter title…' : 'Subtitle text…'"
                         rows="1"
                         @focus="onLabelFocus"
-                        @input="updateLabel(seg.id, ($event.target as HTMLTextAreaElement).value)"
+                        @input="onLabelInput($event, seg.id)"
                         @blur="onLabelBlur"
                         @click.stop
                     />
