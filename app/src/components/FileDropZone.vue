@@ -46,10 +46,10 @@ function clear() {
         @dragleave.prevent="dragging = false"
         @drop.prevent="onDrop"
         :class="[
-            'relative rounded-lg border-2 border-dashed p-8 text-center transition-colors',
+            'relative rounded-xl border-2 border-dashed p-8 text-center transition-colors',
             dragging
                 ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-950/30'
-                : 'border-zinc-300 bg-zinc-50/80 hover:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-900/40 dark:hover:border-zinc-500',
+                : 'border-zinc-200 bg-zinc-50/60 hover:border-zinc-300 dark:border-zinc-600 dark:bg-zinc-900/30 dark:hover:border-zinc-500',
         ]"
     >
         <input

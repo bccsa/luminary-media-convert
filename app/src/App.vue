@@ -3,6 +3,7 @@ import { provide, ref, watch } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { checkIdentity } from './api';
 import AccountMenu from './components/AccountMenu.vue';
+import ThemeToggle from './components/ThemeToggle.vue';
 
 const { isAuthenticated, isLoading, loginWithRedirect, logout, getAccessTokenSilently } = useAuth0();
 const returnTo = window.location.origin;
@@ -134,53 +135,60 @@ watch(isAuthenticated, async (authenticated) => {
         <!-- Authenticated shell -->
         <template v-else>
             <header
-                class="sticky top-0 z-40 border-b border-zinc-200/80 bg-white/85 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/85"
+                class="sticky top-0 z-40 border-b border-zinc-200/90 bg-white/90 font-sans shadow-sm backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/90"
             >
-                <div class="mx-auto flex h-14 max-w-6xl items-center gap-4 px-4 sm:px-6">
+                <div class="mx-auto flex h-14 max-w-6xl items-stretch gap-4 px-4 sm:gap-6 sm:px-6">
                     <router-link
                         to="/sessions"
-                        class="shrink-0 text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100"
+                        class="flex shrink-0 items-center text-base font-bold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-lg"
                     >
-                        Luminary
+                        <span class="sm:hidden">Luminary</span>
+                        <span class="hidden sm:inline">Luminary Media Convert</span>
                     </router-link>
 
-                    <nav class="flex min-w-0 flex-1 items-center gap-1 sm:gap-2" aria-label="Main">
+                    <nav
+                        class="flex min-w-0 flex-1 items-stretch gap-4 overflow-x-auto overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] sm:gap-8 [&::-webkit-scrollbar]:hidden"
+                        aria-label="Main"
+                    >
                         <router-link
                             to="/sessions"
-                            :class="[
-                                'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+                            class="inline-flex items-center border-b-2 text-sm font-medium transition-colors duration-200"
+                            :class="
                                 $route.path.startsWith('/sessions')
-                                    ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
-                                    : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100',
-                            ]"
+                                    ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+                                    : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                            "
                         >
                             Sessions
                         </router-link>
                         <router-link
                             to="/keys"
-                            :class="[
-                                'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+                            class="inline-flex items-center border-b-2 text-sm font-medium transition-colors duration-200"
+                            :class="
                                 $route.path === '/keys'
-                                    ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
-                                    : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100',
-                            ]"
+                                    ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+                                    : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                            "
                         >
                             API Keys
                         </router-link>
                         <router-link
                             to="/s3-configs"
-                            :class="[
-                                'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
+                            class="inline-flex items-center border-b-2 text-sm font-medium transition-colors duration-200"
+                            :class="
                                 $route.path === '/s3-configs'
-                                    ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
-                                    : 'text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100',
-                            ]"
+                                    ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
+                                    : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                            "
                         >
                             S3 Configs
                         </router-link>
                     </nav>
 
-                    <AccountMenu />
+                    <div class="flex shrink-0 items-center gap-2 sm:gap-3">
+                        <ThemeToggle />
+                        <AccountMenu />
+                    </div>
                 </div>
             </header>
 

@@ -1,5 +1,10 @@
 @import 'tailwindcss';
 
+@theme {
+    --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+        'Segoe UI Symbol', 'Noto Color Emoji';
+}
+
 /* Class-based dark mode (toggle via `dark` on <html>) */
 @custom-variant dark (&:where(.dark, .dark *));
 
