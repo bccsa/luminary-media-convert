@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { useRouter } from 'vue-router';
 import { listSessions, deleteSession } from '../api';
-import InlineConfirm from '../components/InlineConfirm.vue';
+import DeleteSessionModal from '../components/DeleteSessionModal.vue';
 import FormSelect from '../components/FormSelect.vue';
 
 const { getAccessTokenSilently } = useAuth0();
@@ -145,24 +145,51 @@ function navigateToImport() {
     router.push('/sessions/import');
 }
 
+function truncateId(id: string): string {
+    if (id.length <= 12) return id;
+    return id.substring(0, 12) + '...';
+}
+
 const deletingId = ref<string | null>(null);
 
-async function onConfirmDeleteSession(sid: string, withFiles: boolean) {
-    deletingId.value = sid;
+const deleteModalTarget = ref<{
+    id: string;
+    label: string;
+    hasS3: boolean;
+} | null>(null);
+
+const deleteModalOpen = computed({
+    get: () => deleteModalTarget.value !== null,
+    set: (v: boolean) => {
+        if (!v) deleteModalTarget.value = null;
+    },
+});
+
+function openDeleteSessionModal(row: (typeof sessions.value)[number]) {
+    const id = row.id || row.sessionId;
+    const label =
+        (row.name && String(row.name).trim()) || truncateId(id);
+    const hasS3 = !!(
+        row.s3ConfigId &&
+        (row.s3Config?.pathPrefix || row.files?.length)
+    );
+    deleteModalTarget.value = { id, label, hasS3 };
+}
+
+async function onDeleteSessionModalConfirm(withFiles: boolean) {
+    const id = deleteModalTarget.value?.id;
+    if (!id) return;
+    deletingId.value = id;
     try {
         const token = await getAccessTokenSilently();
-        await deleteSession(sid, token, withFiles);
+        await deleteSession(id, token, withFiles);
         await fetchSessions();
+        deleteModalTarget.value = null;
     } catch (e) {
         error.value = e instanceof Error ? e.message : String(e);
     } finally {
         deletingId.value = null;
     }
-}
-
-function truncateId(id: string): string {
-    if (id.length <= 12) return id;
-    return id.substring(0, 12) + '...';
 }
 
 function formatDate(dateStr: string | null | undefined): string {
@@ -339,20 +366,13 @@ onMounted(fetchSessions);
                                         {{ formatDate(session.completedAt) }}
                                     </td>
                                     <td class="py-3.5 pl-4 pr-4 text-right align-middle" @click.stop>
-                                        <InlineConfirm
-                                            label="Delete"
-                                            prompt="Delete?"
-                                            :secondary-prompt="
-                                                session.s3ConfigId && (session.s3Config?.pathPrefix || session.files?.length)
-                                                    ? 'Also delete S3 files?'
-                                                    : undefined
-                                            "
-                                            secondary-confirm-label="Yes"
-                                            secondary-decline-label="No"
-                                            :loading="deletingId === (session.id || session.sessionId)"
-                                            loading-label="..."
-                                            @confirm="(withFiles: boolean) => onConfirmDeleteSession(session.id || session.sessionId, withFiles)"
-                                        />
+                                        <button
+                                            type="button"
+                                            class="inline-flex cursor-pointer rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-400 dark:hover:bg-red-950/35"
+                                            @click.stop="openDeleteSessionModal(session)"
+                                        >
+                                            Delete
+                                        </button>
                                     </td>
                                 </tr>
                             </tbody>
@@ -426,5 +446,13 @@ onMounted(fetchSessions);
                 </div>
             </div>
         </section>
+
+        <DeleteSessionModal
+            v-model:open="deleteModalOpen"
+            :session-label="deleteModalTarget?.label ?? ''"
+            :has-s3-files="deleteModalTarget?.hasS3 ?? false"
+            :loading="!!deletingId && deletingId === deleteModalTarget?.id"
+            @confirm="onDeleteSessionModalConfirm"
+        />
     </div>
 </template>

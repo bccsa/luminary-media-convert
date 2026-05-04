@@ -11,7 +11,7 @@ import HlsPlayer from '../components/HlsPlayer.vue';
 import type { AudioTrackInfo, QualityLevelInfo } from '../components/HlsPlayer.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
-import InlineConfirm from '../components/InlineConfirm.vue';
+import DeleteSessionModal from '../components/DeleteSessionModal.vue';
 import FormSelect from '../components/FormSelect.vue';
 import { getSessionDetail, getSessionStatus, startEncode, deleteSession, updateSessionName, moveSessionFiles, renameSessionPrefix, listS3Configs, checkPrefix } from '../api';
 import { useSessionPoller } from '../composables/useSessionPoller';
@@ -611,11 +611,22 @@ const hasS3Files = computed(
     () => !!session.value?.s3ConfigId && !!(session.value?.s3Config?.pathPrefix || session.value?.files?.length),
 );
 
+const deleteModalOpen = ref(false);
+
+const deleteModalLabel = computed(() => {
+    const n = sessionName.value?.trim();
+    if (n) return n;
+    const id = sessionId.value;
+    if (!id) return '';
+    return id.length > 16 ? `${id.slice(0, 12)}…` : id;
+});
+
 async function onConfirmDelete(withFiles: boolean) {
     deleting.value = true;
     try {
         const token = await getAccessTokenSilently();
         await deleteSession(sessionId.value, token, withFiles);
+        deleteModalOpen.value = false;
         router.push('/sessions');
     } catch (e) {
         error.value = e instanceof Error ? e.message : String(e);
@@ -1735,17 +1746,14 @@ onUnmounted(() => {
                         >
                             New Session
                         </button>
-                        <InlineConfirm
+                        <button
                             v-if="isTerminal"
-                            label="Delete"
-                            prompt="Delete session?"
-                            :secondary-prompt="hasS3Files ? 'Also delete S3 files?' : undefined"
-                            secondary-confirm-label="Yes, delete files"
-                            secondary-decline-label="No, keep files"
-                            :loading="deleting"
-                            size="md"
-                            @confirm="onConfirmDelete"
-                        />
+                            type="button"
+                            class="flex-1 rounded-lg border border-red-200 bg-white px-6 py-3 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-400 dark:hover:bg-red-950/40 cursor-pointer"
+                            @click="deleteModalOpen = true"
+                        >
+                            Delete
+                        </button>
                     </div>
                 </template>
 
@@ -1788,5 +1796,13 @@ onUnmounted(() => {
 
             </template>
         </div>
+
+        <DeleteSessionModal
+            v-model:open="deleteModalOpen"
+            :session-label="deleteModalLabel"
+            :has-s3-files="hasS3Files"
+            :loading="deleting"
+            @confirm="onConfirmDelete"
+        />
     </div>
 </template>
