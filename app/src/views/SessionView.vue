@@ -1260,6 +1260,12 @@ onUnmounted(() => {
                             @keyup.enter="saveName"
                             @keyup.escape="cancelEditName"
                         />
+                        <StatusBadge
+                            class="shrink-0"
+                            :label="currentStatus ? statusConfig[currentStatus]?.label ?? currentStatus : '--'"
+                            :color="statusConfig[currentStatus ?? '']?.color ?? 'text-zinc-700 dark:text-zinc-400'"
+                            :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-zinc-300 dark:border-zinc-700'"
+                        />
                         <button
                             type="button"
                             :disabled="savingName"
@@ -1276,25 +1282,38 @@ onUnmounted(() => {
                             Cancel
                         </button>
                     </div>
-                    <h1
+                    <div
                         v-else
-                        class="cursor-pointer text-2xl font-semibold tracking-tight text-zinc-900 transition-colors hover:text-indigo-600 dark:text-zinc-100 dark:hover:text-indigo-400"
-                        @click="startEditName"
-                        :title="sessionName ? 'Click to rename' : 'Click to add a name'"
+                        class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2"
                     >
-                        {{ sessionName || 'Untitled session' }}
-                    </h1>
+                        <h1
+                            class="min-w-0 cursor-pointer text-2xl font-semibold tracking-tight text-zinc-900 transition-colors hover:text-indigo-600 dark:text-zinc-100 dark:hover:text-indigo-400"
+                            @click="startEditName"
+                            :title="sessionName ? 'Click to rename' : 'Click to add a name'"
+                        >
+                            {{ sessionName || 'Untitled session' }}
+                        </h1>
+                        <StatusBadge
+                            class="shrink-0"
+                            :label="currentStatus ? statusConfig[currentStatus]?.label ?? currentStatus : '--'"
+                            :color="statusConfig[currentStatus ?? '']?.color ?? 'text-zinc-700 dark:text-zinc-400'"
+                            :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-zinc-300 dark:border-zinc-700'"
+                        />
+                    </div>
                     <div class="mt-2 flex flex-wrap items-center gap-2">
                         <p class="font-mono text-xs text-zinc-500 dark:text-zinc-400">{{ sessionId }}</p>
                         <span v-if="session.createdAt" class="text-xs text-zinc-500 dark:text-zinc-500">·</span>
                         <p v-if="session.createdAt" class="text-xs text-zinc-500 dark:text-zinc-400">{{ relativeCreatedLabel(session.createdAt) }}</p>
                     </div>
-                    <div class="mt-3 flex flex-wrap items-center gap-2">
-                        <StatusBadge
-                            :label="currentStatus ? statusConfig[currentStatus]?.label ?? currentStatus : '--'"
-                            :color="statusConfig[currentStatus ?? '']?.color ?? 'text-zinc-700 dark:text-zinc-400'"
-                            :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-zinc-300 dark:border-zinc-700'"
-                        />
+                    <div
+                        v-if="
+                            (displayEncoder && encoderConfig[displayEncoder])
+                            || displaySegmentFormat === 'mpegts'
+                            || isEncrypted
+                            || session.imported
+                        "
+                        class="mt-3 flex flex-wrap items-center gap-2"
+                    >
                         <StatusBadge
                             v-if="displayEncoder && encoderConfig[displayEncoder]"
                             :label="encoderConfig[displayEncoder].label"
