@@ -27,6 +27,11 @@ function getTimeline(wrapper: ReturnType<typeof mountEditor>): HTMLElement {
     return wrapper.get('.se-timeline-wrap').element as HTMLElement;
 }
 
+/** Help is teleported to `document.body` — not visible to wrapper.find(). */
+function queryHelpOverlay(): HTMLElement | null {
+    return document.body.querySelector('.se-help');
+}
+
 describe('SegmentEditor — mount & hydration', () => {
     it('auto-hydrates missing ids and emits a normalized list', async () => {
         const bare = [{ inSec: 1, outSec: 2 } as Segment];
@@ -580,10 +585,10 @@ describe('SegmentEditor — keyboard navigation', () => {
         await flush();
         keyDown(getTimeline(w), '?');
         await flush();
-        expect(w.find('.se-help').exists()).toBe(true);
+        expect(queryHelpOverlay()).not.toBeNull();
         keyDown(getTimeline(w), 'Escape');
         await flush();
-        expect(w.find('.se-help').exists()).toBe(false);
+        expect(queryHelpOverlay()).toBeNull();
     });
 
     it('clicking the help button toggles the help overlay', async () => {
@@ -591,12 +596,12 @@ describe('SegmentEditor — keyboard navigation', () => {
         await flush();
         const btn = w.find('.se-btn--icon');
         await btn.trigger('click');
-        expect(w.find('.se-help').exists()).toBe(true);
+        expect(queryHelpOverlay()).not.toBeNull();
         // Clicking the backdrop closes it.
-        const backdrop = w.find('.se-help').element as HTMLElement;
+        const backdrop = queryHelpOverlay()!;
         backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await flush();
-        expect(w.find('.se-help').exists()).toBe(false);
+        expect(queryHelpOverlay()).toBeNull();
     });
 
     it('typed input blocks navigation keys but not Cmd+Z or Escape', async () => {

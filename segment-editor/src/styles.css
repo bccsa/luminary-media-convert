@@ -689,24 +689,51 @@ html.dark .se-root {
 }
 
 .se-help {
+    /* Portaled to body — must define tokens here (outside .se-root). */
+    --se-text: rgb(24 24 27);
+    --se-text-dim: rgb(113 113 122);
+    --se-accent: rgb(79 70 229);
+    --se-shadow:
+        0 1px 2px rgb(9 9 11 / 0.04),
+        0 0 0 1px rgb(9 9 11 / 0.06);
+    --se-help-backdrop: rgba(9, 9, 11, 0.55);
+    --se-help-surface: #ffffff;
+    --se-help-surface-border: rgb(228 228 231);
+
     position: fixed;
     inset: 0;
+    box-sizing: border-box;
     background: var(--se-help-backdrop);
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 9999;
+    z-index: 10050;
     padding: 1rem;
+    font-family: inherit;
+}
+
+html.dark .se-help {
+    --se-text: #e4e4e7;
+    --se-text-dim: #a1a1aa;
+    --se-accent: #818cf8;
+    --se-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 8px 30px rgb(0 0 0 / 0.25);
+    --se-help-backdrop: rgb(0 0 0 / 0.75);
+    --se-help-surface: #18181b;
+    --se-help-surface-border: rgb(63 63 70 / 0.75);
 }
 
 .se-help-panel {
     background: var(--se-help-surface);
     border: 1px solid var(--se-help-surface-border);
-    border-radius: var(--se-radius);
+    border-radius: var(--se-radius, 10px);
     padding: 1.5rem;
-    max-width: 480px;
+    max-width: min(36rem, calc(100vw - 2rem));
     width: 100%;
+    max-height: min(85vh, 42rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     color: var(--se-text);
     font-size: 0.8125rem;
     box-shadow: var(--se-shadow);

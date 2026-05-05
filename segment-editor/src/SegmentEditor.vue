@@ -1229,29 +1229,38 @@ defineExpose({
             Segments overlap — adjust the in/out points.
         </div>
 
-        <div v-if="helpOpen" class="se-help" @click.self="helpOpen = false">
-            <div class="se-help-panel">
-                <h4>Keyboard shortcuts</h4>
-                <dl>
-                    <dt>Space / K</dt><dd>Play / pause</dd>
-                    <dt>← / →</dt><dd>Step 1 second back / forward</dd>
-                    <dt>1 / 2 / 3 + arrow</dt><dd>Step 10s / 30s / 60s</dd>
-                    <dt>J / L</dt><dd>Step 10s back / forward</dd>
-                    <dt v-if="fps > 0">, / .</dt><dd v-if="fps > 0">Step one frame ({{ fps }} fps)</dd>
-                    <dt>I</dt><dd>Mark In at playhead (Resolve-style)</dd>
-                    <dt>O</dt><dd>Mark Out at playhead</dd>
-                    <dt>[ / ]</dt><dd>Mark In / Mark Out (alternate)</dd>
-                    <dt>Alt + ← / →</dt><dd>Nudge nearest edge of selected segment</dd>
-                    <dt>Delete</dt><dd>Remove selected segment(s)</dd>
-                    <dt>⌘ / Ctrl + Z</dt><dd>Undo</dd>
-                    <dt>⌘ / Ctrl + Shift + Z</dt><dd>Redo</dd>
-                    <dt>+ / −</dt><dd>Zoom in / out (0 resets)</dd>
-                    <dt>Ctrl / ⌘ + wheel</dt><dd>Zoom at cursor</dd>
-                    <dt>Shift + drag</dt><dd>Marquee-select segments</dd>
-                    <dt>Esc</dt><dd>Clear selection / close</dd>
-                    <dt>?</dt><dd>Toggle this help</dd>
-                </dl>
+        <Teleport to="body">
+            <div
+                v-if="helpOpen"
+                class="se-help"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="se-help-heading"
+                @click.self="helpOpen = false"
+            >
+                <div class="se-help-panel">
+                    <h4 id="se-help-heading">Keyboard shortcuts</h4>
+                    <dl>
+                        <dt>Space / K</dt><dd>Play / pause</dd>
+                        <dt>← / →</dt><dd>Step 1 second back / forward</dd>
+                        <dt>1 / 2 / 3 + arrow</dt><dd>Step 10s / 30s / 60s</dd>
+                        <dt>J / L</dt><dd>Step 10s back / forward</dd>
+                        <dt v-if="fps > 0">, / .</dt><dd v-if="fps > 0">Step one frame ({{ fps }} fps)</dd>
+                        <dt>I</dt><dd>Mark In at playhead (Resolve-style)</dd>
+                        <dt>O</dt><dd>Mark Out at playhead</dd>
+                        <dt>[ / ]</dt><dd>Mark In / Mark Out (alternate)</dd>
+                        <dt>Alt + ← / →</dt><dd>Nudge nearest edge of selected segment</dd>
+                        <dt>Delete</dt><dd>Remove selected segment(s)</dd>
+                        <dt>⌘ / Ctrl + Z</dt><dd>Undo</dd>
+                        <dt>⌘ / Ctrl + Shift + Z</dt><dd>Redo</dd>
+                        <dt>+ / −</dt><dd>Zoom in / out (0 resets)</dd>
+                        <dt>Ctrl / ⌘ + wheel</dt><dd>Zoom at cursor</dd>
+                        <dt>Shift + drag</dt><dd>Marquee-select segments</dd>
+                        <dt>Esc</dt><dd>Clear selection / close</dd>
+                        <dt>?</dt><dd>Toggle this help</dd>
+                    </dl>
+                </div>
             </div>
-        </div>
+        </Teleport>
     </div>
 </template>
