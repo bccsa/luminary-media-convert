@@ -12,6 +12,7 @@ import type { AudioTrackInfo, QualityLevelInfo } from '../components/HlsPlayer.v
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import DeleteSessionModal from '../components/DeleteSessionModal.vue';
+import SessionWorkflowStepper from '../components/SessionWorkflowStepper.vue';
 import FormSelect from '../components/FormSelect.vue';
 import { getSessionDetail, getSessionStatus, startEncode, deleteSession, updateSessionName, moveSessionFiles, renameSessionPrefix, listS3Configs, checkPrefix } from '../api';
 import { useSessionPoller } from '../composables/useSessionPoller';
@@ -43,7 +44,7 @@ const byteRangeEnabled = ref(true);
 const submitting = ref(false);
 const editorSegments = ref<Segment[]>([]);
 const trimSegments = computed<TrimSegment[]>(() =>
-    editorSegments.value.map((s) => ({ inSec: s.inSec, outSec: s.outSec })),
+    editorSegments.value.map((s: Segment) => ({ inSec: s.inSec, outSec: s.outSec })),
 );
 const configFormRef = ref<InstanceType<typeof EncodeConfigForm> | null>(null);
 
@@ -506,6 +507,11 @@ watch(
 // ---------------------------------------------------------------------------
 
 const playerRef = ref<InstanceType<typeof HlsPlayer> | null>(null);
+
+function seekPlayerTime(t: number) {
+    playerRef.value?.seek(t);
+}
+
 const currentAngleIndex = ref(0);
 const copied = ref(false);
 const copiedKey = ref(false);
@@ -1089,6 +1095,121 @@ async function onDiscardChapters() {
 }
 
 // ---------------------------------------------------------------------------
+// Session workspace — tabs, stepper, activity log
+// ---------------------------------------------------------------------------
+
+type SessionTabId = 'workflow' | 'output' | 'trim' | 'post';
+
+const activeTab = ref<SessionTabId>('workflow');
+
+const effectiveProbe = computed<ProbeResult | null>(() => {
+    const raw = probeResult.value ?? session.value?.probeResult;
+    return (raw as ProbeResult | null) ?? null;
+});
+
+const sessionLogLines = ref<string[]>([]);
+const MAX_SESSION_LOG = 80;
+
+function pushSessionLog(message: string) {
+    const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const line = `[${t}] ${message}`;
+    sessionLogLines.value = [...sessionLogLines.value.slice(-(MAX_SESSION_LOG - 1)), line];
+}
+
+function clearSessionLogs() {
+    sessionLogLines.value = [];
+}
+
+function relativeCreatedLabel(dateStr: string | null | undefined): string {
+    if (!dateStr) return '';
+    const then = new Date(dateStr).getTime();
+    const diff = Date.now() - then;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Created just now';
+    if (mins < 60) return `Created ${mins} min${mins === 1 ? '' : 's'} ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `Created ${hrs} hr${hrs === 1 ? '' : 's'} ago`;
+    const days = Math.floor(hrs / 24);
+    return `Created ${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+const isImportedFlow = computed(() => !!session.value?.imported);
+
+const stepperIngest = computed(() => {
+    if (isImportedFlow.value) return 'done' as const;
+    const s = currentStatus.value;
+    if (!s) return 'pending' as const;
+    if (s === 'created' || s === 'uploading') return 'active' as const;
+    return 'done' as const;
+});
+
+const stepperProbe = computed(() => {
+    if (isImportedFlow.value) return 'done' as const;
+    const s = currentStatus.value;
+    if (!s || s === 'created' || s === 'uploading') return 'pending' as const;
+    if (s === 'uploaded') {
+        if (probeLoading.value) return 'active' as const;
+        if (effectiveProbe.value) return 'done' as const;
+        return 'active' as const;
+    }
+    return 'done' as const;
+});
+
+const stepperEncoding = computed(() => {
+    if (isImportedFlow.value) return 'done' as const;
+    const s = currentStatus.value;
+    if (s === 'failed') return 'error' as const;
+    if (s === 'queued' || s === 'encoding' || s === 'encrypting') return 'active' as const;
+    if (s === 'uploading_to_s3' || s === 'completed') return 'done' as const;
+    return 'pending' as const;
+});
+
+const stepperUpload = computed(() => {
+    if (isImportedFlow.value) return 'done' as const;
+    const s = currentStatus.value;
+    if (s === 'failed') return 'pending' as const;
+    if (s === 'uploading_to_s3') return 'active' as const;
+    if (s === 'completed') return 'done' as const;
+    return 'pending' as const;
+});
+
+const stepperFinalize = computed(() => {
+    if (isImportedFlow.value) return 'done' as const;
+    const s = currentStatus.value;
+    if (s === 'completed') return 'done' as const;
+    if (s === 'failed') return 'error' as const;
+    return 'pending' as const;
+});
+
+function inferOutputFileKind(key: string): string {
+    const lower = key.toLowerCase();
+    if (lower.endsWith('.m3u8')) return 'HLS playlist';
+    if (lower.endsWith('.ts')) return 'MPEG-TS';
+    if (lower.endsWith('.m4s')) return 'fMP4 media';
+    if (lower.endsWith('.mp4')) return 'MP4';
+    if (lower.endsWith('.vtt')) return 'WebVTT';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.webp')) return 'Image';
+    return 'Object';
+}
+
+async function copyOutputObjectKey(key: string) {
+    const base = s3PublicBaseUrl.value;
+    const text = base ? `${base}/${key}` : key;
+    await navigator.clipboard.writeText(text);
+}
+
+watch(currentStatus, (s, prev) => {
+    if (s && s !== prev) pushSessionLog(`Status: ${s}`);
+});
+
+watch(
+    () => poller.error.value,
+    (err) => {
+        if (err) pushSessionLog(`Error: ${err}`);
+    },
+);
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
@@ -1101,76 +1222,79 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="app-view transition-all duration-300">
-        <div class="rounded-2xl border border-zinc-200/90 bg-white/90 p-6 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10">
-            <!-- Back link -->
-            <div class="mb-4">
-                <router-link
-                    to="/sessions"
-                    class="inline-flex items-center gap-1.5 text-sm text-zinc-600 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
-                >
-                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-                    </svg>
-                    Back to Sessions
-                </router-link>
-            </div>
-
-            <!-- Loading -->
-            <div v-if="loading" class="flex justify-center py-16">
-                <svg class="h-8 w-8 animate-spin text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    <div class="app-view w-full max-w-none">
+        <div class="mx-auto w-full max-w-7xl px-4 transition-all duration-300 sm:px-6">
+        <div class="mb-6">
+            <router-link
+                to="/sessions"
+                class="inline-flex items-center gap-1.5 text-sm text-zinc-600 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+            >
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
                 </svg>
-            </div>
+                Back to sessions
+            </router-link>
+        </div>
 
-            <!-- Load error -->
-            <div v-else-if="error" class="rounded-xl border border-red-300 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/30">
-                <p class="text-sm text-red-800 dark:text-red-300">{{ error }}</p>
-            </div>
+        <div v-if="loading" class="flex justify-center rounded-2xl border border-zinc-200/90 bg-white/90 py-16 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10">
+            <svg class="h-8 w-8 animate-spin text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+        </div>
 
-            <!-- Session loaded -->
-            <template v-else-if="session">
-                <!-- Header -->
-                <div class="flex items-center justify-between mb-6">
-                    <div>
-                        <!-- Editable session name -->
-                        <div v-if="editingName" class="flex items-center gap-2">
-                            <input
-                                v-model="nameInput"
-                                type="text"
-                                class="input text-lg font-semibold"
-                                placeholder="Session name"
-                                @keyup.enter="saveName"
-                                @keyup.escape="cancelEditName"
-                            />
-                            <button
-                                type="button"
-                                :disabled="savingName"
-                                @click="saveName"
-                                class="cursor-pointer rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                            >
-                                {{ savingName ? '...' : 'Save' }}
-                            </button>
-                            <button
-                                type="button"
-                                @click="cancelEditName"
-                                class="cursor-pointer rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                        <h2
-                            v-else
-                            class="cursor-pointer text-xl font-semibold text-zinc-900 transition-colors hover:text-indigo-600 dark:text-zinc-100 dark:hover:text-indigo-400"
-                            @click="startEditName"
-                            :title="sessionName ? 'Click to rename' : 'Click to add a name'"
+        <div v-else-if="error" class="rounded-2xl border border-red-300 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/30">
+            <p class="text-sm text-red-800 dark:text-red-300">{{ error }}</p>
+        </div>
+
+        <template v-else-if="session">
+            <!-- Page header -->
+            <header class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div class="min-w-0 flex-1">
+                    <div v-if="editingName" class="flex flex-wrap items-center gap-2">
+                        <input
+                            v-model="nameInput"
+                            type="text"
+                            class="input min-w-0 flex-1 text-lg font-semibold"
+                            placeholder="Session name"
+                            @keyup.enter="saveName"
+                            @keyup.escape="cancelEditName"
+                        />
+                        <button
+                            type="button"
+                            :disabled="savingName"
+                            @click="saveName"
+                            class="cursor-pointer rounded-lg border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                         >
-                            {{ sessionName || 'Untitled session' }}
-                        </h2>
-                        <p class="mt-1 font-mono text-xs text-zinc-500 dark:text-zinc-400">{{ sessionId }}</p>
+                            {{ savingName ? '…' : 'Save' }}
+                        </button>
+                        <button
+                            type="button"
+                            @click="cancelEditName"
+                            class="cursor-pointer rounded-lg border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        >
+                            Cancel
+                        </button>
                     </div>
-                    <div class="flex flex-wrap items-center gap-2">
+                    <h1
+                        v-else
+                        class="cursor-pointer text-2xl font-semibold tracking-tight text-zinc-900 transition-colors hover:text-indigo-600 dark:text-zinc-100 dark:hover:text-indigo-400"
+                        @click="startEditName"
+                        :title="sessionName ? 'Click to rename' : 'Click to add a name'"
+                    >
+                        {{ sessionName || 'Untitled session' }}
+                    </h1>
+                    <div class="mt-2 flex flex-wrap items-center gap-2">
+                        <p class="font-mono text-xs text-zinc-500 dark:text-zinc-400">{{ sessionId }}</p>
+                        <span v-if="session.createdAt" class="text-xs text-zinc-500 dark:text-zinc-500">·</span>
+                        <p v-if="session.createdAt" class="text-xs text-zinc-500 dark:text-zinc-400">{{ relativeCreatedLabel(session.createdAt) }}</p>
+                    </div>
+                    <div class="mt-3 flex flex-wrap items-center gap-2">
+                        <StatusBadge
+                            :label="currentStatus ? statusConfig[currentStatus]?.label ?? currentStatus : '--'"
+                            :color="statusConfig[currentStatus ?? '']?.color ?? 'text-zinc-700 dark:text-zinc-400'"
+                            :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-zinc-300 dark:border-zinc-700'"
+                        />
                         <StatusBadge
                             v-if="displayEncoder && encoderConfig[displayEncoder]"
                             :label="encoderConfig[displayEncoder].label"
@@ -1199,327 +1323,128 @@ onUnmounted(() => {
                             color="text-violet-700 dark:text-violet-400"
                             border-color="border-violet-300 dark:border-violet-700/60"
                         />
-                        <StatusBadge
-                            :label="currentStatus ? statusConfig[currentStatus]?.label ?? currentStatus : '--'"
-                            :color="statusConfig[currentStatus ?? '']?.color ?? 'text-zinc-700 dark:text-zinc-400'"
-                            :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-zinc-300 dark:border-zinc-700'"
-                        />
                     </div>
                 </div>
-
-                <!-- ============================================================ -->
-                <!-- Source file preview (visible throughout lifecycle when File   -->
-                <!-- was registered in this browser session)                       -->
-                <!-- ============================================================ -->
-                <!-- Unified HLS player — shows local preview during upload/encoding,
-                     swaps to S3 output when encoding completes -->
-                <div v-if="activePlaybackUrl" class="mb-5 overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5">
-                    <HlsPlayer
-                        ref="playerRef"
-                        :playback-url="activePlaybackUrl"
-                        :thumbnail-vtt-url="isCompleted ? thumbnailVttUrl : undefined"
-                        :encoding-type="encodingType"
-                        :is-audio-only="isAudioOnly"
-                        :encryption-key-hex="isCompleted ? (encryptionKeyHex || poller.encryptionKeyHex.value) : undefined"
-                        :show-controls="false"
-                        preserve-state-on-source-change
-                        @quality-levels="onPreviewQualityLevels"
-                        @playing-change="isPreviewPlaying = $event"
-                        @duration-change="playerDuration = $event"
-                        @audio-tracks="onNativeAudioTracks"
-                    />
-                </div>
-
-
-                <!-- Submission error banner -->
-                <div
-                    v-if="submissionError"
-                    class="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/40"
-                >
-                    <p class="text-sm text-red-800 dark:text-red-300">{{ submissionError }}</p>
-                </div>
-
-                <!-- ============================================================ -->
-                <!-- Upload progress (shown independently — not exclusive with    -->
-                <!-- the encode config form, which can appear during upload when   -->
-                <!-- early probe results are available from moov extraction)       -->
-                <!-- ============================================================ -->
-                <div v-if="showUploadProgress && !showProbeConfig" class="mb-4">
-                    <ProgressBar
-                        :label="activeUpload!.progress >= 100 ? 'Finalizing upload...' : 'Uploading...'"
-                        :progress="activeUpload!.progress"
-                        :indeterminate="activeUpload!.progress >= 100"
-                    />
-                    <div class="flex justify-end pt-2">
-                        <button
-                            v-if="activeUpload!.progress < 100"
-                            type="button"
-                            class="rounded-lg border border-zinc-300 px-4 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
-                            @click="cancelUpload"
-                        >
-                            Cancel
-                        </button>
-                    </div>
-                </div>
-
-                <!-- STATUS: upload done, waiting for probe -->
-                <div v-else-if="showUploadDoneWaiting && !showProbeConfig" class="mb-4">
-                    <ProgressBar label="Analyzing..." indeterminate />
-                </div>
-
-                <!-- STATUS: created / uploading — upload happening server-side
-                     (URL ingest) or initiated from another browser tab -->
-                <div v-else-if="showUploadRemoteMessage" class="mb-4">
-                    <p v-if="ingestEtaDisplay" class="mb-2 text-xs text-zinc-500 text-right">
-                        {{ ingestEtaDisplay }}
-                    </p>
-                    <ProgressBar
-                        v-if="remoteIngestProgress !== undefined"
-                        :label="remoteIngestLabel"
-                        :progress="remoteIngestProgress"
-                    />
-                    <ProgressBar
-                        v-else-if="poller.ingestTotalBytes.value != null"
-                        :label="remoteIngestLabel"
-                        indeterminate
-                    />
-                    <ProgressBar
-                        v-else
-                        label="Uploading..."
-                        indeterminate
-                        subtitle="Started elsewhere"
-                    />
-                </div>
-
-                <!-- ============================================================ -->
-                <!-- STATUS: uploaded — probe loading spinner                     -->
-                <!-- ============================================================ -->
-                <div v-else-if="currentStatus === 'uploaded' && probeLoading" class="flex flex-col items-center gap-4 py-16">
-                    <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    <p class="text-sm text-zinc-400">Fetching probe results...</p>
-                </div>
-
-                <!-- ============================================================ -->
-                <!-- Encode config form (shown after probe, including during      -->
-                <!-- upload when early probe results arrived via moov)             -->
-                <!-- ============================================================ -->
-                <template v-if="showProbeConfig">
-                    <!-- Compact upload progress bar when config form is visible -->
-                    <div v-if="showUploadProgress" class="mb-4">
-                        <ProgressBar
-                            :label="activeUpload!.progress >= 100 ? 'Finalizing upload...' : 'Uploading...'"
-                            :progress="activeUpload!.progress"
-                            :indeterminate="activeUpload!.progress >= 100"
-                        />
-                    </div>
-
-                    <!-- Segment editor (trim/cut) -->
-                    <SegmentEditor
-                        v-if="activePlaybackUrl && probeResult?.format?.duration"
-                        v-model="editorSegments"
-                        mode="trim"
-                        :duration="probeResult.format.duration"
-                        :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
-                        :on-seek="(t) => playerRef?.seek(t)"
-                        :on-play-pause="() => playerRef?.togglePlay()"
-                        :is-playing="isPreviewPlaying"
-                        keyboard-scope="global"
-                        :fps="segmentEditorProbeFps"
-                        class="mb-4"
+                <div class="flex shrink-0 flex-wrap items-center gap-2">
+                    <router-link
+                        to="/sessions/new"
+                        class="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500"
                     >
-                        <template v-if="previewAudioTracks.length > 1" #playback-start>
-                            <label class="playback-slot-label">Audio:</label>
-                            <FormSelect
-                                variant="playback"
-                                numeric
-                                v-model="selectedAudioTrack"
-                                :options="previewAudioSelectOptions"
-                            />
-                        </template>
-                        <template
-                            v-if="previewQualityLevels.length > 1 && encodingType !== 'audio'"
-                            #playback-end
+                        New session
+                    </router-link>
+                    <details class="relative">
+                        <summary
+                            class="flex cursor-pointer list-none items-center justify-center rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900/80 dark:text-zinc-200 dark:hover:bg-zinc-800 [&::-webkit-details-marker]:hidden"
                         >
-                            <label class="playback-slot-label">Quality:</label>
-                            <FormSelect
-                                variant="playback"
-                                :model-value="selectedQualityId ?? ''"
-                                :options="previewQualitySelectOptions"
-                                @update:model-value="onQualityChange($event === '' ? null : String($event))"
-                            />
-                        </template>
-                    </SegmentEditor>
-
-                    <EncodeConfigForm
-                        ref="configFormRef"
-                        :probe-result="probeResult!"
-                        :byte-range="byteRangeEnabled"
-                        @submit="onEncodeSubmit"
-                        @back="onEncodeBack"
-                    />
-                </template>
-
-                <!-- ============================================================ -->
-                <!-- Submitting encoding config spinner                           -->
-                <!-- ============================================================ -->
-                <div v-else-if="submitting" class="flex flex-col items-center gap-4 py-16">
-                    <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    <p class="text-sm text-zinc-400">Starting encoding...</p>
+                            <span class="sr-only">More actions</span>
+                            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M12 8a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z" />
+                            </svg>
+                        </summary>
+                        <div
+                            class="absolute right-0 z-20 mt-2 min-w-[12rem] overflow-hidden rounded-xl border border-zinc-200/90 bg-white py-1 text-sm shadow-xl ring-1 ring-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900 dark:ring-white/10"
+                        >
+                            <button
+                                v-if="showEncoding && (poller.status.value === 'queued' || poller.status.value === 'encoding' || poller.status.value === 'encrypting')"
+                                type="button"
+                                class="block w-full px-4 py-2.5 text-left text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                @click="onCancelEncode"
+                            >
+                                Cancel encoding
+                            </button>
+                            <button
+                                v-if="isCompleted && hasS3Files && !showMoveForm && !showRenameForm"
+                                type="button"
+                                class="block w-full px-4 py-2.5 text-left text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                @click="() => { void openMoveForm(); activeTab = 'post'; }"
+                            >
+                                Move files…
+                            </button>
+                            <button
+                                v-if="isCompleted && hasS3Files && !showMoveForm && !showRenameForm"
+                                type="button"
+                                class="block w-full px-4 py-2.5 text-left text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                                @click="() => { openRenameForm(); activeTab = 'post'; }"
+                            >
+                                Rename prefix…
+                            </button>
+                            <button
+                                v-if="isTerminal"
+                                type="button"
+                                class="block w-full px-4 py-2.5 text-left text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                                @click="deleteModalOpen = true"
+                            >
+                                Delete session…
+                            </button>
+                        </div>
+                    </details>
                 </div>
+            </header>
 
-                <!-- ============================================================ -->
-                <!-- ENCODING PROGRESS (queue, encoding, encrypting, s3 upload)   -->
-                <!-- ============================================================ -->
-                <template v-else-if="showEncoding || isCompleted || currentStatus === 'failed'">
-
-                    <!-- Chapter editor (sidecar). Available throughout encoding and after completion.
-                         Uses player-reported duration so trimmed encodes and imported sessions both
-                         render with the correct timeline length. -->
-                    <SegmentEditor
-                        v-if="activePlaybackUrl && chapterTimelineDuration > 0 && currentStatus !== 'failed'"
-                        v-model="chapterSegments"
-                        mode="chapters"
-                        :duration="chapterTimelineDuration"
-                        :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
-                        :on-seek="(t) => playerRef?.seek(t)"
-                        :on-play-pause="() => playerRef?.togglePlay()"
-                        :is-playing="isPreviewPlaying"
-                        :ripple-edit="false"
-                        title="Chapters"
-                        keyboard-scope="global"
-                        :fps="segmentEditorProbeFps"
-                        class="mb-6"
-                    >
-                        <!-- Audio track selector.
-                             During preview the on-demand HLS bakes one audio track in per
-                             playlist URL, so we still drive it via the existing URL-based
-                             selectedAudioTrack. After encoding completes the final HLS master
-                             carries every track natively, so we drive Video.js directly. -->
-                        <template
-                            v-if="(isCompleted && nativeAudioTracks.length > 1) || (!isCompleted && previewAudioTracks.length > 1)"
-                            #playback-start
-                        >
-                            <label class="playback-slot-label">Audio:</label>
-                            <FormSelect
-                                v-if="isCompleted"
-                                variant="playback"
-                                :model-value="selectedNativeAudioId ?? ''"
-                                :options="nativeAudioSelectOptions"
-                                @update:model-value="onNativeAudioChange(String($event))"
-                            />
-                            <FormSelect
-                                v-else
-                                variant="playback"
-                                numeric
-                                v-model="selectedAudioTrack"
-                                :options="previewAudioSelectOptions"
-                            />
-                        </template>
-
-                        <!-- Video quality selector (drives VHS qualityLevel.enabled directly). -->
-                        <template
-                            v-if="previewQualityLevels.length > 1 && encodingType !== 'audio'"
-                            #playback-end
-                        >
-                            <label class="playback-slot-label">Quality:</label>
-                            <FormSelect
-                                variant="playback"
-                                :model-value="selectedQualityId ?? ''"
-                                :options="previewQualitySelectOptions"
-                                @update:model-value="onQualityChange($event === '' ? null : String($event))"
-                            />
-                        </template>
-
-                        <template #toolbar-end>
-                            <span
-                                v-if="chapters.isDirty.value"
-                                class="chapter-unsaved-pill"
-                                title="Unsaved changes are stored locally; click Save to commit to S3."
-                            >Unsaved</span>
-                            <button
-                                v-if="chapters.isDirty.value"
-                                type="button"
-                                class="chapter-toolbar-muted"
-                                :disabled="chapters.isSaving.value"
-                                @click="onDiscardChapters"
-                            >Discard</button>
-                            <button
-                                type="button"
-                                class="chapter-save-btn"
-                                :disabled="!chapters.isDirty.value || chapters.isSaving.value"
-                                @click="onSaveChapters"
-                            >{{ chapters.isSaving.value ? 'Saving…' : 'Save' }}</button>
-                        </template>
-                    </SegmentEditor>
-
-                    <p v-if="chaptersSaveError" class="mb-4 text-xs text-red-600 dark:text-red-400">{{ chaptersSaveError }}</p>
-
-                    <!-- Queue position -->
-                    <div v-if="poller.status.value === 'queued' && poller.queuePosition.value != null" class="mb-4 rounded-xl border border-zinc-200 bg-zinc-50/95 p-4 dark:border-transparent dark:bg-zinc-900/60">
-                        <p class="text-sm text-zinc-600 dark:text-zinc-400">
-                            Queue position: <span class="font-semibold text-amber-700 dark:text-amber-400">{{ poller.queuePosition.value }}</span>
-                        </p>
+            <!-- Expired -->
+            <div
+                v-if="isExpired"
+                class="rounded-2xl border border-zinc-200/90 bg-white/90 p-8 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10"
+            >
+                <div class="flex flex-col items-center gap-4 py-8">
+                    <svg class="h-10 w-10 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p class="text-sm text-zinc-700 dark:text-zinc-300">Session expired</p>
+                    <p class="max-w-md text-center text-xs text-zinc-500">The encoding session is no longer active and cannot be interacted with.</p>
+                    <div class="mt-2 grid w-full max-w-lg grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Status</p>
+                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ statusConfig[session.status]?.label ?? session.status }}</p>
+                        </div>
+                        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Created</p>
+                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ formatDate(session.createdAt) }}</p>
+                        </div>
                     </div>
+                    <button
+                        type="button"
+                        class="mt-2 rounded-xl border border-zinc-300 bg-zinc-100 px-6 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-200 dark:border-transparent dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                        @click="router.push('/sessions/new')"
+                    >
+                        New session
+                    </button>
+                </div>
+            </div>
 
-                    <!-- Pipeline progress bars (encoding + encrypting + uploading) -->
+            <!-- Main column -->
+            <div v-else class="min-w-0 space-y-5">
                     <div
-                        v-if="poller.status.value === 'encoding' || poller.status.value === 'encrypting' || poller.status.value === 'uploading_to_s3'"
-                        class="mb-4 space-y-3"
+                        class="rounded-2xl border border-zinc-200/90 bg-white/90 p-4 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur sm:p-6 dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10"
                     >
-                        <!-- ETA (based on encoding progress) -->
-                        <p v-if="etaDisplay" class="text-xs text-zinc-500 text-right">
-                            {{ etaDisplay }}
-                        </p>
-                        <!-- Encoding progress -->
-                        <ProgressBar
-                            label="Encoding"
-                            :progress="poller.pipelineProgress.value?.encoding ?? poller.progress.value"
-                        />
-                        <!-- Encrypting progress (appears when encryption starts) -->
-                        <ProgressBar
-                            v-if="poller.pipelineProgress.value?.encrypting != null"
-                            label="Encrypting"
-                            :progress="poller.pipelineProgress.value.encrypting"
-                        />
-                        <!-- Uploading progress (appears when uploads start) -->
-                        <ProgressBar
-                            v-if="poller.pipelineProgress.value?.uploading != null"
-                            label="Uploading to S3"
-                            :progress="poller.pipelineProgress.value.uploading"
-                        />
-                    </div>
+                        <div v-if="activePlaybackUrl" class="overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5">
+                            <HlsPlayer
+                                ref="playerRef"
+                                :playback-url="activePlaybackUrl"
+                                :thumbnail-vtt-url="isCompleted ? thumbnailVttUrl : undefined"
+                                :encoding-type="encodingType"
+                                :is-audio-only="isAudioOnly"
+                                :encryption-key-hex="isCompleted ? (encryptionKeyHex || poller.encryptionKeyHex.value) : undefined"
+                                :show-controls="false"
+                                preserve-state-on-source-change
+                                @quality-levels="onPreviewQualityLevels"
+                                @playing-change="isPreviewPlaying = $event"
+                                @duration-change="playerDuration = $event"
+                                @audio-tracks="onNativeAudioTracks"
+                            />
+                        </div>
 
-                    <!-- Failed banner -->
-                    <div v-if="currentStatus === 'failed'" class="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/40">
-                        <p class="text-sm font-medium text-red-900 dark:text-red-400">Encoding failed</p>
-                        <p
-                            v-if="poller.error.value || session.error"
-                            class="mt-1 text-sm text-red-700/90 dark:text-red-300/80"
-                        >
-                            {{ poller.error.value || session.error }}
-                        </p>
-                    </div>
-
-                    <!-- Player, files, encryption key (shown when completed) -->
-                    <div v-if="isCompleted" class="space-y-3">
-                        <!-- Angle switcher -->
-                        <div v-if="showAngleSwitcher" class="flex flex-wrap items-center gap-2">
-                            <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Angle:</span>
+                        <div v-if="isCompleted && showAngleSwitcher" class="mt-4 flex flex-wrap items-center gap-2">
+                            <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Angle</span>
                             <div class="flex flex-wrap gap-1.5">
                                 <button
                                     v-for="(ap, i) in uniqueAnglePlaylists"
                                     :key="ap.key"
                                     type="button"
-                                    class="rounded-md px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer"
+                                    class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
                                     :class="i === currentAngleIndex
                                         ? 'bg-indigo-600 text-white dark:bg-indigo-600 dark:text-white'
-                                        : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 hover:text-zinc-900 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-300'"
+                                        : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700'"
                                     @click="switchToAngle(i)"
                                 >
                                     {{ ap.name }}
@@ -1527,275 +1452,578 @@ onUnmounted(() => {
                             </div>
                         </div>
 
-                        <!-- Video player is now unified at the top of the page -->
-
-                        <!-- Master Playlist URL + Copy -->
-                        <div v-if="displayMasterPlaylist" class="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
-                            <div class="mb-2 flex items-center justify-between">
-                                <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Master Playlist</p>
-                                <button
-                                    v-if="s3Url"
-                                    type="button"
-                                    class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer"
-                                    :class="copied
-                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-400'
-                                        : 'bg-white border border-zinc-300 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-300'"
-                                    @click="copyPlaybackUrl"
-                                >
-                                    {{ copied ? 'Copied!' : 'Copy URL' }}
-                                </button>
-                            </div>
-                            <p class="break-all font-mono text-sm text-indigo-700 dark:text-indigo-400">{{ s3Url ?? displayMasterPlaylist }}</p>
+                        <div
+                            v-if="submissionError"
+                            class="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/40"
+                        >
+                            <p class="text-sm text-red-800 dark:text-red-300">{{ submissionError }}</p>
                         </div>
 
-                        <!-- Encryption key display -->
-                        <div v-if="isEncrypted && encryptionKeyHex" class="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
-                            <div class="mb-2 flex items-center justify-between">
-                                <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Encryption Key</p>
+                        <!-- Tabs -->
+                        <div class="mt-6">
+                            <div class="flex gap-1 overflow-x-auto rounded-xl border border-zinc-200/90 bg-zinc-100/80 p-1 dark:border-zinc-700 dark:bg-zinc-900/50">
                                 <button
+                                    v-for="tab in [
+                                        { id: 'workflow' as const, label: 'Encode workflow' },
+                                        { id: 'output' as const, label: 'Output configuration' },
+                                        { id: 'trim' as const, label: 'Trim & chapters' },
+                                        { id: 'post' as const, label: 'Post-process' },
+                                    ]"
+                                    :key="tab.id"
                                     type="button"
-                                    class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer"
-                                    :class="copiedKey
-                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-400'
-                                        : 'bg-white border border-zinc-300 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-300'"
-                                    @click="copyEncryptionKey"
+                                    class="whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition-colors sm:text-sm"
+                                    :class="activeTab === tab.id
+                                        ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100'
+                                        : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'"
+                                    @click="activeTab = tab.id"
                                 >
-                                    {{ copiedKey ? 'Copied!' : 'Copy Key' }}
+                                    {{ tab.label }}
                                 </button>
                             </div>
-                            <code class="block break-all rounded-lg bg-zinc-100 px-3 py-2 font-mono text-xs text-amber-800 dark:bg-zinc-800 dark:text-amber-400">{{ encryptionKeyHex }}</code>
-                        </div>
 
-                        <!-- Output files -->
-                        <div v-if="displayFiles?.length" class="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
-                            <template v-if="shouldCollapseFiles">
-                                <button
-                                    type="button"
-                                    class="flex w-full items-center justify-between cursor-pointer"
-                                    @click="showFiles = !showFiles"
-                                >
-                                    <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">
-                                        Output Files ({{ displayFiles.length }})
-                                    </p>
-                                    <svg
-                                        class="h-4 w-4 text-zinc-500 transition-transform"
-                                        :class="{ 'rotate-180': showFiles }"
-                                        fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-                                    >
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                            <!-- Encode workflow -->
+                            <div v-show="activeTab === 'workflow'" class="mt-5 space-y-5">
+                                <SessionWorkflowStepper
+                                    :ingest="stepperIngest"
+                                    :probe="stepperProbe"
+                                    :encoding="stepperEncoding"
+                                    :upload="stepperUpload"
+                                    :finalize="stepperFinalize"
+                                />
+
+                                <template v-if="!showProbeConfig && !submitting && !(showEncoding || isCompleted || currentStatus === 'failed')">
+                                    <div v-if="showUploadProgress">
+                                        <ProgressBar
+                                            :label="activeUpload!.progress >= 100 ? 'Finalizing upload…' : 'Uploading…'"
+                                            :progress="activeUpload!.progress"
+                                            :indeterminate="activeUpload!.progress >= 100"
+                                        />
+                                        <div class="flex justify-end pt-2">
+                                            <button
+                                                v-if="activeUpload!.progress < 100"
+                                                type="button"
+                                                class="cursor-pointer rounded-lg border border-zinc-300 px-4 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                                                @click="cancelUpload"
+                                            >
+                                                Cancel
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div v-else-if="showUploadDoneWaiting">
+                                        <ProgressBar label="Analyzing…" indeterminate />
+                                    </div>
+                                    <div v-else-if="showUploadRemoteMessage">
+                                        <p v-if="ingestEtaDisplay" class="mb-2 text-right text-xs text-zinc-500">{{ ingestEtaDisplay }}</p>
+                                        <ProgressBar
+                                            v-if="remoteIngestProgress !== undefined"
+                                            :label="remoteIngestLabel"
+                                            :progress="remoteIngestProgress"
+                                        />
+                                        <ProgressBar
+                                            v-else-if="poller.ingestTotalBytes.value != null"
+                                            :label="remoteIngestLabel"
+                                            indeterminate
+                                        />
+                                        <ProgressBar v-else label="Uploading…" indeterminate subtitle="Started elsewhere" />
+                                    </div>
+                                    <div v-else-if="currentStatus === 'uploaded' && probeLoading" class="flex flex-col items-center gap-3 py-10">
+                                        <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                        </svg>
+                                        <p class="text-sm text-zinc-500">Fetching probe results…</p>
+                                    </div>
+                                </template>
+
+                                <template v-if="showProbeConfig">
+                                    <div v-if="showUploadProgress">
+                                        <ProgressBar
+                                            :label="activeUpload!.progress >= 100 ? 'Finalizing upload…' : 'Uploading…'"
+                                            :progress="activeUpload!.progress"
+                                            :indeterminate="activeUpload!.progress >= 100"
+                                        />
+                                    </div>
+                                    <div class="rounded-xl border border-zinc-200 bg-zinc-50/80 p-4 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/40 dark:text-zinc-400">
+                                        <p class="font-medium text-zinc-900 dark:text-zinc-200">Ready to configure</p>
+                                        <p class="mt-1 text-xs leading-relaxed">
+                                            Set the HLS ladder in
+                                            <button type="button" class="font-semibold text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400" @click="activeTab = 'output'">Output configuration</button>
+                                            and optional cuts in
+                                            <button type="button" class="font-semibold text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400" @click="activeTab = 'trim'">Trim & chapters</button>.
+                                        </p>
+                                    </div>
+                                </template>
+
+                                <div v-if="submitting" class="flex flex-col items-center gap-3 py-12">
+                                    <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                     </svg>
-                                </button>
-                                <ul v-if="showFiles" class="mt-3 max-h-60 space-y-1 overflow-y-auto">
-                                    <li v-for="f in displayFiles" :key="f" class="break-all font-mono text-xs text-zinc-600 dark:text-zinc-400">{{ f }}</li>
-                                </ul>
-                            </template>
-                            <template v-else>
-                                <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Output Files</p>
-                                <ul class="max-h-60 space-y-1 overflow-y-auto">
-                                    <li v-for="f in displayFiles" :key="f" class="break-all font-mono text-xs text-zinc-600 dark:text-zinc-400">{{ f }}</li>
-                                </ul>
-                            </template>
+                                    <p class="text-sm text-zinc-500">Starting encoding…</p>
+                                </div>
+
+                                <template v-if="(showEncoding || isCompleted || currentStatus === 'failed') && !submitting">
+                                    <div
+                                        v-if="currentStatus === 'failed'"
+                                        class="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/40"
+                                    >
+                                        <p class="text-sm font-medium text-red-900 dark:text-red-400">Encoding failed</p>
+                                        <p v-if="poller.error.value || session.error" class="mt-1 text-sm text-red-700 dark:text-red-300">
+                                            {{ poller.error.value || session.error }}
+                                        </p>
+                                    </div>
+
+                                    <div
+                                        v-else
+                                        class="rounded-2xl border border-zinc-200/90 bg-white/95 p-4 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/50"
+                                    >
+                                        <div class="mb-3 flex flex-wrap items-start justify-between gap-2">
+                                            <div>
+                                                <h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">HLS package</h2>
+                                                <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                                                    <template v-if="displayEncoder && encoderConfig[displayEncoder]">{{ encoderConfig[displayEncoder].label }}</template>
+                                                    <template v-if="displaySegmentFormat"> · {{ displaySegmentFormat === 'fmp4' ? 'fMP4' : 'MPEG-TS' }}</template>
+                                                    <template v-if="encodingType === 'audio'"> · Audio-only</template>
+                                                </p>
+                                            </div>
+                                            <div v-if="poller.status.value === 'queued' && poller.queuePosition.value != null" class="text-xs font-medium text-amber-700 dark:text-amber-400">
+                                                Queue #{{ poller.queuePosition.value }}
+                                            </div>
+                                        </div>
+
+                                        <div
+                                            v-if="poller.status.value === 'encoding' || poller.status.value === 'encrypting' || poller.status.value === 'uploading_to_s3'"
+                                            class="space-y-3"
+                                        >
+                                            <p v-if="etaDisplay" class="text-right text-xs text-zinc-500">{{ etaDisplay }}</p>
+                                            <ProgressBar
+                                                label="Encoding"
+                                                :progress="poller.pipelineProgress.value?.encoding ?? poller.progress.value"
+                                            />
+                                            <ProgressBar
+                                                v-if="poller.pipelineProgress.value?.encrypting != null"
+                                                label="Encrypting manifest"
+                                                :progress="poller.pipelineProgress.value.encrypting"
+                                            />
+                                            <ProgressBar
+                                                v-if="poller.pipelineProgress.value?.uploading != null"
+                                                label="S3 parallel upload"
+                                                :progress="poller.pipelineProgress.value.uploading"
+                                            />
+                                        </div>
+
+                                        <div v-if="isCompleted" class="mt-4 rounded-lg border border-emerald-200/80 bg-emerald-50/80 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+                                            Encoding finished. Delivery links and storage tools are on the
+                                            <button type="button" class="font-semibold underline-offset-2 hover:underline" @click="activeTab = 'post'">Post-process</button>
+                                            tab.
+                                        </div>
+
+                                        <div class="mt-4 flex flex-wrap gap-2">
+                                            <button
+                                                v-if="showEncoding && (poller.status.value === 'queued' || poller.status.value === 'encoding' || poller.status.value === 'encrypting')"
+                                                type="button"
+                                                class="cursor-pointer rounded-xl border border-red-200 bg-white px-4 py-2 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/50"
+                                                @click="onCancelEncode"
+                                            >
+                                                Cancel encoding
+                                            </button>
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <div
+                                    class="rounded-2xl border border-zinc-200/90 bg-white/90 p-4 shadow-sm ring-1 ring-zinc-900/5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10"
+                                >
+                                    <div class="mb-2 flex items-center justify-between gap-2">
+                                        <h3 class="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                            Real-time logs
+                                        </h3>
+                                        <button
+                                            v-if="sessionLogLines.length"
+                                            type="button"
+                                            class="rounded-md px-2 py-1 text-[10px] font-medium text-zinc-500 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                            @click="clearSessionLogs"
+                                        >
+                                            Clear
+                                        </button>
+                                    </div>
+                                    <div
+                                        class="max-h-48 overflow-y-auto rounded-lg bg-zinc-950 px-2 py-2 font-mono text-[10px] leading-relaxed text-emerald-200/90 ring-1 ring-zinc-800"
+                                    >
+                                        <p v-for="(line, i) in sessionLogLines" :key="i" class="whitespace-pre-wrap break-all">
+                                            {{ line }}
+                                        </p>
+                                        <p v-if="!sessionLogLines.length" class="text-zinc-500">Waiting for session events…</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Output configuration -->
+                            <div v-show="activeTab === 'output'" class="mt-5">
+                                <EncodeConfigForm
+                                    v-if="showProbeConfig"
+                                    ref="configFormRef"
+                                    :probe-result="probeResult!"
+                                    :byte-range="byteRangeEnabled"
+                                    @submit="onEncodeSubmit"
+                                    @back="onEncodeBack"
+                                />
+                                <p v-else class="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+                                    Output settings are only editable while the session is probed and waiting to encode. For active jobs, use the Encode workflow tab for progress and logs.
+                                </p>
+                            </div>
+
+                            <!-- Post-process -->
+                            <div v-show="activeTab === 'post'" class="mt-5 space-y-5">
+                                <p v-if="!isCompleted && currentStatus !== 'failed'" class="text-sm text-zinc-500 dark:text-zinc-400">
+                                    When the package completes, this tab lists output keys, URLs, prefix tools, and delete options.
+                                </p>
+                                <p v-else-if="currentStatus === 'failed'" class="text-sm text-zinc-500 dark:text-zinc-400">
+                                    Encoding did not complete. See the Encode workflow tab for the error detail.
+                                </p>
+
+                                <template v-if="isCompleted">
+                                    <div v-if="displayMasterPlaylist" class="rounded-xl border border-zinc-200 bg-zinc-50/95 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+                                        <div class="mb-2 flex items-center justify-between gap-2">
+                                            <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Master playlist</p>
+                                            <button
+                                                v-if="s3Url"
+                                                type="button"
+                                                class="cursor-pointer rounded-md border border-zinc-300 px-2.5 py-1 text-xs font-medium transition-colors"
+                                                :class="copied ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/15' : 'bg-white text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'"
+                                                @click="copyPlaybackUrl"
+                                            >
+                                                {{ copied ? 'Copied' : 'Copy URL' }}
+                                            </button>
+                                        </div>
+                                        <p class="break-all font-mono text-sm text-indigo-700 dark:text-indigo-400">{{ s3Url ?? displayMasterPlaylist }}</p>
+                                    </div>
+
+                                    <div v-if="isEncrypted && encryptionKeyHex" class="rounded-xl border border-zinc-200 bg-zinc-50/95 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+                                        <div class="mb-2 flex items-center justify-between gap-2">
+                                            <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Encryption key</p>
+                                            <button
+                                                type="button"
+                                                class="cursor-pointer rounded-md border px-2.5 py-1 text-xs font-medium transition-colors"
+                                                :class="copiedKey ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40' : 'border-zinc-300 bg-white dark:border-zinc-700 dark:bg-zinc-800'"
+                                                @click="copyEncryptionKey"
+                                            >
+                                                {{ copiedKey ? 'Copied' : 'Copy key' }}
+                                            </button>
+                                        </div>
+                                        <code class="block break-all rounded-lg bg-zinc-100 px-3 py-2 font-mono text-xs text-amber-800 dark:bg-zinc-800 dark:text-amber-400">{{ encryptionKeyHex }}</code>
+                                    </div>
+
+                                    <div v-if="displayFiles?.length" class="rounded-xl border border-zinc-200 bg-zinc-50/95 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+                                        <div class="mb-3 flex items-center gap-2">
+                                            <svg class="h-4 w-4 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                                            </svg>
+                                            <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Generated assets</h3>
+                                        </div>
+                                        <div class="overflow-x-auto">
+                                            <table class="w-full min-w-[28rem] text-left text-xs">
+                                                <thead>
+                                                    <tr class="border-b border-zinc-200 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                                                        <th class="pb-2 pr-2 font-medium">File</th>
+                                                        <th class="pb-2 pr-2 font-medium">Type</th>
+                                                        <th class="pb-2 pr-2 font-medium">Size</th>
+                                                        <th class="pb-2 font-medium text-right">Actions</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <tr
+                                                        v-for="f in (shouldCollapseFiles && !showFiles ? (displayFiles ?? []).slice(0, 12) : (displayFiles ?? []))"
+                                                        :key="f"
+                                                        class="border-b border-zinc-100 last:border-0 dark:border-zinc-800"
+                                                    >
+                                                        <td class="py-1.5 pr-2 font-mono text-zinc-800 dark:text-zinc-200">{{ f.split('/').pop() || f }}</td>
+                                                        <td class="py-1.5 pr-2 text-zinc-600 dark:text-zinc-400">{{ inferOutputFileKind(f) }}</td>
+                                                        <td class="py-1.5 pr-2 text-zinc-400">—</td>
+                                                        <td class="py-1.5 text-right">
+                                                            <button
+                                                                type="button"
+                                                                class="rounded p-1 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                                                                title="Copy URL"
+                                                                @click="copyOutputObjectKey(f)"
+                                                            >
+                                                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m0 0V18a2 2 0 01-2 2h-3m3 0l-3-3" />
+                                                                </svg>
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <button
+                                            v-if="shouldCollapseFiles"
+                                            type="button"
+                                            class="mt-2 text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                                            @click="showFiles = !showFiles"
+                                        >
+                                            {{ showFiles ? 'Show less' : `Show all ${displayFiles.length} files` }}
+                                        </button>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                        <div v-if="session.s3Config?.endPoint" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">S3 endpoint</p>
+                                            <p class="break-all font-mono text-xs text-zinc-800 dark:text-zinc-200">
+                                                {{ session.s3Config.endPoint }}{{ session.s3Config.port ? `:${session.s3Config.port}` : '' }}
+                                            </p>
+                                        </div>
+                                        <div v-if="session.s3Config?.bucket" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Bucket</p>
+                                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ session.s3Config.bucket }}</p>
+                                        </div>
+                                        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Created</p>
+                                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ formatDate(session.createdAt) }}</p>
+                                        </div>
+                                        <div v-if="session.completedAt" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
+                                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Completed</p>
+                                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ formatDate(session.completedAt) }}</p>
+                                        </div>
+                                    </div>
+
+                                    <div
+                                        v-if="showMoveForm && hasS3Files"
+                                        class="rounded-xl border border-zinc-200 bg-zinc-50 p-4 space-y-3 dark:border-zinc-700 dark:bg-zinc-900/80"
+                                    >
+                                        <p class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Move files to another S3 config</p>
+                                        <div>
+                                            <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Target S3 config</label>
+                                            <FormSelect
+                                                v-model="selectedTargetConfigId"
+                                                :options="moveTargetS3SelectOptions"
+                                                placeholder="Select a config…"
+                                                @change="checkMovePrefix"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Path prefix</label>
+                                            <input v-model="moveNewPrefix" type="text" placeholder="e.g. videos/project-1/" class="input" @blur="checkMovePrefix" />
+                                        </div>
+                                        <div v-if="movePrefixWarning" class="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/50 dark:bg-amber-950/40">
+                                            <p class="text-xs text-amber-800 dark:text-amber-400">{{ movePrefixWarning }}</p>
+                                            <label class="mt-2 flex cursor-pointer items-center gap-2 text-xs text-amber-700 dark:text-amber-300">
+                                                <input v-model="moveConfirmedOverwrite" type="checkbox" class="rounded accent-amber-600" />
+                                                I understand, proceed anyway
+                                            </label>
+                                        </div>
+                                        <p v-if="moveError" class="text-xs text-red-700 dark:text-red-400">{{ moveError }}</p>
+                                        <div class="flex flex-wrap gap-2">
+                                            <button
+                                                type="button"
+                                                :disabled="!canMove"
+                                                class="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                                                @click="confirmMove"
+                                            >{{ moving ? 'Moving…' : 'Apply move' }}</button>
+                                            <button type="button" :disabled="moving" class="cursor-pointer rounded-lg border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-600" @click="showMoveForm = false">Cancel</button>
+                                        </div>
+                                    </div>
+
+                                    <div
+                                        v-if="showRenameForm && hasS3Files"
+                                        class="rounded-xl border border-zinc-200 bg-zinc-50 p-4 space-y-3 dark:border-zinc-700 dark:bg-zinc-900/80"
+                                    >
+                                        <p class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Rename path prefix</p>
+                                        <div>
+                                            <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">New prefix</label>
+                                            <input v-model="renameNewPrefix" type="text" placeholder="e.g. production/client-x/" class="input" @blur="checkRenamePrefix" />
+                                        </div>
+                                        <div v-if="renamePrefixWarning" class="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/50 dark:bg-amber-950/40">
+                                            <p class="text-xs text-amber-800 dark:text-amber-400">{{ renamePrefixWarning }}</p>
+                                            <label class="mt-2 flex cursor-pointer items-center gap-2 text-xs text-amber-700 dark:text-amber-300">
+                                                <input v-model="renameConfirmedOverwrite" type="checkbox" class="rounded accent-amber-600" />
+                                                I understand, proceed anyway
+                                            </label>
+                                        </div>
+                                        <p v-if="renameError" class="text-xs text-red-700 dark:text-red-400">{{ renameError }}</p>
+                                        <div class="flex flex-wrap gap-2">
+                                            <button
+                                                type="button"
+                                                :disabled="!canRename"
+                                                class="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                                                @click="confirmRename"
+                                            >{{ renaming ? 'Renaming…' : 'Apply rename' }}</button>
+                                            <button type="button" :disabled="renaming" class="cursor-pointer rounded-lg border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-600" @click="showRenameForm = false">Cancel</button>
+                                        </div>
+                                    </div>
+
+                                    <div class="rounded-2xl border border-red-200/80 bg-red-50/50 p-4 dark:border-red-900/40 dark:bg-red-950/20">
+                                        <p class="text-sm font-semibold text-red-900 dark:text-red-300">Danger zone</p>
+                                        <p class="mt-1 text-xs text-red-800/90 dark:text-red-400/90">Deleting removes this session from your history. Optionally delete objects from your bucket with the checkbox in the dialog.</p>
+                                        <button
+                                            type="button"
+                                            class="mt-3 cursor-pointer rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:bg-red-950/40 dark:text-red-400 dark:hover:bg-red-950/60"
+                                            @click="deleteModalOpen = true"
+                                        >
+                                            Delete session permanently
+                                        </button>
+                                    </div>
+
+                                    <div class="flex flex-wrap gap-3">
+                                        <button
+                                            v-if="hasS3Files && !showMoveForm && !showRenameForm"
+                                            type="button"
+                                            class="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                                            @click="openMoveForm"
+                                        >
+                                            Move files
+                                        </button>
+                                        <button
+                                            v-if="hasS3Files && !showMoveForm && !showRenameForm"
+                                            type="button"
+                                            class="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                                            @click="openRenameForm"
+                                        >
+                                            Rename prefix
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="cursor-pointer rounded-xl border border-zinc-300 bg-zinc-100 px-4 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-200 dark:border-transparent dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                                            @click="router.push('/sessions/new')"
+                                        >
+                                            New session
+                                        </button>
+                                    </div>
+                                </template>
+                            </div>
                         </div>
                     </div>
-
-                    <!-- Metadata grid -->
-                    <div class="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div v-if="session.s3Config?.endPoint" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">S3 Endpoint</p>
-                            <p class="font-mono text-xs text-zinc-800 break-all dark:text-zinc-200">
-                                {{ session.s3Config.endPoint }}{{ session.s3Config.port ? `:${session.s3Config.port}` : '' }}
-                            </p>
-                        </div>
-                        <div v-if="session.s3Config?.bucket" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">S3 Bucket</p>
-                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ session.s3Config.bucket }}</p>
-                        </div>
-                        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Created</p>
-                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ formatDate(session.createdAt) }}</p>
-                        </div>
-                        <div v-if="session.completedAt" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Completed</p>
-                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ formatDate(session.completedAt) }}</p>
-                        </div>
-                    </div>
-
-                    <!-- Move / Rename forms -->
-                    <div v-if="showMoveForm && isCompleted && hasS3Files" class="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4 space-y-3 dark:border-zinc-700 dark:bg-zinc-900/80">
-                        <p class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Move Files to Another S3 Config</p>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Target S3 Config</label>
-                            <FormSelect
-                                v-model="selectedTargetConfigId"
-                                :options="moveTargetS3SelectOptions"
-                                placeholder="Select a config..."
-                                @change="checkMovePrefix"
-                            />
-                        </div>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">Path Prefix</label>
-                            <input
-                                v-model="moveNewPrefix"
-                                type="text"
-                                placeholder="e.g. videos/project-1/"
-                                class="input"
-                                @blur="checkMovePrefix"
-                            />
-                        </div>
-                        <div v-if="movePrefixWarning" class="rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/50 dark:bg-amber-950/40">
-                            <p class="text-xs text-amber-800 dark:text-amber-400">{{ movePrefixWarning }}</p>
-                            <label class="mt-2 flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 cursor-pointer">
-                                <input v-model="moveConfirmedOverwrite" type="checkbox" class="rounded accent-amber-600" />
-                                I understand, proceed anyway
-                            </label>
-                        </div>
-                        <p v-if="moveError" class="text-xs text-red-700 dark:text-red-400">{{ moveError }}</p>
-                        <div class="flex gap-2">
-                            <button
-                                type="button"
-                                :disabled="!canMove"
-                                class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:opacity-50 cursor-pointer"
-                                @click="confirmMove"
-                            >
-                                <template v-if="moving">Moving...</template>
-                                <template v-else>Move</template>
-                            </button>
-                            <button
-                                type="button"
-                                :disabled="moving"
-                                class="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 cursor-pointer"
-                                @click="showMoveForm = false"
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-
-                    <div v-if="showRenameForm && isCompleted && hasS3Files" class="mt-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4 space-y-3 dark:border-zinc-700 dark:bg-zinc-900/80">
-                        <p class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Rename Path Prefix</p>
-                        <div>
-                            <label class="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">New Path Prefix</label>
-                            <input
-                                v-model="renameNewPrefix"
-                                type="text"
-                                placeholder="e.g. production/client-x/"
-                                class="input"
-                                @blur="checkRenamePrefix"
-                            />
-                        </div>
-                        <div v-if="renamePrefixWarning" class="rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/50 dark:bg-amber-950/40">
-                            <p class="text-xs text-amber-800 dark:text-amber-400">{{ renamePrefixWarning }}</p>
-                            <label class="mt-2 flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 cursor-pointer">
-                                <input v-model="renameConfirmedOverwrite" type="checkbox" class="rounded accent-amber-600" />
-                                I understand, proceed anyway
-                            </label>
-                        </div>
-                        <p v-if="renameError" class="text-xs text-red-700 dark:text-red-400">{{ renameError }}</p>
-                        <div class="flex gap-2">
-                            <button
-                                type="button"
-                                :disabled="!canRename"
-                                class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:opacity-50 cursor-pointer"
-                                @click="confirmRename"
-                            >
-                                <template v-if="renaming">Renaming...</template>
-                                <template v-else>Rename</template>
-                            </button>
-                            <button
-                                type="button"
-                                :disabled="renaming"
-                                class="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 cursor-pointer"
-                                @click="showRenameForm = false"
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Action buttons -->
-                    <div class="mt-4 flex flex-wrap gap-3">
-                        <button
-                            v-if="showEncoding && (poller.status.value === 'queued' || poller.status.value === 'encoding')"
-                            type="button"
-                            class="flex-1 rounded-lg border border-zinc-300 px-6 py-3 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
-                            @click="onCancelEncode"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            v-if="isCompleted && hasS3Files && !showMoveForm && !showRenameForm"
-                            type="button"
-                            class="rounded-lg border border-zinc-300 px-4 py-3 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
-                            @click="openMoveForm"
-                        >
-                            Move Files
-                        </button>
-                        <button
-                            v-if="isCompleted && hasS3Files && !showMoveForm && !showRenameForm"
-                            type="button"
-                            class="rounded-lg border border-zinc-300 px-4 py-3 text-sm font-semibold text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 cursor-pointer"
-                            @click="openRenameForm"
-                        >
-                            Rename Prefix
-                        </button>
-                        <button
-                            v-if="isTerminal"
-                            type="button"
-                            class="flex-1 rounded-lg border border-zinc-300 bg-zinc-100 px-6 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-200 hover:text-zinc-900 dark:border-transparent dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 cursor-pointer"
-                            @click="router.push('/sessions/new')"
-                        >
-                            New Session
-                        </button>
-                        <button
-                            v-if="isTerminal"
-                            type="button"
-                            class="flex-1 rounded-lg border border-red-200 bg-white px-6 py-3 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-400 dark:hover:bg-red-950/40 cursor-pointer"
-                            @click="deleteModalOpen = true"
-                        >
-                            Delete
-                        </button>
-                    </div>
-                </template>
-
-                <!-- ============================================================ -->
-                <!-- Expired / no session token for non-terminal status           -->
-                <!-- ============================================================ -->
-                <div v-else-if="isExpired" class="flex flex-col items-center gap-4 py-16">
-                    <svg class="h-10 w-10 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <p class="text-sm text-zinc-400">Session expired</p>
-                    <p class="text-xs text-zinc-500">The encoding session is no longer active and cannot be interacted with.</p>
-
-                    <!-- Metadata grid for expired sessions -->
-                    <div class="mt-4 w-full grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Status</p>
-                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ statusConfig[session.status]?.label ?? session.status }}</p>
-                        </div>
-                        <div v-if="session.s3Config?.endPoint" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">S3 Endpoint</p>
-                            <p class="font-mono text-xs text-zinc-800 break-all dark:text-zinc-200">
-                                {{ session.s3Config.endPoint }}{{ session.s3Config.port ? `:${session.s3Config.port}` : '' }}
-                            </p>
-                        </div>
-                        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">Created</p>
-                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ formatDate(session.createdAt) }}</p>
-                        </div>
-                    </div>
-
-                    <button
-                        type="button"
-                        class="mt-4 rounded-lg border border-zinc-300 bg-zinc-100 px-6 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-200 dark:border-transparent dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700 cursor-pointer"
-                        @click="router.push('/sessions/new')"
-                    >
-                        New Session
-                    </button>
-                </div>
-
-            </template>
+            </div>
+        </template>
         </div>
+
+        <section
+            v-if="session && !isExpired && activeTab === 'trim'"
+            class="mt-2 w-full border-t border-zinc-200/90 pt-8 dark:border-zinc-800"
+        >
+            <div
+                v-if="showProbeConfig && activePlaybackUrl && probeResult?.format?.duration"
+                class="relative left-1/2 mb-6 w-screen max-w-[100vw] -translate-x-1/2 px-4 sm:px-6"
+            >
+                <SegmentEditor
+                    v-model="editorSegments"
+                    mode="trim"
+                    :duration="probeResult.format.duration"
+                    :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
+                    :on-seek="(t) => playerRef?.seek(t)"
+                    :on-play-pause="() => playerRef?.togglePlay()"
+                    :is-playing="isPreviewPlaying"
+                    keyboard-scope="global"
+                    :fps="segmentEditorProbeFps"
+                >
+                    <template v-if="previewAudioTracks.length > 1" #playback-start>
+                        <label class="playback-slot-label">Audio:</label>
+                        <FormSelect
+                            variant="playback"
+                            numeric
+                            v-model="selectedAudioTrack"
+                            :options="previewAudioSelectOptions"
+                        />
+                    </template>
+                    <template
+                        v-if="previewQualityLevels.length > 1 && encodingType !== 'audio'"
+                        #playback-end
+                    >
+                        <label class="playback-slot-label">Quality:</label>
+                        <FormSelect
+                            variant="playback"
+                            :model-value="selectedQualityId ?? ''"
+                            :options="previewQualitySelectOptions"
+                            @update:model-value="onQualityChange($event === '' ? null : String($event))"
+                        />
+                    </template>
+                </SegmentEditor>
+            </div>
+
+            <div class="mx-auto w-full max-w-7xl px-4 sm:px-6">
+                <SegmentEditor
+                    v-if="isPostSubmit && activePlaybackUrl && chapterTimelineDuration > 0 && currentStatus !== 'failed'"
+                    v-model="chapterSegments"
+                    mode="chapters"
+                    :duration="chapterTimelineDuration"
+                    :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
+                    :on-seek="(t) => playerRef?.seek(t)"
+                    :on-play-pause="() => playerRef?.togglePlay()"
+                    :is-playing="isPreviewPlaying"
+                    :ripple-edit="false"
+                    title="Chapters"
+                    keyboard-scope="global"
+                    :fps="segmentEditorProbeFps"
+                    class="mb-4"
+                >
+                    <template
+                        v-if="(isCompleted && nativeAudioTracks.length > 1) || (!isCompleted && previewAudioTracks.length > 1)"
+                        #playback-start
+                    >
+                        <label class="playback-slot-label">Audio:</label>
+                        <FormSelect
+                            v-if="isCompleted"
+                            variant="playback"
+                            :model-value="selectedNativeAudioId ?? ''"
+                            :options="nativeAudioSelectOptions"
+                            @update:model-value="onNativeAudioChange(String($event))"
+                        />
+                        <FormSelect
+                            v-else
+                            variant="playback"
+                            numeric
+                            v-model="selectedAudioTrack"
+                            :options="previewAudioSelectOptions"
+                        />
+                    </template>
+                    <template
+                        v-if="previewQualityLevels.length > 1 && encodingType !== 'audio'"
+                        #playback-end
+                    >
+                        <label class="playback-slot-label">Quality:</label>
+                        <FormSelect
+                            variant="playback"
+                            :model-value="selectedQualityId ?? ''"
+                            :options="previewQualitySelectOptions"
+                            @update:model-value="onQualityChange($event === '' ? null : String($event))"
+                        />
+                    </template>
+                    <template #toolbar-end>
+                        <span
+                            v-if="chapters.isDirty.value"
+                            class="chapter-unsaved-pill"
+                            title="Unsaved changes are stored locally; click Save to commit to S3."
+                        >Unsaved</span>
+                        <button
+                            v-if="chapters.isDirty.value"
+                            type="button"
+                            class="chapter-toolbar-muted"
+                            :disabled="chapters.isSaving.value"
+                            @click="onDiscardChapters"
+                        >Discard</button>
+                        <button
+                            type="button"
+                            class="chapter-save-btn"
+                            :disabled="!chapters.isDirty.value || chapters.isSaving.value"
+                            @click="onSaveChapters"
+                        >{{ chapters.isSaving.value ? 'Saving…' : 'Save' }}</button>
+                    </template>
+                </SegmentEditor>
+
+                <p v-if="chaptersSaveError" class="text-xs text-red-600 dark:text-red-400">{{ chaptersSaveError }}</p>
+                <p
+                    v-else-if="
+                        !(
+                            (showProbeConfig && activePlaybackUrl && probeResult?.format?.duration)
+                            || (isPostSubmit && activePlaybackUrl && chapterTimelineDuration > 0 && currentStatus !== 'failed')
+                        )
+                    "
+                    class="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400"
+                >
+                    Trim ranges appear after the source is probed. Chapters appear once encoding has started or finished.
+                </p>
+            </div>
+        </section>
 
         <DeleteSessionModal
             v-model:open="deleteModalOpen"
