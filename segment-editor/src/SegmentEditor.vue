@@ -894,58 +894,76 @@ defineExpose({
         </div>
 
         <div v-if="showToolbar" class="se-toolbar">
-            Marks:
-            <button type="button" class="se-btn se-btn--io" @click="markIn" title="Mark In at playhead ( I or [ )">
-            <span aria-hidden="true">[</span>
-            </button>
-            <button type="button" class="se-btn se-btn--io" @click="markOut" title="Mark Out at playhead ( O or ] )">
-            <span aria-hidden="true">]</span>
-            </button>
-            <button type="button" class="se-btn" @click="addSegmentAtPlayhead" title="Add a 10-second segment at playhead">
-                <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-                Add
-            </button>
-            <button
-                type="button"
-                class="se-btn se-btn--squish"
-                :disabled="history.length === 0"
-                @click="undo"
-                title="Undo"
-            ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
-            <button
-                type="button"
-                class="se-btn se-btn--squish"
-                :disabled="redoStack.length === 0"
-                @click="redo"
-                title="Redo"
-            ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
-            <button
-                v-if="segments.length > 0"
-                type="button"
-                class="se-btn se-btn--danger"
-                @click="clearAll"
+            <div class="se-toolbar__marks">
+                Marks:
+                <button type="button" class="se-btn se-btn--squish" @click="markIn" title="Mark In at playhead ( I or [ )">
+                    <span aria-hidden="true">[</span>
+                </button>
+                <button type="button" class="se-btn se-btn--squish" @click="markOut" title="Mark Out at playhead ( O or ] )">
+                    <span aria-hidden="true">]</span>
+                </button>
+                <button type="button" class="se-btn" @click="addSegmentAtPlayhead" title="Add a 10-second segment at playhead">
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                    Add
+                </button>
+                <button
+                    type="button"
+                    class="se-btn se-btn--squish"
+                    :disabled="history.length === 0"
+                    @click="undo"
+                    title="Undo"
+                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                <button
+                    type="button"
+                    class="se-btn se-btn--squish"
+                    :disabled="redoStack.length === 0"
+                    @click="redo"
+                    title="Redo"
+                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
+                <button
+                    v-if="segments.length > 0"
+                    type="button"
+                    class="se-btn se-btn--danger"
+                    @click="clearAll"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
+                    Clear All
+                </button>
+                <span v-if="pendingInSec !== null" class="se-pending">
+                    In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
+                    · <span class="se-pending-cancel">Esc cancels</span>
+                </span>
+                <label class="se-zoom">
+                    Zoom
+                    <input
+                        type="range"
+                        min="1"
+                        :max="maxZoom"
+                        step="0.1"
+                        :value="zoom"
+                        @input="(e) => setZoom(parseFloat((e.target as HTMLInputElement).value), playheadSec)"
+                    />
+                    <span>{{ zoom.toFixed(1) }}×</span>
+                </label>
+                <slot name="toolbar-end" />
+            </div>
+            <div
+                v-if="$slots['playback-start'] || $slots['playback-end']"
+                class="se-toolbar__playback-options"
             >
-                <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
-                Clear All
-            </button>
-            <span v-if="pendingInSec !== null" class="se-pending">
-                In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
-                · <span class="se-pending-cancel">Esc cancels</span>
-            </span>
-            <div class="se-spacer" />
-            <label class="se-zoom">
-                Zoom
-                <input
-                    type="range"
-                    min="1"
-                    :max="maxZoom"
-                    step="0.1"
-                    :value="zoom"
-                    @input="(e) => setZoom(parseFloat((e.target as HTMLInputElement).value), playheadSec)"
-                />
-                <span>{{ zoom.toFixed(1) }}×</span>
-            </label>
-            <slot name="toolbar-end" />
+                <div
+                    v-if="$slots['playback-start']"
+                    class="se-playback-controls__slot se-playback-controls__slot--start"
+                >
+                    <slot name="playback-start" />
+                </div>
+                <div
+                    v-if="$slots['playback-end']"
+                    class="se-playback-controls__slot se-playback-controls__slot--end"
+                >
+                    <slot name="playback-end" />
+                </div>
+            </div>
         </div>
 
         <div v-if="showPlaybackControls" class="se-time-above">
@@ -1044,13 +1062,10 @@ defineExpose({
         </div>
 
         <div
-            v-if="showPlaybackControls && (onPlayPause || onSeek || $slots['playback-start'] || $slots['playback-end'])"
+            v-if="showPlaybackControls && (onPlayPause || onSeek)"
             class="se-playback-controls"
         >
-            <div class="se-playback-controls__slot se-playback-controls__slot--start">
-                <slot name="playback-start" />
-            </div>
-            <div v-if="onPlayPause || onSeek" class="se-playback-controls__center">
+            <div class="se-playback-controls__center">
                 <button
                     v-if="onSeek"
                     type="button"
@@ -1114,9 +1129,6 @@ defineExpose({
                     <span>1s</span>
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="11 7 16 12 11 17"/><path d="M4 12h12"/></svg>
                 </button>
-            </div>
-            <div class="se-playback-controls__slot se-playback-controls__slot--end">
-                <slot name="playback-end" />
             </div>
         </div>
 

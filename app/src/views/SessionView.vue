@@ -1920,6 +1920,7 @@ onUnmounted(() => {
                         <label class="playback-slot-label">Audio:</label>
                         <FormSelect
                             variant="playback"
+                            presentation="custom"
                             numeric
                             v-model="selectedAudioTrack"
                             :options="previewAudioSelectOptions"
@@ -1932,6 +1933,7 @@ onUnmounted(() => {
                         <label class="playback-slot-label">Quality:</label>
                         <FormSelect
                             variant="playback"
+                            presentation="custom"
                             :model-value="selectedQualityId ?? ''"
                             :options="previewQualitySelectOptions"
                             @update:model-value="onQualityChange($event === '' ? null : String($event))"
@@ -1964,6 +1966,7 @@ onUnmounted(() => {
                         <FormSelect
                             v-if="isCompleted"
                             variant="playback"
+                            presentation="custom"
                             :model-value="selectedNativeAudioId ?? ''"
                             :options="nativeAudioSelectOptions"
                             @update:model-value="onNativeAudioChange(String($event))"
@@ -1971,6 +1974,7 @@ onUnmounted(() => {
                         <FormSelect
                             v-else
                             variant="playback"
+                            presentation="custom"
                             numeric
                             v-model="selectedAudioTrack"
                             :options="previewAudioSelectOptions"
@@ -1983,6 +1987,7 @@ onUnmounted(() => {
                         <label class="playback-slot-label">Quality:</label>
                         <FormSelect
                             variant="playback"
+                            presentation="custom"
                             :model-value="selectedQualityId ?? ''"
                             :options="previewQualitySelectOptions"
                             @update:model-value="onQualityChange($event === '' ? null : String($event))"

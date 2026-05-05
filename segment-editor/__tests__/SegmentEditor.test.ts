@@ -1278,7 +1278,7 @@ describe('SegmentEditor — list rendering', () => {
         expect(onPlayPause).toHaveBeenCalled();
     });
 
-    it('playback-start and playback-end slots render in the left and right cells', async () => {
+    it('playback-start and playback-end slots render side by side in the right toolbar cluster', async () => {
         const w = mount(SegmentEditor, {
             props: {
                 modelValue: [],
@@ -1294,8 +1294,8 @@ describe('SegmentEditor — list rendering', () => {
             attachTo: document.body,
         });
         await flush();
-        expect(w.find('.se-playback-controls__slot--start .mock-audio').exists()).toBe(true);
-        expect(w.find('.se-playback-controls__slot--end .mock-quality').exists()).toBe(true);
+        expect(w.find('.se-toolbar__playback-options .mock-audio').exists()).toBe(true);
+        expect(w.find('.se-toolbar__playback-options .mock-quality').exists()).toBe(true);
     });
 
     it('center group renders jog + play strip when both callbacks are set', async () => {
@@ -1339,7 +1339,7 @@ describe('SegmentEditor — list rendering', () => {
         expect(w.find('.se-time-above').exists()).toBe(false);
     });
 
-    it('renders the playback row when only slot content is provided (no callbacks)', async () => {
+    it('render slot content in the toolbar when no playback callbacks are set', async () => {
         const w = mount(SegmentEditor, {
             props: {
                 modelValue: [],
@@ -1352,8 +1352,8 @@ describe('SegmentEditor — list rendering', () => {
             attachTo: document.body,
         });
         await flush();
-        expect(w.find('.se-playback-controls').exists()).toBe(true);
-        expect(w.find('.se-playback-controls__center').exists()).toBe(false);
+        expect(w.find('.se-toolbar__playback-options .mock-audio').exists()).toBe(true);
+        expect(w.find('.se-playback-controls').exists()).toBe(false);
     });
 
     it('renders the toolbar-end slot at the end of the toolbar row', async () => {
