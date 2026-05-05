@@ -76,7 +76,7 @@ Override the mode-derived defaults with `show-labels`, `allow-overlap`, or `ripp
 | `showList`            | `boolean`                               | `true`    | |
 | `showHelp`            | `boolean`                               | `true`    | |
 | `maxZoom`             | `number`                                | `40`      | |
-| `showShortcutsStrip`  | `boolean`                               | `true`    | NLE-style hint row under playback (In/Out, jog, zoom). |
+| `showShortcutsStrip`  | `boolean`                               | mode-dependent | NLE-style hint row under playback. Default **off** for `trim` (use header **?**); **on** for `chapters` / `subtitles`. |
 | `title`               | `string`                                | —         | Override the panel heading. |
 
 ## Emits

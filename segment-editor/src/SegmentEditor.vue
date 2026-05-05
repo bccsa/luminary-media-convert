@@ -59,7 +59,6 @@ const props = withDefaults(defineProps<Props>(), {
     showList: true,
     showHelp: true,
     maxZoom: 40,
-    showShortcutsStrip: true,
     isPlaying: false,
     rippleEdit: true,
     showLabels: undefined,
@@ -85,6 +84,9 @@ const modeTitle = computed(() => {
         default: return 'Trim Segments';
     }
 });
+
+/** Hint row under playback: off for trim (header ? opens the same help); on for chapters/subtitles unless overridden. */
+const shortcutsStripVisible = computed(() => props.showShortcutsStrip ?? props.mode !== 'trim');
 
 // -------------- id hygiene --------------
 // Ensure every incoming segment has a stable id; re-emit once with ids if the consumer omitted them.
@@ -892,13 +894,12 @@ defineExpose({
         </div>
 
         <div v-if="showToolbar" class="se-toolbar">
+            Marks:
             <button type="button" class="se-btn se-btn--io" @click="markIn" title="Mark In at playhead ( I or [ )">
-                <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7v10M8 9h6M8 15h6"/></svg>
-                <span class="se-btn__label">Mark In</span><span class="se-kbd" aria-hidden="true">I</span><span class="se-kbd" aria-hidden="true">[</span>
+            <span aria-hidden="true">[</span>
             </button>
             <button type="button" class="se-btn se-btn--io" @click="markOut" title="Mark Out at playhead ( O or ] )">
-                <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 7v10M16 9h-6M16 15h-6"/></svg>
-                <span class="se-btn__label">Mark Out</span><span class="se-kbd" aria-hidden="true">O</span><span class="se-kbd" aria-hidden="true">]</span>
+            <span aria-hidden="true">]</span>
             </button>
             <button type="button" class="se-btn" @click="addSegmentAtPlayhead" title="Add a 10-second segment at playhead">
                 <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
@@ -1120,7 +1121,7 @@ defineExpose({
         </div>
 
         <div
-            v-if="showShortcutsStrip && showPlaybackControls && (onPlayPause || onSeek)"
+            v-if="shortcutsStripVisible && showPlaybackControls && (onPlayPause || onSeek)"
             class="se-shortcuts-strip"
             role="note"
             aria-label="Keyboard shortcuts"

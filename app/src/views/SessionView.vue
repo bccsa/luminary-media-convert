@@ -1903,7 +1903,7 @@ onUnmounted(() => {
         >
             <div
                 v-if="showProbeConfig && activePlaybackUrl && probeResult?.format?.duration"
-                class="relative left-1/2 mb-6 w-screen max-w-[100vw] -translate-x-1/2 px-4 sm:px-6"
+                class="relative left-1/2 mb-6 w-screen max-w-[90vw] -translate-x-1/2 px-4 sm:px-6"
             >
                 <SegmentEditor
                     v-model="editorSegments"

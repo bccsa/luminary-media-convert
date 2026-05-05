@@ -45,6 +45,147 @@
     .ecf-legend { @apply text-sm font-semibold uppercase tracking-wider text-zinc-400 p-0; }
     .ecf-section-title { @apply mb-1 text-xs font-medium text-zinc-500; }
 
+    /* EncodeConfigForm — mode bar */
+    .ecf-modebar { @apply flex flex-wrap items-center gap-3; }
+    .ecf-mode-seg {
+        @apply inline-flex rounded-xl border border-zinc-200 bg-zinc-50/80 p-0.5 gap-0.5
+            dark:border-zinc-700/70 dark:bg-zinc-900/40;
+    }
+    .ecf-mode-opt {
+        @apply inline-flex items-center gap-1.5 rounded-[0.4375rem] px-4 py-1.5 text-sm
+            font-medium whitespace-nowrap border-none cursor-pointer transition-colors
+            text-zinc-500 bg-transparent
+            hover:bg-zinc-200/60 hover:text-zinc-800
+            disabled:opacity-35 disabled:cursor-not-allowed
+            dark:text-zinc-400 dark:hover:bg-zinc-700/40 dark:hover:text-zinc-200;
+    }
+    .ecf-mode-opt--on {
+        @apply bg-indigo-600 text-white shadow-sm
+            hover:bg-indigo-600 hover:text-white
+            dark:bg-indigo-600 dark:text-white dark:hover:bg-indigo-600;
+    }
+    .ecf-seg-ctrl { @apply ml-auto inline-flex items-center gap-1.5; }
+    .ecf-seg-lbl { @apply text-xs text-zinc-400 dark:text-zinc-500; }
+
+    /* EncodeConfigForm — collapsible panels (detect + ladder) */
+    .ecf-detect,
+    .ecf-panel {
+        @apply overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 shadow-sm shadow-zinc-900/5
+            dark:border-zinc-700/50 dark:bg-zinc-900/40 dark:shadow-none;
+    }
+    .ecf-detect-summary,
+    .ecf-panel-summary {
+        @apply flex min-h-11 cursor-pointer select-none items-center gap-2.5 px-4 py-2.5
+            bg-transparent transition-colors hover:bg-zinc-100/90
+            dark:hover:bg-zinc-800/55;
+    }
+    .ecf-detect-chevron,
+    .ecf-panel-chevron {
+        @apply w-3.5 h-3.5 text-zinc-400 flex-shrink-0 transition-transform dark:text-zinc-500;
+    }
+    .ecf-detect[open] .ecf-detect-chevron,
+    .ecf-panel[open] .ecf-panel-chevron {
+        @apply rotate-180;
+    }
+    .ecf-detect-title {
+        @apply text-xs font-semibold uppercase tracking-wider flex-shrink-0
+            text-zinc-500 dark:text-zinc-400;
+    }
+    .ecf-detect-meta {
+        @apply text-xs flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap
+            text-zinc-400 dark:text-zinc-500;
+    }
+    .ecf-detect-badge { @apply inline-flex items-center rounded-full px-2 py-0.5 text-[0.6875rem] font-medium flex-shrink-0; }
+    .ecf-detect-badge--video {
+        @apply bg-indigo-50 text-indigo-600 border border-indigo-200/70
+            dark:bg-indigo-950/20 dark:text-indigo-300 dark:border-indigo-800/30;
+    }
+    .ecf-detect-badge--audio {
+        @apply bg-teal-50 text-teal-600 border border-teal-200/70
+            dark:bg-teal-950/15 dark:text-teal-400 dark:border-teal-800/25;
+    }
+    .ecf-detect-action { @apply ml-auto flex-shrink-0; }
+    .ecf-detect-body,
+    .ecf-panel-body {
+        @apply flex flex-col gap-3 border-t border-zinc-200 bg-white p-3.5
+            dark:border-zinc-700/40 dark:bg-zinc-950/25;
+    }
+    .ecf-detect-sub {
+        @apply text-[0.6875rem] font-semibold uppercase tracking-wider mb-1.5
+            text-zinc-400 dark:text-zinc-600;
+    }
+
+    /* EncodeConfigForm — ladder stack (gap matches ecf-root space-y-6) */
+    .ecf-ladder-stack { @apply flex flex-col gap-6; }
+    .ecf-box-hint { @apply text-[0.6875rem] m-0 text-zinc-400 dark:text-zinc-600; }
+
+    /* EncodeConfigForm — ladder table */
+    .ecf-lt { @apply w-full text-[0.8125rem]; }
+    .ecf-lt-thead {
+        @apply border-b border-zinc-200
+            bg-zinc-50/60
+            dark:bg-zinc-900/35 dark:border-zinc-700/35;
+    }
+    .ecf-lt-th {
+        @apply px-2 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-wide
+            text-zinc-400 text-left whitespace-nowrap dark:text-zinc-500;
+    }
+    .ecf-lt-tr {
+        @apply border-b border-zinc-100 transition-colors
+            hover:bg-zinc-50/70
+            dark:border-zinc-700/20 dark:hover:bg-zinc-800/25;
+    }
+    .ecf-lt-td { @apply px-2 py-1.5 align-middle; }
+    .ecf-lt-expand {
+        @apply bg-zinc-50/50 border-b border-zinc-100
+            dark:bg-zinc-900/30 dark:border-zinc-700/25;
+    }
+    .ecf-lt-expand-td { @apply px-3.5 py-1.5 pb-2.5 flex items-center flex-wrap gap-2.5; }
+    .ecf-expand-label { @apply text-xs flex-shrink-0 text-zinc-400 dark:text-zinc-500; }
+    .ecf-lt-warning {
+        @apply border-b border-amber-100/80
+            bg-amber-50/40
+            dark:bg-amber-950/20 dark:border-amber-800/25;
+    }
+    .ecf-lt-warning-td {
+        @apply px-3.5 py-1 flex items-center gap-1.5 text-xs
+            text-amber-600 dark:text-amber-400;
+    }
+    .ecf-lt-foot {
+        @apply border-t border-zinc-200 bg-zinc-50/40
+            dark:border-zinc-700/30 dark:bg-zinc-900/20;
+    }
+    .ecf-lt-add-td { @apply px-2.5 py-1.5; }
+    .ecf-btn-add {
+        @apply text-xs font-medium bg-transparent border-none cursor-pointer p-0 leading-normal transition-colors
+            text-zinc-400 hover:text-zinc-700
+            dark:text-zinc-600 dark:hover:text-zinc-200;
+    }
+
+    /* EncodeConfigForm — inline table inputs */
+    .ecf-cell-dim { @apply text-xs text-zinc-500 dark:text-zinc-600; }
+    .ecf-res-pair { @apply inline-flex items-center gap-0.5 whitespace-nowrap; }
+    .ecf-res-x { @apply text-xs text-zinc-500 px-px dark:text-zinc-600; }
+    .ecf-input-res { @apply !w-[3.75rem] text-right !p-[0.1875rem_0.375rem] !text-[0.8125rem]; }
+    .ecf-input-kbps { @apply !w-[4.5rem] text-right !p-[0.1875rem_0.375rem] !text-[0.8125rem]; }
+    .ecf-input-lbl { @apply !w-[5.5rem] !p-[0.1875rem_0.375rem] !text-[0.8125rem]; }
+    .ecf-input-id { @apply !w-16 !p-[0.1875rem_0.375rem] !text-[0.8125rem]; }
+    .ecf-input-lang { @apply !w-12 text-center !p-[0.1875rem_0.25rem] !text-[0.8125rem]; }
+    .ecf-input-num { @apply !w-20 text-center; }
+    .ecf-select-inline { @apply !min-w-[7rem] !p-[0.1875rem_2rem_0.1875rem_0.375rem] !text-[0.8125rem]; }
+    .ecf-select-ch { @apply !w-[5.5rem] !p-[0.1875rem_2rem_0.1875rem_0.375rem] !text-[0.8125rem]; }
+    .ecf-select-src { @apply !min-w-[10rem] !p-[0.1875rem_2rem_0.1875rem_0.375rem] !text-xs; }
+    .ecf-toggle {
+        @apply inline-flex items-center gap-1 text-xs cursor-pointer whitespace-nowrap mr-2.5 last:mr-0
+            text-zinc-500 dark:text-zinc-400;
+    }
+
+    /* legacy kept for backward compat */
+    .ecf-sr-only { @apply sr-only; }
+    .ecf-stack { @apply flex flex-col gap-3; }
+    .ecf-hint { @apply -mt-0.5 mb-2 text-xs leading-snug text-zinc-500; }
+    .ecf-em { @apply font-semibold text-zinc-800 dark:text-zinc-100; }
+
     /* Info panel */
     .ecf-info-panel { @apply rounded-md bg-zinc-900/60 p-3 text-sm; }
     .ecf-info-items { @apply flex flex-wrap gap-x-6 gap-y-1 text-zinc-300; }
@@ -53,10 +194,10 @@
     /* Tables */
     .ecf-table-wrap { @apply overflow-x-auto; }
     .ecf-table { @apply w-full text-xs text-left; }
-    .ecf-thead { @apply text-zinc-500 border-b border-zinc-800; }
+    .ecf-thead { @apply text-zinc-500 border-b border-zinc-200 dark:border-zinc-800; }
     .ecf-th { @apply px-2 py-1; }
-    .ecf-tbody { @apply text-zinc-300; }
-    .ecf-tr { @apply border-b border-zinc-800/50; }
+    .ecf-tbody { @apply text-zinc-700 dark:text-zinc-300; }
+    .ecf-tr { @apply border-b border-zinc-200/90 dark:border-zinc-800/50; }
     .ecf-td { @apply px-2 py-1; }
 
     /* Cards */
@@ -68,9 +209,21 @@
     .ecf-field-label { @apply mb-1 block text-xs text-zinc-500; }
     .ecf-reanalyze-row { @apply mt-2; }
 
-    /* Inputs */
-    .ecf-input { @apply w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none transition-colors focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-500; }
-    .ecf-select { @apply w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none transition-colors focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-500; }
+    /* Inputs — light surfaces in light mode (matches `.input`) */
+    .ecf-input {
+        @apply w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder-zinc-400 outline-none transition-colors
+            focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20
+            disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-50 disabled:text-zinc-400
+            dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder-zinc-500 dark:focus:ring-indigo-500/30
+            dark:disabled:border-zinc-800 dark:disabled:bg-zinc-900 dark:disabled:text-zinc-500;
+    }
+    .ecf-select {
+        @apply w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition-colors
+            focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20
+            disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-50 disabled:text-zinc-400
+            dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:ring-indigo-500/30
+            dark:disabled:border-zinc-800 dark:disabled:bg-zinc-900 dark:disabled:text-zinc-500;
+    }
 
     /* Input size variants */
     .ecf-input-sm { @apply w-24 text-xs; }
@@ -101,7 +254,16 @@
     .ecf-btn-remove-corner { @apply absolute top-2 right-2; }
     .ecf-btn-primary { @apply flex-1 rounded-lg px-6 py-3 text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-500 cursor-pointer transition-colors; }
     .ecf-btn-primary-disabled { @apply bg-zinc-800 text-zinc-500 cursor-not-allowed hover:bg-zinc-800; }
-    .ecf-btn-secondary { @apply rounded-lg border border-zinc-700 px-6 py-3 text-sm font-semibold text-zinc-300 transition-colors hover:bg-zinc-800 cursor-pointer; }
+    .ecf-btn-secondary {
+        @apply inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border px-5 py-3 text-sm font-semibold shadow-sm transition-colors cursor-pointer
+            border-zinc-300 bg-white text-zinc-700
+            hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900
+            active:bg-zinc-100
+            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/35 focus-visible:ring-offset-2 focus-visible:ring-offset-white
+            dark:border-zinc-600 dark:bg-zinc-900/60 dark:text-zinc-200 dark:shadow-none
+            dark:hover:border-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-white
+            dark:focus-visible:ring-offset-zinc-950;
+    }
     .ecf-btn-danger { @apply rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-500 cursor-pointer; }
 
     /* Icons */
@@ -116,7 +278,10 @@
     .ecf-confirm-actions { @apply flex gap-3; }
 
     /* Actions bar */
-    .ecf-actions { @apply flex gap-3; }
+    .ecf-actions {
+        @apply mt-2 flex flex-wrap items-stretch gap-3 border-t border-zinc-200/90 pt-6
+            dark:border-zinc-700/70 sm:items-center;
+    }
 
     /* SegmentEditor playback row — matches light/dark shell */
     .playback-slot-label {
