@@ -623,16 +623,33 @@ export class SegmentPipeline {
     }
 
     private async waitForUploads(): Promise<void> {
-        const timeout = 5 * 60 * 1000; // 5 minutes
-        const start = Date.now();
+        // Stall watchdog: trip only when no upload has completed for stallMs.
+        // A wall-clock deadline punishes slow-but-progressing links on large
+        // outputs; a stall detector still catches genuinely stuck uploads.
+        const stallMs = Number(
+            process.env.S3_UPLOAD_STALL_TIMEOUT_MS ?? 5 * 60 * 1000,
+        );
+
+        let lastProgressAt = Date.now();
+        let lastUploaded = this.segmentsUploaded;
+        let lastQueueDepth = this.activeUploads + this.uploadQueue.length;
 
         while (
             (this.activeUploads > 0 || this.uploadQueue.length > 0) &&
             !this.pipelineError
         ) {
-            if (Date.now() - start > timeout) {
+            const queueDepth = this.activeUploads + this.uploadQueue.length;
+            if (
+                this.segmentsUploaded !== lastUploaded ||
+                queueDepth !== lastQueueDepth
+            ) {
+                lastUploaded = this.segmentsUploaded;
+                lastQueueDepth = queueDepth;
+                lastProgressAt = Date.now();
+            } else if (Date.now() - lastProgressAt > stallMs) {
                 throw new Error(
-                    'Pipeline drain timeout: uploads did not complete within 5 minutes',
+                    `Pipeline drain stalled: no upload progress for ${Math.round(stallMs / 1000)}s ` +
+                        `(active=${this.activeUploads}, queued=${this.uploadQueue.length}, uploaded=${this.segmentsUploaded})`,
                 );
             }
             await new Promise((r) => setTimeout(r, 200));
