@@ -1858,57 +1858,75 @@ onUnmounted(() => {
                                         <code class="block break-all rounded-lg bg-zinc-100 px-3 py-2 font-mono text-xs text-amber-800 dark:bg-zinc-800 dark:text-amber-400">{{ encryptionKeyHex }}</code>
                                     </div>
 
-                                    <div v-if="displayFiles?.length" class="rounded-xl border border-zinc-200 bg-zinc-50/95 p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
-                                        <div class="mb-3 flex items-center gap-2">
-                                            <svg class="h-4 w-4 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <details
+                                        v-if="displayFiles?.length"
+                                        class="group rounded-xl border border-zinc-200 bg-zinc-50/95 dark:border-zinc-800 dark:bg-zinc-900/60"
+                                    >
+                                        <summary
+                                            class="flex cursor-pointer list-none items-center gap-2 rounded-xl p-4 text-left [&::-webkit-details-marker]:hidden"
+                                        >
+                                            <svg class="h-4 w-4 shrink-0 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                                                 <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                                             </svg>
                                             <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Generated assets</h3>
+                                            <span class="text-xs text-zinc-500 dark:text-zinc-400">({{ displayFiles.length }} {{ displayFiles.length === 1 ? 'file' : 'files' }})</span>
+                                            <svg
+                                                class="ml-auto h-4 w-4 shrink-0 text-zinc-400 transition-transform group-open:rotate-180"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                aria-hidden="true"
+                                            >
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </summary>
+                                        <div class="border-t border-zinc-200 px-4 pb-4 pt-2 dark:border-zinc-700">
+                                            <div class="overflow-x-auto">
+                                                <table class="w-full min-w-[28rem] text-left text-xs">
+                                                    <thead>
+                                                        <tr class="border-b border-zinc-200 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                                                            <th class="pb-2 pr-2 font-medium">File</th>
+                                                            <th class="pb-2 pr-2 font-medium">Type</th>
+                                                            <th class="pb-2 pr-2 font-medium">Size</th>
+                                                            <th class="pb-2 font-medium text-right">Actions</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <tr
+                                                            v-for="f in (shouldCollapseFiles && !showFiles ? (displayFiles ?? []).slice(0, 12) : (displayFiles ?? []))"
+                                                            :key="f"
+                                                            class="border-b border-zinc-100 last:border-0 dark:border-zinc-800"
+                                                        >
+                                                            <td class="py-1.5 pr-2 font-mono text-zinc-800 dark:text-zinc-200">{{ f.split('/').pop() || f }}</td>
+                                                            <td class="py-1.5 pr-2 text-zinc-600 dark:text-zinc-400">{{ inferOutputFileKind(f) }}</td>
+                                                            <td class="py-1.5 pr-2 text-zinc-400">—</td>
+                                                            <td class="py-1.5 text-right">
+                                                                <button
+                                                                    type="button"
+                                                                    class="rounded p-1 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                                                                    title="Copy URL"
+                                                                    @click="copyOutputObjectKey(f)"
+                                                                >
+                                                                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m0 0V18a2 2 0 01-2 2h-3m3 0l-3-3" />
+                                                                    </svg>
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                            <button
+                                                v-if="shouldCollapseFiles"
+                                                type="button"
+                                                class="mt-2 text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                                                @click="showFiles = !showFiles"
+                                            >
+                                                {{ showFiles ? 'Show less' : `Show all ${displayFiles.length} files` }}
+                                            </button>
                                         </div>
-                                        <div class="overflow-x-auto">
-                                            <table class="w-full min-w-[28rem] text-left text-xs">
-                                                <thead>
-                                                    <tr class="border-b border-zinc-200 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-                                                        <th class="pb-2 pr-2 font-medium">File</th>
-                                                        <th class="pb-2 pr-2 font-medium">Type</th>
-                                                        <th class="pb-2 pr-2 font-medium">Size</th>
-                                                        <th class="pb-2 font-medium text-right">Actions</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    <tr
-                                                        v-for="f in (shouldCollapseFiles && !showFiles ? (displayFiles ?? []).slice(0, 12) : (displayFiles ?? []))"
-                                                        :key="f"
-                                                        class="border-b border-zinc-100 last:border-0 dark:border-zinc-800"
-                                                    >
-                                                        <td class="py-1.5 pr-2 font-mono text-zinc-800 dark:text-zinc-200">{{ f.split('/').pop() || f }}</td>
-                                                        <td class="py-1.5 pr-2 text-zinc-600 dark:text-zinc-400">{{ inferOutputFileKind(f) }}</td>
-                                                        <td class="py-1.5 pr-2 text-zinc-400">—</td>
-                                                        <td class="py-1.5 text-right">
-                                                            <button
-                                                                type="button"
-                                                                class="rounded p-1 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                                                                title="Copy URL"
-                                                                @click="copyOutputObjectKey(f)"
-                                                            >
-                                                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m0 0V18a2 2 0 01-2 2h-3m3 0l-3-3" />
-                                                                </svg>
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                </tbody>
-                                            </table>
-                                        </div>
-                                        <button
-                                            v-if="shouldCollapseFiles"
-                                            type="button"
-                                            class="mt-2 text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400"
-                                            @click="showFiles = !showFiles"
-                                        >
-                                            {{ showFiles ? 'Show less' : `Show all ${displayFiles.length} files` }}
-                                        </button>
-                                    </div>
+                                    </details>
 
                                     <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                         <div v-if="session.s3Config?.endPoint" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
