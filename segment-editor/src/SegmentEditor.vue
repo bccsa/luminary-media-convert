@@ -44,6 +44,8 @@ interface Props {
     maxZoom?: number;
     /** Compact NLE-style hint row below playback controls (In/Out keys, jog, zoom). */
     showShortcutsStrip?: boolean;
+    /** When false, hides the timeline, zoom, and in/out mark controls (list + slim toolbar only). */
+    showTimeline?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -58,6 +60,7 @@ const props = withDefaults(defineProps<Props>(), {
     showPlaybackControls: true,
     showList: true,
     showHelp: true,
+    showTimeline: true,
     maxZoom: 40,
     isPlaying: false,
     rippleEdit: true,
@@ -86,7 +89,9 @@ const modeTitle = computed(() => {
 });
 
 /** Hint row under playback: off for trim (header ? opens the same help); on for chapters/subtitles unless overridden. */
-const shortcutsStripVisible = computed(() => props.showShortcutsStrip ?? props.mode !== 'trim');
+const shortcutsStripVisible = computed(
+    () => props.showTimeline && (props.showShortcutsStrip ?? props.mode !== 'trim'),
+);
 
 // -------------- id hygiene --------------
 // Ensure every incoming segment has a stable id; re-emit once with ids if the consumer omitted them.
@@ -893,8 +898,12 @@ defineExpose({
             </div>
         </div>
 
-        <div v-if="showToolbar" class="se-toolbar">
-            <div class="se-toolbar__marks">
+        <div
+            v-if="showToolbar"
+            class="se-toolbar"
+            :class="{ 'se-toolbar--no-timeline': !showTimeline }"
+        >
+            <div v-if="showTimeline" class="se-toolbar__marks">
                 Marks:
                 <button type="button" class="se-btn se-btn--squish" @click="markIn" title="Mark In at playhead ( I or [ )">
                     <span aria-hidden="true">[</span>
@@ -950,6 +959,7 @@ defineExpose({
             <div
                 v-if="$slots['playback-start'] || $slots['playback-end']"
                 class="se-toolbar__playback-options"
+                :class="{ 'se-toolbar__playback-options--stacked': !showTimeline }"
             >
                 <div
                     v-if="$slots['playback-start']"
@@ -964,6 +974,9 @@ defineExpose({
                     <slot name="playback-end" />
                 </div>
             </div>
+            <div v-if="!showTimeline" class="se-toolbar__marks se-toolbar__marks--list-only">
+                <slot name="toolbar-end" />
+            </div>
         </div>
 
         <div v-if="showPlaybackControls" class="se-time-above">
@@ -971,6 +984,7 @@ defineExpose({
         </div>
 
         <div
+            v-if="showTimeline"
             ref="timelineRef"
             class="se-timeline-wrap"
             :tabindex="keyboardScope === 'off' ? -1 : 0"

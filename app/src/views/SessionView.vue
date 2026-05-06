@@ -61,6 +61,27 @@ const chapterTimelineDuration = computed(
     () => playerDuration.value ?? probeResult.value?.format?.duration ?? 0,
 );
 
+/** Duration for the beside-player chapters panel (player > in-memory probe > session doc probe). */
+const chaptersSidePanelDuration = computed(() => {
+    const pd = playerDuration.value;
+    if (pd != null && pd > 0) return pd;
+    const pr = probeResult.value?.format?.duration;
+    if (typeof pr === 'number' && pr > 0) return pr;
+    const sp = (session.value?.probeResult as ProbeResult | undefined)?.format?.duration;
+    if (typeof sp === 'number' && sp > 0) return sp;
+    return 0;
+});
+
+/** Chapters list + editor beside the video whenever we have a playback URL (any workflow tab). */
+const showChaptersSidePanel = computed(
+    () =>
+        !!session.value
+        && !isExpired.value
+        && !!activePlaybackUrl.value
+        && currentStatus.value !== 'failed'
+        && chaptersSidePanelDuration.value > 0,
+);
+
 /** Probe video FPS for SegmentEditor comma/period frame steps (same source as EncodeConfigForm). */
 const segmentEditorProbeFps = computed(() => {
     const v = probeResult.value?.videoTracks?.[0];
@@ -1054,20 +1075,24 @@ watch(
 // Chapter editor — load / save / discard
 // ---------------------------------------------------------------------------
 
-// Load chapters once a post-submit state is reached (preview is then live).
-// Uploaded / uploading / created phases use the trim editor on a separate branch.
-const isPostSubmit = computed(() => {
-    const s = currentStatus.value;
-    return s === 'queued' || s === 'encoding' || s === 'encrypting'
-        || s === 'uploading_to_s3' || s === 'completed';
-});
+// Load chapters from localStorage / S3 whenever this session has preview playback (any status).
+watch(
+    () => sessionId.value,
+    (id, prev) => {
+        if (id !== prev && prev != null) {
+            chapters.unload();
+            chaptersSaveError.value = null;
+        }
+    },
+);
 
 watch(
-    [isPostSubmit, () => sessionId.value],
-    async ([active, id]) => {
-        if (!active || !id) return;
+    [() => sessionId.value, activePlaybackUrl, isExpired],
+    async ([id, url, expired]) => {
+        if (!id || !url || expired) return;
         if (chapters.isLoaded.value) return;
         try {
+            chaptersSaveError.value = null;
             await chapters.load(id);
         } catch (err) {
             chaptersSaveError.value = err instanceof Error ? err.message : String(err);
@@ -1089,10 +1114,67 @@ async function onDiscardChapters() {
     chaptersSaveError.value = null;
     try {
         await chapters.discardLocal();
+        syncChaptersFromTrim();
     } catch (err) {
         chaptersSaveError.value = err instanceof Error ? err.message : String(err);
     }
 }
+
+/** While configuring trim before encode, chapter list mirrors trim ranges (labels preserved by row index). */
+const hadTrimForChapterSync = ref(false);
+
+function segmentTimesAlmostEqual(a: Segment, b: Segment): boolean {
+    return Math.abs(a.inSec - b.inSec) < 1e-4 && Math.abs(a.outSec - b.outSec) < 1e-4;
+}
+
+function sameTrimAsChapterBoundaries(trim: Segment[], ch: Segment[]): boolean {
+    if (trim.length !== ch.length) return false;
+    return trim.every((t, i) => segmentTimesAlmostEqual(t, ch[i]!));
+}
+
+function syncChaptersFromTrim() {
+    if (!showProbeConfig.value || !chapters.isLoaded.value) return;
+
+    const trim = editorSegments.value;
+    if (trim.length === 0) {
+        if (hadTrimForChapterSync.value) {
+            chapterSegments.value = [];
+            hadTrimForChapterSync.value = false;
+        }
+        return;
+    }
+
+    hadTrimForChapterSync.value = true;
+    const prev = chapterSegments.value;
+    const next: Segment[] = trim.map((t: Segment, i: number) => ({
+        ...t,
+        label: i < prev.length ? (prev[i]!.label ?? '') : '',
+    }));
+
+    if (
+        sameTrimAsChapterBoundaries(trim, prev)
+        && next.every((s, i) => (s.label ?? '') === (prev[i]?.label ?? ''))
+    ) {
+        return;
+    }
+
+    chapterSegments.value = next;
+}
+
+watch(editorSegments, () => {
+    syncChaptersFromTrim();
+}, { deep: true });
+
+watch(
+    () => chapters.isLoaded.value,
+    (loaded) => {
+        if (loaded) syncChaptersFromTrim();
+    },
+);
+
+watch(showProbeConfig, (probe) => {
+    if (!probe) hadTrimForChapterSync.value = false;
+});
 
 // ---------------------------------------------------------------------------
 // Session workspace — tabs, stepper, activity log
@@ -1436,22 +1518,65 @@ onUnmounted(() => {
                     <div
                         class="rounded-2xl border border-zinc-200/90 bg-white/90 p-4 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur sm:p-6 dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10"
                     >
-                        <div v-if="activePlaybackUrl" class="overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5">
-                            <HlsPlayer
-                                ref="playerRef"
-                                :playback-url="activePlaybackUrl"
-                                :thumbnail-vtt-url="isCompleted ? thumbnailVttUrl : undefined"
-                                :encoding-type="encodingType"
-                                :is-audio-only="isAudioOnly"
-                                :encryption-key-hex="isCompleted ? (encryptionKeyHex || poller.encryptionKeyHex.value) : undefined"
-                                :show-controls="false"
-                                preserve-state-on-source-change
-                                @quality-levels="onPreviewQualityLevels"
-                                @playing-change="isPreviewPlaying = $event"
-                                @duration-change="playerDuration = $event"
-                                @audio-tracks="onNativeAudioTracks"
-                            />
+                        <div
+                            v-if="activePlaybackUrl"
+                            class="flex flex-col gap-4"
+                            :class="showChaptersSidePanel ? 'lg:flex-row lg:items-stretch lg:gap-4' : ''"
+                        >
+                            <div :class="showChaptersSidePanel ? 'min-w-0 flex-1' : 'w-full'">
+                                <div class="overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5">
+                                    <HlsPlayer
+                                        ref="playerRef"
+                                        :playback-url="activePlaybackUrl"
+                                        :thumbnail-vtt-url="isCompleted ? thumbnailVttUrl : undefined"
+                                        :encoding-type="encodingType"
+                                        :is-audio-only="isAudioOnly"
+                                        :encryption-key-hex="isCompleted ? (encryptionKeyHex || poller.encryptionKeyHex.value) : undefined"
+                                        :show-controls="false"
+                                        preserve-state-on-source-change
+                                        @quality-levels="onPreviewQualityLevels"
+                                        @playing-change="isPreviewPlaying = $event"
+                                        @duration-change="playerDuration = $event"
+                                        @audio-tracks="onNativeAudioTracks"
+                                    />
+                                </div>
+                            </div>
+                            <aside
+                                v-if="showChaptersSidePanel"
+                                class="w-full shrink-0 lg:w-[min(26rem,38vw)] lg:max-w-md"
+                            >
+                                <div
+                                    class="max-h-[min(85vh,56rem)] overflow-y-auto overflow-x-hidden rounded-xl border border-zinc-200/90 bg-white/95 p-3 shadow-sm ring-1 ring-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900/80 dark:ring-white/10 sm:p-4"
+                                >
+                                    <SegmentEditor
+                                        v-model="chapterSegments"
+                                        mode="chapters"
+                                        :duration="chaptersSidePanelDuration"
+                                        :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
+                                        :on-seek="(t: number) => playerRef?.seek(t)"
+                                        :on-play-pause="() => playerRef?.togglePlay()"
+                                        :is-playing="isPreviewPlaying"
+                                        :ripple-edit="false"
+                                        :show-timeline="false"
+                                        :show-toolbar="false"
+                                        :show-playback-controls="false"
+                                        :show-help="false"
+                                        title="Chapters"
+                                        keyboard-scope="global"
+                                        :fps="segmentEditorProbeFps"
+                                    />
+                                </div>
+                                <p
+                                    v-if="chaptersSaveError && activeTab !== 'trim'"
+                                    class="mt-2 text-xs text-red-600 dark:text-red-400"
+                                >{{ chaptersSaveError }}</p>
+                            </aside>
                         </div>
+
+                        <p
+                            v-if="chaptersSaveError && !showChaptersSidePanel"
+                            class="mt-2 text-xs text-red-600 dark:text-red-400"
+                        >{{ chaptersSaveError }}</p>
 
                         <div v-if="isCompleted && showAngleSwitcher" class="mt-4 flex flex-wrap items-center gap-2">
                             <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Angle</span>
@@ -1921,6 +2046,41 @@ onUnmounted(() => {
             class="mt-2 w-full border-t border-zinc-200/90 pt-8 dark:border-zinc-800"
         >
             <div
+                v-if="showChaptersSidePanel"
+                class="mx-auto mb-5 w-full max-w-7xl px-4 sm:px-6"
+            >
+                <div
+                    class="flex flex-col gap-3 rounded-xl border border-zinc-200/80 bg-zinc-50/95 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/55 sm:flex-row sm:items-center sm:justify-between"
+                >
+                    <p class="max-w-xl text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
+                        <span class="font-semibold text-zinc-800 dark:text-zinc-200">Chapters</span>
+                        (sidecar VTT). Unsaved / Save / Discard apply to the chapter list beside the player, not trim ranges.
+                    </p>
+                    <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                        <span
+                            v-if="chapters.isDirty.value"
+                            class="chapter-unsaved-pill"
+                            title="Unsaved changes are stored locally; click Save to commit to S3."
+                        >Unsaved</span>
+                        <button
+                            v-if="chapters.isDirty.value"
+                            type="button"
+                            class="chapter-toolbar-muted"
+                            :disabled="chapters.isSaving.value"
+                            @click="onDiscardChapters"
+                        >Discard</button>
+                        <button
+                            type="button"
+                            class="chapter-save-btn"
+                            :disabled="!chapters.isDirty.value || chapters.isSaving.value"
+                            @click="onSaveChapters"
+                        >{{ chapters.isSaving.value ? 'Saving…' : 'Save chapters' }}</button>
+                    </div>
+                </div>
+                <p v-if="chaptersSaveError" class="mt-2 text-xs text-red-600 dark:text-red-400">{{ chaptersSaveError }}</p>
+            </div>
+
+            <div
                 v-if="showProbeConfig && activePlaybackUrl && probeResult?.format?.duration"
                 class="relative left-1/2 mb-6 w-screen max-w-[90vw] -translate-x-1/2 px-4 sm:px-6"
             >
@@ -1929,9 +2089,10 @@ onUnmounted(() => {
                     mode="trim"
                     :duration="probeResult.format.duration"
                     :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
-                    :on-seek="(t) => playerRef?.seek(t)"
+                    :on-seek="(t: number) => playerRef?.seek(t)"
                     :on-play-pause="() => playerRef?.togglePlay()"
                     :is-playing="isPreviewPlaying"
+                    :show-list="false"
                     keyboard-scope="global"
                     :fps="segmentEditorProbeFps"
                 >
@@ -1962,89 +2123,16 @@ onUnmounted(() => {
             </div>
 
             <div class="mx-auto w-full max-w-7xl px-4 sm:px-6">
-                <SegmentEditor
-                    v-if="isPostSubmit && activePlaybackUrl && chapterTimelineDuration > 0 && currentStatus !== 'failed'"
-                    v-model="chapterSegments"
-                    mode="chapters"
-                    :duration="chapterTimelineDuration"
-                    :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
-                    :on-seek="(t) => playerRef?.seek(t)"
-                    :on-play-pause="() => playerRef?.togglePlay()"
-                    :is-playing="isPreviewPlaying"
-                    :ripple-edit="false"
-                    title="Chapters"
-                    keyboard-scope="global"
-                    :fps="segmentEditorProbeFps"
-                    class="mb-4"
-                >
-                    <template
-                        v-if="(isCompleted && nativeAudioTracks.length > 1) || (!isCompleted && previewAudioTracks.length > 1)"
-                        #playback-start
-                    >
-                        <label class="playback-slot-label">Audio:</label>
-                        <FormSelect
-                            v-if="isCompleted"
-                            variant="playback"
-                            presentation="custom"
-                            :model-value="selectedNativeAudioId ?? ''"
-                            :options="nativeAudioSelectOptions"
-                            @update:model-value="onNativeAudioChange(String($event))"
-                        />
-                        <FormSelect
-                            v-else
-                            variant="playback"
-                            presentation="custom"
-                            numeric
-                            v-model="selectedAudioTrack"
-                            :options="previewAudioSelectOptions"
-                        />
-                    </template>
-                    <template
-                        v-if="previewQualityLevels.length > 1 && encodingType !== 'audio'"
-                        #playback-end
-                    >
-                        <label class="playback-slot-label">Quality:</label>
-                        <FormSelect
-                            variant="playback"
-                            presentation="custom"
-                            :model-value="selectedQualityId ?? ''"
-                            :options="previewQualitySelectOptions"
-                            @update:model-value="onQualityChange($event === '' ? null : String($event))"
-                        />
-                    </template>
-                    <template #toolbar-end>
-                        <span
-                            v-if="chapters.isDirty.value"
-                            class="chapter-unsaved-pill"
-                            title="Unsaved changes are stored locally; click Save to commit to S3."
-                        >Unsaved</span>
-                        <button
-                            v-if="chapters.isDirty.value"
-                            type="button"
-                            class="chapter-toolbar-muted"
-                            :disabled="chapters.isSaving.value"
-                            @click="onDiscardChapters"
-                        >Discard</button>
-                        <button
-                            type="button"
-                            class="chapter-save-btn"
-                            :disabled="!chapters.isDirty.value || chapters.isSaving.value"
-                            @click="onSaveChapters"
-                        >{{ chapters.isSaving.value ? 'Saving…' : 'Save' }}</button>
-                    </template>
-                </SegmentEditor>
-
-                <p v-if="chaptersSaveError" class="text-xs text-red-600 dark:text-red-400">{{ chaptersSaveError }}</p>
                 <p
-                    v-else-if="
+                    v-if="
                         !(
                             (showProbeConfig && activePlaybackUrl && probeResult?.format?.duration)
-                            || (isPostSubmit && activePlaybackUrl && chapterTimelineDuration > 0 && currentStatus !== 'failed')
+                            || showChaptersSidePanel
                         )
                     "
                     class="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400"
                 >
-                    Trim ranges appear after the source is probed. Chapters appear once encoding has started or finished.
+                    Trim ranges appear below once the source is probed. Chapters are edited in the panel beside the player when preview is available.
                 </p>
             </div>
         </section>

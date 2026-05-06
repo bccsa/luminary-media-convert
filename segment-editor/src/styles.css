@@ -157,6 +157,25 @@ html.dark .se-root {
     max-width: min(28rem, calc(100vw - 4rem));
 }
 
+.se-toolbar--no-timeline {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.se-toolbar--no-timeline .se-toolbar__playback-options--stacked {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+}
+
+.se-toolbar__marks--list-only {
+    flex: 0 1 auto;
+    min-width: 0;
+    justify-content: flex-end;
+    gap: 0.35rem 0.5rem;
+}
+
 /* Inline SVG glyphs for toolbar / playback (currentColor stroke) */
 .se-icon {
     display: inline-block;
