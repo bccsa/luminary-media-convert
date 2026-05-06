@@ -1928,24 +1928,60 @@ onUnmounted(() => {
                                         </div>
                                     </details>
 
-                                    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                        <div v-if="session.s3Config?.endPoint" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">S3 endpoint</p>
-                                            <p class="break-all font-mono text-xs text-zinc-800 dark:text-zinc-200">
-                                                {{ session.s3Config.endPoint }}{{ session.s3Config.port ? `:${session.s3Config.port}` : '' }}
-                                            </p>
-                                        </div>
-                                        <div v-if="session.s3Config?.bucket" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Bucket</p>
-                                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ session.s3Config.bucket }}</p>
-                                        </div>
-                                        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Created</p>
-                                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ formatDate(session.createdAt) }}</p>
-                                        </div>
-                                        <div v-if="session.completedAt" class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Completed</p>
-                                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ formatDate(session.completedAt) }}</p>
+                                    <div class="rounded-xl border border-zinc-200 bg-zinc-50/90 p-4 sm:p-5 dark:border-zinc-800 dark:bg-zinc-900/55">
+                                        <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Session &amp; storage</h3>
+                                        <dl class="mt-4 grid grid-cols-1 gap-x-8 gap-y-4 text-sm sm:grid-cols-2">
+                                            <div v-if="session.s3Config?.endPoint">
+                                                <dt class="text-xs font-semibold uppercase tracking-wider text-zinc-500">S3 endpoint</dt>
+                                                <dd class="mt-1 break-all font-mono text-zinc-800 dark:text-zinc-200">
+                                                    {{ session.s3Config.endPoint }}{{ session.s3Config.port ? `:${session.s3Config.port}` : '' }}
+                                                </dd>
+                                            </div>
+                                            <div v-if="session.s3Config?.bucket">
+                                                <dt class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Bucket</dt>
+                                                <dd class="mt-1 text-zinc-800 dark:text-zinc-200">{{ session.s3Config.bucket }}</dd>
+                                            </div>
+                                            <div>
+                                                <dt class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Created</dt>
+                                                <dd class="mt-1 text-zinc-800 dark:text-zinc-200">{{ formatDate(session.createdAt) }}</dd>
+                                            </div>
+                                            <div v-if="session.completedAt">
+                                                <dt class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Completed</dt>
+                                                <dd class="mt-1 text-zinc-800 dark:text-zinc-200">{{ formatDate(session.completedAt) }}</dd>
+                                            </div>
+                                        </dl>
+                                    </div>
+
+                                    <div
+                                        class="flex flex-col gap-3 rounded-xl border border-zinc-200/90 bg-zinc-50/60 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between dark:border-zinc-700 dark:bg-zinc-900/40"
+                                    >
+                                        <p class="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                            Bucket tools
+                                        </p>
+                                        <div class="flex flex-wrap gap-2 sm:justify-end">
+                                            <button
+                                                v-if="hasS3Files && !showMoveForm && !showRenameForm"
+                                                type="button"
+                                                class="cursor-pointer rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                                                @click="openMoveForm"
+                                            >
+                                                Move files
+                                            </button>
+                                            <button
+                                                v-if="hasS3Files && !showMoveForm && !showRenameForm"
+                                                type="button"
+                                                class="cursor-pointer rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                                                @click="openRenameForm"
+                                            >
+                                                Rename prefix
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="cursor-pointer rounded-lg border border-zinc-300 bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-200 dark:border-transparent dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                                                @click="router.push('/sessions/new')"
+                                            >
+                                                New session
+                                            </button>
                                         </div>
                                     </div>
 
@@ -2023,32 +2059,6 @@ onUnmounted(() => {
                                             @click="deleteModalOpen = true"
                                         >
                                             Delete session permanently
-                                        </button>
-                                    </div>
-
-                                    <div class="flex flex-wrap gap-3">
-                                        <button
-                                            v-if="hasS3Files && !showMoveForm && !showRenameForm"
-                                            type="button"
-                                            class="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                                            @click="openMoveForm"
-                                        >
-                                            Move files
-                                        </button>
-                                        <button
-                                            v-if="hasS3Files && !showMoveForm && !showRenameForm"
-                                            type="button"
-                                            class="cursor-pointer rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-semibold text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                                            @click="openRenameForm"
-                                        >
-                                            Rename prefix
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="cursor-pointer rounded-xl border border-zinc-300 bg-zinc-100 px-4 py-2.5 text-sm font-semibold text-zinc-800 hover:bg-zinc-200 dark:border-transparent dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-                                            @click="router.push('/sessions/new')"
-                                        >
-                                            New session
                                         </button>
                                     </div>
                                 </template>
