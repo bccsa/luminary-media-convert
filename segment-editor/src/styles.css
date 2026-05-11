@@ -228,6 +228,15 @@ html.dark .se-root {
     border-color: var(--se-border);
 }
 
+.se-btn:focus-visible {
+    outline: 2px solid var(--se-accent);
+    outline-offset: 2px;
+}
+
+.se-btn:focus:not(:focus-visible) {
+    outline: none;
+}
+
 .se-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
@@ -597,10 +606,39 @@ html.dark .se-root {
 
 .se-playback-controls__center {
     display: inline-flex;
-    gap: 0.2rem;
+    gap: 0.35rem;
     align-items: center;
     flex-wrap: wrap;
     justify-content: center;
+}
+
+.se-playback-controls .se-btn {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+    justify-content: center;
+    box-sizing: border-box;
+}
+
+.se-playback-controls .se-btn--playback {
+    /* Same outer size as jog buttons; large glyph via .se-icon only */
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0.125rem;
+}
+
+.se-playback-controls .se-btn--playback-icon {
+    padding: 0.45rem;
+    gap: 0;
+}
+
+.se-playback-controls .se-btn--playback-icon .se-icon {
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+.se-playback-controls .se-btn--playback .se-icon {
+    width: 2.5rem;
+    height: 2.5rem;
 }
 
 .se-playback-controls__slot {

@@ -1274,6 +1274,7 @@ describe('SegmentEditor — list rendering', () => {
         const playPause = w.find('.se-btn--playback');
         expect(playPause.exists()).toBe(true);
         expect(playPause.attributes('aria-label')).toBe('Pause');
+        expect(playPause.attributes('aria-pressed')).toBe('true');
         await playPause.trigger('click');
         expect(onPlayPause).toHaveBeenCalled();
     });
@@ -1305,12 +1306,9 @@ describe('SegmentEditor — list rendering', () => {
         await flush();
         const buttons = w.findAll('.se-playback-controls__center .se-btn');
         expect(buttons).toHaveLength(5);
-        expect(buttons[0].text()).toMatch(/1s/); // −1 s
-        expect(buttons[1].text()).toMatch(/10\s*J/);
+        expect(buttons[0].classes()).toContain('se-btn--playback-icon');
         expect(buttons[2].classes()).toContain('se-btn--playback');
         expect(buttons[2].attributes('aria-label')).toBe('Play');
-        expect(buttons[3].text()).toMatch(/10\s*L/);
-        expect(buttons[4].text()).toMatch(/1s/); // +1 s
     });
 
     it('renders the current-time display above the timeline, not inside playback controls', async () => {

@@ -174,6 +174,11 @@ const primarySelectedId = computed(() => {
     return segments.value.find((s) => ids.includes(s.id))?.id ?? null;
 });
 
+/** Seek / jog controls need a positive duration and an onSeek handler. */
+const canSeekPlayback = computed(
+    () => props.duration > 0 && typeof props.onSeek === 'function',
+);
+
 // -------------- viewport / zoom --------------
 
 const zoom = ref(1); // 1 = full duration visible
@@ -1225,29 +1230,32 @@ defineExpose({
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Back 1 second · Left Arrow — Hold 1, 2, or 3 before ← for 10s, 30s, or 60s steps"
+                    aria-label="Back 1 second"
                     @click="stepSeek(-1)"
-                    title="−1 second (←). Hold 1 / 2 / 3 before ← for −10 / −30 / −60."
                 >
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12H8"/><polyline points="13 7 8 12 13 17"/></svg>
-                    <span>1s</span>
                 </button>
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn"
-                    title="−10 seconds (J)"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Back 10 seconds · J"
+                    aria-label="Back 10 seconds (J)"
                     @click="stepSeek(-1, 10)"
                 >
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 7 10 12 15 17"/><polyline points="21 7 16 12 21 17"/></svg>
-                    <span>10<span class="se-kbd se-kbd--inline">J</span></span>
                 </button>
                 <button
                     v-if="onPlayPause"
                     type="button"
                     class="se-btn se-btn--playback"
-                    :title="'Play / pause · Space · K'"
+                    title="Play or pause · Space — Also K"
                     :aria-label="isPlaying ? 'Pause' : 'Play'"
+                    :aria-pressed="isPlaying"
                     @click="onPlayPause"
                 >
                     <svg
@@ -1268,21 +1276,23 @@ defineExpose({
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn"
-                    title="+10 seconds (L)"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Forward 10 seconds · L"
+                    aria-label="Forward 10 seconds (L)"
                     @click="stepSeek(1, 10)"
                 >
-                    <span>10<span class="se-kbd se-kbd--inline">L</span></span>
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 7 14 12 9 17"/><polyline points="15 7 20 12 15 17"/></svg>
                 </button>
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Forward 1 second · Right Arrow — Hold 1, 2, or 3 before → for 10s, 30s, or 60s steps"
+                    aria-label="Forward 1 second"
                     @click="stepSeek(1)"
-                    title="+1 second (→). Hold 1 / 2 / 3 before → for +10 / +30 / +60."
                 >
-                    <span>1s</span>
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="11 7 16 12 11 17"/><path d="M4 12h12"/></svg>
                 </button>
             </div>
