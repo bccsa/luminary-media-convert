@@ -4,6 +4,11 @@ import type { Segment, SegmentEditorMode } from './types';
 import { createSegmentId } from './types';
 import { formatDuration, formatTime, parseTime } from './time';
 import { exportChaptersVtt, exportSubtitlesVtt, parseVtt } from './vtt';
+import {
+    findThumbnailCue,
+    parseThumbnailVtt,
+    type ThumbnailSpriteCue,
+} from './thumbnailVtt';
 import './styles.css';
 
 type KeyboardScope = 'focus' | 'global' | 'off';
@@ -53,6 +58,10 @@ interface Props {
     splitListPanel?: boolean;
     /** No outer panel border/shadow — use when the editor sits on the app’s own card or page background. */
     embedded?: boolean;
+    /**
+     * URL of `thumbnails.vtt` (HLS sprite storyboard). In trim mode, hovering the timeline shows the matching thumbnail.
+     */
+    thumbnailVttUrl?: string | null;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -214,10 +223,16 @@ const playheadPercent = computed(() => {
 // -------------- timeline measurement --------------
 
 const timelineRef = ref<HTMLDivElement | null>(null);
+const timelineTrackRef = ref<HTMLDivElement | null>(null);
+
+function timelineMetricsEl(): HTMLDivElement | null {
+    return timelineTrackRef.value ?? timelineRef.value;
+}
 
 function pxToTime(clientX: number): number {
-    if (!timelineRef.value) return 0;
-    const rect = timelineRef.value.getBoundingClientRect();
+    const el = timelineMetricsEl();
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     return viewStart.value + ratio * visibleSpan.value;
 }
@@ -328,9 +343,10 @@ function beginPan(e: MouseEvent) {
     const startX = e.clientX;
     const startPan = panStartSec.value;
     const onMove = (ev: MouseEvent) => {
-        if (!timelineRef.value) return;
+        const track = timelineMetricsEl();
+        if (!track) return;
         const dx = ev.clientX - startX;
-        const width = timelineRef.value.getBoundingClientRect().width;
+        const width = track.getBoundingClientRect().width;
         const deltaSec = (-dx / width) * visibleSpan.value;
         panStartSec.value = clampPan(startPan + deltaSec);
     };
@@ -386,8 +402,9 @@ function onSegmentMouseDown(seg: Segment, e: MouseEvent) {
     dragMode.value = 'segment';
     dragContext.value = { id: seg.id, originIn: startIn, originOut: startOut };
     const onMove = (ev: MouseEvent) => {
-        if (!timelineRef.value) return;
-        const rect = timelineRef.value.getBoundingClientRect();
+        const track = timelineMetricsEl();
+        if (!track) return;
+        const rect = track.getBoundingClientRect();
         const dx = ev.clientX - startX;
         if (!moved && Math.abs(dx) < 2) return;
         if (!moved) { pushHistory(cloneSegments()); moved = true; }
@@ -779,9 +796,11 @@ function onTouchMove(e: TouchEvent) {
         e.preventDefault();
         const ratio = touchDistance(e.touches) / pinchStart.dist;
         setZoom(pinchStart.zoom * ratio, pinchStart.anchorSec);
-    } else if (e.touches.length === 1 && swipeStart && timelineRef.value) {
+    } else if (e.touches.length === 1 && swipeStart) {
+        const track = timelineMetricsEl();
+        if (!track) return;
         const dx = e.touches[0].clientX - swipeStart.x;
-        const width = timelineRef.value.getBoundingClientRect().width;
+        const width = track.getBoundingClientRect().width;
         panStartSec.value = clampPan(swipeStart.pan - (dx / width) * visibleSpan.value);
     }
 }
@@ -851,6 +870,85 @@ function formatTickLabel(sec: number): string {
     return `${sec.toFixed(sec < 10 ? 1 : 0)}s`;
 }
 
+// -------------- timeline thumbnail hover (trim + thumbnails.vtt) --------------
+
+const thumbnailCues = ref<ThumbnailSpriteCue[]>([]);
+const thumbPreviewStyle = ref<Record<string, string>>({ display: 'none' });
+let thumbnailFetchAbort: AbortController | null = null;
+
+function preloadThumbnailSprites(cues: ThumbnailSpriteCue[]) {
+    const seen = new Set<string>();
+    for (const c of cues) {
+        if (seen.has(c.spriteUrl)) continue;
+        seen.add(c.spriteUrl);
+        const img = new Image();
+        img.src = c.spriteUrl;
+    }
+}
+
+watch(
+    () => [props.thumbnailVttUrl, props.mode] as const,
+    async ([url, mode]) => {
+        thumbnailFetchAbort?.abort();
+        thumbnailFetchAbort = null;
+        thumbnailCues.value = [];
+        thumbPreviewStyle.value = { display: 'none' };
+        if (!url || mode !== 'trim') return;
+        const ac = new AbortController();
+        thumbnailFetchAbort = ac;
+        try {
+            const res = await fetch(url, { signal: ac.signal });
+            if (!res.ok) return;
+            const text = await res.text();
+            const baseUrl = url.substring(0, url.lastIndexOf('/'));
+            const cues = parseThumbnailVtt(text, baseUrl);
+            if (ac.signal.aborted) return;
+            thumbnailCues.value = cues;
+            preloadThumbnailSprites(cues);
+        } catch (e) {
+            if ((e as Error).name === 'AbortError') return;
+        }
+    },
+    { immediate: true },
+);
+
+function hideThumbPreview() {
+    thumbPreviewStyle.value = { display: 'none' };
+}
+
+function onTimelineHoverMove(e: MouseEvent) {
+    if (props.mode !== 'trim' || !props.thumbnailVttUrl) return;
+    if (dragMode.value !== null) {
+        hideThumbPreview();
+        return;
+    }
+    if (!thumbnailCues.value.length || !timelineRef.value) return;
+    const t = pxToTime(e.clientX);
+    const cue = findThumbnailCue(thumbnailCues.value, t);
+    if (!cue?.w || !cue?.h) {
+        hideThumbPreview();
+        return;
+    }
+    const wrap = timelineRef.value.getBoundingClientRect();
+    let left = e.clientX - wrap.left - cue.w / 2;
+    left = Math.max(0, Math.min(left, wrap.width - cue.w));
+    thumbPreviewStyle.value = {
+        display: 'block',
+        left: `${left}px`,
+        bottom: '100%',
+        marginBottom: '6px',
+        width: `${cue.w}px`,
+        height: `${cue.h}px`,
+        backgroundImage: `url(${JSON.stringify(cue.spriteUrl)})`,
+        backgroundPosition: `-${cue.x}px -${cue.y}px`,
+        backgroundRepeat: 'no-repeat',
+    };
+}
+
+function onTimelineHoverLeave() {
+    hideThumbPreview();
+}
+
 // -------------- lifecycle --------------
 
 watch(
@@ -870,6 +968,8 @@ onMounted(() => {
     rafId = requestAnimationFrame(tick);
 });
 onBeforeUnmount(() => {
+    thumbnailFetchAbort?.abort();
+    thumbnailFetchAbort = null;
     cancelAnimationFrame(rafId);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
@@ -1026,9 +1126,17 @@ defineExpose({
             @keyup="keyboardScope === 'focus' ? onKeyUp($event) : undefined"
         >
             <div
+                v-if="thumbnailVttUrl && mode === 'trim'"
+                class="se-thumb-preview"
+                :style="thumbPreviewStyle"
+            />
+            <div
+                ref="timelineTrackRef"
                 class="se-timeline"
                 :class="{ 'se-timeline--subtitles': mode === 'subtitles' }"
                 @mousedown="onTimelineMouseDown"
+                @mousemove="onTimelineHoverMove"
+                @mouseleave="onTimelineHoverLeave"
                 @wheel="onWheel"
                 @touchstart.passive="onTouchStart"
                 @touchmove="onTouchMove"

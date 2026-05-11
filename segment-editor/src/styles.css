@@ -269,6 +269,17 @@ html.dark .se-root {
     outline: none;
 }
 
+.se-thumb-preview {
+    position: absolute;
+    pointer-events: none;
+    z-index: 40;
+    border: 2px solid rgba(255, 255, 255, 0.9);
+    border-radius: var(--se-radius-sm, 3px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+    image-rendering: auto;
+    box-sizing: content-box;
+}
+
 .se-timeline-wrap:focus-visible {
     outline: 2px solid var(--se-accent);
     outline-offset: 2px;

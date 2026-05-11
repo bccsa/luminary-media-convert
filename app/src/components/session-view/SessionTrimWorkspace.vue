@@ -25,6 +25,8 @@ const props = withDefaults(
         previewQualitySelectOptions: { value: string; label: string }[];
         /** `toolbar` = hints + chapter actions in the workflow card. `timeline` = full trim editor (below the player row). */
         section?: 'toolbar' | 'timeline';
+        /** Post-encode `thumbnails.vtt` URL for timeline hover previews (trim mode). */
+        thumbnailVttUrl?: string | null;
     }>(),
     { section: undefined },
 );
@@ -111,6 +113,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             :show-list="false"
             keyboard-scope="global"
             :fps="segmentEditorProbeFps"
+            :thumbnail-vtt-url="thumbnailVttUrl"
         >
             <template v-if="showChaptersSidePanel" #toolbar-before-clear>
                 <span

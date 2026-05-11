@@ -9,3 +9,9 @@ export {
     parseVttTimestamp,
 } from './vtt';
 export { formatTime, formatDuration, parseTime } from './time';
+export {
+    parseThumbnailVtt,
+    parseThumbnailVttTime,
+    findThumbnailCue,
+    type ThumbnailSpriteCue,
+} from './thumbnailVtt';
