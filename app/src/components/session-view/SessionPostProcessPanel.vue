@@ -40,7 +40,6 @@ const emit = defineEmits<{
     copyOutputObjectKey: [key: string];
     openMoveForm: [];
     openRenameForm: [];
-    newSession: [];
     checkMovePrefix: [];
     confirmMove: [];
     cancelMove: [];
@@ -230,13 +229,6 @@ function formatDate(dateStr: string | null | undefined): string {
                         @click="emit('openRenameForm')"
                     >
                         Rename prefix
-                    </button>
-                    <button
-                        type="button"
-                        class="cursor-pointer rounded-lg border border-zinc-300 bg-zinc-100 px-4 py-2 text-sm font-semibold text-zinc-800 hover:bg-zinc-200 dark:border-transparent dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-                        @click="emit('newSession')"
-                    >
-                        New session
                     </button>
                 </div>
             </div>

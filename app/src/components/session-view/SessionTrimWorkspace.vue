@@ -91,7 +91,7 @@ const trimToolbarHasVisibleContent = computed(() => {
     <!-- Timeline: breakout width, below player + chapters row -->
     <div
         v-if="section === 'timeline' && showTrimSegmentEditor"
-        class="relative left-1/2 w-screen max-w-[72vw] -translate-x-1/2"
+        class="relative left-1/2 w-screen max-w-[92vw] -translate-x-1/2"
     >
         <SegmentEditor
             v-model="editorSegments"

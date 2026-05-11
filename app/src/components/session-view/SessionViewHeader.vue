@@ -39,13 +39,6 @@ defineProps<{
     displayEncoder: string | undefined;
     displaySegmentFormat?: string;
     isEncrypted: boolean;
-    showEncoding: boolean;
-    pollerStatus: string | null | undefined;
-    isCompleted: boolean;
-    hasS3Files: boolean;
-    showMoveForm: boolean;
-    showRenameForm: boolean;
-    isTerminal: boolean;
 }>();
 
 const nameInput = defineModel<string>('nameInput', { required: true });
@@ -54,16 +47,12 @@ const emit = defineEmits<{
     saveName: [];
     cancelEditName: [];
     startEditName: [];
-    cancelEncode: [];
-    moveToPost: [];
-    renameToPost: [];
-    deleteSession: [];
 }>();
 </script>
 
 <template>
-    <header class="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div class="min-w-0 flex-1">
+    <header class="mb-4 flex flex-col gap-3">
+        <div class="min-w-0">
             <div v-if="editingName" class="flex flex-wrap items-center gap-2">
                 <input
                     v-model="nameInput"
@@ -156,60 +145,6 @@ const emit = defineEmits<{
                     border-color="border-violet-300 dark:border-violet-700/60"
                 />
             </div>
-        </div>
-        <div class="flex shrink-0 flex-wrap items-center gap-2">
-            <router-link
-                to="/sessions/new"
-                class="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500"
-            >
-                New session
-            </router-link>
-            <details class="relative">
-                <summary
-                    class="flex cursor-pointer list-none items-center justify-center rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900/80 dark:text-zinc-200 dark:hover:bg-zinc-800 [&::-webkit-details-marker]:hidden"
-                >
-                    <span class="sr-only">More actions</span>
-                    <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12 8a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z" />
-                    </svg>
-                </summary>
-                <div
-                    class="absolute right-0 z-20 mt-2 min-w-[12rem] overflow-hidden rounded-xl border border-zinc-200/90 bg-white py-1 text-sm shadow-xl ring-1 ring-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900 dark:ring-white/10"
-                >
-                    <button
-                        v-if="showEncoding && (pollerStatus === 'queued' || pollerStatus === 'encoding' || pollerStatus === 'encrypting')"
-                        type="button"
-                        class="block w-full px-4 py-2.5 text-left text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                        @click="emit('cancelEncode')"
-                    >
-                        Cancel encoding
-                    </button>
-                    <button
-                        v-if="isCompleted && hasS3Files && !showMoveForm && !showRenameForm"
-                        type="button"
-                        class="block w-full px-4 py-2.5 text-left text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                        @click="emit('moveToPost')"
-                    >
-                        Move files…
-                    </button>
-                    <button
-                        v-if="isCompleted && hasS3Files && !showMoveForm && !showRenameForm"
-                        type="button"
-                        class="block w-full px-4 py-2.5 text-left text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
-                        @click="emit('renameToPost')"
-                    >
-                        Rename prefix…
-                    </button>
-                    <button
-                        v-if="isTerminal"
-                        type="button"
-                        class="block w-full px-4 py-2.5 text-left text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                        @click="emit('deleteSession')"
-                    >
-                        Delete session…
-                    </button>
-                </div>
-            </details>
         </div>
     </header>
 </template>

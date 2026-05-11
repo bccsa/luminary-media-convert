@@ -1399,20 +1399,9 @@ onUnmounted(() => {
                 :display-encoder="displayEncoder"
                 :display-segment-format="displaySegmentFormat"
                 :is-encrypted="isEncrypted"
-                :show-encoding="showEncoding"
-                :poller-status="poller.status.value"
-                :is-completed="isCompleted"
-                :has-s3-files="hasS3Files"
-                :show-move-form="showMoveForm"
-                :show-rename-form="showRenameForm"
-                :is-terminal="isTerminal"
                 @save-name="saveName"
                 @cancel-edit-name="cancelEditName"
                 @start-edit-name="startEditName"
-                @cancel-encode="onCancelEncode"
-                @move-to-post="() => { void openMoveForm(); activeTab = 'post'; }"
-                @rename-to-post="() => { openRenameForm(); activeTab = 'post'; }"
-                @delete-session="deleteModalOpen = true"
             />
 
             <!-- Expired -->
@@ -1626,7 +1615,6 @@ onUnmounted(() => {
                                     @copy-output-object-key="copyOutputObjectKey"
                                     @open-move-form="openMoveForm"
                                     @open-rename-form="openRenameForm"
-                                    @new-session="router.push('/sessions/new')"
                                     @check-move-prefix="checkMovePrefix"
                                     @confirm-move="confirmMove"
                                     @cancel-move="showMoveForm = false"
