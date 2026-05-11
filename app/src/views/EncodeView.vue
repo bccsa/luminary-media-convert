@@ -144,8 +144,10 @@ async function startUpload(payload: SubmitPayload) {
 
         const session = await createSession(payload.config, accessToken);
 
-        if (payload.sessionName) {
-            updateSessionName(accessToken, session.sessionId, payload.sessionName).catch(() => {});
+        const trimmedName = payload.sessionName?.trim() ?? '';
+        if (trimmedName) {
+            // Must finish before navigate — otherwise SessionView often loads before the name exists.
+            await updateSessionName(accessToken, session.sessionId, trimmedName);
         }
 
         if (payload.source === 'file') {

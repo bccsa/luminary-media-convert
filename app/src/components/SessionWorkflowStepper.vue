@@ -41,8 +41,11 @@ const stepsWithVisual = computed(() =>
 </script>
 
 <template>
-    <nav aria-label="Encoding pipeline progress" class="overflow-x-auto pb-1">
-        <ol class="flex min-w-max items-start gap-2 sm:gap-4">
+    <nav
+        aria-label="Encoding pipeline progress"
+        class="flex w-full justify-center overflow-x-auto pb-1"
+    >
+        <ol class="flex min-w-max items-start justify-center gap-2 sm:gap-4">
             <li v-for="(step, i) in stepsWithVisual" :key="step.key" class="flex items-start gap-1 sm:gap-3">
                 <div class="flex flex-col items-center">
                     <span :class="circleClass(step.visual)">
