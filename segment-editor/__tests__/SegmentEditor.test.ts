@@ -1469,3 +1469,62 @@ describe('SegmentEditor — edge cases', () => {
         }
     });
 });
+
+describe('SegmentEditor — split list panel (beside player)', () => {
+    it('shows header and empty state when chapters split list has no segments', async () => {
+        const w = mountEditor({
+            segments: [],
+            props: {
+                mode: 'chapters',
+                splitListPanel: true,
+                showToolbar: false,
+                showTimeline: false,
+                showPlaybackControls: false,
+                showList: true,
+            },
+        });
+        await flush();
+        expect(w.find('.se-list-split-header').exists()).toBe(true);
+        expect(w.find('.se-list-split-header .se-title').text()).toBe('Chapters');
+        expect(w.find('.se-list-empty').exists()).toBe(true);
+        expect(w.find('.se-list-empty__title').text()).toBe('No chapters yet.');
+    });
+
+    it('seeks to chapter start when a list row is clicked in split chapters mode', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({
+            segments: [seg(1, 12.5, 30)],
+            props: {
+                mode: 'chapters',
+                splitListPanel: true,
+                showToolbar: false,
+                showTimeline: false,
+                showPlaybackControls: false,
+                showList: true,
+                onSeek,
+            },
+        });
+        await flush();
+        await w.find('.se-list-row').trigger('click');
+        await flush();
+        expect(w.emitted('seek')).toBeTruthy();
+        expect(w.emitted('seek')).toHaveLength(1);
+        expect(w.emitted('seek')![0]).toEqual([12.5]);
+        expect(onSeek).toHaveBeenCalledWith(12.5);
+    });
+
+    it('does not seek on list row click in full chapters editor (no split panel)', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({
+            segments: [seg(1, 3, 8)],
+            props: {
+                mode: 'chapters',
+                onSeek,
+            },
+        });
+        await flush();
+        await w.find('.se-list-row').trigger('click');
+        await flush();
+        expect(onSeek).not.toHaveBeenCalled();
+    });
+});

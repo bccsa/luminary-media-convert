@@ -2,7 +2,7 @@
 import { ref, computed, inject, onMounted, onBeforeUnmount, watch, type Ref } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { createApiKey, listApiKeys, revokeApiKey } from '../api';
-import InlineConfirm from '../components/InlineConfirm.vue';
+import ConfirmDangerModal from '../components/ConfirmDangerModal.vue';
 
 const encodingApiUrl = inject<Ref<string>>('encodingApiUrl', ref(''));
 const docsUrl = computed(() => (encodingApiUrl.value ? `${encodingApiUrl.value}/api/docs` : ''));
@@ -30,7 +30,8 @@ const createdKey = ref<string | null>(null);
 const copiedKey = ref(false);
 const showCreateModal = ref(false);
 
-const revokeConfirmId = ref<string | null>(null);
+const revokeModalOpen = ref(false);
+const revokeTarget = ref<{ id: string; name: string; prefix: string } | null>(null);
 const revoking = ref(false);
 
 const filterQuery = ref('');
@@ -113,18 +114,26 @@ async function copyKey() {
     }, 2000);
 }
 
-async function handleRevoke(keyId: string) {
-    revokeConfirmId.value = keyId;
+function openRevokeModal(key: ApiKey) {
+    revokeTarget.value = { id: key.id, name: key.name, prefix: key.prefix };
+    revokeModalOpen.value = true;
+}
+
+async function confirmRevokeKey() {
+    const id = revokeTarget.value?.id;
+    if (!id) return;
     revoking.value = true;
+    error.value = null;
     try {
         const token = await getAccessTokenSilently();
-        await revokeApiKey(token, keyId);
+        await revokeApiKey(token, id);
+        revokeModalOpen.value = false;
+        revokeTarget.value = null;
         await fetchKeys();
     } catch (e) {
         error.value = e instanceof Error ? e.message : String(e);
     } finally {
         revoking.value = false;
-        revokeConfirmId.value = null;
     }
 }
 
@@ -392,17 +401,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                                     <td class="px-5 py-4 text-zinc-600 dark:text-zinc-400">
                                         {{ formatRelative(key.lastUsedAt) }}
                                     </td>
-                                    <td class="px-5 py-4 text-right">
-                                        <InlineConfirm
+                                    <td class="px-5 py-4 text-right align-middle">
+                                        <button
                                             v-if="key.status === 'active'"
-                                            label="Revoke"
-                                            prompt="Revoke this key?"
-                                            confirm-label="Revoke"
-                                            :loading="revoking && revokeConfirmId === key.id"
-                                            loading-label="Revoking…"
-                                            size="sm"
-                                            @confirm="() => handleRevoke(key.id)"
-                                        />
+                                            type="button"
+                                            class="inline-flex cursor-pointer rounded-lg border border-red-200 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/35"
+                                            :disabled="revoking"
+                                            @click="openRevokeModal(key)"
+                                        >
+                                            Revoke
+                                        </button>
                                         <span v-else class="text-xs text-zinc-400 dark:text-zinc-500">—</span>
                                     </td>
                                 </tr>
@@ -487,6 +495,27 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                 </div>
             </div>
         </div>
+
+        <ConfirmDangerModal
+            v-model:open="revokeModalOpen"
+            title="Revoke API key"
+            confirm-label="Revoke"
+            cancel-label="Cancel"
+            loading-label="Revoking…"
+            :loading="revoking"
+            @confirm="confirmRevokeKey"
+        >
+            <p>
+                This will revoke
+                <span class="font-medium text-zinc-900 dark:text-zinc-200">{{
+                    revokeTarget?.name?.trim() || 'this key'
+                }}</span>
+                <template v-if="revokeTarget?.prefix">
+                    (<span class="font-mono text-xs">{{ maskPrefix(revokeTarget.prefix) }}</span>)
+                </template>
+                . API requests using it will fail immediately. This cannot be undone.
+            </p>
+        </ConfirmDangerModal>
 
         <Teleport to="body">
             <div

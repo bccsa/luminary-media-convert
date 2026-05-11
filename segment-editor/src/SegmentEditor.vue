@@ -137,6 +137,14 @@ function setSelection(ids: string[]) {
     selectedIds.value = new Set(ids);
     emit('select', ids);
 }
+
+/** List row activation: select, and beside-player chapters jump playhead to cue start (full editor keeps selection-only). */
+function onListRowActivate(seg: Segment) {
+    setSelection([seg.id]);
+    if (props.mode === 'chapters' && props.splitListPanel && props.onSeek) {
+        emitSeek(seg.inSec, true);
+    }
+}
 function toggleSelection(id: string) {
     const next = new Set(selectedIds.value);
     if (next.has(id)) next.delete(id);
@@ -1216,7 +1224,7 @@ defineExpose({
         </div>
 
         <div
-            v-if="showList && segments.length > 0"
+            v-if="showList && (segments.length > 0 || listOnlySplitPanel)"
             class="se-list-section"
             :class="{ 'se-list-section--split': splitListPanel }"
         >
@@ -1241,13 +1249,13 @@ defineExpose({
             >
                 {{ mode === 'chapters' ? 'Chapter list' : 'Subtitle cues' }}
             </p>
-            <div class="se-list">
+            <div v-if="segments.length > 0" class="se-list">
                 <div
                     v-for="(seg, i) in segments"
                     :key="seg.id"
                     class="se-list-row"
                     :class="{ 'se-list-row--selected': isSelected(seg.id) }"
-                    @click="setSelection([seg.id])"
+                    @click="onListRowActivate(seg)"
                 >
                     <span class="se-list-index">{{ i + 1 }}</span>
                     <input
@@ -1295,6 +1303,24 @@ defineExpose({
                         ><path d="M8 8l8 8M16 8l-8 8"/></svg>
                     </button>
                 </div>
+            </div>
+            <div
+                v-else-if="listOnlySplitPanel && labelsVisible && mode === 'chapters'"
+                class="se-list-empty"
+            >
+                <p class="se-list-empty__title">No chapters yet.</p>
+                <p class="se-list-empty__hint">
+                    Add chapter markers with the trim timeline below (in/out marks and segments), or import an existing chapters file.
+                </p>
+            </div>
+            <div
+                v-else-if="listOnlySplitPanel && labelsVisible && mode === 'subtitles'"
+                class="se-list-empty"
+            >
+                <p class="se-list-empty__title">No subtitle cues yet.</p>
+                <p class="se-list-empty__hint">
+                    Add cues using the timeline below.
+                </p>
             </div>
         </div>
 

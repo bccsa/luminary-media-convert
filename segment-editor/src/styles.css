@@ -1029,3 +1029,71 @@ html.dark .se-help {
 .se-root--split-list[data-mode='subtitles'] .se-list-section--split {
     padding: 0.5rem 1.5rem 1rem;
 }
+
+/* Split-panel list: empty state + chapter row scanability (beside player) */
+.se-list-empty {
+    margin-top: 0.375rem;
+    max-width: 28rem;
+}
+
+.se-list-empty__title {
+    margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--se-text);
+}
+
+.se-list-empty__hint {
+    margin: 0.35rem 0 0;
+    font-size: 0.75rem;
+    line-height: 1.45;
+    color: var(--se-text-dim);
+}
+
+.se-root--split-list[data-mode='chapters'] .se-list-section--split .se-list {
+    gap: 0;
+    padding-left: 0;
+    padding-right: 0;
+}
+
+.se-root--split-list[data-mode='chapters'] .se-list-section--split .se-list-row {
+    gap: 0.5rem;
+    padding: 0.625rem 0.5rem;
+    margin: 0;
+    border-radius: var(--se-radius-sm);
+    border-bottom: 1px solid var(--se-border);
+    align-items: center;
+}
+
+.se-root--split-list[data-mode='chapters'] .se-list-section--split .se-list-row:last-child {
+    border-bottom: none;
+}
+
+.se-root--split-list[data-mode='chapters'] .se-list-section--split .se-list-index {
+    flex-shrink: 0;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    font-size: 0.625rem;
+    font-weight: 600;
+    color: var(--se-text-dim);
+    background: var(--se-kbd-bg);
+    border: 1px solid var(--se-kbd-border);
+}
+
+.se-root--split-list[data-mode='chapters'] .se-list-section--split .se-list-duration {
+    flex-shrink: 0;
+    padding: 0.2rem 0.5rem;
+    min-width: 0;
+    border-radius: 9999px;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    background: var(--se-kbd-bg);
+    border: 1px solid var(--se-kbd-border);
+    color: var(--se-text-dim);
+    text-align: center;
+}

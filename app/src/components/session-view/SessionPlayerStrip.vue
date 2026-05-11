@@ -65,7 +65,9 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
         >
             <div
                 :class="[
-                    showChaptersSidePanel ? 'min-w-0 flex-[2]' : 'w-full',
+                    showChaptersSidePanel
+                        ? 'min-w-0 flex-[5]'
+                        : 'w-full',
                     !showChaptersSidePanel && activeTab === 'trim' ? 'flex justify-center' : '',
                 ]"
             >
@@ -75,7 +77,7 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
                         'w-full',
                         activeTab === 'trim' && !isAudioOnly ? 'session-trim-player-cap' : '',
                         !showChaptersSidePanel && activeTab === 'trim'
-                            ? 'lg:max-w-[min(100%,48vw)]'
+                            ? 'lg:max-w-[min(100%,60vw)]'
                             : '',
                     ]"
                 >
@@ -97,7 +99,7 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
             </div>
             <aside
                 v-if="showChaptersSidePanel"
-                class="flex min-h-0 min-w-0 flex-1 flex-col"
+                class="flex min-h-0 min-w-0 flex-[3] flex-col"
                 :class="activeTab === 'trim' ? 'gap-2' : 'gap-3'"
             >
                 <SegmentEditor
@@ -151,11 +153,11 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
 </template>
 
 <style scoped>
-/* Trim tab: cap video height so timeline + tabs stay in view without scrolling (fluid Video.js overrides). */
+/* Trim tab: 16/9 matches typical preview/HLS; flex shares favor a wider/bigger player beside chapters. */
 .session-trim-player-cap {
     width: 100%;
     aspect-ratio: 16 / 9;
-    max-height: min(38dvh, 48vw);
+    max-height: min(58dvh, 82vh);
 }
 .session-trim-player-cap :deep(> div) {
     height: 100%;

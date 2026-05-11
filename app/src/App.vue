@@ -3,7 +3,6 @@ import { provide, ref, watch } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { checkIdentity } from './api';
 import AccountMenu from './components/AccountMenu.vue';
-import ThemeToggle from './components/ThemeToggle.vue';
 
 const { isAuthenticated, isLoading, loginWithRedirect, logout, getAccessTokenSilently } = useAuth0();
 const returnTo = window.location.origin;
@@ -186,7 +185,6 @@ watch(isAuthenticated, async (authenticated) => {
                     </nav>
 
                     <div class="flex shrink-0 items-center gap-2 sm:gap-3">
-                        <ThemeToggle />
                         <AccountMenu />
                     </div>
                 </div>

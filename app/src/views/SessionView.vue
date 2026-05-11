@@ -1101,6 +1101,7 @@ watch(
         if (id !== prev && prev != null) {
             chapters.unload();
             chaptersSaveError.value = null;
+            editorSegments.value = [];
         }
     },
 );
@@ -1151,6 +1152,28 @@ function sameTrimAsChapterBoundaries(trim: Segment[], ch: Segment[]): boolean {
     return trim.every((t, i) => segmentTimesAlmostEqual(t, ch[i]!));
 }
 
+/** True when trim timeline and chapter list already match (times + labels, same order). */
+function editorMatchesChapters(ed: Segment[], ch: Segment[]): boolean {
+    if (ed.length !== ch.length) return false;
+    return ed.every((s, i) => {
+        const c = ch[i]!;
+        return (
+            segmentTimesAlmostEqual(s, c)
+            && (s.label ?? '') === (c.label ?? '')
+        );
+    });
+}
+
+/**
+ * Keeps the trim timeline in sync with the chapter list during encode config: after refresh
+ * or edits beside the player, chapters can update while editorSegments is still empty or stale.
+ */
+function syncEditorFromChaptersIfNeeded() {
+    if (!showProbeConfig.value || !chapters.isLoaded.value) return;
+    if (editorMatchesChapters(editorSegments.value, chapterSegments.value)) return;
+    editorSegments.value = chapterSegments.value.map((s) => ({ ...s }));
+}
+
 function syncChaptersFromTrim() {
     if (!showProbeConfig.value || !chapters.isLoaded.value) return;
 
@@ -1187,12 +1210,24 @@ watch(editorSegments, () => {
 watch(
     () => chapters.isLoaded.value,
     (loaded) => {
-        if (loaded) syncChaptersFromTrim();
+        if (loaded) {
+            syncChaptersFromTrim();
+            syncEditorFromChaptersIfNeeded();
+        }
     },
+);
+
+watch(
+    chapterSegments,
+    () => {
+        syncEditorFromChaptersIfNeeded();
+    },
+    { deep: true },
 );
 
 watch(showProbeConfig, (probe) => {
     if (!probe) hadTrimForChapterSync.value = false;
+    else syncEditorFromChaptersIfNeeded();
 });
 
 // ---------------------------------------------------------------------------
