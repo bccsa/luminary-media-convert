@@ -1588,6 +1588,7 @@ onUnmounted(() => {
                                     v-model:rename-new-prefix="renameNewPrefix"
                                     v-model:rename-confirmed-overwrite="renameConfirmedOverwrite"
                                     :is-completed="isCompleted"
+                                    :is-terminal="isTerminal"
                                     :current-status="currentStatus"
                                     :display-master-playlist="displayMasterPlaylist"
                                     :s3-url="s3Url"

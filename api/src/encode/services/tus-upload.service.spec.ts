@@ -12,6 +12,7 @@ const {
     mockCopyFile,
     mockUnlink,
     mockMkdir,
+    mockAccess,
 } = vi.hoisted(() => ({
     mockStart: vi.fn().mockResolvedValue(undefined),
     mockStop: vi.fn().mockResolvedValue(undefined),
@@ -22,6 +23,8 @@ const {
     mockCopyFile: vi.fn().mockResolvedValue(undefined),
     mockUnlink: vi.fn().mockResolvedValue(undefined),
     mockMkdir: vi.fn().mockResolvedValue(undefined),
+    // Rejects by default → file does not exist yet → move proceeds normally.
+    mockAccess: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
 }));
 
 vi.mock('node-tusd', () => ({
@@ -39,6 +42,7 @@ vi.mock('fs/promises', () => ({
     copyFile: (...args: any[]) => mockCopyFile(...args),
     unlink: (...args: any[]) => mockUnlink(...args),
     mkdir: (...args: any[]) => mockMkdir(...args),
+    access: (...args: any[]) => mockAccess(...args),
 }));
 
 vi.mock('fs', async (importOriginal) => {
@@ -370,6 +374,28 @@ describe('TusUploadService', () => {
             );
         });
 
+        it('should skip move when file is already at destination (idempotency)', async () => {
+            const session = sessionService.create(makeConfig());
+            (probeService.probe as Mock).mockResolvedValue({
+                format: { duration: 10, bitrateKbps: 1000, formatName: 'mp4' },
+                videoTracks: [],
+                audioTracks: [],
+            });
+            // access resolves → file already exists → rename should be skipped
+            mockAccess.mockResolvedValueOnce(undefined);
+
+            const hook = capturedServerConfig.value.onUploadFinish;
+            await hook(makeRequestInfo(), {
+                id: 'upload-idempotent',
+                metadata: { sessionId: session.id, filename: 'test.mp4' },
+                storage: { path: '/tmp/tus-uploads/upload-idempotent' },
+            });
+
+            expect(mockRename).not.toHaveBeenCalled();
+            expect(mockCopyFile).not.toHaveBeenCalled();
+            expect(sessionService.get(session.id)!.status).toBe('uploaded');
+        });
+
         it('should fall back to copyFile when rename fails', async () => {
             const session = sessionService.create(makeConfig());
             (probeService.probe as Mock).mockResolvedValue({
@@ -377,7 +403,9 @@ describe('TusUploadService', () => {
                 videoTracks: [],
                 audioTracks: [],
             });
-            mockRename.mockRejectedValueOnce(new Error('EXDEV: cross-device link'));
+            mockRename.mockRejectedValueOnce(
+                Object.assign(new Error('EXDEV: cross-device link'), { code: 'EXDEV' }),
+            );
 
             const hook = capturedServerConfig.value.onUploadFinish;
             await hook(makeRequestInfo(), {
