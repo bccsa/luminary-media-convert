@@ -15,3 +15,5 @@ jobQueue.json
 tusd/bin/
 *.tsbuildinfo
 docs/todo.md
+
+DESIGN.md
