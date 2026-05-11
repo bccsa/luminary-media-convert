@@ -35,9 +35,18 @@ const emit = defineEmits<{
 }>();
 
 const hlsPlayerRef = ref<InstanceType<typeof HlsPlayer> | null>(null);
+const chapterSegmentEditorRef = ref<{ focus?: () => void } | null>(null);
+
 defineExpose({
     playerRef: hlsPlayerRef,
 });
+
+/** Focus chapters keyboard root (without stealing from inputs): enables I/J/L/… on first click in the panel. */
+function onChaptersAsidePointerDown(e: MouseEvent) {
+    const el = e.target as HTMLElement | null;
+    if (!el || el.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
+    chapterSegmentEditorRef.value?.focus?.();
+}
 
 function onQualityLevels(levels: QualityLevelInfo[]) {
     emit('qualityLevels', levels);
@@ -101,8 +110,10 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
                 v-if="showChaptersSidePanel"
                 class="flex min-h-0 min-w-0 flex-[3] flex-col"
                 :class="activeTab === 'trim' ? 'gap-2' : 'gap-3'"
+                @mousedown.capture="onChaptersAsidePointerDown"
             >
                 <SegmentEditor
+                    ref="chapterSegmentEditorRef"
                     v-model="chapterSegments"
                     mode="chapters"
                     split-list-panel
@@ -117,7 +128,7 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
                     :show-playback-controls="false"
                     :show-help="false"
                     title="Chapters"
-                    keyboard-scope="global"
+                    keyboard-scope="focus"
                     :fps="segmentEditorProbeFps"
                 />
                 <p

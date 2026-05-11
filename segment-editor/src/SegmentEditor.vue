@@ -120,6 +120,24 @@ const listOnlySplitPanel = computed(
         !props.showPlaybackControls,
 );
 
+/** `focus` keyboard: timeline has tabindex, or list-only panel uses the root (no timeline row). */
+const keyboardRootTabindex = computed(() => {
+    if (props.keyboardScope !== 'focus' || !listOnlySplitPanel.value) return -1;
+    return 0;
+});
+
+const rootElRef = ref<HTMLDivElement | null>(null);
+
+function onKeyboardRootKeyDown(e: KeyboardEvent) {
+    if (props.keyboardScope !== 'focus' || !listOnlySplitPanel.value) return;
+    onKeyDown(e);
+}
+
+function onKeyboardRootKeyUp(e: KeyboardEvent) {
+    if (props.keyboardScope !== 'focus' || !listOnlySplitPanel.value) return;
+    onKeyUp(e);
+}
+
 // -------------- id hygiene --------------
 // Ensure every incoming segment has a stable id; re-emit once with ids if the consumer omitted them.
 
@@ -1005,15 +1023,27 @@ defineExpose({
     zoomTo,
     exportVtt,
     importVtt,
-    focus: () => timelineRef.value?.focus(),
+    focus: () => {
+        if (timelineRef.value) {
+            timelineRef.value.focus({ preventScroll: true });
+            return;
+        }
+        if (props.keyboardScope === 'focus' && listOnlySplitPanel.value) {
+            rootElRef.value?.focus({ preventScroll: true });
+        }
+    },
 });
 </script>
 
 <template>
     <div
+        ref="rootElRef"
         class="se-root"
         :data-mode="mode"
         :class="{ 'se-root--split-list': splitListPanel, 'se-root--embedded': embedded }"
+        :tabindex="keyboardRootTabindex"
+        @keydown="onKeyboardRootKeyDown"
+        @keyup="onKeyboardRootKeyUp"
     >
         <div
             :class="splitListPanel && !listOnlySplitPanel ? 'se-split-main' : 'se-split-main--contents'"

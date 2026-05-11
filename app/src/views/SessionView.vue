@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, unref } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, unref, nextTick } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { useRoute, useRouter } from 'vue-router';
 import { computeLayoutKey, saveConfig } from '@luminary-media-converter/encode-config';
@@ -1273,6 +1273,17 @@ type SessionTabId = 'workflow' | 'output' | 'trim' | 'post';
 
 const activeTab = ref<SessionTabId>('workflow');
 
+const trimTimelineWorkspaceRef = ref<InstanceType<typeof SessionTrimWorkspace> | null>(null);
+
+watch(
+    () => [activeTab.value, showTrimSegmentEditor.value] as const,
+    async ([tab, showTrim]) => {
+        if (tab !== 'trim' || !showTrim) return;
+        await nextTick();
+        trimTimelineWorkspaceRef.value?.focusSegmentEditor?.();
+    },
+);
+
 /** Chapter list beside the player only on the Trim & chapters tab. */
 const showChaptersBesidePlayer = computed(
     () => activeTab.value === 'trim' && showChaptersSidePanel.value,
@@ -1545,6 +1556,7 @@ onUnmounted(() => {
                 </div>
 
                 <SessionTrimWorkspace
+                    ref="trimTimelineWorkspaceRef"
                     v-if="activeTab === 'trim' && showTrimSegmentEditor"
                     section="timeline"
                     v-model:editor-segments="editorSegments"

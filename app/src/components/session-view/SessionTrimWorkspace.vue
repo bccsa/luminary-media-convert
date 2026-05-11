@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { SegmentEditor } from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
 import FormSelect from '../FormSelect.vue';
@@ -41,6 +41,14 @@ const emit = defineEmits<{
 }>();
 
 const showToolbarSection = () => props.section !== 'timeline';
+
+const trimSegmentEditorRef = ref<{ focus?: () => void } | null>(null);
+
+defineExpose({
+    focusSegmentEditor: () => {
+        trimSegmentEditorRef.value?.focus?.();
+    },
+});
 
 /** Avoid an empty mt-5 wrapper (looked like stray margin / empty card in the session panel). */
 const trimToolbarHasVisibleContent = computed(() => {
@@ -103,6 +111,7 @@ const trimToolbarHasVisibleContent = computed(() => {
         class="relative left-1/2 w-screen max-w-[92vw] -translate-x-1/2"
     >
         <SegmentEditor
+            ref="trimSegmentEditorRef"
             v-model="editorSegments"
             mode="trim"
             :duration="probeDuration"
