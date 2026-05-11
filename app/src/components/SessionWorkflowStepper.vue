@@ -14,11 +14,11 @@ const props = defineProps<{
 }>();
 
 const STEPS: { key: StepKey; label: string }[] = [
-    { key: 'ingest', label: 'Ingest' },
-    { key: 'probe', label: 'Probe' },
-    { key: 'encoding', label: 'Encoding' },
-    { key: 'upload', label: 'Upload' },
-    { key: 'finalize', label: 'Finalize' },
+    { key: 'ingest', label: 'Upload' },
+    { key: 'probe', label: 'Analyse' },
+    { key: 'encoding', label: 'Encode' },
+    { key: 'upload', label: 'Save to S3' },
+    { key: 'finalize', label: 'Done' },
 ];
 
 function circleClass(v: StepVisual): string {

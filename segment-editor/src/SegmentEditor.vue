@@ -46,6 +46,13 @@ interface Props {
     showShortcutsStrip?: boolean;
     /** When false, hides the timeline, zoom, and in/out mark controls (list + slim toolbar only). */
     showTimeline?: boolean;
+    /**
+     * When true, the segment list is in a separate card below the main block (header, timeline, etc.).
+     * The root becomes a transparent column; use beside a video player with independent scroll areas.
+     */
+    splitListPanel?: boolean;
+    /** No outer panel border/shadow — use when the editor sits on the app’s own card or page background. */
+    embedded?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -66,6 +73,8 @@ const props = withDefaults(defineProps<Props>(), {
     rippleEdit: true,
     showLabels: undefined,
     allowOverlap: undefined,
+    splitListPanel: false,
+    embedded: false,
 });
 
 const emit = defineEmits<{
@@ -91,6 +100,15 @@ const modeTitle = computed(() => {
 /** Hint row under playback: off for trim (header ? opens the same help); on for chapters/subtitles unless overridden. */
 const shortcutsStripVisible = computed(
     () => props.showTimeline && (props.showShortcutsStrip ?? props.mode !== 'trim'),
+);
+
+/** Chapter/subtitle list beside player only: one card — title + meta live in the list header, not a separate panel. */
+const listOnlySplitPanel = computed(
+    () =>
+        props.splitListPanel &&
+        !props.showToolbar &&
+        !props.showTimeline &&
+        !props.showPlaybackControls,
 );
 
 // -------------- id hygiene --------------
@@ -879,8 +897,15 @@ defineExpose({
 </script>
 
 <template>
-    <div class="se-root" :data-mode="mode">
-        <div class="se-header">
+    <div
+        class="se-root"
+        :data-mode="mode"
+        :class="{ 'se-root--split-list': splitListPanel, 'se-root--embedded': embedded }"
+    >
+        <div
+            :class="splitListPanel && !listOnlySplitPanel ? 'se-split-main' : 'se-split-main--contents'"
+        >
+            <div v-if="!listOnlySplitPanel" class="se-header">
             <h3 class="se-title">{{ modeTitle }}</h3>
             <div class="se-meta">
                 <span v-if="segments.length > 0">
@@ -929,6 +954,7 @@ defineExpose({
                     @click="redo"
                     title="Redo"
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
+                <slot name="toolbar-before-clear" />
                 <button
                     v-if="segments.length > 0"
                     type="button"
@@ -942,7 +968,7 @@ defineExpose({
                     In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
                     · <span class="se-pending-cancel">Esc cancels</span>
                 </span>
-                <label class="se-zoom">
+                <label v-if="showTimeline" class="se-zoom">
                     Zoom
                     <input
                         type="range"
@@ -1187,9 +1213,30 @@ defineExpose({
             </span>
         </div>
 
-        <div v-if="showList && segments.length > 0" class="se-list-section">
+        </div>
+
+        <div
+            v-if="showList && segments.length > 0"
+            class="se-list-section"
+            :class="{ 'se-list-section--split': splitListPanel }"
+        >
+            <div
+                v-if="
+                    listOnlySplitPanel && labelsVisible && (mode === 'chapters' || mode === 'subtitles')
+                "
+                class="se-list-split-header"
+            >
+                <h3 class="se-title">{{ modeTitle }}</h3>
+                <div class="se-meta">
+                    <span v-if="segments.length > 0">
+                        {{ segments.length }} segment{{ segments.length !== 1 ? 's' : '' }}
+                        · {{ formatDuration(totalSelectedDuration) }}
+                    </span>
+                    <span v-else>No segments</span>
+                </div>
+            </div>
             <p
-                v-if="labelsVisible && (mode === 'chapters' || mode === 'subtitles')"
+                v-else-if="labelsVisible && (mode === 'chapters' || mode === 'subtitles')"
                 class="se-list-heading"
             >
                 {{ mode === 'chapters' ? 'Chapter list' : 'Subtitle cues' }}
