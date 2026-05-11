@@ -1110,7 +1110,7 @@ watch(
     [() => sessionId.value, activePlaybackUrl, isExpired],
     async ([id, url, expired]) => {
         if (!id || !url || expired) return;
-        if (chapters.isLoaded.value) return;
+        if (chapters.isLoaded.value && chapters.loadedSessionId.value === id) return;
         try {
             chaptersSaveError.value = null;
             await chapters.load(id);
