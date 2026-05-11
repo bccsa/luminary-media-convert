@@ -48,6 +48,8 @@ const trimSegments = computed<TrimSegment[]>(() =>
     editorSegments.value.map((s: Segment) => ({ inSec: s.inSec, outSec: s.outSec })),
 );
 const outputPanelRef = ref<InstanceType<typeof SessionOutputPanel> | null>(null);
+/** Ladder validity from EncodeConfigForm (for Trim tab Start Encoding). */
+const encodeConfigCanSubmit = ref(false);
 
 // Chapter editor — sidecar VTT in S3, autosaves to localStorage, explicit save to S3.
 const chapters = useChapters({ getAccessToken: () => getAccessTokenSilently() });
@@ -258,6 +260,10 @@ const remoteIngestLabel = computed<string>(() => {
 const showProbeConfig = computed(() => {
     const s = currentStatus.value;
     return s === 'uploaded' && isActiveSession.value && !!probeResult.value && !submitting.value;
+});
+
+watch(showProbeConfig, (ready) => {
+    if (!ready) encodeConfigCanSubmit.value = false;
 });
 
 const showEncoding = computed(() => {
@@ -1026,6 +1032,24 @@ function onEncodeBack() {
     activeTab.value = 'workflow';
 }
 
+function onEncodeNextToTrim() {
+    activeTab.value = 'trim';
+}
+
+function onEncodeCanSubmitChange(valid: boolean) {
+    encodeConfigCanSubmit.value = valid;
+}
+
+async function onStartEncodingFromTrim() {
+    submissionError.value = null;
+    const cfg = outputPanelRef.value?.getEncodeForm()?.buildEncodeConfig() ?? null;
+    if (cfg) {
+        await onEncodeSubmit(cfg);
+    } else {
+        submissionError.value = 'Complete encoding settings on the Encode settings tab before starting.';
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Cancel actions
 // ---------------------------------------------------------------------------
@@ -1484,25 +1508,39 @@ onUnmounted(() => {
                 </div>
 
                 <div class="min-w-0" :class="trimPlayerBreakoutClass">
-                    <!-- Tabs: same width as trim timeline; sits above timeline like other tabs sit above the card -->
-                    <div class="flex gap-1 overflow-x-auto rounded-xl border border-zinc-200/90 bg-zinc-100/80 p-1 dark:border-zinc-700 dark:bg-zinc-900/50">
-                        <button
-                            v-for="tab in [
-                                { id: 'workflow' as const, label: 'Workflow' },
-                                ...(!isCompleted ? [{ id: 'output' as const, label: 'Encode settings' }] : []),
-                                { id: 'trim' as const, label: 'Trim & chapters' },
-                                { id: 'post' as const, label: 'Delivery' },
-                            ]"
-                            :key="tab.id"
-                            type="button"
-                            class="whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition-colors sm:text-sm"
-                            :class="activeTab === tab.id
-                                ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100'
-                                : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'"
-                            @click="activeTab = tab.id"
+                    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                        <div class="min-w-0 flex-1 flex gap-1 overflow-x-auto rounded-xl border border-zinc-200/90 bg-zinc-100/80 p-1 dark:border-zinc-700 dark:bg-zinc-900/50">
+                            <button
+                                v-for="tab in [
+                                    { id: 'workflow' as const, label: 'Workflow' },
+                                    ...(!isCompleted ? [{ id: 'output' as const, label: 'Encode settings' }] : []),
+                                    { id: 'trim' as const, label: 'Trim & chapters' },
+                                    { id: 'post' as const, label: 'Delivery' },
+                                ]"
+                                :key="tab.id"
+                                type="button"
+                                class="whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition-colors sm:text-sm"
+                                :class="activeTab === tab.id
+                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100'
+                                    : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'"
+                                @click="activeTab = tab.id"
+                            >
+                                {{ tab.label }}
+                            </button>
+                        </div>
+                        <div
+                            v-if="activeTab === 'trim' && showProbeConfig"
+                            class="flex shrink-0 justify-center sm:justify-end"
                         >
-                            {{ tab.label }}
-                        </button>
+                            <button
+                                type="button"
+                                class="w-full cursor-pointer rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto dark:bg-indigo-500 dark:hover:bg-indigo-400"
+                                :disabled="!encodeConfigCanSubmit || submitting"
+                                @click="onStartEncodingFromTrim"
+                            >
+                                {{ submitting ? 'Starting…' : 'Start Encoding' }}
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -1591,7 +1629,10 @@ onUnmounted(() => {
                                     :show-probe-config="showProbeConfig"
                                     :probe-result="probeResult"
                                     :byte-range-enabled="byteRangeEnabled"
+                                    encode-primary-action="next-to-trim"
                                     @submit="onEncodeSubmit"
+                                    @next-to-trim="onEncodeNextToTrim"
+                                    @can-submit-change="onEncodeCanSubmitChange"
                                     @back="onEncodeBack"
                                 />
                             </div>

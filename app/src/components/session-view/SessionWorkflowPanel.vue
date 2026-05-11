@@ -115,10 +115,12 @@ const emit = defineEmits<{
                         <p class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">File analysed — ready to encode</p>
                         <p class="mt-1 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
                             Review the encoding ladder and bitrate settings, then click
-                            <strong class="text-zinc-800 dark:text-zinc-200">Start Encoding</strong>.
-                            Optionally set cut points in
-                            <button type="button" class="font-semibold text-indigo-600 underline-offset-2 hover:underline dark:text-indigo-400" @click="emit('switchTab', 'trim')">Trim & chapters</button>
-                            first.
+                            <strong class="text-zinc-800 dark:text-zinc-200">Next</strong>
+                            to open
+                            <strong class="text-zinc-800 dark:text-zinc-200">Trim &amp; chapters</strong>
+                            and adjust cut points if needed. Start the job with
+                            <strong class="text-zinc-800 dark:text-zinc-200">Start Encoding</strong>
+                            on that tab.
                         </p>
                     </div>
                     <button

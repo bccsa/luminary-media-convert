@@ -7,11 +7,14 @@ defineProps<{
     showProbeConfig: boolean;
     probeResult: ProbeResult | null;
     byteRangeEnabled: boolean;
+    encodePrimaryAction?: 'start-encoding' | 'next-to-trim';
 }>();
 
 defineEmits<{
     submit: [config: EncodeConfig];
     back: [];
+    'next-to-trim': [];
+    'can-submit-change': [valid: boolean];
 }>();
 
 const encodeFormRef = ref<InstanceType<typeof EncodeConfigForm> | null>(null);
@@ -30,8 +33,11 @@ defineExpose({ encodeFormRef, getEncodeForm });
             ref="encodeFormRef"
             :probe-result="probeResult"
             :byte-range="byteRangeEnabled"
+            :encode-primary-action="encodePrimaryAction"
             @submit="$emit('submit', $event)"
             @back="$emit('back')"
+            @next-to-trim="$emit('next-to-trim')"
+            @can-submit-change="$emit('can-submit-change', $event)"
         />
         <p v-else class="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
             Output settings are only editable while the session is probed and waiting to encode. For active jobs, use the Encode workflow tab for progress and logs.

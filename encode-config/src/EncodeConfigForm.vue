@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, computed, ref } from 'vue';
+import { reactive, computed, ref, watch } from 'vue';
 import type {
     ProbeResult,
     EncodeConfig,
@@ -10,14 +10,21 @@ import type {
 } from './types';
 import { computeLayoutKey, getStoredConfig } from './layoutStorage';
 
-const props = defineProps<{
-    probeResult: ProbeResult;
-    byteRange: boolean;
-}>();
+const props = withDefaults(
+    defineProps<{
+        probeResult: ProbeResult;
+        byteRange: boolean;
+        /** When `next-to-trim`, primary CTA navigates to trim instead of submitting encode. */
+        encodePrimaryAction?: 'start-encoding' | 'next-to-trim';
+    }>(),
+    { encodePrimaryAction: 'start-encoding' },
+);
 
 const emit = defineEmits<{
     submit: [config: EncodeConfig];
     back: [];
+    'next-to-trim': [];
+    'can-submit-change': [valid: boolean];
 }>();
 
 
@@ -438,8 +445,16 @@ const canSubmit = computed(() => {
     return audioGroups.length > 0 && audioGroups.every(g => g.audioBitrateKbps > 0);
 });
 
-function onSubmit() {
-    if (!canSubmit.value) return;
+watch(
+    canSubmit,
+    (valid) => {
+        emit('can-submit-change', valid);
+    },
+    { immediate: true },
+);
+
+function buildEncodeConfig(): EncodeConfig | null {
+    if (!canSubmit.value) return null;
 
     const config: EncodeConfig = {
         type: encodingType.value,
@@ -467,10 +482,23 @@ function onSubmit() {
         }));
     }
 
-    emit('submit', config);
+    return config;
 }
 
-defineExpose({ editableAudioTracks });
+function onSubmit() {
+    const config = buildEncodeConfig();
+    if (config) emit('submit', config);
+}
+
+function onNextToTrim() {
+    if (buildEncodeConfig() != null) emit('next-to-trim');
+}
+
+function getCanSubmit(): boolean {
+    return canSubmit.value;
+}
+
+defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
 </script>
 
 <template>
@@ -786,11 +814,11 @@ defineExpose({ editableAudioTracks });
             </button>
             <button
                 type="button"
-                @click="onSubmit"
+                @click="encodePrimaryAction === 'next-to-trim' ? onNextToTrim() : onSubmit()"
                 :disabled="!canSubmit"
                 :class="['ecf-btn-primary', !canSubmit && 'ecf-btn-primary-disabled']"
             >
-                Start Encoding
+                {{ encodePrimaryAction === 'next-to-trim' ? 'Next' : 'Start Encoding' }}
             </button>
         </div>
     </div>
