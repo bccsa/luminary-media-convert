@@ -135,7 +135,7 @@ function providerIconWrapClass(tone: ProviderTone): string {
         gcs: 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-400',
         b2: 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-400',
         minio: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400',
-        generic: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
+        generic: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
     };
     return map[tone];
 }
@@ -304,10 +304,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
         <div class="mx-auto w-full max-w-7xl px-4 transition-all duration-300 sm:px-6">
             <header class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div class="max-w-2xl">
-                    <h1 class="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+                    <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">
                         S3 storage configs
                     </h1>
-                    <p class="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+                    <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                         Manage object storage destinations for encoded output. Credentials are stored encrypted and are only used server-side when creating sessions.
                     </p>
                 </div>
@@ -325,7 +325,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
 
             <div class="mb-8 grid gap-4 sm:grid-cols-3">
                 <div
-                    class="flex items-center gap-4 rounded-2xl border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-900/50 dark:ring-white/5"
+                    class="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/50 dark:ring-white/5"
                 >
                     <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400">
                         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -337,18 +337,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                         </svg>
                     </div>
                     <div class="min-w-0 flex-1">
-                        <p class="text-xs font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Saved destinations</p>
-                        <p class="mt-0.5 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+                        <p class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Saved destinations</p>
+                        <p class="mt-0.5 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">
                             {{ loading ? '—' : configs.length }}
                         </p>
-                        <p class="mt-1 flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        <p class="mt-1 flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
                             <span class="text-emerald-600 dark:text-emerald-400">✓</span>
                             Ready to select when encoding
                         </p>
                     </div>
                 </div>
                 <div
-                    class="flex items-center gap-4 rounded-2xl border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-900/50 dark:ring-white/5"
+                    class="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/50 dark:ring-white/5"
                 >
                     <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
                         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -360,15 +360,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                         </svg>
                     </div>
                     <div class="min-w-0 flex-1">
-                        <p class="text-xs font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">TLS to endpoint</p>
-                        <p class="mt-0.5 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+                        <p class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">TLS to endpoint</p>
+                        <p class="mt-0.5 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">
                             {{ loading ? '—' : tlsEnabledCount }}
                         </p>
-                        <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Configs with SSL enabled</p>
+                        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Configs with SSL enabled</p>
                     </div>
                 </div>
                 <div
-                    class="flex items-center gap-4 rounded-2xl border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-900/50 dark:ring-white/5"
+                    class="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/50 dark:ring-white/5"
                 >
                     <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-50 text-violet-600 dark:bg-violet-950/35 dark:text-violet-400">
                         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -380,11 +380,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                         </svg>
                     </div>
                     <div class="min-w-0 flex-1">
-                        <p class="text-xs font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Distinct regions</p>
-                        <p class="mt-0.5 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+                        <p class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Distinct regions</p>
+                        <p class="mt-0.5 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">
                             {{ loading ? '—' : distinctRegionCount }}
                         </p>
-                        <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                             <template v-if="!loading">{{ withPublicUrlCount }} with optional public URL</template>
                         </p>
                     </div>
@@ -392,10 +392,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
             </div>
 
             <section
-                class="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white/90 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10"
+                class="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/60 dark:ring-white/10"
             >
-                <div class="flex flex-col gap-4 border-b border-zinc-200/80 p-5 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-700/80">
-                    <h2 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">Storage buckets</h2>
+                <div class="flex flex-col gap-4 border-b border-slate-200/80 p-5 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700/80">
+                    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Storage buckets</h2>
                     <div class="w-full sm:max-w-xs">
                         <label for="s3-filter" class="sr-only">Filter configs</label>
                         <input
@@ -416,7 +416,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                         </svg>
                     </div>
-                    <p class="text-sm text-zinc-600 dark:text-zinc-400">Loading configurations…</p>
+                    <p class="text-sm text-slate-600 dark:text-slate-400">Loading configurations…</p>
                 </div>
 
                 <div v-else-if="error" class="p-6">
@@ -426,7 +426,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                 </div>
 
                 <div v-else-if="configs.length === 0" class="px-6 py-16 text-center">
-                    <p class="text-sm text-zinc-600 dark:text-zinc-400">No storage configurations yet. Add one to use it when creating encoding sessions.</p>
+                    <p class="text-sm text-slate-600 dark:text-slate-400">No storage configurations yet. Add one to use it when creating encoding sessions.</p>
                     <button
                         type="button"
                         class="mt-4 text-sm font-semibold text-indigo-600 hover:text-indigo-500 dark:text-indigo-400"
@@ -437,13 +437,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                 </div>
 
                 <template v-else>
-                    <div v-if="filteredConfigs.length === 0" class="px-6 py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">
+                    <div v-if="filteredConfigs.length === 0" class="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
                         No configs match your filter.
                     </div>
                     <div v-else class="overflow-x-auto">
                         <table class="w-full min-w-[800px] text-left text-sm">
                             <thead>
-                                <tr class="border-b border-zinc-200 bg-zinc-50/80 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-400">
+                                <tr class="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-400">
                                     <th class="px-5 py-3">Name</th>
                                     <th class="px-5 py-3">Endpoint</th>
                                     <th class="px-5 py-3">Bucket</th>
@@ -451,7 +451,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                                     <th class="px-5 py-3 text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                            <tbody class="divide-y divide-slate-100 dark:divide-slate-800/80">
                                 <tr v-for="config in paginatedConfigs" :key="config.id">
                                     <td class="px-5 py-4">
                                         <div class="flex items-start gap-3">
@@ -468,17 +468,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                                                 </svg>
                                             </div>
                                             <div class="min-w-0">
-                                                <p class="font-medium text-zinc-900 dark:text-zinc-100">{{ config.name }}</p>
-                                                <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                                                <p class="font-medium text-slate-900 dark:text-slate-100">{{ config.name }}</p>
+                                                <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                                                     {{ providerFromEndpoint(config.endPoint).label }}
                                                 </p>
                                             </div>
                                         </div>
                                     </td>
-                                    <td class="px-5 py-4 font-mono text-xs text-zinc-600 dark:text-zinc-400">
+                                    <td class="px-5 py-4 font-mono text-xs text-slate-600 dark:text-slate-400">
                                         {{ endpointDisplay(config) }}
                                     </td>
-                                    <td class="px-5 py-4 font-mono text-xs text-zinc-600 dark:text-zinc-400">
+                                    <td class="px-5 py-4 font-mono text-xs text-slate-600 dark:text-slate-400">
                                         {{ config.bucket }}
                                     </td>
                                     <td class="px-5 py-4">
@@ -486,8 +486,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                                             class="inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium tabular-nums"
                                             :class="
                                                 isRegionBadgeEmpty(config)
-                                                    ? 'border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-400'
-                                                    : 'border-zinc-200 bg-white text-zinc-800 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200'
+                                                    ? 'border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400'
+                                                    : 'border-slate-200 bg-white text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'
                                             "
                                         >
                                             {{ regionPill(config) }}
@@ -497,7 +497,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                                         <div class="inline-flex items-center justify-end gap-1">
                                             <button
                                                 type="button"
-                                                class="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                                                class="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                                                 title="Edit"
                                                 @click="openEditForm(config.id)"
                                             >
@@ -526,30 +526,30 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                     </div>
                     <div
                         v-if="filteredConfigs.length > 0"
-                        class="flex flex-col items-center justify-between gap-3 border-t border-zinc-200/80 px-5 py-4 sm:flex-row dark:border-zinc-800"
+                        class="flex flex-col items-center justify-between gap-3 border-t border-slate-200/80 px-5 py-4 sm:flex-row dark:border-slate-800"
                     >
-                        <p class="text-xs text-zinc-500 dark:text-zinc-400">
+                        <p class="text-xs text-slate-500 dark:text-slate-400">
                             Showing
-                            <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ (page - 1) * PAGE_SIZE + 1 }}</span>
+                            <span class="font-medium text-slate-700 dark:text-slate-300">{{ (page - 1) * PAGE_SIZE + 1 }}</span>
                             –
-                            <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ Math.min(page * PAGE_SIZE, totalFiltered) }}</span>
+                            <span class="font-medium text-slate-700 dark:text-slate-300">{{ Math.min(page * PAGE_SIZE, totalFiltered) }}</span>
                             of
-                            <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ totalFiltered }}</span>
+                            <span class="font-medium text-slate-700 dark:text-slate-300">{{ totalFiltered }}</span>
                             storage configurations
                         </p>
                         <div class="flex items-center gap-2">
                             <button
                                 type="button"
-                                class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 enabled:hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:enabled:hover:bg-zinc-800"
+                                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:enabled:hover:bg-slate-800"
                                 :disabled="page <= 1"
                                 @click="goPage(-1)"
                             >
                                 Previous
                             </button>
-                            <span class="min-w-[3rem] text-center text-xs font-medium text-zinc-600 dark:text-zinc-400">{{ page }} / {{ totalPages }}</span>
+                            <span class="min-w-[3rem] text-center text-xs font-medium text-slate-600 dark:text-slate-400">{{ page }} / {{ totalPages }}</span>
                             <button
                                 type="button"
-                                class="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-600 enabled:hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:enabled:hover:bg-zinc-800"
+                                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:enabled:hover:bg-slate-800"
                                 :disabled="page >= totalPages"
                                 @click="goPage(1)"
                             >
@@ -564,12 +564,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                 <div
                     class="rounded-2xl border border-indigo-200/60 bg-indigo-50/40 p-5 dark:border-indigo-900/40 dark:bg-indigo-950/20 sm:p-6"
                 >
-                    <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Secure credentials</h3>
-                    <p class="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+                    <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Secure credentials</h3>
+                    <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                         Access keys are encrypted at rest in the app database and are not returned after you save them. Prefer narrow IAM
                         policies (or equivalent) scoped to a single bucket prefix, and rotate keys if they are exposed.
                     </p>
-                    <ul class="mt-4 space-y-2 text-xs text-zinc-600 dark:text-zinc-400">
+                    <ul class="mt-4 space-y-2 text-xs text-slate-600 dark:text-slate-400">
                         <li class="flex items-center gap-2">
                             <span class="text-emerald-600 dark:text-emerald-400" aria-hidden="true">✓</span>
                             HTTPS recommended for compatible endpoints (TLS toggle)
@@ -581,13 +581,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                     </ul>
                 </div>
                 <div
-                    class="rounded-2xl border border-zinc-200/90 bg-gradient-to-br from-zinc-50 to-zinc-100/80 p-5 shadow-sm ring-1 ring-zinc-900/5 dark:border-zinc-800 dark:from-zinc-900/50 dark:to-zinc-950/80 dark:ring-white/5 sm:p-6"
+                    class="rounded-2xl border border-slate-200/90 bg-gradient-to-br from-slate-50 to-slate-100/80 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:from-slate-900/50 dark:to-slate-950/80 dark:ring-white/5 sm:p-6"
                 >
-                    <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Connectivity</h3>
-                    <p class="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+                    <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Connectivity</h3>
+                    <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                         Use the hostname your provider documents (virtual-hosted or path-style as required). Set region when your provider needs it for signing (for example AWS S3). Wrong endpoint or region often shows up as signature or access errors during upload.
                     </p>
-                    <p class="mt-3 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                    <p class="mt-3 text-xs font-medium text-slate-500 dark:text-slate-400">
                         Tip: create separate configs per environment (staging vs production).
                     </p>
                 </div>
@@ -605,7 +605,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
         >
             <p>
                 Do you want to remove
-                <span class="font-medium text-zinc-900 dark:text-zinc-200">{{
+                <span class="font-medium text-slate-900 dark:text-slate-200">{{
                     deleteTarget?.name?.trim() || 'this configuration'
                 }}</span>
                 <template v-if="deleteTarget?.bucket">
@@ -624,30 +624,30 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
             >
                 <button
                     type="button"
-                    class="absolute inset-0 bg-zinc-900/50 backdrop-blur-[1px] dark:bg-black/60"
+                    class="absolute inset-0 bg-slate-900/50 backdrop-blur-[1px] dark:bg-black/60"
                     aria-label="Close"
                     :disabled="saving || loadingConfig"
                     @click="closeForm"
                 />
                 <div
-                    class="relative max-h-[min(90vh,700px)] w-full max-w-[40rem] overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl ring-1 ring-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900 dark:ring-white/10"
+                    class="relative max-h-[min(90vh,700px)] w-full max-w-[40rem] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-900 dark:ring-white/10"
                     @click.stop
                 >
                     <div class="flex items-start justify-between gap-4">
                         <div>
                             <h2
                                 :id="editingId ? 's3-edit-modal-title' : 's3-create-modal-title'"
-                                class="text-lg font-semibold text-zinc-900 dark:text-zinc-100"
+                                class="text-lg font-semibold text-slate-900 dark:text-slate-100"
                             >
                                 {{ editingId ? 'Edit configuration' : 'New configuration' }}
                             </h2>
-                            <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                                 S3-compatible storage: endpoint, bucket, and credentials for uploads.
                             </p>
                         </div>
                         <button
                             type="button"
-                            class="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-40 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                            class="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                             :disabled="saving || loadingConfig"
                             aria-label="Close dialog"
                             @click="closeForm"
@@ -667,40 +667,40 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
 
                     <form v-else class="mt-5 space-y-4" @submit.prevent="handleSubmit">
                         <div>
-                            <label class="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400" for="s3-form-name">Name</label>
+                            <label class="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400" for="s3-form-name">Name</label>
                             <input id="s3-form-name" v-model="form.name" type="text" class="input w-full" placeholder="My S3 config" />
                         </div>
 
                         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div class="sm:col-span-2">
-                                <label class="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400" for="s3-form-endpoint">Endpoint</label>
+                                <label class="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400" for="s3-form-endpoint">Endpoint</label>
                                 <input id="s3-form-endpoint" v-model="form.endPoint" type="text" class="input w-full" placeholder="s3.amazonaws.com" />
                             </div>
                             <div>
-                                <label class="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400" for="s3-form-port">Port</label>
+                                <label class="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400" for="s3-form-port">Port</label>
                                 <input id="s3-form-port" v-model.number="form.port" type="number" class="input w-full" placeholder="443" />
                             </div>
                             <div class="flex items-end pb-2">
-                                <label class="flex cursor-pointer items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                                <label class="flex cursor-pointer items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                                     <input v-model="form.useSSL" type="checkbox" class="accent-indigo-600" />
                                     Use SSL
                                 </label>
                             </div>
                             <div>
-                                <label class="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400" for="s3-form-bucket">Bucket</label>
+                                <label class="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400" for="s3-form-bucket">Bucket</label>
                                 <input id="s3-form-bucket" v-model="form.bucket" type="text" class="input w-full" />
                             </div>
                             <div>
-                                <label class="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400" for="s3-form-region">Region</label>
+                                <label class="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400" for="s3-form-region">Region</label>
                                 <input id="s3-form-region" v-model="form.region" type="text" class="input w-full" placeholder="us-east-1" />
                             </div>
                         </div>
 
                         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
-                                <label class="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400" for="s3-form-ak">
+                                <label class="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400" for="s3-form-ak">
                                     Access key
-                                    <span v-if="editingId" class="font-normal text-zinc-500 dark:text-zinc-500">(optional)</span>
+                                    <span v-if="editingId" class="font-normal text-slate-500 dark:text-slate-500">(optional)</span>
                                 </label>
                                 <input
                                     id="s3-form-ak"
@@ -714,9 +714,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                                 />
                             </div>
                             <div>
-                                <label class="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400" for="s3-form-sk">
+                                <label class="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400" for="s3-form-sk">
                                     Secret key
-                                    <span v-if="editingId" class="font-normal text-zinc-500 dark:text-zinc-500">(optional)</span>
+                                    <span v-if="editingId" class="font-normal text-slate-500 dark:text-slate-500">(optional)</span>
                                 </label>
                                 <input
                                     id="s3-form-sk"
@@ -732,9 +732,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                         </div>
 
                         <div>
-                            <label class="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400" for="s3-form-public">
+                            <label class="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400" for="s3-form-public">
                                 Public URL
-                                <span class="font-normal text-zinc-500">(optional)</span>
+                                <span class="font-normal text-slate-500">(optional)</span>
                             </label>
                             <input
                                 id="s3-form-public"
@@ -743,17 +743,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                                 class="input w-full"
                                 placeholder="https://media.example.com"
                             />
-                            <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">CDN or custom domain, e.g. Cloudflare R2 public bucket URL.</p>
+                            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">CDN or custom domain, e.g. Cloudflare R2 public bucket URL.</p>
                         </div>
 
                         <div v-if="formError" class="rounded-xl border border-red-200 bg-red-50 p-3 dark:border-red-900/50 dark:bg-red-950/35">
                             <p class="text-sm text-red-800 dark:text-red-300">{{ formError }}</p>
                         </div>
 
-                        <div class="flex flex-wrap justify-end gap-2 border-t border-zinc-200/80 pt-4 dark:border-zinc-700/80">
+                        <div class="flex flex-wrap justify-end gap-2 border-t border-slate-200/80 pt-4 dark:border-slate-700/80">
                             <button
                                 type="button"
-                                class="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                                class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                                 :disabled="saving"
                                 @click="closeForm"
                             >
@@ -776,7 +776,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                                     && !saving
                                     && (editingId || (form.accessKey.trim() && form.secretKey.trim()))
                                         ? 'bg-indigo-600 text-white hover:bg-indigo-500'
-                                        : 'cursor-not-allowed bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500',
+                                        : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500',
                                 ]"
                             >
                                 {{ saving ? 'Saving…' : editingId ? 'Update' : 'Create' }}

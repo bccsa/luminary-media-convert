@@ -187,7 +187,7 @@ onMounted(fetchSavedS3Configs);
         <div class="mb-6 lg:mb-8">
             <router-link
                 to="/sessions"
-                class="mb-4 inline-flex items-center gap-1.5 text-sm text-zinc-600 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+                class="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
             >
                 <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
@@ -195,10 +195,10 @@ onMounted(fetchSavedS3Configs);
                 Back to sessions
             </router-link>
             <header class="space-y-2">
-                <h1 class="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
                     Create new encoding session
                 </h1>
-                <p class="max-w-2xl text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+                <p class="max-w-2xl text-sm leading-relaxed text-slate-500 dark:text-slate-400">
                     Choose S3 storage and how you want to ingest source media. After create, we probe the file and prepare
                     encoding options on the session screen.
                 </p>
@@ -208,7 +208,7 @@ onMounted(fetchSavedS3Configs);
         <div class="grid gap-8 lg:grid-cols-12 lg:items-start">
             <div class="lg:col-span-8">
                 <section
-                    class="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white/90 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-900/60 dark:shadow-black/20 dark:ring-white/10"
+                    class="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/60 dark:shadow-black/20 dark:ring-white/10"
                 >
                     <div class="p-5 sm:p-6 lg:p-8">
                         <div
@@ -226,7 +226,7 @@ onMounted(fetchSavedS3Configs);
                                 </button>
                                 <button
                                     type="button"
-                                    class="cursor-pointer rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                                    class="cursor-pointer rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
                                     @click="dismissPrefixWarning"
                                 >
                                     Revise prefix
@@ -248,7 +248,7 @@ onMounted(fetchSavedS3Configs);
                                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                 </svg>
                             </div>
-                            <p class="text-sm font-medium text-zinc-600 dark:text-zinc-400">
+                            <p class="text-sm font-medium text-slate-600 dark:text-slate-400">
                                 {{ validating ? 'Validating prefix…' : 'Creating session…' }}
                             </p>
                         </div>

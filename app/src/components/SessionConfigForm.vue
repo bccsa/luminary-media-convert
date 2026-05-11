@@ -268,8 +268,8 @@ const canCreateConfig = computed(() =>
                     </svg>
                 </span>
                 <div>
-                    <h2 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">Session name</h2>
-                    <p class="text-xs text-zinc-500 dark:text-zinc-400">Optional — shown in your session history.</p>
+                    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Session name</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Optional — shown in your session history.</p>
                 </div>
             </div>
             <input
@@ -280,7 +280,7 @@ const canCreateConfig = computed(() =>
             />
         </section>
 
-        <div class="border-t border-zinc-200/90 dark:border-zinc-800" aria-hidden="true" />
+        <div class="border-t border-slate-200/90 dark:border-slate-800" aria-hidden="true" />
 
         <!-- Storage destination -->
         <section class="space-y-5">
@@ -299,14 +299,14 @@ const canCreateConfig = computed(() =>
                         </svg>
                     </span>
                     <div>
-                        <h2 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">Storage destination</h2>
-                        <p class="text-xs text-zinc-500 dark:text-zinc-400">S3 output bucket and key prefix for this session.</p>
+                        <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Storage destination</h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">S3 output bucket and key prefix for this session.</p>
                     </div>
                 </div>
                 <button
                     v-if="!showNewConfigForm"
                     type="button"
-                    class="cursor-pointer rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    class="cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
                     @click="showNewConfigForm = true"
                 >
                     New config
@@ -317,36 +317,36 @@ const canCreateConfig = computed(() =>
                 v-if="showNewConfigForm"
                 class="space-y-4 rounded-xl border border-indigo-200/80 bg-indigo-50/60 p-4 dark:border-indigo-500/30 dark:bg-indigo-950/25"
             >
-                <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">New S3 configuration</h3>
+                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">New S3 configuration</h3>
                 <div>
-                    <label class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Name</label>
+                    <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Name</label>
                     <input v-model="newConfig.name" type="text" class="input" placeholder="e.g. Production S3" />
                 </div>
                 <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div class="sm:col-span-2">
-                        <label class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Endpoint</label>
+                        <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Endpoint</label>
                         <input v-model="newConfig.endPoint" type="text" class="input" placeholder="s3.amazonaws.com" />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Port</label>
+                        <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Port</label>
                         <input v-model.number="newConfig.port" type="number" class="input" placeholder="443" />
                     </div>
                     <div class="flex items-end pb-1">
-                        <label class="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+                        <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                             <input v-model="newConfig.useSSL" type="checkbox" class="accent-indigo-500" />
                             Use SSL
                         </label>
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Bucket</label>
+                        <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Bucket</label>
                         <input v-model="newConfig.bucket" type="text" class="input" />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Region</label>
+                        <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Region</label>
                         <input v-model="newConfig.region" type="text" class="input" placeholder="us-east-1" />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Access key</label>
+                        <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Access key</label>
                         <input
                             v-model="newConfig.accessKey"
                             type="text"
@@ -357,7 +357,7 @@ const canCreateConfig = computed(() =>
                         />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Secret key</label>
+                        <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Secret key</label>
                         <input
                             v-model="newConfig.secretKey"
                             type="text"
@@ -376,7 +376,7 @@ const canCreateConfig = computed(() =>
                         :class="
                             canCreateConfig
                                 ? 'cursor-pointer bg-indigo-600 text-white hover:bg-indigo-500'
-                                : 'cursor-not-allowed bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500'
+                                : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500'
                         "
                         @click="onCreateConfig"
                     >
@@ -384,7 +384,7 @@ const canCreateConfig = computed(() =>
                     </button>
                     <button
                         type="button"
-                        class="cursor-pointer rounded-xl border border-zinc-300 bg-white px-4 py-2 text-xs font-semibold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        class="cursor-pointer rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
                         @click="showNewConfigForm = false; resetNewConfig()"
                     >
                         Cancel
@@ -394,9 +394,9 @@ const canCreateConfig = computed(() =>
 
             <div
                 v-else-if="savedS3Configs.length === 0"
-                class="rounded-xl border border-dashed border-zinc-300 bg-zinc-50/80 p-6 text-center dark:border-zinc-600 dark:bg-zinc-900/50"
+                class="rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-6 text-center dark:border-slate-600 dark:bg-slate-900/50"
             >
-                <p class="text-sm text-zinc-600 dark:text-zinc-400">No S3 configurations saved yet.</p>
+                <p class="text-sm text-slate-600 dark:text-slate-400">No S3 configurations saved yet.</p>
                 <button
                     type="button"
                     class="mt-3 cursor-pointer text-sm font-semibold text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
@@ -408,7 +408,7 @@ const canCreateConfig = computed(() =>
 
             <div v-else class="grid gap-4 sm:grid-cols-2">
                 <div>
-                    <label class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">S3 configuration</label>
+                    <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">S3 configuration</label>
                     <FormSelect
                         v-model="selectedConfigId"
                         :options="savedS3ConfigOptions"
@@ -417,37 +417,37 @@ const canCreateConfig = computed(() =>
                     />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Path prefix</label>
+                    <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Path prefix</label>
                     <input
                         v-model="pathPrefix"
                         type="text"
                         class="input"
                         placeholder="/encoded/v1/year=2024/"
                     />
-                    <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Output keys are written under this prefix (optional).</p>
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Output keys are written under this prefix (optional).</p>
                 </div>
             </div>
 
             <div
                 v-if="hasS3Config"
-                class="flex flex-col gap-4 rounded-xl border border-zinc-200/80 bg-zinc-50/50 p-4 dark:border-zinc-700 dark:bg-zinc-900/30 sm:flex-row sm:flex-wrap sm:items-center"
+                class="flex flex-col gap-4 rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 dark:border-slate-700 dark:bg-slate-900/30 sm:flex-row sm:flex-wrap sm:items-center"
             >
-                <label class="flex items-center gap-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                <label class="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                     <input v-model="byteRange" type="checkbox" class="accent-indigo-500" />
                     Byte-range segments
                 </label>
                 <div v-if="byteRange" class="flex flex-wrap items-center gap-2">
-                    <label class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Max file size (MB)</label>
+                    <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Max file size (MB)</label>
                     <input v-model.number="byteRangeMaxFileSizeMB" type="number" min="1" class="input w-28" placeholder="500" />
                 </div>
-                <label class="flex items-center gap-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                <label class="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                     <input v-model="thumbnails" type="checkbox" class="accent-indigo-500" />
                     Scrubbing thumbnails
                 </label>
             </div>
         </section>
 
-        <div class="border-t border-zinc-200/90 dark:border-zinc-800" aria-hidden="true" />
+        <div class="border-t border-slate-200/90 dark:border-slate-800" aria-hidden="true" />
 
         <!-- Source ingest -->
         <section class="space-y-5">
@@ -465,13 +465,13 @@ const canCreateConfig = computed(() =>
                     </svg>
                 </span>
                 <div>
-                    <h2 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">Source ingest</h2>
-                    <p class="text-xs text-zinc-500 dark:text-zinc-400">HTTPS URL fetch or resumable upload from your machine.</p>
+                    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Source ingest</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">HTTPS URL fetch or resumable upload from your machine.</p>
                 </div>
             </div>
 
             <div
-                class="inline-flex w-full rounded-xl border border-zinc-200 bg-zinc-100/90 p-1 dark:border-zinc-600 dark:bg-zinc-900/80 sm:w-auto"
+                class="inline-flex w-full rounded-xl border border-slate-200 bg-slate-100/90 p-1 dark:border-slate-600 dark:bg-slate-900/80 sm:w-auto"
                 role="group"
                 aria-label="Ingest method"
             >
@@ -481,7 +481,7 @@ const canCreateConfig = computed(() =>
                         'min-w-0 flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer sm:flex-none sm:px-5',
                         sourceMode === 'url'
                             ? 'bg-indigo-600 text-white shadow-sm dark:bg-indigo-500'
-                            : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100',
+                            : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100',
                     ]"
                     :aria-pressed="sourceMode === 'url'"
                     @click="sourceMode = 'url'"
@@ -494,7 +494,7 @@ const canCreateConfig = computed(() =>
                         'min-w-0 flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer sm:flex-none sm:px-5',
                         sourceMode === 'file'
                             ? 'bg-indigo-600 text-white shadow-sm dark:bg-indigo-500'
-                            : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100',
+                            : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100',
                     ]"
                     :aria-pressed="sourceMode === 'file'"
                     @click="sourceMode = 'file'"
@@ -507,7 +507,7 @@ const canCreateConfig = computed(() =>
 
             <div v-else class="space-y-3">
                 <div>
-                    <label class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Source URL</label>
+                    <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Source URL</label>
                     <input
                         v-model="sourceUrl"
                         type="url"
@@ -516,23 +516,23 @@ const canCreateConfig = computed(() =>
                     />
                 </div>
                 <div>
-                    <label class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Filename override (optional)</label>
+                    <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Filename override (optional)</label>
                     <input v-model="urlFilename" type="text" class="input" placeholder="e.g. meeting.mp4" />
                 </div>
-                <p class="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+                <p class="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
                     Direct-download links work best (public files, presigned S3, or CDN). The server uses parallel range
                     requests when the origin supports them.
                 </p>
             </div>
 
-            <p class="text-xs text-zinc-500 dark:text-zinc-400">
+            <p class="text-xs text-slate-500 dark:text-slate-400">
                 Common containers: MP4, MKV, MOV, WebM, and typical audio formats. Direct upload limit:
-                <span class="font-medium text-zinc-600 dark:text-zinc-300">10 GB</span>
+                <span class="font-medium text-slate-600 dark:text-slate-300">10 GB</span>
                 per file unless your session quota is lower.
             </p>
         </section>
 
-        <div class="border-t border-zinc-200/90 dark:border-zinc-800" aria-hidden="true" />
+        <div class="border-t border-slate-200/90 dark:border-slate-800" aria-hidden="true" />
 
         <!-- HLS encryption -->
         <section v-if="hasS3Config" class="space-y-4">
@@ -550,16 +550,16 @@ const canCreateConfig = computed(() =>
                     </svg>
                 </span>
                 <div>
-                    <h2 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">HLS encryption</h2>
-                    <p class="text-xs text-zinc-500 dark:text-zinc-400">Optional AES-128 for segments (key URL required when enabled).</p>
+                    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">HLS encryption</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Optional AES-128 for segments (key URL required when enabled).</p>
                 </div>
             </div>
-            <label class="flex items-center gap-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            <label class="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                 <input v-model="encryptionEnabled" type="checkbox" class="accent-indigo-500" />
                 Enable AES-128 encryption
             </label>
             <div v-if="encryptionEnabled">
-                <label class="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Key URL (production key endpoint)</label>
+                <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Key URL (production key endpoint)</label>
                 <input
                     v-model="encryptionKeyUrl"
                     type="text"
@@ -571,11 +571,11 @@ const canCreateConfig = computed(() =>
 
         <!-- Submit -->
         <div
-            class="flex flex-col gap-4 border-t border-zinc-200/90 pt-6 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between"
+            class="flex flex-col gap-4 border-t border-slate-200/90 pt-6 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between"
         >
-            <p class="flex max-w-xl items-start gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+            <p class="flex max-w-xl items-start gap-2 text-xs text-slate-500 dark:text-slate-400">
                 <svg
-                    class="mt-0.5 h-4 w-4 shrink-0 text-zinc-400"
+                    class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
@@ -600,7 +600,7 @@ const canCreateConfig = computed(() =>
                     'w-full shrink-0 rounded-xl px-6 py-3.5 text-sm font-semibold shadow-sm transition-colors sm:w-auto sm:min-w-[11rem]',
                     canSubmit
                         ? 'cursor-pointer bg-indigo-600 text-white hover:bg-indigo-500'
-                        : 'cursor-not-allowed bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500',
+                        : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500',
                 ]"
             >
                 Create session

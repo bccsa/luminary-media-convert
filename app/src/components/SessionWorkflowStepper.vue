@@ -31,7 +31,7 @@ function circleClass(v: StepVisual): string {
         case 'error':
             return `${base} bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400`;
         default:
-            return `${base} bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500`;
+            return `${base} bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-500`;
     }
 }
 
@@ -69,7 +69,7 @@ const stepsWithVisual = computed(() =>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                         </svg>
                         <span v-else-if="step.visual === 'error'">!</span>
-                        <span v-else class="text-[11px] text-zinc-500">{{ i + 1 }}</span>
+                        <span v-else class="text-[11px] text-slate-500">{{ i + 1 }}</span>
                     </span>
                     <span
                         class="mt-1.5 max-w-[4.5rem] text-center text-[10px] font-medium uppercase tracking-wide sm:max-w-none sm:text-xs"
@@ -79,14 +79,14 @@ const stepsWithVisual = computed(() =>
                               ? 'text-emerald-700 dark:text-emerald-400'
                               : step.visual === 'error'
                                 ? 'text-red-700 dark:text-red-400'
-                                : 'text-zinc-500 dark:text-zinc-500'"
+                                : 'text-slate-500 dark:text-slate-500'"
                     >
                         {{ step.label }}
                     </span>
                 </div>
                 <div
                     v-if="i < stepsWithVisual.length - 1"
-                    class="mx-0.5 mt-4 hidden h-px w-4 shrink-0 bg-zinc-200 sm:block sm:w-6 dark:bg-zinc-700"
+                    class="mx-0.5 mt-4 hidden h-px w-4 shrink-0 bg-slate-200 sm:block sm:w-6 dark:bg-slate-700"
                     aria-hidden="true"
                 />
             </li>

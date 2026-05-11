@@ -39,7 +39,7 @@ defineExpose({ encodeFormRef, getEncodeForm });
             @next-to-trim="$emit('next-to-trim')"
             @can-submit-change="$emit('can-submit-change', $event)"
         />
-        <p v-else class="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+        <p v-else class="text-sm leading-relaxed text-slate-500 dark:text-slate-400">
             Output settings are only editable while the session is probed and waiting to encode. For active jobs, use the Encode workflow tab for progress and logs.
         </p>
     </div>

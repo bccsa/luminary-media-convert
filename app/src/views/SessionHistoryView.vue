@@ -24,7 +24,7 @@ const statusConfig: Record<string, { label: string; color: string }> = {
     created: {
         label: 'Created',
         color:
-            'border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
+            'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400',
     },
     uploading: {
         label: 'Uploading',
@@ -34,7 +34,7 @@ const statusConfig: Record<string, { label: string; color: string }> = {
     uploaded: {
         label: 'Uploaded',
         color:
-            'border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
+            'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400',
     },
     queued: {
         label: 'Queued',
@@ -263,7 +263,7 @@ const showingTo = computed(() =>
 
 function badgeClasses(status: string): string {
     const cfg = statusConfig[status];
-    return `inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${cfg?.color ?? 'border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'}`;
+    return `inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${cfg?.color ?? 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400'}`;
 }
 
 onMounted(fetchSessions);
@@ -274,10 +274,10 @@ onMounted(fetchSessions);
         <!-- Page header: Stitch-style title + search + primary CTA -->
         <div class="mb-6 flex flex-col gap-6 lg:mb-8 lg:flex-row lg:items-end lg:justify-between">
             <div class="min-w-0 space-y-2">
-                <h1 class="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
                     Encoding Sessions
                 </h1>
-                <p class="max-w-xl text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+                <p class="max-w-xl text-sm leading-relaxed text-slate-500 dark:text-slate-400">
                     Monitor and manage your active media transcoding pipelines.
                 </p>
             </div>
@@ -285,7 +285,7 @@ onMounted(fetchSessions);
                 <div class="relative min-w-0 sm:min-w-[18rem]">
                     <label class="sr-only" for="session-search">Search sessions</label>
                     <svg
-                        class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400 dark:text-zinc-500"
+                        class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500"
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -319,7 +319,7 @@ onMounted(fetchSessions);
 
         <!-- Session list card -->
         <section
-            class="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white/90 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-900/60 dark:shadow-black/20 dark:ring-white/10"
+            class="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/60 dark:shadow-black/20 dark:ring-white/10"
         >
             <div v-if="loading" class="flex justify-center py-20">
                 <div class="flex flex-col items-center gap-3">
@@ -329,13 +329,13 @@ onMounted(fetchSessions);
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                         </svg>
                     </div>
-                    <p class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Loading sessions…</p>
+                    <p class="text-xs font-medium text-slate-500 dark:text-slate-400">Loading sessions…</p>
                 </div>
             </div>
 
             <div
                 v-else-if="error"
-                class="border-b border-zinc-200/80 p-6 dark:border-zinc-800"
+                class="border-b border-slate-200/80 p-6 dark:border-slate-800"
             >
                 <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-900/50 dark:bg-red-950/40">
                     <p class="text-sm text-red-800 dark:text-red-400">{{ error }}</p>
@@ -345,10 +345,10 @@ onMounted(fetchSessions);
             <template v-else>
                 <!-- Card toolbar (status + import) -->
                 <div
-                    class="flex flex-col gap-3 border-b border-zinc-200/90 bg-zinc-50/90 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950/40 sm:flex-row sm:items-center sm:justify-between sm:px-6"
+                    class="flex flex-col gap-3 border-b border-slate-200/90 bg-slate-50/90 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/40 sm:flex-row sm:items-center sm:justify-between sm:px-6"
                 >
                     <div class="flex min-w-0 flex-wrap items-center gap-2">
-                        <label for="session-status" class="shrink-0 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                        <label for="session-status" class="shrink-0 text-xs font-medium text-slate-500 dark:text-slate-400">
                             Status
                         </label>
                         <FormSelect
@@ -362,7 +362,7 @@ onMounted(fetchSessions);
                     </div>
                     <button
                         type="button"
-                        class="inline-flex w-full cursor-pointer items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800 sm:w-auto"
+                        class="inline-flex w-full cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 sm:w-auto"
                         @click="navigateToImport"
                     >
                         Import HLS
@@ -374,38 +374,38 @@ onMounted(fetchSessions);
                         <table class="w-full min-w-[800px] border-collapse text-left text-sm">
                             <thead>
                                 <tr
-                                    class="border-b border-zinc-200/90 bg-zinc-50/80 dark:border-zinc-800 dark:bg-zinc-950/50"
+                                    class="border-b border-slate-200/90 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-950/50"
                                 >
-                                    <th class="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                    <th class="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                                         ID
                                     </th>
-                                    <th class="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                    <th class="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                                         Name / Status
                                     </th>
-                                    <th class="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                    <th class="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                                         Flags
                                     </th>
-                                    <th class="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                    <th class="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                                         Created
                                     </th>
-                                    <th class="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                    <th class="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                                         Completed
                                     </th>
-                                    <th class="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400" scope="col">
+                                    <th class="px-6 py-4 text-right text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400" scope="col">
                                         Actions
                                     </th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                            <tbody class="divide-y divide-slate-100 dark:divide-slate-800/80">
                                 <tr
                                     v-for="session in sessions"
                                     :key="session.id || session.sessionId"
-                                    class="cursor-pointer transition-colors hover:bg-zinc-50/90 dark:hover:bg-zinc-800/40"
+                                    class="cursor-pointer transition-colors hover:bg-slate-50/90 dark:hover:bg-slate-800/40"
                                     @click="navigateToSession(session.id || session.sessionId)"
                                 >
                                     <td class="whitespace-nowrap px-6 py-4 align-middle">
                                         <code
-                                            class="inline-block rounded-md bg-zinc-100 px-2 py-1 font-mono text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                                            class="inline-block rounded-md bg-slate-100 px-2 py-1 font-mono text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-400"
                                             :title="session.id || session.sessionId"
                                         >
                                             {{ displaySessionId(session) }}
@@ -413,7 +413,7 @@ onMounted(fetchSessions);
                                     </td>
                                     <td class="px-6 py-4 align-top">
                                         <div class="flex flex-col gap-2">
-                                            <span class="font-medium leading-snug text-zinc-900 dark:text-zinc-100">
+                                            <span class="font-medium leading-snug text-slate-900 dark:text-slate-100">
                                                 {{
                                                     session.name
                                                         ? session.name
@@ -476,16 +476,16 @@ onMounted(fetchSessions);
                                             </span>
                                             <span
                                                 v-if="!session.encrypted && !session.imported"
-                                                class="text-xs text-zinc-400 dark:text-zinc-600"
+                                                class="text-xs text-slate-400 dark:text-slate-600"
                                             >
                                                 —
                                             </span>
                                         </div>
                                     </td>
-                                    <td class="whitespace-nowrap px-6 py-4 text-zinc-600 dark:text-zinc-400">
+                                    <td class="whitespace-nowrap px-6 py-4 text-slate-600 dark:text-slate-400">
                                         {{ formatRelative(session.createdAt) }}
                                     </td>
-                                    <td class="whitespace-nowrap px-6 py-4 text-zinc-600 dark:text-zinc-400">
+                                    <td class="whitespace-nowrap px-6 py-4 text-slate-600 dark:text-slate-400">
                                         {{ session.completedAt ? formatRelative(session.completedAt) : '—' }}
                                     </td>
                                     <td class="px-6 py-4 text-right align-middle" @click.stop>
@@ -504,9 +504,9 @@ onMounted(fetchSessions);
                     </div>
 
                     <div
-                        class="flex flex-col gap-4 border-t border-zinc-200/90 bg-zinc-50/80 px-6 py-4 dark:border-zinc-800 dark:bg-zinc-950/40 sm:flex-row sm:items-center sm:justify-between"
+                        class="flex flex-col gap-4 border-t border-slate-200/90 bg-slate-50/80 px-6 py-4 dark:border-slate-800 dark:bg-slate-950/40 sm:flex-row sm:items-center sm:justify-between"
                     >
-                        <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                        <span class="text-xs font-medium text-slate-500 dark:text-slate-400">
                             <template v-if="total > 0">
                                 Showing {{ showingFrom }} to {{ showingTo }} of {{ total }} session{{ total === 1 ? '' : 's' }}
                             </template>
@@ -516,7 +516,7 @@ onMounted(fetchSessions);
                             <button
                                 type="button"
                                 :disabled="currentPage <= 1"
-                                class="rounded-lg border border-zinc-300 p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                                class="rounded-lg border border-slate-300 p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                                 aria-label="Previous page"
                                 @click="goToPage(currentPage - 1)"
                             >
@@ -533,7 +533,7 @@ onMounted(fetchSessions);
                                         'min-w-[2rem] rounded-lg px-2 py-1 text-xs font-semibold transition-colors',
                                         p === currentPage
                                             ? 'border border-indigo-200 bg-indigo-50 text-indigo-600 dark:border-indigo-500/40 dark:bg-indigo-950/50 dark:text-indigo-400'
-                                            : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800',
+                                            : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800',
                                     ]"
                                     @click="goToPage(p)"
                                 >
@@ -542,14 +542,14 @@ onMounted(fetchSessions);
                             </template>
                             <span
                                 v-else
-                                class="px-2 text-xs tabular-nums text-zinc-500 dark:text-zinc-500"
+                                class="px-2 text-xs tabular-nums text-slate-500 dark:text-slate-500"
                             >
                                 Page {{ currentPage }} / {{ totalPages }}
                             </span>
                             <button
                                 type="button"
                                 :disabled="currentPage >= totalPages"
-                                class="rounded-lg border border-zinc-300 p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                                class="rounded-lg border border-slate-300 p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                                 aria-label="Next page"
                                 @click="goToPage(currentPage + 1)"
                             >
@@ -562,10 +562,10 @@ onMounted(fetchSessions);
                 </template>
 
                 <div v-else class="px-6 py-16 text-center">
-                    <p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                    <p class="text-sm font-medium text-slate-900 dark:text-slate-100">
                         {{ nameSearch.trim() || statusFilter ? 'No sessions match' : 'No sessions yet' }}
                     </p>
-                    <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
                         {{
                             nameSearch.trim() || statusFilter
                                 ? 'Try different filters or create a new encode.'
@@ -582,7 +582,7 @@ onMounted(fetchSessions);
                         </button>
                         <button
                             type="button"
-                            class="inline-flex cursor-pointer items-center justify-center rounded-xl border border-zinc-300 bg-white px-4 py-2.5 text-sm font-semibold text-zinc-800 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                            class="inline-flex cursor-pointer items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                             @click="navigateToImport"
                         >
                             Import HLS

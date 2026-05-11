@@ -14,11 +14,11 @@ const props = withDefaults(defineProps<{
 <template>
     <div class="space-y-2">
         <div class="flex items-center justify-between text-sm">
-            <span class="text-zinc-400">{{ label }}</span>
-            <span v-if="subtitle" class="text-xs text-zinc-500">{{ subtitle }}</span>
-            <span v-else-if="progress != null && !indeterminate" class="font-mono text-zinc-300">{{ progress }}%</span>
+            <span class="text-slate-400">{{ label }}</span>
+            <span v-if="subtitle" class="text-xs text-slate-500">{{ subtitle }}</span>
+            <span v-else-if="progress != null && !indeterminate" class="font-mono text-slate-300">{{ progress }}%</span>
         </div>
-        <div class="h-3 overflow-hidden rounded-full bg-zinc-800">
+        <div class="h-3 overflow-hidden rounded-full bg-slate-800">
             <div
                 v-if="indeterminate"
                 class="h-full rounded-full bg-indigo-500 animate-pulse"

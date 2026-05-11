@@ -1,7 +1,7 @@
 <template>
     <div class="flex flex-col gap-4" aria-label="Encoding pipeline overview">
         <div
-            class="relative overflow-hidden rounded-2xl bg-zinc-900 px-5 py-6 text-white shadow-lg shadow-zinc-900/20 ring-1 ring-white/10 dark:ring-white/5"
+            class="relative overflow-hidden rounded-2xl bg-slate-900 px-5 py-6 text-white shadow-lg shadow-slate-900/20 ring-1 ring-white/10 dark:ring-white/5"
         >
             <svg
                 class="pointer-events-none absolute -right-4 -top-4 h-28 w-28 text-white/[0.06]"
@@ -17,8 +17,8 @@
                     d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"
                 />
             </svg>
-            <p class="relative text-sm font-semibold text-zinc-100">Encoding workflow</p>
-            <p class="relative mt-2 text-xs leading-relaxed text-zinc-400">
+            <p class="relative text-sm font-semibold text-slate-100">Encoding workflow</p>
+            <p class="relative mt-2 text-xs leading-relaxed text-slate-400">
                 Ingest is resumable (tus) or fetched from a URL. The service probes your media, transcodes to ABR HLS,
                 then writes segments and manifests to the prefix you choose — with optional AES-128 and byte-range
                 packaging.
@@ -26,10 +26,10 @@
         </div>
 
         <div
-            class="rounded-2xl border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-900/5 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10"
+            class="rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/60 dark:ring-white/10"
         >
-            <h2 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Pipeline preview</h2>
-            <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">What happens after you create a session.</p>
+            <h2 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Pipeline preview</h2>
+            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">What happens after you create a session.</p>
             <ol class="mt-4 space-y-4">
                 <li class="flex gap-3">
                     <span
@@ -40,8 +40,8 @@
                         </svg>
                     </span>
                     <div>
-                        <p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Ingest</p>
-                        <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                        <p class="text-sm font-medium text-slate-900 dark:text-slate-100">Ingest</p>
+                        <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                             Upload from disk or let the API download from HTTPS.
                         </p>
                     </div>
@@ -59,15 +59,15 @@
                         </svg>
                     </span>
                     <div>
-                        <p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Analyze &amp; configure</p>
-                        <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                        <p class="text-sm font-medium text-slate-900 dark:text-slate-100">Analyze &amp; configure</p>
+                        <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                             ffprobe-driven track metadata; you confirm renditions on the session page.
                         </p>
                     </div>
                 </li>
                 <li class="flex gap-3">
                     <span
-                        class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                        class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
                     >
                         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path
@@ -78,8 +78,8 @@
                         </svg>
                     </span>
                     <div>
-                        <p class="text-sm font-medium text-zinc-900 dark:text-zinc-100">Encode &amp; deliver</p>
-                        <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                        <p class="text-sm font-medium text-slate-900 dark:text-slate-100">Encode &amp; deliver</p>
+                        <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                             Queue encodes HLS to your bucket prefix; optional thumbnails and encryption.
                         </p>
                     </div>
@@ -88,10 +88,10 @@
         </div>
 
         <div
-            class="rounded-2xl border border-zinc-200/80 bg-gradient-to-br from-zinc-900 via-zinc-800 to-indigo-950 p-5 shadow-md ring-1 ring-white/10 dark:border-zinc-700"
+            class="rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 p-5 shadow-md ring-1 ring-white/10 dark:border-slate-700"
         >
             <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-indigo-300/95">Luminary Media Convert</p>
-            <p class="mt-2 text-xs leading-relaxed text-zinc-400">
+            <p class="mt-2 text-xs leading-relaxed text-slate-400">
                 ABR HLS output, S3-native delivery, real-time session progress.
             </p>
         </div>

@@ -43,7 +43,7 @@ function onConfirm(withFiles: boolean) {
     >
         <p>
             Remove
-            <span class="font-medium text-zinc-900 dark:text-zinc-200">{{
+            <span class="font-medium text-slate-900 dark:text-slate-200">{{
                 sessionLabel?.trim() || 'this session'
             }}</span>
             from your account. This cannot be undone.

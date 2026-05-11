@@ -205,12 +205,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
             <!-- Header -->
             <header class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div class="max-w-2xl">
-                    <h1 class="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+                    <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">
                         API keys
                     </h1>
-                    <p class="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+                    <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                         Create keys to call the Encoding API from scripts, CI, or backends. Send the raw key in the
-                        <code class="rounded border border-zinc-200 bg-zinc-50 px-1 py-0.5 font-mono text-[11px] text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">X-API-Key</code>
+                        <code class="rounded border border-slate-200 bg-slate-50 px-1 py-0.5 font-mono text-[11px] text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">X-API-Key</code>
                         header on each request.
                     </p>
                 </div>
@@ -229,7 +229,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
             <!-- Summary metrics -->
             <div class="mb-8 grid gap-4 sm:grid-cols-3">
                 <div
-                    class="flex items-center gap-4 rounded-2xl border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-900/50 dark:ring-white/5"
+                    class="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/50 dark:ring-white/5"
                 >
                     <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400">
                         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -241,14 +241,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                         </svg>
                     </div>
                     <div>
-                        <p class="text-xs font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Active</p>
-                        <p class="mt-0.5 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+                        <p class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Active</p>
+                        <p class="mt-0.5 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">
                             {{ loading ? '—' : activeKeys.length }}
                         </p>
                     </div>
                 </div>
                 <div
-                    class="flex items-center gap-4 rounded-2xl border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-900/50 dark:ring-white/5"
+                    class="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/50 dark:ring-white/5"
                 >
                     <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
                         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -256,15 +256,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                         </svg>
                     </div>
                     <div class="min-w-0 flex-1">
-                        <p class="text-xs font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Used recently</p>
-                        <p class="mt-0.5 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+                        <p class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Used recently</p>
+                        <p class="mt-0.5 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">
                             {{ loading ? '—' : recentlyUsedActiveCount }}
                         </p>
-                        <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Active keys with use in the last 7 days</p>
+                        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Active keys with use in the last 7 days</p>
                     </div>
                 </div>
                 <div
-                    class="flex items-center gap-4 rounded-2xl border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-900/50 dark:ring-white/5"
+                    class="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/50 dark:ring-white/5"
                 >
                     <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400">
                         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -272,8 +272,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                         </svg>
                     </div>
                     <div class="min-w-0 flex-1">
-                        <p class="text-xs font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Revoked</p>
-                        <p class="mt-0.5 text-2xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+                        <p class="text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">Revoked</p>
+                        <p class="mt-0.5 text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-50">
                             {{ loading ? '—' : revokedKeys.length }}
                         </p>
                         <a
@@ -286,7 +286,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                             OpenAPI docs
                             <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
                         </a>
-                        <p v-else class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Only a hash of each key is stored</p>
+                        <p v-else class="mt-1 text-xs text-slate-500 dark:text-slate-400">Only a hash of each key is stored</p>
                     </div>
                 </div>
             </div>
@@ -294,19 +294,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
             <!-- Encoding API strip -->
             <div
                 v-if="encodingApiUrl"
-                class="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-zinc-200/90 bg-zinc-50/90 px-4 py-3 text-xs dark:border-zinc-800 dark:bg-zinc-900/40"
+                class="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200/90 bg-slate-50/90 px-4 py-3 text-xs dark:border-slate-800 dark:bg-slate-900/40"
             >
-                <span class="font-medium text-zinc-600 dark:text-zinc-400">Encoding API base URL</span>
-                <code class="rounded-lg border border-zinc-200 bg-white px-2 py-1 font-mono text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">{{ encodingApiUrl }}</code>
+                <span class="font-medium text-slate-600 dark:text-slate-400">Encoding API base URL</span>
+                <code class="rounded-lg border border-slate-200 bg-white px-2 py-1 font-mono text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">{{ encodingApiUrl }}</code>
                 <button
                     type="button"
-                    class="ml-auto rounded-lg border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    class="ml-auto rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
                     @click="showDocs = !showDocs"
                 >
                     {{ showDocs ? 'Hide' : 'Show' }} embedded docs
                 </button>
             </div>
-            <div v-if="showDocs && docsUrl" class="mb-8 overflow-hidden rounded-2xl border border-zinc-200/80 shadow-lg dark:border-zinc-800">
+            <div v-if="showDocs && docsUrl" class="mb-8 overflow-hidden rounded-2xl border border-slate-200/80 shadow-lg dark:border-slate-800">
                 <iframe
                     :src="docsUrl"
                     class="h-[min(70vh,560px)] w-full border-0 bg-white"
@@ -316,10 +316,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
 
             <!-- Keys table card -->
             <section
-                class="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white/90 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10"
+                class="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/60 dark:ring-white/10"
             >
-                <div class="flex flex-col gap-4 border-b border-zinc-200/80 p-5 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-700/80">
-                    <h2 class="text-base font-semibold text-zinc-900 dark:text-zinc-100">Keys</h2>
+                <div class="flex flex-col gap-4 border-b border-slate-200/80 p-5 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700/80">
+                    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Keys</h2>
                     <div class="w-full sm:max-w-xs">
                         <label for="key-filter" class="sr-only">Filter keys</label>
                         <input
@@ -340,7 +340,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                         </svg>
                     </div>
-                    <p class="text-sm text-zinc-600 dark:text-zinc-400">Loading keys…</p>
+                    <p class="text-sm text-slate-600 dark:text-slate-400">Loading keys…</p>
                 </div>
 
                 <div v-else-if="error" class="p-6">
@@ -350,7 +350,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                 </div>
 
                 <div v-else-if="keys.length === 0" class="px-6 py-16 text-center">
-                    <p class="text-sm text-zinc-600 dark:text-zinc-400">No keys yet. Create one to authenticate Encoding API requests.</p>
+                    <p class="text-sm text-slate-600 dark:text-slate-400">No keys yet. Create one to authenticate Encoding API requests.</p>
                     <button
                         type="button"
                         class="mt-4 text-sm font-semibold text-indigo-600 hover:text-indigo-500 dark:text-indigo-400"
@@ -361,13 +361,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                 </div>
 
                 <template v-else>
-                    <div v-if="filteredKeys.length === 0" class="px-6 py-12 text-center text-sm text-zinc-500 dark:text-zinc-400">
+                    <div v-if="filteredKeys.length === 0" class="px-6 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
                         No keys match your filter.
                     </div>
                     <div v-else class="overflow-x-auto">
                         <table class="w-full min-w-[640px] text-left text-sm">
                             <thead>
-                                <tr class="border-b border-zinc-200 bg-zinc-50/80 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-400">
+                                <tr class="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-400">
                                     <th class="px-5 py-3">Name</th>
                                     <th class="px-5 py-3">Key ID</th>
                                     <th class="px-5 py-3">Created</th>
@@ -375,30 +375,30 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                                     <th class="px-5 py-3 text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                            <tbody class="divide-y divide-slate-100 dark:divide-slate-800/80">
                                 <tr
                                     v-for="key in paginatedKeys"
                                     :key="key.id"
-                                    :class="key.status === 'revoked' ? 'bg-zinc-50/50 opacity-75 dark:bg-zinc-900/30' : ''"
+                                    :class="key.status === 'revoked' ? 'bg-slate-50/50 opacity-75 dark:bg-slate-900/30' : ''"
                                 >
                                     <td class="px-5 py-4">
-                                        <p class="font-medium text-zinc-900 dark:text-zinc-100">{{ key.name }}</p>
-                                        <p class="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                                        <p class="font-medium text-slate-900 dark:text-slate-100">{{ key.name }}</p>
+                                        <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                                             <span
-                                                :class="key.status === 'active' ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'"
+                                                :class="key.status === 'active' ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'"
                                             >●</span>
                                             {{ key.status === 'active' ? 'Active' : 'Revoked' }}
                                         </p>
                                     </td>
                                     <td class="px-5 py-4">
-                                        <code class="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 font-mono text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300">
+                                        <code class="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
                                             {{ maskPrefix(key.prefix) }}
                                         </code>
                                     </td>
-                                    <td class="px-5 py-4 text-zinc-600 dark:text-zinc-400">
+                                    <td class="px-5 py-4 text-slate-600 dark:text-slate-400">
                                         {{ formatDate(key.createdAt) }}
                                     </td>
-                                    <td class="px-5 py-4 text-zinc-600 dark:text-zinc-400">
+                                    <td class="px-5 py-4 text-slate-600 dark:text-slate-400">
                                         {{ formatRelative(key.lastUsedAt) }}
                                     </td>
                                     <td class="px-5 py-4 text-right align-middle">
@@ -411,7 +411,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                                         >
                                             Revoke
                                         </button>
-                                        <span v-else class="text-xs text-zinc-400 dark:text-zinc-500">—</span>
+                                        <span v-else class="text-xs text-slate-400 dark:text-slate-500">—</span>
                                     </td>
                                 </tr>
                             </tbody>
@@ -419,30 +419,30 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                     </div>
                     <div
                         v-if="filteredKeys.length > 0"
-                        class="flex flex-col items-center justify-between gap-3 border-t border-zinc-200/80 px-5 py-4 sm:flex-row dark:border-zinc-800"
+                        class="flex flex-col items-center justify-between gap-3 border-t border-slate-200/80 px-5 py-4 sm:flex-row dark:border-slate-800"
                     >
-                        <p class="text-xs text-zinc-500 dark:text-zinc-400">
+                        <p class="text-xs text-slate-500 dark:text-slate-400">
                             Showing
-                            <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ (page - 1) * PAGE_SIZE + 1 }}</span>
+                            <span class="font-medium text-slate-700 dark:text-slate-300">{{ (page - 1) * PAGE_SIZE + 1 }}</span>
                             –
-                            <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ Math.min(page * PAGE_SIZE, totalFiltered) }}</span>
+                            <span class="font-medium text-slate-700 dark:text-slate-300">{{ Math.min(page * PAGE_SIZE, totalFiltered) }}</span>
                             of
-                            <span class="font-medium text-zinc-700 dark:text-zinc-300">{{ totalFiltered }}</span>
+                            <span class="font-medium text-slate-700 dark:text-slate-300">{{ totalFiltered }}</span>
                         </p>
                         <div class="flex items-center gap-2">
                             <button
                                 type="button"
-                                class="rounded-lg border border-zinc-300 bg-white p-2 text-zinc-600 enabled:hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:enabled:hover:bg-zinc-800"
+                                class="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:enabled:hover:bg-slate-800"
                                 :disabled="page <= 1"
                                 aria-label="Previous page"
                                 @click="goPage(-1)"
                             >
                                 <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
                             </button>
-                            <span class="min-w-[3rem] text-center text-xs font-medium text-zinc-600 dark:text-zinc-400">{{ page }} / {{ totalPages }}</span>
+                            <span class="min-w-[3rem] text-center text-xs font-medium text-slate-600 dark:text-slate-400">{{ page }} / {{ totalPages }}</span>
                             <button
                                 type="button"
-                                class="rounded-lg border border-zinc-300 bg-white p-2 text-zinc-600 enabled:hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:enabled:hover:bg-zinc-800"
+                                class="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:enabled:hover:bg-slate-800"
                                 :disabled="page >= totalPages"
                                 aria-label="Next page"
                                 @click="goPage(1)"
@@ -466,8 +466,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                             </svg>
                         </div>
                         <div>
-                            <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Security practices</h3>
-                            <p class="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+                            <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Security practices</h3>
+                            <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                                 Do not commit keys to git or client-side apps. Prefer environment variables or a secret manager. Rotate keys
                                 if they leak or someone leaves the team; revoking here takes effect immediately for the Encoding API.
                             </p>
@@ -475,10 +475,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                     </div>
                 </div>
                 <div
-                    class="rounded-2xl border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-900/5 dark:border-zinc-800 dark:bg-zinc-900/50 dark:ring-white/5 sm:p-6"
+                    class="rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/50 dark:ring-white/5 sm:p-6"
                 >
-                    <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Auth &amp; limits</h3>
-                    <p class="mt-2 text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
+                    <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Auth &amp; limits</h3>
+                    <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                         Tenant keys are validated by the Encoding API via your SaaS webhook. Rate limits and quotas depend on your deployment;
                         see OpenAPI / operations docs for endpoint-level throttling.
                     </p>
@@ -507,7 +507,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
         >
             <p>
                 This will revoke
-                <span class="font-medium text-zinc-900 dark:text-zinc-200">{{
+                <span class="font-medium text-slate-900 dark:text-slate-200">{{
                     revokeTarget?.name?.trim() || 'this key'
                 }}</span>
                 <template v-if="revokeTarget?.prefix">
@@ -527,30 +527,30 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
             >
                 <button
                     type="button"
-                    class="absolute inset-0 bg-zinc-900/50 backdrop-blur-[1px] dark:bg-black/60"
+                    class="absolute inset-0 bg-slate-900/50 backdrop-blur-[1px] dark:bg-black/60"
                     aria-label="Close"
                     :disabled="creating"
                     @click="closeCreateModal"
                 />
                 <div
-                    class="relative max-h-[min(90vh,700px)] w-full max-w-[38rem] overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-6 shadow-xl ring-1 ring-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900 dark:ring-white/10"
+                    class="relative max-h-[min(90vh,700px)] w-full max-w-[38rem] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-900 dark:ring-white/10"
                     @click.stop
                 >
                     <div class="flex items-start justify-between gap-4">
                         <div>
                             <h2
                                 id="create-api-key-modal-title"
-                                class="text-lg font-semibold text-zinc-900 dark:text-zinc-100"
+                                class="text-lg font-semibold text-slate-900 dark:text-slate-100"
                             >
                                 New API key
                             </h2>
-                            <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                                 The secret is generated in your browser and shown once. We only store a hash and the public prefix.
                             </p>
                         </div>
                         <button
                             type="button"
-                            class="rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-40 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                            class="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                             :disabled="creating"
                             aria-label="Close dialog"
                             @click="closeCreateModal"
@@ -563,7 +563,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
 
                     <form @submit.prevent="handleCreate" class="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end">
                         <div class="min-w-0 flex-1">
-                            <label for="api-key-name-modal" class="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">Name</label>
+                            <label for="api-key-name-modal" class="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400">Name</label>
                             <input
                                 id="api-key-name-modal"
                                 v-model="newKeyName"
@@ -581,7 +581,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                                 'inline-flex min-h-[2.75rem] shrink-0 items-center justify-center rounded-xl px-6 text-sm font-semibold transition-colors',
                                 newKeyName.trim() && !creating && !createdKey
                                     ? 'bg-indigo-600 text-white hover:bg-indigo-500'
-                                    : 'cursor-not-allowed bg-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500',
+                                    : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500',
                             ]"
                         >
                             {{ creating ? 'Creating…' : 'Generate key' }}
@@ -594,10 +594,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                     <div v-if="createdKey" class="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/40 dark:bg-emerald-950/30">
                         <p class="text-sm font-medium text-emerald-900 dark:text-emerald-200">Copy this key now — it will not be shown again.</p>
                         <div class="mt-3 flex flex-col gap-2 sm:flex-row sm:items-stretch">
-                            <code class="flex-1 break-all rounded-lg border border-emerald-200/80 bg-white px-3 py-2 font-mono text-sm text-zinc-900 dark:border-emerald-800/50 dark:bg-zinc-950 dark:text-zinc-100">{{ createdKey }}</code>
+                            <code class="flex-1 break-all rounded-lg border border-emerald-200/80 bg-white px-3 py-2 font-mono text-sm text-slate-900 dark:border-emerald-800/50 dark:bg-slate-950 dark:text-slate-100">{{ createdKey }}</code>
                             <button
                                 type="button"
-                                class="inline-flex items-center justify-center rounded-xl border border-emerald-300 bg-white px-4 text-sm font-semibold text-emerald-800 hover:bg-emerald-100/80 dark:border-emerald-700 dark:bg-zinc-900 dark:text-emerald-200 dark:hover:bg-zinc-800"
+                                class="inline-flex items-center justify-center rounded-xl border border-emerald-300 bg-white px-4 text-sm font-semibold text-emerald-800 hover:bg-emerald-100/80 dark:border-emerald-700 dark:bg-slate-900 dark:text-emerald-200 dark:hover:bg-slate-800"
                                 @click="copyKey"
                             >
                                 {{ copiedKey ? 'Copied' : 'Copy' }}
@@ -605,10 +605,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                         </div>
                     </div>
 
-                    <div class="mt-6 flex justify-end gap-2 border-t border-zinc-200/80 pt-4 dark:border-zinc-700/80">
+                    <div class="mt-6 flex justify-end gap-2 border-t border-slate-200/80 pt-4 dark:border-slate-700/80">
                         <button
                             type="button"
-                            class="rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                            class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                             :disabled="creating"
                             @click="closeCreateModal"
                         >

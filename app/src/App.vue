@@ -34,7 +34,7 @@ watch(isAuthenticated, async (authenticated) => {
 <template>
     <div class="relative min-h-screen">
         <div
-            class="pointer-events-none fixed inset-0 bg-gradient-to-b from-indigo-50/90 via-zinc-50 to-zinc-100 dark:from-zinc-950 dark:via-zinc-950 dark:to-zinc-950"
+            class="pointer-events-none fixed inset-0 bg-gradient-to-b from-indigo-50/90 via-slate-50 to-slate-100 dark:from-slate-950 dark:via-slate-950 dark:to-slate-950"
             aria-hidden="true"
         />
         <div
@@ -48,10 +48,10 @@ watch(isAuthenticated, async (authenticated) => {
             class="relative flex min-h-[calc(100vh-5rem)] items-center px-4 py-10 sm:py-14"
         >
             <div
-                class="mx-auto w-full max-w-md rounded-2xl border border-zinc-200/80 bg-white/90 p-8 text-center shadow-xl shadow-zinc-900/5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/70 dark:shadow-black/20"
+                class="mx-auto w-full max-w-md rounded-2xl border border-slate-200/80 bg-white/90 p-8 text-center shadow-xl shadow-slate-900/5 backdrop-blur dark:border-slate-800 dark:bg-slate-900/70 dark:shadow-black/20"
             >
                 <div
-                    class="mx-auto mb-4 inline-flex items-center rounded-full border border-zinc-200 bg-white/80 px-3 py-1 text-xs font-medium text-zinc-600 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300"
+                    class="mx-auto mb-4 inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300"
                 >
                     Luminary Media Convert
                 </div>
@@ -61,11 +61,11 @@ watch(isAuthenticated, async (authenticated) => {
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
                 </div>
-                <h2 class="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Loading your workspace</h2>
-                <p class="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+                <h2 class="text-lg font-semibold text-slate-900 dark:text-slate-100">Loading your workspace</h2>
+                <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
                     Verifying authentication and preparing your session.
                 </p>
-                <div class="mt-5 h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                <div class="mt-5 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
                     <div class="loading-bar h-full w-1/3 rounded-full bg-indigo-500 dark:bg-indigo-400" />
                 </div>
             </div>
@@ -76,24 +76,24 @@ watch(isAuthenticated, async (authenticated) => {
             <div class="mx-auto grid w-full max-w-5xl gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
                 <section class="text-left">
                     <div
-                        class="mb-4 inline-flex items-center rounded-full border border-zinc-200 bg-white/80 px-3 py-1 text-xs font-medium text-zinc-600 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-300"
+                        class="mb-4 inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300"
                     >
                         Luminary Media Convert
                     </div>
-                    <h1 class="text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100 sm:text-5xl">
+                    <h1 class="text-4xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 sm:text-5xl">
                         Encode media with a clean, production-ready workflow
                     </h1>
-                    <p class="mt-5 max-w-2xl text-base leading-relaxed text-zinc-600 dark:text-zinc-400 sm:text-lg">
+                    <p class="mt-5 max-w-2xl text-base leading-relaxed text-slate-600 dark:text-slate-400 sm:text-lg">
                         Upload source files, configure ABR renditions, track progress in real time, and deliver HLS
                         output to S3 from one focused UI.
                     </p>
                 </section>
 
                 <section
-                    class="mx-auto w-full max-w-md rounded-2xl border border-zinc-200/80 bg-white/90 p-8 shadow-xl shadow-zinc-900/5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/70 dark:shadow-black/20"
+                    class="mx-auto w-full max-w-md rounded-2xl border border-slate-200/80 bg-white/90 p-8 shadow-xl shadow-slate-900/5 backdrop-blur dark:border-slate-800 dark:bg-slate-900/70 dark:shadow-black/20"
                 >
-                    <h2 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Sign in to continue</h2>
-                    <p class="mt-2 text-base text-zinc-600 dark:text-zinc-400">
+                    <h2 class="text-xl font-semibold text-slate-900 dark:text-slate-100">Sign in to continue</h2>
+                    <p class="mt-2 text-base text-slate-600 dark:text-slate-400">
                         Authenticate with your workspace account to access sessions, API keys, and storage configs.
                     </p>
                     <button
@@ -103,7 +103,7 @@ watch(isAuthenticated, async (authenticated) => {
                     >
                         Continue with Auth0
                     </button>
-                    <p class="mt-3 text-center text-xs text-zinc-500 dark:text-zinc-400">
+                    <p class="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
                         Secure sign-in via Auth0
                     </p>
                 </section>
@@ -113,18 +113,18 @@ watch(isAuthenticated, async (authenticated) => {
         <!-- Identity check failed (disabled, not provisioned, etc.) -->
         <div v-else-if="identityError" class="relative px-4 py-16 sm:py-24">
             <header class="mx-auto mb-10 max-w-lg text-center">
-                <h1 class="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
                     Luminary Media Convert
                 </h1>
             </header>
             <div
-                class="mx-auto max-w-md rounded-2xl border border-red-200/80 bg-white/90 p-8 shadow-xl shadow-zinc-900/5 backdrop-blur dark:border-red-900/50 dark:bg-zinc-900/70 dark:shadow-black/20 text-center"
+                class="mx-auto max-w-md rounded-2xl border border-red-200/80 bg-white/90 p-8 shadow-xl shadow-slate-900/5 backdrop-blur dark:border-red-900/50 dark:bg-slate-900/70 dark:shadow-black/20 text-center"
             >
                 <p class="mb-6 text-sm text-red-600 dark:text-red-400">{{ identityError }}</p>
                 <button
                     type="button"
                     @click="logout({ logoutParams: { returnTo } })"
-                    class="inline-flex w-full cursor-pointer items-center justify-center rounded-xl border border-zinc-300 px-6 py-3 text-sm font-semibold text-zinc-800 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                    class="inline-flex w-full cursor-pointer items-center justify-center rounded-xl border border-slate-300 px-6 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
                     Sign Out
                 </button>
@@ -134,12 +134,12 @@ watch(isAuthenticated, async (authenticated) => {
         <!-- Authenticated shell -->
         <template v-else>
             <header
-                class="sticky top-0 z-40 border-b border-zinc-200/90 bg-white/90 font-sans shadow-sm backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/90"
+                class="sticky top-0 z-40 border-b border-slate-200/90 bg-white/90 font-sans shadow-sm backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/90"
             >
                 <div class="mx-auto flex h-14 max-w-6xl items-stretch gap-4 px-4 sm:gap-6 sm:px-6">
                     <router-link
                         to="/sessions"
-                        class="flex shrink-0 items-center text-base font-bold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-lg"
+                        class="flex shrink-0 items-center text-base font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:text-lg"
                     >
                         <span class="sm:hidden">Luminary</span>
                         <span class="hidden sm:inline">Luminary Media Convert</span>
@@ -155,7 +155,7 @@ watch(isAuthenticated, async (authenticated) => {
                             :class="
                                 $route.path.startsWith('/sessions')
                                     ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
-                                    : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                                    : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
                             "
                         >
                             Sessions
@@ -166,7 +166,7 @@ watch(isAuthenticated, async (authenticated) => {
                             :class="
                                 $route.path === '/keys'
                                     ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
-                                    : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                                    : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
                             "
                         >
                             API Keys
@@ -177,7 +177,7 @@ watch(isAuthenticated, async (authenticated) => {
                             :class="
                                 $route.path === '/s3-configs'
                                     ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
-                                    : 'border-transparent text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100'
+                                    : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
                             "
                         >
                             S3 Configs

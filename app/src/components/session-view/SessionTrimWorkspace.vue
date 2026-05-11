@@ -94,7 +94,7 @@ const trimToolbarHasVisibleContent = computed(() => {
 
         <p
             v-if="showToolbarSection() && !(showTrimSegmentEditor || showChaptersSidePanel)"
-            class="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400"
+            class="text-sm leading-relaxed text-slate-500 dark:text-slate-400"
         >
             <template v-if="canEditWithTimeline">
                 Loading player — the timeline will appear once playback is ready.

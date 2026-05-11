@@ -117,7 +117,7 @@ const triggerClasses = computed(() => {
             break;
         case 'admin':
             base =
-                'relative block w-full rounded-md border border-zinc-700 bg-zinc-800 py-2 pl-3 pr-9 text-left text-sm text-zinc-100 outline-none transition-colors ' +
+                'relative block w-full rounded-md border border-slate-700 bg-slate-800 py-2 pl-3 pr-9 text-left text-sm text-slate-100 outline-none transition-colors ' +
                 'focus-visible:border-indigo-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500 disabled:opacity-50';
             break;
         default:
@@ -145,7 +145,7 @@ const showChevron = computed(() => {
 
 const chevronWrapClass = computed(() => {
     const pad = props.size === 'sm' ? ' pr-2' : ' pr-3';
-    return `pointer-events-none absolute inset-y-0 right-0 flex items-center text-zinc-500 dark:text-zinc-400${pad}`;
+    return `pointer-events-none absolute inset-y-0 right-0 flex items-center text-slate-500 dark:text-slate-400${pad}`;
 });
 
 const chevronSvgClass = computed(() =>
@@ -160,22 +160,22 @@ const panelOptionPadding = computed(() =>
 const panelClasses = computed(() => {
     const common =
         `${panelPadding.value} rounded-lg border shadow-lg outline-none ` +
-        'ring-1 ring-zinc-900/10 dark:ring-white/10 ';
+        'ring-1 ring-slate-900/10 dark:ring-white/10 ';
     switch (props.variant) {
         case 'admin':
             return (
                 `${common}` +
-                'border-zinc-600 bg-zinc-950 text-zinc-100 backdrop-blur-sm'
+                'border-slate-600 bg-slate-950 text-slate-100 backdrop-blur-sm'
             );
         case 'playback':
             return (
                 `${common}` +
-                'border-zinc-300 bg-white text-zinc-900 shadow-md dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100'
+                'border-slate-300 bg-white text-slate-900 shadow-md dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100'
             );
         default:
             return (
                 `${common}` +
-                'border-zinc-200 bg-white text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100'
+                'border-slate-200 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100'
             );
     }
 });
@@ -405,9 +405,9 @@ function rowVisualClass(idx: number, r: FlatRow) {
             ? ' bg-indigo-600/15 text-indigo-900 dark:bg-indigo-500/20 dark:text-indigo-100'
             : ' bg-indigo-50 text-indigo-900 dark:bg-indigo-950/50 dark:text-indigo-100';
     } else if (hi) {
-        tone = ' bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100';
+        tone = ' bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100';
     } else {
-        tone = ' text-zinc-800 dark:text-zinc-200';
+        tone = ' text-slate-800 dark:text-slate-200';
     }
     return `${base}${tone}`;
 }

@@ -2,9 +2,9 @@
 import StatusBadge from '../StatusBadge.vue';
 
 const statusConfig: Record<string, { label: string; color: string; borderColor: string }> = {
-    created: { label: 'Created', color: 'text-zinc-700 dark:text-zinc-400', borderColor: 'border-zinc-300 dark:border-zinc-700' },
+    created: { label: 'Created', color: 'text-slate-700 dark:text-slate-400', borderColor: 'border-slate-300 dark:border-slate-700' },
     uploading: { label: 'Uploading', color: 'text-cyan-700 dark:text-cyan-400', borderColor: 'border-cyan-300 dark:border-cyan-700/60' },
-    uploaded: { label: 'Uploaded', color: 'text-zinc-700 dark:text-zinc-400', borderColor: 'border-zinc-300 dark:border-zinc-700' },
+    uploaded: { label: 'Uploaded', color: 'text-slate-700 dark:text-slate-400', borderColor: 'border-slate-300 dark:border-slate-700' },
     queued: { label: 'Queued', color: 'text-amber-700 dark:text-amber-400', borderColor: 'border-amber-300 dark:border-amber-700/60' },
     encoding: { label: 'Encoding', color: 'text-indigo-700 dark:text-indigo-400', borderColor: 'border-indigo-300 dark:border-indigo-700/60' },
     encrypting: { label: 'Encrypting', color: 'text-amber-700 dark:text-amber-400', borderColor: 'border-amber-300 dark:border-amber-700/60' },
@@ -65,20 +65,20 @@ const emit = defineEmits<{
                 <StatusBadge
                     class="shrink-0"
                     :label="currentStatus ? statusConfig[currentStatus]?.label ?? currentStatus : '--'"
-                    :color="statusConfig[currentStatus ?? '']?.color ?? 'text-zinc-700 dark:text-zinc-400'"
-                    :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-zinc-300 dark:border-zinc-700'"
+                    :color="statusConfig[currentStatus ?? '']?.color ?? 'text-slate-700 dark:text-slate-400'"
+                    :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-slate-300 dark:border-slate-700'"
                 />
                 <button
                     type="button"
                     :disabled="savingName"
-                    class="cursor-pointer rounded-lg border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                     @click="emit('saveName')"
                 >
                     {{ savingName ? '…' : 'Save' }}
                 </button>
                 <button
                     type="button"
-                    class="cursor-pointer rounded-lg border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                     @click="emit('cancelEditName')"
                 >
                     Cancel
@@ -89,7 +89,7 @@ const emit = defineEmits<{
                 class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2"
             >
                 <h1
-                    class="min-w-0 cursor-pointer text-2xl font-semibold tracking-tight text-zinc-900 transition-colors hover:text-indigo-600 dark:text-zinc-100 dark:hover:text-indigo-400"
+                    class="min-w-0 cursor-pointer text-2xl font-semibold tracking-tight text-slate-900 transition-colors hover:text-indigo-600 dark:text-slate-100 dark:hover:text-indigo-400"
                     @click="emit('startEditName')"
                     :title="sessionName ? 'Click to rename' : 'Click to add a name'"
                 >
@@ -98,14 +98,14 @@ const emit = defineEmits<{
                 <StatusBadge
                     class="shrink-0"
                     :label="currentStatus ? statusConfig[currentStatus]?.label ?? currentStatus : '--'"
-                    :color="statusConfig[currentStatus ?? '']?.color ?? 'text-zinc-700 dark:text-zinc-400'"
-                    :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-zinc-300 dark:border-zinc-700'"
+                    :color="statusConfig[currentStatus ?? '']?.color ?? 'text-slate-700 dark:text-slate-400'"
+                    :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-slate-300 dark:border-slate-700'"
                 />
             </div>
             <div class="mt-1.5 flex flex-wrap items-center gap-2">
-                <p class="font-mono text-xs text-zinc-500 dark:text-zinc-400">{{ sessionId }}</p>
-                <span v-if="session.createdAt" class="text-xs text-zinc-500 dark:text-zinc-500">·</span>
-                <p v-if="session.createdAt" class="text-xs text-zinc-500 dark:text-zinc-400">{{ createdSubtitle }}</p>
+                <p class="font-mono text-xs text-slate-500 dark:text-slate-400">{{ sessionId }}</p>
+                <span v-if="session.createdAt" class="text-xs text-slate-500 dark:text-slate-500">·</span>
+                <p v-if="session.createdAt" class="text-xs text-slate-500 dark:text-slate-400">{{ createdSubtitle }}</p>
             </div>
             <div
                 v-if="
@@ -120,8 +120,8 @@ const emit = defineEmits<{
                     v-if="displayEncoder && encoderConfig[displayEncoder]"
                     :label="encoderConfig[displayEncoder].label"
                     :icon="encoderConfig[displayEncoder].icon"
-                    :color="displayEncoder === 'cpu' ? 'text-zinc-700 dark:text-zinc-400' : 'text-violet-700 dark:text-violet-400'"
-                    :border-color="displayEncoder === 'cpu' ? 'border-zinc-300 dark:border-zinc-700' : 'border-violet-300 dark:border-violet-700/60'"
+                    :color="displayEncoder === 'cpu' ? 'text-slate-700 dark:text-slate-400' : 'text-violet-700 dark:text-violet-400'"
+                    :border-color="displayEncoder === 'cpu' ? 'border-slate-300 dark:border-slate-700' : 'border-violet-300 dark:border-violet-700/60'"
                 />
                 <StatusBadge
                     v-if="displaySegmentFormat === 'mpegts'"

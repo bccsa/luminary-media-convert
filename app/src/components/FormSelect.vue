@@ -146,7 +146,7 @@ const selectClasses = computed(() => {
             break;
         case 'admin':
             base =
-                'w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none transition-colors ' +
+                'w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-100 outline-none transition-colors ' +
                 'focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500';
             break;
         default:
@@ -170,7 +170,7 @@ const showChevron = () => props.variant === 'field' && !props.hideChevron;
 
 const chevronWrapClass = computed(() => {
     const pad = props.size === 'sm' ? ' pr-2' : ' pr-3';
-    return `pointer-events-none absolute inset-y-0 right-0 flex items-center text-zinc-500 dark:text-zinc-400${pad}`;
+    return `pointer-events-none absolute inset-y-0 right-0 flex items-center text-slate-500 dark:text-slate-400${pad}`;
 });
 
 const chevronSvgClass = computed(() =>

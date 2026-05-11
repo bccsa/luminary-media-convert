@@ -61,7 +61,7 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
 <template>
     <div class="relative inline-flex items-center gap-2">
         <!-- Loading -->
-        <span v-if="loading" :class="[textSize, 'text-zinc-500 dark:text-zinc-500']">
+        <span v-if="loading" :class="[textSize, 'text-slate-500 dark:text-slate-500']">
             {{ loadingLabel }}
         </span>
 
@@ -82,11 +82,11 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
         <!-- Confirmation overlay — positioned absolute right so it doesn't shift layout -->
         <div
             v-else
-            class="absolute right-0 z-10 flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-lg ring-1 ring-zinc-900/5 dark:border-zinc-700 dark:bg-zinc-900 dark:ring-white/10"
+            class="absolute right-0 z-10 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-900 dark:ring-white/10"
         >
             <!-- Simple confirm -->
             <template v-if="state === 'confirm'">
-                <span :class="[textSize, 'whitespace-nowrap text-zinc-600 dark:text-zinc-400']">{{ prompt }}</span>
+                <span :class="[textSize, 'whitespace-nowrap text-slate-600 dark:text-slate-400']">{{ prompt }}</span>
                 <button
                     type="button"
                     :class="[btnBase, btnSm, 'bg-red-600 text-white hover:bg-red-500']"
@@ -99,7 +99,7 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
                     :class="[
                         btnBase,
                         btnSm,
-                        'border border-zinc-300 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800',
+                        'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800',
                     ]"
                     @click="cancel"
                 >
@@ -109,7 +109,7 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
 
             <!-- Secondary choice (e.g., delete S3 files?) -->
             <template v-else-if="state === 'secondary'">
-                <span :class="[textSize, 'whitespace-nowrap text-zinc-600 dark:text-zinc-400']">{{ secondaryPrompt }}</span>
+                <span :class="[textSize, 'whitespace-nowrap text-slate-600 dark:text-slate-400']">{{ secondaryPrompt }}</span>
                 <button
                     type="button"
                     :class="[btnBase, btnSm, 'bg-red-600 text-white hover:bg-red-500']"
@@ -122,7 +122,7 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
                     :class="[
                         btnBase,
                         btnSm,
-                        'border border-zinc-300 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800',
+                        'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800',
                     ]"
                     @click="onConfirm(false)"
                 >
@@ -133,7 +133,7 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
                     :class="[
                         btnBase,
                         btnSm,
-                        'border border-zinc-300 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800',
+                        'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800',
                     ]"
                     @click="cancel"
                 >

@@ -144,7 +144,7 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
         >{{ chaptersSaveError }}</p>
 
         <div v-if="isCompleted && showAngleSwitcher" class="mt-4 flex flex-wrap items-center gap-2">
-            <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Angle</span>
+            <span class="text-xs font-medium text-slate-500 dark:text-slate-400">Angle</span>
             <div class="flex flex-wrap gap-1.5">
                 <button
                     v-for="(ap, i) in uniqueAnglePlaylists"
@@ -153,7 +153,7 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
                     class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
                     :class="i === currentAngleIndex
                         ? 'bg-indigo-600 text-white dark:bg-indigo-600 dark:text-white'
-                        : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700'"
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
                     @click="emit('angleChange', i)"
                 >
                     {{ ap.name }}

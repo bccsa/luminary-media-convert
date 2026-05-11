@@ -142,9 +142,9 @@ const activeUploads = useActiveUploads();
 // ---------------------------------------------------------------------------
 
 const statusConfig: Record<string, { label: string; color: string; borderColor: string }> = {
-    created: { label: 'Created', color: 'text-zinc-700 dark:text-zinc-400', borderColor: 'border-zinc-300 dark:border-zinc-700' },
+    created: { label: 'Created', color: 'text-slate-700 dark:text-slate-400', borderColor: 'border-slate-300 dark:border-slate-700' },
     uploading: { label: 'Uploading', color: 'text-cyan-700 dark:text-cyan-400', borderColor: 'border-cyan-300 dark:border-cyan-700/60' },
-    uploaded: { label: 'Uploaded', color: 'text-zinc-700 dark:text-zinc-400', borderColor: 'border-zinc-300 dark:border-zinc-700' },
+    uploaded: { label: 'Uploaded', color: 'text-slate-700 dark:text-slate-400', borderColor: 'border-slate-300 dark:border-slate-700' },
     queued: { label: 'Queued', color: 'text-amber-700 dark:text-amber-400', borderColor: 'border-amber-300 dark:border-amber-700/60' },
     encoding: { label: 'Encoding', color: 'text-indigo-700 dark:text-indigo-400', borderColor: 'border-indigo-300 dark:border-indigo-700/60' },
     encrypting: { label: 'Encrypting', color: 'text-amber-700 dark:text-amber-400', borderColor: 'border-amber-300 dark:border-amber-700/60' },
@@ -1419,7 +1419,7 @@ onUnmounted(() => {
         <div class="mb-4">
             <router-link
                 to="/sessions"
-                class="inline-flex items-center gap-1.5 text-sm text-zinc-600 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+                class="inline-flex items-center gap-1.5 text-sm text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
             >
                 <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
@@ -1428,7 +1428,7 @@ onUnmounted(() => {
             </router-link>
         </div>
 
-        <div v-if="loading" class="flex justify-center rounded-2xl border border-zinc-200/90 bg-white/90 py-16 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10">
+        <div v-if="loading" class="flex justify-center rounded-2xl border border-slate-200/90 bg-white/90 py-16 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur dark:border-slate-800 dark:bg-slate-900/60 dark:ring-white/10">
             <svg class="h-8 w-8 animate-spin text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -1460,27 +1460,27 @@ onUnmounted(() => {
             <!-- Expired -->
             <div
                 v-if="isExpired"
-                class="rounded-2xl border border-zinc-200/90 bg-white/90 p-8 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10"
+                class="rounded-2xl border border-slate-200/90 bg-white/90 p-8 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur dark:border-slate-800 dark:bg-slate-900/60 dark:ring-white/10"
             >
                 <div class="flex flex-col items-center gap-4 py-8">
-                    <svg class="h-10 w-10 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                    <svg class="h-10 w-10 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    <p class="text-sm text-zinc-700 dark:text-zinc-300">Session expired</p>
-                    <p class="max-w-md text-center text-xs text-zinc-500">The encoding session is no longer active and cannot be interacted with.</p>
+                    <p class="text-sm text-slate-700 dark:text-slate-300">Session expired</p>
+                    <p class="max-w-md text-center text-xs text-slate-500">The encoding session is no longer active and cannot be interacted with.</p>
                     <div class="mt-2 grid w-full max-w-lg grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Status</p>
-                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ statusConfig[session.status]?.label ?? session.status }}</p>
+                        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Status</p>
+                            <p class="text-sm text-slate-800 dark:text-slate-200">{{ statusConfig[session.status]?.label ?? session.status }}</p>
                         </div>
-                        <div class="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
-                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Created</p>
-                            <p class="text-sm text-zinc-800 dark:text-zinc-200">{{ formatDate(session.createdAt) }}</p>
+                        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                            <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Created</p>
+                            <p class="text-sm text-slate-800 dark:text-slate-200">{{ formatDate(session.createdAt) }}</p>
                         </div>
                     </div>
                     <button
                         type="button"
-                        class="mt-2 rounded-xl border border-zinc-300 bg-zinc-100 px-6 py-3 text-sm font-semibold text-zinc-700 transition-colors hover:bg-zinc-200 dark:border-transparent dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                        class="mt-2 rounded-xl border border-slate-300 bg-slate-100 px-6 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200 dark:border-transparent dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                         @click="router.push('/sessions/new')"
                     >
                         New session
@@ -1520,7 +1520,7 @@ onUnmounted(() => {
 
                 <div class="min-w-0" :class="trimPlayerBreakoutClass">
                     <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                        <div class="min-w-0 flex-1 flex gap-1 overflow-x-auto rounded-xl border border-zinc-200/90 bg-zinc-100/80 p-1 dark:border-zinc-700 dark:bg-zinc-900/50">
+                        <div class="min-w-0 flex-1 flex gap-1 overflow-x-auto rounded-xl border border-slate-200/90 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-900/50">
                             <button
                                 v-for="tab in [
                                     { id: 'workflow' as const, label: 'Workflow' },
@@ -1532,8 +1532,8 @@ onUnmounted(() => {
                                 type="button"
                                 class="whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition-colors sm:text-sm"
                                 :class="activeTab === tab.id
-                                    ? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100'
-                                    : 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'"
+                                    ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-800 dark:text-slate-100'
+                                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
                                 @click="activeTab = tab.id"
                             >
                                 {{ tab.label }}
@@ -1585,7 +1585,7 @@ onUnmounted(() => {
 
                 <div
                     v-if="showSessionDetailCard"
-                    class="w-full rounded-2xl border border-zinc-200/90 bg-white/90 p-4 shadow-lg shadow-zinc-900/5 ring-1 ring-zinc-900/5 backdrop-blur sm:p-6 dark:border-zinc-800 dark:bg-zinc-900/60 dark:ring-white/10"
+                    class="w-full rounded-2xl border border-slate-200/90 bg-white/90 p-4 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur sm:p-6 dark:border-slate-800 dark:bg-slate-900/60 dark:ring-white/10"
                 >
                     <div
                         v-if="submissionError"
