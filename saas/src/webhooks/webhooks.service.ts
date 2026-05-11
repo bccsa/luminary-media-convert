@@ -130,6 +130,7 @@ export class WebhooksService {
             if (dto.masterPlaylist) doc.masterPlaylist = dto.masterPlaylist;
             if (dto.anglePlaylists) doc.anglePlaylists = dto.anglePlaylists;
             if (dto.thumbnailsVtt) doc.thumbnailsVtt = dto.thumbnailsVtt;
+            if (dto.probeResult) doc.probeResult = dto.probeResult;
             if (dto.encryptionKeyHex) {
                 doc.encrypted = true;
                 doc.encryptionKeyHex = dto.encryptionKeyHex;

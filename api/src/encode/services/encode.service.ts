@@ -271,6 +271,7 @@ export class EncodeService {
                 encryptionKeyHex: encryptionKey
                     ? encryptionKey.toString('hex')
                     : undefined,
+                probeResult: session.probeResult ?? undefined,
             });
 
             this.logger.log(`Session ${sessionId} completed successfully`);

@@ -96,4 +96,10 @@ export class WebhookPayloadDto {
         example: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
     })
     encryptionKeyHex?: string;
+
+    @ApiPropertyOptional({
+        description:
+            'ffprobe result for the source file. Present on "completed" so consumers can show the trim/chapter timeline without re-probing.',
+    })
+    probeResult?: unknown;
 }

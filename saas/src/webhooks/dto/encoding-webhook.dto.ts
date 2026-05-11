@@ -18,4 +18,5 @@ export class EncodingWebhookDto {
     @IsString() @IsOptional() @Expose() thumbnailsVtt?: string;
     @IsArray() @IsOptional() @ValidateNested({ each: true }) @Type(() => AnglePlaylistDto) @Expose() anglePlaylists?: AnglePlaylistDto[];
     @IsString() @IsOptional() @Expose() encryptionKeyHex?: string;
+    @IsOptional() @Expose() probeResult?: unknown;
 }

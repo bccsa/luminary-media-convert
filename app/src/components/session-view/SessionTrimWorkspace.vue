@@ -11,6 +11,8 @@ const props = withDefaults(
         chaptersIsSaving: boolean;
         chaptersSaveError: string | null;
         showTrimSegmentEditor: boolean;
+        /** True when the session is completed/imported — changes the placeholder copy while player duration loads. */
+        canEditWithTimeline?: boolean;
         probeDuration: number;
         getCurrentTime: () => number;
         onSeek: (t: number) => void;
@@ -84,7 +86,12 @@ const trimToolbarHasVisibleContent = computed(() => {
             v-if="showToolbarSection() && !(showTrimSegmentEditor || showChaptersSidePanel)"
             class="text-sm leading-relaxed text-zinc-500 dark:text-zinc-400"
         >
-            Trim ranges appear once the source is probed. Chapters are edited beside the player when preview is available.
+            <template v-if="canEditWithTimeline">
+                Loading player — the timeline will appear once playback is ready.
+            </template>
+            <template v-else>
+                Trim ranges appear once the source is probed. Chapters are edited beside the player when preview is available.
+            </template>
         </p>
     </div>
 

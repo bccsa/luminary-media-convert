@@ -403,13 +403,23 @@ const activePlaybackUrl = computed(() => {
     return previewPlaybackUrl.value;
 });
 
+/**
+ * True when the Trim & chapters timeline should be available — either during encode
+ * configuration (probe-config phase) or after the session has been completed/imported so
+ * the user can still adjust trim markers and chapter labels and save them.
+ */
+const canEditWithTimeline = computed(
+    () => showProbeConfig.value || isCompleted.value,
+);
+
 const showTrimSegmentEditor = computed(
-    () => !!(showProbeConfig.value && activePlaybackUrl.value && probeResult.value?.format?.duration),
+    () => !!(canEditWithTimeline.value && activePlaybackUrl.value && chaptersSidePanelDuration.value > 0),
 );
 
 const trimEditorProbeDuration = computed(() => {
-    const d = probeResult.value?.format?.duration;
-    return typeof d === 'number' && d > 0 ? d : 0;
+    // Prefer player-reported duration (reflects encoded trim cuts); fall back through
+    // in-memory probe then session-doc probe so completed sessions always get a value.
+    return chaptersSidePanelDuration.value;
 });
 
 // Display metadata from the session detail or poller
@@ -1165,17 +1175,18 @@ function editorMatchesChapters(ed: Segment[], ch: Segment[]): boolean {
 }
 
 /**
- * Keeps the trim timeline in sync with the chapter list during encode config: after refresh
- * or edits beside the player, chapters can update while editorSegments is still empty or stale.
+ * Keeps the trim timeline in sync with the chapter list during encode config AND for
+ * completed sessions: after refresh or edits beside the player, chapters can update while
+ * editorSegments is still empty or stale.
  */
 function syncEditorFromChaptersIfNeeded() {
-    if (!showProbeConfig.value || !chapters.isLoaded.value) return;
+    if (!canEditWithTimeline.value || !chapters.isLoaded.value) return;
     if (editorMatchesChapters(editorSegments.value, chapterSegments.value)) return;
     editorSegments.value = chapterSegments.value.map((s) => ({ ...s }));
 }
 
 function syncChaptersFromTrim() {
-    if (!showProbeConfig.value || !chapters.isLoaded.value) return;
+    if (!canEditWithTimeline.value || !chapters.isLoaded.value) return;
 
     const trim = editorSegments.value;
     if (trim.length === 0) {
@@ -1225,8 +1236,8 @@ watch(
     { deep: true },
 );
 
-watch(showProbeConfig, (probe) => {
-    if (!probe) hadTrimForChapterSync.value = false;
+watch(canEditWithTimeline, (can) => {
+    if (!can) hadTrimForChapterSync.value = false;
     else syncEditorFromChaptersIfNeeded();
 });
 
@@ -1274,6 +1285,13 @@ watch(showProbeConfig, (ready) => {
         activeTab.value = 'output';
     }
     if (!ready) autoSwitchedToOutput = false;
+});
+
+// If the session transitions to completed while the Encode settings tab is open, redirect away.
+watch(isCompleted, (completed) => {
+    if (completed && activeTab.value === 'output') {
+        activeTab.value = 'workflow';
+    }
 });
 
 const effectiveProbe = computed<ProbeResult | null>(() => {
@@ -1471,7 +1489,7 @@ onUnmounted(() => {
                         <button
                             v-for="tab in [
                                 { id: 'workflow' as const, label: 'Workflow' },
-                                { id: 'output' as const, label: 'Encode settings' },
+                                ...(!isCompleted ? [{ id: 'output' as const, label: 'Encode settings' }] : []),
                                 { id: 'trim' as const, label: 'Trim & chapters' },
                                 { id: 'post' as const, label: 'Delivery' },
                             ]"
@@ -1638,6 +1656,7 @@ onUnmounted(() => {
                                 :chapters-is-saving="chapters.isSaving.value"
                                 :chapters-save-error="chaptersSaveError"
                                 :show-trim-segment-editor="showTrimSegmentEditor"
+                                :can-edit-with-timeline="canEditWithTimeline"
                                 :probe-duration="trimEditorProbeDuration"
                                 :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
                                 :on-seek="(t: number) => playerRef?.seek(t)"
