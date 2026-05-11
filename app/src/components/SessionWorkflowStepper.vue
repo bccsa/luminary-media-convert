@@ -27,7 +27,7 @@ function circleClass(v: StepVisual): string {
         case 'done':
             return `${base} bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400`;
         case 'active':
-            return `${base} bg-indigo-100 text-indigo-700 ring-2 ring-indigo-400/60 dark:bg-indigo-500/20 dark:text-indigo-300 dark:ring-indigo-400/40`;
+            return `${base} bg-slate-100 text-slate-700 ring-2 ring-slate-400/60 dark:bg-slate-500/20 dark:text-slate-300 dark:ring-slate-400/40`;
         case 'error':
             return `${base} bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400`;
         default:
@@ -74,7 +74,7 @@ const stepsWithVisual = computed(() =>
                     <span
                         class="mt-1.5 max-w-[4.5rem] text-center text-[10px] font-medium uppercase tracking-wide sm:max-w-none sm:text-xs"
                         :class="step.visual === 'active'
-                            ? 'text-indigo-700 dark:text-indigo-300'
+                            ? 'text-slate-700 dark:text-slate-300'
                             : step.visual === 'done'
                               ? 'text-emerald-700 dark:text-emerald-400'
                               : step.visual === 'error'

@@ -208,7 +208,7 @@ onMounted(fetchSavedS3Configs);
         <div class="grid gap-8 lg:grid-cols-12 lg:items-start">
             <div class="lg:col-span-8">
                 <section
-                    class="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/60 dark:shadow-black/20 dark:ring-white/10"
+                    class="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur-md dark:border-slate-700 dark:bg-slate-800/60 dark:shadow-black/20 dark:ring-white/10"
                 >
                     <div class="p-5 sm:p-6 lg:p-8">
                         <div
@@ -226,7 +226,7 @@ onMounted(fetchSavedS3Configs);
                                 </button>
                                 <button
                                     type="button"
-                                    class="cursor-pointer rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                                    class="cursor-pointer rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                                     @click="dismissPrefixWarning"
                                 >
                                     Revise prefix
@@ -242,8 +242,8 @@ onMounted(fetchSavedS3Configs);
                         </div>
 
                         <div v-if="validating || submitting" class="flex flex-col items-center gap-4 py-16">
-                            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 dark:bg-indigo-950/40">
-                                <svg class="h-6 w-6 animate-spin text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
+                            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 dark:bg-slate-950/40">
+                                <svg class="h-6 w-6 animate-spin text-slate-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24">
                                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
                                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                 </svg>

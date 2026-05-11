@@ -216,7 +216,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                 </div>
                 <button
                     type="button"
-                    class="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500 dark:bg-indigo-600 dark:hover:bg-indigo-500"
+                    class="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600"
                     @click="openCreateModal"
                 >
                     <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -229,9 +229,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
             <!-- Summary metrics -->
             <div class="mb-8 grid gap-4 sm:grid-cols-3">
                 <div
-                    class="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/50 dark:ring-white/5"
+                    class="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800/50 dark:ring-white/5"
                 >
-                    <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400">
+                    <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-50 text-slate-600 dark:bg-slate-950/50 dark:text-slate-400">
                         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                             <path
                                 stroke-linecap="round"
@@ -248,7 +248,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                     </div>
                 </div>
                 <div
-                    class="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/50 dark:ring-white/5"
+                    class="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800/50 dark:ring-white/5"
                 >
                     <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
                         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -264,7 +264,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                     </div>
                 </div>
                 <div
-                    class="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/50 dark:ring-white/5"
+                    class="flex items-center gap-4 rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800/50 dark:ring-white/5"
                 >
                     <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-400">
                         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -281,7 +281,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                             :href="docsUrl"
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
+                            class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-slate-500 dark:text-slate-400 dark:hover:text-slate-300"
                         >
                             OpenAPI docs
                             <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
@@ -294,19 +294,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
             <!-- Encoding API strip -->
             <div
                 v-if="encodingApiUrl"
-                class="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200/90 bg-slate-50/90 px-4 py-3 text-xs dark:border-slate-800 dark:bg-slate-900/40"
+                class="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200/90 bg-slate-50/90 px-4 py-3 text-xs dark:border-slate-700 dark:bg-slate-800/40"
             >
                 <span class="font-medium text-slate-600 dark:text-slate-400">Encoding API base URL</span>
                 <code class="rounded-lg border border-slate-200 bg-white px-2 py-1 font-mono text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">{{ encodingApiUrl }}</code>
                 <button
                     type="button"
-                    class="ml-auto rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                    class="ml-auto rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                     @click="showDocs = !showDocs"
                 >
                     {{ showDocs ? 'Hide' : 'Show' }} embedded docs
                 </button>
             </div>
-            <div v-if="showDocs && docsUrl" class="mb-8 overflow-hidden rounded-2xl border border-slate-200/80 shadow-lg dark:border-slate-800">
+            <div v-if="showDocs && docsUrl" class="mb-8 overflow-hidden rounded-2xl border border-slate-200/80 shadow-lg dark:border-slate-700">
                 <iframe
                     :src="docsUrl"
                     class="h-[min(70vh,560px)] w-full border-0 bg-white"
@@ -316,7 +316,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
 
             <!-- Keys table card -->
             <section
-                class="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/60 dark:ring-white/10"
+                class="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10"
             >
                 <div class="flex flex-col gap-4 border-b border-slate-200/80 p-5 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700/80">
                     <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Keys</h2>
@@ -334,8 +334,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                 </div>
 
                 <div v-if="loading" class="flex flex-col items-center gap-4 py-16">
-                    <div class="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 dark:bg-indigo-950/40">
-                        <svg class="h-6 w-6 animate-spin text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
+                    <div class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 dark:bg-slate-950/40">
+                        <svg class="h-6 w-6 animate-spin text-slate-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                         </svg>
@@ -353,7 +353,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                     <p class="text-sm text-slate-600 dark:text-slate-400">No keys yet. Create one to authenticate Encoding API requests.</p>
                     <button
                         type="button"
-                        class="mt-4 text-sm font-semibold text-indigo-600 hover:text-indigo-500 dark:text-indigo-400"
+                        class="mt-4 text-sm font-semibold text-slate-600 hover:text-slate-500 dark:text-slate-400"
                         @click="openCreateModal"
                     >
                         Create API key
@@ -367,7 +367,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                     <div v-else class="overflow-x-auto">
                         <table class="w-full min-w-[640px] text-left text-sm">
                             <thead>
-                                <tr class="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-400">
+                                <tr class="border-b border-slate-200 bg-slate-50/80 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
                                     <th class="px-5 py-3">Name</th>
                                     <th class="px-5 py-3">Key ID</th>
                                     <th class="px-5 py-3">Created</th>
@@ -379,7 +379,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                                 <tr
                                     v-for="key in paginatedKeys"
                                     :key="key.id"
-                                    :class="key.status === 'revoked' ? 'bg-slate-50/50 opacity-75 dark:bg-slate-900/30' : ''"
+                                    :class="key.status === 'revoked' ? 'bg-slate-50/50 opacity-75 dark:bg-slate-800/30' : ''"
                                 >
                                     <td class="px-5 py-4">
                                         <p class="font-medium text-slate-900 dark:text-slate-100">{{ key.name }}</p>
@@ -419,7 +419,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                     </div>
                     <div
                         v-if="filteredKeys.length > 0"
-                        class="flex flex-col items-center justify-between gap-3 border-t border-slate-200/80 px-5 py-4 sm:flex-row dark:border-slate-800"
+                        class="flex flex-col items-center justify-between gap-3 border-t border-slate-200/80 px-5 py-4 sm:flex-row dark:border-slate-700"
                     >
                         <p class="text-xs text-slate-500 dark:text-slate-400">
                             Showing
@@ -432,7 +432,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                         <div class="flex items-center gap-2">
                             <button
                                 type="button"
-                                class="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:enabled:hover:bg-slate-800"
+                                class="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:enabled:hover:bg-slate-800"
                                 :disabled="page <= 1"
                                 aria-label="Previous page"
                                 @click="goPage(-1)"
@@ -442,7 +442,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                             <span class="min-w-[3rem] text-center text-xs font-medium text-slate-600 dark:text-slate-400">{{ page }} / {{ totalPages }}</span>
                             <button
                                 type="button"
-                                class="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:enabled:hover:bg-slate-800"
+                                class="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 enabled:hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:enabled:hover:bg-slate-800"
                                 :disabled="page >= totalPages"
                                 aria-label="Next page"
                                 @click="goPage(1)"
@@ -457,10 +457,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
             <!-- Bottom info -->
             <div class="mt-8 grid gap-6 pb-12 lg:grid-cols-2">
                 <div
-                    class="rounded-2xl border border-indigo-200/60 bg-indigo-50/40 p-5 dark:border-indigo-900/40 dark:bg-indigo-950/20 sm:p-6"
+                    class="rounded-2xl border border-slate-200/60 bg-slate-50/40 p-5 dark:border-slate-900/40 dark:bg-slate-950/20 sm:p-6"
                 >
                     <div class="flex gap-3">
-                        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600 dark:bg-indigo-900/50 dark:text-indigo-300">
+                        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-900/50 dark:text-slate-300">
                             <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.623 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
                             </svg>
@@ -475,7 +475,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                     </div>
                 </div>
                 <div
-                    class="rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/50 dark:ring-white/5 sm:p-6"
+                    class="rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800/50 dark:ring-white/5 sm:p-6"
                 >
                     <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Auth &amp; limits</h3>
                     <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
@@ -487,7 +487,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                         :href="docsUrl"
                         target="_blank"
                         rel="noopener noreferrer"
-                        class="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:text-indigo-500 dark:text-indigo-400"
+                        class="mt-3 inline-flex items-center gap-1 text-sm font-semibold text-slate-600 hover:text-slate-500 dark:text-slate-400"
                     >
                         Browse API reference
                         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
@@ -533,7 +533,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                     @click="closeCreateModal"
                 />
                 <div
-                    class="relative max-h-[min(90vh,700px)] w-full max-w-[38rem] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-900 dark:ring-white/10"
+                    class="relative max-h-[min(90vh,700px)] w-full max-w-[38rem] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10"
                     @click.stop
                 >
                     <div class="flex items-start justify-between gap-4">
@@ -550,7 +550,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                         </div>
                         <button
                             type="button"
-                            class="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                            class="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-40 dark:hover:bg-slate-700 dark:hover:text-slate-200"
                             :disabled="creating"
                             aria-label="Close dialog"
                             @click="closeCreateModal"
@@ -580,7 +580,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                             :class="[
                                 'inline-flex min-h-[2.75rem] shrink-0 items-center justify-center rounded-xl px-6 text-sm font-semibold transition-colors',
                                 newKeyName.trim() && !creating && !createdKey
-                                    ? 'bg-indigo-600 text-white hover:bg-indigo-500'
+                                    ? 'bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600'
                                     : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500',
                             ]"
                         >
@@ -597,7 +597,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                             <code class="flex-1 break-all rounded-lg border border-emerald-200/80 bg-white px-3 py-2 font-mono text-sm text-slate-900 dark:border-emerald-800/50 dark:bg-slate-950 dark:text-slate-100">{{ createdKey }}</code>
                             <button
                                 type="button"
-                                class="inline-flex items-center justify-center rounded-xl border border-emerald-300 bg-white px-4 text-sm font-semibold text-emerald-800 hover:bg-emerald-100/80 dark:border-emerald-700 dark:bg-slate-900 dark:text-emerald-200 dark:hover:bg-slate-800"
+                                class="inline-flex items-center justify-center rounded-xl border border-emerald-300 bg-white px-4 text-sm font-semibold text-emerald-800 hover:bg-emerald-100/80 dark:border-emerald-700 dark:bg-slate-800 dark:text-emerald-200 dark:hover:bg-slate-700"
                                 @click="copyKey"
                             >
                                 {{ copiedKey ? 'Copied' : 'Copy' }}

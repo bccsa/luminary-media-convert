@@ -256,7 +256,7 @@ const canCreateConfig = computed(() =>
         <section class="space-y-4">
             <div class="flex items-center gap-3">
                 <span
-                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400"
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-950/60 dark:text-slate-400"
                     aria-hidden="true"
                 >
                     <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -280,14 +280,14 @@ const canCreateConfig = computed(() =>
             />
         </section>
 
-        <div class="border-t border-slate-200/90 dark:border-slate-800" aria-hidden="true" />
+        <div class="border-t border-slate-200/90 dark:border-slate-700" aria-hidden="true" />
 
         <!-- Storage destination -->
         <section class="space-y-5">
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div class="flex items-center gap-3">
                     <span
-                        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400"
+                        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-950/60 dark:text-slate-400"
                         aria-hidden="true"
                     >
                         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -306,7 +306,7 @@ const canCreateConfig = computed(() =>
                 <button
                     v-if="!showNewConfigForm"
                     type="button"
-                    class="cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                    class="cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                     @click="showNewConfigForm = true"
                 >
                     New config
@@ -315,7 +315,7 @@ const canCreateConfig = computed(() =>
 
             <div
                 v-if="showNewConfigForm"
-                class="space-y-4 rounded-xl border border-indigo-200/80 bg-indigo-50/60 p-4 dark:border-indigo-500/30 dark:bg-indigo-950/25"
+                class="space-y-4 rounded-xl border border-slate-200/80 bg-slate-50/60 p-4 dark:border-slate-500/30 dark:bg-slate-950/25"
             >
                 <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">New S3 configuration</h3>
                 <div>
@@ -333,7 +333,7 @@ const canCreateConfig = computed(() =>
                     </div>
                     <div class="flex items-end pb-1">
                         <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                            <input v-model="newConfig.useSSL" type="checkbox" class="accent-indigo-500" />
+                            <input v-model="newConfig.useSSL" type="checkbox" class="accent-slate-500" />
                             Use SSL
                         </label>
                     </div>
@@ -375,7 +375,7 @@ const canCreateConfig = computed(() =>
                         class="rounded-xl px-4 py-2 text-xs font-semibold transition-colors"
                         :class="
                             canCreateConfig
-                                ? 'cursor-pointer bg-indigo-600 text-white hover:bg-indigo-500'
+                                ? 'cursor-pointer bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600'
                                 : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500'
                         "
                         @click="onCreateConfig"
@@ -384,7 +384,7 @@ const canCreateConfig = computed(() =>
                     </button>
                     <button
                         type="button"
-                        class="cursor-pointer rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                        class="cursor-pointer rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                         @click="showNewConfigForm = false; resetNewConfig()"
                     >
                         Cancel
@@ -394,12 +394,12 @@ const canCreateConfig = computed(() =>
 
             <div
                 v-else-if="savedS3Configs.length === 0"
-                class="rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-6 text-center dark:border-slate-600 dark:bg-slate-900/50"
+                class="rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-6 text-center dark:border-slate-600 dark:bg-slate-800/50"
             >
                 <p class="text-sm text-slate-600 dark:text-slate-400">No S3 configurations saved yet.</p>
                 <button
                     type="button"
-                    class="mt-3 cursor-pointer text-sm font-semibold text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
+                    class="mt-3 cursor-pointer text-sm font-semibold text-slate-600 hover:text-slate-500 dark:text-slate-400 dark:hover:text-slate-300"
                     @click="showNewConfigForm = true"
                 >
                     Create one now
@@ -430,10 +430,10 @@ const canCreateConfig = computed(() =>
 
             <div
                 v-if="hasS3Config"
-                class="flex flex-col gap-4 rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 dark:border-slate-700 dark:bg-slate-900/30 sm:flex-row sm:flex-wrap sm:items-center"
+                class="flex flex-col gap-4 rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 dark:border-slate-700 dark:bg-slate-800/30 sm:flex-row sm:flex-wrap sm:items-center"
             >
                 <label class="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-                    <input v-model="byteRange" type="checkbox" class="accent-indigo-500" />
+                    <input v-model="byteRange" type="checkbox" class="accent-slate-500" />
                     Byte-range segments
                 </label>
                 <div v-if="byteRange" class="flex flex-wrap items-center gap-2">
@@ -441,19 +441,19 @@ const canCreateConfig = computed(() =>
                     <input v-model.number="byteRangeMaxFileSizeMB" type="number" min="1" class="input w-28" placeholder="500" />
                 </div>
                 <label class="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-                    <input v-model="thumbnails" type="checkbox" class="accent-indigo-500" />
+                    <input v-model="thumbnails" type="checkbox" class="accent-slate-500" />
                     Scrubbing thumbnails
                 </label>
             </div>
         </section>
 
-        <div class="border-t border-slate-200/90 dark:border-slate-800" aria-hidden="true" />
+        <div class="border-t border-slate-200/90 dark:border-slate-700" aria-hidden="true" />
 
         <!-- Source ingest -->
         <section class="space-y-5">
             <div class="flex items-center gap-3">
                 <span
-                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400"
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-950/60 dark:text-slate-400"
                     aria-hidden="true"
                 >
                     <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -471,7 +471,7 @@ const canCreateConfig = computed(() =>
             </div>
 
             <div
-                class="inline-flex w-full rounded-xl border border-slate-200 bg-slate-100/90 p-1 dark:border-slate-600 dark:bg-slate-900/80 sm:w-auto"
+                class="inline-flex w-full rounded-xl border border-slate-200 bg-slate-100/90 p-1 dark:border-slate-600 dark:bg-slate-800/80 sm:w-auto"
                 role="group"
                 aria-label="Ingest method"
             >
@@ -480,7 +480,7 @@ const canCreateConfig = computed(() =>
                     :class="[
                         'min-w-0 flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer sm:flex-none sm:px-5',
                         sourceMode === 'url'
-                            ? 'bg-indigo-600 text-white shadow-sm dark:bg-indigo-500'
+                            ? 'bg-slate-800 text-white shadow-sm dark:bg-slate-700'
                             : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100',
                     ]"
                     :aria-pressed="sourceMode === 'url'"
@@ -493,7 +493,7 @@ const canCreateConfig = computed(() =>
                     :class="[
                         'min-w-0 flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer sm:flex-none sm:px-5',
                         sourceMode === 'file'
-                            ? 'bg-indigo-600 text-white shadow-sm dark:bg-indigo-500'
+                            ? 'bg-slate-800 text-white shadow-sm dark:bg-slate-700'
                             : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100',
                     ]"
                     :aria-pressed="sourceMode === 'file'"
@@ -532,13 +532,13 @@ const canCreateConfig = computed(() =>
             </p>
         </section>
 
-        <div class="border-t border-slate-200/90 dark:border-slate-800" aria-hidden="true" />
+        <div class="border-t border-slate-200/90 dark:border-slate-700" aria-hidden="true" />
 
         <!-- HLS encryption -->
         <section v-if="hasS3Config" class="space-y-4">
             <div class="flex items-center gap-3">
                 <span
-                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400"
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-950/60 dark:text-slate-400"
                     aria-hidden="true"
                 >
                     <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -555,7 +555,7 @@ const canCreateConfig = computed(() =>
                 </div>
             </div>
             <label class="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-                <input v-model="encryptionEnabled" type="checkbox" class="accent-indigo-500" />
+                <input v-model="encryptionEnabled" type="checkbox" class="accent-slate-500" />
                 Enable AES-128 encryption
             </label>
             <div v-if="encryptionEnabled">
@@ -571,7 +571,7 @@ const canCreateConfig = computed(() =>
 
         <!-- Submit -->
         <div
-            class="flex flex-col gap-4 border-t border-slate-200/90 pt-6 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between"
+            class="flex flex-col gap-4 border-t border-slate-200/90 pt-6 dark:border-slate-700 sm:flex-row sm:items-center sm:justify-between"
         >
             <p class="flex max-w-xl items-start gap-2 text-xs text-slate-500 dark:text-slate-400">
                 <svg
@@ -599,7 +599,7 @@ const canCreateConfig = computed(() =>
                 :class="[
                     'w-full shrink-0 rounded-xl px-6 py-3.5 text-sm font-semibold shadow-sm transition-colors sm:w-auto sm:min-w-[11rem]',
                     canSubmit
-                        ? 'cursor-pointer bg-indigo-600 text-white hover:bg-indigo-500'
+                        ? 'cursor-pointer bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600'
                         : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500',
                 ]"
             >

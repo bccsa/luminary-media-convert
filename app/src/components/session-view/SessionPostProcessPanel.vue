@@ -84,7 +84,7 @@ function formatDate(dateStr: string | null | undefined): string {
         </p>
 
         <template v-if="isCompleted">
-            <div v-if="displayMasterPlaylist" class="rounded-xl border border-slate-200 bg-slate-50/95 p-4 dark:border-slate-800 dark:bg-slate-900/60">
+            <div v-if="displayMasterPlaylist" class="rounded-xl border border-slate-200 bg-slate-50/95 p-4 dark:border-slate-700 dark:bg-slate-800/60">
                 <div class="mb-2 flex items-center justify-between gap-2">
                     <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Master playlist</p>
                     <button
@@ -97,10 +97,10 @@ function formatDate(dateStr: string | null | undefined): string {
                         {{ copied ? 'Copied' : 'Copy URL' }}
                     </button>
                 </div>
-                <p class="break-all font-mono text-sm text-indigo-700 dark:text-indigo-400">{{ s3Url ?? displayMasterPlaylist }}</p>
+                <p class="break-all font-mono text-sm text-slate-700 dark:text-slate-400">{{ s3Url ?? displayMasterPlaylist }}</p>
             </div>
 
-            <div v-if="isEncrypted && encryptionKeyHex" class="rounded-xl border border-slate-200 bg-slate-50/95 p-4 dark:border-slate-800 dark:bg-slate-900/60">
+            <div v-if="isEncrypted && encryptionKeyHex" class="rounded-xl border border-slate-200 bg-slate-50/95 p-4 dark:border-slate-700 dark:bg-slate-800/60">
                 <div class="mb-2 flex items-center justify-between gap-2">
                     <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Encryption key</p>
                     <button
@@ -117,7 +117,7 @@ function formatDate(dateStr: string | null | undefined): string {
 
             <details
                 v-if="displayFiles?.length"
-                class="group rounded-xl border border-slate-200 bg-slate-50/95 dark:border-slate-800 dark:bg-slate-900/60"
+                class="group rounded-xl border border-slate-200 bg-slate-50/95 dark:border-slate-700 dark:bg-slate-800/60"
             >
                 <summary
                     class="flex cursor-pointer list-none items-center gap-2 rounded-xl p-4 text-left [&::-webkit-details-marker]:hidden"
@@ -153,7 +153,7 @@ function formatDate(dateStr: string | null | undefined): string {
                                 <tr
                                     v-for="f in (shouldCollapseFiles && !showFiles ? (displayFiles ?? []).slice(0, 12) : (displayFiles ?? []))"
                                     :key="f"
-                                    class="border-b border-slate-100 last:border-0 dark:border-slate-800"
+                                    class="border-b border-slate-100 last:border-0 dark:border-slate-700"
                                 >
                                     <td class="py-1.5 pr-2 font-mono text-slate-800 dark:text-slate-200">{{ f.split('/').pop() || f }}</td>
                                     <td class="py-1.5 pr-2 text-slate-600 dark:text-slate-400">{{ inferOutputFileKind(f) }}</td>
@@ -161,7 +161,7 @@ function formatDate(dateStr: string | null | undefined): string {
                                     <td class="py-1.5 text-right">
                                         <button
                                             type="button"
-                                            class="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                                            class="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-slate-200"
                                             title="Copy URL"
                                             @click="emit('copyOutputObjectKey', f)"
                                         >
@@ -177,7 +177,7 @@ function formatDate(dateStr: string | null | undefined): string {
                     <button
                         v-if="shouldCollapseFiles"
                         type="button"
-                        class="mt-2 text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                        class="mt-2 text-xs font-medium text-slate-600 hover:underline dark:text-slate-400"
                         @click="showFiles = !showFiles"
                     >
                         {{ showFiles ? 'Show less' : `Show all ${displayFiles!.length} files` }}
@@ -185,7 +185,7 @@ function formatDate(dateStr: string | null | undefined): string {
                 </div>
             </details>
 
-            <div class="rounded-xl border border-slate-200 bg-slate-50/90 p-4 sm:p-5 dark:border-slate-800 dark:bg-slate-900/55">
+            <div class="rounded-xl border border-slate-200 bg-slate-50/90 p-4 sm:p-5 dark:border-slate-700 dark:bg-slate-800/55">
                 <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Session &amp; storage</h3>
                 <dl class="mt-4 grid grid-cols-1 gap-x-8 gap-y-4 text-sm sm:grid-cols-2">
                     <div v-if="session?.s3Config?.endPoint">
@@ -210,7 +210,7 @@ function formatDate(dateStr: string | null | undefined): string {
             </div>
 
             <div
-                class="flex flex-col gap-3 rounded-xl border border-slate-200/90 bg-slate-50/60 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between dark:border-slate-700 dark:bg-slate-900/40"
+                class="flex flex-col gap-3 rounded-xl border border-slate-200/90 bg-slate-50/60 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between dark:border-slate-700 dark:bg-slate-800/40"
             >
                 <p class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                     Bucket tools
@@ -237,7 +237,7 @@ function formatDate(dateStr: string | null | undefined): string {
 
             <div
                 v-if="showMoveForm && hasS3Files"
-                class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3 dark:border-slate-700 dark:bg-slate-900/80"
+                class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3 dark:border-slate-700 dark:bg-slate-800/80"
             >
                 <p class="text-sm font-semibold text-slate-800 dark:text-slate-200">Move files to another S3 config</p>
                 <div>
@@ -265,7 +265,7 @@ function formatDate(dateStr: string | null | undefined): string {
                     <button
                         type="button"
                         :disabled="!canMove"
-                        class="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                        class="cursor-pointer rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600"
                         @click="emit('confirmMove')"
                     >{{ moving ? 'Moving…' : 'Apply move' }}</button>
                     <button type="button" :disabled="moving" class="cursor-pointer rounded-lg border border-slate-300 px-4 py-2 text-sm dark:border-slate-600" @click="emit('cancelMove')">Cancel</button>
@@ -274,7 +274,7 @@ function formatDate(dateStr: string | null | undefined): string {
 
             <div
                 v-if="showRenameForm && hasS3Files"
-                class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3 dark:border-slate-700 dark:bg-slate-900/80"
+                class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3 dark:border-slate-700 dark:bg-slate-800/80"
             >
                 <p class="text-sm font-semibold text-slate-800 dark:text-slate-200">Rename path prefix</p>
                 <div>
@@ -293,7 +293,7 @@ function formatDate(dateStr: string | null | undefined): string {
                     <button
                         type="button"
                         :disabled="!canRename"
-                        class="cursor-pointer rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                        class="cursor-pointer rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600"
                         @click="emit('confirmRename')"
                     >{{ renaming ? 'Renaming…' : 'Apply rename' }}</button>
                     <button type="button" :disabled="renaming" class="cursor-pointer rounded-lg border border-slate-300 px-4 py-2 text-sm dark:border-slate-600" @click="emit('cancelRename')">Cancel</button>

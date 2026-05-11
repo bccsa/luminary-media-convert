@@ -82,7 +82,7 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
         <!-- Confirmation overlay — positioned absolute right so it doesn't shift layout -->
         <div
             v-else
-            class="absolute right-0 z-10 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-900 dark:ring-white/10"
+            class="absolute right-0 z-10 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10"
         >
             <!-- Simple confirm -->
             <template v-if="state === 'confirm'">
@@ -99,7 +99,7 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
                     :class="[
                         btnBase,
                         btnSm,
-                        'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800',
+                        'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700',
                     ]"
                     @click="cancel"
                 >
@@ -122,7 +122,7 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
                     :class="[
                         btnBase,
                         btnSm,
-                        'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800',
+                        'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700',
                     ]"
                     @click="onConfirm(false)"
                 >
@@ -133,7 +133,7 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
                     :class="[
                         btnBase,
                         btnSm,
-                        'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800',
+                        'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700',
                     ]"
                     @click="cancel"
                 >

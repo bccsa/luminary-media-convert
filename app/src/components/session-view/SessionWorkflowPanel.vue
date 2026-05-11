@@ -68,7 +68,7 @@ const emit = defineEmits<{
                     <button
                         v-if="activeUploadCanCancel"
                         type="button"
-                        class="cursor-pointer rounded-lg border border-slate-300 px-4 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+                        class="cursor-pointer rounded-lg border border-slate-300 px-4 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700"
                         @click="emit('cancelUpload')"
                     >
                         Cancel
@@ -93,7 +93,7 @@ const emit = defineEmits<{
                 <ProgressBar v-else label="Uploading…" indeterminate subtitle="Started elsewhere" />
             </div>
             <div v-else-if="currentStatus === 'uploaded' && probeLoading" class="flex flex-col items-center gap-3 py-10">
-                <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+                <svg class="h-8 w-8 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
@@ -109,7 +109,7 @@ const emit = defineEmits<{
                     :indeterminate="activeUploadProgress >= 100"
                 />
             </div>
-            <div class="rounded-xl border border-indigo-200/80 bg-indigo-50/60 p-5 dark:border-indigo-500/30 dark:bg-indigo-500/10">
+            <div class="rounded-xl border border-slate-200/80 bg-slate-50/60 p-5 dark:border-slate-600/45 dark:bg-slate-800/35">
                 <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div class="min-w-0">
                         <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">File analysed — ready to encode</p>
@@ -125,7 +125,7 @@ const emit = defineEmits<{
                     </div>
                     <button
                         type="button"
-                        class="shrink-0 cursor-pointer rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500 dark:bg-indigo-500 dark:hover:bg-indigo-400"
+                        class="shrink-0 cursor-pointer rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600"
                         @click="emit('switchTab', 'output')"
                     >
                         Configure &amp; encode →
@@ -135,7 +135,7 @@ const emit = defineEmits<{
         </template>
 
         <div v-if="submitting" class="flex flex-col items-center gap-3 py-12">
-            <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
+            <svg class="h-8 w-8 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
@@ -155,7 +155,7 @@ const emit = defineEmits<{
 
             <div
                 v-else
-                class="rounded-2xl border border-slate-200/90 bg-white/95 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900/50"
+                class="rounded-2xl border border-slate-200/90 bg-white/95 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800/50"
             >
                 <div class="mb-3 flex flex-wrap items-start justify-between gap-2">
                     <div>

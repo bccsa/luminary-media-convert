@@ -1,34 +1,34 @@
-/* Light mode default — matches Luminary web app zinc + indigo. Dark: `html.dark .se-root`. */
+/* Light mode default — slate neutrals + sky accent (pairs with dark theme). */
 .se-root {
     --se-bg: #ffffff;
     --se-panel: rgba(255, 255, 255, 0.96);
-    --se-strip-bg: #fafafa;
-    --se-border: rgb(228 228 231);
+    --se-strip-bg: rgb(240 249 255);
+    --se-border: rgb(186 230 253);
     --se-text: rgb(24 24 27);
-    --se-text-dim: rgb(113 113 122);
+    --se-text-dim: rgb(100 116 139);
     --se-text-warning: rgb(180 83 9);
     --se-text-danger: rgb(220 38 38);
-    --se-track: rgb(244 244 245);
-    --se-track-hover: rgb(228 228 231);
-    --se-accent: rgb(79 70 229);
-    --se-accent-soft: rgba(79, 70, 229, 0.12);
-    --se-accent-active: rgba(79, 70, 229, 0.28);
+    --se-track: rgb(241 245 249);
+    --se-track-hover: rgb(224 242 254);
+    --se-accent: rgb(2 132 199);
+    --se-accent-soft: rgba(14, 165, 233, 0.14);
+    --se-accent-active: rgba(14, 165, 233, 0.28);
     --se-selected: rgb(21 128 61);
     --se-selected-soft: rgba(34, 197, 94, 0.14);
     --se-danger: rgba(239, 68, 68, 0.12);
     --se-danger-hover: rgba(239, 68, 68, 0.1);
-    --se-playhead: rgb(79 70 229);
-    --se-playhead-shadow: rgba(67, 56, 202, 0.35);
-    --se-segment-label: rgb(49 46 83);
+    --se-playhead: rgb(3 105 161);
+    --se-playhead-shadow: rgba(14, 116, 144, 0.28);
+    --se-segment-label: rgb(30 41 55);
     --se-segment-label-shadow: none;
-    --se-ruler-tick: rgba(113, 113, 122, 0.3);
-    --se-list-hover: rgba(228, 228, 231, 0.85);
-    --se-list-selected: rgb(244 244 245);
+    --se-ruler-tick: rgba(100, 116, 139, 0.28);
+    --se-list-hover: rgba(14, 165, 233, 0.08);
+    --se-list-selected: rgba(14, 165, 233, 0.12);
     --se-kbd-bg: rgb(250 250 250);
     --se-kbd-border: rgb(228 228 231);
     --se-help-backdrop: rgba(9, 9, 11, 0.4);
     --se-help-surface: #ffffff;
-    --se-help-surface-border: rgb(228 228 231);
+    --se-help-surface-border: rgb(186 230 253);
     --se-scrollbar-thumb-hover: rgb(212 212 216);
     --se-shadow:
         0 1px 2px rgb(9 9 11 / 0.04),
@@ -50,19 +50,19 @@
 }
 
 html.dark .se-root {
-    --se-bg: #18181b;
-    --se-panel: rgba(24, 24, 27, 0.75);
-    --se-strip-bg: rgba(39, 39, 42, 0.55);
-    --se-border: rgb(63 63 70 / 0.65);
-    --se-text: #e4e4e7;
-    --se-text-dim: #a1a1aa;
+    --se-bg: #0c1222;
+    --se-panel: rgba(30, 41, 55, 0.82);
+    --se-strip-bg: rgba(30, 58, 88, 0.22);
+    --se-border: rgb(56 189 248 / 0.12);
+    --se-text: #e2e8f0;
+    --se-text-dim: #94a3b8;
     --se-text-warning: #fbbf24;
     --se-text-danger: #f87171;
-    --se-track: #27272a;
-    --se-track-hover: #3f3f46;
-    --se-accent: #818cf8;
-    --se-accent-soft: rgba(99, 102, 241, 0.28);
-    --se-accent-active: rgba(99, 102, 241, 0.42);
+    --se-track: #172554;
+    --se-track-hover: #1e3a5f;
+    --se-accent: #38bdf8;
+    --se-accent-soft: rgba(56, 189, 248, 0.2);
+    --se-accent-active: rgba(56, 189, 248, 0.38);
     --se-selected: #4ade80;
     --se-selected-soft: rgba(34, 197, 94, 0.32);
     --se-danger: rgba(239, 68, 68, 0.28);
@@ -71,15 +71,15 @@ html.dark .se-root {
     --se-playhead-shadow: rgba(0, 0, 0, 0.65);
     --se-segment-label: rgba(255, 255, 255, 0.92);
     --se-segment-label-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
-    --se-ruler-tick: rgba(161, 161, 170, 0.22);
-    --se-list-hover: rgba(39, 39, 42, 0.72);
-    --se-list-selected: rgba(39, 39, 42, 0.95);
-    --se-kbd-bg: rgb(9 9 11 / 0.35);
-    --se-kbd-border: rgb(63 63 70 / 0.6);
+    --se-ruler-tick: rgba(148, 163, 184, 0.22);
+    --se-list-hover: rgba(56, 189, 248, 0.08);
+    --se-list-selected: rgba(56, 189, 248, 0.14);
+    --se-kbd-bg: rgb(15 23 42 / 0.45);
+    --se-kbd-border: rgb(71 85 105 / 0.55);
     --se-help-backdrop: rgb(0 0 0 / 0.72);
-    --se-help-surface: #18181b;
-    --se-help-surface-border: rgb(63 63 70 / 0.75);
-    --se-scrollbar-thumb-hover: #52525b;
+    --se-help-surface: #1e293b;
+    --se-help-surface-border: rgb(56 189 248 / 0.2);
+    --se-scrollbar-thumb-hover: #64748b;
     --se-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 8px 30px rgb(0 0 0 / 0.25);
     --se-pending-bracket-shadow: 0 1px 2px rgb(0 0 0 / 0.8);
 }
@@ -796,14 +796,14 @@ html.dark .se-root {
 .se-help {
     /* Portaled to body — must define tokens here (outside .se-root). */
     --se-text: rgb(24 24 27);
-    --se-text-dim: rgb(113 113 122);
-    --se-accent: rgb(79 70 229);
+    --se-text-dim: rgb(100 116 139);
+    --se-accent: rgb(2 132 199);
     --se-shadow:
         0 1px 2px rgb(9 9 11 / 0.04),
         0 0 0 1px rgb(9 9 11 / 0.06);
     --se-help-backdrop: rgba(9, 9, 11, 0.55);
     --se-help-surface: #ffffff;
-    --se-help-surface-border: rgb(228 228 231);
+    --se-help-surface-border: rgb(186 230 253);
 
     position: fixed;
     inset: 0;
@@ -820,9 +820,9 @@ html.dark .se-root {
 }
 
 html.dark .se-help {
-    --se-text: #e4e4e7;
-    --se-text-dim: #a1a1aa;
-    --se-accent: #818cf8;
+    --se-text: #e2e8f0;
+    --se-text-dim: #94a3b8;
+    --se-accent: #7dd3fc;
     --se-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 8px 30px rgb(0 0 0 / 0.25);
     --se-help-backdrop: rgb(0 0 0 / 0.75);
     --se-help-surface: #18181b;

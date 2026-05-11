@@ -26,7 +26,7 @@
         </div>
 
         <div
-            class="rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/60 dark:ring-white/10"
+            class="rounded-2xl border border-slate-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-slate-900/5 backdrop-blur-md dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10"
         >
             <h2 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Pipeline preview</h2>
             <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">What happens after you create a session.</p>
@@ -48,7 +48,7 @@
                 </li>
                 <li class="flex gap-3">
                     <span
-                        class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300"
+                        class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 dark:bg-slate-950/50 dark:text-slate-300"
                     >
                         <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                             <path
@@ -88,9 +88,9 @@
         </div>
 
         <div
-            class="rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 p-5 shadow-md ring-1 ring-white/10 dark:border-slate-700"
+            class="rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 p-5 shadow-md ring-1 ring-white/10 dark:border-slate-700"
         >
-            <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-indigo-300/95">Luminary Media Convert</p>
+            <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300/95">Luminary Media Convert</p>
             <p class="mt-2 text-xs leading-relaxed text-slate-400">
                 ABR HLS output, S3-native delivery, real-time session progress.
             </p>

@@ -122,7 +122,7 @@ onMounted(fetchS3Configs);
             <header class="mb-8 max-w-3xl">
                 <div class="flex flex-wrap items-center gap-3 gap-y-2">
                     <div
-                        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600/10 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400"
+                        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-600/10 text-slate-600 dark:bg-slate-500/15 dark:text-slate-400"
                         aria-hidden="true"
                     >
                         <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -148,12 +148,12 @@ onMounted(fetchS3Configs);
             <div class="grid gap-8 lg:grid-cols-12 lg:items-start">
                 <div class="lg:col-span-8">
                     <section
-                        class="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/60 dark:shadow-black/20 dark:ring-white/10"
+                        class="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur-md dark:border-slate-700 dark:bg-slate-800/60 dark:shadow-black/20 dark:ring-white/10"
                     >
                         <div class="p-5 sm:p-6 lg:p-8">
                             <div v-if="loadingConfigs" class="flex flex-col items-center gap-4 py-14">
-                                <div class="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 dark:bg-indigo-950/40">
-                                    <svg class="h-6 w-6 animate-spin text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
+                                <div class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 dark:bg-slate-950/40">
+                                    <svg class="h-6 w-6 animate-spin text-slate-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24">
                                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
                                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                     </svg>
@@ -181,7 +181,7 @@ onMounted(fetchS3Configs);
                                         No saved configs yet.
                                         <router-link
                                             to="/s3-configs"
-                                            class="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
+                                            class="font-medium text-slate-600 hover:text-slate-500 dark:text-slate-400 dark:hover:text-slate-300"
                                         >
                                             Add an S3 configuration
                                         </router-link>
@@ -226,7 +226,7 @@ onMounted(fetchS3Configs);
                                 </div>
 
                                 <!-- Encryption -->
-                                <div class="space-y-2 rounded-xl border border-slate-200/80 bg-slate-50/80 p-4 dark:border-slate-700/60 dark:bg-slate-950/30">
+                                <div class="space-y-2 rounded-xl border border-slate-200/80 bg-slate-50/80 p-4 dark:border-slate-700/60 dark:bg-slate-800/30">
                                     <label for="import-key" class="text-sm font-medium text-slate-800 dark:text-slate-200">
                                         AES-128 key
                                         <span class="font-normal text-slate-500 dark:text-slate-400">(optional)</span>
@@ -262,7 +262,7 @@ onMounted(fetchS3Configs);
                                         :class="[
                                             'inline-flex min-h-[2.75rem] items-center justify-center rounded-xl px-6 text-sm font-semibold transition-colors',
                                             isValid() && !submitting
-                                                ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-500 dark:bg-indigo-600 dark:hover:bg-indigo-500'
+                                                ? 'bg-slate-800 text-white shadow-sm hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600'
                                                 : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500',
                                         ]"
                                     >
@@ -270,7 +270,7 @@ onMounted(fetchS3Configs);
                                     </button>
                                     <router-link
                                         to="/sessions"
-                                        class="inline-flex min-h-[2.75rem] items-center justify-center rounded-xl border border-slate-300 bg-white px-6 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                                        class="inline-flex min-h-[2.75rem] items-center justify-center rounded-xl border border-slate-300 bg-white px-6 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                                     >
                                         Cancel
                                     </router-link>
@@ -282,7 +282,7 @@ onMounted(fetchS3Configs);
 
                 <aside class="lg:col-span-4" aria-label="Import tips">
                     <div
-                        class="sticky top-6 space-y-6 rounded-2xl border border-slate-200/90 bg-slate-50/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-800 dark:bg-slate-900/40 dark:ring-white/5 sm:p-6"
+                        class="sticky top-6 space-y-6 rounded-2xl border border-slate-200/90 bg-slate-50/90 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800/40 dark:ring-white/5 sm:p-6"
                     >
                         <div>
                             <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -299,11 +299,11 @@ onMounted(fetchS3Configs);
                                 Path examples
                             </h2>
                             <dl class="mt-3 space-y-3 text-xs">
-                                <div class="rounded-lg border border-slate-200/80 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-950/50">
+                                <div class="rounded-lg border border-slate-200/80 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-800/50">
                                     <dt class="font-mono text-[11px] text-slate-800 dark:text-slate-200">…/out/master.m3u8</dt>
                                     <dd class="mt-1 text-slate-500 dark:text-slate-400">Single package from that master.</dd>
                                 </div>
-                                <div class="rounded-lg border border-slate-200/80 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-950/50">
+                                <div class="rounded-lg border border-slate-200/80 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-800/50">
                                     <dt class="font-mono text-[11px] text-slate-800 dark:text-slate-200">…/angles/</dt>
                                     <dd class="mt-1 text-slate-500 dark:text-slate-400">Prefix; each top-level <kbd class="font-mono">*.m3u8</kbd> becomes an angle.</dd>
                                 </div>

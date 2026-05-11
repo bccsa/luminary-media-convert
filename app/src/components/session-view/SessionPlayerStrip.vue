@@ -152,7 +152,7 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
                     type="button"
                     class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
                     :class="i === currentAngleIndex
-                        ? 'bg-indigo-600 text-white dark:bg-indigo-600 dark:text-white'
+                        ? 'bg-slate-800 text-white dark:bg-slate-700 dark:text-white'
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
                     @click="emit('angleChange', i)"
                 >

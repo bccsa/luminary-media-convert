@@ -34,11 +34,11 @@ watch(isAuthenticated, async (authenticated) => {
 <template>
     <div class="relative min-h-screen">
         <div
-            class="pointer-events-none fixed inset-0 bg-gradient-to-b from-indigo-50/90 via-slate-50 to-slate-100 dark:from-slate-950 dark:via-slate-950 dark:to-slate-950"
+            class="pointer-events-none fixed inset-0 bg-gradient-to-b from-slate-50/90 via-sky-50/35 to-slate-100 dark:from-slate-950 dark:via-sky-950/35 dark:to-slate-950"
             aria-hidden="true"
         />
         <div
-            class="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(99,102,241,0.12),transparent)] dark:bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(99,102,241,0.08),transparent)]"
+            class="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(56,189,248,0.14),transparent)] dark:bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(14,165,233,0.14),transparent)]"
             aria-hidden="true"
         />
 
@@ -48,15 +48,15 @@ watch(isAuthenticated, async (authenticated) => {
             class="relative flex min-h-[calc(100vh-5rem)] items-center px-4 py-10 sm:py-14"
         >
             <div
-                class="mx-auto w-full max-w-md rounded-2xl border border-slate-200/80 bg-white/90 p-8 text-center shadow-xl shadow-slate-900/5 backdrop-blur dark:border-slate-800 dark:bg-slate-900/70 dark:shadow-black/20"
+                class="mx-auto w-full max-w-md rounded-2xl border border-slate-200/80 bg-white/90 p-8 text-center shadow-xl shadow-slate-900/5 backdrop-blur dark:border-slate-700 dark:bg-slate-800/70 dark:shadow-black/20"
             >
                 <div
-                    class="mx-auto mb-4 inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300"
+                    class="mx-auto mb-4 inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300"
                 >
                     Luminary Media Convert
                 </div>
-                <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 dark:bg-indigo-950/40">
-                    <svg class="h-6 w-6 animate-spin text-indigo-500 dark:text-indigo-400" fill="none" viewBox="0 0 24 24">
+                <div class="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 dark:bg-sky-950/40">
+                    <svg class="h-6 w-6 animate-spin text-slate-500 dark:text-sky-400" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
@@ -66,7 +66,7 @@ watch(isAuthenticated, async (authenticated) => {
                     Verifying authentication and preparing your session.
                 </p>
                 <div class="mt-5 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-                    <div class="loading-bar h-full w-1/3 rounded-full bg-indigo-500 dark:bg-indigo-400" />
+                    <div class="loading-bar h-full w-1/3 rounded-full bg-sky-500 dark:bg-sky-400" />
                 </div>
             </div>
         </div>
@@ -76,7 +76,7 @@ watch(isAuthenticated, async (authenticated) => {
             <div class="mx-auto grid w-full max-w-5xl gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
                 <section class="text-left">
                     <div
-                        class="mb-4 inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300"
+                        class="mb-4 inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300"
                     >
                         Luminary Media Convert
                     </div>
@@ -90,7 +90,7 @@ watch(isAuthenticated, async (authenticated) => {
                 </section>
 
                 <section
-                    class="mx-auto w-full max-w-md rounded-2xl border border-slate-200/80 bg-white/90 p-8 shadow-xl shadow-slate-900/5 backdrop-blur dark:border-slate-800 dark:bg-slate-900/70 dark:shadow-black/20"
+                    class="mx-auto w-full max-w-md rounded-2xl border border-slate-200/80 bg-white/90 p-8 shadow-xl shadow-slate-900/5 backdrop-blur dark:border-slate-700 dark:bg-slate-800/70 dark:shadow-black/20"
                 >
                     <h2 class="text-xl font-semibold text-slate-900 dark:text-slate-100">Sign in to continue</h2>
                     <p class="mt-2 text-base text-slate-600 dark:text-slate-400">
@@ -99,7 +99,7 @@ watch(isAuthenticated, async (authenticated) => {
                     <button
                         type="button"
                         @click="loginWithRedirect()"
-                        class="mt-6 inline-flex w-full cursor-pointer items-center justify-center rounded-xl bg-indigo-600 px-6 py-3.5 text-base font-semibold text-white transition-colors hover:bg-indigo-500"
+                        class="mt-6 inline-flex w-full cursor-pointer items-center justify-center rounded-xl bg-slate-800 px-6 py-3.5 text-base font-semibold text-white transition-colors hover:bg-slate-700 dark:bg-sky-800 dark:hover:bg-sky-700"
                     >
                         Continue with Auth0
                     </button>
@@ -118,13 +118,13 @@ watch(isAuthenticated, async (authenticated) => {
                 </h1>
             </header>
             <div
-                class="mx-auto max-w-md rounded-2xl border border-red-200/80 bg-white/90 p-8 shadow-xl shadow-slate-900/5 backdrop-blur dark:border-red-900/50 dark:bg-slate-900/70 dark:shadow-black/20 text-center"
+                class="mx-auto max-w-md rounded-2xl border border-red-200/80 bg-white/90 p-8 shadow-xl shadow-slate-900/5 backdrop-blur dark:border-red-900/50 dark:bg-slate-800/70 dark:shadow-black/20 text-center"
             >
                 <p class="mb-6 text-sm text-red-600 dark:text-red-400">{{ identityError }}</p>
                 <button
                     type="button"
                     @click="logout({ logoutParams: { returnTo } })"
-                    class="inline-flex w-full cursor-pointer items-center justify-center rounded-xl border border-slate-300 px-6 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                    class="inline-flex w-full cursor-pointer items-center justify-center rounded-xl border border-slate-300 px-6 py-3 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-700"
                 >
                     Sign Out
                 </button>
@@ -134,12 +134,12 @@ watch(isAuthenticated, async (authenticated) => {
         <!-- Authenticated shell -->
         <template v-else>
             <header
-                class="sticky top-0 z-40 border-b border-slate-200/90 bg-white/90 font-sans shadow-sm backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/90"
+                class="sticky top-0 z-40 border-b border-sky-200/50 bg-white/90 font-sans shadow-sm backdrop-blur-md dark:border-sky-500/15 dark:bg-slate-900/85"
             >
                 <div class="mx-auto flex h-14 max-w-6xl items-stretch gap-4 px-4 sm:gap-6 sm:px-6">
                     <router-link
                         to="/sessions"
-                        class="flex shrink-0 items-center text-base font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:text-lg"
+                        class="flex shrink-0 items-center text-base font-bold tracking-tight text-slate-900 dark:text-slate-100 sm:text-lg"
                     >
                         <span class="sm:hidden">Luminary</span>
                         <span class="hidden sm:inline">Luminary Media Convert</span>
@@ -154,8 +154,8 @@ watch(isAuthenticated, async (authenticated) => {
                             class="inline-flex items-center border-b-2 text-sm font-medium transition-colors duration-200"
                             :class="
                                 $route.path.startsWith('/sessions')
-                                    ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
-                                    : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
+                                    ? 'border-sky-500 text-sky-700 dark:border-sky-400 dark:text-sky-300'
+                                    : 'border-transparent text-slate-500 hover:text-sky-800 dark:text-slate-400 dark:hover:text-sky-200'
                             "
                         >
                             Sessions
@@ -165,8 +165,8 @@ watch(isAuthenticated, async (authenticated) => {
                             class="inline-flex items-center border-b-2 text-sm font-medium transition-colors duration-200"
                             :class="
                                 $route.path === '/keys'
-                                    ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
-                                    : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
+                                    ? 'border-sky-500 text-sky-700 dark:border-sky-400 dark:text-sky-300'
+                                    : 'border-transparent text-slate-500 hover:text-sky-800 dark:text-slate-400 dark:hover:text-sky-200'
                             "
                         >
                             API Keys
@@ -176,8 +176,8 @@ watch(isAuthenticated, async (authenticated) => {
                             class="inline-flex items-center border-b-2 text-sm font-medium transition-colors duration-200"
                             :class="
                                 $route.path === '/s3-configs'
-                                    ? 'border-indigo-600 text-indigo-600 dark:border-indigo-400 dark:text-indigo-400'
-                                    : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100'
+                                    ? 'border-sky-500 text-sky-700 dark:border-sky-400 dark:text-sky-300'
+                                    : 'border-transparent text-slate-500 hover:text-sky-800 dark:text-slate-400 dark:hover:text-sky-200'
                             "
                         >
                             S3 Configs

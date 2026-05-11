@@ -113,17 +113,17 @@ const triggerClasses = computed(() => {
         case 'playback':
             base =
                 'playback-slot-select w-full min-w-0 inline-flex items-center gap-2 text-left ' +
-                'focus:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500/35 dark:focus-visible:ring-indigo-400/35';
+                'focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-500/35 dark:focus-visible:ring-sky-400/35';
             break;
         case 'admin':
             base =
                 'relative block w-full rounded-md border border-slate-700 bg-slate-800 py-2 pl-3 pr-9 text-left text-sm text-slate-100 outline-none transition-colors ' +
-                'focus-visible:border-indigo-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500 disabled:opacity-50';
+                'focus-visible:border-slate-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-500 disabled:opacity-50';
             break;
         default:
             base =
                 `input relative block w-full cursor-pointer appearance-none py-2 pl-3 text-sm text-left${paddingForChevron.value} ` +
-                'focus:outline-none focus-visible:border-indigo-500 focus-visible:ring-2 focus-visible:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50';
+                'focus:outline-none focus-visible:border-sky-500 focus-visible:ring-2 focus-visible:ring-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50';
             break;
     }
     const parts = [base, invalidClass.value, sizeClass.value, props.selectClass].filter(Boolean);
@@ -170,12 +170,12 @@ const panelClasses = computed(() => {
         case 'playback':
             return (
                 `${common}` +
-                'border-slate-300 bg-white text-slate-900 shadow-md dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100'
+                'border-slate-300 bg-white text-slate-900 shadow-md dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100'
             );
         default:
             return (
                 `${common}` +
-                'border-slate-200 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100'
+                'border-slate-200 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
             );
     }
 });
@@ -402,8 +402,8 @@ function rowVisualClass(idx: number, r: FlatRow) {
         tone = ' cursor-not-allowed opacity-40';
     } else if (selected) {
         tone = playback
-            ? ' bg-indigo-600/15 text-indigo-900 dark:bg-indigo-500/20 dark:text-indigo-100'
-            : ' bg-indigo-50 text-indigo-900 dark:bg-indigo-950/50 dark:text-indigo-100';
+            ? ' bg-sky-500/15 text-slate-900 dark:bg-sky-500/20 dark:text-slate-100'
+            : ' bg-slate-50 text-slate-900 dark:bg-slate-950/50 dark:text-slate-100';
     } else if (hi) {
         tone = ' bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100';
     } else {
@@ -481,7 +481,7 @@ function rowVisualClass(idx: number, r: FlatRow) {
                         <span class="truncate">{{ row.label }}</span>
                         <svg
                             v-if="!row.disabled && domString(modelValue) === row.value"
-                            class="h-4 w-4 shrink-0 text-indigo-600 dark:text-indigo-400"
+                            class="h-4 w-4 shrink-0 text-slate-600 dark:text-slate-400"
                             aria-hidden="true"
                             fill="none"
                             viewBox="0 0 24 24"

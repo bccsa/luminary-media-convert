@@ -6,7 +6,7 @@ const statusConfig: Record<string, { label: string; color: string; borderColor: 
     uploading: { label: 'Uploading', color: 'text-cyan-700 dark:text-cyan-400', borderColor: 'border-cyan-300 dark:border-cyan-700/60' },
     uploaded: { label: 'Uploaded', color: 'text-slate-700 dark:text-slate-400', borderColor: 'border-slate-300 dark:border-slate-700' },
     queued: { label: 'Queued', color: 'text-amber-700 dark:text-amber-400', borderColor: 'border-amber-300 dark:border-amber-700/60' },
-    encoding: { label: 'Encoding', color: 'text-indigo-700 dark:text-indigo-400', borderColor: 'border-indigo-300 dark:border-indigo-700/60' },
+    encoding: { label: 'Encoding', color: 'text-slate-700 dark:text-slate-400', borderColor: 'border-slate-300 dark:border-slate-700/60' },
     encrypting: { label: 'Encrypting', color: 'text-amber-700 dark:text-amber-400', borderColor: 'border-amber-300 dark:border-amber-700/60' },
     uploading_to_s3: { label: 'Uploading to S3', color: 'text-cyan-700 dark:text-cyan-400', borderColor: 'border-cyan-300 dark:border-cyan-700/60' },
     completed: { label: 'Completed', color: 'text-emerald-700 dark:text-emerald-400', borderColor: 'border-emerald-300 dark:border-emerald-700/60' },
@@ -71,14 +71,14 @@ const emit = defineEmits<{
                 <button
                     type="button"
                     :disabled="savingName"
-                    class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
                     @click="emit('saveName')"
                 >
                     {{ savingName ? '…' : 'Save' }}
                 </button>
                 <button
                     type="button"
-                    class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
                     @click="emit('cancelEditName')"
                 >
                     Cancel
@@ -89,7 +89,7 @@ const emit = defineEmits<{
                 class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2"
             >
                 <h1
-                    class="min-w-0 cursor-pointer text-2xl font-semibold tracking-tight text-slate-900 transition-colors hover:text-indigo-600 dark:text-slate-100 dark:hover:text-indigo-400"
+                    class="min-w-0 cursor-pointer text-2xl font-semibold tracking-tight text-slate-900 transition-colors hover:text-slate-600 dark:text-slate-100 dark:hover:text-slate-400"
                     @click="emit('startEditName')"
                     :title="sessionName ? 'Click to rename' : 'Click to add a name'"
                 >
