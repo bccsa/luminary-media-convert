@@ -617,6 +617,7 @@ defineExpose({ editableAudioTracks });
                     <table class="ecf-lt">
                         <thead class="ecf-lt-thead">
                             <tr>
+                                <th v-if="editableVideoTracks.length > 0" class="ecf-lt-th">Source track</th>
                                 <th class="ecf-lt-th">Resolution</th>
                                 <th class="ecf-lt-th ecf-lt-th--r">kbps</th>
                                 <th class="ecf-lt-th">Audio group</th>
@@ -628,6 +629,14 @@ defineExpose({ editableAudioTracks });
                         <tbody>
                             <template v-for="(r, i) in videoRenditions" :key="i">
                                 <tr class="ecf-lt-tr">
+                                    <td v-if="editableVideoTracks.length > 0" class="ecf-lt-td">
+                                        <select v-if="r.copyStream" v-model.number="r.sourceTrackIndex" class="ecf-select ecf-select-src" @change="onCopySourceChange(r)">
+                                            <option v-for="t in editableVideoTracks" :key="t.index" :value="t.index">
+                                                #{{ t.index }}{{ t.name ? ` — ${t.name}` : '' }} ({{ t.width }}&times;{{ t.height }}, {{ t.bitrateKbps }} kbps)
+                                            </option>
+                                        </select>
+                                        <span v-else class="ecf-cell-dim">—</span>
+                                    </td>
                                     <td class="ecf-lt-td">
                                         <span v-if="r.copyStream" class="ecf-cell-dim">auto</span>
                                         <span v-else class="ecf-res-pair">
@@ -663,21 +672,11 @@ defineExpose({ editableAudioTracks });
                                         </button>
                                     </td>
                                 </tr>
-                                <tr v-if="r.copyStream && editableVideoTracks.length > 0" class="ecf-lt-expand">
-                                    <td colspan="6" class="ecf-lt-expand-td">
-                                        <span class="ecf-expand-label">Source track</span>
-                                        <select v-model.number="r.sourceTrackIndex" class="ecf-select ecf-select-src" @change="onCopySourceChange(r)">
-                                            <option v-for="t in editableVideoTracks" :key="t.index" :value="t.index">
-                                                #{{ t.index }}: {{ t.width }}&times;{{ t.height }} {{ t.codec }}{{ t.name ? ` — ${t.name}` : '' }} {{ t.bitrateKbps ? `(${t.bitrateKbps} kbps)` : '' }}
-                                            </option>
-                                        </select>
-                                    </td>
-                                </tr>
                             </template>
                         </tbody>
                         <tfoot class="ecf-lt-foot">
                             <tr>
-                                <td colspan="6" class="ecf-lt-add-td">
+                                <td :colspan="editableVideoTracks.length > 0 ? 7 : 6" class="ecf-lt-add-td">
                                     <button type="button" class="ecf-btn-add" @click="addVideoRendition">+ Add rendition</button>
                                 </td>
                             </tr>
