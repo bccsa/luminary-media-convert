@@ -5,9 +5,19 @@ import { useAuth0 } from '@auth0/auth0-vue';
 import { checkIdentity } from './api';
 import AccountMenu from './components/AccountMenu.vue';
 import AppPrimaryNav from './components/AppPrimaryNav.vue';
+import { useAppLayout } from './composables/useAppLayout';
 
 const route = useRoute();
 const isSessionDetail = computed(() => route.name === 'session-detail');
+
+const { headerLayout } = useAppLayout();
+
+// Mirror the trimPlayerBreakoutClass max-width formula so the logo/nav left
+// edge aligns with the player/title left edge at every viewport width.
+const headerInnerClass = computed(() => {
+    if (headerLayout.value === 'session-trim') return 'max-w-[min(100vw-2rem,96rem)] px-0';
+    return 'max-w-6xl px-4 sm:px-6';
+});
 
 const { isAuthenticated, isLoading, loginWithRedirect, logout, getAccessTokenSilently } = useAuth0();
 const returnTo = window.location.origin;
@@ -142,7 +152,8 @@ watch(isAuthenticated, async (authenticated) => {
                 class="sticky top-0 z-40 border-b border-sky-200/50 bg-white/90 font-sans shadow-sm backdrop-blur-md dark:border-sky-500/15 dark:bg-slate-900/85"
             >
                 <div
-                    class="mx-auto flex min-h-14 w-full max-w-6xl items-center gap-1.5 px-4 py-2 sm:gap-2 sm:px-6"
+                    class="mx-auto flex min-h-14 w-full items-center gap-1.5 py-2 sm:gap-2 transition-[padding,max-width] duration-200"
+                    :class="headerInnerClass"
                 >
                     <router-link
                         to="/sessions"

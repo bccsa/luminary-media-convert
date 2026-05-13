@@ -19,6 +19,7 @@ import SessionWorkflowPanel from '../components/session-view/SessionWorkflowPane
 import { getSessionDetail, getSessionStatus, startEncode, deleteSession, updateSessionName, moveSessionFiles, renameSessionPrefix, listS3Configs, checkPrefix } from '../api';
 import { useSessionPoller } from '../composables/useSessionPoller';
 import { useActiveUploads } from '../composables/useActiveUploads';
+import { useAppLayout } from '../composables/useAppLayout';
 import type { AccelMode, SegmentFormat } from '../types';
 
 const { getAccessTokenSilently } = useAuth0();
@@ -127,6 +128,7 @@ const sessionId = computed(() => route.params.id as string);
 
 const poller = useSessionPoller();
 const activeUploads = useActiveUploads();
+const { setHeaderLayout } = useAppLayout();
 
 // ---------------------------------------------------------------------------
 // Status badge config
@@ -1350,11 +1352,12 @@ const tabItems = computed(() => [
     { id: 'post' as const, label: 'Delivery' },
 ]);
 
-// Lock page scroll when on the trim tab so it becomes a true full-viewport workspace.
+// Lock page scroll on trim tab; sync header max-width to the view's layout.
 watch(
     () => activeTab.value,
     (tab) => {
         document.documentElement.style.overflowY = tab === 'trim' ? 'hidden' : '';
+        setHeaderLayout(tab === 'trim' ? 'session-trim' : 'session');
     },
     { immediate: true },
 );
@@ -1455,10 +1458,22 @@ async function copyOutputObjectKey(key: string) {
 
 onMounted(fetchSession);
 
+// Track lg breakpoint in JS — used to v-if the header teleport tabs so they
+// reliably disappear at lg+ (CSS lg:hidden on Teleported nodes is unreliable).
+const isLgScreen = ref(typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches);
+
+onMounted(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onMqChange = (e: MediaQueryListEvent) => { isLgScreen.value = e.matches; };
+    mq.addEventListener('change', onMqChange);
+    onUnmounted(() => mq.removeEventListener('change', onMqChange));
+});
+
 onUnmounted(() => {
     poller.stop();
     chapters.unload();
     document.documentElement.style.overflowY = '';
+    setHeaderLayout('default');
 });
 </script>
 
@@ -1636,7 +1651,7 @@ onUnmounted(() => {
                 <Teleport to="#app-session-workflow-teleport">
                     <div class="flex w-full min-w-0 items-center justify-end gap-1.5 sm:gap-2">
                         <!-- Workflow tabs — visible on mobile; at lg+ the tabs appear in the content area -->
-                        <div class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50 lg:hidden">
+                        <div v-if="!isLgScreen" class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50">
                             <button
                                 v-for="tab in tabItems"
                                 :key="tab.id"
