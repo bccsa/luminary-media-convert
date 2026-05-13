@@ -1093,6 +1093,46 @@ html.dark .se-help {
     max-width: 28rem;
 }
 
+.se-list-empty--split {
+    margin-top: 0;
+    max-width: none;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem 0.5rem 1rem;
+    box-sizing: border-box;
+}
+
+.se-list-empty__stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.5rem;
+    max-width: 20rem;
+}
+
+.se-list-empty__visual {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    margin-bottom: 0;
+    border-radius: 9999px;
+    color: var(--se-text-dim);
+    background: var(--se-kbd-bg);
+    border: 1px solid var(--se-kbd-border);
+}
+
+.se-list-empty__icon {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
 .se-list-empty__title {
     margin: 0;
     font-size: 0.8125rem;
@@ -1101,10 +1141,15 @@ html.dark .se-help {
 }
 
 .se-list-empty__hint {
-    margin: 0.35rem 0 0;
+    margin: 0;
     font-size: 0.75rem;
     line-height: 1.45;
     color: var(--se-text-dim);
+}
+
+.se-list-section--split > .se-list-split-header,
+.se-list-section--split > .se-list-heading {
+    flex-shrink: 0;
 }
 
 .se-root--split-list[data-mode='chapters'] .se-list-section--split .se-list,

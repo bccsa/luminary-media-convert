@@ -1485,7 +1485,7 @@ describe('SegmentEditor — split list panel (beside player)', () => {
         expect(w.find('.se-list-split-header').exists()).toBe(true);
         expect(w.find('.se-list-split-header .se-title').text()).toBe('Chapters');
         expect(w.find('.se-list-empty').exists()).toBe(true);
-        expect(w.find('.se-list-empty__title').text()).toBe('No chapters yet.');
+        expect(w.find('.se-list-empty__title').text()).toBe('No chapters yet');
     });
 
     it('seeks to chapter start when a list row is clicked in split chapters mode', async () => {

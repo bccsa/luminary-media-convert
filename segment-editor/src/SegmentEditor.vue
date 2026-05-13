@@ -1454,21 +1454,32 @@ defineExpose({
             </div>
             <div
                 v-else-if="listOnlySplitPanel && labelsVisible && mode === 'chapters'"
-                class="se-list-empty"
+                class="se-list-empty se-list-empty--split"
             >
-                <p class="se-list-empty__title">No chapters yet.</p>
-                <p class="se-list-empty__hint">
-                    Add chapter markers with the trim timeline below (in/out marks and segments), or import an existing chapters file.
-                </p>
+                <div class="se-list-empty__stack">
+                    <div class="se-list-empty__visual" aria-hidden="true">
+                        <svg class="se-list-empty__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                            <path d="M8 7h8M8 11h5" />
+                        </svg>
+                    </div>
+                    <p class="se-list-empty__title">No chapters yet</p>
+                    <p class="se-list-empty__hint">
+                        Use the trim timeline below to add in/out marks, or load chapters from a VTT sidecar.
+                    </p>
+                </div>
             </div>
             <div
                 v-else-if="listOnlySplitPanel && labelsVisible && mode === 'subtitles'"
-                class="se-list-empty"
+                class="se-list-empty se-list-empty--split"
             >
-                <p class="se-list-empty__title">No subtitle cues yet.</p>
-                <p class="se-list-empty__hint">
-                    Add cues using the timeline below.
-                </p>
+                <div class="se-list-empty__stack">
+                    <p class="se-list-empty__title">No subtitle cues yet</p>
+                    <p class="se-list-empty__hint">
+                        Add cues using the timeline below.
+                    </p>
+                </div>
             </div>
         </div>
 
