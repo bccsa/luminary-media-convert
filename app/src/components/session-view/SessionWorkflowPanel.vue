@@ -1,14 +1,7 @@
 <script setup lang="ts">
-import type { StepVisual } from '../SessionWorkflowStepper.vue';
 import ProgressBar from '../ProgressBar.vue';
-import SessionWorkflowStepper from '../SessionWorkflowStepper.vue';
 
 defineProps<{
-    ingest: StepVisual;
-    probe: StepVisual;
-    encoding: StepVisual;
-    upload: StepVisual;
-    finalize: StepVisual;
     showProbeConfig: boolean;
     submitting: boolean;
     showEncoding: boolean;
@@ -49,14 +42,6 @@ const emit = defineEmits<{
 
 <template>
     <div class="space-y-3">
-        <SessionWorkflowStepper
-            :ingest="ingest"
-            :probe="probe"
-            :encoding="encoding"
-            :upload="upload"
-            :finalize="finalize"
-        />
-
         <template v-if="!showProbeConfig && !submitting && !(showEncoding || isCompleted || currentStatus === 'failed')">
             <div v-if="showUploadProgress && activeUploadProgress != null">
                 <ProgressBar
@@ -108,30 +93,6 @@ const emit = defineEmits<{
                     :progress="activeUploadProgress"
                     :indeterminate="activeUploadProgress >= 100"
                 />
-            </div>
-            <div class="rounded-xl border border-slate-200/80 bg-slate-50/60 p-3 sm:p-4 dark:border-slate-600/45 dark:bg-slate-800/35">
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div class="min-w-0">
-                        <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">File analysed — ready to encode</p>
-                        <p class="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
-                            Review the encoding ladder and bitrate settings, then click
-                            <strong class="text-slate-800 dark:text-slate-200">Next</strong>
-                            to open
-                            <strong class="text-slate-800 dark:text-slate-200">Trim segments</strong>
-                            and choose which parts of the source to encode (optional).
-                            Start the job with
-                            <strong class="text-slate-800 dark:text-slate-200">Start Encoding</strong>
-                            on that tab. You can add chapter titles beside the player before, during, or after encoding.
-                        </p>
-                    </div>
-                    <button
-                        type="button"
-                        class="shrink-0 cursor-pointer rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600"
-                        @click="emit('switchTab', 'output')"
-                    >
-                        Configure &amp; encode →
-                    </button>
-                </div>
             </div>
         </template>
 

@@ -165,7 +165,7 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
                     :show-toolbar="false"
                     :show-playback-controls="false"
                     :show-help="false"
-                    title="Chapters"
+                    :title="isCompleted ? 'Chapters' : 'Trim segments'"
                     keyboard-scope="focus"
                     :fps="segmentEditorProbeFps"
                 />

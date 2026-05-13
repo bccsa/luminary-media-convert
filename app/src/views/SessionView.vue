@@ -8,7 +8,6 @@ import type { Segment } from '@luminary-media-converter/segment-editor';
 import { useChapters, clearChapterDraftForSession } from '../composables/useChapters';
 import type { AudioTrackInfo, QualityLevelInfo } from '../components/HlsPlayer.vue';
 import ProgressBar from '../components/ProgressBar.vue';
-import StatusBadge from '../components/StatusBadge.vue';
 import DeleteSessionModal from '../components/DeleteSessionModal.vue';
 import SessionOutputPanel from '../components/session-view/SessionOutputPanel.vue';
 import SessionPostProcessPanel from '../components/session-view/SessionPostProcessPanel.vue';
@@ -262,6 +261,28 @@ watch(showProbeConfig, (ready) => {
 const showEncoding = computed(() => {
     const s = currentStatus.value;
     return s === 'queued' || s === 'encoding' || s === 'encrypting' || s === 'uploading_to_s3';
+});
+
+/** Mirrors `SessionWorkflowPanel` visibility — avoids an empty padded card when probe is ready but there is no upload / encode UI yet. */
+const showSessionWorkflowPanel = computed(() => {
+    const cs = currentStatus.value;
+    const preEncodeFlow =
+        !showProbeConfig.value &&
+        !submitting.value &&
+        !(showEncoding.value || isCompleted.value || cs === 'failed');
+    if (preEncodeFlow) {
+        if (showUploadProgress.value && activeUpload.value?.progress != null) return true;
+        if (showUploadDoneWaiting.value) return true;
+        if (showUploadRemoteMessage.value) return true;
+        if (cs === 'uploaded' && probeLoading.value) return true;
+        return false;
+    }
+    if (showProbeConfig.value && showUploadProgress.value && activeUpload.value?.progress != null) {
+        return true;
+    }
+    if (submitting.value) return true;
+    if ((showEncoding.value || isCompleted.value || cs === 'failed') && !submitting.value) return true;
+    return false;
 });
 
 // Server-side preview — API serves on-demand HLS segments.
@@ -1064,6 +1085,9 @@ function onEncodeBack() {
 
 function onEncodeNextToTrim() {
     activeTab.value = 'trim';
+    void nextTick(() => {
+        window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    });
 }
 
 function onEncodeCanSubmitChange(valid: boolean) {
@@ -1332,6 +1356,30 @@ const showSessionDetailCard = computed(
         showProbeConfig.value,
 );
 
+/**
+ * Detail card chrome is collapsed (Encode panel stays mounted via v-show).
+ * Also used to drop flex gap between the title row and the player on Trim.
+ */
+const sessionDetailChromeCollapsed = computed(() => {
+    const tab = activeTab.value;
+    const workflowEmpty = !showSessionWorkflowPanel.value;
+    if (tab === 'trim' && showProbeConfig.value && workflowEmpty && !hasTrimToolbarContent.value) {
+        return true;
+    }
+    if (tab === 'workflow' && workflowEmpty) return true;
+    return false;
+});
+
+/** Collapse session card chrome when the active tab has no visible body (Encode panel stays mounted via v-show). */
+const sessionDetailCardSurfaceClass = computed(() => {
+    const full =
+        'rounded-xl border border-slate-200/90 bg-white/90 p-3 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur sm:p-4 dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10';
+    if (sessionDetailChromeCollapsed.value) {
+        return 'm-0 max-h-0 min-h-0 overflow-hidden border-0 bg-transparent p-0 shadow-none ring-0 backdrop-blur-none';
+    }
+    return full;
+});
+
 /** Wide breakout for trim tab — maximize horizontal space for segment editing. */
 const trimPlayerBreakoutClass = computed(() => {
     if (activeTab.value !== 'trim' || !showTrimSegmentEditor.value) {
@@ -1340,10 +1388,8 @@ const trimPlayerBreakoutClass = computed(() => {
     return 'relative left-1/2 w-screen max-w-[min(100vw-2rem,96rem)] -translate-x-1/2';
 });
 
-/** Tab label for the trim/chapters tab: "Trim segments" pre-encode, "Chapters" once encoding starts. */
-const trimTabLabel = computed(() =>
-    showEncoding.value || isCompleted.value ? 'Chapters' : 'Trim segments',
-);
+/** Tab label: "Chapters" only after encode completes; otherwise the trim tab is "Trim segments". */
+const trimTabLabel = computed(() => (isCompleted.value ? 'Chapters' : 'Trim segments'));
 
 const tabItems = computed(() => [
     { id: 'workflow' as const, label: 'Workflow' },
@@ -1398,54 +1444,6 @@ function relativeCreatedLabel(dateStr: string | null | undefined): string {
     return `Created ${days} day${days === 1 ? '' : 's'} ago`;
 }
 
-const isImportedFlow = computed(() => !!session.value?.imported);
-
-const stepperIngest = computed(() => {
-    if (isImportedFlow.value) return 'done' as const;
-    const s = currentStatus.value;
-    if (!s) return 'pending' as const;
-    if (s === 'created' || s === 'uploading') return 'active' as const;
-    return 'done' as const;
-});
-
-const stepperProbe = computed(() => {
-    if (isImportedFlow.value) return 'done' as const;
-    const s = currentStatus.value;
-    if (!s || s === 'created' || s === 'uploading') return 'pending' as const;
-    if (s === 'uploaded') {
-        if (probeLoading.value) return 'active' as const;
-        if (effectiveProbe.value) return 'done' as const;
-        return 'active' as const;
-    }
-    return 'done' as const;
-});
-
-const stepperEncoding = computed(() => {
-    if (isImportedFlow.value) return 'done' as const;
-    const s = currentStatus.value;
-    if (s === 'failed') return 'error' as const;
-    if (s === 'queued' || s === 'encoding' || s === 'encrypting') return 'active' as const;
-    if (s === 'uploading_to_s3' || s === 'completed') return 'done' as const;
-    return 'pending' as const;
-});
-
-const stepperUpload = computed(() => {
-    if (isImportedFlow.value) return 'done' as const;
-    const s = currentStatus.value;
-    if (s === 'failed') return 'pending' as const;
-    if (s === 'uploading_to_s3') return 'active' as const;
-    if (s === 'completed') return 'done' as const;
-    return 'pending' as const;
-});
-
-const stepperFinalize = computed(() => {
-    if (isImportedFlow.value) return 'done' as const;
-    const s = currentStatus.value;
-    if (s === 'completed') return 'done' as const;
-    if (s === 'failed') return 'error' as const;
-    return 'pending' as const;
-});
-
 async function copyOutputObjectKey(key: string) {
     const base = s3PublicBaseUrl.value;
     const text = base ? `${base}/${key}` : key;
@@ -1480,8 +1478,8 @@ onUnmounted(() => {
 <template>
     <div class="app-view flex min-h-dvh w-full max-w-none flex-col">
         <div
-            class="w-full flex-1 pb-8 pt-4 transition-all duration-300"
-            :class="session && !loading && activeTab === 'trim' ? 'min-h-0 flex flex-col' : ''"
+            class="w-full flex-1 pb-8 transition-all duration-300"
+            :class="session && !loading && activeTab === 'trim' ? 'min-h-0 flex flex-col pt-2' : 'pt-4'"
         >
 
         <div v-if="loading" class="flex justify-center rounded-2xl border border-slate-200/90 bg-white/90 py-16 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10">
@@ -1496,74 +1494,35 @@ onUnmounted(() => {
         </div>
 
         <template v-else-if="session">
-            <!-- Trim tab: compact name + status strip — same horizontal breakout as the player so edges align -->
+            <!-- Full session header + lifecycle status + in-content workflow tabs (all tabs; trim uses same wide breakout as player) -->
             <div
-                v-if="activeTab === 'trim'"
-                class="mb-2 flex shrink-0 items-center justify-between gap-2 lg:gap-4"
-                :class="trimPlayerBreakoutClass"
+                class="flex shrink-0 items-start gap-4"
+                :class="[
+                    activeTab === 'trim' ? 'mb-1.5 sm:mb-2' : 'mb-4',
+                    activeTab === 'trim' ? trimPlayerBreakoutClass : '',
+                ]"
             >
-                <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                    <router-link
-                        to="/sessions"
-                        class="-ml-1 inline-flex shrink-0 items-center justify-center rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                        title="Back to sessions list"
-                    >
-                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-                        </svg>
-                        <span class="sr-only">Back to sessions list</span>
-                    </router-link>
-                    <span
-                        class="min-w-0 truncate text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100"
-                        :title="sessionName || 'Untitled session'"
-                    >{{ sessionName || 'Untitled session' }}</span>
-                    <template v-if="session?.createdAt">
-                        <span class="shrink-0 text-slate-400" aria-hidden="true">·</span>
-                        <span class="min-w-0 text-xs font-medium text-slate-500 dark:text-slate-400 sm:text-sm">{{ relativeCreatedLabel(session.createdAt) }}</span>
-                    </template>
-                    <StatusBadge
-                        v-if="currentStatus"
-                        class="shrink-0"
-                        :label="statusConfig[currentStatus]?.label ?? currentStatus"
-                        :color="statusConfig[currentStatus]?.color ?? 'text-slate-700 dark:text-slate-400'"
-                        :border-color="statusConfig[currentStatus]?.borderColor ?? 'border-slate-300 dark:border-slate-700'"
+                <div class="min-w-0 flex-1">
+                    <SessionViewHeader
+                        class="min-w-0"
+                        v-model:name-input="nameInput"
+                        show-back-to-sessions
+                        :session-name="sessionName"
+                        :session="session"
+                        :editing-name="editingName"
+                        :saving-name="savingName"
+                        :created-subtitle="relativeCreatedLabel(session.createdAt)"
+                        :display-encoder="displayEncoder"
+                        :display-segment-format="displaySegmentFormat"
+                        :is-encrypted="isEncrypted"
+                        :pipeline-status-label="currentStatus ? (statusConfig[currentStatus]?.label ?? currentStatus) : undefined"
+                        :pipeline-status-color="currentStatus ? (statusConfig[currentStatus]?.color ?? 'text-slate-700 dark:text-slate-400') : undefined"
+                        :pipeline-status-border-color="currentStatus ? (statusConfig[currentStatus]?.borderColor ?? 'border-slate-300 dark:border-slate-700') : undefined"
+                        @save-name="saveName"
+                        @cancel-edit-name="cancelEditName"
+                        @start-edit-name="startEditName"
                     />
                 </div>
-                <!-- Tabs aligned to the right on the trim strip (lg+); header tabs always hidden at lg+ -->
-                <div class="hidden shrink-0 lg:flex lg:items-center">
-                    <div class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50">
-                        <button
-                            v-for="tab in tabItems"
-                            :key="tab.id"
-                            type="button"
-                            class="shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-medium transition-colors sm:px-2.5 sm:py-1.5 sm:text-xs"
-                            :class="activeTab === tab.id
-                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
-                            @click="activeTab = tab.id"
-                        >{{ tab.label }}</button>
-                    </div>
-                </div>
-            </div>
-
-            <div v-show="activeTab !== 'trim'" class="mb-4 flex items-start gap-4">
-                <SessionViewHeader
-                    class="min-w-0 flex-1"
-                    v-model:name-input="nameInput"
-                    show-back-to-sessions
-                    :session-name="sessionName"
-                    :session="session"
-                    :editing-name="editingName"
-                    :saving-name="savingName"
-                    :created-subtitle="relativeCreatedLabel(session.createdAt)"
-                    :display-encoder="displayEncoder"
-                    :display-segment-format="displaySegmentFormat"
-                    :is-encrypted="isEncrypted"
-                    @save-name="saveName"
-                    @cancel-edit-name="cancelEditName"
-                    @start-edit-name="startEditName"
-                />
-                <!-- Tabs to the right of the header (lg+); header tabs always hidden at lg+ -->
                 <div class="hidden shrink-0 pt-1 lg:flex">
                     <div class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50">
                         <button
@@ -1616,76 +1575,91 @@ onUnmounted(() => {
                 v-else
                 :class="[
                     'min-w-0 flex flex-col',
-                    activeTab === 'trim' ? 'min-h-0 flex-1 gap-2' : 'space-y-5',
+                    activeTab === 'trim'
+                        ? [
+                              'min-h-0 flex-1',
+                              sessionDetailChromeCollapsed ? 'gap-0' : 'gap-2',
+                          ]
+                        : 'space-y-5',
                 ]"
             >
-                <div class="min-w-0" :class="trimPlayerBreakoutClass">
-                    <SessionPlayerStrip
-                        ref="sessionPlayerStripRef"
-                        v-model:chapter-segments="chapterSegments"
-                        :active-playback-url="activePlaybackUrl"
-                        :is-completed="isCompleted"
-                        :thumbnail-vtt-url="thumbnailVttUrl"
-                        :encoding-type="encodingType"
-                        :is-audio-only="isAudioOnly"
-                        :encryption-key-hex="encryptionKeyHex"
-                        :poller-encryption-key-hex="poller.encryptionKeyHex.value ?? undefined"
-                        :show-chapters-side-panel="showChaptersBesidePlayer"
-                        :chapters-side-panel-duration="chaptersSidePanelDuration"
-                        :is-preview-playing="isPreviewPlaying"
-                        :segment-editor-probe-fps="segmentEditorProbeFps"
-                        :chapters-save-error="chaptersSaveError"
-                        :active-tab="activeTab"
-                        :show-angle-switcher="showAngleSwitcher"
-                        :hide-angle-switcher="hideAngleBelowPlayer"
-                        :unique-angle-playlists="uniqueAnglePlaylists"
-                        :current-angle-index="currentAngleIndex"
-                        @quality-levels="onPreviewQualityLevels"
-                        @playing-change="isPreviewPlaying = $event"
-                        @duration-change="playerDuration = $event"
-                        @audio-tracks="onNativeAudioTracks"
-                        @angle-change="switchToAngle"
-                    />
-                </div>
-
-                <Teleport to="#app-session-workflow-teleport">
-                    <div class="flex w-full min-w-0 items-center justify-end gap-1.5 sm:gap-2">
-                        <!-- Workflow tabs — visible on mobile; at lg+ the tabs appear in the content area -->
-                        <div v-if="!isLgScreen" class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50">
-                            <button
-                                v-for="tab in tabItems"
-                                :key="tab.id"
-                                type="button"
-                                class="shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-medium transition-colors sm:px-2.5 sm:py-1.5 sm:text-xs"
-                                :class="activeTab === tab.id
-                                    ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
-                                @click="activeTab = tab.id"
-                            >
-                                {{ tab.label }}
-                            </button>
-                        </div>
-
-                        <!-- Start Encoding (trim tab, pre-encode only) -->
-                        <div v-if="activeTab === 'trim' && showProbeConfig" class="shrink-0">
-                            <button
-                                type="button"
-                                class="cursor-pointer rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600 sm:px-3 sm:py-1.5 sm:text-xs"
-                                :disabled="!encodeConfigCanSubmit || submitting"
-                                :title="!encodeConfigCanSubmit && !submitting
-                                    ? 'Open Encode settings and complete the ladder (all required options) first.'
-                                    : undefined"
-                                @click="onStartEncodingFromTrim"
-                            >
-                                {{ submitting ? 'Starting…' : 'Start encoding' }}
-                            </button>
-                        </div>
+                <!-- On trim: flex order shows workflow card above player (same vertical rhythm as Workflow tab) -->
+                <div
+                    :class="[
+                        'min-w-0 flex flex-col gap-2',
+                        activeTab === 'trim' ? 'order-2' : '',
+                    ]"
+                >
+                    <div class="min-w-0" :class="trimPlayerBreakoutClass">
+                        <SessionPlayerStrip
+                            ref="sessionPlayerStripRef"
+                            v-model:chapter-segments="chapterSegments"
+                            :active-playback-url="activePlaybackUrl"
+                            :is-completed="isCompleted"
+                            :thumbnail-vtt-url="thumbnailVttUrl"
+                            :encoding-type="encodingType"
+                            :is-audio-only="isAudioOnly"
+                            :encryption-key-hex="encryptionKeyHex"
+                            :poller-encryption-key-hex="poller.encryptionKeyHex.value ?? undefined"
+                            :show-chapters-side-panel="showChaptersBesidePlayer"
+                            :chapters-side-panel-duration="chaptersSidePanelDuration"
+                            :is-preview-playing="isPreviewPlaying"
+                            :segment-editor-probe-fps="segmentEditorProbeFps"
+                            :chapters-save-error="chaptersSaveError"
+                            :active-tab="activeTab"
+                            :show-angle-switcher="showAngleSwitcher"
+                            :hide-angle-switcher="hideAngleBelowPlayer"
+                            :unique-angle-playlists="uniqueAnglePlaylists"
+                            :current-angle-index="currentAngleIndex"
+                            @quality-levels="onPreviewQualityLevels"
+                            @playing-change="isPreviewPlaying = $event"
+                            @duration-change="playerDuration = $event"
+                            @audio-tracks="onNativeAudioTracks"
+                            @angle-change="switchToAngle"
+                        />
                     </div>
-                </Teleport>
+
+                    <Teleport to="#app-session-workflow-teleport">
+                        <div class="flex w-full min-w-0 items-center justify-end gap-1.5 sm:gap-2">
+                            <!-- Workflow tabs — visible on mobile; at lg+ the tabs appear in the content area -->
+                            <div v-if="!isLgScreen" class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50">
+                                <button
+                                    v-for="tab in tabItems"
+                                    :key="tab.id"
+                                    type="button"
+                                    class="shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-medium transition-colors sm:px-2.5 sm:py-1.5 sm:text-xs"
+                                    :class="activeTab === tab.id
+                                        ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                        : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
+                                    @click="activeTab = tab.id"
+                                >
+                                    {{ tab.label }}
+                                </button>
+                            </div>
+
+                            <!-- Start Encoding (trim tab, pre-encode only) -->
+                            <div v-if="activeTab === 'trim' && showProbeConfig" class="shrink-0">
+                                <button
+                                    type="button"
+                                    class="cursor-pointer rounded-lg bg-sky-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600 sm:px-3 sm:py-1.5 sm:text-xs"
+                                    :disabled="!encodeConfigCanSubmit || submitting"
+                                    :title="!encodeConfigCanSubmit && !submitting
+                                        ? 'Open Encode settings and complete the ladder (all required options) first.'
+                                        : undefined"
+                                    @click="onStartEncodingFromTrim"
+                                >
+                                    {{ submitting ? 'Starting…' : 'Start encoding' }}
+                                </button>
+                            </div>
+                        </div>
+                    </Teleport>
+                </div>
 
                 <SessionTrimWorkspace
                     ref="trimTimelineWorkspaceRef"
                     v-if="activeTab === 'trim' && showTrimSegmentEditor"
+                    class="shrink-0"
+                    :class="activeTab === 'trim' ? 'order-3' : ''"
                     section="timeline"
                     v-model:editor-segments="editorSegments"
                     v-model:selected-audio-track="selectedAudioTrack"
@@ -1697,6 +1671,7 @@ onUnmounted(() => {
                     :show-trim-segment-editor="showTrimSegmentEditor"
                     :thumbnail-vtt-url="thumbnailVttUrl"
                     :probe-duration="trimEditorProbeDuration"
+                    :add-gap-above-timeline="sessionDetailChromeCollapsed"
                     :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
                     :on-seek="(t: number) => playerRef?.seek(t)"
                     :on-play-pause="() => playerRef?.togglePlay()"
@@ -1707,7 +1682,7 @@ onUnmounted(() => {
                     :show-angle-select="isCompleted && showAngleSwitcher"
                     :angle-index="currentAngleIndex"
                     :preview-angle-select-options="previewAngleSelectOptions"
-                    :show-quality-select="previewQualityLevels.length > 1 && encodingType !== 'audio'"
+                    :show-quality-select="previewQualityLevels.length >= 1 && encodingType !== 'audio'"
                     :preview-quality-select-options="previewQualitySelectOptions"
                     @update:selected-quality-id="onTrimQualityChange"
                     @angle-change="switchToAngle"
@@ -1717,17 +1692,18 @@ onUnmounted(() => {
 
                 <div
                     v-if="showSessionDetailCard"
-                    class="rounded-xl border border-slate-200/90 bg-white/90 p-3 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur sm:p-4 dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10"
-                    :class="{ hidden: activeTab === 'trim' }"
+                    :class="[
+                        sessionDetailCardSurfaceClass,
+                        activeTab === 'trim' ? `${trimPlayerBreakoutClass} order-1` : '',
+                    ]"
                 >
-                    <!-- Encode workflow -->
-                    <div v-show="activeTab === 'workflow'" class="mt-2">
+                    <!-- Encode workflow + pipeline (visible on Trim tab too — matches Workflow tab) -->
+                    <div
+                        v-show="activeTab === 'workflow' || activeTab === 'trim'"
+                        v-if="showSessionWorkflowPanel"
+                        class="mt-2"
+                    >
                                 <SessionWorkflowPanel
-                                    :ingest="stepperIngest"
-                                    :probe="stepperProbe"
-                                    :encoding="stepperEncoding"
-                                    :upload="stepperUpload"
-                                    :finalize="stepperFinalize"
                                     :show-probe-config="showProbeConfig"
                                     :submitting="submitting"
                                     :show-encoding="showEncoding"
@@ -1840,9 +1816,9 @@ onUnmounted(() => {
                                 />
                             </div>
 
-                            <!-- Trim segments toolbar (chapter save/discard when chapter panel is visible) -->
+                            <!-- Chapter-only toolbar when trim timeline is not mounted -->
                             <SessionTrimWorkspace
-                                v-show="activeTab === 'trim'"
+                                v-show="activeTab === 'trim' && !showTrimSegmentEditor"
                                 section="toolbar"
                                 v-model:editor-segments="editorSegments"
                                 v-model:selected-audio-track="selectedAudioTrack"
@@ -1863,7 +1839,7 @@ onUnmounted(() => {
                                 :segment-editor-probe-fps="segmentEditorProbeFps"
                                 :show-audio-select="previewAudioTracks.length > 1"
                                 :preview-audio-select-options="previewAudioSelectOptions"
-                                :show-quality-select="previewQualityLevels.length > 1 && encodingType !== 'audio'"
+                                :show-quality-select="previewQualityLevels.length >= 1 && encodingType !== 'audio'"
                                 :preview-quality-select-options="previewQualitySelectOptions"
                                 @update:selected-quality-id="onTrimQualityChange"
                                 @discard-chapters="onDiscardChapters"

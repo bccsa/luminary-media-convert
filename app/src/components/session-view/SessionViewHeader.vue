@@ -27,8 +27,17 @@ withDefaults(
         isEncrypted: boolean;
         /** Session detail: back control before the title row */
         showBackToSessions?: boolean;
+        /** Pipeline status (e.g. Uploaded) — inline beside the session title when set */
+        pipelineStatusLabel?: string;
+        pipelineStatusColor?: string;
+        pipelineStatusBorderColor?: string;
     }>(),
-    { showBackToSessions: false },
+    {
+        showBackToSessions: false,
+        pipelineStatusLabel: undefined,
+        pipelineStatusColor: undefined,
+        pipelineStatusBorderColor: undefined,
+    },
 );
 
 const backLinkClass =
@@ -97,7 +106,7 @@ const emit = defineEmits<{
                     </svg>
                     <span class="sr-only">Back to sessions list</span>
                 </router-link>
-                <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     <h1
                         class="min-w-0 cursor-pointer text-2xl font-semibold tracking-tight text-slate-900 transition-colors hover:text-slate-600 dark:text-slate-100 dark:hover:text-slate-400"
                         :title="sessionName ? 'Click to rename' : 'Click to add a name'"
@@ -108,6 +117,15 @@ const emit = defineEmits<{
                     <template v-if="session.createdAt && createdSubtitle">
                         <span class="shrink-0 text-slate-400" aria-hidden="true">·</span>
                         <span class="min-w-0 text-xs font-medium text-slate-500 dark:text-slate-400 sm:text-sm">{{ createdSubtitle }}</span>
+                    </template>
+                    <template v-if="pipelineStatusLabel">
+                        <span class="shrink-0 text-slate-400" aria-hidden="true">·</span>
+                        <StatusBadge
+                            class="shrink-0"
+                            :label="pipelineStatusLabel"
+                            :color="pipelineStatusColor"
+                            :border-color="pipelineStatusBorderColor"
+                        />
                     </template>
                 </div>
                 <StatusBadge

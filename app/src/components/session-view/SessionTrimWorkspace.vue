@@ -33,8 +33,19 @@ const props = withDefaults(
         section?: 'toolbar' | 'timeline';
         /** Post-encode `thumbnails.vtt` URL for timeline hover previews (trim mode). */
         thumbnailVttUrl?: string | null;
+        /**
+         * When the session shell uses zero flex gap (collapsed detail card), add space
+         * between the player row and this timeline so it matches the spaced stack after encode.
+         */
+        addGapAboveTimeline?: boolean;
     }>(),
-    { section: undefined, showAngleSelect: false, angleIndex: 0, previewAngleSelectOptions: () => [] },
+    {
+        section: undefined,
+        showAngleSelect: false,
+        angleIndex: 0,
+        previewAngleSelectOptions: () => [],
+        addGapAboveTimeline: false,
+    },
 );
 
 const editorSegments = defineModel<Segment[]>('editorSegments', { required: true });
@@ -122,6 +133,7 @@ const trimToolbarHasVisibleContent = computed(() => {
     <div
         v-if="section === 'timeline' && showTrimSegmentEditor"
         class="relative left-1/2 w-screen max-w-[min(100vw-0.5rem,96rem)] -translate-x-1/2"
+        :class="addGapAboveTimeline ? 'mt-2 sm:mt-3' : ''"
     >
         <SegmentEditor
             ref="trimSegmentEditorRef"
