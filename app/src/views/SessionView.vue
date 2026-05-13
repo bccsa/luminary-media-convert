@@ -1335,7 +1335,7 @@ const trimPlayerBreakoutClass = computed(() => {
     if (activeTab.value !== 'trim' || !showTrimSegmentEditor.value) {
         return '';
     }
-    return 'relative left-1/2 w-screen max-w-[min(100vw-1rem,96rem)] -translate-x-1/2 px-1 sm:px-2';
+    return 'relative left-1/2 w-screen max-w-[min(100vw-2rem,96rem)] -translate-x-1/2';
 });
 
 /** Tab label for the trim/chapters tab: "Trim segments" pre-encode, "Chapters" once encoding starts. */
@@ -1465,8 +1465,8 @@ onUnmounted(() => {
 <template>
     <div class="app-view flex min-h-dvh w-full max-w-none flex-col">
         <div
-            class="mx-auto w-full max-w-7xl flex-1 pb-8 pt-4 transition-all duration-300"
-            :class="session && !loading && activeTab === 'trim' ? 'min-h-0 flex flex-col px-2 sm:px-3' : 'px-4 sm:px-6'"
+            class="w-full flex-1 pb-8 pt-4 transition-all duration-300"
+            :class="session && !loading && activeTab === 'trim' ? 'min-h-0 flex flex-col' : ''"
         >
 
         <div v-if="loading" class="flex justify-center rounded-2xl border border-slate-200/90 bg-white/90 py-16 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10">

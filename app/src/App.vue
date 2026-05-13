@@ -142,8 +142,7 @@ watch(isAuthenticated, async (authenticated) => {
                 class="sticky top-0 z-40 border-b border-sky-200/50 bg-white/90 font-sans shadow-sm backdrop-blur-md dark:border-sky-500/15 dark:bg-slate-900/85"
             >
                 <div
-                    class="mx-auto flex min-h-14 w-full items-center gap-1.5 px-4 py-2 sm:gap-2 sm:px-6"
-                    :class="isSessionDetail ? 'max-w-none' : 'max-w-6xl'"
+                    class="mx-auto flex min-h-14 w-full max-w-6xl items-center gap-1.5 px-4 py-2 sm:gap-2 sm:px-6"
                 >
                     <router-link
                         to="/sessions"
@@ -171,12 +170,8 @@ watch(isAuthenticated, async (authenticated) => {
             </header>
 
             <main
-                class="relative mx-auto"
-                :class="
-                    isSessionDetail
-                        ? 'max-w-none px-0 py-0'
-                        : 'max-w-6xl px-4 py-8 sm:px-6 sm:py-10'
-                "
+                class="relative mx-auto w-full max-w-6xl px-4 sm:px-6"
+                :class="isSessionDetail ? 'py-0' : 'py-8 sm:py-10'"
             >
                 <router-view />
             </main>
