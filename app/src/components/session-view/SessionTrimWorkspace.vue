@@ -25,12 +25,16 @@ const props = withDefaults(
         previewAudioSelectOptions: { value: number; label: string }[];
         showQualitySelect: boolean;
         previewQualitySelectOptions: { value: string; label: string }[];
+        /** Completed multi-angle HLS: angle dropdown in timeline toolbar (before audio). */
+        showAngleSelect?: boolean;
+        angleIndex?: number;
+        previewAngleSelectOptions?: { value: number; label: string }[];
         /** `toolbar` = hints + chapter actions in the workflow card. `timeline` = full trim editor (below the player row). */
         section?: 'toolbar' | 'timeline';
         /** Post-encode `thumbnails.vtt` URL for timeline hover previews (trim mode). */
         thumbnailVttUrl?: string | null;
     }>(),
-    { section: undefined },
+    { section: undefined, showAngleSelect: false, angleIndex: 0, previewAngleSelectOptions: () => [] },
 );
 
 const editorSegments = defineModel<Segment[]>('editorSegments', { required: true });
@@ -40,6 +44,7 @@ const selectedQualityId = defineModel<string | null>('selectedQualityId', { requ
 const emit = defineEmits<{
     discardChapters: [];
     saveChapters: [];
+    angleChange: [index: number];
 }>();
 
 const showToolbarSection = () => props.section !== 'timeline';
@@ -153,15 +158,40 @@ const trimToolbarHasVisibleContent = computed(() => {
                     @click="emit('saveChapters')"
                 >{{ chaptersIsSaving ? 'Saving…' : 'Save chapters' }}</button>
             </template>
-            <template v-if="showAudioSelect" #playback-start>
-                <label class="playback-slot-label">Audio:</label>
-                <FormSelect
-                    variant="playback"
-                    presentation="custom"
-                    numeric
-                    v-model="selectedAudioTrack"
-                    :options="previewAudioSelectOptions"
-                />
+            <template
+                v-if="showAngleSelect || showAudioSelect"
+                #playback-start
+            >
+                <span
+                    v-if="showAngleSelect && previewAngleSelectOptions.length > 0"
+                    class="inline-flex shrink-0 items-center gap-1.5"
+                >
+                    <label class="playback-slot-label">Angle:</label>
+                    <FormSelect
+                        variant="playback"
+                        presentation="custom"
+                        numeric
+                        wrapper-class="min-w-[8.5rem] max-w-[min(100%,18rem)]"
+                        :model-value="angleIndex"
+                        :options="previewAngleSelectOptions"
+                        aria-label="Camera angle"
+                        @update:model-value="emit('angleChange', Number($event))"
+                    />
+                </span>
+                <span
+                    v-if="showAudioSelect"
+                    class="inline-flex shrink-0 items-center gap-1.5"
+                    :class="showAngleSelect && previewAngleSelectOptions.length > 0 ? 'ml-3 sm:ml-4' : ''"
+                >
+                    <label class="playback-slot-label">Audio:</label>
+                    <FormSelect
+                        variant="playback"
+                        presentation="custom"
+                        numeric
+                        v-model="selectedAudioTrack"
+                        :options="previewAudioSelectOptions"
+                    />
+                </span>
             </template>
             <template v-if="showQualitySelect" #playback-end>
                 <label class="playback-slot-label">Quality:</label>

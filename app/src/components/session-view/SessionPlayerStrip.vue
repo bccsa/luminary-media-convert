@@ -4,6 +4,7 @@ import { SegmentEditor } from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
 import HlsPlayer from '../HlsPlayer.vue';
 import type { AudioTrackInfo, QualityLevelInfo } from '../HlsPlayer.vue';
+import FormSelect from '../FormSelect.vue';
 
 const props = defineProps<{
     activePlaybackUrl: string | null;
@@ -22,7 +23,13 @@ const props = defineProps<{
     showAngleSwitcher: boolean;
     uniqueAnglePlaylists: { name: string; key: string }[];
     currentAngleIndex: number;
+    /** When true, hide the below-player angle row (trim toolbar carries it, or another tab is active). */
+    hideAngleSwitcher?: boolean;
 }>();
+
+const angleSelectOptions = computed(() =>
+    props.uniqueAnglePlaylists.map((ap, i) => ({ value: i, label: ap.name })),
+);
 
 const chapterSegments = defineModel<Segment[]>('chapterSegments', { required: true });
 
@@ -174,22 +181,21 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
             class="mt-2 text-xs text-red-600 dark:text-red-400"
         >{{ chaptersSaveError }}</p>
 
-        <div v-if="isCompleted && showAngleSwitcher" class="mt-4 flex flex-wrap items-center gap-2">
-            <span class="text-xs font-medium text-slate-500 dark:text-slate-400">Angle</span>
-            <div class="flex flex-wrap gap-1.5">
-                <button
-                    v-for="(ap, i) in uniqueAnglePlaylists"
-                    :key="ap.key"
-                    type="button"
-                    class="cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
-                    :class="i === currentAngleIndex
-                        ? 'bg-slate-800 text-white dark:bg-slate-700 dark:text-white'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'"
-                    @click="emit('angleChange', i)"
-                >
-                    {{ ap.name }}
-                </button>
-            </div>
+        <div
+            v-if="isCompleted && showAngleSwitcher && !hideAngleSwitcher"
+            class="mt-4 flex flex-wrap items-center gap-2"
+        >
+            <label class="playback-slot-label shrink-0">Angle:</label>
+            <FormSelect
+                variant="playback"
+                presentation="custom"
+                numeric
+                wrapper-class="min-w-[10rem] max-w-[min(100%,20rem)]"
+                :model-value="currentAngleIndex"
+                :options="angleSelectOptions"
+                aria-label="Camera angle"
+                @update:model-value="emit('angleChange', Number($event))"
+            />
         </div>
     </div>
 </template>

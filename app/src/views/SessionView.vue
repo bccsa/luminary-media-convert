@@ -612,6 +612,19 @@ const uniqueAnglePlaylists = computed(() => {
 
 const showAngleSwitcher = computed(() => uniqueAnglePlaylists.value.length > 1);
 
+const previewAngleSelectOptions = computed(() =>
+    uniqueAnglePlaylists.value.map((ap, i) => ({ value: i, label: ap.name })),
+);
+
+/** Multi-angle dropdown lives in trim timeline next to audio; hide duplicate under player. */
+const anglesEmbeddedInTrimToolbar = computed(
+    () =>
+        isCompleted.value
+        && showAngleSwitcher.value
+        && showTrimSegmentEditor.value
+        && activeTab.value === 'trim',
+);
+
 const currentAngleIsAudioOnly = computed(() => {
     const lists = uniqueAnglePlaylists.value;
     if (!lists.length) return false;
@@ -1575,6 +1588,7 @@ onUnmounted(() => {
                         :chapters-save-error="chaptersSaveError"
                         :active-tab="activeTab"
                         :show-angle-switcher="showAngleSwitcher"
+                        :hide-angle-switcher="anglesEmbeddedInTrimToolbar"
                         :unique-angle-playlists="uniqueAnglePlaylists"
                         :current-angle-index="currentAngleIndex"
                         @quality-levels="onPreviewQualityLevels"
@@ -1646,9 +1660,13 @@ onUnmounted(() => {
                     :segment-editor-probe-fps="segmentEditorProbeFps"
                     :show-audio-select="previewAudioTracks.length > 1"
                     :preview-audio-select-options="previewAudioSelectOptions"
+                    :show-angle-select="isCompleted && showAngleSwitcher"
+                    :angle-index="currentAngleIndex"
+                    :preview-angle-select-options="previewAngleSelectOptions"
                     :show-quality-select="previewQualityLevels.length > 1 && encodingType !== 'audio'"
                     :preview-quality-select-options="previewQualitySelectOptions"
                     @update:selected-quality-id="onTrimQualityChange"
+                    @angle-change="switchToAngle"
                     @discard-chapters="onDiscardChapters"
                     @save-chapters="onSaveChapters"
                 />

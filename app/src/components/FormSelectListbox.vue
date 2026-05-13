@@ -233,20 +233,35 @@ async function syncPanelPosition() {
     const r = tr.getBoundingClientRect();
     const gap = props.variant === 'playback' ? 2 : 4;
     const isPlayback = props.variant === 'playback';
-    const minWidth = isPlayback ? 220 : Math.round(r.width);
-    const panelWidth = Math.max(Math.round(r.width), minWidth);
-    // Playback dropdowns right-align to the trigger's right edge so they don't clip off-screen.
-    const left = isPlayback
-        ? Math.max(4, Math.round(r.right) - panelWidth)
-        : Math.round(r.left);
+    const triggerW = Math.round(r.width);
+    const viewportW = typeof window !== 'undefined' ? window.innerWidth : 1024;
+
+    if (isPlayback) {
+        /** Width from content; align right edge to trigger; cap so we don't spill past the viewport. */
+        const right = Math.max(0, Math.round(viewportW - r.right));
+        panelStyle.value = {
+            position: 'fixed',
+            top: `${Math.round(r.bottom + gap)}px`,
+            right: `${right}px`,
+            left: 'auto',
+            width: 'max-content',
+            minWidth: `${triggerW}px`,
+            maxWidth: 'min(calc(100vw - 1rem), 22rem)',
+            zIndex: '60',
+            maxHeight: '9rem',
+        };
+        return;
+    }
+
+    const panelWidth = triggerW;
     panelStyle.value = {
         position: 'fixed',
         top: `${Math.round(r.bottom + gap)}px`,
-        left: `${left}px`,
+        left: `${Math.round(r.left)}px`,
         width: `${panelWidth}px`,
         zIndex: '60',
         minWidth: `${panelWidth}px`,
-        maxHeight: isPlayback ? '9rem' : 'min(15rem, calc(100vh - 5rem))',
+        maxHeight: 'min(15rem, calc(100vh - 5rem))',
     };
 }
 
