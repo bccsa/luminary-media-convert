@@ -1,19 +1,6 @@
 <script setup lang="ts">
 import StatusBadge from '../StatusBadge.vue';
 
-const statusConfig: Record<string, { label: string; color: string; borderColor: string }> = {
-    created: { label: 'Created', color: 'text-slate-700 dark:text-slate-400', borderColor: 'border-slate-300 dark:border-slate-700' },
-    uploading: { label: 'Uploading', color: 'text-cyan-700 dark:text-cyan-400', borderColor: 'border-cyan-300 dark:border-cyan-700/60' },
-    uploaded: { label: 'Uploaded', color: 'text-slate-700 dark:text-slate-400', borderColor: 'border-slate-300 dark:border-slate-700' },
-    queued: { label: 'Queued', color: 'text-amber-700 dark:text-amber-400', borderColor: 'border-amber-300 dark:border-amber-700/60' },
-    encoding: { label: 'Encoding', color: 'text-slate-700 dark:text-slate-400', borderColor: 'border-slate-300 dark:border-slate-700/60' },
-    encrypting: { label: 'Encrypting', color: 'text-amber-700 dark:text-amber-400', borderColor: 'border-amber-300 dark:border-amber-700/60' },
-    uploading_to_s3: { label: 'Uploading to S3', color: 'text-cyan-700 dark:text-cyan-400', borderColor: 'border-cyan-300 dark:border-cyan-700/60' },
-    completed: { label: 'Completed', color: 'text-emerald-700 dark:text-emerald-400', borderColor: 'border-emerald-300 dark:border-emerald-700/60' },
-    failed: { label: 'Failed', color: 'text-red-700 dark:text-red-400', borderColor: 'border-red-300 dark:border-red-700/60' },
-    imported: { label: 'Imported', color: 'text-violet-700 dark:text-violet-400', borderColor: 'border-violet-300 dark:border-violet-700/60' },
-};
-
 const ICON_PATHS = {
     cpu: 'M9 3.5V2m0 17.5V21M5.06 5.06l-.94-.94m13.76 13.76-.94-.94M2 12H3.5m17 0H22M5.06 18.94l-.94.94M18.82 5.06l.94-.94M12 8a4 4 0 100 8 4 4 0 000-8z',
     gpu: 'M13 10V3L4 14h7v7l9-11h-7z',
@@ -28,13 +15,11 @@ const encoderConfig: Record<string, { label: string; icon: string }> = {
 };
 
 defineProps<{
-    sessionId: string;
     sessionName: string;
     session: Record<string, any>;
     editingName: boolean;
     savingName: boolean;
-    currentStatus: string | null;
-    /** Subtitle under session id e.g. "Created 5 min ago" */
+    /** Subtitle under session name e.g. "Created 5 min ago" */
     createdSubtitle: string;
     displayEncoder: string | undefined;
     displaySegmentFormat?: string;
@@ -51,8 +36,9 @@ const emit = defineEmits<{
 </script>
 
 <template>
-    <header class="mb-4 flex flex-col gap-3">
+    <header class="flex flex-col gap-3">
         <div class="min-w-0">
+            <!-- Editing mode: inline input + save/cancel -->
             <div v-if="editingName" class="flex flex-wrap items-center gap-2">
                 <input
                     v-model="nameInput"
@@ -61,12 +47,6 @@ const emit = defineEmits<{
                     placeholder="Session name"
                     @keyup.enter="emit('saveName')"
                     @keyup.escape="emit('cancelEditName')"
-                />
-                <StatusBadge
-                    class="shrink-0"
-                    :label="currentStatus ? statusConfig[currentStatus]?.label ?? currentStatus : '--'"
-                    :color="statusConfig[currentStatus ?? '']?.color ?? 'text-slate-700 dark:text-slate-400'"
-                    :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-slate-300 dark:border-slate-700'"
                 />
                 <button
                     type="button"
@@ -84,40 +64,25 @@ const emit = defineEmits<{
                     Cancel
                 </button>
             </div>
-            <div
-                v-else
-                class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2"
-            >
-                <h1
-                    class="min-w-0 cursor-pointer text-2xl font-semibold tracking-tight text-slate-900 transition-colors hover:text-slate-600 dark:text-slate-100 dark:hover:text-slate-400"
-                    @click="emit('startEditName')"
-                    :title="sessionName ? 'Click to rename' : 'Click to add a name'"
-                >
-                    {{ sessionName || 'Untitled session' }}
-                </h1>
-                <StatusBadge
-                    class="shrink-0"
-                    :label="currentStatus ? statusConfig[currentStatus]?.label ?? currentStatus : '--'"
-                    :color="statusConfig[currentStatus ?? '']?.color ?? 'text-slate-700 dark:text-slate-400'"
-                    :border-color="statusConfig[currentStatus ?? '']?.borderColor ?? 'border-slate-300 dark:border-slate-700'"
-                />
-            </div>
-            <div class="mt-1.5 flex flex-wrap items-center gap-2">
-                <p class="font-mono text-xs text-slate-500 dark:text-slate-400">{{ sessionId }}</p>
-                <span v-if="session.createdAt" class="text-xs text-slate-500 dark:text-slate-500">·</span>
-                <p v-if="session.createdAt" class="text-xs text-slate-500 dark:text-slate-400">{{ createdSubtitle }}</p>
-            </div>
-            <div
-                v-if="
-                    (displayEncoder && encoderConfig[displayEncoder])
-                    || displaySegmentFormat === 'mpegts'
-                    || isEncrypted
-                    || session.imported
-                "
-                class="mt-3 flex flex-wrap items-center gap-2"
-            >
+
+            <!-- Display mode: clickable name + detail badges -->
+            <div v-else class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <h1
+                        class="min-w-0 cursor-pointer text-2xl font-semibold tracking-tight text-slate-900 transition-colors hover:text-slate-600 dark:text-slate-100 dark:hover:text-slate-400"
+                        :title="sessionName ? 'Click to rename' : 'Click to add a name'"
+                        @click="emit('startEditName')"
+                    >
+                        {{ sessionName || 'Untitled session' }}
+                    </h1>
+                    <template v-if="session.createdAt && createdSubtitle">
+                        <span class="shrink-0 text-slate-400" aria-hidden="true">·</span>
+                        <span class="min-w-0 text-xs font-medium text-slate-500 dark:text-slate-400 sm:text-sm">{{ createdSubtitle }}</span>
+                    </template>
+                </div>
                 <StatusBadge
                     v-if="displayEncoder && encoderConfig[displayEncoder]"
+                    class="shrink-0"
                     :label="encoderConfig[displayEncoder].label"
                     :icon="encoderConfig[displayEncoder].icon"
                     :color="displayEncoder === 'cpu' ? 'text-slate-700 dark:text-slate-400' : 'text-violet-700 dark:text-violet-400'"
@@ -125,12 +90,16 @@ const emit = defineEmits<{
                 />
                 <StatusBadge
                     v-if="displaySegmentFormat === 'mpegts'"
+                    class="shrink-0"
                     label="MPEG-TS"
                     color="text-amber-700 dark:text-amber-400"
                     border-color="border-amber-300 dark:border-amber-700/60"
                     :icon="ICON_PATHS.warning"
                     title="MPEG-TS segments used because source streams have misaligned start times."
                 />
+            </div>
+
+            <div v-if="isEncrypted || session.imported" class="mt-3 flex flex-wrap items-center gap-2">
                 <StatusBadge
                     v-if="isEncrypted"
                     label="Encrypted"

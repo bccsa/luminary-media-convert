@@ -11,8 +11,10 @@ const props = withDefaults(
         chaptersIsSaving: boolean;
         chaptersSaveError: string | null;
         showTrimSegmentEditor: boolean;
-        /** True when the session is completed/imported — changes the placeholder copy while player duration loads. */
-        canEditWithTimeline?: boolean;
+        /** Trim timeline is available (pre-encode configure phase). */
+        canEditTrimTimeline?: boolean;
+        /** Chapters beside player whenever playback is available (pre-encode, encoding, or completed). */
+        canEditChaptersPlayback?: boolean;
         probeDuration: number;
         getCurrentTime: () => number;
         onSeek: (t: number) => void;
@@ -96,24 +98,31 @@ const trimToolbarHasVisibleContent = computed(() => {
             v-if="showToolbarSection() && !(showTrimSegmentEditor || showChaptersSidePanel)"
             class="text-sm leading-relaxed text-slate-500 dark:text-slate-400"
         >
-            <template v-if="canEditWithTimeline">
-                Loading player — the timeline will appear once playback is ready.
+            <template v-if="canEditTrimTimeline">
+                Loading player — the trim timeline will appear once playback is ready.
+            </template>
+            <template v-else-if="canEditChaptersPlayback">
+                Chapter titles are edited in the column beside the player (trim cuts use the timeline below when available).
             </template>
             <template v-else>
-                Trim ranges appear once the source is probed. Chapters are edited beside the player when preview is available.
+                <strong class="font-semibold text-slate-600 dark:text-slate-300">Trim segments</strong>
+                below choose what gets encoded (until you start the job).
+                <strong class="font-semibold text-slate-600 dark:text-slate-300">Chapters</strong>
+                beside the player are titles only — available once playback loads.
             </template>
         </p>
     </div>
 
-    <!-- Timeline: breakout width, below player + chapters row -->
+    <!-- Timeline: full-width bottom strip for precise trim editing -->
     <div
         v-if="section === 'timeline' && showTrimSegmentEditor"
-        class="relative left-1/2 w-screen max-w-[92vw] -translate-x-1/2"
+        class="relative left-1/2 w-screen max-w-[min(100vw-0.5rem,96rem)] -translate-x-1/2"
     >
         <SegmentEditor
             ref="trimSegmentEditorRef"
             v-model="editorSegments"
             mode="trim"
+            title="Trim segments"
             :duration="probeDuration"
             :get-current-time="getCurrentTime"
             :on-seek="onSeek"

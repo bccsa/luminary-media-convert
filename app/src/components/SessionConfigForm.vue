@@ -300,7 +300,7 @@ const canCreateConfig = computed(() =>
                     </span>
                     <div>
                         <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Storage destination</h2>
-                        <p class="text-xs text-slate-500 dark:text-slate-400">S3 output bucket and key prefix for this session.</p>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Storage output bucket and key prefix for this session.</p>
                     </div>
                 </div>
                 <button
@@ -317,10 +317,10 @@ const canCreateConfig = computed(() =>
                 v-if="showNewConfigForm"
                 class="space-y-4 rounded-xl border border-slate-200/80 bg-slate-50/60 p-4 dark:border-slate-500/30 dark:bg-slate-950/25"
             >
-                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">New S3 configuration</h3>
+                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">New storage configuration</h3>
                 <div>
                     <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Name</label>
-                    <input v-model="newConfig.name" type="text" class="input" placeholder="e.g. Production S3" />
+                    <input v-model="newConfig.name" type="text" class="input" placeholder="e.g. Production bucket" />
                 </div>
                 <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div class="sm:col-span-2">
@@ -396,7 +396,7 @@ const canCreateConfig = computed(() =>
                 v-else-if="savedS3Configs.length === 0"
                 class="rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-6 text-center dark:border-slate-600 dark:bg-slate-800/50"
             >
-                <p class="text-sm text-slate-600 dark:text-slate-400">No S3 configurations saved yet.</p>
+                <p class="text-sm text-slate-600 dark:text-slate-400">No storage configurations saved yet.</p>
                 <button
                     type="button"
                     class="mt-3 cursor-pointer text-sm font-semibold text-slate-600 hover:text-slate-500 dark:text-slate-400 dark:hover:text-slate-300"
@@ -408,7 +408,7 @@ const canCreateConfig = computed(() =>
 
             <div v-else class="grid gap-4 sm:grid-cols-2">
                 <div>
-                    <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">S3 configuration</label>
+                    <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Storage configuration</label>
                     <FormSelect
                         v-model="selectedConfigId"
                         :options="savedS3ConfigOptions"

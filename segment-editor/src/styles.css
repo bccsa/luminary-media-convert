@@ -504,7 +504,7 @@ html.dark .se-root {
 .se-shortcuts-strip {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
+    align-items: center;
     gap: 0.4rem 0.875rem;
     padding: 0.5rem 0.75rem;
     margin-bottom: 0.75rem;
@@ -736,7 +736,7 @@ html.dark .se-root {
     overflow-x: hidden;
     overflow-y: hidden;
     min-height: 1.5rem;
-    max-height: 9rem;
+    max-height: 4.5rem;
     height: 1.5rem;
     line-height: 1.25rem;
     transition: border-color 0.12s ease;
@@ -986,8 +986,9 @@ html.dark .se-help {
     border-top: 1px solid var(--se-border);
 }
 
-.se-root[data-mode='chapters'] .se-list,
-.se-root[data-mode='subtitles'] .se-list {
+/* Full editor only — split list beside a player must grow with the column (see .se-list-section--split). */
+.se-root[data-mode='chapters']:not(.se-root--split-list) .se-list,
+.se-root[data-mode='subtitles']:not(.se-root--split-list) .se-list {
     gap: 0.5rem;
     max-height: min(50vh, 22rem);
     padding: 0.125rem 0.25rem 0.125rem 0;
@@ -1069,8 +1070,10 @@ html.dark .se-help {
     flex: 1 1 auto;
     min-height: 0;
     max-height: min(85vh, 56rem);
+    display: flex;
+    flex-direction: column;
     overflow-x: hidden;
-    overflow-y: auto;
+    overflow: hidden;
     border: 1px solid var(--se-border);
     background: var(--se-panel);
     border-radius: var(--se-radius);
@@ -1104,7 +1107,12 @@ html.dark .se-help {
     color: var(--se-text-dim);
 }
 
-.se-root--split-list[data-mode='chapters'] .se-list-section--split .se-list {
+.se-root--split-list[data-mode='chapters'] .se-list-section--split .se-list,
+.se-root--split-list[data-mode='subtitles'] .se-list-section--split .se-list {
+    flex: 1 1 0%;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
     gap: 0;
     padding-left: 0;
     padding-right: 0;

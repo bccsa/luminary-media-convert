@@ -861,3 +861,91 @@
     display: flex;
     gap: 0.75rem; /* gap-3 */
 }
+
+/* ── Session view embedding (light card + readable ladder on white/slate shell) ─ */
+
+.ecf-root--session {
+    color: #0f172a;
+    gap: 1.25rem;
+}
+
+.ecf-root--session .ecf-section-title,
+.ecf-root--session .ecf-legend {
+    color: #64748b;
+}
+
+.ecf-root--session .ecf-detect,
+.ecf-root--session .ecf-panel {
+    background: rgb(248 250 252);
+    border-color: rgb(226 232 240);
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.06);
+}
+
+.ecf-root--session .ecf-detect-summary:hover,
+.ecf-root--session .ecf-panel-summary:hover {
+    background: rgb(241 245 249);
+}
+
+.ecf-root--session .ecf-lt-thead {
+    background: rgb(241 245 249);
+    border-bottom-color: rgb(226 232 240);
+}
+
+.ecf-root--session .ecf-lt-th {
+    color: #64748b;
+}
+
+.ecf-root--session .ecf-lt-tr {
+    border-bottom-color: rgb(226 232 240 / 0.85);
+}
+
+.ecf-root--session .ecf-lt-tr:hover {
+    background: rgb(248 250 252);
+}
+
+.ecf-root--session .ecf-lt-td,
+.ecf-root--session .ecf-lt-th {
+    padding: 0.25rem 0.4rem;
+}
+
+.ecf-root--session .ecf-lt-foot {
+    border-top-color: rgb(226 232 240);
+    background: rgb(248 250 252);
+}
+
+.ecf-root--session .ecf-mode-seg {
+    border-color: rgb(203 213 225);
+    background: rgb(255 255 255 / 0.85);
+}
+
+.ecf-root--session .ecf-mode-opt--on {
+    background: #334155;
+}
+
+html.dark .ecf-root--session {
+    color: #e2e8f0;
+}
+
+html.dark .ecf-root--session .ecf-detect,
+html.dark .ecf-root--session .ecf-panel {
+    background: rgb(30 41 59 / 0.55);
+    border-color: rgb(51 65 85 / 0.65);
+}
+
+html.dark .ecf-root--session .ecf-lt-thead {
+    background: rgb(15 23 42 / 0.65);
+    border-bottom-color: rgb(51 65 85 / 0.55);
+}
+
+html.dark .ecf-root--session .ecf-lt-tr:hover {
+    background: rgb(30 41 59 / 0.35);
+}
+
+html.dark .ecf-root--session .ecf-lt-tr {
+    border-bottom-color: rgb(51 65 85 / 0.45);
+}
+
+html.dark .ecf-root--session .ecf-lt-foot {
+    border-top-color: rgb(51 65 85 / 0.55);
+    background: rgb(15 23 42 / 0.45);
+}

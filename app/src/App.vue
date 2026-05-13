@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { provide, ref, watch } from 'vue';
+import { computed, provide, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { checkIdentity } from './api';
 import AccountMenu from './components/AccountMenu.vue';
+import AppPrimaryNav from './components/AppPrimaryNav.vue';
+
+const route = useRoute();
+const isSessionDetail = computed(() => route.name === 'session-detail');
 
 const { isAuthenticated, isLoading, loginWithRedirect, logout, getAccessTokenSilently } = useAuth0();
 const returnTo = window.location.origin;
@@ -136,7 +141,22 @@ watch(isAuthenticated, async (authenticated) => {
             <header
                 class="sticky top-0 z-40 border-b border-sky-200/50 bg-white/90 font-sans shadow-sm backdrop-blur-md dark:border-sky-500/15 dark:bg-slate-900/85"
             >
-                <div class="mx-auto flex h-14 max-w-6xl items-stretch gap-4 px-4 sm:gap-6 sm:px-6">
+                <div
+                    class="mx-auto flex min-h-14 w-full items-center gap-1.5 px-4 py-2 sm:gap-2 sm:px-6"
+                    :class="isSessionDetail ? 'max-w-none' : 'max-w-6xl'"
+                >
+                    <router-link
+                        v-if="isSessionDetail"
+                        to="/sessions"
+                        class="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200/90 bg-white text-slate-700 shadow-sm ring-1 ring-slate-900/5 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:ring-white/10 dark:hover:bg-slate-700"
+                        title="Back to sessions list"
+                    >
+                        <svg class="h-5 w-5 shrink-0 text-slate-600 dark:text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+                        </svg>
+                        <span class="sr-only">Back to sessions list</span>
+                    </router-link>
+
                     <router-link
                         to="/sessions"
                         class="flex shrink-0 items-center text-base font-bold tracking-tight text-slate-900 dark:text-slate-100 sm:text-lg"
@@ -145,52 +165,31 @@ watch(isAuthenticated, async (authenticated) => {
                         <span class="hidden sm:inline">Luminary Media Convert</span>
                     </router-link>
 
-                    <nav
-                        class="flex min-w-0 flex-1 items-stretch gap-4 overflow-x-auto overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] sm:gap-8 [&::-webkit-scrollbar]:hidden"
-                        aria-label="Main"
-                    >
-                        <router-link
-                            to="/sessions"
-                            class="inline-flex items-center border-b-2 text-sm font-medium transition-colors duration-200"
-                            :class="
-                                $route.path.startsWith('/sessions')
-                                    ? 'border-sky-500 text-sky-700 dark:border-sky-400 dark:text-sky-300'
-                                    : 'border-transparent text-slate-500 hover:text-sky-800 dark:text-slate-400 dark:hover:text-sky-200'
-                            "
-                        >
-                            Sessions
-                        </router-link>
-                        <router-link
-                            to="/keys"
-                            class="inline-flex items-center border-b-2 text-sm font-medium transition-colors duration-200"
-                            :class="
-                                $route.path === '/keys'
-                                    ? 'border-sky-500 text-sky-700 dark:border-sky-400 dark:text-sky-300'
-                                    : 'border-transparent text-slate-500 hover:text-sky-800 dark:text-slate-400 dark:hover:text-sky-200'
-                            "
-                        >
-                            API Keys
-                        </router-link>
-                        <router-link
-                            to="/s3-configs"
-                            class="inline-flex items-center border-b-2 text-sm font-medium transition-colors duration-200"
-                            :class="
-                                $route.path === '/s3-configs'
-                                    ? 'border-sky-500 text-sky-700 dark:border-sky-400 dark:text-sky-300'
-                                    : 'border-transparent text-slate-500 hover:text-sky-800 dark:text-slate-400 dark:hover:text-sky-200'
-                            "
-                        >
-                            S3 Configs
-                        </router-link>
-                    </nav>
+                    <AppPrimaryNav />
 
-                    <div class="flex shrink-0 items-center gap-2 sm:gap-3">
+                    <div class="min-w-0 flex-1" />
+
+                    <div
+                        class="flex min-h-10 min-w-0 shrink-0 items-center justify-end gap-2 sm:gap-3"
+                    >
+                        <div
+                            v-if="isSessionDetail"
+                            id="app-session-workflow-teleport"
+                            class="flex min-w-0 max-w-[min(100vw-14rem,40rem)] items-center justify-end overflow-x-auto"
+                        />
                         <AccountMenu />
                     </div>
                 </div>
             </header>
 
-            <main class="relative mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+            <main
+                class="relative mx-auto"
+                :class="
+                    isSessionDetail
+                        ? 'max-w-none px-0 py-0'
+                        : 'max-w-6xl px-4 py-8 sm:px-6 sm:py-10'
+                "
+            >
                 <router-view />
             </main>
         </template>

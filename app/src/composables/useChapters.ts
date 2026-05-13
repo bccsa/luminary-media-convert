@@ -48,6 +48,11 @@ function clearLocal(sessionId: string): void {
     }
 }
 
+/** Remove persisted chapter draft for a session (e.g. after delete or from session list). */
+export function clearChapterDraftForSession(sessionId: string): void {
+    clearLocal(sessionId);
+}
+
 export interface UseChaptersOptions {
     /** Default 'en'. */
     lang?: string;
@@ -106,7 +111,7 @@ export function useChapters(opts: UseChaptersOptions) {
 
         const local = readLocal(sessionId);
         if (local) {
-            if (epoch !== loadEpoch) return;
+            if (epoch !== loadEpoch || activeSessionId !== sessionId) return;
             segments.value = local.segments;
             isDirty.value = true;
             isLoaded.value = true;
@@ -119,9 +124,9 @@ export function useChapters(opts: UseChaptersOptions) {
 
         try {
             const token = await getAccessToken();
-            if (epoch !== loadEpoch) return;
+            if (epoch !== loadEpoch || activeSessionId !== sessionId) return;
             const remote = await fetchRemote(sessionId, lang, token);
-            if (epoch !== loadEpoch) return;
+            if (epoch !== loadEpoch || activeSessionId !== sessionId) return;
             segments.value = remote?.vtt ? parseVtt(remote.vtt) : [];
             isDirty.value = false;
         } catch (err) {

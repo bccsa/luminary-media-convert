@@ -117,10 +117,11 @@ const emit = defineEmits<{
                             Review the encoding ladder and bitrate settings, then click
                             <strong class="text-slate-800 dark:text-slate-200">Next</strong>
                             to open
-                            <strong class="text-slate-800 dark:text-slate-200">Trim &amp; chapters</strong>
-                            and adjust cut points if needed. Start the job with
+                            <strong class="text-slate-800 dark:text-slate-200">Trim segments</strong>
+                            and choose which parts of the source to encode (optional).
+                            Start the job with
                             <strong class="text-slate-800 dark:text-slate-200">Start Encoding</strong>
-                            on that tab.
+                            on that tab. You can add chapter titles beside the player before, during, or after encoding.
                         </p>
                     </div>
                     <button

@@ -300,12 +300,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
 </script>
 
 <template>
-    <div class="app-view w-full max-w-none">
-        <div class="mx-auto w-full max-w-7xl px-4 transition-all duration-300 sm:px-6">
+    <div class="app-view font-sans">
             <header class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div class="max-w-2xl">
                     <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">
-                        S3 storage configs
+                        Storage configs
                     </h1>
                     <p class="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                         Manage object storage destinations for encoded output. Credentials are stored encrypted and are only used server-side when creating sessions.
@@ -592,7 +591,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                     </p>
                 </div>
             </div>
-        </div>
 
         <ConfirmDangerModal
             v-model:open="deleteModalOpen"
@@ -668,7 +666,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                     <form v-else class="mt-5 space-y-4" @submit.prevent="handleSubmit">
                         <div>
                             <label class="mb-1.5 block text-xs font-medium text-slate-600 dark:text-slate-400" for="s3-form-name">Name</label>
-                            <input id="s3-form-name" v-model="form.name" type="text" class="input w-full" placeholder="My S3 config" />
+                            <input id="s3-form-name" v-model="form.name" type="text" class="input w-full" placeholder="My storage config" />
                         </div>
 
                         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">

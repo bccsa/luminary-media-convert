@@ -16,8 +16,10 @@ const props = withDefaults(
         byteRange: boolean;
         /** When `next-to-trim`, primary CTA navigates to trim instead of submitting encode. */
         encodePrimaryAction?: 'start-encoding' | 'next-to-trim';
+        /** `session` — light slate panels for embedding in the web app session card. */
+        appearance?: 'default' | 'session';
     }>(),
-    { encodePrimaryAction: 'start-encoding' },
+    { encodePrimaryAction: 'start-encoding', appearance: 'default' },
 );
 
 const emit = defineEmits<{
@@ -502,7 +504,7 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
 </script>
 
 <template>
-    <div class="ecf-root">
+    <div class="ecf-root" :class="{ 'ecf-root--session': props.appearance === 'session' }">
 
         <!-- ① Mode segmented control + optional segment duration -->
         <div class="ecf-modebar">
@@ -660,7 +662,7 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                     <td v-if="editableVideoTracks.length > 0" class="ecf-lt-td">
                                         <select v-if="r.copyStream" v-model.number="r.sourceTrackIndex" class="ecf-select ecf-select-src" @change="onCopySourceChange(r)">
                                             <option v-for="t in editableVideoTracks" :key="t.index" :value="t.index">
-                                                #{{ t.index }}{{ t.name ? ` — ${t.name}` : '' }} ({{ t.width }}&times;{{ t.height }}, {{ t.bitrateKbps }} kbps)
+                                                #{{ t.index }}{{ t.name ? ` — ${t.name}` : '' }} ({{ t.width }}&times;{{ t.height }}, {{ t.bitrateKbps != null && t.bitrateKbps > 0 ? `${t.bitrateKbps} kbps` : 'bitrate n/a' }})
                                             </option>
                                         </select>
                                         <span v-else class="ecf-cell-dim">—</span>
@@ -818,7 +820,7 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                 :disabled="!canSubmit"
                 :class="['ecf-btn-primary', !canSubmit && 'ecf-btn-primary-disabled']"
             >
-                {{ encodePrimaryAction === 'next-to-trim' ? 'Next' : 'Start Encoding' }}
+                {{ encodePrimaryAction === 'next-to-trim' ? 'Next: trim segments' : 'Start Encoding' }}
             </button>
         </div>
     </div>

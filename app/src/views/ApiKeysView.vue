@@ -200,8 +200,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
 </script>
 
 <template>
-    <div class="app-view w-full max-w-none">
-        <div class="mx-auto w-full max-w-7xl px-4 transition-all duration-300 sm:px-6">
+    <div class="app-view font-sans">
             <!-- Header -->
             <header class="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div class="max-w-2xl">
@@ -494,7 +493,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                     </a>
                 </div>
             </div>
-        </div>
 
         <ConfirmDangerModal
             v-model:open="revokeModalOpen"

@@ -5,9 +5,10 @@ import { useRoute, useRouter } from 'vue-router';
 import { computeLayoutKey, saveConfig } from '@luminary-media-converter/encode-config';
 import type { ProbeResult, EncodeConfig, TrimSegment } from '@luminary-media-converter/encode-config';
 import type { Segment } from '@luminary-media-converter/segment-editor';
-import { useChapters } from '../composables/useChapters';
+import { useChapters, clearChapterDraftForSession } from '../composables/useChapters';
 import type { AudioTrackInfo, QualityLevelInfo } from '../components/HlsPlayer.vue';
 import ProgressBar from '../components/ProgressBar.vue';
+import StatusBadge from '../components/StatusBadge.vue';
 import DeleteSessionModal from '../components/DeleteSessionModal.vue';
 import SessionOutputPanel from '../components/session-view/SessionOutputPanel.vue';
 import SessionPostProcessPanel from '../components/session-view/SessionPostProcessPanel.vue';
@@ -74,16 +75,6 @@ const chaptersSidePanelDuration = computed(() => {
     if (typeof sp === 'number' && sp > 0) return sp;
     return 0;
 });
-
-/** Preview is ready for chapter editing (duration + URL); list is shown only on Trim & chapters tab. */
-const showChaptersSidePanel = computed(
-    () =>
-        !!session.value
-        && !isExpired.value
-        && !!activePlaybackUrl.value
-        && currentStatus.value !== 'failed'
-        && chaptersSidePanelDuration.value > 0,
-);
 
 /** Probe video FPS for SegmentEditor comma/period frame steps (same source as EncodeConfigForm). */
 const segmentEditorProbeFps = computed(() => {
@@ -410,16 +401,34 @@ const activePlaybackUrl = computed(() => {
 });
 
 /**
- * True when the Trim & chapters timeline should be available — either during encode
- * configuration (probe-config phase) or after the session has been completed/imported so
- * the user can still adjust trim markers and chapter labels and save them.
+ * Trim timeline: same layout whenever playback exists — configure, pipeline, or completed (final HLS).
+ * Trim ranges only affect the submitted encode before the job is queued; after that, edits are for reference / chapter sync only.
  */
-const canEditWithTimeline = computed(
-    () => showProbeConfig.value || isCompleted.value,
+const canEditTrimTimeline = computed(
+    () => showProbeConfig.value || showEncoding.value || isCompleted.value,
+);
+
+/**
+ * Chapter list beside the player whenever preview/final playback exists: before Start Encoding,
+ * during the encode pipeline, and after completion. Separate from trim (bottom timeline).
+ */
+const canEditChaptersPlayback = computed(
+    () => showProbeConfig.value || showEncoding.value || isCompleted.value,
+);
+
+/** Preview is ready for chapter editing (duration + URL); Trim segments tab, panel beside player. */
+const showChaptersSidePanel = computed(
+    () =>
+        !!session.value
+        && !isExpired.value
+        && !!activePlaybackUrl.value
+        && currentStatus.value !== 'failed'
+        && chaptersSidePanelDuration.value > 0
+        && canEditChaptersPlayback.value,
 );
 
 const showTrimSegmentEditor = computed(
-    () => !!(canEditWithTimeline.value && activePlaybackUrl.value && chaptersSidePanelDuration.value > 0),
+    () => !!(canEditTrimTimeline.value && activePlaybackUrl.value && chaptersSidePanelDuration.value > 0),
 );
 
 const trimEditorProbeDuration = computed(() => {
@@ -688,6 +697,7 @@ async function onConfirmDelete(withFiles: boolean) {
     try {
         const token = await getAccessTokenSilently();
         await deleteSession(sessionId.value, token, withFiles);
+        clearChapterDraftForSession(sessionId.value);
         deleteModalOpen.value = false;
         router.push('/sessions');
     } catch (e) {
@@ -1046,7 +1056,9 @@ async function onStartEncodingFromTrim() {
     if (cfg) {
         await onEncodeSubmit(cfg);
     } else {
-        submissionError.value = 'Complete encoding settings on the Encode settings tab before starting.';
+        activeTab.value = 'output';
+        submissionError.value =
+            'Encoding options are incomplete or invalid. Use the Encode settings tab to fix any highlighted fields, then return here and click Start Encoding again.';
     }
 }
 
@@ -1174,7 +1186,7 @@ async function onDiscardChapters() {
     }
 }
 
-/** While configuring trim before encode, chapter list mirrors trim ranges (labels preserved by row index). */
+/** While trim timeline is editable, chapter list mirrors trim ranges (labels preserved by row index). */
 const hadTrimForChapterSync = ref(false);
 
 function segmentTimesAlmostEqual(a: Segment, b: Segment): boolean {
@@ -1198,19 +1210,15 @@ function editorMatchesChapters(ed: Segment[], ch: Segment[]): boolean {
     });
 }
 
-/**
- * Keeps the trim timeline in sync with the chapter list during encode config AND for
- * completed sessions: after refresh or edits beside the player, chapters can update while
- * editorSegments is still empty or stale.
- */
+/** Keeps the trim timeline in sync with the chapter list whenever trim editing is enabled. */
 function syncEditorFromChaptersIfNeeded() {
-    if (!canEditWithTimeline.value || !chapters.isLoaded.value) return;
+    if (!canEditTrimTimeline.value || !chapters.isLoaded.value) return;
     if (editorMatchesChapters(editorSegments.value, chapterSegments.value)) return;
     editorSegments.value = chapterSegments.value.map((s) => ({ ...s }));
 }
 
 function syncChaptersFromTrim() {
-    if (!canEditWithTimeline.value || !chapters.isLoaded.value) return;
+    if (!canEditTrimTimeline.value || !chapters.isLoaded.value) return;
 
     const trim = editorSegments.value;
     if (trim.length === 0) {
@@ -1260,7 +1268,7 @@ watch(
     { deep: true },
 );
 
-watch(canEditWithTimeline, (can) => {
+watch(canEditTrimTimeline, (can) => {
     if (!can) hadTrimForChapterSync.value = false;
     else syncEditorFromChaptersIfNeeded();
 });
@@ -1284,7 +1292,7 @@ watch(
     },
 );
 
-/** Chapter list beside the player only on the Trim & chapters tab. */
+/** Chapter list beside the player on the Trim segments tab (when playback + duration are ready). */
 const showChaptersBesidePlayer = computed(
     () => activeTab.value === 'trim' && showChaptersSidePanel.value,
 );
@@ -1296,20 +1304,35 @@ const hasTrimToolbarContent = computed(() => {
     return !(showTrimSegmentEditor.value || showChaptersBesidePlayer.value);
 });
 
+/** Includes `showProbeConfig` so the card (and SessionOutputPanel / EncodeConfigForm) stay mounted on the Trim tab — otherwise `buildEncodeConfig()` is null and Start Encoding shows a false "incomplete" alert. */
 const showSessionDetailCard = computed(
     () =>
-        !!submissionError.value
-        || activeTab.value !== 'trim'
-        || hasTrimToolbarContent.value,
+        activeTab.value !== 'trim' ||
+        hasTrimToolbarContent.value ||
+        showProbeConfig.value,
 );
 
-/** Same centered breakout as the trim timeline so player + chapters align with it. */
+/** Wide breakout for trim tab — maximize horizontal space for segment editing. */
 const trimPlayerBreakoutClass = computed(() => {
     if (activeTab.value !== 'trim' || !showTrimSegmentEditor.value) {
         return '';
     }
-    return 'relative left-1/2 w-screen max-w-[72vw] -translate-x-1/2';
+    return 'relative left-1/2 w-screen max-w-[min(100vw-1rem,96rem)] -translate-x-1/2 px-1 sm:px-2';
 });
+
+/** Tab label for the trim/chapters tab: "Trim segments" pre-encode, "Chapters" once encoding starts. */
+const trimTabLabel = computed(() =>
+    showEncoding.value || isCompleted.value ? 'Chapters' : 'Trim segments',
+);
+
+// Lock page scroll when on the trim tab so it becomes a true full-viewport workspace.
+watch(
+    () => activeTab.value,
+    (tab) => {
+        document.documentElement.style.overflowY = tab === 'trim' ? 'hidden' : '';
+    },
+    { immediate: true },
+);
 
 // Auto-advance to Encode settings the first time probe results are ready
 // so the user lands directly on the configuration form instead of the status tab.
@@ -1410,23 +1433,16 @@ onMounted(fetchSession);
 onUnmounted(() => {
     poller.stop();
     chapters.unload();
+    document.documentElement.style.overflowY = '';
 });
 </script>
 
 <template>
-    <div class="app-view w-full max-w-none">
-        <div class="mx-auto w-full max-w-7xl px-4 transition-all duration-300 sm:px-6">
-        <div class="mb-4">
-            <router-link
-                to="/sessions"
-                class="inline-flex items-center gap-1.5 text-sm text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
-            >
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-                </svg>
-                Back to sessions
-            </router-link>
-        </div>
+    <div class="app-view flex min-h-dvh w-full max-w-none flex-col">
+        <div
+            class="mx-auto w-full max-w-7xl flex-1 pb-8 pt-4 transition-all duration-300"
+            :class="session && !loading && activeTab === 'trim' ? 'min-h-0 flex flex-col px-2 sm:px-3' : 'px-4 sm:px-6'"
+        >
 
         <div v-if="loading" class="flex justify-center rounded-2xl border border-slate-200/90 bg-white/90 py-16 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10">
             <svg class="h-8 w-8 animate-spin text-slate-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24">
@@ -1440,22 +1456,56 @@ onUnmounted(() => {
         </div>
 
         <template v-else-if="session">
-            <SessionViewHeader
-                v-model:name-input="nameInput"
-                :session-id="sessionId"
-                :session-name="sessionName"
-                :session="session"
-                :editing-name="editingName"
-                :saving-name="savingName"
-                :current-status="currentStatus"
-                :created-subtitle="relativeCreatedLabel(session.createdAt)"
-                :display-encoder="displayEncoder"
-                :display-segment-format="displaySegmentFormat"
-                :is-encrypted="isEncrypted"
-                @save-name="saveName"
-                @cancel-edit-name="cancelEditName"
-                @start-edit-name="startEditName"
-            />
+            <!-- Trim tab: compact name + status strip — same horizontal breakout as the player so edges align -->
+            <div
+                v-if="activeTab === 'trim'"
+                class="mb-2 flex shrink-0 items-center"
+                :class="[
+                    showChaptersBesidePlayer ? 'lg:gap-3' : '',
+                    trimPlayerBreakoutClass,
+                ]"
+            >
+                <div
+                    class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"
+                    :class="showChaptersBesidePlayer ? 'lg:flex-5' : 'w-full'"
+                >
+                    <span
+                        class="min-w-0 truncate text-xl font-semibold tracking-tight text-slate-800 dark:text-slate-100"
+                        :title="sessionName || 'Untitled session'"
+                    >{{ sessionName || 'Untitled session' }}</span>
+                    <template v-if="session?.createdAt">
+                        <span class="shrink-0 text-slate-400" aria-hidden="true">·</span>
+                        <span class="shrink-0 text-xs font-medium text-slate-500 dark:text-slate-400">{{ relativeCreatedLabel(session.createdAt) }}</span>
+                    </template>
+                    <StatusBadge
+                        v-if="currentStatus"
+                        class="shrink-0"
+                        :label="statusConfig[currentStatus]?.label ?? currentStatus"
+                        :color="statusConfig[currentStatus]?.color ?? 'text-slate-700 dark:text-slate-400'"
+                        :border-color="statusConfig[currentStatus]?.borderColor ?? 'border-slate-300 dark:border-slate-700'"
+                    />
+                </div>
+                <!-- Spacer matching the chapters column so name/badge stays above the player -->
+                <div v-if="showChaptersBesidePlayer" class="hidden lg:block lg:flex-3" />
+            </div>
+
+            <div v-show="activeTab !== 'trim'" class="mb-4">
+                <SessionViewHeader
+                    class="min-w-0"
+                    v-model:name-input="nameInput"
+                    :session-name="sessionName"
+                    :session="session"
+                    :editing-name="editingName"
+                    :saving-name="savingName"
+                    :created-subtitle="relativeCreatedLabel(session.createdAt)"
+                    :display-encoder="displayEncoder"
+                    :display-segment-format="displaySegmentFormat"
+                    :is-encrypted="isEncrypted"
+                    @save-name="saveName"
+                    @cancel-edit-name="cancelEditName"
+                    @start-edit-name="startEditName"
+                />
+            </div>
 
             <!-- Expired -->
             <div
@@ -1489,7 +1539,13 @@ onUnmounted(() => {
             </div>
 
             <!-- Main column -->
-            <div v-else :class="['min-w-0', activeTab === 'trim' ? 'space-y-3' : 'space-y-5']">
+            <div
+                v-else
+                :class="[
+                    'min-w-0 flex flex-col',
+                    activeTab === 'trim' ? 'min-h-0 flex-1 gap-2' : 'space-y-5',
+                ]"
+            >
                 <div class="min-w-0" :class="trimPlayerBreakoutClass">
                     <SessionPlayerStrip
                         ref="sessionPlayerStripRef"
@@ -1518,19 +1574,20 @@ onUnmounted(() => {
                     />
                 </div>
 
-                <div class="min-w-0" :class="trimPlayerBreakoutClass">
-                    <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                        <div class="min-w-0 flex-1 flex gap-1 overflow-x-auto rounded-xl border border-slate-200/90 bg-slate-100/80 p-1 dark:border-slate-700 dark:bg-slate-800/50">
+                <Teleport to="#app-session-workflow-teleport">
+                    <div class="flex w-full min-w-0 items-center justify-end gap-1.5 sm:gap-2">
+                        <!-- Workflow tabs -->
+                        <div class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50">
                             <button
                                 v-for="tab in [
                                     { id: 'workflow' as const, label: 'Workflow' },
-                                    ...(!isCompleted ? [{ id: 'output' as const, label: 'Encode settings' }] : []),
-                                    { id: 'trim' as const, label: 'Trim & chapters' },
+                                    ...(!isCompleted ? [{ id: 'output' as const, label: 'Encode' }] : []),
+                                    { id: 'trim' as const, label: trimTabLabel },
                                     { id: 'post' as const, label: 'Delivery' },
                                 ]"
                                 :key="tab.id"
                                 type="button"
-                                class="whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium transition-colors sm:text-sm"
+                                class="shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-medium transition-colors sm:px-2.5 sm:py-1.5 sm:text-xs"
                                 :class="activeTab === tab.id
                                     ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
                                     : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
@@ -1539,21 +1596,23 @@ onUnmounted(() => {
                                 {{ tab.label }}
                             </button>
                         </div>
-                        <div
-                            v-if="activeTab === 'trim' && showProbeConfig"
-                            class="flex shrink-0 justify-center sm:justify-end"
-                        >
+
+                        <!-- Start Encoding (trim tab, pre-encode only) -->
+                        <div v-if="activeTab === 'trim' && showProbeConfig" class="shrink-0">
                             <button
                                 type="button"
-                                class="w-full cursor-pointer rounded-xl bg-slate-800 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto dark:bg-slate-700 dark:hover:bg-slate-600"
+                                class="cursor-pointer rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600 sm:px-3 sm:py-1.5 sm:text-xs"
                                 :disabled="!encodeConfigCanSubmit || submitting"
+                                :title="!encodeConfigCanSubmit && !submitting
+                                    ? 'Open Encode settings and complete the ladder (all required options) first.'
+                                    : undefined"
                                 @click="onStartEncodingFromTrim"
                             >
-                                {{ submitting ? 'Starting…' : 'Start Encoding' }}
+                                {{ submitting ? 'Starting…' : 'Start encoding' }}
                             </button>
                         </div>
                     </div>
-                </div>
+                </Teleport>
 
                 <SessionTrimWorkspace
                     ref="trimTimelineWorkspaceRef"
@@ -1586,14 +1645,8 @@ onUnmounted(() => {
                 <div
                     v-if="showSessionDetailCard"
                     class="w-full rounded-2xl border border-slate-200/90 bg-white/90 p-4 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur sm:p-6 dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10"
+                    :class="{ hidden: activeTab === 'trim' }"
                 >
-                    <div
-                        v-if="submissionError"
-                        class="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/40"
-                    >
-                        <p class="text-sm text-red-800 dark:text-red-300">{{ submissionError }}</p>
-                    </div>
-
                     <!-- Encode workflow -->
                     <div v-show="activeTab === 'workflow'" class="mt-5">
                                 <SessionWorkflowPanel
@@ -1636,13 +1689,29 @@ onUnmounted(() => {
                             </div>
 
                             <!-- Output configuration -->
-                            <div v-show="activeTab === 'output'" class="mt-5">
+                            <div v-show="activeTab === 'output'" class="mt-5 space-y-4">
+                                <div
+                                    v-if="showProbeConfig"
+                                    class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+                                >
+                                    <p class="text-xs text-slate-500 dark:text-slate-400">
+                                        Choose <strong class="text-slate-700 dark:text-slate-300">trim segments</strong> on the next tab (timeline) and optional <strong class="text-slate-700 dark:text-slate-300">chapter titles</strong> beside the player anytime preview is available — including before you start encoding.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        class="shrink-0 rounded-xl border border-slate-300 bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                                        @click="activeTab = 'trim'"
+                                    >
+                                        Trim segments →
+                                    </button>
+                                </div>
                                 <SessionOutputPanel
                                     ref="outputPanelRef"
                                     :show-probe-config="showProbeConfig"
                                     :probe-result="probeResult"
                                     :byte-range-enabled="byteRangeEnabled"
                                     encode-primary-action="next-to-trim"
+                                    appearance="session"
                                     @submit="onEncodeSubmit"
                                     @next-to-trim="onEncodeNextToTrim"
                                     @can-submit-change="onEncodeCanSubmitChange"
@@ -1698,7 +1767,7 @@ onUnmounted(() => {
                                 />
                             </div>
 
-                            <!-- Trim & chapters toolbar (save bar) -->
+                            <!-- Trim segments toolbar (chapter save/discard when chapter panel is visible) -->
                             <SessionTrimWorkspace
                                 v-show="activeTab === 'trim'"
                                 section="toolbar"
@@ -1711,7 +1780,8 @@ onUnmounted(() => {
                                 :chapters-save-error="chaptersSaveError"
                                 :show-trim-segment-editor="showTrimSegmentEditor"
                                 :thumbnail-vtt-url="thumbnailVttUrl"
-                                :can-edit-with-timeline="canEditWithTimeline"
+                                :can-edit-trim-timeline="canEditTrimTimeline"
+                                :can-edit-chapters-playback="canEditChaptersPlayback"
                                 :probe-duration="trimEditorProbeDuration"
                                 :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
                                 :on-seek="(t: number) => playerRef?.seek(t)"
@@ -1739,5 +1809,37 @@ onUnmounted(() => {
             :loading="deleting"
             @confirm="onConfirmDelete"
         />
+
+        <Transition name="session-toast">
+            <div
+                v-if="submissionError"
+                role="alert"
+                class="fixed top-4 right-4 z-[60] flex max-w-md items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900 shadow-lg shadow-red-900/10 sm:top-6 sm:right-6 dark:border-red-800/60 dark:bg-red-950/90 dark:text-red-100 dark:shadow-black/40"
+            >
+                <svg class="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <p class="min-w-0 flex-1 leading-snug">{{ submissionError }}</p>
+                <button
+                    type="button"
+                    class="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-red-800 hover:bg-red-100 dark:text-red-200 dark:hover:bg-red-900/50"
+                    @click="submissionError = null"
+                >
+                    Dismiss
+                </button>
+            </div>
+        </Transition>
     </div>
 </template>
+
+<style scoped>
+.session-toast-enter-active,
+.session-toast-leave-active {
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.session-toast-enter-from,
+.session-toast-leave-to {
+    opacity: 0;
+    transform: translate(6px, -6px);
+}
+</style>

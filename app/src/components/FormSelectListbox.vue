@@ -232,13 +232,21 @@ async function syncPanelPosition() {
     if (!tr || !open.value) return;
     const r = tr.getBoundingClientRect();
     const gap = props.variant === 'playback' ? 2 : 4;
+    const isPlayback = props.variant === 'playback';
+    const minWidth = isPlayback ? 220 : Math.round(r.width);
+    const panelWidth = Math.max(Math.round(r.width), minWidth);
+    // Playback dropdowns right-align to the trigger's right edge so they don't clip off-screen.
+    const left = isPlayback
+        ? Math.max(4, Math.round(r.right) - panelWidth)
+        : Math.round(r.left);
     panelStyle.value = {
         position: 'fixed',
         top: `${Math.round(r.bottom + gap)}px`,
-        left: `${Math.round(r.left)}px`,
-        width: `${Math.round(r.width)}px`,
+        left: `${left}px`,
+        width: `${panelWidth}px`,
         zIndex: '60',
-        minWidth: `${Math.round(r.width)}px`,
+        minWidth: `${panelWidth}px`,
+        maxHeight: isPlayback ? '9rem' : 'min(15rem, calc(100vh - 5rem))',
     };
 }
 
@@ -457,7 +465,7 @@ function rowVisualClass(idx: number, r: FlatRow) {
                     v-show="open"
                     :id="listboxId"
                     ref="panelRef"
-                    class="max-h-[min(15rem,calc(100vh-5rem))] overflow-y-auto overscroll-contain"
+                    class="overflow-y-auto overscroll-contain"
                     :class="panelClasses"
                     :style="panelStyle"
                     role="listbox"

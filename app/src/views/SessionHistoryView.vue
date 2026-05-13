@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { useRouter } from 'vue-router';
 import { listSessions, deleteSession } from '../api';
+import { clearChapterDraftForSession } from '../composables/useChapters';
 import DeleteSessionModal from '../components/DeleteSessionModal.vue';
 import FormSelect from '../components/FormSelect.vue';
 
@@ -191,6 +192,7 @@ async function onDeleteSessionModalConfirm(withFiles: boolean) {
     try {
         const token = await getAccessTokenSilently();
         await deleteSession(id, token, withFiles);
+        clearChapterDraftForSession(id);
         await fetchSessions();
         deleteModalTarget.value = null;
     } catch (e) {

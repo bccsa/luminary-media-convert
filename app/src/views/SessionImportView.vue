@@ -105,8 +105,7 @@ onMounted(fetchS3Configs);
 </script>
 
 <template>
-    <div class="app-view w-full max-w-none">
-        <div class="mx-auto w-full max-w-7xl px-4 transition-all duration-300 sm:px-6">
+    <div class="app-view font-sans">
             <div class="mb-6">
                 <router-link
                     to="/sessions"
@@ -135,7 +134,7 @@ onMounted(fetchS3Configs);
                     </div>
                     <div>
                         <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">
-                            Import HLS from S3
+                            Import HLS from storage
                         </h1>
                         <p class="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-400">
                             Register an existing Apple HLS package in your bucket as a session—playback, chapters, and
@@ -158,7 +157,7 @@ onMounted(fetchS3Configs);
                                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                                     </svg>
                                 </div>
-                                <p class="text-sm font-medium text-slate-600 dark:text-slate-400">Loading S3 configurations…</p>
+                                <p class="text-sm font-medium text-slate-600 dark:text-slate-400">Loading storage configurations…</p>
                             </div>
 
                             <form v-else @submit.prevent="handleSubmit" class="space-y-8">
@@ -166,7 +165,7 @@ onMounted(fetchS3Configs);
                                 <div class="space-y-2">
                                     <div class="flex items-baseline justify-between gap-2">
                                         <label for="import-s3" class="text-sm font-medium text-slate-800 dark:text-slate-200">
-                                            S3 configuration
+                                            Storage configuration
                                         </label>
                                         <span class="text-xs font-medium uppercase tracking-wider text-slate-400 dark:text-slate-500">Required</span>
                                     </div>
@@ -183,7 +182,7 @@ onMounted(fetchS3Configs);
                                             to="/s3-configs"
                                             class="font-medium text-slate-600 hover:text-slate-500 dark:text-slate-400 dark:hover:text-slate-300"
                                         >
-                                            Add an S3 configuration
+                                            Add a storage configuration
                                         </router-link>
                                         first.
                                     </p>
@@ -317,6 +316,5 @@ onMounted(fetchS3Configs);
                     </div>
                 </aside>
             </div>
-        </div>
     </div>
 </template>

@@ -8,6 +8,7 @@ defineProps<{
     probeResult: ProbeResult | null;
     byteRangeEnabled: boolean;
     encodePrimaryAction?: 'start-encoding' | 'next-to-trim';
+    appearance?: 'default' | 'session';
 }>();
 
 defineEmits<{
@@ -34,6 +35,7 @@ defineExpose({ encodeFormRef, getEncodeForm });
             :probe-result="probeResult"
             :byte-range="byteRangeEnabled"
             :encode-primary-action="encodePrimaryAction"
+            :appearance="appearance ?? 'default'"
             @submit="$emit('submit', $event)"
             @back="$emit('back')"
             @next-to-trim="$emit('next-to-trim')"

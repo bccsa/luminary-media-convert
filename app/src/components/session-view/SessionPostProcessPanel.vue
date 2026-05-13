@@ -189,7 +189,7 @@ function formatDate(dateStr: string | null | undefined): string {
                 <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Session &amp; storage</h3>
                 <dl class="mt-4 grid grid-cols-1 gap-x-8 gap-y-4 text-sm sm:grid-cols-2">
                     <div v-if="session?.s3Config?.endPoint">
-                        <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">S3 endpoint</dt>
+                        <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Storage endpoint</dt>
                         <dd class="mt-1 break-all font-mono text-slate-800 dark:text-slate-200">
                             {{ session.s3Config.endPoint }}{{ session.s3Config.port ? `:${session.s3Config.port}` : '' }}
                         </dd>
@@ -239,9 +239,9 @@ function formatDate(dateStr: string | null | undefined): string {
                 v-if="showMoveForm && hasS3Files"
                 class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3 dark:border-slate-700 dark:bg-slate-800/80"
             >
-                <p class="text-sm font-semibold text-slate-800 dark:text-slate-200">Move files to another S3 config</p>
+                <p class="text-sm font-semibold text-slate-800 dark:text-slate-200">Move files to another storage config</p>
                 <div>
-                    <label class="mb-1 block text-xs text-slate-500 dark:text-slate-400">Target S3 config</label>
+                    <label class="mb-1 block text-xs text-slate-500 dark:text-slate-400">Target storage config</label>
                     <FormSelect
                         v-model="selectedTargetConfigId"
                         :options="moveTargetS3SelectOptions"

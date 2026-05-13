@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref, watchEffect } from 'vue';
 import { SegmentEditor } from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
 import HlsPlayer from '../HlsPlayer.vue';
 import type { AudioTrackInfo, QualityLevelInfo } from '../HlsPlayer.vue';
 
-defineProps<{
+const props = defineProps<{
     activePlaybackUrl: string | null;
     isCompleted: boolean;
     thumbnailVttUrl: string | null | undefined;
@@ -25,6 +25,34 @@ defineProps<{
 }>();
 
 const chapterSegments = defineModel<Segment[]>('chapterSegments', { required: true });
+
+/** Match chapters column height to the player shell so the list never extends below the video (scroll inside list). */
+const playerShellRef = ref<HTMLElement | null>(null);
+const chaptersAsideMaxHeightPx = ref<number | null>(null);
+
+watchEffect(
+    (onCleanup) => {
+        const el = playerShellRef.value;
+        if (!el || !props.showChaptersSidePanel) {
+            chaptersAsideMaxHeightPx.value = null;
+            return;
+        }
+        const ro = new ResizeObserver(() => {
+            const h = el.getBoundingClientRect().height;
+            chaptersAsideMaxHeightPx.value = h > 0 ? Math.round(h * 100) / 100 : null;
+        });
+        ro.observe(el);
+        const h = el.getBoundingClientRect().height;
+        chaptersAsideMaxHeightPx.value = h > 0 ? Math.round(h * 100) / 100 : null;
+        onCleanup(() => ro.disconnect());
+    },
+    { flush: 'post' },
+);
+
+const chaptersAsideStyle = computed(() => {
+    if (!props.showChaptersSidePanel || chaptersAsideMaxHeightPx.value == null) return undefined;
+    return { maxHeight: `${chaptersAsideMaxHeightPx.value}px` };
+});
 
 const emit = defineEmits<{
     qualityLevels: [levels: QualityLevelInfo[]];
@@ -69,7 +97,7 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
             class="flex flex-col"
             :class="[
                 activeTab === 'trim' ? 'gap-3' : 'gap-4',
-                showChaptersSidePanel ? (activeTab === 'trim' ? 'lg:flex-row lg:items-start lg:gap-3' : 'lg:flex-row lg:items-start lg:gap-4') : '',
+                showChaptersSidePanel ? (activeTab === 'trim' ? 'lg:flex-row lg:items-stretch lg:gap-3' : 'lg:flex-row lg:items-start lg:gap-4') : '',
             ]"
         >
             <div
@@ -81,6 +109,7 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
                 ]"
             >
                 <div
+                    ref="playerShellRef"
                     :class="[
                         'overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5',
                         'w-full',
@@ -109,12 +138,14 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
             <aside
                 v-if="showChaptersSidePanel"
                 class="flex min-h-0 min-w-0 flex-[3] flex-col"
-                :class="activeTab === 'trim' ? 'gap-2' : 'gap-3'"
+                :class="activeTab === 'trim' ? 'gap-2 overflow-hidden trim-chapters-aside' : 'gap-3'"
+                :style="chaptersAsideStyle"
                 @mousedown.capture="onChaptersAsidePointerDown"
             >
                 <SegmentEditor
                     ref="chapterSegmentEditorRef"
                     v-model="chapterSegments"
+                    :class="activeTab === 'trim' ? 'h-full overflow-hidden' : ''"
                     mode="chapters"
                     split-list-panel
                     :duration="chaptersSidePanelDuration"
@@ -164,6 +195,15 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
 </template>
 
 <style scoped>
+/* Force the SegmentEditor's split list panel to fill the full aside height in trim mode. */
+.trim-chapters-aside :deep(.se-root--split-list) {
+    height: 100%;
+}
+.trim-chapters-aside :deep(.se-list-section--split) {
+    flex: 1 1 0%;
+    max-height: none;
+}
+
 /* Trim tab: 16/9 matches typical preview/HLS; flex shares favor a wider/bigger player beside chapters. */
 .session-trim-player-cap {
     width: 100%;
