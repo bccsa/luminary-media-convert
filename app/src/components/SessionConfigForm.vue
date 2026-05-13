@@ -375,7 +375,7 @@ const canCreateConfig = computed(() =>
                         class="rounded-xl px-4 py-2 text-xs font-semibold transition-colors"
                         :class="
                             canCreateConfig
-                                ? 'cursor-pointer bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600'
+                                ? 'cursor-pointer bg-sky-600 text-white shadow-sm hover:bg-sky-500 dark:bg-slate-700 dark:hover:bg-slate-600'
                                 : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500'
                         "
                         @click="onCreateConfig"
@@ -480,7 +480,7 @@ const canCreateConfig = computed(() =>
                     :class="[
                         'min-w-0 flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer sm:flex-none sm:px-5',
                         sourceMode === 'url'
-                            ? 'bg-slate-800 text-white shadow-sm dark:bg-slate-700'
+                            ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-300/90 dark:bg-slate-600 dark:text-white dark:ring-0'
                             : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100',
                     ]"
                     :aria-pressed="sourceMode === 'url'"
@@ -493,7 +493,7 @@ const canCreateConfig = computed(() =>
                     :class="[
                         'min-w-0 flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer sm:flex-none sm:px-5',
                         sourceMode === 'file'
-                            ? 'bg-slate-800 text-white shadow-sm dark:bg-slate-700'
+                            ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-300/90 dark:bg-slate-600 dark:text-white dark:ring-0'
                             : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100',
                     ]"
                     :aria-pressed="sourceMode === 'file'"
@@ -599,7 +599,7 @@ const canCreateConfig = computed(() =>
                 :class="[
                     'w-full shrink-0 rounded-xl px-6 py-3.5 text-sm font-semibold shadow-sm transition-colors sm:w-auto sm:min-w-[11rem]',
                     canSubmit
-                        ? 'cursor-pointer bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600'
+                        ? 'cursor-pointer bg-sky-600 text-white shadow-sm hover:bg-sky-500 dark:bg-slate-700 dark:hover:bg-slate-600'
                         : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500',
                 ]"
             >

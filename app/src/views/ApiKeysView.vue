@@ -578,7 +578,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onCreateModalKeydown
                             :class="[
                                 'inline-flex min-h-[2.75rem] shrink-0 items-center justify-center rounded-xl px-6 text-sm font-semibold transition-colors',
                                 newKeyName.trim() && !creating && !createdKey
-                                    ? 'bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600'
+                                    ? 'bg-sky-600 text-white shadow-sm hover:bg-sky-500 dark:bg-slate-700 dark:hover:bg-slate-600'
                                     : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500',
                             ]"
                         >

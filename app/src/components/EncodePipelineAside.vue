@@ -1,10 +1,10 @@
 <template>
     <div class="flex flex-col gap-4" aria-label="Encoding pipeline overview">
         <div
-            class="relative overflow-hidden rounded-2xl bg-slate-900 px-5 py-6 text-white shadow-lg shadow-slate-900/20 ring-1 ring-white/10 dark:ring-white/5"
+            class="relative overflow-hidden rounded-2xl border border-slate-200/90 bg-gradient-to-br from-sky-100/70 via-slate-50/95 to-slate-100/80 px-5 py-6 shadow-sm ring-1 ring-slate-900/5 dark:border-transparent dark:bg-gradient-to-br dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 dark:text-white dark:shadow-lg dark:shadow-slate-900/25 dark:ring-white/10"
         >
             <svg
-                class="pointer-events-none absolute -right-4 -top-4 h-28 w-28 text-white/[0.06]"
+                class="pointer-events-none absolute -right-4 -top-4 h-28 w-28 text-sky-300/45 dark:text-white/[0.06]"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -17,8 +17,8 @@
                     d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"
                 />
             </svg>
-            <p class="relative text-sm font-semibold text-slate-100">Encoding workflow</p>
-            <p class="relative mt-2 text-xs leading-relaxed text-slate-400">
+            <p class="relative text-sm font-semibold text-slate-900 dark:text-slate-100">Encoding workflow</p>
+            <p class="relative mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
                 Ingest is resumable (tus) or fetched from a URL. The service probes your media, transcodes to ABR HLS,
                 then writes segments and manifests to the prefix you choose — with optional AES-128 and byte-range
                 packaging.
@@ -88,10 +88,10 @@
         </div>
 
         <div
-            class="rounded-2xl border border-slate-200/80 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-950 p-5 shadow-md ring-1 ring-white/10 dark:border-slate-700"
+            class="rounded-2xl border border-slate-200/90 bg-gradient-to-br from-slate-100/90 via-slate-50/95 to-sky-100/50 p-5 shadow-sm ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-gradient-to-br dark:from-slate-900 dark:via-slate-800 dark:to-slate-950 dark:shadow-md dark:ring-white/10"
         >
-            <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300/95">Luminary Media Convert</p>
-            <p class="mt-2 text-xs leading-relaxed text-slate-400">
+            <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-700 dark:text-slate-300/95">Luminary Media Convert</p>
+            <p class="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
                 ABR HLS output, S3-native delivery, real-time session progress.
             </p>
         </div>

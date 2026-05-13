@@ -773,7 +773,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                                     && form.bucket.trim()
                                     && !saving
                                     && (editingId || (form.accessKey.trim() && form.secretKey.trim()))
-                                        ? 'bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600'
+                                        ? 'bg-sky-600 text-white shadow-sm hover:bg-sky-500 dark:bg-slate-700 dark:hover:bg-slate-600'
                                         : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500',
                                 ]"
                             >

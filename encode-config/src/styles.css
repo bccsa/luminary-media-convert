@@ -919,7 +919,24 @@
 }
 
 .ecf-root--session .ecf-mode-opt--on {
-    background: #334155;
+    background: #fff;
+    color: #0f172a;
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.08);
+    outline: 1px solid rgb(203 213 225);
+}
+
+.ecf-root--session .ecf-btn-primary {
+    background-color: #0284c7;
+}
+
+.ecf-root--session .ecf-btn-primary:hover {
+    background-color: #0ea5e9;
+}
+
+.ecf-root--session .ecf-btn-primary-disabled,
+.ecf-root--session .ecf-btn-primary-disabled:hover {
+    background-color: #e2e8f0;
+    color: #94a3b8;
 }
 
 html.dark .ecf-root--session {
@@ -948,4 +965,25 @@ html.dark .ecf-root--session .ecf-lt-tr {
 html.dark .ecf-root--session .ecf-lt-foot {
     border-top-color: rgb(51 65 85 / 0.55);
     background: rgb(15 23 42 / 0.45);
+}
+
+html.dark .ecf-root--session .ecf-mode-opt--on {
+    background: #475569;
+    color: #fff;
+    outline: none;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+}
+
+html.dark .ecf-root--session .ecf-btn-primary {
+    background-color: #334155;
+}
+
+html.dark .ecf-root--session .ecf-btn-primary:hover {
+    background-color: #475569;
+}
+
+html.dark .ecf-root--session .ecf-btn-primary-disabled,
+html.dark .ecf-root--session .ecf-btn-primary-disabled:hover {
+    background-color: rgb(30 41 59 / 0.5);
+    color: #64748b;
 }
