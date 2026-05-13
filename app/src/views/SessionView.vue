@@ -1498,12 +1498,12 @@ onUnmounted(() => {
                         <span class="sr-only">Back to sessions list</span>
                     </router-link>
                     <span
-                        class="min-w-0 truncate text-xl font-semibold tracking-tight text-slate-800 dark:text-slate-100"
+                        class="min-w-0 truncate text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100"
                         :title="sessionName || 'Untitled session'"
                     >{{ sessionName || 'Untitled session' }}</span>
                     <template v-if="session?.createdAt">
                         <span class="shrink-0 text-slate-400" aria-hidden="true">·</span>
-                        <span class="shrink-0 text-xs font-medium text-slate-500 dark:text-slate-400">{{ relativeCreatedLabel(session.createdAt) }}</span>
+                        <span class="min-w-0 text-xs font-medium text-slate-500 dark:text-slate-400 sm:text-sm">{{ relativeCreatedLabel(session.createdAt) }}</span>
                     </template>
                     <StatusBadge
                         v-if="currentStatus"
