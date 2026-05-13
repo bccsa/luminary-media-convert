@@ -146,18 +146,6 @@ watch(isAuthenticated, async (authenticated) => {
                     :class="isSessionDetail ? 'max-w-none' : 'max-w-6xl'"
                 >
                     <router-link
-                        v-if="isSessionDetail"
-                        to="/sessions"
-                        class="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-lg border border-slate-200/90 bg-white text-slate-700 shadow-sm ring-1 ring-slate-900/5 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:ring-white/10 dark:hover:bg-slate-700"
-                        title="Back to sessions list"
-                    >
-                        <svg class="h-5 w-5 shrink-0 text-slate-600 dark:text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-                        </svg>
-                        <span class="sr-only">Back to sessions list</span>
-                    </router-link>
-
-                    <router-link
                         to="/sessions"
                         class="flex shrink-0 items-center text-base font-bold tracking-tight text-slate-900 dark:text-slate-100 sm:text-lg"
                     >

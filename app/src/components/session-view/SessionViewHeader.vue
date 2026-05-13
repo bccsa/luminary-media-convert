@@ -14,17 +14,25 @@ const encoderConfig: Record<string, { label: string; icon: string }> = {
     apple: { label: 'Apple GPU', icon: ICON_PATHS.gpu },
 };
 
-defineProps<{
-    sessionName: string;
-    session: Record<string, any>;
-    editingName: boolean;
-    savingName: boolean;
-    /** Subtitle under session name e.g. "Created 5 min ago" */
-    createdSubtitle: string;
-    displayEncoder: string | undefined;
-    displaySegmentFormat?: string;
-    isEncrypted: boolean;
-}>();
+withDefaults(
+    defineProps<{
+        sessionName: string;
+        session: Record<string, any>;
+        editingName: boolean;
+        savingName: boolean;
+        /** Subtitle next to session name e.g. "Created 5 min ago" */
+        createdSubtitle: string;
+        displayEncoder: string | undefined;
+        displaySegmentFormat?: string;
+        isEncrypted: boolean;
+        /** Session detail: back control before the title row */
+        showBackToSessions?: boolean;
+    }>(),
+    { showBackToSessions: false },
+);
+
+const backLinkClass =
+    '-ml-1 inline-flex shrink-0 items-center justify-center self-center rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200';
 
 const nameInput = defineModel<string>('nameInput', { required: true });
 
@@ -40,6 +48,17 @@ const emit = defineEmits<{
         <div class="min-w-0">
             <!-- Editing mode: inline input + save/cancel -->
             <div v-if="editingName" class="flex flex-wrap items-center gap-2">
+                <router-link
+                    v-if="showBackToSessions"
+                    to="/sessions"
+                    :class="backLinkClass"
+                    title="Back to sessions list"
+                >
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
+                    <span class="sr-only">Back to sessions list</span>
+                </router-link>
                 <input
                     v-model="nameInput"
                     type="text"
@@ -67,6 +86,17 @@ const emit = defineEmits<{
 
             <!-- Display mode: clickable name + detail badges -->
             <div v-else class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                <router-link
+                    v-if="showBackToSessions"
+                    to="/sessions"
+                    :class="backLinkClass"
+                    title="Back to sessions list"
+                >
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+                    </svg>
+                    <span class="sr-only">Back to sessions list</span>
+                </router-link>
                 <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
                     <h1
                         class="min-w-0 cursor-pointer text-2xl font-semibold tracking-tight text-slate-900 transition-colors hover:text-slate-600 dark:text-slate-100 dark:hover:text-slate-400"
