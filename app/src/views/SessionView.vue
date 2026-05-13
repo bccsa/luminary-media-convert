@@ -625,6 +625,11 @@ const anglesEmbeddedInTrimToolbar = computed(
         && activeTab.value === 'trim',
 );
 
+/** Below-player angle only on Trim when not in timeline; hide on Workflow, Encode, Delivery. */
+const hideAngleBelowPlayer = computed(
+    () => anglesEmbeddedInTrimToolbar.value || activeTab.value !== 'trim',
+);
+
 const currentAngleIsAudioOnly = computed(() => {
     const lists = uniqueAnglePlaylists.value;
     if (!lists.length) return false;
@@ -1588,7 +1593,7 @@ onUnmounted(() => {
                         :chapters-save-error="chaptersSaveError"
                         :active-tab="activeTab"
                         :show-angle-switcher="showAngleSwitcher"
-                        :hide-angle-switcher="anglesEmbeddedInTrimToolbar"
+                        :hide-angle-switcher="hideAngleBelowPlayer"
                         :unique-angle-playlists="uniqueAnglePlaylists"
                         :current-angle-index="currentAngleIndex"
                         @quality-levels="onPreviewQualityLevels"
