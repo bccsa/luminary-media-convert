@@ -1343,6 +1343,13 @@ const trimTabLabel = computed(() =>
     showEncoding.value || isCompleted.value ? 'Chapters' : 'Trim segments',
 );
 
+const tabItems = computed(() => [
+    { id: 'workflow' as const, label: 'Workflow' },
+    ...(!isCompleted.value ? [{ id: 'output' as const, label: 'Encode' }] : []),
+    { id: 'trim' as const, label: trimTabLabel.value },
+    { id: 'post' as const, label: 'Delivery' },
+]);
+
 // Lock page scroll when on the trim tab so it becomes a true full-viewport workspace.
 watch(
     () => activeTab.value,
@@ -1477,16 +1484,10 @@ onUnmounted(() => {
             <!-- Trim tab: compact name + status strip — same horizontal breakout as the player so edges align -->
             <div
                 v-if="activeTab === 'trim'"
-                class="mb-2 flex shrink-0 items-center"
-                :class="[
-                    showChaptersBesidePlayer ? 'lg:gap-3' : '',
-                    trimPlayerBreakoutClass,
-                ]"
+                class="mb-2 flex shrink-0 items-center justify-between gap-2 lg:gap-4"
+                :class="trimPlayerBreakoutClass"
             >
-                <div
-                    class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"
-                    :class="showChaptersBesidePlayer ? 'lg:flex-5' : 'w-full'"
-                >
+                <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                     <router-link
                         to="/sessions"
                         class="-ml-1 inline-flex shrink-0 items-center justify-center rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
@@ -1513,13 +1514,26 @@ onUnmounted(() => {
                         :border-color="statusConfig[currentStatus]?.borderColor ?? 'border-slate-300 dark:border-slate-700'"
                     />
                 </div>
-                <!-- Spacer matching the chapters column so name/badge stays above the player -->
-                <div v-if="showChaptersBesidePlayer" class="hidden lg:block lg:flex-3" />
+                <!-- Tabs aligned to the right on the trim strip (lg+); header tabs always hidden at lg+ -->
+                <div class="hidden shrink-0 lg:flex lg:items-center">
+                    <div class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50">
+                        <button
+                            v-for="tab in tabItems"
+                            :key="tab.id"
+                            type="button"
+                            class="shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-medium transition-colors sm:px-2.5 sm:py-1.5 sm:text-xs"
+                            :class="activeTab === tab.id
+                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
+                            @click="activeTab = tab.id"
+                        >{{ tab.label }}</button>
+                    </div>
+                </div>
             </div>
 
-            <div v-show="activeTab !== 'trim'" class="mb-4">
+            <div v-show="activeTab !== 'trim'" class="mb-4 flex items-start gap-4">
                 <SessionViewHeader
-                    class="min-w-0"
+                    class="min-w-0 flex-1"
                     v-model:name-input="nameInput"
                     show-back-to-sessions
                     :session-name="sessionName"
@@ -1534,6 +1548,21 @@ onUnmounted(() => {
                     @cancel-edit-name="cancelEditName"
                     @start-edit-name="startEditName"
                 />
+                <!-- Tabs to the right of the header (lg+); header tabs always hidden at lg+ -->
+                <div class="hidden shrink-0 pt-1 lg:flex">
+                    <div class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50">
+                        <button
+                            v-for="tab in tabItems"
+                            :key="tab.id"
+                            type="button"
+                            class="shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-medium transition-colors sm:px-2.5 sm:py-1.5 sm:text-xs"
+                            :class="activeTab === tab.id
+                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
+                            @click="activeTab = tab.id"
+                        >{{ tab.label }}</button>
+                    </div>
+                </div>
             </div>
 
             <!-- Expired -->
@@ -1606,15 +1635,10 @@ onUnmounted(() => {
 
                 <Teleport to="#app-session-workflow-teleport">
                     <div class="flex w-full min-w-0 items-center justify-end gap-1.5 sm:gap-2">
-                        <!-- Workflow tabs -->
-                        <div class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50">
+                        <!-- Workflow tabs — visible on mobile; at lg+ the tabs appear in the content area -->
+                        <div class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50 lg:hidden">
                             <button
-                                v-for="tab in [
-                                    { id: 'workflow' as const, label: 'Workflow' },
-                                    ...(!isCompleted ? [{ id: 'output' as const, label: 'Encode' }] : []),
-                                    { id: 'trim' as const, label: trimTabLabel },
-                                    { id: 'post' as const, label: 'Delivery' },
-                                ]"
+                                v-for="tab in tabItems"
                                 :key="tab.id"
                                 type="button"
                                 class="shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-medium transition-colors sm:px-2.5 sm:py-1.5 sm:text-xs"
