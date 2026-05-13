@@ -1678,11 +1678,11 @@ onUnmounted(() => {
 
                 <div
                     v-if="showSessionDetailCard"
-                    class="w-full rounded-2xl border border-slate-200/90 bg-white/90 p-4 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur sm:p-6 dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10"
+                    class="rounded-xl border border-slate-200/90 bg-white/90 p-3 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur sm:p-4 dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10"
                     :class="{ hidden: activeTab === 'trim' }"
                 >
                     <!-- Encode workflow -->
-                    <div v-show="activeTab === 'workflow'" class="mt-5">
+                    <div v-show="activeTab === 'workflow'" class="mt-2">
                                 <SessionWorkflowPanel
                                     :ingest="stepperIngest"
                                     :probe="stepperProbe"
@@ -1723,7 +1723,7 @@ onUnmounted(() => {
                             </div>
 
                             <!-- Output configuration -->
-                            <div v-show="activeTab === 'output'" class="mt-5 space-y-4">
+                            <div v-show="activeTab === 'output'" class="mt-2 space-y-3">
                                 <div
                                     v-if="showProbeConfig"
                                     class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
@@ -1754,7 +1754,7 @@ onUnmounted(() => {
                             </div>
 
                             <!-- Post-process -->
-                            <div v-show="activeTab === 'post'" class="mt-5">
+                            <div v-show="activeTab === 'post'" class="mt-2">
                                 <SessionPostProcessPanel
                                     v-model:show-files="showFiles"
                                     v-model:selected-target-config-id="selectedTargetConfigId"

@@ -48,7 +48,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-    <div class="space-y-5">
+    <div class="space-y-3">
         <SessionWorkflowStepper
             :ingest="ingest"
             :probe="probe"
@@ -109,8 +109,8 @@ const emit = defineEmits<{
                     :indeterminate="activeUploadProgress >= 100"
                 />
             </div>
-            <div class="rounded-xl border border-slate-200/80 bg-slate-50/60 p-5 dark:border-slate-600/45 dark:bg-slate-800/35">
-                <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div class="rounded-xl border border-slate-200/80 bg-slate-50/60 p-3 sm:p-4 dark:border-slate-600/45 dark:bg-slate-800/35">
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div class="min-w-0">
                         <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">File analysed — ready to encode</p>
                         <p class="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-400">
@@ -146,7 +146,7 @@ const emit = defineEmits<{
         <template v-if="(showEncoding || isCompleted || currentStatus === 'failed') && !submitting">
             <div
                 v-if="currentStatus === 'failed'"
-                class="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/40"
+                class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800/50 dark:bg-red-950/40"
             >
                 <p class="text-sm font-medium text-red-900 dark:text-red-400">Encoding failed</p>
                 <p v-if="pollerError || sessionError" class="mt-1 text-sm text-red-700 dark:text-red-300">
@@ -156,9 +156,9 @@ const emit = defineEmits<{
 
             <div
                 v-else
-                class="rounded-2xl border border-slate-200/90 bg-white/95 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800/50"
+                class="rounded-xl border border-slate-200/90 bg-white/95 p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50"
             >
-                <div class="mb-3 flex flex-wrap items-start justify-between gap-2">
+                <div class="mb-2 flex flex-wrap items-start justify-between gap-2">
                     <div>
                         <h2 class="text-sm font-semibold text-slate-900 dark:text-slate-100">HLS package</h2>
                         <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
@@ -174,7 +174,7 @@ const emit = defineEmits<{
 
                 <div
                     v-if="pollerStatus === 'encoding' || pollerStatus === 'encrypting' || pollerStatus === 'uploading_to_s3'"
-                    class="space-y-3"
+                    class="space-y-2"
                 >
                     <p v-if="etaDisplay" class="text-right text-xs text-slate-500">{{ etaDisplay }}</p>
                     <ProgressBar
@@ -193,13 +193,13 @@ const emit = defineEmits<{
                     />
                 </div>
 
-                <div v-if="isCompleted" class="mt-4 rounded-lg border border-emerald-200/80 bg-emerald-50/80 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+                <div v-if="isCompleted" class="mt-2 rounded-lg border border-emerald-200/80 bg-emerald-50/80 px-2.5 py-1.5 text-xs leading-snug text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
                     Encoding finished. Delivery links and storage tools are on the
                     <button type="button" class="font-semibold underline-offset-2 hover:underline" @click="emit('switchTab', 'post')">Delivery</button>
                     tab.
                 </div>
 
-                <div class="mt-4 flex flex-wrap gap-2">
+                <div class="mt-2 flex flex-wrap gap-2">
                     <button
                         v-if="showEncoding && (pollerStatus === 'queued' || pollerStatus === 'encoding' || pollerStatus === 'encrypting')"
                         type="button"

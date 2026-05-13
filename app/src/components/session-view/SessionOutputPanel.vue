@@ -28,7 +28,7 @@ defineExpose({ encodeFormRef, getEncodeForm });
 </script>
 
 <template>
-    <div class="space-y-5">
+    <div class="space-y-3">
         <EncodeConfigForm
             v-if="showProbeConfig && probeResult"
             ref="encodeFormRef"

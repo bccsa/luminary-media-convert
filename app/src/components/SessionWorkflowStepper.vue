@@ -22,7 +22,7 @@ const STEPS: { key: StepKey; label: string }[] = [
 ];
 
 function circleClass(v: StepVisual): string {
-    const base = 'mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold';
+    const base = 'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold';
     switch (v) {
         case 'done':
             return `${base} bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400`;
@@ -43,15 +43,15 @@ const stepsWithVisual = computed(() =>
 <template>
     <nav
         aria-label="Encoding pipeline progress"
-        class="flex w-full justify-center overflow-x-auto pb-1"
+        class="flex w-full justify-center overflow-x-auto pb-0.5"
     >
-        <ol class="flex min-w-max items-start justify-center gap-2 sm:gap-4">
-            <li v-for="(step, i) in stepsWithVisual" :key="step.key" class="flex items-start gap-1 sm:gap-3">
+        <ol class="flex min-w-max items-start justify-center gap-1 sm:gap-3">
+            <li v-for="(step, i) in stepsWithVisual" :key="step.key" class="flex items-start gap-0.5 sm:gap-2">
                 <div class="flex flex-col items-center">
                     <span :class="circleClass(step.visual)">
                         <svg
                             v-if="step.visual === 'done'"
-                            class="h-4 w-4"
+                            class="h-3.5 w-3.5"
                             fill="none"
                             viewBox="0 0 24 24"
                             stroke="currentColor"
@@ -61,7 +61,7 @@ const stepsWithVisual = computed(() =>
                         </svg>
                         <svg
                             v-else-if="step.visual === 'active'"
-                            class="h-4 w-4 animate-spin"
+                            class="h-3.5 w-3.5 animate-spin"
                             fill="none"
                             viewBox="0 0 24 24"
                         >
@@ -72,7 +72,7 @@ const stepsWithVisual = computed(() =>
                         <span v-else class="text-[11px] text-slate-500">{{ i + 1 }}</span>
                     </span>
                     <span
-                        class="mt-1.5 max-w-[4.5rem] text-center text-[10px] font-medium uppercase tracking-wide sm:max-w-none sm:text-xs"
+                        class="mt-1 max-w-[4.5rem] text-center text-[10px] font-medium uppercase tracking-wide sm:max-w-none sm:text-xs"
                         :class="step.visual === 'active'
                             ? 'text-slate-700 dark:text-slate-300'
                             : step.visual === 'done'
@@ -86,7 +86,7 @@ const stepsWithVisual = computed(() =>
                 </div>
                 <div
                     v-if="i < stepsWithVisual.length - 1"
-                    class="mx-0.5 mt-4 hidden h-px w-4 shrink-0 bg-slate-200 sm:block sm:w-6 dark:bg-slate-700"
+                    class="mx-0.5 mt-3 hidden h-px w-3 shrink-0 bg-slate-200 sm:block sm:w-5 dark:bg-slate-700"
                     aria-hidden="true"
                 />
             </li>
