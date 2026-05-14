@@ -485,10 +485,10 @@ onMounted(fetchSessions);
                                         </div>
                                     </td>
                                     <td class="whitespace-nowrap px-6 py-4 text-slate-600 dark:text-slate-400">
-                                        {{ formatRelative(session.createdAt) }}
+                                        {{ formatDate(session.createdAt) }}
                                     </td>
                                     <td class="whitespace-nowrap px-6 py-4 text-slate-600 dark:text-slate-400">
-                                        {{ session.completedAt ? formatRelative(session.completedAt) : '—' }}
+                                        {{ session.completedAt ? formatDate(session.completedAt) : '—' }}
                                     </td>
                                     <td class="px-6 py-4 text-right align-middle" @click.stop>
                                         <button

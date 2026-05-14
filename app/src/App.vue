@@ -87,40 +87,78 @@ watch(isAuthenticated, async (authenticated) => {
         </div>
 
         <!-- Login prompt -->
-        <div v-else-if="!isAuthenticated" class="relative flex min-h-[calc(100vh-5rem)] items-center px-4 py-10 sm:py-14">
-            <div class="mx-auto grid w-full max-w-5xl gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
+        <div v-else-if="!isAuthenticated" class="relative flex min-h-[calc(100vh-5rem)] items-center px-4 py-8 sm:py-10">
+            <div class="mx-auto grid w-full max-w-6xl gap-8 lg:grid-cols-2 lg:items-center">
+                <!-- Hero Section with Visual -->
                 <section class="text-left">
                     <div
                         class="mb-4 inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-300"
                     >
                         Luminary Media Convert
                     </div>
-                    <h1 class="text-4xl font-semibold tracking-tight text-slate-900 dark:text-slate-100 sm:text-5xl">
+
+                    <h1 class="text-4xl font-bold tracking-tight text-slate-900 dark:text-slate-100 sm:text-5xl leading-tight">
                         Encode media with a clean, production-ready workflow
                     </h1>
-                    <p class="mt-5 max-w-2xl text-base leading-relaxed text-slate-600 dark:text-slate-400 sm:text-lg">
-                        Upload source files, configure ABR renditions, track progress in real time, and deliver HLS
-                        output to S3 from one focused UI.
+
+                    <p class="mt-3 max-w-2xl text-base leading-relaxed text-slate-600 dark:text-slate-400">
+                        Upload source files, configure ABR renditions, track progress in real time, and deliver HLS output to S3 from one focused UI.
                     </p>
+
+                    <!-- Feature Highlights -->
+                    <ul class="mt-6 space-y-2">
+                        <li class="flex items-start gap-3">
+                            <svg class="mt-1 h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                            </svg>
+                            <span class="text-sm text-slate-700 dark:text-slate-300"><strong>GPU-accelerated encoding</strong></span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <svg class="mt-1 h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                            </svg>
+                            <span class="text-sm text-slate-700 dark:text-slate-300"><strong>Multi-format HLS output</strong> — ABR renditions, encryption & byte-range packing</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <svg class="mt-1 h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                            </svg>
+                            <span class="text-sm text-slate-700 dark:text-slate-300"><strong>Real-time progress</strong> — Live encoding status, webhooks & event streams</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <svg class="mt-1 h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                            </svg>
+                            <span class="text-sm text-slate-700 dark:text-slate-300"><strong>S3-native delivery</strong> — MinIO, AWS, Cloudflare R2, Backblaze B2 compatible</span>
+                        </li>
+                        <li class="flex items-start gap-3">
+                            <svg class="mt-1 h-5 w-5 shrink-0 text-sky-600 dark:text-sky-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                            </svg>
+                            <span class="text-sm text-slate-700 dark:text-slate-300"><strong>Well-documented API</strong> — OpenAPI-backed REST and webhooks so you can integrate it cleanly into your stack</span>
+                        </li>
+                    </ul>
                 </section>
 
+                <!-- Auth Card -->
                 <section
                     class="mx-auto w-full max-w-md rounded-2xl border border-slate-200/80 bg-white/90 p-8 shadow-xl shadow-slate-900/5 backdrop-blur dark:border-slate-700 dark:bg-slate-800/70 dark:shadow-black/20"
                 >
-                    <h2 class="text-xl font-semibold text-slate-900 dark:text-slate-100">Sign in to continue</h2>
-                    <p class="mt-2 text-base text-slate-600 dark:text-slate-400">
+                    <h2 class="text-2xl font-bold text-slate-900 dark:text-slate-100">Sign in</h2>
+                    <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
                         Authenticate with your workspace account to access sessions, API keys, and storage configs.
                     </p>
+
                     <button
                         type="button"
                         @click="loginWithRedirect()"
-                        class="mt-6 inline-flex w-full cursor-pointer items-center justify-center rounded-xl bg-slate-800 px-6 py-3.5 text-base font-semibold text-white transition-colors hover:bg-slate-700 dark:bg-sky-800 dark:hover:bg-sky-700"
+                        class="mt-8 inline-flex w-full cursor-pointer items-center justify-center rounded-lg bg-slate-900 px-6 py-3 text-base font-semibold text-white transition-colors hover:bg-slate-800 dark:bg-sky-700 dark:hover:bg-sky-600"
                     >
+                        <svg class="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
                         Continue with Auth0
                     </button>
-                    <p class="mt-3 text-center text-xs text-slate-500 dark:text-slate-400">
-                        Secure sign-in via Auth0
-                    </p>
                 </section>
             </div>
         </div>
