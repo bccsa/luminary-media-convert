@@ -265,6 +265,9 @@ const showEncoding = computed(() => {
 
 /** Mirrors `SessionWorkflowPanel` visibility — avoids an empty padded card when probe is ready but there is no upload / encode UI yet. */
 const showSessionWorkflowPanel = computed(() => {
+    if ((activeTab.value === 'workflow' || activeTab.value === 'trim') && showProbeConfig.value) {
+        return true;
+    }
     const cs = currentStatus.value;
     const preEncodeFlow =
         !showProbeConfig.value &&
@@ -1431,6 +1434,54 @@ const effectiveProbe = computed<ProbeResult | null>(() => {
     return (raw as ProbeResult | null) ?? null;
 });
 
+const isImportedFlow = computed(() => !!session.value?.imported);
+
+const stepperIngest = computed(() => {
+    if (isImportedFlow.value) return 'done' as const;
+    const s = currentStatus.value;
+    if (!s) return 'pending' as const;
+    if (s === 'created' || s === 'uploading') return 'active' as const;
+    return 'done' as const;
+});
+
+const stepperProbe = computed(() => {
+    if (isImportedFlow.value) return 'done' as const;
+    const s = currentStatus.value;
+    if (!s || s === 'created' || s === 'uploading') return 'pending' as const;
+    if (s === 'uploaded') {
+        if (probeLoading.value) return 'active' as const;
+        if (effectiveProbe.value) return 'done' as const;
+        return 'active' as const;
+    }
+    return 'done' as const;
+});
+
+const stepperEncoding = computed(() => {
+    if (isImportedFlow.value) return 'done' as const;
+    const s = currentStatus.value;
+    if (s === 'failed') return 'error' as const;
+    if (s === 'queued' || s === 'encoding' || s === 'encrypting') return 'active' as const;
+    if (s === 'uploading_to_s3' || s === 'completed') return 'done' as const;
+    return 'pending' as const;
+});
+
+const stepperUpload = computed(() => {
+    if (isImportedFlow.value) return 'done' as const;
+    const s = currentStatus.value;
+    if (s === 'failed') return 'pending' as const;
+    if (s === 'uploading_to_s3') return 'active' as const;
+    if (s === 'completed') return 'done' as const;
+    return 'pending' as const;
+});
+
+const stepperFinalize = computed(() => {
+    if (isImportedFlow.value) return 'done' as const;
+    const s = currentStatus.value;
+    if (s === 'completed') return 'done' as const;
+    if (s === 'failed') return 'error' as const;
+    return 'pending' as const;
+});
+
 function relativeCreatedLabel(dateStr: string | null | undefined): string {
     if (!dateStr) return '';
     const then = new Date(dateStr).getTime();
@@ -1704,6 +1755,11 @@ onUnmounted(() => {
                         class="mt-2"
                     >
                                 <SessionWorkflowPanel
+                                    :ingest="stepperIngest"
+                                    :probe="stepperProbe"
+                                    :encoding="stepperEncoding"
+                                    :upload="stepperUpload"
+                                    :finalize="stepperFinalize"
                                     :show-probe-config="showProbeConfig"
                                     :submitting="submitting"
                                     :show-encoding="showEncoding"
@@ -1733,6 +1789,7 @@ onUnmounted(() => {
                                     :poller-error="poller.error.value"
                                     :is-encrypted="isEncrypted"
                                     :imported-session="!!session?.imported"
+                                    :session-workspace-tab="activeTab"
                                     @switch-tab="activeTab = $event"
                                     @cancel-upload="cancelUpload"
                                     @cancel-encode="onCancelEncode"
