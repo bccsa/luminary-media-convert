@@ -1072,7 +1072,6 @@ defineExpose({
             :class="{ 'se-toolbar--no-timeline': !showTimeline }"
         >
             <div v-if="showTimeline" class="se-toolbar__marks">
-                Marks:
                 <button type="button" class="se-btn se-btn--squish" @click="markIn" title="Mark In at playhead ( I or [ )">
                     <span aria-hidden="true">[</span>
                 </button>

@@ -265,7 +265,7 @@ const showEncoding = computed(() => {
 
 /** Mirrors `SessionWorkflowPanel` visibility — avoids an empty padded card when probe is ready but there is no upload / encode UI yet. */
 const showSessionWorkflowPanel = computed(() => {
-    if ((activeTab.value === 'workflow' || activeTab.value === 'trim') && showProbeConfig.value) {
+    if (activeTab.value === 'workflow' && showProbeConfig.value) {
         return true;
     }
     const cs = currentStatus.value;
