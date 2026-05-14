@@ -112,7 +112,7 @@ const triggerClasses = computed(() => {
     switch (props.variant) {
         case 'playback':
             base =
-                'playback-slot-select w-full min-w-0 inline-flex items-center gap-2 text-left ' +
+                'playback-slot-select w-full min-w-0 inline-flex items-center gap-2 text-left pr-8 ' +
                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-500/35 dark:focus-visible:ring-sky-400/35';
             break;
         case 'admin':
