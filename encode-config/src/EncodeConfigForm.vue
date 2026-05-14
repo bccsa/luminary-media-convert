@@ -50,6 +50,11 @@ const editableAudioTracks = reactive<AudioTrackInfo[]>(
     props.probeResult.audioTracks.map(t => ({ ...t })),
 );
 
+/** Source track picker only applies to copy-mode renditions; hide the column when every row is transcode (all "—"). */
+const showVideoRenditionSourceColumn = computed(
+    () => editableVideoTracks.length > 0 && videoRenditions.some(r => r.copyStream),
+);
+
 const ABR_LADDER = [
     { height: 2160, width: 3840, bitrateKbps: 15000, label: '4K' },
     { height: 1440, width: 2560, bitrateKbps: 8000, label: '1440p' },
@@ -647,7 +652,7 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                     <table class="ecf-lt">
                         <thead class="ecf-lt-thead">
                             <tr>
-                                <th v-if="editableVideoTracks.length > 0" class="ecf-lt-th">Source track</th>
+                                <th v-if="showVideoRenditionSourceColumn" class="ecf-lt-th">Source track</th>
                                 <th class="ecf-lt-th">Resolution</th>
                                 <th class="ecf-lt-th ecf-lt-th--r">kbps</th>
                                 <th class="ecf-lt-th">Audio group</th>
@@ -659,7 +664,7 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                         <tbody>
                             <template v-for="(r, i) in videoRenditions" :key="i">
                                 <tr class="ecf-lt-tr">
-                                    <td v-if="editableVideoTracks.length > 0" class="ecf-lt-td">
+                                    <td v-if="showVideoRenditionSourceColumn" class="ecf-lt-td">
                                         <select v-if="r.copyStream" v-model.number="r.sourceTrackIndex" class="ecf-select ecf-select-src" @change="onCopySourceChange(r)">
                                             <option v-for="t in editableVideoTracks" :key="t.index" :value="t.index">
                                                 #{{ t.index }}{{ t.name ? ` — ${t.name}` : '' }} ({{ t.width }}&times;{{ t.height }}, {{ t.bitrateKbps != null && t.bitrateKbps > 0 ? `${t.bitrateKbps} kbps` : 'bitrate n/a' }})
@@ -706,7 +711,7 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                         </tbody>
                         <tfoot class="ecf-lt-foot">
                             <tr>
-                                <td :colspan="editableVideoTracks.length > 0 ? 7 : 6" class="ecf-lt-add-td">
+                                <td :colspan="showVideoRenditionSourceColumn ? 7 : 6" class="ecf-lt-add-td">
                                     <button type="button" class="ecf-btn-add" @click="addVideoRendition">+ Add rendition</button>
                                 </td>
                             </tr>
