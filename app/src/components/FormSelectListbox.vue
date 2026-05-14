@@ -138,7 +138,6 @@ const wrapperClasses = computed(() => {
 });
 
 const showChevron = computed(() => {
-    if (props.variant === 'playback') return false;
     if (props.variant === 'field' && props.hideChevron) return false;
     return true;
 });
