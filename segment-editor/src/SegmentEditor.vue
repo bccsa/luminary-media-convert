@@ -62,6 +62,10 @@ interface Props {
      * URL of `thumbnails.vtt` (HLS sprite storyboard). In trim mode, hovering the timeline shows the matching thumbnail.
      */
     thumbnailVttUrl?: string | null;
+    /** Audio waveform peaks (normalized 0–1 amplitude). When provided, rendered as a canvas background in the timeline. */
+    waveformPeaks?: number[] | null;
+    /** Color for waveform visualization. Defaults to CSS variable --se-waveform or rgba(255,255,255,0.35). */
+    waveformColor?: string | null;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -247,6 +251,7 @@ const playheadPercent = computed(() => {
 
 const timelineRef = ref<HTMLDivElement | null>(null);
 const timelineTrackRef = ref<HTMLDivElement | null>(null);
+const waveformCanvas = ref<HTMLCanvasElement | null>(null);
 
 function timelineMetricsEl(): HTMLDivElement | null {
     return timelineTrackRef.value ?? timelineRef.value;
@@ -987,8 +992,77 @@ watch(
     { immediate: true },
 );
 
+// -------------- waveform rendering --------------
+
+let waveformResizeObserver: ResizeObserver | null = null;
+
+function drawWaveform(): void {
+    const canvas = waveformCanvas.value;
+    if (!canvas || !props.waveformPeaks?.length) return;
+
+    const container = timelineMetricsEl();
+    if (!container) return;
+
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const peaks = props.waveformPeaks;
+    const canvasHeight = canvas.height;
+    const canvasWidth = canvas.width;
+    const centerY = canvasHeight / 2;
+
+    const rootEl = rootElRef.value || document.documentElement;
+    const color = props.waveformColor || getComputedStyle(rootEl).getPropertyValue('--se-waveform').trim() || 'rgba(255,255,255,0.35)';
+    ctx.fillStyle = color;
+
+    const startIdx = Math.floor((viewStart.value / props.duration) * peaks.length);
+    const endIdx = Math.ceil(((viewStart.value + visibleSpan.value) / props.duration) * peaks.length);
+    const rangeLen = Math.max(1, endIdx - startIdx);
+
+    for (let x = 0; x < canvasWidth; x++) {
+        const peakIdx = startIdx + (x / canvasWidth) * rangeLen;
+        const idx1 = Math.floor(peakIdx);
+        const idx2 = Math.ceil(peakIdx);
+        const t = peakIdx - idx1;
+
+        const peak1 = peaks[Math.min(idx1, peaks.length - 1)] || 0;
+        const peak2 = peaks[Math.min(idx2, peaks.length - 1)] || 0;
+        const peak = peak1 * (1 - t) + peak2 * t;
+
+        const barHeight = Math.max(1, peak * (canvasHeight * 0.9));
+        ctx.fillRect(x, centerY - barHeight / 2, 1, barHeight);
+    }
+}
+
+watch(
+    () => props.waveformPeaks,
+    () => {
+        drawWaveform();
+    },
+);
+
+watch(
+    [viewStart, visibleSpan],
+    () => {
+        drawWaveform();
+    },
+);
+
 onMounted(() => {
     rafId = requestAnimationFrame(tick);
+
+    const canvas = waveformCanvas.value;
+    const container = timelineMetricsEl();
+    if (canvas && container && props.waveformPeaks?.length) {
+        waveformResizeObserver = new ResizeObserver(() => {
+            drawWaveform();
+        });
+        waveformResizeObserver.observe(container);
+        drawWaveform();
+    }
 });
 onBeforeUnmount(() => {
     thumbnailFetchAbort?.abort();
@@ -996,6 +1070,11 @@ onBeforeUnmount(() => {
     cancelAnimationFrame(rafId);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
+
+    if (waveformResizeObserver) {
+        waveformResizeObserver.disconnect();
+        waveformResizeObserver = null;
+    }
 });
 
 // -------------- VTT helpers --------------
@@ -1181,6 +1260,12 @@ defineExpose({
                 :aria-valuenow="playheadSec"
                 :aria-label="`${modeTitle} timeline`"
             >
+                <canvas
+                    v-if="waveformPeaks?.length"
+                    ref="waveformCanvas"
+                    class="se-waveform-canvas"
+                />
+
                 <div class="se-ruler">
                     <template v-for="tick in rulerTicks" :key="tick.sec">
                         <div

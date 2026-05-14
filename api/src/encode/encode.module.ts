@@ -16,6 +16,7 @@ import { TusUploadService } from './services/tus-upload.service.js';
 import { UrlFetchService } from './services/url-fetch.service.js';
 import { SegmentPipelineService } from './services/segment-pipeline.service.js';
 import { PreviewService } from './services/preview.service.js';
+import { WaveformService } from './services/waveform.service.js';
 import { AuthorizationWebhookService } from '../auth/authorization-webhook.service.js';
 
 @Module({
@@ -36,6 +37,7 @@ import { AuthorizationWebhookService } from '../auth/authorization-webhook.servi
         UrlFetchService,
         SegmentPipelineService,
         PreviewService,
+        WaveformService,
         AuthorizationWebhookService,
     ],
     exports: [SessionService, SessionEventsService],

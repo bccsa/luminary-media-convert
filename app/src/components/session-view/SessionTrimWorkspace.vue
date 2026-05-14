@@ -33,6 +33,8 @@ const props = withDefaults(
         section?: 'toolbar' | 'timeline';
         /** Post-encode `thumbnails.vtt` URL for timeline hover previews (trim mode). */
         thumbnailVttUrl?: string | null;
+        /** Audio waveform peaks (normalized 0–1 amplitude). */
+        waveformPeaks?: number[] | null;
         /** After encode completes — timeline title is for chapter editing, not pre-encode trim. */
         isCompleted?: boolean;
         /**
@@ -156,6 +158,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             keyboard-scope="global"
             :fps="segmentEditorProbeFps"
             :thumbnail-vtt-url="thumbnailVttUrl"
+            :waveform-peaks="waveformPeaks"
         >
             <template v-if="showChaptersSidePanel" #toolbar-before-clear>
                 <span

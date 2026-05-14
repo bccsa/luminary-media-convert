@@ -45,6 +45,7 @@ import { CreateSessionDto } from './dto/create-session.dto.js';
 import { EncodeConfigDto } from './dto/encode-config.dto.js';
 import { UrlUploadDto } from './dto/url-upload.dto.js';
 import { UrlFetchService } from './services/url-fetch.service.js';
+import { WaveformService } from './services/waveform.service.js';
 import {
     SessionResponseDto,
     EncodeStartResponseDto,
@@ -74,6 +75,7 @@ export class EncodeController {
         private readonly authorizationWebhookService: AuthorizationWebhookService,
         private readonly previewService: PreviewService,
         private readonly urlFetchService: UrlFetchService,
+        private readonly waveformService: WaveformService,
     ) {}
 
     @Post()
@@ -464,6 +466,59 @@ export class EncodeController {
         await this.previewService.destroy(sessionId);
         this.sessionService.remove(sessionId);
         this.logger.log(`Session ${sessionId} deleted by client`);
+    }
+
+    @Get(':sessionId/waveform')
+    @ApiOperation({
+        summary: 'Get audio waveform peaks',
+        description:
+            'Returns computed waveform peak data for the uploaded source file. ' +
+            'The session must be in "uploaded" or later status. ' +
+            'Peaks are normalized to 0–1 amplitude values sampled at regular intervals.',
+    })
+    @ApiParam({
+        name: 'sessionId',
+        description: 'Session ID returned from POST /api/sessions',
+    })
+    @ApiResponse({
+        status: 200,
+        description: 'Waveform peaks data.',
+        schema: {
+            type: 'object',
+            properties: {
+                peaks: { type: 'array', items: { type: 'number' }, description: 'Normalized 0–1 amplitude peaks' },
+                numPeaks: { type: 'number', description: 'Number of peaks' },
+            },
+        },
+    })
+    @ApiResponse({
+        status: 400,
+        description: 'Session source file not yet uploaded.',
+    })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    async getWaveform(
+        @Param('sessionId') sessionId: string,
+        @Query('token') token: string,
+    ): Promise<{ peaks: number[]; numPeaks: number }> {
+        this.validatePreviewToken(sessionId, token);
+
+        const session = this.sessionService.get(sessionId);
+        if (!session) {
+            throw new BadRequestException('Session not found');
+        }
+
+        const filePath = session.filePath;
+        if (!filePath) {
+            throw new BadRequestException('Source file not yet uploaded');
+        }
+
+        try {
+            const peaks = await this.waveformService.generateWaveform(filePath);
+            return { peaks, numPeaks: peaks.length };
+        } catch (err) {
+            this.logger.error(`Failed to generate waveform for session ${sessionId}: ${(err as Error).message}`);
+            throw new BadRequestException('Failed to generate waveform');
+        }
     }
 
     // -----------------------------------------------------------------------
