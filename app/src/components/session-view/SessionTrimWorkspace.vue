@@ -33,6 +33,8 @@ const props = withDefaults(
         section?: 'toolbar' | 'timeline';
         /** Post-encode `thumbnails.vtt` URL for timeline hover previews (trim mode). */
         thumbnailVttUrl?: string | null;
+        /** After encode completes — timeline title is for chapter editing, not pre-encode trim. */
+        isCompleted?: boolean;
         /**
          * When the session shell uses zero flex gap (collapsed detail card), add space
          * between the player row and this timeline so it matches the spaced stack after encode.
@@ -45,6 +47,7 @@ const props = withDefaults(
         angleIndex: 0,
         previewAngleSelectOptions: () => [],
         addGapAboveTimeline: false,
+        isCompleted: false,
     },
 );
 
@@ -61,6 +64,10 @@ const emit = defineEmits<{
 const showToolbarSection = () => props.section !== 'timeline';
 
 const trimSegmentEditorRef = ref<{ focus?: () => void } | null>(null);
+
+const segmentEditorTimelineTitle = computed(() =>
+    props.isCompleted ? 'Edit chapters' : 'Trim segments',
+);
 
 defineExpose({
     focusSegmentEditor: () => {
@@ -139,7 +146,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             ref="trimSegmentEditorRef"
             v-model="editorSegments"
             mode="trim"
-            title="Trim segments"
+            :title="segmentEditorTimelineTitle"
             :duration="probeDuration"
             :get-current-time="getCurrentTime"
             :on-seek="onSeek"
