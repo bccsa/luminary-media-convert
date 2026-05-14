@@ -42,7 +42,7 @@ const props = withDefaults(
         isEncrypted?: boolean;
         /** External HLS import — omit encode pipeline summary; different completion copy. */
         importedSession?: boolean;
-        /** Which session workspace tab is active — drives post-probe copy on the Workflow tab. */
+        /** Active session tab — hides the pipeline stepper on Trim; drives post-probe copy on Workflow. */
         sessionWorkspaceTab?: 'workflow' | 'output' | 'trim' | 'post';
     }>(),
     { isEncrypted: false, importedSession: false, sessionWorkspaceTab: undefined },
