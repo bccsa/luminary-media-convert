@@ -1,37 +1,55 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import ProgressBar from '../ProgressBar.vue';
 
-defineProps<{
-    showProbeConfig: boolean;
-    submitting: boolean;
-    showEncoding: boolean;
-    isCompleted: boolean;
-    currentStatus: string | null;
-    showUploadProgress: boolean;
-    showUploadDoneWaiting: boolean;
-    showUploadRemoteMessage: boolean;
-    /** When showUploadProgress — progress 0-100+ */
-    activeUploadProgress?: number;
-    /** Show cancel when tus upload in progress */
-    activeUploadCanCancel?: boolean;
-    remoteIngestProgress?: number;
-    remoteIngestLabel: string;
-    ingestEtaDisplay?: string;
-    pollerIngestTotalBytes: number | null | undefined;
-    probeLoading: boolean;
-    sessionError?: string;
-    encoderLabel?: string;
-    displaySegmentFormat?: string;
-    encodingType: 'video' | 'audio';
-    etaDisplay?: string;
-    pollerStatus: string | null | undefined;
-    pollerQueuePosition: number | null | undefined;
-    pipelineEncoding: number | null | undefined;
-    pipelineEncrypting: number | null | undefined;
-    pipelineUploading: number | null | undefined;
-    pollerProgress: number | undefined;
-    pollerError: string | null | undefined;
-}>();
+const props = withDefaults(
+    defineProps<{
+        showProbeConfig: boolean;
+        submitting: boolean;
+        showEncoding: boolean;
+        isCompleted: boolean;
+        currentStatus: string | null;
+        showUploadProgress: boolean;
+        showUploadDoneWaiting: boolean;
+        showUploadRemoteMessage: boolean;
+        activeUploadProgress?: number;
+        activeUploadCanCancel?: boolean;
+        remoteIngestProgress?: number;
+        remoteIngestLabel: string;
+        ingestEtaDisplay?: string;
+        pollerIngestTotalBytes: number | null | undefined;
+        probeLoading: boolean;
+        sessionError?: string;
+        encoderLabel?: string;
+        displaySegmentFormat?: string;
+        encodingType: 'video' | 'audio';
+        etaDisplay?: string;
+        pollerStatus: string | null | undefined;
+        pollerQueuePosition: number | null | undefined;
+        pipelineEncoding: number | null | undefined;
+        pipelineEncrypting: number | null | undefined;
+        pipelineUploading: number | null | undefined;
+        pollerProgress: number | undefined;
+        pollerError: string | null | undefined;
+        /** Completed encode with encryption — show encrypt step at 100% in summary. */
+        isEncrypted?: boolean;
+        /** External HLS import — omit encode pipeline summary; different completion copy. */
+        importedSession?: boolean;
+    }>(),
+    { isEncrypted: false, importedSession: false },
+);
+
+const showLivePipeline = computed(
+    () =>
+        props.pollerStatus === 'encoding'
+        || props.pollerStatus === 'encrypting'
+        || props.pollerStatus === 'uploading_to_s3',
+);
+
+/** After a real encode job, keep pipeline steps visible at 100% (step encoding was here during the run). */
+const showCompletedPipelineSummary = computed(
+    () => props.isCompleted && !props.importedSession,
+);
 
 const emit = defineEmits<{
     switchTab: [tab: 'output' | 'trim' | 'post'];
@@ -115,11 +133,8 @@ const emit = defineEmits<{
                 </p>
             </div>
 
-            <div
-                v-else
-                class="rounded-xl border border-slate-200/90 bg-white/95 p-3 shadow-sm dark:border-slate-700 dark:bg-slate-800/50"
-            >
-                <div class="mb-2 flex flex-wrap items-start justify-between gap-2">
+            <div v-else class="space-y-2">
+                <div class="mb-0.5 flex flex-wrap items-start justify-between gap-2">
                     <div>
                         <h2 class="text-sm font-semibold text-slate-900 dark:text-slate-100">HLS package</h2>
                         <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
@@ -134,30 +149,37 @@ const emit = defineEmits<{
                 </div>
 
                 <div
-                    v-if="pollerStatus === 'encoding' || pollerStatus === 'encrypting' || pollerStatus === 'uploading_to_s3'"
+                    v-if="showLivePipeline || showCompletedPipelineSummary"
                     class="space-y-2"
                 >
-                    <p v-if="etaDisplay" class="text-right text-xs text-slate-500">{{ etaDisplay }}</p>
+                    <p v-if="etaDisplay && showLivePipeline" class="text-right text-xs text-slate-500">{{ etaDisplay }}</p>
                     <ProgressBar
                         label="Encoding"
-                        :progress="pipelineEncoding ?? pollerProgress"
+                        :progress="showCompletedPipelineSummary ? 100 : (pipelineEncoding ?? pollerProgress)"
                     />
                     <ProgressBar
-                        v-if="pipelineEncrypting != null"
+                        v-if="(showLivePipeline && pipelineEncrypting != null) || (showCompletedPipelineSummary && isEncrypted)"
                         label="Encrypting manifest"
-                        :progress="pipelineEncrypting"
+                        :progress="showCompletedPipelineSummary ? 100 : (pipelineEncrypting ?? 0)"
                     />
                     <ProgressBar
-                        v-if="pipelineUploading != null"
+                        v-if="(showLivePipeline && pipelineUploading != null) || showCompletedPipelineSummary"
                         label="S3 parallel upload"
-                        :progress="pipelineUploading"
+                        :progress="showCompletedPipelineSummary ? 100 : (pipelineUploading ?? 0)"
                     />
                 </div>
 
                 <div v-if="isCompleted" class="mt-2 rounded-lg border border-emerald-200/80 bg-emerald-50/80 px-2.5 py-1.5 text-xs leading-snug text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
-                    Encoding finished. Delivery links and storage tools are on the
-                    <button type="button" class="font-semibold underline-offset-2 hover:underline" @click="emit('switchTab', 'post')">Delivery</button>
-                    tab.
+                    <template v-if="importedSession">
+                        Import ready. Delivery links and storage tools are on the
+                        <button type="button" class="font-semibold underline-offset-2 hover:underline" @click="emit('switchTab', 'post')">Delivery</button>
+                        tab.
+                    </template>
+                    <template v-else>
+                        Encoding finished. Delivery links and storage tools are on the
+                        <button type="button" class="font-semibold underline-offset-2 hover:underline" @click="emit('switchTab', 'post')">Delivery</button>
+                        tab.
+                    </template>
                 </div>
 
                 <div class="mt-2 flex flex-wrap gap-2">

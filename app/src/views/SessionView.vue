@@ -1731,6 +1731,8 @@ onUnmounted(() => {
                                     :pipeline-uploading="poller.pipelineProgress.value?.uploading"
                                     :poller-progress="poller.progress.value"
                                     :poller-error="poller.error.value"
+                                    :is-encrypted="isEncrypted"
+                                    :imported-session="!!session?.imported"
                                     @switch-tab="activeTab = $event"
                                     @cancel-upload="cancelUpload"
                                     @cancel-encode="onCancelEncode"
