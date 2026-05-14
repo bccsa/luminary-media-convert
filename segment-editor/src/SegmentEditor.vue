@@ -1266,7 +1266,7 @@ defineExpose({
                     aria-label="Back 1 second"
                     @click="stepSeek(-1)"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12H8"/><polyline points="13 7 8 12 13 17"/></svg>
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
                 </button>
                 <button
                     v-if="onSeek"
@@ -1277,7 +1277,7 @@ defineExpose({
                     aria-label="Back 10 seconds (J)"
                     @click="stepSeek(-1, 10)"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 7 10 12 15 17"/><polyline points="21 7 16 12 21 17"/></svg>
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 7 13 12 18 17" /><polyline points="11 7 6 12 11 17" /></svg>
                 </button>
                 <button
                     v-if="onPlayPause"
@@ -1294,14 +1294,14 @@ defineExpose({
                         viewBox="0 0 24 24"
                         fill="currentColor"
                         aria-hidden="true"
-                    ><path d="M10 8.125v7.75L17.625 12 10 8.125z"/></svg>
+                    ><path d="M9 7.5L9 16.5L18 12L9 7.5z" /></svg>
                     <svg
                         v-else
                         class="se-icon"
                         viewBox="0 0 24 24"
                         fill="currentColor"
                         aria-hidden="true"
-                    ><path d="M9 9h3v6H9V9Zm5 0h3v6h-3V9z"/></svg>
+                    ><path d="M8 8h3v8H8V8Zm5 0h3v8h-3V8z" /></svg>
                 </button>
                 <button
                     v-if="onSeek"
@@ -1312,7 +1312,7 @@ defineExpose({
                     aria-label="Forward 10 seconds (L)"
                     @click="stepSeek(1, 10)"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 7 14 12 9 17"/><polyline points="15 7 20 12 15 17"/></svg>
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 7 11 12 6 17" /><polyline points="13 7 18 12 13 17" /></svg>
                 </button>
                 <button
                     v-if="onSeek"
@@ -1323,7 +1323,7 @@ defineExpose({
                     aria-label="Forward 1 second"
                     @click="stepSeek(1)"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="11 7 16 12 11 17"/><path d="M4 12h12"/></svg>
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>
                 </button>
             </div>
         </div>

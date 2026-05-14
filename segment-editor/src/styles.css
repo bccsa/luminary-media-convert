@@ -620,30 +620,37 @@ html.dark .se-root {
 .se-playback-controls .se-btn {
     min-height: 2.75rem;
     min-width: 2.75rem;
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
     box-sizing: border-box;
+    line-height: 0;
 }
 
 .se-playback-controls .se-btn--playback {
     /* Same outer size as jog buttons; large glyph via .se-icon only */
     min-width: 2.75rem;
     min-height: 2.75rem;
-    padding: 0.125rem;
+    padding: 0;
 }
 
 .se-playback-controls .se-btn--playback-icon {
-    padding: 0.45rem;
+    padding: 0;
     gap: 0;
 }
 
 .se-playback-controls .se-btn--playback-icon .se-icon {
     width: 1.5rem;
     height: 1.5rem;
+    display: block;
+    vertical-align: unset;
 }
 
 .se-playback-controls .se-btn--playback .se-icon {
     width: 2.5rem;
     height: 2.5rem;
+    display: block;
+    vertical-align: unset;
 }
 
 .se-playback-controls__slot {
