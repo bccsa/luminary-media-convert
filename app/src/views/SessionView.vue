@@ -1552,6 +1552,9 @@ const activeTab = ref<SessionTabId>('trim');
 /** Sub-tab within the aside panel when encode config is shown (pre-encode). */
 const encodeSidePanelTab = ref<'encode' | 'chapters'>('encode');
 
+/** Sub-tab within the aside panel during active encoding. */
+const encodingAsideTab = ref<'progress' | 'chapters'>('progress');
+
 const trimTimelineWorkspaceRef = ref<InstanceType<
     typeof SessionTrimWorkspace
 > | null>(null);
@@ -1576,7 +1579,6 @@ const showChaptersBesidePlayer = computed(
     () =>
         !!session.value &&
         !isExpired.value &&
-        !showEncoding.value &&
         currentStatus.value !== 'failed' &&
         chaptersSidePanelDuration.value > 0 &&
         canEditChaptersPlayback.value
@@ -1880,48 +1882,55 @@ onUnmounted(() => {
                                 @angle-change="switchToAngle"
                             >
                                 <template #aside>
-                                    <!-- Aside tab switcher — only when both panels are available -->
+                                    <!-- Tab switcher: pre-encode (Encode settings / Chapters) -->
                                     <div
-                                        v-if="
-                                            showProbeConfig &&
-                                            showChaptersBesidePlayer
-                                        "
+                                        v-if="showProbeConfig && showChaptersBesidePlayer"
                                         class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
                                     >
                                         <button
                                             type="button"
                                             class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                            :class="
-                                                encodeSidePanelTab === 'encode'
-                                                    ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                                                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                                            "
-                                            @click="
-                                                encodeSidePanelTab = 'encode'
-                                            "
+                                            :class="encodeSidePanelTab === 'encode' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
+                                            @click="encodeSidePanelTab = 'encode'"
                                         >
                                             Encode settings
                                         </button>
                                         <button
                                             type="button"
                                             class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                            :class="
-                                                encodeSidePanelTab ===
-                                                'chapters'
-                                                    ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                                                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                                            "
-                                            @click="
-                                                encodeSidePanelTab = 'chapters'
-                                            "
+                                            :class="encodeSidePanelTab === 'chapters' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
+                                            @click="encodeSidePanelTab = 'chapters'"
                                         >
                                             Chapters
                                         </button>
                                     </div>
 
-                                    <!-- Standalone encoding progress panel (shown during encoding when chapter panel is hidden) -->
+                                    <!-- Tab switcher: encoding phase (Progress / Chapters) — hidden once completed -->
                                     <div
-                                        v-if="showEncoding && !showChaptersBesidePlayer"
+                                        v-if="showEncoding && showChaptersBesidePlayer"
+                                        class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
+                                    >
+                                        <button
+                                            type="button"
+                                            class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                            :class="encodingAsideTab === 'progress' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
+                                            @click="encodingAsideTab = 'progress'"
+                                        >
+                                            Progress
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                            :class="encodingAsideTab === 'chapters' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
+                                            @click="encodingAsideTab = 'chapters'"
+                                        >
+                                            Chapters
+                                        </button>
+                                    </div>
+
+                                    <!-- Encoding progress panel -->
+                                    <div
+                                        v-if="showEncoding && (!showChaptersBesidePlayer || encodingAsideTab === 'progress')"
                                         class="min-h-0 flex-1 overflow-y-auto space-y-3"
                                     >
                                         <div
@@ -1998,69 +2007,11 @@ onUnmounted(() => {
                                     <div
                                         v-if="
                                             showChaptersBesidePlayer &&
-                                            (!showProbeConfig ||
-                                                encodeSidePanelTab ===
-                                                    'chapters')
+                                            (!showProbeConfig || encodeSidePanelTab === 'chapters') &&
+                                            (!showEncoding || encodingAsideTab === 'chapters')
                                         "
                                         class="min-h-0 flex-1 flex flex-col overflow-hidden"
                                     >
-                                        <!-- Compact encoding progress -->
-                                        <div
-                                            v-if="showEncoding"
-                                            class="shrink-0 space-y-1.5 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/60"
-                                        >
-                                            <div
-                                                v-if="
-                                                    poller.status.value ===
-                                                        'queued' &&
-                                                    poller.queuePosition
-                                                        .value != null
-                                                "
-                                                class="text-xs font-medium text-amber-700 dark:text-amber-400"
-                                            >
-                                                Queue #{{
-                                                    poller.queuePosition.value
-                                                }}
-                                            </div>
-                                            <p
-                                                v-if="etaDisplay"
-                                                class="text-right text-xs text-slate-500"
-                                            >
-                                                {{ etaDisplay }}
-                                            </p>
-                                            <ProgressBar
-                                                label="Encoding"
-                                                :progress="
-                                                    poller.pipelineProgress
-                                                        .value?.encoding ??
-                                                    poller.progress.value
-                                                "
-                                            />
-                                            <ProgressBar
-                                                v-if="
-                                                    poller.pipelineProgress
-                                                        .value?.encrypting !=
-                                                    null
-                                                "
-                                                label="Encrypting"
-                                                :progress="
-                                                    poller.pipelineProgress
-                                                        .value.encrypting
-                                                "
-                                            />
-                                            <ProgressBar
-                                                v-if="
-                                                    poller.pipelineProgress
-                                                        .value?.uploading !=
-                                                    null
-                                                "
-                                                label="S3 upload"
-                                                :progress="
-                                                    poller.pipelineProgress
-                                                        .value.uploading
-                                                "
-                                            />
-                                        </div>
                                         <SegmentEditor
                                             ref="chapterSegmentEditorRef"
                                             v-model="chapterSegments"
