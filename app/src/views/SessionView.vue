@@ -1550,7 +1550,7 @@ type SessionTabId = 'trim' | 'post';
 const activeTab = ref<SessionTabId>('trim');
 
 /** Sub-tab within the aside panel when encode config is shown (pre-encode). */
-const encodeSidePanelTab = ref<'encode' | 'trim'>('encode');
+const encodeSidePanelTab = ref<'encode' | 'chapters'>('encode');
 
 const trimTimelineWorkspaceRef = ref<InstanceType<
     typeof SessionTrimWorkspace
@@ -1872,8 +1872,34 @@ onUnmounted(() => {
                                 @angle-change="switchToAngle"
                             >
                                 <template #aside>
-                                    <!-- Encode config (pre-encode) -->
-                                    <div v-if="showProbeConfig" class="min-h-0 flex-1 overflow-y-auto">
+                                    <!-- Aside tab switcher — only when both panels are available -->
+                                    <div
+                                        v-if="showProbeConfig && showChaptersBesidePlayer"
+                                        class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
+                                    >
+                                        <button
+                                            type="button"
+                                            class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                            :class="encodeSidePanelTab === 'encode'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
+                                            @click="encodeSidePanelTab = 'encode'"
+                                        >Encode settings</button>
+                                        <button
+                                            type="button"
+                                            class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                            :class="encodeSidePanelTab === 'chapters'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
+                                            @click="encodeSidePanelTab = 'chapters'"
+                                        >Chapters</button>
+                                    </div>
+
+                                    <!-- Encode config panel -->
+                                    <div
+                                        v-if="showProbeConfig && (!showChaptersBesidePlayer || encodeSidePanelTab === 'encode')"
+                                        class="min-h-0 flex-1 overflow-y-auto"
+                                    >
                                         <SessionOutputPanel
                                             ref="outputPanelRef"
                                             :show-probe-config="showProbeConfig"
@@ -1886,14 +1912,13 @@ onUnmounted(() => {
                                         />
                                     </div>
 
-                                    <!-- Chapter list — shown whenever a duration is known, stacks below encode config during pre-encode -->
+                                    <!-- Chapter list panel -->
                                     <div
-                                        v-if="showChaptersBesidePlayer"
-                                        class="flex flex-col overflow-hidden"
-                                        :class="showProbeConfig ? 'shrink-0 max-h-52' : 'min-h-0 flex-1'"
+                                        v-if="showChaptersBesidePlayer && (!showProbeConfig || encodeSidePanelTab === 'chapters')"
+                                        class="min-h-0 flex-1 flex flex-col overflow-hidden"
                                     >
                                         <!-- Compact encoding progress -->
-                                        <div v-if="showEncoding && !showProbeConfig" class="shrink-0 space-y-1.5 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/60">
+                                        <div v-if="showEncoding" class="shrink-0 space-y-1.5 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/60">
                                             <div v-if="poller.status.value === 'queued' && poller.queuePosition.value != null" class="text-xs font-medium text-amber-700 dark:text-amber-400">
                                                 Queue #{{ poller.queuePosition.value }}
                                             </div>
@@ -1918,6 +1943,7 @@ onUnmounted(() => {
                                             :show-toolbar="false"
                                             :show-playback-controls="false"
                                             :show-help="false"
+                                            :read-only="showProbeConfig"
                                             title="Chapters"
                                             keyboard-scope="focus"
                                             :fps="segmentEditorProbeFps"
