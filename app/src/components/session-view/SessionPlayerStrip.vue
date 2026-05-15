@@ -1,7 +1,5 @@
 <script setup lang="ts">
 import { computed, ref, watchEffect } from 'vue';
-import { SegmentEditor } from '@luminary-media-converter/segment-editor';
-import type { Segment } from '@luminary-media-converter/segment-editor';
 import HlsPlayer from '../HlsPlayer.vue';
 import type { AudioTrackInfo, QualityLevelInfo } from '../HlsPlayer.vue';
 import FormSelect from '../FormSelect.vue';
@@ -14,11 +12,8 @@ const props = defineProps<{
     isAudioOnly: boolean;
     encryptionKeyHex: string | undefined;
     pollerEncryptionKeyHex: string | undefined;
-    showChaptersSidePanel: boolean;
-    chaptersSidePanelDuration: number;
-    isPreviewPlaying: boolean;
-    segmentEditorProbeFps: number;
-    chaptersSaveError: string | null;
+    /** Whether to show the aside column beside the player. */
+    showAside: boolean;
     activeTab: string;
     showAngleSwitcher: boolean;
     uniqueAnglePlaylists: { name: string; key: string }[];
@@ -31,34 +26,32 @@ const angleSelectOptions = computed(() =>
     props.uniqueAnglePlaylists.map((ap, i) => ({ value: i, label: ap.name })),
 );
 
-const chapterSegments = defineModel<Segment[]>('chapterSegments', { required: true });
-
-/** Match chapters column height to the player shell so the list never extends below the video (scroll inside list). */
+/** Match aside column height to the player shell so content never extends below the video. */
 const playerShellRef = ref<HTMLElement | null>(null);
-const chaptersAsideMaxHeightPx = ref<number | null>(null);
+const asideMaxHeightPx = ref<number | null>(null);
 
 watchEffect(
     (onCleanup) => {
         const el = playerShellRef.value;
-        if (!el || !props.showChaptersSidePanel) {
-            chaptersAsideMaxHeightPx.value = null;
+        if (!el || !props.showAside) {
+            asideMaxHeightPx.value = null;
             return;
         }
         const ro = new ResizeObserver(() => {
             const h = el.getBoundingClientRect().height;
-            chaptersAsideMaxHeightPx.value = h > 0 ? Math.round(h * 100) / 100 : null;
+            asideMaxHeightPx.value = h > 0 ? Math.round(h * 100) / 100 : null;
         });
         ro.observe(el);
         const h = el.getBoundingClientRect().height;
-        chaptersAsideMaxHeightPx.value = h > 0 ? Math.round(h * 100) / 100 : null;
+        asideMaxHeightPx.value = h > 0 ? Math.round(h * 100) / 100 : null;
         onCleanup(() => ro.disconnect());
     },
     { flush: 'post' },
 );
 
-const chaptersAsideStyle = computed(() => {
-    if (!props.showChaptersSidePanel || chaptersAsideMaxHeightPx.value == null) return undefined;
-    return { maxHeight: `${chaptersAsideMaxHeightPx.value}px` };
+const asideStyle = computed(() => {
+    if (!props.showAside || asideMaxHeightPx.value == null) return undefined;
+    return { maxHeight: `${asideMaxHeightPx.value}px` };
 });
 
 const emit = defineEmits<{
@@ -70,31 +63,10 @@ const emit = defineEmits<{
 }>();
 
 const hlsPlayerRef = ref<InstanceType<typeof HlsPlayer> | null>(null);
-const chapterSegmentEditorRef = ref<{ focus?: () => void } | null>(null);
 
 defineExpose({
     playerRef: hlsPlayerRef,
 });
-
-/** Focus chapters keyboard root (without stealing from inputs): enables I/J/L/… on first click in the panel. */
-function onChaptersAsidePointerDown(e: MouseEvent) {
-    const el = e.target as HTMLElement | null;
-    if (!el || el.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
-    chapterSegmentEditorRef.value?.focus?.();
-}
-
-function onQualityLevels(levels: QualityLevelInfo[]) {
-    emit('qualityLevels', levels);
-}
-function onPlayingChange(playing: boolean) {
-    emit('playingChange', playing);
-}
-function onDurationChange(seconds: number | null) {
-    if (seconds != null) emit('durationChange', seconds);
-}
-function onAudioTracks(tracks: AudioTrackInfo[]) {
-    emit('audioTracks', tracks);
-}
 </script>
 
 <template>
@@ -104,15 +76,15 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
             class="flex flex-col"
             :class="[
                 activeTab === 'trim' ? 'gap-3' : 'gap-4',
-                showChaptersSidePanel ? (activeTab === 'trim' ? 'lg:flex-row lg:items-stretch lg:gap-3' : 'lg:flex-row lg:items-start lg:gap-4') : '',
+                showAside ? (activeTab === 'trim' ? 'lg:flex-row lg:items-stretch lg:gap-3' : 'lg:flex-row lg:items-start lg:gap-4') : '',
             ]"
         >
             <div
                 :class="[
-                    showChaptersSidePanel
-                        ? 'min-w-0 flex-[5]'
+                    showAside
+                        ? 'min-w-0 flex-5'
                         : 'w-full',
-                    !showChaptersSidePanel && activeTab === 'trim' ? 'flex justify-center' : '',
+                    !showAside && activeTab === 'trim' ? 'flex justify-center' : '',
                 ]"
             >
                 <div
@@ -121,7 +93,7 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
                         'overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5',
                         'w-full',
                         activeTab === 'trim' && !isAudioOnly ? 'session-trim-player-cap' : '',
-                        !showChaptersSidePanel && activeTab === 'trim'
+                        !showAside && activeTab === 'trim'
                             ? 'lg:max-w-[min(100%,60vw)]'
                             : '',
                     ]"
@@ -135,51 +107,23 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
                         :encryption-key-hex="isCompleted ? (encryptionKeyHex || pollerEncryptionKeyHex) : undefined"
                         :show-controls="false"
                         preserve-state-on-source-change
-                        @quality-levels="onQualityLevels"
-                        @playing-change="onPlayingChange"
-                        @duration-change="onDurationChange"
-                        @audio-tracks="onAudioTracks"
+                        @quality-levels="emit('qualityLevels', $event)"
+                        @playing-change="emit('playingChange', $event)"
+                        @duration-change="(d) => { if (d != null) emit('durationChange', d) }"
+                        @audio-tracks="emit('audioTracks', $event)"
                     />
                 </div>
             </div>
+
             <aside
-                v-if="showChaptersSidePanel"
-                class="flex min-h-0 min-w-0 flex-[3] flex-col"
-                :class="activeTab === 'trim' ? 'gap-2 overflow-hidden trim-chapters-aside' : 'gap-3'"
-                :style="chaptersAsideStyle"
-                @mousedown.capture="onChaptersAsidePointerDown"
+                v-if="showAside"
+                class="flex min-h-0 min-w-0 flex-3 flex-col"
+                :class="activeTab === 'trim' ? 'gap-2 overflow-hidden trim-aside' : 'gap-3'"
+                :style="asideStyle"
             >
-                <SegmentEditor
-                    ref="chapterSegmentEditorRef"
-                    v-model="chapterSegments"
-                    :class="activeTab === 'trim' ? 'h-full overflow-hidden' : ''"
-                    mode="chapters"
-                    split-list-panel
-                    :duration="chaptersSidePanelDuration"
-                    :get-current-time="() => hlsPlayerRef?.getCurrentTime() ?? 0"
-                    :on-seek="(t: number) => hlsPlayerRef?.seek(t)"
-                    :on-play-pause="() => hlsPlayerRef?.togglePlay()"
-                    :is-playing="isPreviewPlaying"
-                    :ripple-edit="false"
-                    :show-timeline="false"
-                    :show-toolbar="false"
-                    :show-playback-controls="false"
-                    :show-help="false"
-                    :title="isCompleted ? 'Chapters' : 'Trim segments'"
-                    keyboard-scope="focus"
-                    :fps="segmentEditorProbeFps"
-                />
-                <p
-                    v-if="chaptersSaveError"
-                    class="text-xs text-red-600 dark:text-red-400"
-                >{{ chaptersSaveError }}</p>
+                <slot name="aside" />
             </aside>
         </div>
-
-        <p
-            v-if="chaptersSaveError && !showChaptersSidePanel"
-            class="mt-2 text-xs text-red-600 dark:text-red-400"
-        >{{ chaptersSaveError }}</p>
 
         <div
             v-if="isCompleted && showAngleSwitcher && !hideAngleSwitcher"
@@ -201,16 +145,7 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
 </template>
 
 <style scoped>
-/* Force the SegmentEditor's split list panel to fill the full aside height in trim mode. */
-.trim-chapters-aside :deep(.se-root--split-list) {
-    height: 100%;
-}
-.trim-chapters-aside :deep(.se-list-section--split) {
-    flex: 1 1 0%;
-    max-height: none;
-}
-
-/* Trim tab: 16/9 matches typical preview/HLS; flex shares favor a wider/bigger player beside chapters. */
+/* Trim tab: 16/9 matches typical preview/HLS; flex shares favor a wider/bigger player beside the aside. */
 .session-trim-player-cap {
     width: 100%;
     aspect-ratio: 16 / 9;
@@ -226,5 +161,14 @@ function onAudioTracks(tracks: AudioTrackInfo[]) {
 }
 .session-trim-player-cap :deep(.video-js .vjs-tech) {
     object-fit: contain;
+}
+
+/* Force slot content that uses split-list-panel to fill the full aside height. */
+.trim-aside :deep(.se-root--split-list) {
+    height: 100%;
+}
+.trim-aside :deep(.se-list-section--split) {
+    flex: 1 1 0%;
+    max-height: none;
 }
 </style>

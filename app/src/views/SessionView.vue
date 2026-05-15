@@ -19,6 +19,7 @@ import type {
     EncodeConfig,
     TrimSegment,
 } from '@luminary-media-converter/encode-config';
+import { SegmentEditor } from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
 import {
     useChapters,
@@ -730,6 +731,7 @@ watch(
 const sessionPlayerStripRef = ref<InstanceType<
     typeof SessionPlayerStrip
 > | null>(null);
+const chapterSegmentEditorRef = ref<{ focus?: () => void } | null>(null);
 const playerRef = computed(() => {
     const inner = sessionPlayerStripRef.value?.playerRef;
     if (inner == null) return null;
@@ -1296,17 +1298,6 @@ async function onEncodeSubmit(config: EncodeConfig) {
     }
 }
 
-function onEncodeBack() {
-    activeTab.value = 'trim';
-}
-
-function onEncodeNextToTrim() {
-    activeTab.value = 'trim';
-    void nextTick(() => {
-        window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-    });
-}
-
 function onEncodeCanSubmitChange(valid: boolean) {
     encodeConfigCanSubmit.value = valid;
 }
@@ -1318,9 +1309,9 @@ async function onStartEncodingFromTrim() {
     if (cfg) {
         await onEncodeSubmit(cfg);
     } else {
-        activeTab.value = 'output';
+        encodeSidePanelTab.value = 'encode';
         submissionError.value =
-            'Encoding options are incomplete or invalid. Use the Encode settings tab to fix any highlighted fields, then return here and click Start Encoding again.';
+            'Encoding options are incomplete or invalid. Fix any highlighted fields in the Encode settings panel, then click Start Encoding again.';
     }
 }
 
@@ -1554,9 +1545,12 @@ watch(canEditTrimTimeline, (can) => {
 // Session workspace — tabs, stepper, activity log
 // ---------------------------------------------------------------------------
 
-type SessionTabId = 'output' | 'trim' | 'post';
+type SessionTabId = 'trim' | 'post';
 
 const activeTab = ref<SessionTabId>('trim');
+
+/** Sub-tab within the aside panel when encode config is shown (pre-encode). */
+const encodeSidePanelTab = ref<'encode' | 'trim'>('encode');
 
 const trimTimelineWorkspaceRef = ref<InstanceType<
     typeof SessionTrimWorkspace
@@ -1571,54 +1565,28 @@ watch(
     }
 );
 
-/** Chapter list beside the player on the Trim segments tab (when playback + duration are ready). */
-const showChaptersBesidePlayer = computed(
-    () => activeTab.value === 'trim' && showChaptersSidePanel.value
+/** Aside is shown beside the player: encode config panel (pre-encode) or chapter editor (encoding/completed). */
+const showAside = computed(
+    () => activeTab.value === 'trim' && (showProbeConfig.value || showChaptersSidePanel.value),
 );
 
-/** Trim tab panel below tabs: hide when there is nothing to show (timeline + chapters live elsewhere). */
-const hasTrimToolbarContent = computed(() => {
-    if (showChaptersBesidePlayer.value && chaptersSaveError.value) return true;
-    if (showChaptersBesidePlayer.value && !showTrimSegmentEditor.value)
-        return true;
-    return !(showTrimSegmentEditor.value || showChaptersBesidePlayer.value);
-});
+/** Chapter editor occupies the aside only when we are NOT showing the encode config panel. */
+const showChaptersBesidePlayer = computed(
+    () => showChaptersSidePanel.value && !showProbeConfig.value
+);
 
-/** Includes `showProbeConfig` so the card (and SessionOutputPanel / EncodeConfigForm) stay mounted on the Trim tab — otherwise `buildEncodeConfig()` is null and Start Encoding shows a false "incomplete" alert. */
+/** Detail card: always on post tab; on trim tab only while upload/probe progress is visible. */
 const showSessionDetailCard = computed(
     () =>
-        activeTab.value !== 'trim' ||
-        hasTrimToolbarContent.value ||
-        showProbeConfig.value
+        activeTab.value === 'post' ||
+        (activeTab.value === 'trim' && showSessionWorkflowPanel.value && !showProbeConfig.value && !showEncoding.value && !isCompleted.value)
 );
 
-/**
- * Detail card chrome is collapsed (Encode panel stays mounted via v-show).
- * Also used to drop flex gap between the title row and the player on Trim.
- */
-const sessionDetailChromeCollapsed = computed(() => {
-    const tab = activeTab.value;
-    const workflowEmpty = !showSessionWorkflowPanel.value;
-    if (
-        tab === 'trim' &&
-        showProbeConfig.value &&
-        workflowEmpty &&
-        !hasTrimToolbarContent.value
-    ) {
-        return true;
-    }
-    return false;
-});
+const sessionDetailChromeCollapsed = computed(() => false);
 
-/** Collapse session card chrome when the active tab has no visible body (Encode panel stays mounted via v-show). */
-const sessionDetailCardSurfaceClass = computed(() => {
-    const full =
-        'rounded-xl border border-slate-200/90 bg-white/90 p-3 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur sm:p-4 dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10';
-    if (sessionDetailChromeCollapsed.value) {
-        return 'm-0 max-h-0 min-h-0 overflow-hidden border-0 bg-transparent p-0 shadow-none ring-0 backdrop-blur-none';
-    }
-    return full;
-});
+const sessionDetailCardSurfaceClass = computed(
+    () => 'rounded-xl border border-slate-200/90 bg-white/90 p-3 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur sm:p-4 dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10'
+);
 
 /** Wide breakout for trim tab — maximize horizontal space for segment editing. */
 const trimPlayerBreakoutClass = computed(() => {
@@ -1633,9 +1601,8 @@ const trimTabLabel = computed(() =>
     isCompleted.value ? 'Chapters' : 'Timeline'
 );
 
-/** Encode → Timeline → Delivery (encode tab hidden after completion). */
+/** Timeline → Delivery. */
 const tabItems = computed(() => [
-    ...(!isCompleted.value ? [{ id: 'output' as const, label: 'Encode' }] : []),
     { id: 'trim' as const, label: trimTabLabel.value },
     { id: 'post' as const, label: 'Delivery' },
 ]);
@@ -1651,21 +1618,9 @@ watch(
     { immediate: true }
 );
 
-// First time source is probed, open Timeline (player + trim); Encode stays one tab away.
-let autoSwitchedToTimeline = false;
+// Reset aside sub-tab back to encode settings when probe config becomes available again.
 watch(showProbeConfig, (ready) => {
-    if (ready && !autoSwitchedToTimeline) {
-        autoSwitchedToTimeline = true;
-        activeTab.value = 'trim';
-    }
-    if (!ready) autoSwitchedToTimeline = false;
-});
-
-// Encode tab is removed after completion; leave it via Timeline (chapters).
-watch(isCompleted, (completed) => {
-    if (completed && activeTab.value === 'output') {
-        activeTab.value = 'trim';
-    }
+    if (ready) encodeSidePanelTab.value = 'encode';
 });
 
 function relativeCreatedLabel(dateStr: string | null | undefined): string {
@@ -1891,7 +1846,6 @@ onUnmounted(() => {
                         <div class="min-w-0" :class="trimPlayerBreakoutClass">
                             <SessionPlayerStrip
                                 ref="sessionPlayerStripRef"
-                                v-model:chapter-segments="chapterSegments"
                                 :active-playback-url="activePlaybackUrl"
                                 :is-completed="isCompleted"
                                 :thumbnail-vtt-url="thumbnailVttUrl"
@@ -1901,17 +1855,7 @@ onUnmounted(() => {
                                 :poller-encryption-key-hex="
                                     poller.encryptionKeyHex.value ?? undefined
                                 "
-                                :show-chapters-side-panel="
-                                    showChaptersBesidePlayer
-                                "
-                                :chapters-side-panel-duration="
-                                    chaptersSidePanelDuration
-                                "
-                                :is-preview-playing="isPreviewPlaying"
-                                :segment-editor-probe-fps="
-                                    segmentEditorProbeFps
-                                "
-                                :chapters-save-error="chaptersSaveError"
+                                :show-aside="showAside"
                                 :active-tab="activeTab"
                                 :show-angle-switcher="showAngleSwitcher"
                                 :hide-angle-switcher="hideAngleBelowPlayer"
@@ -1922,7 +1866,107 @@ onUnmounted(() => {
                                 @duration-change="playerDuration = $event"
                                 @audio-tracks="onNativeAudioTracks"
                                 @angle-change="switchToAngle"
-                            />
+                            >
+                                <template #aside>
+                                    <!-- Pre-encode: encode config + trim list sub-tabs -->
+                                    <template v-if="showProbeConfig">
+                                        <div class="flex shrink-0 gap-0.5 self-start rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50">
+                                            <button
+                                                v-for="tab in [{ id: 'encode', label: 'Encode' }, { id: 'trim', label: 'Trim' }]"
+                                                :key="tab.id"
+                                                type="button"
+                                                class="shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                                :class="
+                                                    encodeSidePanelTab === tab.id
+                                                        ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                        : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                                "
+                                                @click="encodeSidePanelTab = tab.id as 'encode' | 'trim'"
+                                            >{{ tab.label }}</button>
+                                        </div>
+                                        <div v-show="encodeSidePanelTab === 'encode'" class="min-h-0 flex-1 overflow-y-auto">
+                                            <SessionOutputPanel
+                                                ref="outputPanelRef"
+                                                :show-probe-config="showProbeConfig"
+                                                :probe-result="probeResult"
+                                                :byte-range-enabled="byteRangeEnabled"
+                                                encode-primary-action="start-encoding"
+                                                appearance="session"
+                                                @submit="onEncodeSubmit"
+                                                @can-submit-change="onEncodeCanSubmitChange"
+                                            />
+                                        </div>
+                                        <div v-show="encodeSidePanelTab === 'trim'" class="min-h-0 flex-1 overflow-y-auto">
+                                            <SegmentEditor
+                                                v-model="editorSegments"
+                                                mode="trim"
+                                                title="Trim segments"
+                                                split-list-panel
+                                                :duration="trimEditorProbeDuration"
+                                                :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
+                                                :on-seek="(t: number) => playerRef?.seek(t)"
+                                                :on-play-pause="() => playerRef?.togglePlay()"
+                                                :is-playing="isPreviewPlaying"
+                                                :show-timeline="false"
+                                                :show-toolbar="false"
+                                                :show-playback-controls="false"
+                                                :show-help="false"
+                                                keyboard-scope="focus"
+                                                :fps="segmentEditorProbeFps"
+                                            />
+                                        </div>
+                                    </template>
+
+                                    <!-- Encoding/completed: optional compact progress + chapter editor -->
+                                    <template v-else-if="showChaptersBesidePlayer">
+                                        <!-- Compact encoding progress -->
+                                        <div v-if="showEncoding" class="shrink-0 space-y-1.5 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/60">
+                                            <div v-if="poller.status.value === 'queued' && poller.queuePosition.value != null" class="text-xs font-medium text-amber-700 dark:text-amber-400">
+                                                Queue #{{ poller.queuePosition.value }}
+                                            </div>
+                                            <p v-if="etaDisplay" class="text-right text-xs text-slate-500">{{ etaDisplay }}</p>
+                                            <ProgressBar
+                                                label="Encoding"
+                                                :progress="poller.pipelineProgress.value?.encoding ?? poller.progress.value"
+                                            />
+                                            <ProgressBar
+                                                v-if="poller.pipelineProgress.value?.encrypting != null"
+                                                label="Encrypting"
+                                                :progress="poller.pipelineProgress.value.encrypting"
+                                            />
+                                            <ProgressBar
+                                                v-if="poller.pipelineProgress.value?.uploading != null"
+                                                label="S3 upload"
+                                                :progress="poller.pipelineProgress.value.uploading"
+                                            />
+                                        </div>
+                                        <SegmentEditor
+                                            ref="chapterSegmentEditorRef"
+                                            v-model="chapterSegments"
+                                            class="h-full overflow-hidden"
+                                            mode="chapters"
+                                            split-list-panel
+                                            :duration="chaptersSidePanelDuration"
+                                            :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
+                                            :on-seek="(t: number) => playerRef?.seek(t)"
+                                            :on-play-pause="() => playerRef?.togglePlay()"
+                                            :is-playing="isPreviewPlaying"
+                                            :ripple-edit="false"
+                                            :show-timeline="false"
+                                            :show-toolbar="false"
+                                            :show-playback-controls="false"
+                                            :show-help="false"
+                                            :title="isCompleted ? 'Chapters' : 'Trim segments'"
+                                            keyboard-scope="focus"
+                                            :fps="segmentEditorProbeFps"
+                                        />
+                                        <p
+                                            v-if="chaptersSaveError"
+                                            class="shrink-0 text-xs text-red-600 dark:text-red-400"
+                                        >{{ chaptersSaveError }}</p>
+                                    </template>
+                                </template>
+                            </SessionPlayerStrip>
                         </div>
 
                         <Teleport to="#app-session-workflow-teleport">
@@ -2037,10 +2081,9 @@ onUnmounted(() => {
                                 : '',
                         ]"
                     >
-                        <!-- Upload / encode progress (Timeline tab detail card) -->
+                        <!-- Upload / probe progress (trim tab, pre-encode only) -->
                         <div
-                            v-show="activeTab === 'trim'"
-                            v-if="showSessionWorkflowPanel"
+                            v-if="showSessionWorkflowPanel && !showProbeConfig && !showEncoding && !isCompleted"
                             class="mt-2"
                         >
                             <SessionWorkflowPanel
@@ -2092,25 +2135,9 @@ onUnmounted(() => {
                                 :poller-error="poller.error.value"
                                 :is-encrypted="isEncrypted"
                                 :imported-session="!!session?.imported"
-                                @switch-tab="activeTab = $event"
+                                @switch-tab="activeTab = ($event as SessionTabId)"
                                 @cancel-upload="cancelUpload"
                                 @cancel-encode="onCancelEncode"
-                            />
-                        </div>
-
-                        <!-- Output configuration -->
-                        <div v-show="activeTab === 'output'" class="mt-2">
-                            <SessionOutputPanel
-                                ref="outputPanelRef"
-                                :show-probe-config="showProbeConfig"
-                                :probe-result="probeResult"
-                                :byte-range-enabled="byteRangeEnabled"
-                                encode-primary-action="next-to-trim"
-                                appearance="session"
-                                @submit="onEncodeSubmit"
-                                @next-to-trim="onEncodeNextToTrim"
-                                @can-submit-change="onEncodeCanSubmitChange"
-                                @back="onEncodeBack"
                             />
                         </div>
 
