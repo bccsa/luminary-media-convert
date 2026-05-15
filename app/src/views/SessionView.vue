@@ -1568,7 +1568,7 @@ watch(
 const showAside = computed(
     () =>
         activeTab.value === 'trim' &&
-        (showProbeConfig.value || showChaptersBesidePlayer.value)
+        (showProbeConfig.value || showChaptersBesidePlayer.value || showEncoding.value)
 );
 
 /** Chapter card is shown whenever we have a duration to work with, regardless of playback URL. */
@@ -1917,6 +1917,56 @@ onUnmounted(() => {
                                         >
                                             Chapters
                                         </button>
+                                    </div>
+
+                                    <!-- Standalone encoding progress panel (shown during encoding when chapter panel is hidden) -->
+                                    <div
+                                        v-if="showEncoding && !showChaptersBesidePlayer"
+                                        class="min-h-0 flex-1 overflow-y-auto space-y-3"
+                                    >
+                                        <div
+                                            v-if="
+                                                poller.status.value === 'queued' &&
+                                                poller.queuePosition.value != null
+                                            "
+                                            class="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-400 inline-block"
+                                        >
+                                            Queue position #{{ poller.queuePosition.value }}
+                                        </div>
+                                        <p
+                                            v-if="etaDisplay"
+                                            class="text-right text-xs text-slate-500"
+                                        >
+                                            {{ etaDisplay }}
+                                        </p>
+                                        <div class="space-y-3 rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-3 dark:border-slate-700/50 dark:bg-slate-800/30">
+                                            <ProgressBar
+                                                label="Encoding"
+                                                :progress="
+                                                    poller.pipelineProgress.value?.encoding ??
+                                                    poller.progress.value
+                                                "
+                                            />
+                                            <ProgressBar
+                                                v-if="poller.pipelineProgress.value?.encrypting != null"
+                                                label="Encrypting"
+                                                :progress="poller.pipelineProgress.value.encrypting"
+                                            />
+                                            <ProgressBar
+                                                v-if="poller.pipelineProgress.value?.uploading != null"
+                                                label="S3 upload"
+                                                :progress="poller.pipelineProgress.value.uploading"
+                                            />
+                                        </div>
+                                        <div v-if="poller.status.value === 'queued' || poller.status.value === 'encoding' || poller.status.value === 'encrypting'">
+                                            <button
+                                                type="button"
+                                                class="cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/40"
+                                                @click="onCancelEncode"
+                                            >
+                                                Cancel encoding
+                                            </button>
+                                        </div>
                                     </div>
 
                                     <!-- Encode config panel -->
