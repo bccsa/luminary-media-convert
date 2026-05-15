@@ -1663,11 +1663,11 @@ onUnmounted(() => {
 <template>
     <div class="app-view flex min-h-dvh w-full max-w-none flex-col">
         <div
-            class="w-full flex-1 pb-8 transition-all duration-300"
+            class="w-full flex-1 transition-all duration-300"
             :class="
                 session && !loading && activeTab === 'trim'
-                    ? 'min-h-0 flex flex-col pt-2'
-                    : 'pt-4'
+                    ? 'min-h-0 flex flex-col justify-center py-4'
+                    : 'pb-8 pt-4'
             "
         >
             <div
