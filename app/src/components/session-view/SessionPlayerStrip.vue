@@ -82,7 +82,7 @@ defineExpose({
             <div
                 :class="[
                     showAside
-                        ? 'min-w-0 flex-5'
+                        ? 'min-w-0 flex-3'
                         : 'w-full',
                     !showAside && activeTab === 'trim' ? 'flex justify-center' : '',
                 ]"
