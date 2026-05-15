@@ -811,8 +811,8 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
             </details>
         </div>
 
-        <!-- ④ Action bar -->
-        <div class="ecf-actions">
+        <!-- ④ Action bar (hidden in session layout — header carries the CTA) -->
+        <div v-if="appearance !== 'session'" class="ecf-actions">
             <button type="button" class="ecf-btn-secondary" @click="emit('back')">
                 <svg class="ecf-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
