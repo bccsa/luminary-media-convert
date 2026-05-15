@@ -378,11 +378,8 @@ const showEncoding = computed(() => {
     );
 });
 
-/** Mirrors `SessionWorkflowPanel` visibility — avoids an empty padded card when probe is ready but there is no upload / encode UI yet. */
+/** Upload / encode progress panel on the Timeline tab (and when the detail card is visible). */
 const showSessionWorkflowPanel = computed(() => {
-    if (activeTab.value === 'workflow' && showProbeConfig.value) {
-        return true;
-    }
     const cs = currentStatus.value;
     const preEncodeFlow =
         !showProbeConfig.value &&
@@ -1300,7 +1297,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
 }
 
 function onEncodeBack() {
-    activeTab.value = 'workflow';
+    activeTab.value = 'trim';
 }
 
 function onEncodeNextToTrim() {
@@ -1557,9 +1554,9 @@ watch(canEditTrimTimeline, (can) => {
 // Session workspace — tabs, stepper, activity log
 // ---------------------------------------------------------------------------
 
-type SessionTabId = 'workflow' | 'output' | 'trim' | 'post';
+type SessionTabId = 'output' | 'trim' | 'post';
 
-const activeTab = ref<SessionTabId>('workflow');
+const activeTab = ref<SessionTabId>('trim');
 
 const trimTimelineWorkspaceRef = ref<InstanceType<
     typeof SessionTrimWorkspace
@@ -1610,7 +1607,6 @@ const sessionDetailChromeCollapsed = computed(() => {
     ) {
         return true;
     }
-    if (tab === 'workflow' && workflowEmpty) return true;
     return false;
 });
 
@@ -1632,13 +1628,13 @@ const trimPlayerBreakoutClass = computed(() => {
     return 'relative left-1/2 w-screen max-w-[min(100vw-2rem,96rem)] -translate-x-1/2';
 });
 
-/** Tab label: "Chapters" only after encode completes; otherwise the trim tab is "Trim segments". */
+/** Primary editing tab: timeline + trim before encode; chapters after. */
 const trimTabLabel = computed(() =>
-    isCompleted.value ? 'Chapters' : 'Trim segments'
+    isCompleted.value ? 'Chapters' : 'Timeline'
 );
 
+/** Encode → Timeline → Delivery (encode tab hidden after completion). */
 const tabItems = computed(() => [
-    { id: 'workflow' as const, label: 'Workflow' },
     ...(!isCompleted.value ? [{ id: 'output' as const, label: 'Encode' }] : []),
     { id: 'trim' as const, label: trimTabLabel.value },
     { id: 'post' as const, label: 'Delivery' },
@@ -1655,76 +1651,21 @@ watch(
     { immediate: true }
 );
 
-// Auto-advance to Encode settings the first time probe results are ready
-// so the user lands directly on the configuration form instead of the status tab.
-let autoSwitchedToOutput = false;
+// First time source is probed, open Timeline (player + trim); Encode stays one tab away.
+let autoSwitchedToTimeline = false;
 watch(showProbeConfig, (ready) => {
-    if (ready && !autoSwitchedToOutput) {
-        autoSwitchedToOutput = true;
-        activeTab.value = 'output';
+    if (ready && !autoSwitchedToTimeline) {
+        autoSwitchedToTimeline = true;
+        activeTab.value = 'trim';
     }
-    if (!ready) autoSwitchedToOutput = false;
+    if (!ready) autoSwitchedToTimeline = false;
 });
 
-// If the session transitions to completed while the Encode settings tab is open, redirect away.
+// Encode tab is removed after completion; leave it via Timeline (chapters).
 watch(isCompleted, (completed) => {
     if (completed && activeTab.value === 'output') {
-        activeTab.value = 'workflow';
+        activeTab.value = 'trim';
     }
-});
-
-const effectiveProbe = computed<ProbeResult | null>(() => {
-    const raw = probeResult.value ?? session.value?.probeResult;
-    return (raw as ProbeResult | null) ?? null;
-});
-
-const isImportedFlow = computed(() => !!session.value?.imported);
-
-const stepperIngest = computed(() => {
-    if (isImportedFlow.value) return 'done' as const;
-    const s = currentStatus.value;
-    if (!s) return 'pending' as const;
-    if (s === 'created' || s === 'uploading') return 'active' as const;
-    return 'done' as const;
-});
-
-const stepperProbe = computed(() => {
-    if (isImportedFlow.value) return 'done' as const;
-    const s = currentStatus.value;
-    if (!s || s === 'created' || s === 'uploading') return 'pending' as const;
-    if (s === 'uploaded') {
-        if (probeLoading.value) return 'active' as const;
-        if (effectiveProbe.value) return 'done' as const;
-        return 'active' as const;
-    }
-    return 'done' as const;
-});
-
-const stepperEncoding = computed(() => {
-    if (isImportedFlow.value) return 'done' as const;
-    const s = currentStatus.value;
-    if (s === 'failed') return 'error' as const;
-    if (s === 'queued' || s === 'encoding' || s === 'encrypting')
-        return 'active' as const;
-    if (s === 'uploading_to_s3' || s === 'completed') return 'done' as const;
-    return 'pending' as const;
-});
-
-const stepperUpload = computed(() => {
-    if (isImportedFlow.value) return 'done' as const;
-    const s = currentStatus.value;
-    if (s === 'failed') return 'pending' as const;
-    if (s === 'uploading_to_s3') return 'active' as const;
-    if (s === 'completed') return 'done' as const;
-    return 'pending' as const;
-});
-
-const stepperFinalize = computed(() => {
-    if (isImportedFlow.value) return 'done' as const;
-    const s = currentStatus.value;
-    if (s === 'completed') return 'done' as const;
-    if (s === 'failed') return 'error' as const;
-    return 'pending' as const;
 });
 
 function relativeCreatedLabel(dateStr: string | null | undefined): string {
@@ -1751,22 +1692,6 @@ async function copyOutputObjectKey(key: string) {
 // ---------------------------------------------------------------------------
 
 onMounted(fetchSession);
-
-// Track lg breakpoint in JS — used to v-if the header teleport tabs so they
-// reliably disappear at lg+ (CSS lg:hidden on Teleported nodes is unreliable).
-const isLgScreen = ref(
-    typeof window !== 'undefined' &&
-        window.matchMedia('(min-width: 1024px)').matches
-);
-
-onMounted(() => {
-    const mq = window.matchMedia('(min-width: 1024px)');
-    const onMqChange = (e: MediaQueryListEvent) => {
-        isLgScreen.value = e.matches;
-    };
-    mq.addEventListener('change', onMqChange);
-    onUnmounted(() => mq.removeEventListener('change', onMqChange));
-});
 
 onUnmounted(() => {
     poller.stop();
@@ -1821,7 +1746,7 @@ onUnmounted(() => {
             </div>
 
             <template v-else-if="session">
-                <!-- Full session header + lifecycle status + in-content workflow tabs (all tabs; trim uses same wide breakout as player) -->
+                <!-- Session title row; tabs live in the app header teleport (single strip, all breakpoints). -->
                 <div
                     class="flex shrink-0 items-start gap-4"
                     :class="[
@@ -1867,26 +1792,6 @@ onUnmounted(() => {
                             @cancel-edit-name="cancelEditName"
                             @start-edit-name="startEditName"
                         />
-                    </div>
-                    <div class="hidden shrink-0 pt-1 lg:flex">
-                        <div
-                            class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
-                        >
-                            <button
-                                v-for="tab in tabItems"
-                                :key="tab.id"
-                                type="button"
-                                class="shrink-0 whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-medium transition-colors sm:px-2.5 sm:py-1.5 sm:text-xs"
-                                :class="
-                                    activeTab === tab.id
-                                        ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                                        : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                                "
-                                @click="activeTab = tab.id"
-                            >
-                                {{ tab.label }}
-                            </button>
-                        </div>
                     </div>
                 </div>
 
@@ -1976,7 +1881,7 @@ onUnmounted(() => {
                             : 'space-y-5',
                     ]"
                 >
-                    <!-- On trim: flex order shows workflow card above player (same vertical rhythm as Workflow tab) -->
+                    <!-- On trim: flex order shows progress card above player -->
                     <div
                         :class="[
                             'min-w-0 flex flex-col gap-2',
@@ -2024,9 +1929,7 @@ onUnmounted(() => {
                             <div
                                 class="flex w-full min-w-0 items-center justify-end gap-1.5 sm:gap-2"
                             >
-                                <!-- Workflow tabs — visible on mobile; at lg+ the tabs appear in the content area -->
                                 <div
-                                    v-if="!isLgScreen"
                                     class="flex shrink-0 gap-0.5 overflow-x-auto rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
                                 >
                                     <button
@@ -2134,20 +2037,13 @@ onUnmounted(() => {
                                 : '',
                         ]"
                     >
-                        <!-- Encode workflow + pipeline (visible on Trim tab too — matches Workflow tab) -->
+                        <!-- Upload / encode progress (Timeline tab detail card) -->
                         <div
-                            v-show="
-                                activeTab === 'workflow' || activeTab === 'trim'
-                            "
+                            v-show="activeTab === 'trim'"
                             v-if="showSessionWorkflowPanel"
                             class="mt-2"
                         >
                             <SessionWorkflowPanel
-                                :ingest="stepperIngest"
-                                :probe="stepperProbe"
-                                :encoding="stepperEncoding"
-                                :upload="stepperUpload"
-                                :finalize="stepperFinalize"
                                 :show-probe-config="showProbeConfig"
                                 :submitting="submitting"
                                 :show-encoding="showEncoding"
@@ -2196,7 +2092,6 @@ onUnmounted(() => {
                                 :poller-error="poller.error.value"
                                 :is-encrypted="isEncrypted"
                                 :imported-session="!!session?.imported"
-                                :session-workspace-tab="activeTab"
                                 @switch-tab="activeTab = $event"
                                 @cancel-upload="cancelUpload"
                                 @cancel-encode="onCancelEncode"

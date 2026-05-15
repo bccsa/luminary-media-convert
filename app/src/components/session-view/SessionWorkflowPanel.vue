@@ -1,16 +1,9 @@
 <script setup lang="ts">
-import type { StepVisual } from '../SessionWorkflowStepper.vue';
 import { computed } from 'vue';
 import ProgressBar from '../ProgressBar.vue';
-import SessionWorkflowStepper from '../SessionWorkflowStepper.vue';
 
 const props = withDefaults(
     defineProps<{
-        ingest: StepVisual;
-        probe: StepVisual;
-        encoding: StepVisual;
-        upload: StepVisual;
-        finalize: StepVisual;
         showProbeConfig: boolean;
         submitting: boolean;
         showEncoding: boolean;
@@ -42,10 +35,8 @@ const props = withDefaults(
         isEncrypted?: boolean;
         /** External HLS import — omit encode pipeline summary; different completion copy. */
         importedSession?: boolean;
-        /** Active session tab — hides the pipeline stepper on Trim; drives post-probe copy on Workflow. */
-        sessionWorkspaceTab?: 'workflow' | 'output' | 'trim' | 'post';
     }>(),
-    { isEncrypted: false, importedSession: false, sessionWorkspaceTab: undefined },
+    { isEncrypted: false, importedSession: false },
 );
 
 const showLivePipeline = computed(
@@ -61,7 +52,7 @@ const showCompletedPipelineSummary = computed(
 );
 
 const emit = defineEmits<{
-    switchTab: [tab: 'workflow' | 'output' | 'trim' | 'post'];
+    switchTab: [tab: 'output' | 'trim' | 'post'];
     cancelUpload: [];
     cancelEncode: [];
 }>();
@@ -69,15 +60,6 @@ const emit = defineEmits<{
 
 <template>
     <div class="space-y-3">
-        <SessionWorkflowStepper
-            v-if="sessionWorkspaceTab !== 'trim'"
-            :ingest="ingest"
-            :probe="probe"
-            :encoding="encoding"
-            :upload="upload"
-            :finalize="finalize"
-        />
-
         <template v-if="!showProbeConfig && !submitting && !(showEncoding || isCompleted || currentStatus === 'failed')">
             <div v-if="showUploadProgress && activeUploadProgress != null">
                 <ProgressBar
@@ -129,26 +111,6 @@ const emit = defineEmits<{
                     :progress="activeUploadProgress"
                     :indeterminate="activeUploadProgress >= 100"
                 />
-            </div>
-            <div
-                v-else-if="
-                    sessionWorkspaceTab === 'workflow'
-                    && !(submitting || showEncoding || isCompleted || currentStatus === 'failed')
-                "
-                class="rounded-lg border border-slate-200/80 bg-slate-50/80 p-3 dark:border-slate-600 dark:bg-slate-800/40"
-            >
-                <p class="text-xs leading-relaxed text-slate-600 dark:text-slate-300">
-                    Source is ready. Configure renditions and audio on the
-                    <strong class="text-slate-800 dark:text-slate-100">Encode</strong>
-                    tab, then start encoding when you are done.
-                </p>
-                <button
-                    type="button"
-                    class="mt-2 cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 shadow-sm transition-colors hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-                    @click="emit('switchTab', 'output')"
-                >
-                    Open Encode →
-                </button>
             </div>
         </template>
 
