@@ -1565,14 +1565,18 @@ watch(
     }
 );
 
-/** Aside is shown beside the player: encode config panel (pre-encode) or chapter editor (encoding/completed). */
 const showAside = computed(
-    () => activeTab.value === 'trim' && (showProbeConfig.value || showChaptersSidePanel.value),
+    () => activeTab.value === 'trim' && (showProbeConfig.value || showChaptersBesidePlayer.value),
 );
 
-/** Chapter editor occupies the aside only when we are NOT showing the encode config panel. */
+/** Chapter card is shown whenever we have a duration to work with, regardless of playback URL. */
 const showChaptersBesidePlayer = computed(
-    () => showChaptersSidePanel.value && !showProbeConfig.value
+    () =>
+        !!session.value &&
+        !isExpired.value &&
+        currentStatus.value !== 'failed' &&
+        chaptersSidePanelDuration.value > 0 &&
+        canEditChaptersPlayback.value,
 );
 
 /** Detail card: always on post tab; on trim tab only while upload/probe progress is visible. */
@@ -1868,82 +1872,40 @@ onUnmounted(() => {
                                 @angle-change="switchToAngle"
                             >
                                 <template #aside>
-                                    <!-- Pre-encode: encode config + trim list sub-tabs -->
-                                    <template v-if="showProbeConfig">
-                                        <div class="flex shrink-0 gap-0.5 self-start rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50">
-                                            <button
-                                                v-for="tab in [{ id: 'encode', label: 'Encode' }, { id: 'trim', label: 'Trim' }]"
-                                                :key="tab.id"
-                                                type="button"
-                                                class="shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                                :class="
-                                                    encodeSidePanelTab === tab.id
-                                                        ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                                                        : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                                                "
-                                                @click="encodeSidePanelTab = tab.id as 'encode' | 'trim'"
-                                            >{{ tab.label }}</button>
-                                        </div>
-                                        <div v-show="encodeSidePanelTab === 'encode'" class="min-h-0 flex-1 overflow-y-auto">
-                                            <SessionOutputPanel
-                                                ref="outputPanelRef"
-                                                :show-probe-config="showProbeConfig"
-                                                :probe-result="probeResult"
-                                                :byte-range-enabled="byteRangeEnabled"
-                                                encode-primary-action="start-encoding"
-                                                appearance="session"
-                                                @submit="onEncodeSubmit"
-                                                @can-submit-change="onEncodeCanSubmitChange"
-                                            />
-                                        </div>
-                                        <div v-show="encodeSidePanelTab === 'trim'" class="min-h-0 flex-1 overflow-y-auto">
-                                            <SegmentEditor
-                                                v-model="editorSegments"
-                                                mode="trim"
-                                                title="Trim segments"
-                                                split-list-panel
-                                                :duration="trimEditorProbeDuration"
-                                                :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
-                                                :on-seek="(t: number) => playerRef?.seek(t)"
-                                                :on-play-pause="() => playerRef?.togglePlay()"
-                                                :is-playing="isPreviewPlaying"
-                                                :show-timeline="false"
-                                                :show-toolbar="false"
-                                                :show-playback-controls="false"
-                                                :show-help="false"
-                                                keyboard-scope="focus"
-                                                :fps="segmentEditorProbeFps"
-                                            />
-                                        </div>
-                                    </template>
+                                    <!-- Encode config (pre-encode) -->
+                                    <div v-if="showProbeConfig" class="min-h-0 flex-1 overflow-y-auto">
+                                        <SessionOutputPanel
+                                            ref="outputPanelRef"
+                                            :show-probe-config="showProbeConfig"
+                                            :probe-result="probeResult"
+                                            :byte-range-enabled="byteRangeEnabled"
+                                            encode-primary-action="start-encoding"
+                                            appearance="session"
+                                            @submit="onEncodeSubmit"
+                                            @can-submit-change="onEncodeCanSubmitChange"
+                                        />
+                                    </div>
 
-                                    <!-- Encoding/completed: optional compact progress + chapter editor -->
-                                    <template v-else-if="showChaptersBesidePlayer">
+                                    <!-- Chapter list — shown whenever a duration is known, stacks below encode config during pre-encode -->
+                                    <div
+                                        v-if="showChaptersBesidePlayer"
+                                        class="flex flex-col overflow-hidden"
+                                        :class="showProbeConfig ? 'shrink-0 max-h-52' : 'min-h-0 flex-1'"
+                                    >
                                         <!-- Compact encoding progress -->
-                                        <div v-if="showEncoding" class="shrink-0 space-y-1.5 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/60">
+                                        <div v-if="showEncoding && !showProbeConfig" class="shrink-0 space-y-1.5 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/60">
                                             <div v-if="poller.status.value === 'queued' && poller.queuePosition.value != null" class="text-xs font-medium text-amber-700 dark:text-amber-400">
                                                 Queue #{{ poller.queuePosition.value }}
                                             </div>
                                             <p v-if="etaDisplay" class="text-right text-xs text-slate-500">{{ etaDisplay }}</p>
-                                            <ProgressBar
-                                                label="Encoding"
-                                                :progress="poller.pipelineProgress.value?.encoding ?? poller.progress.value"
-                                            />
-                                            <ProgressBar
-                                                v-if="poller.pipelineProgress.value?.encrypting != null"
-                                                label="Encrypting"
-                                                :progress="poller.pipelineProgress.value.encrypting"
-                                            />
-                                            <ProgressBar
-                                                v-if="poller.pipelineProgress.value?.uploading != null"
-                                                label="S3 upload"
-                                                :progress="poller.pipelineProgress.value.uploading"
-                                            />
+                                            <ProgressBar label="Encoding" :progress="poller.pipelineProgress.value?.encoding ?? poller.progress.value" />
+                                            <ProgressBar v-if="poller.pipelineProgress.value?.encrypting != null" label="Encrypting" :progress="poller.pipelineProgress.value.encrypting" />
+                                            <ProgressBar v-if="poller.pipelineProgress.value?.uploading != null" label="S3 upload" :progress="poller.pipelineProgress.value.uploading" />
                                         </div>
                                         <SegmentEditor
                                             ref="chapterSegmentEditorRef"
                                             v-model="chapterSegments"
-                                            class="h-full overflow-hidden"
+                                            class="min-h-0 flex-1 overflow-hidden"
                                             mode="chapters"
                                             split-list-panel
                                             :duration="chaptersSidePanelDuration"
@@ -1956,15 +1918,12 @@ onUnmounted(() => {
                                             :show-toolbar="false"
                                             :show-playback-controls="false"
                                             :show-help="false"
-                                            :title="isCompleted ? 'Chapters' : 'Trim segments'"
+                                            title="Chapters"
                                             keyboard-scope="focus"
                                             :fps="segmentEditorProbeFps"
                                         />
-                                        <p
-                                            v-if="chaptersSaveError"
-                                            class="shrink-0 text-xs text-red-600 dark:text-red-400"
-                                        >{{ chaptersSaveError }}</p>
-                                    </template>
+                                        <p v-if="chaptersSaveError" class="shrink-0 text-xs text-red-600 dark:text-red-400">{{ chaptersSaveError }}</p>
+                                    </div>
                                 </template>
                             </SessionPlayerStrip>
                         </div>
