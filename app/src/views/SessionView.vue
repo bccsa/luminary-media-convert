@@ -1566,7 +1566,9 @@ watch(
 );
 
 const showAside = computed(
-    () => activeTab.value === 'trim' && (showProbeConfig.value || showChaptersBesidePlayer.value),
+    () =>
+        activeTab.value === 'trim' &&
+        (showProbeConfig.value || showChaptersBesidePlayer.value)
 );
 
 /** Chapter card is shown whenever we have a duration to work with, regardless of playback URL. */
@@ -1574,22 +1576,28 @@ const showChaptersBesidePlayer = computed(
     () =>
         !!session.value &&
         !isExpired.value &&
+        !showEncoding.value &&
         currentStatus.value !== 'failed' &&
         chaptersSidePanelDuration.value > 0 &&
-        canEditChaptersPlayback.value,
+        canEditChaptersPlayback.value
 );
 
 /** Detail card: always on post tab; on trim tab only while upload/probe progress is visible. */
 const showSessionDetailCard = computed(
     () =>
         activeTab.value === 'post' ||
-        (activeTab.value === 'trim' && showSessionWorkflowPanel.value && !showProbeConfig.value && !showEncoding.value && !isCompleted.value)
+        (activeTab.value === 'trim' &&
+            showSessionWorkflowPanel.value &&
+            !showProbeConfig.value &&
+            !showEncoding.value &&
+            !isCompleted.value)
 );
 
 const sessionDetailChromeCollapsed = computed(() => false);
 
 const sessionDetailCardSurfaceClass = computed(
-    () => 'rounded-xl border border-slate-200/90 bg-white/90 p-3 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur sm:p-4 dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10'
+    () =>
+        'rounded-xl border border-slate-200/90 bg-white/90 p-3 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur sm:p-4 dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10'
 );
 
 /** Wide breakout for trim tab — maximize horizontal space for segment editing. */
@@ -1874,58 +1882,134 @@ onUnmounted(() => {
                                 <template #aside>
                                     <!-- Aside tab switcher — only when both panels are available -->
                                     <div
-                                        v-if="showProbeConfig && showChaptersBesidePlayer"
+                                        v-if="
+                                            showProbeConfig &&
+                                            showChaptersBesidePlayer
+                                        "
                                         class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
                                     >
                                         <button
                                             type="button"
                                             class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                            :class="encodeSidePanelTab === 'encode'
-                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
-                                            @click="encodeSidePanelTab = 'encode'"
-                                        >Encode settings</button>
+                                            :class="
+                                                encodeSidePanelTab === 'encode'
+                                                    ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                            "
+                                            @click="
+                                                encodeSidePanelTab = 'encode'
+                                            "
+                                        >
+                                            Encode settings
+                                        </button>
                                         <button
                                             type="button"
                                             class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                            :class="encodeSidePanelTab === 'chapters'
-                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
-                                            @click="encodeSidePanelTab = 'chapters'"
-                                        >Chapters</button>
+                                            :class="
+                                                encodeSidePanelTab ===
+                                                'chapters'
+                                                    ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                            "
+                                            @click="
+                                                encodeSidePanelTab = 'chapters'
+                                            "
+                                        >
+                                            Chapters
+                                        </button>
                                     </div>
 
                                     <!-- Encode config panel -->
                                     <div
-                                        v-if="showProbeConfig && (!showChaptersBesidePlayer || encodeSidePanelTab === 'encode')"
+                                        v-if="
+                                            showProbeConfig &&
+                                            (!showChaptersBesidePlayer ||
+                                                encodeSidePanelTab === 'encode')
+                                        "
                                         class="min-h-0 flex-1 overflow-y-auto"
                                     >
                                         <SessionOutputPanel
                                             ref="outputPanelRef"
                                             :show-probe-config="showProbeConfig"
                                             :probe-result="probeResult"
-                                            :byte-range-enabled="byteRangeEnabled"
+                                            :byte-range-enabled="
+                                                byteRangeEnabled
+                                            "
                                             encode-primary-action="start-encoding"
                                             appearance="session"
                                             @submit="onEncodeSubmit"
-                                            @can-submit-change="onEncodeCanSubmitChange"
+                                            @can-submit-change="
+                                                onEncodeCanSubmitChange
+                                            "
                                         />
                                     </div>
 
                                     <!-- Chapter list panel -->
                                     <div
-                                        v-if="showChaptersBesidePlayer && (!showProbeConfig || encodeSidePanelTab === 'chapters')"
+                                        v-if="
+                                            showChaptersBesidePlayer &&
+                                            (!showProbeConfig ||
+                                                encodeSidePanelTab ===
+                                                    'chapters')
+                                        "
                                         class="min-h-0 flex-1 flex flex-col overflow-hidden"
                                     >
                                         <!-- Compact encoding progress -->
-                                        <div v-if="showEncoding" class="shrink-0 space-y-1.5 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/60">
-                                            <div v-if="poller.status.value === 'queued' && poller.queuePosition.value != null" class="text-xs font-medium text-amber-700 dark:text-amber-400">
-                                                Queue #{{ poller.queuePosition.value }}
+                                        <div
+                                            v-if="showEncoding"
+                                            class="shrink-0 space-y-1.5 rounded-lg border border-slate-200/80 bg-white/80 px-3 py-2.5 dark:border-slate-700 dark:bg-slate-800/60"
+                                        >
+                                            <div
+                                                v-if="
+                                                    poller.status.value ===
+                                                        'queued' &&
+                                                    poller.queuePosition
+                                                        .value != null
+                                                "
+                                                class="text-xs font-medium text-amber-700 dark:text-amber-400"
+                                            >
+                                                Queue #{{
+                                                    poller.queuePosition.value
+                                                }}
                                             </div>
-                                            <p v-if="etaDisplay" class="text-right text-xs text-slate-500">{{ etaDisplay }}</p>
-                                            <ProgressBar label="Encoding" :progress="poller.pipelineProgress.value?.encoding ?? poller.progress.value" />
-                                            <ProgressBar v-if="poller.pipelineProgress.value?.encrypting != null" label="Encrypting" :progress="poller.pipelineProgress.value.encrypting" />
-                                            <ProgressBar v-if="poller.pipelineProgress.value?.uploading != null" label="S3 upload" :progress="poller.pipelineProgress.value.uploading" />
+                                            <p
+                                                v-if="etaDisplay"
+                                                class="text-right text-xs text-slate-500"
+                                            >
+                                                {{ etaDisplay }}
+                                            </p>
+                                            <ProgressBar
+                                                label="Encoding"
+                                                :progress="
+                                                    poller.pipelineProgress
+                                                        .value?.encoding ??
+                                                    poller.progress.value
+                                                "
+                                            />
+                                            <ProgressBar
+                                                v-if="
+                                                    poller.pipelineProgress
+                                                        .value?.encrypting !=
+                                                    null
+                                                "
+                                                label="Encrypting"
+                                                :progress="
+                                                    poller.pipelineProgress
+                                                        .value.encrypting
+                                                "
+                                            />
+                                            <ProgressBar
+                                                v-if="
+                                                    poller.pipelineProgress
+                                                        .value?.uploading !=
+                                                    null
+                                                "
+                                                label="S3 upload"
+                                                :progress="
+                                                    poller.pipelineProgress
+                                                        .value.uploading
+                                                "
+                                            />
                                         </div>
                                         <SegmentEditor
                                             ref="chapterSegmentEditorRef"
@@ -1933,10 +2017,21 @@ onUnmounted(() => {
                                             class="min-h-0 flex-1 overflow-hidden"
                                             mode="chapters"
                                             split-list-panel
-                                            :duration="chaptersSidePanelDuration"
-                                            :get-current-time="() => playerRef?.getCurrentTime() ?? 0"
-                                            :on-seek="(t: number) => playerRef?.seek(t)"
-                                            :on-play-pause="() => playerRef?.togglePlay()"
+                                            :duration="
+                                                chaptersSidePanelDuration
+                                            "
+                                            :get-current-time="
+                                                () =>
+                                                    playerRef?.getCurrentTime() ??
+                                                    0
+                                            "
+                                            :on-seek="
+                                                (t: number) =>
+                                                    playerRef?.seek(t)
+                                            "
+                                            :on-play-pause="
+                                                () => playerRef?.togglePlay()
+                                            "
                                             :is-playing="isPreviewPlaying"
                                             :ripple-edit="false"
                                             :show-timeline="false"
@@ -1948,7 +2043,12 @@ onUnmounted(() => {
                                             keyboard-scope="focus"
                                             :fps="segmentEditorProbeFps"
                                         />
-                                        <p v-if="chaptersSaveError" class="shrink-0 text-xs text-red-600 dark:text-red-400">{{ chaptersSaveError }}</p>
+                                        <p
+                                            v-if="chaptersSaveError"
+                                            class="shrink-0 text-xs text-red-600 dark:text-red-400"
+                                        >
+                                            {{ chaptersSaveError }}
+                                        </p>
                                     </div>
                                 </template>
                             </SessionPlayerStrip>
@@ -2068,7 +2168,12 @@ onUnmounted(() => {
                     >
                         <!-- Upload / probe progress (trim tab, pre-encode only) -->
                         <div
-                            v-if="showSessionWorkflowPanel && !showProbeConfig && !showEncoding && !isCompleted"
+                            v-if="
+                                showSessionWorkflowPanel &&
+                                !showProbeConfig &&
+                                !showEncoding &&
+                                !isCompleted
+                            "
                             class="mt-2"
                         >
                             <SessionWorkflowPanel
@@ -2120,7 +2225,7 @@ onUnmounted(() => {
                                 :poller-error="poller.error.value"
                                 :is-encrypted="isEncrypted"
                                 :imported-session="!!session?.imported"
-                                @switch-tab="activeTab = ($event as SessionTabId)"
+                                @switch-tab="activeTab = $event as SessionTabId"
                                 @cancel-upload="cancelUpload"
                                 @cancel-encode="onCancelEncode"
                             />

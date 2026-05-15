@@ -133,8 +133,9 @@ const emit = defineEmits<{
                 </p>
             </div>
 
-            <div v-else class="space-y-2">
-                <div class="mb-0.5 flex flex-wrap items-start justify-between gap-2">
+            <div v-else class="space-y-3">
+                <!-- Header row -->
+                <div class="flex flex-wrap items-start justify-between gap-2">
                     <div>
                         <h2 class="text-sm font-semibold text-slate-900 dark:text-slate-100">HLS package</h2>
                         <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
@@ -143,50 +144,50 @@ const emit = defineEmits<{
                             <template v-if="encodingType === 'audio'"> · Audio-only</template>
                         </p>
                     </div>
-                    <div v-if="pollerStatus === 'queued' && pollerQueuePosition != null" class="text-xs font-medium text-amber-700 dark:text-amber-400">
-                        Queue #{{ pollerQueuePosition }}
+                    <div v-if="pollerStatus === 'queued' && pollerQueuePosition != null" class="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-400">
+                        Queue position #{{ pollerQueuePosition }}
                     </div>
+                    <p v-if="etaDisplay && showLivePipeline" class="text-xs text-slate-500 dark:text-slate-400">{{ etaDisplay }}</p>
                 </div>
 
+                <!-- Pipeline steps -->
                 <div
                     v-if="showLivePipeline || showCompletedPipelineSummary"
-                    class="space-y-2"
+                    class="rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-3 space-y-3 dark:border-slate-700/50 dark:bg-slate-800/30"
                 >
-                    <p v-if="etaDisplay && showLivePipeline" class="text-right text-xs text-slate-500">{{ etaDisplay }}</p>
                     <ProgressBar
                         label="Encoding"
                         :progress="showCompletedPipelineSummary ? 100 : (pipelineEncoding ?? pollerProgress)"
                     />
                     <ProgressBar
                         v-if="(showLivePipeline && pipelineEncrypting != null) || (showCompletedPipelineSummary && isEncrypted)"
-                        label="Encrypting manifest"
+                        label="Encrypting"
                         :progress="showCompletedPipelineSummary ? 100 : (pipelineEncrypting ?? 0)"
                     />
                     <ProgressBar
                         v-if="(showLivePipeline && pipelineUploading != null) || showCompletedPipelineSummary"
-                        label="S3 parallel upload"
+                        label="S3 upload"
                         :progress="showCompletedPipelineSummary ? 100 : (pipelineUploading ?? 0)"
                     />
                 </div>
 
-                <div v-if="isCompleted" class="mt-2 rounded-lg border border-emerald-200/80 bg-emerald-50/80 px-2.5 py-1.5 text-xs leading-snug text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+                <!-- Completed -->
+                <div v-if="isCompleted" class="rounded-lg border border-emerald-200/80 bg-emerald-50/80 px-3 py-2.5 text-xs leading-snug text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
                     <template v-if="importedSession">
                         Import ready. Delivery links and storage tools are on the
-                        <button type="button" class="font-semibold underline-offset-2 hover:underline" @click="emit('switchTab', 'post')">Delivery</button>
-                        tab.
+                        <button type="button" class="font-semibold underline-offset-2 hover:underline" @click="emit('switchTab', 'post')">Delivery</button> tab.
                     </template>
                     <template v-else>
                         Encoding finished. Delivery links and storage tools are on the
-                        <button type="button" class="font-semibold underline-offset-2 hover:underline" @click="emit('switchTab', 'post')">Delivery</button>
-                        tab.
+                        <button type="button" class="font-semibold underline-offset-2 hover:underline" @click="emit('switchTab', 'post')">Delivery</button> tab.
                     </template>
                 </div>
 
-                <div class="mt-2 flex flex-wrap gap-2">
+                <!-- Cancel -->
+                <div v-if="showEncoding && (pollerStatus === 'queued' || pollerStatus === 'encoding' || pollerStatus === 'encrypting')">
                     <button
-                        v-if="showEncoding && (pollerStatus === 'queued' || pollerStatus === 'encoding' || pollerStatus === 'encrypting')"
                         type="button"
-                        class="cursor-pointer rounded-xl border border-red-200 bg-white px-4 py-2 text-xs font-semibold text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/50"
+                        class="cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/40"
                         @click="emit('cancelEncode')"
                     >
                         Cancel encoding
