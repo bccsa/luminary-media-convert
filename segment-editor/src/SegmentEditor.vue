@@ -58,6 +58,8 @@ interface Props {
     splitListPanel?: boolean;
     /** No outer panel border/shadow — use when the editor sits on the app’s own card or page background. */
     embedded?: boolean;
+    /** Hide label inputs and remove buttons — use when the list is informational only. */
+    readOnly?: boolean;
     /**
      * URL of `thumbnails.vtt` (HLS sprite storyboard). In trim mode, hovering the timeline shows the matching thumbnail.
      */
@@ -88,6 +90,7 @@ const props = withDefaults(defineProps<Props>(), {
     allowOverlap: undefined,
     splitListPanel: false,
     embedded: false,
+    readOnly: false,
 });
 
 const emit = defineEmits<{
@@ -1506,7 +1509,7 @@ defineExpose({
                         @click.stop
                     />
                     <textarea
-                        v-if="labelsVisible"
+                        v-if="labelsVisible && !readOnly"
                         class="se-label-field"
                         :value="seg.label || ''"
                         :placeholder="mode === 'chapters' ? 'Chapter title…' : 'Subtitle text…'"
@@ -1516,24 +1519,26 @@ defineExpose({
                         @blur="onLabelBlur"
                         @click.stop
                     />
-                    <span class="se-list-duration">{{ formatDuration(seg.outSec - seg.inSec) }}</span>
-                    <button
-                        type="button"
-                        class="se-remove"
-                        title="Remove segment"
-                        aria-label="Remove segment"
-                        @click.stop="removeSegment(seg.id)"
-                    >
-                        <svg
-                            class="se-icon"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            aria-hidden="true"
-                        ><path d="M8 8l8 8M16 8l-8 8"/></svg>
-                    </button>
+                    <span class="se-list-end">
+                        <span class="se-list-duration">{{ formatDuration(seg.outSec - seg.inSec) }}</span>
+                        <button
+                            type="button"
+                            class="se-remove"
+                            title="Remove segment"
+                            aria-label="Remove segment"
+                            @click.stop="removeSegment(seg.id)"
+                        >
+                            <svg
+                                class="se-icon"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                aria-hidden="true"
+                            ><path d="M8 8l8 8M16 8l-8 8"/></svg>
+                        </button>
+                    </span>
                 </div>
             </div>
             <div
