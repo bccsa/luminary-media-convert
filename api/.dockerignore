@@ -1,0 +1,28 @@
+**/node_modules
+**/dist
+**/.cache
+**/coverage
+**/.nyc_output
+
+.git
+.gitignore
+.github
+.claude
+.vscode
+.idea
+
+# Pre-downloaded tusd binary from the host — let the Linux container re-download
+tusd/bin
+
+# Runtime env files — env is injected via --env-file at `docker run` time
+**/.env
+**/.env.*
+!**/.env.example
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+
+# Docs / scratch
+*.md
+docs/
