@@ -1,0 +1,67 @@
+name: "Build & Deploy SaaS to staging"
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - saas/**
+      - hls/**
+      - package.json
+      - package-lock.json
+      - .github/workflows/saas-deploy-staging.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, za-scc-dhe03]
+    environment: saas-staging
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Write .env file
+        run: |
+          cat > saas/.env <<'ENV_EOF'
+          PORT=${{ vars.DOCKER_PORT }}
+          AUTH0_DOMAIN=${{ vars.AUTH0_DOMAIN }}
+          AUTH0_AUDIENCE=${{ vars.AUTH0_AUDIENCE }}
+          AUTH0_CLAIM_NAMESPACE=${{ vars.AUTH0_CLAIM_NAMESPACE }}
+          CORS_ORIGIN=${{ vars.CORS_ORIGIN }}
+          COUCHDB_URL=${{ secrets.COUCHDB_URL }}
+          COUCHDB_DATABASE=${{ vars.COUCHDB_DATABASE }}
+          ENCODING_API_URL=${{ vars.ENCODING_API_URL }}
+          ENCODING_API_MASTER_KEY=${{ secrets.ENCODING_API_MASTER_KEY }}
+          SAAS_SERVICE_URL=${{ vars.SAAS_SERVICE_URL }}
+          WEBHOOK_SECRET=${{ secrets.WEBHOOK_SECRET }}
+          SESSION_RETENTION_DAYS=${{ vars.SESSION_RETENTION_DAYS }}
+          SESSION_EXPIRY_CRON=${{ vars.SESSION_EXPIRY_CRON }}
+          S3_UPLOAD_CONCURRENCY=${{ vars.S3_UPLOAD_CONCURRENCY }}
+          S3_ENCRYPTION_KEY=${{ secrets.S3_ENCRYPTION_KEY }}
+          ENV_EOF
+
+      - name: Build Docker image
+        run: docker build -f saas/Dockerfile . -t ${{ vars.DOCKER_IMAGE }}
+
+      - name: Stop and remove old container
+        run: |
+          docker stop ${{ vars.DOCKER_CONTAINER }} || true
+          docker rm ${{ vars.DOCKER_CONTAINER }} || true
+
+      - name: Run new container
+        run: >
+          docker run -d -p "${{ vars.DOCKER_PORT }}":"${{ vars.DOCKER_PORT }}"
+          --restart unless-stopped
+          --name=${{ vars.DOCKER_CONTAINER }}
+          --add-host=host.docker.internal:host-gateway
+          --env-file saas/.env
+          ${{ vars.DOCKER_IMAGE }}

@@ -1,0 +1,73 @@
+name: "Build & Deploy API to staging"
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - api/**
+      - hls/**
+      - tusd/**
+      - package.json
+      - package-lock.json
+      - .github/workflows/api-deploy-staging.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, za-scc-dhe03]
+    environment: api-staging
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Write .env file
+        # Heredoc with a quoted delimiter ('ENV_EOF') disables shell expansion
+        # inside the body, so substituted secrets/vars are written verbatim and
+        # bash will never try to interpret $, backticks, or backslashes in them.
+        # `--env-file` reads the file literally (no quote stripping), so values
+        # must NOT be wrapped in quotes here.
+        run: |
+          cat > api/.env <<'ENV_EOF'
+          PORT=${{ vars.DOCKER_PORT }}
+          CORS_ORIGIN=${{ vars.CORS_ORIGIN }}
+          WORK_DIR=${{ vars.WORK_DIR }}
+          FFMPEG_TIMEOUT_MS=${{ vars.FFMPEG_TIMEOUT_MS }}
+          FFMPEG_THREADS=${{ vars.FFMPEG_THREADS }}
+          MAX_UPLOAD_SIZE=${{ vars.MAX_UPLOAD_SIZE }}
+          S3_UPLOAD_CONCURRENCY=${{ vars.S3_UPLOAD_CONCURRENCY }}
+          MASTER_API_KEY=${{ secrets.MASTER_API_KEY }}
+          HLS_ENCRYPTION_SEED=${{ secrets.HLS_ENCRYPTION_SEED }}
+          KEY_VALIDATION_WEBHOOK_URL=${{ vars.KEY_VALIDATION_WEBHOOK_URL }}
+          KEY_VALIDATION_WEBHOOK_TIMEOUT_MS=${{ vars.KEY_VALIDATION_WEBHOOK_TIMEOUT_MS }}
+          KEY_VALIDATION_CACHE_TTL_MS=${{ vars.KEY_VALIDATION_CACHE_TTL_MS }}
+          AUTHORIZATION_WEBHOOK_URL=${{ vars.AUTHORIZATION_WEBHOOK_URL }}
+          AUTHORIZATION_WEBHOOK_TIMEOUT_MS=${{ vars.AUTHORIZATION_WEBHOOK_TIMEOUT_MS }}
+          AUTHORIZATION_WEBHOOK_FAIL_MODE=${{ vars.AUTHORIZATION_WEBHOOK_FAIL_MODE }}
+          ENV_EOF
+
+      - name: Build Docker image
+        run: docker build -f api/Dockerfile . -t ${{ vars.DOCKER_IMAGE }}
+
+      - name: Stop and remove old container
+        run: |
+          docker stop ${{ vars.DOCKER_CONTAINER }} || true
+          docker rm ${{ vars.DOCKER_CONTAINER }} || true
+
+      - name: Run new container
+        run: >
+          docker run -d -p "${{ vars.DOCKER_PORT }}":"${{ vars.DOCKER_PORT }}"
+          --restart unless-stopped
+          --name=${{ vars.DOCKER_CONTAINER }}
+          --add-host=host.docker.internal:host-gateway
+          --env-file api/.env
+          ${{ vars.DOCKER_IMAGE }}
