@@ -105,7 +105,7 @@ function nextPage() {
     fetchUsers();
 }
 
-function formatDate(dateStr: string): string {
+function formatDate(dateStr: string | null | undefined): string {
     if (!dateStr) return '-';
     return new Date(dateStr).toLocaleDateString();
 }
@@ -234,7 +234,7 @@ onMounted(fetchUsers);
                         >
                             <div class="flex justify-end gap-2">
                                 <button
-                                    v-if="u.status === 'active' && u.id !== currentUserId?.value"
+                                    v-if="u.status === 'active' && u.id !== currentUserId"
                                     @click="onDisable(u.id)"
                                     class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 transition-colors hover:border-amber-700 hover:text-amber-400 cursor-pointer"
                                 >
@@ -248,7 +248,7 @@ onMounted(fetchUsers);
                                     Enable
                                 </button>
                                 <button
-                                    v-if="u.id !== currentUserId?.value"
+                                    v-if="u.id !== currentUserId"
                                     @click="onDelete(u.id)"
                                     class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-400 transition-colors hover:border-red-700 hover:text-red-400 cursor-pointer"
                                 >
