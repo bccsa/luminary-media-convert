@@ -149,6 +149,25 @@ export class SessionsController {
         return result;
     }
 
+    @Get(':sessionId/waveform')
+    @SkipAdmin()
+    async readWaveform(
+        @Param('sessionId') sessionId: string,
+        @Req() req: { user: { _id: string } },
+    ): Promise<{
+        version: number;
+        sampleRate: number;
+        numPeaks: number;
+        peaks: number[];
+    }> {
+        const result = await this.sessionsService.readWaveform(
+            req.user._id,
+            sessionId,
+        );
+        if (!result) throw new NotFoundException('No waveform sidecar for this session');
+        return result;
+    }
+
     @Put(':sessionId/chapters')
     @SkipAdmin()
     @HttpCode(HttpStatus.NO_CONTENT)

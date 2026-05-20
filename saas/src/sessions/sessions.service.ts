@@ -582,6 +582,25 @@ export class SessionsService implements OnModuleInit {
     }
 
     /**
+     * Read the waveform.json sidecar for a session via the Encoding API.
+     * Returns null when the sidecar is missing — caller responds 404 and
+     * the client quietly skips waveform rendering.
+     */
+    async readWaveform(
+        userId: string,
+        sessionId: string,
+    ): Promise<{
+        version: number;
+        sampleRate: number;
+        numPeaks: number;
+        peaks: number[];
+    } | null> {
+        const { doc, s3Payload } = await this.resolveForHlsEdit(userId, sessionId);
+        const folderPrefix = this.deriveFolderPrefix(doc);
+        return this.hlsEditClient.readWaveform(s3Payload, folderPrefix);
+    }
+
+    /**
      * Write the chapter VTT for a session via the Encoding API. The Encoding
      * API enforces VTT and lang validation; we just forward.
      */
