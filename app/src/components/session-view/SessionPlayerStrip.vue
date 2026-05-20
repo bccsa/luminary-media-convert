@@ -53,16 +53,16 @@ defineExpose({
                 activeTab === 'trim' ? 'session-trim-player-row' : '',
             ]"
         >
-            <!-- Player column: black bg so letterbox space is invisible; centers player vertically -->
+            <!-- Player column: flex-col so shell can be flex-1 and fill exactly, no misalignment -->
             <div
-                class="flex min-h-0 min-w-0 flex-col items-center justify-center bg-black flex-3"
+                class="flex min-h-0 min-w-0 flex-col bg-black flex-3"
                 :class="!showAside && activeTab === 'trim' ? 'max-w-[min(100%,60vw)]' : ''"
             >
                 <div
                     ref="playerShellRef"
                     class="bg-black"
                     :class="activeTab === 'trim'
-                        ? 'session-trim-player-fill'
+                        ? 'session-trim-player-fill flex-1 min-h-0'
                         : 'w-full overflow-hidden rounded-xl shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'"
                 >
                     <HlsPlayer
@@ -124,10 +124,9 @@ defineExpose({
     max-height: min(33.75vw, calc(100dvh - 12rem));
 }
 
-/* Trim: shell fills its column exactly — column is already the right height. */
+/* Trim: shell is flex-1 in the column so it grows to exactly fill it. */
 .session-trim-player-fill {
     width: 100%;
-    height: 100%;
 }
 .session-trim-player-fill :deep(> div) {
     height: 100%;
