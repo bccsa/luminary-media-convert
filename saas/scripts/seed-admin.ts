@@ -1,6 +1,7 @@
 import nano from 'nano';
 import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
+import { buildCouchdbUrl } from '../src/database/couchdb-url.js';
 
 dotenv.config();
 
@@ -29,10 +30,8 @@ function parseArgs(args: string[]): { email: string; name: string } {
 async function main() {
     const { email, name } = parseArgs(process.argv.slice(2));
 
-    const couchdbUrl = process.env.COUCHDB_URL || 'http://localhost:5984';
-    const dbName = process.env.COUCHDB_DATABASE || 'luminary';
-
-    const server = nano(couchdbUrl);
+    const { url, dbName } = buildCouchdbUrl();
+    const server = nano(url);
 
     // Create database if needed
     try {

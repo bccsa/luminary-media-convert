@@ -43,12 +43,21 @@ docker run -d -p 5984:5984 -e COUCHDB_USER=admin -e COUCHDB_PASSWORD=password co
 
 The database and required indexes are created automatically on first startup.
 
+> **Upgrading from an embedded-auth `COUCHDB_URL`?** Previous versions allowed
+> `COUCHDB_URL=http://user:pass@host:5984`. That form is no longer supported —
+> the service will fail to start with a clear migration error. Split your URL
+> into `COUCHDB_URL` (host only), `COUCHDB_USERNAME`, and `COUCHDB_PASSWORD`.
+> Passwords containing `:`, `@`, `%`, `(`, `.`, etc. are now handled correctly
+> without URL-encoding on your end.
+
 ## Environment Variables
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `PORT` | No | `3001` | HTTP server port |
-| `COUCHDB_URL` | No | `http://localhost:5984` | CouchDB connection URL |
+| `COUCHDB_URL` | No | `http://localhost:5984` | CouchDB connection URL (host only, no embedded credentials). The service refuses to start if this contains userinfo. |
+| `COUCHDB_USERNAME` | No | -- | CouchDB username. Omit for no-auth setups. |
+| `COUCHDB_PASSWORD` | No | -- | CouchDB password. Required when `COUCHDB_USERNAME` is set. Paste the literal password — special characters (`:`, `@`, `%`, `(`, `.`, etc.) are URL-encoded automatically. |
 | `COUCHDB_DATABASE` | No | `luminary` | CouchDB database name |
 | `AUTH0_DOMAIN` | **Yes** | -- | Auth0 tenant domain |
 | `AUTH0_AUDIENCE` | **Yes** | -- | Auth0 API identifier / audience |
@@ -62,7 +71,9 @@ Example `saas/.env`:
 
 ```bash
 PORT=3001
-COUCHDB_URL=http://admin:password@localhost:5984
+COUCHDB_URL=http://localhost:5984
+COUCHDB_USERNAME=admin
+COUCHDB_PASSWORD=password
 COUCHDB_DATABASE=luminary
 AUTH0_DOMAIN=your-tenant.auth0.com
 AUTH0_AUDIENCE=https://luminary-media-convert/api
