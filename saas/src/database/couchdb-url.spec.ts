@@ -46,36 +46,24 @@ describe('buildCouchdbUrl', () => {
     });
 
     describe('no-auth mode', () => {
-        it('omits userinfo when neither username nor password is set', () => {
-            const { url } = buildCouchdbUrl();
+        it('omits userinfo and returns no auth when neither var is set', () => {
+            const { url, auth } = buildCouchdbUrl();
             const parsed = new URL(url);
             expect(parsed.username).toBe('');
             expect(parsed.password).toBe('');
+            expect(auth).toBeUndefined();
         });
     });
 
     describe('credential injection', () => {
-        // Each case asserts the raw password round-trips through percent-decoding,
-        // rather than asserting an exact serialized form. That's the real contract:
-        // CouchDB receives the original bytes regardless of how the URL class
-        // chooses to encode them.
+        // The contract: every byte of the configured username/password reaches
+        // the caller (and therefore axios -> CouchDB) verbatim, with no URL
+        // encoding round-trip. The URL never carries userinfo when auth is set.
         const cases: Array<{ name: string; user: string; pass: string }> = [
             { name: 'simple ASCII', user: 'admin', pass: 'password' },
-            {
-                name: "password with ':'",
-                user: 'admin',
-                pass: 'pa:ss',
-            },
-            {
-                name: "password with '@'",
-                user: 'admin',
-                pass: 'pa@ss',
-            },
-            {
-                name: "password with '%'",
-                user: 'admin',
-                pass: 'pa%ss',
-            },
+            { name: "password with ':'", user: 'admin', pass: 'pa:ss' },
+            { name: "password with '@'", user: 'admin', pass: 'pa@ss' },
+            { name: "password with '%'", user: 'admin', pass: 'pa%ss' },
             {
                 name: "password with '(' and '.'",
                 user: 'admin',
@@ -94,16 +82,17 @@ describe('buildCouchdbUrl', () => {
         ];
 
         for (const { name, user, pass } of cases) {
-            it(`round-trips ${name}`, () => {
+            it(`passes ${name} through unchanged`, () => {
                 process.env.COUCHDB_USERNAME = user;
                 process.env.COUCHDB_PASSWORD = pass;
 
-                const { url } = buildCouchdbUrl();
+                const { url, auth } = buildCouchdbUrl();
                 const parsed = new URL(url);
 
-                expect(decodeURIComponent(parsed.username)).toBe(user);
-                expect(decodeURIComponent(parsed.password)).toBe(pass);
+                expect(parsed.username).toBe('');
+                expect(parsed.password).toBe('');
                 expect(parsed.host).toBe('localhost:5984');
+                expect(auth).toEqual({ username: user, password: pass });
             });
         }
 
@@ -112,12 +101,13 @@ describe('buildCouchdbUrl', () => {
             process.env.COUCHDB_USERNAME = 'admin';
             process.env.COUCHDB_PASSWORD = 'p@ss';
 
-            const { url } = buildCouchdbUrl();
+            const { url, auth } = buildCouchdbUrl();
             const parsed = new URL(url);
 
             expect(parsed.protocol).toBe('https:');
             expect(parsed.host).toBe('db.internal:6984');
-            expect(decodeURIComponent(parsed.password)).toBe('p@ss');
+            expect(parsed.username).toBe('');
+            expect(auth).toEqual({ username: 'admin', password: 'p@ss' });
         });
     });
 

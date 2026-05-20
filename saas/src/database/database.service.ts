@@ -15,8 +15,8 @@ export class DatabaseService implements OnModuleInit {
     private ready = false;
 
     constructor() {
-        const { url, dbName } = buildCouchdbUrl();
-        this.server = nano(url);
+        const { url, dbName, auth } = buildCouchdbUrl();
+        this.server = nano(auth ? { url, requestDefaults: { auth } } : url);
         this.dbName = dbName;
         this.db = this.server.db.use(dbName);
     }
