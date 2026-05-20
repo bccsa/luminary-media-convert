@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import nano from 'nano';
+import { buildCouchdbUrl } from './couchdb-url.js';
 import { INDEXES } from './indexes.js';
 
 const MAX_UPSERT_RETRIES = 10;
@@ -10,12 +11,13 @@ export class DatabaseService implements OnModuleInit {
     private readonly logger = new Logger(DatabaseService.name);
     private db: nano.DocumentScope<unknown>;
     private server: nano.ServerScope;
+    private readonly dbName: string;
     private ready = false;
 
     constructor() {
-        const couchdbUrl = process.env.COUCHDB_URL || 'http://localhost:5984';
-        this.server = nano(couchdbUrl);
-        const dbName = process.env.COUCHDB_DATABASE || 'luminary';
+        const { url, dbName } = buildCouchdbUrl();
+        this.server = nano(url);
+        this.dbName = dbName;
         this.db = this.server.db.use(dbName);
     }
 
@@ -24,11 +26,9 @@ export class DatabaseService implements OnModuleInit {
     }
 
     private async connectWithRetry(): Promise<void> {
-        const dbName = process.env.COUCHDB_DATABASE || 'luminary';
-
         while (!this.ready) {
             try {
-                await this.initDatabase(dbName);
+                await this.initDatabase(this.dbName);
                 this.ready = true;
             } catch (err) {
                 this.logger.warn(
