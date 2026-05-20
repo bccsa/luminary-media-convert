@@ -1,6 +1,12 @@
+export interface CouchdbAuth {
+    username: string;
+    password: string;
+}
+
 export interface CouchdbConfig {
     url: string;
     dbName: string;
+    auth?: CouchdbAuth;
 }
 
 export function buildCouchdbUrl(): CouchdbConfig {
@@ -35,14 +41,17 @@ export function buildCouchdbUrl(): CouchdbConfig {
         );
     }
 
+    const result: CouchdbConfig = { url: parsed.toString(), dbName };
+
     if (username && password) {
-        // encodeURIComponent first so bare '%' characters become '%25'. The
-        // WHATWG URL setter passes valid '%XX' sequences through unchanged
-        // (it won't double-encode), but on its own does NOT escape a bare '%'
-        // — which would leave the URL malformed.
-        parsed.username = encodeURIComponent(username);
-        parsed.password = encodeURIComponent(password);
+        // Pass credentials through nano's requestDefaults.auth (forwarded to
+        // axios) instead of embedding them in the URL. Axios builds the Basic
+        // Auth header from the raw username/password, so every byte — including
+        // ':', '@', '%', '(', '.' — reaches CouchDB exactly as configured.
+        // URL-embedded userinfo would arrive percent-encoded and not match the
+        // stored password.
+        result.auth = { username, password };
     }
 
-    return { url: parsed.toString(), dbName };
+    return result;
 }

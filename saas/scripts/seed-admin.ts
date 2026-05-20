@@ -30,8 +30,8 @@ function parseArgs(args: string[]): { email: string; name: string } {
 async function main() {
     const { email, name } = parseArgs(process.argv.slice(2));
 
-    const { url, dbName } = buildCouchdbUrl();
-    const server = nano(url);
+    const { url, dbName, auth } = buildCouchdbUrl();
+    const server = nano(auth ? { url, requestDefaults: { auth } } : url);
 
     // Create database if needed
     try {
