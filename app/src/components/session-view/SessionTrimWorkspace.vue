@@ -137,7 +137,7 @@ const trimToolbarHasVisibleContent = computed(() => {
     <!-- Timeline: full-width bottom strip for precise trim editing -->
     <div
         v-if="section === 'timeline' && showTrimSegmentEditor"
-        class="w-full"
+        class="se-timeline-wrap w-full"
     >
         <SegmentEditor
             ref="trimSegmentEditorRef"
@@ -225,3 +225,9 @@ const trimToolbarHasVisibleContent = computed(() => {
     </div>
 </div>
 </template>
+
+<style scoped>
+.se-timeline-wrap :deep(.se-root) {
+    border-radius: 0;
+}
+</style>

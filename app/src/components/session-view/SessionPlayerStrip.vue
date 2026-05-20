@@ -44,11 +44,14 @@ defineExpose({
 
 <template>
     <div class="flex h-full flex-col">
-        <!-- Player + aside: fill all available height in the trim layout -->
+        <!-- Player + aside: height capped to 16/9 of the player-column width so no black bars show -->
         <div
             v-if="activePlaybackUrl"
             class="flex min-h-0 flex-1"
-            :class="showAside ? 'flex-row' : (activeTab === 'trim' ? 'flex-col items-center justify-center' : 'flex-col gap-4')"
+            :class="[
+                showAside ? 'flex-row' : (activeTab === 'trim' ? 'flex-col items-center justify-center' : 'flex-col gap-4'),
+                activeTab === 'trim' ? 'session-trim-player-row' : '',
+            ]"
         >
             <!-- Player column: black bg so letterbox space is invisible; centers player vertically -->
             <div
@@ -113,14 +116,18 @@ defineExpose({
 
 <style scoped>
 /*
- * Trim: shell is 16/9, capped to the column height. CSS aspect-ratio reduces the width
- * automatically when max-height is hit, so the video never letterboxes — the column's
- * black background fills any remaining vertical space invisibly.
+ * Trim: cap the player+aside row to exactly the 16/9 height of the player column.
+ * Player column is flex-3 of flex-5 total ≈ 60vw, so 16/9 height = 60vw × 9/16 = 33.75vw.
+ * Also guarded by viewport height minus header and a rough timeline estimate.
  */
+.session-trim-player-row {
+    max-height: min(33.75vw, calc(100dvh - 12rem));
+}
+
+/* Trim: shell fills its column exactly — column is already the right height. */
 .session-trim-player-fill {
     width: 100%;
-    aspect-ratio: 16 / 9;
-    max-height: 100%;
+    height: 100%;
 }
 .session-trim-player-fill :deep(> div) {
     height: 100%;
