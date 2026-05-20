@@ -44,26 +44,30 @@ defineExpose({
 
 <template>
     <div class="flex h-full flex-col">
-        <!-- Player + aside: height capped to 16/9 of the player-column width so no black bars show -->
+        <!--
+            Trim layout: row fills all space above the timeline.
+            The player shell self-sizes to 16/9 of its column width and anchors
+            top-left; the aside is free to stretch to the full row height so
+            its form content (Detected media, Renditions, Audio groups…) lines
+            up with the player's bottom instead of clipping above it.
+        -->
         <div
             v-if="activePlaybackUrl"
             class="flex min-h-0 flex-1"
             :class="[
                 showAside ? 'flex-row' : (activeTab === 'trim' ? 'flex-col items-center justify-center' : 'flex-col gap-4'),
-                activeTab === 'trim' ? 'session-trim-player-row' : '',
             ]"
         >
-            <!-- Player column: flex-col so shell can be flex-1 and fill exactly, no misalignment -->
+            <!-- Player column: shell anchored to the top, empty space below shows page background -->
             <div
-                class="flex min-h-0 min-w-0 flex-col bg-black flex-1"
+                class="flex min-h-0 min-w-0 flex-col flex-1"
                 :class="!showAside && activeTab === 'trim' ? 'max-w-[min(100%,60vw)]' : ''"
             >
                 <div
                     ref="playerShellRef"
-                    class="bg-black"
                     :class="activeTab === 'trim'
-                        ? 'session-trim-player-fill flex-1 min-h-0'
-                        : 'w-full overflow-hidden rounded-xl shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'"
+                        ? 'session-trim-player-shell bg-black'
+                        : 'w-full overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'"
                 >
                     <HlsPlayer
                         ref="hlsPlayerRef"
@@ -116,27 +120,30 @@ defineExpose({
 
 <style scoped>
 /*
- * Trim: cap the player+aside row to exactly the 16/9 height of the player column.
- * Player column is flex-1 of flex-2 total ≈ 50vw, so 16/9 height = 50vw × 9/16 = 28.125vw.
- * Also guarded by viewport height minus header and a rough timeline estimate.
+ * Trim: player shell self-sizes to 16/9 of its column width and anchors
+ * top-left in a column that fills the full row height. The aside (the
+ * other flex-1 column in the row) stretches to fill, so its form content
+ * reaches all the way down to the timeline instead of clipping above
+ * the player's bottom edge.
+ *
+ * max-height: 100% guards against extreme short windows where 16/9 of
+ * the column width would exceed the row's height; video-js then shrinks
+ * proportionally rather than overflowing.
  */
-.session-trim-player-row {
-    max-height: min(28.125vw, calc(100dvh - 12rem));
-}
-
-/* Trim: shell is flex-1 in the column so it grows to exactly fill it. */
-.session-trim-player-fill {
+.session-trim-player-shell {
     width: 100%;
+    aspect-ratio: 16 / 9;
+    max-height: 100%;
 }
-.session-trim-player-fill :deep(> div) {
+.session-trim-player-shell :deep(> div) {
     height: 100%;
 }
-.session-trim-player-fill :deep(.video-js.vjs-fluid) {
+.session-trim-player-shell :deep(.video-js.vjs-fluid) {
     padding-top: 0 !important;
     width: 100%;
     height: 100%;
 }
-.session-trim-player-fill :deep(.video-js .vjs-tech) {
+.session-trim-player-shell :deep(.video-js .vjs-tech) {
     object-fit: cover;
 }
 
