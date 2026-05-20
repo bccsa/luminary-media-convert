@@ -1751,74 +1751,99 @@ onUnmounted(() => {
                     </router-link>
                 </Teleport>
 
-                <!-- Expired -->
+                <!--
+                    Expired: card centered vertically + horizontally in the
+                    remaining viewport. Uses min-h-[70dvh] so it sits in the
+                    middle whether or not the parent gives this branch a fixed
+                    height (App.vue's main switches between full-height and
+                    constrained layouts depending on tab).
+                -->
                 <div
                     v-if="isExpired"
-                    class="rounded-2xl border border-slate-200/90 bg-white/90 p-8 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10"
+                    class="flex min-h-[70dvh] w-full items-center justify-center px-4 py-10"
                 >
-                    <div class="flex flex-col items-center gap-4 py-8">
-                        <svg
-                            class="h-10 w-10 text-slate-600"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            stroke-width="1.5"
-                        >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-                            />
-                        </svg>
-                        <p class="text-sm text-slate-700 dark:text-slate-300">
-                            Session expired
-                        </p>
-                        <p class="max-w-md text-center text-xs text-slate-500">
-                            The encoding session is no longer active and cannot
-                            be interacted with.
-                        </p>
-                        <div
-                            class="mt-2 grid w-full max-w-lg grid-cols-1 gap-3 sm:grid-cols-2"
-                        >
+                    <div
+                        class="w-full max-w-md rounded-2xl border border-slate-200/90 bg-white/90 p-8 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10"
+                    >
+                        <div class="flex flex-col items-center gap-4 text-center">
                             <div
-                                class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60"
+                                class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800/80"
                             >
-                                <p
-                                    class="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500"
+                                <svg
+                                    class="h-6 w-6 text-slate-600 dark:text-slate-300"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    stroke-width="1.5"
                                 >
-                                    Status
-                                </p>
-                                <p
-                                    class="text-sm text-slate-800 dark:text-slate-200"
-                                >
-                                    {{
-                                        statusConfig[session.status]?.label ??
-                                        session.status
-                                    }}
-                                </p>
+                                    <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
+                                    />
+                                </svg>
                             </div>
-                            <div
-                                class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60"
+                            <h2
+                                class="text-base font-semibold text-slate-800 dark:text-slate-100"
                             >
-                                <p
-                                    class="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500"
+                                Session expired
+                            </h2>
+                            <p class="text-xs text-slate-500 dark:text-slate-400">
+                                The encoding session is no longer active and
+                                cannot be interacted with.
+                            </p>
+                            <div
+                                class="mt-2 grid w-full grid-cols-2 gap-3 text-left"
+                            >
+                                <div
+                                    class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60"
                                 >
-                                    Created
-                                </p>
-                                <p
-                                    class="text-sm text-slate-800 dark:text-slate-200"
+                                    <p
+                                        class="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500"
+                                    >
+                                        Status
+                                    </p>
+                                    <p
+                                        class="text-sm text-slate-800 dark:text-slate-200"
+                                    >
+                                        {{
+                                            statusConfig[session.status]?.label ??
+                                            session.status
+                                        }}
+                                    </p>
+                                </div>
+                                <div
+                                    class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60"
                                 >
-                                    {{ formatDate(session.createdAt) }}
-                                </p>
+                                    <p
+                                        class="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500"
+                                    >
+                                        Created
+                                    </p>
+                                    <p
+                                        class="text-sm text-slate-800 dark:text-slate-200"
+                                    >
+                                        {{ formatDate(session.createdAt) }}
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="mt-2 flex w-full flex-col gap-2 sm:flex-row">
+                                <button
+                                    type="button"
+                                    class="flex-1 cursor-pointer rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                                    @click="router.push('/sessions')"
+                                >
+                                    Back to sessions
+                                </button>
+                                <button
+                                    type="button"
+                                    class="flex-1 cursor-pointer rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-sky-500 dark:bg-sky-700 dark:hover:bg-sky-600"
+                                    @click="router.push('/sessions/new')"
+                                >
+                                    New session
+                                </button>
                             </div>
                         </div>
-                        <button
-                            type="button"
-                            class="mt-2 rounded-xl border border-slate-300 bg-slate-100 px-6 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200 dark:border-transparent dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                            @click="router.push('/sessions/new')"
-                        >
-                            New session
-                        </button>
                     </div>
                 </div>
 
