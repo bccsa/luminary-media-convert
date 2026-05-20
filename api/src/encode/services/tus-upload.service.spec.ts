@@ -89,7 +89,8 @@ describe('TusUploadService', () => {
         process.env.WORK_DIR = '/tmp/tus-test-work';
 
         const previewService = { init: vi.fn().mockResolvedValue(undefined), destroy: vi.fn().mockResolvedValue(undefined) } as any;
-        service = new TusUploadService(sessionService, probeService, previewService, webhookService);
+        const waveformService = { getOrComputeCached: vi.fn().mockResolvedValue({ version: 1, sampleRate: 8000, numPeaks: 0, peaks: [] }) } as any;
+        service = new TusUploadService(sessionService, probeService, previewService, webhookService, waveformService);
         await service.onModuleInit();
     });
 
@@ -507,7 +508,7 @@ describe('TusUploadService', () => {
             vi.clearAllMocks();
 
             // Create a fresh service with fake timers active
-            const svc2 = new TusUploadService(sessionService, probeService, { init: vi.fn(), destroy: vi.fn() } as any, { send: vi.fn().mockResolvedValue(undefined) } as any);
+            const svc2 = new TusUploadService(sessionService, probeService, { init: vi.fn(), destroy: vi.fn() } as any, { send: vi.fn().mockResolvedValue(undefined) } as any, { getOrComputeCached: vi.fn().mockResolvedValue({ version: 1, sampleRate: 8000, numPeaks: 0, peaks: [] }) } as any);
             await svc2.onModuleInit();
             mockCleanUpExpiredUploads.mockResolvedValueOnce(3);
 
@@ -524,7 +525,7 @@ describe('TusUploadService', () => {
             vi.useFakeTimers();
             vi.clearAllMocks();
 
-            const svc2 = new TusUploadService(sessionService, probeService, { init: vi.fn(), destroy: vi.fn() } as any, { send: vi.fn().mockResolvedValue(undefined) } as any);
+            const svc2 = new TusUploadService(sessionService, probeService, { init: vi.fn(), destroy: vi.fn() } as any, { send: vi.fn().mockResolvedValue(undefined) } as any, { getOrComputeCached: vi.fn().mockResolvedValue({ version: 1, sampleRate: 8000, numPeaks: 0, peaks: [] }) } as any);
             await svc2.onModuleInit();
             mockCleanUpExpiredUploads.mockRejectedValueOnce(new Error('cleanup failed'));
 

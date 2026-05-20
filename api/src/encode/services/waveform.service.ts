@@ -1,11 +1,81 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { spawn } from 'child_process';
 import { existsSync, readdirSync } from 'fs';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
+
+export interface WaveformSidecar {
+    version: number;
+    sampleRate: number;
+    numPeaks: number;
+    peaks: number[];
+}
 
 @Injectable()
 export class WaveformService {
     private readonly logger = new Logger(WaveformService.name);
+    private readonly workDir =
+        process.env.WORK_DIR || join(process.cwd(), 'work');
+    /** In-flight computes keyed by sessionId — coalesces concurrent requests. */
+    private readonly inFlight = new Map<string, Promise<WaveformSidecar>>();
+
+    /**
+     * Return the cached sidecar for a session if available; otherwise compute
+     * it, write it to disk, and return it. Concurrent calls for the same
+     * sessionId share the in-flight ffmpeg pass via the inFlight map, so two
+     * tabs racing for the trim UI never spawn duplicate work.
+     *
+     * Cache path: `${WORK_DIR}/<sessionId>/waveform.json`. The full session
+     * directory is rm -rf'd on session delete, so no separate invalidation.
+     */
+    async getOrComputeCached(
+        sessionId: string,
+        opts: { inputPath: string; concatFilePath?: string; numPeaks?: number },
+    ): Promise<WaveformSidecar> {
+        const cachePath = this.cachePath(sessionId);
+
+        if (existsSync(cachePath)) {
+            try {
+                const body = await readFile(cachePath, 'utf-8');
+                return JSON.parse(body) as WaveformSidecar;
+            } catch (err) {
+                this.logger.warn(
+                    `Failed to read cached waveform for ${sessionId}: ${(err as Error).message}. Recomputing.`,
+                );
+            }
+        }
+
+        const existing = this.inFlight.get(sessionId);
+        if (existing) return existing;
+
+        const promise = (async () => {
+            const peaks = await this.generateWaveform(opts);
+            const sidecar: WaveformSidecar = {
+                version: 1,
+                sampleRate: 8000,
+                numPeaks: peaks.length,
+                peaks,
+            };
+            try {
+                await mkdir(dirname(cachePath), { recursive: true });
+                await writeFile(cachePath, JSON.stringify(sidecar));
+            } catch (err) {
+                this.logger.warn(
+                    `Failed to write waveform cache for ${sessionId}: ${(err as Error).message}`,
+                );
+            }
+            return sidecar;
+        })().finally(() => {
+            this.inFlight.delete(sessionId);
+        });
+
+        this.inFlight.set(sessionId, promise);
+        return promise;
+    }
+
+    cachePath(sessionId: string): string {
+        return join(this.workDir, sessionId, 'waveform.json');
+    }
 
     async generateWaveform(opts: {
         inputPath: string;

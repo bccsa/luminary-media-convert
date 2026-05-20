@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { existsSync } from 'fs';
-import { rm, writeFile } from 'fs/promises';
+import { copyFile, rm, writeFile } from 'fs/promises';
 import { join, posix } from 'path';
 import { SessionService, type Session } from './session.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
@@ -229,25 +229,40 @@ export class EncodeService {
                 try {
                     const concatFilePath = join(outputDir, 'concat.txt');
                     const hasConcatFile = existsSync(concatFilePath);
-                    const peaks = await this.waveformService.generateWaveform({
-                        inputPath: session.filePath!,
-                        concatFilePath: hasConcatFile
-                            ? concatFilePath
-                            : undefined,
-                    });
-                    const payload = {
-                        version: 1,
-                        sampleRate: 8000,
-                        numPeaks: peaks.length,
-                        peaks,
-                    };
-                    await writeFile(
-                        join(outputDir, 'waveform.json'),
-                        JSON.stringify(payload)
-                    );
-                    this.logger.log(
-                        `Generated waveform sidecar for session ${sessionId} (${peaks.length} peaks)`
-                    );
+                    const outputSidecarPath = join(outputDir, 'waveform.json');
+                    const cachePath =
+                        this.waveformService.cachePath(sessionId);
+
+                    if (!hasConcatFile && existsSync(cachePath)) {
+                        // Upload-time prime already produced peaks for this
+                        // exact source timeline. Reuse instead of running
+                        // ffmpeg a second time.
+                        await copyFile(cachePath, outputSidecarPath);
+                        this.logger.log(
+                            `Reused cached waveform sidecar for session ${sessionId}`
+                        );
+                    } else {
+                        const peaks =
+                            await this.waveformService.generateWaveform({
+                                inputPath: session.filePath!,
+                                concatFilePath: hasConcatFile
+                                    ? concatFilePath
+                                    : undefined,
+                            });
+                        const payload = {
+                            version: 1,
+                            sampleRate: 8000,
+                            numPeaks: peaks.length,
+                            peaks,
+                        };
+                        await writeFile(
+                            outputSidecarPath,
+                            JSON.stringify(payload)
+                        );
+                        this.logger.log(
+                            `Generated waveform sidecar for session ${sessionId} (${peaks.length} peaks)`
+                        );
+                    }
                 } catch (err) {
                     this.logger.warn(
                         `Waveform generation failed for session ${sessionId}: ${(err as Error).message}`

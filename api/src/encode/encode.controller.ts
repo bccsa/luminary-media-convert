@@ -536,10 +536,11 @@ export class EncodeController {
         }
 
         try {
-            const peaks = await this.waveformService.generateWaveform({
-                inputPath: filePath,
-            });
-            return { peaks, numPeaks: peaks.length };
+            const sidecar = await this.waveformService.getOrComputeCached(
+                sessionId,
+                { inputPath: filePath },
+            );
+            return { peaks: sidecar.peaks, numPeaks: sidecar.numPeaks };
         } catch (err) {
             this.logger.error(
                 `Failed to generate waveform for session ${sessionId}: ${(err as Error).message}`

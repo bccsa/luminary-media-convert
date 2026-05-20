@@ -13,6 +13,7 @@ import { SessionService } from './session.service.js';
 import { ProbeService } from './probe.service.js';
 import { PreviewService } from './preview.service.js';
 import { WebhookService } from './webhook.service.js';
+import { WaveformService } from './waveform.service.js';
 import { hasAllowedExtension } from './media-extensions.js';
 
 const DEFAULT_MAX_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
@@ -31,6 +32,7 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
         private readonly probeService: ProbeService,
         private readonly previewService: PreviewService,
         private readonly webhookService: WebhookService,
+        private readonly waveformService: WaveformService,
     ) {
         this.workDir = process.env.WORK_DIR || join(process.cwd(), 'work');
         this.tusDir = join(this.workDir, '.tus-uploads');
@@ -239,6 +241,19 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
 
         this.sessionService.updateStatus(sessionId, 'uploaded');
         this.sendStatusWebhook(sessionId, 'uploaded');
+
+        // Prime the waveform cache in the background — by the time the user
+        // opens the trim UI, the JSON is already on disk and the HTTP GET
+        // serves from cache. Skipped for files with no audio tracks.
+        if (probeResult.audioTracks.length > 0) {
+            void this.waveformService
+                .getOrComputeCached(sessionId, { inputPath: destPath })
+                .catch((err) => {
+                    this.logger.warn(
+                        `Background waveform prime failed for ${sessionId}: ${(err as Error).message}`,
+                    );
+                });
+        }
 
         this.logger.log(
             `Ingest complete for session ${sessionId}: ` +
