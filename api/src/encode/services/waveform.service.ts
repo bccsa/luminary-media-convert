@@ -7,55 +7,61 @@ import { dirname, join } from 'path';
 export class WaveformService {
     private readonly logger = new Logger(WaveformService.name);
 
-    async generateWaveform(
-        filePath: string,
-        numPeaks: number = 1000
-    ): Promise<number[]> {
-        let resolvedPath = filePath;
-        this.logger.log(`generateWaveform called with filePath: ${filePath}`);
+    async generateWaveform(opts: {
+        inputPath: string;
+        concatFilePath?: string;
+        numPeaks?: number;
+    }): Promise<number[]> {
+        const numPeaks = opts.numPeaks ?? 1000;
+        let resolvedInput = opts.concatFilePath ?? opts.inputPath;
+        this.logger.log(`generateWaveform called with input: ${resolvedInput}`);
 
-        // If filePath doesn't exist, try to find the uploaded file in the directory
-        if (!existsSync(resolvedPath)) {
-            const dir = dirname(resolvedPath);
-            this.logger.log(`File not found at ${resolvedPath}, checking directory: ${dir}`);
+        // For a direct input (no concat file), tolerate the upload-side rename
+        // by falling back to whatever non-hidden file sits in the same dir.
+        if (!opts.concatFilePath && !existsSync(resolvedInput)) {
+            const dir = dirname(resolvedInput);
+            this.logger.log(
+                `File not found at ${resolvedInput}, checking directory: ${dir}`
+            );
 
             if (existsSync(dir)) {
                 try {
                     const allFiles = readdirSync(dir);
-                    this.logger.log(`Files in directory: ${allFiles.join(', ')}`);
-
                     const files = allFiles.filter(
-                        (f) => !f.startsWith('.') && !f.endsWith('.info'),
+                        (f) => !f.startsWith('.') && !f.endsWith('.info')
                     );
-                    this.logger.log(`Filtered files: ${files.join(', ')}`);
-
                     if (files.length > 0) {
-                        resolvedPath = join(dir, files[0]);
+                        resolvedInput = join(dir, files[0]);
                         this.logger.log(
-                            `Using first file in directory: ${resolvedPath}`,
+                            `Using first file in directory: ${resolvedInput}`
                         );
                     } else {
                         this.logger.warn(`No usable files found in ${dir}`);
                     }
                 } catch (err) {
-                    this.logger.error(`Failed to list directory ${dir}: ${err}`);
+                    this.logger.error(
+                        `Failed to list directory ${dir}: ${err}`
+                    );
                 }
             } else {
                 this.logger.warn(`Directory does not exist: ${dir}`);
             }
         }
 
-        if (!existsSync(resolvedPath)) {
-            throw new Error(`Source file does not exist: ${resolvedPath}`);
+        if (!existsSync(resolvedInput)) {
+            throw new Error(`Source file does not exist: ${resolvedInput}`);
         }
+
+        const inputArgs = opts.concatFilePath
+            ? ['-f', 'concat', '-safe', '0', '-i', opts.concatFilePath]
+            : ['-i', resolvedInput];
 
         return new Promise((resolve, reject) => {
             const chunks: Buffer[] = [];
             let errOutput = '';
 
             const ffmpeg = spawn('ffmpeg', [
-                '-i',
-                filePath,
+                ...inputArgs,
                 '-af',
                 'aresample=8000,aformat=sample_fmts=s16:channel_layouts=mono',
                 '-f',

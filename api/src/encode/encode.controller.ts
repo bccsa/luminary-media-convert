@@ -37,7 +37,10 @@ import { AuthResolverGuard } from '../auth/auth-resolver.guard.js';
 import { AuthTypes } from '../auth/auth-types.decorator.js';
 import { AuthorizationWebhookService } from '../auth/authorization-webhook.service.js';
 import { SessionService } from './services/session.service.js';
-import { SessionEventsService, type SessionEvent } from './services/session-events.service.js';
+import {
+    SessionEventsService,
+    type SessionEvent,
+} from './services/session-events.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
 import { PreviewService } from './services/preview.service.js';
@@ -75,7 +78,7 @@ export class EncodeController {
         private readonly authorizationWebhookService: AuthorizationWebhookService,
         private readonly previewService: PreviewService,
         private readonly urlFetchService: UrlFetchService,
-        private readonly waveformService: WaveformService,
+        private readonly waveformService: WaveformService
     ) {}
 
     @Post()
@@ -102,20 +105,23 @@ export class EncodeController {
     })
     async createSession(
         @Body() dto: CreateSessionDto,
-        @Req() req: Request,
+        @Req() req: Request
     ): Promise<SessionResponseDto> {
         const apiKey = (req as any).apiKey;
 
         await this.authorizationWebhookService.checkAuthorization(
             'create_session',
-            { apiKey, dto },
+            { apiKey, dto }
         );
 
         const session = this.sessionService.create(dto);
 
         // Bind webhook from API key if no per-session webhook is configured
         if (!dto.webhook && apiKey?.webhookUrl) {
-            session.config.webhook = { url: apiKey.webhookUrl, sessionToken: '' };
+            session.config.webhook = {
+                url: apiKey.webhookUrl,
+                sessionToken: '',
+            };
         }
 
         const protocol = req.protocol;
@@ -164,7 +170,7 @@ export class EncodeController {
     @ApiResponse({ status: 404, description: 'Session not found.' })
     async startUrlUpload(
         @Param('sessionId') sessionId: string,
-        @Body() dto: UrlUploadDto,
+        @Body() dto: UrlUploadDto
     ): Promise<{ sessionId: string; status: 'uploading' }> {
         const session = this.sessionService.get(sessionId);
         if (!session) {
@@ -173,7 +179,7 @@ export class EncodeController {
 
         if (session.status !== 'created' && session.status !== 'uploading') {
             throw new BadRequestException(
-                `Session is not accepting uploads (current status: ${session.status})`,
+                `Session is not accepting uploads (current status: ${session.status})`
             );
         }
 
@@ -182,7 +188,7 @@ export class EncodeController {
         void this.urlFetchService.fetchToSession(
             sessionId,
             dto.url,
-            dto.filename,
+            dto.filename
         );
 
         return { sessionId, status: 'uploading' };
@@ -220,13 +226,13 @@ export class EncodeController {
     async startEncode(
         @Param('sessionId') sessionId: string,
         @Body() dto: EncodeConfigDto,
-        @Req() req: Request,
+        @Req() req: Request
     ): Promise<EncodeStartResponseDto> {
         const apiKey = (req as any).apiKey;
 
         await this.authorizationWebhookService.checkAuthorization(
             'start_encode',
-            { apiKey, sessionId, dto },
+            { apiKey, sessionId, dto }
         );
         const session = this.sessionService.get(sessionId);
         if (!session) {
@@ -235,38 +241,38 @@ export class EncodeController {
 
         if (session.status !== 'uploaded') {
             throw new BadRequestException(
-                `Session must be in "uploaded" status to start encoding (current: "${session.status}")`,
+                `Session must be in "uploaded" status to start encoding (current: "${session.status}")`
             );
         }
 
         if (dto.type === 'video') {
             if (!dto.videoRenditions?.length) {
                 throw new BadRequestException(
-                    'Video type requires at least one videoRendition',
+                    'Video type requires at least one videoRendition'
                 );
             }
             if (!dto.audioGroups?.length) {
                 throw new BadRequestException(
-                    'Video type requires at least one audioGroup',
+                    'Video type requires at least one audioGroup'
                 );
             }
             const groupIds = new Set(dto.audioGroups.map((g) => g.id));
             for (const vr of dto.videoRenditions) {
                 if (!groupIds.has(vr.audioGroupId)) {
                     throw new BadRequestException(
-                        `Video rendition references unknown audioGroupId "${vr.audioGroupId}"`,
+                        `Video rendition references unknown audioGroupId "${vr.audioGroupId}"`
                     );
                 }
                 if (vr.copyStream && vr.sourceTrackIndex == null) {
                     throw new BadRequestException(
-                        'copyStream renditions require a sourceTrackIndex',
+                        'copyStream renditions require a sourceTrackIndex'
                     );
                 }
             }
         } else {
             if (!dto.audioGroups?.length) {
                 throw new BadRequestException(
-                    'Audio type requires at least one audioGroup',
+                    'Audio type requires at least one audioGroup'
                 );
             }
         }
@@ -280,7 +286,7 @@ export class EncodeController {
         const position = this.queueService.enqueue(sessionId);
 
         this.logger.log(
-            `Encoding started for session ${sessionId}, queued at position ${position}`,
+            `Encoding started for session ${sessionId}, queued at position ${position}`
         );
 
         return {
@@ -301,7 +307,7 @@ export class EncodeController {
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     streamEvents(
         @Param('sessionId') sessionId: string,
-        @Query('token') token: string,
+        @Query('token') token: string
     ): Observable<MessageEvent> {
         if (!token) {
             throw new UnauthorizedException('Missing token query parameter');
@@ -315,7 +321,7 @@ export class EncodeController {
         return this.sessionEventsService.forSession(sessionId).pipe(
             map((event) => ({
                 data: { ...event, encoder: accelMode },
-            })),
+            }))
         );
     }
 
@@ -347,7 +353,7 @@ export class EncodeController {
     @ApiResponse({ status: 404, description: 'Session not found.' })
     getStatus(
         @Param('sessionId') sessionId: string,
-        @Req() req: Request,
+        @Req() req: Request
     ): SessionStatusDto {
         const session = this.sessionService.get(sessionId);
         if (!session) {
@@ -360,7 +366,11 @@ export class EncodeController {
             encoder: this.ffmpegService.getAccelMode(),
         };
 
-        if (session.probeResult && session.status !== 'created' && session.status !== 'uploading') {
+        if (
+            session.probeResult &&
+            session.status !== 'created' &&
+            session.status !== 'uploading'
+        ) {
             result.probeResult = session.probeResult as any;
         }
 
@@ -376,7 +386,11 @@ export class EncodeController {
             }
         }
 
-        if (session.status === 'encoding' || session.status === 'encrypting' || session.status === 'uploading_to_s3') {
+        if (
+            session.status === 'encoding' ||
+            session.status === 'encrypting' ||
+            session.status === 'uploading_to_s3'
+        ) {
             result.progress = session.progress;
             result.pipelineProgress = session.pipelineProgress;
         }
@@ -433,10 +447,16 @@ export class EncodeController {
             throw new NotFoundException(`Session ${sessionId} not found`);
         }
 
-        const deletableStatuses = ['created', 'uploading', 'uploaded', 'queued', 'encoding'];
+        const deletableStatuses = [
+            'created',
+            'uploading',
+            'uploaded',
+            'queued',
+            'encoding',
+        ];
         if (!deletableStatuses.includes(session.status)) {
             throw new BadRequestException(
-                `Cannot delete session in "${session.status}" status`,
+                `Cannot delete session in "${session.status}" status`
             );
         }
 
@@ -452,14 +472,13 @@ export class EncodeController {
             this.ffmpegService.killActiveProcess();
         }
 
-        const workDir =
-            process.env.WORK_DIR || join(process.cwd(), 'work');
+        const workDir = process.env.WORK_DIR || join(process.cwd(), 'work');
         const sessionDir = join(workDir, sessionId);
         try {
             await rm(sessionDir, { recursive: true, force: true });
         } catch (err) {
             this.logger.warn(
-                `Failed to clean up directory for session ${sessionId}: ${(err as Error).message}`,
+                `Failed to clean up directory for session ${sessionId}: ${(err as Error).message}`
             );
         }
 
@@ -486,7 +505,11 @@ export class EncodeController {
         schema: {
             type: 'object',
             properties: {
-                peaks: { type: 'array', items: { type: 'number' }, description: 'Normalized 0–1 amplitude peaks' },
+                peaks: {
+                    type: 'array',
+                    items: { type: 'number' },
+                    description: 'Normalized 0–1 amplitude peaks',
+                },
                 numPeaks: { type: 'number', description: 'Number of peaks' },
             },
         },
@@ -498,7 +521,7 @@ export class EncodeController {
     @ApiResponse({ status: 404, description: 'Session not found.' })
     async getWaveform(
         @Param('sessionId') sessionId: string,
-        @Query('token') token: string,
+        @Query('token') token: string
     ): Promise<{ peaks: number[]; numPeaks: number }> {
         this.validatePreviewToken(sessionId, token);
 
@@ -513,10 +536,14 @@ export class EncodeController {
         }
 
         try {
-            const peaks = await this.waveformService.generateWaveform(filePath);
+            const peaks = await this.waveformService.generateWaveform({
+                inputPath: filePath,
+            });
             return { peaks, numPeaks: peaks.length };
         } catch (err) {
-            this.logger.error(`Failed to generate waveform for session ${sessionId}: ${(err as Error).message}`);
+            this.logger.error(
+                `Failed to generate waveform for session ${sessionId}: ${(err as Error).message}`
+            );
             throw new BadRequestException('Failed to generate waveform');
         }
     }
@@ -529,7 +556,7 @@ export class EncodeController {
     @ApiOperation({ summary: 'Get available preview audio tracks' })
     getPreviewAudioTracks(
         @Param('sessionId') sessionId: string,
-        @Query('token') token: string,
+        @Query('token') token: string
     ): any {
         this.validatePreviewToken(sessionId, token);
         const tracks = this.previewService.getAudioTracks(sessionId);
@@ -543,15 +570,24 @@ export class EncodeController {
         @Param('sessionId') sessionId: string,
         @Query('token') token: string,
         @Query('audio') audio: string | undefined,
-        @Res() res: Response,
+        @Res() res: Response
     ): void {
         this.validatePreviewToken(sessionId, token);
 
-        const audioTrackIndex = audio !== undefined ? parseInt(audio, 10) : undefined;
-        const playlist = this.previewService.getPlaylist(sessionId, token, undefined, audioTrackIndex);
+        const audioTrackIndex =
+            audio !== undefined ? parseInt(audio, 10) : undefined;
+        const playlist = this.previewService.getPlaylist(
+            sessionId,
+            token,
+            undefined,
+            audioTrackIndex
+        );
         if (!playlist) throw new NotFoundException('Preview not ready');
 
-        res.set({ 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' });
+        res.set({
+            'Content-Type': 'application/vnd.apple.mpegurl',
+            'Cache-Control': 'no-cache',
+        });
         res.send(playlist);
     }
 
@@ -562,16 +598,25 @@ export class EncodeController {
         @Param('rendition') rendition: string,
         @Query('token') token: string,
         @Query('audio') audio: string | undefined,
-        @Res() res: Response,
+        @Res() res: Response
     ): void {
         this.validatePreviewToken(sessionId, token);
 
         const renditionIndex = parseInt(rendition, 10);
-        const audioTrackIndex = audio !== undefined ? parseInt(audio, 10) : undefined;
-        const playlist = this.previewService.getPlaylist(sessionId, token, renditionIndex, audioTrackIndex);
+        const audioTrackIndex =
+            audio !== undefined ? parseInt(audio, 10) : undefined;
+        const playlist = this.previewService.getPlaylist(
+            sessionId,
+            token,
+            renditionIndex,
+            audioTrackIndex
+        );
         if (!playlist) throw new NotFoundException('Rendition not available');
 
-        res.set({ 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' });
+        res.set({
+            'Content-Type': 'application/vnd.apple.mpegurl',
+            'Cache-Control': 'no-cache',
+        });
         res.send(playlist);
     }
 
@@ -583,7 +628,7 @@ export class EncodeController {
         @Param('filename') filename: string,
         @Query('token') token: string,
         @Query('audio') audio: string | undefined,
-        @Res() res: Response,
+        @Res() res: Response
     ): Promise<void> {
         this.validatePreviewToken(sessionId, token);
 
@@ -592,8 +637,14 @@ export class EncodeController {
         if (!segMatch) throw new NotFoundException('Invalid segment filename');
 
         const segmentIndex = parseInt(segMatch[1], 10);
-        const audioTrackIndex = audio !== undefined ? parseInt(audio, 10) : undefined;
-        const result = await this.previewService.getSegmentStream(sessionId, renditionIndex, segmentIndex, audioTrackIndex);
+        const audioTrackIndex =
+            audio !== undefined ? parseInt(audio, 10) : undefined;
+        const result = await this.previewService.getSegmentStream(
+            sessionId,
+            renditionIndex,
+            segmentIndex,
+            audioTrackIndex
+        );
 
         if (!result) throw new NotFoundException('Segment not available');
 
