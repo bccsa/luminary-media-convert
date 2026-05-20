@@ -1865,9 +1865,43 @@ onUnmounted(() => {
                                     Session title + status + relative created label,
                                     shown directly under the player so the page
                                     header stays minimal (just the back arrow).
+                                    Clicking the title swaps in an inline rename
+                                    field (Enter to save, Esc to cancel).
                                 -->
                                 <template #below-player>
-                                    <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                                    <div
+                                        v-if="editingName"
+                                        class="flex min-w-0 flex-wrap items-center gap-2"
+                                    >
+                                        <input
+                                            v-model="nameInput"
+                                            type="text"
+                                            class="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-base font-semibold text-slate-800 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                                            placeholder="Session name"
+                                            autofocus
+                                            @keyup.enter="saveName"
+                                            @keyup.escape="cancelEditName"
+                                        />
+                                        <button
+                                            type="button"
+                                            class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+                                            :disabled="savingName"
+                                            @click="saveName"
+                                        >
+                                            {{ savingName ? '…' : 'Save' }}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+                                            @click="cancelEditName"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                    <div
+                                        v-else
+                                        class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"
+                                    >
                                         <button
                                             type="button"
                                             class="min-w-0 truncate text-base font-semibold text-slate-800 transition-colors hover:text-slate-600 dark:text-slate-100 dark:hover:text-slate-300 cursor-pointer"
