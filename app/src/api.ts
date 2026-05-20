@@ -649,6 +649,32 @@ export async function getSessionChapters(
 }
 
 /**
+ * Fetch the waveform sidecar (waveform.json) for a completed session.
+ * Returns null when no sidecar exists — e.g. imported sessions or sessions
+ * encoded before the sidecar was wired in.
+ */
+export async function getSessionWaveform(
+    accessToken: string,
+    sessionId: string,
+): Promise<{
+    version: number;
+    sampleRate: number;
+    numPeaks: number;
+    peaks: number[];
+} | null> {
+    const res = await fetch(
+        `${SAAS_URL}/saas/sessions/${sessionId}/waveform`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || `Get waveform failed (${res.status})`);
+    }
+    return res.json();
+}
+
+/**
  * Persist the chapter VTT to S3. Server validates BCP-47 lang + WEBVTT body.
  */
 export async function putSessionChapters(

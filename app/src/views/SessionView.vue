@@ -47,6 +47,7 @@ import {
     renameSessionPrefix,
     listS3Configs,
     checkPrefix,
+    getSessionWaveform,
 } from '../api';
 import { useSessionPoller } from '../composables/useSessionPoller';
 import { useActiveUploads } from '../composables/useActiveUploads';
@@ -1091,10 +1092,10 @@ async function fetchSession() {
         sessionToken.value = detail.sessionToken ?? null;
         encodingApiUrl.value = detail.encodingApiUrl ?? null;
 
-        // Fetch waveform early if session is active (non-critical)
-        if (sessionToken.value && encodingApiUrl.value) {
-            fetchWaveform();
-        }
+        // Kick off waveform fetch (non-critical):
+        // - completed sessions read the persisted sidecar via the SaaS proxy
+        // - active pre-encode sessions compute it on-demand from the source
+        fetchWaveform();
 
         // Determine encoding type from session data
         if (detail.encodingType) {
@@ -1197,6 +1198,21 @@ async function pollForProbe(
 }
 
 async function fetchWaveform() {
+    // Post-encode: fetch the persisted waveform.json sidecar from S3 via the
+    // SaaS proxy. Imported sessions or sessions encoded before the sidecar
+    // landed return 404 — the proxy returns null and we silently skip render.
+    if (isCompleted.value) {
+        try {
+            const token = await getAccessTokenSilently();
+            const data = await getSessionWaveform(token, sessionId.value);
+            waveformPeaks.value = data?.peaks ?? null;
+        } catch {
+            // Non-critical: waveform is a UX enhancement, don't error the whole view
+        }
+        return;
+    }
+
+    // Pre-encode: compute on-demand from the source file still on the API's disk.
     if (!encodingApiUrl.value || !sessionToken.value) return;
     try {
         const response = await fetch(
@@ -1212,6 +1228,15 @@ async function fetchWaveform() {
         // Non-critical: waveform is a UX enhancement, don't error the whole view
     }
 }
+
+// Re-fetch the waveform when a session transitions to completed: the encode
+// pipeline writes waveform.json to S3 at the end, so the persisted sidecar
+// becomes available exactly when we cross this edge.
+watch(isCompleted, (now, prev) => {
+    if (now && !prev) {
+        fetchWaveform();
+    }
+});
 
 // ---------------------------------------------------------------------------
 // Encode submission
