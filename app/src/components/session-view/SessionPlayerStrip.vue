@@ -84,6 +84,17 @@ defineExpose({
                         @audio-tracks="emit('audioTracks', $event)"
                     />
                 </div>
+                <!--
+                    Meta strip sits in the player column under the shell, so on
+                    trim it occupies the page-background space below the 16/9
+                    player instead of leaving it blank.
+                -->
+                <div
+                    v-if="$slots['below-player']"
+                    class="shrink-0 px-4 pt-3"
+                >
+                    <slot name="below-player" />
+                </div>
             </div>
 
             <!-- Aside: bleeds flush to the right edge; thin left border is the separator -->

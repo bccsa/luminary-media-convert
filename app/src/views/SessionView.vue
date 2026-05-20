@@ -1733,36 +1733,22 @@ onUnmounted(() => {
             </div>
 
             <template v-else-if="session">
-                <!-- Session header teleported into app top bar: back arrow + name + status -->
+                <!--
+                    Header teleport keeps the back-arrow only — title, created
+                    label, and status badge now sit under the player (rendered
+                    via the SessionPlayerStrip #below-player slot below).
+                -->
                 <Teleport to="#app-session-meta-teleport">
-                    <div class="flex min-w-0 items-center gap-1">
-                        <router-link
-                            to="/sessions"
-                            class="-ml-1 inline-flex shrink-0 items-center justify-center rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                            title="Back to sessions"
-                        >
-                            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
-                            </svg>
-                            <span class="sr-only">Back to sessions</span>
-                        </router-link>
-                        <span class="text-slate-300 dark:text-slate-600 select-none" aria-hidden="true">/</span>
-                        <button
-                            type="button"
-                            class="min-w-0 truncate text-sm font-semibold text-slate-800 dark:text-slate-100 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer"
-                            :title="sessionName ? 'Click to rename' : 'Click to add a name'"
-                            @click="startEditName"
-                        >
-                            {{ sessionName || 'Untitled session' }}
-                        </button>
-                        <StatusBadge
-                            v-if="currentStatus"
-                            class="shrink-0"
-                            :label="statusConfig[currentStatus]?.label ?? currentStatus"
-                            :color="statusConfig[currentStatus]?.color"
-                            :border-color="statusConfig[currentStatus]?.borderColor"
-                        />
-                    </div>
+                    <router-link
+                        to="/sessions"
+                        class="-ml-1 inline-flex shrink-0 items-center justify-center rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                        title="Back to sessions"
+                    >
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+                        </svg>
+                        <span class="sr-only">Back to sessions</span>
+                    </router-link>
                 </Teleport>
 
                 <!-- Expired -->
@@ -1875,6 +1861,37 @@ onUnmounted(() => {
                                 @audio-tracks="onNativeAudioTracks"
                                 @angle-change="switchToAngle"
                             >
+                                <!--
+                                    Session title + status + relative created label,
+                                    shown directly under the player so the page
+                                    header stays minimal (just the back arrow).
+                                -->
+                                <template #below-player>
+                                    <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                                        <button
+                                            type="button"
+                                            class="min-w-0 truncate text-base font-semibold text-slate-800 transition-colors hover:text-slate-600 dark:text-slate-100 dark:hover:text-slate-300 cursor-pointer"
+                                            :title="sessionName ? 'Click to rename' : 'Click to add a name'"
+                                            @click="startEditName"
+                                        >
+                                            {{ sessionName || 'Untitled session' }}
+                                        </button>
+                                        <StatusBadge
+                                            v-if="currentStatus"
+                                            class="shrink-0"
+                                            :label="statusConfig[currentStatus]?.label ?? currentStatus"
+                                            :color="statusConfig[currentStatus]?.color"
+                                            :border-color="statusConfig[currentStatus]?.borderColor"
+                                        />
+                                        <span
+                                            v-if="session?.createdAt"
+                                            class="shrink-0 text-xs text-slate-500 dark:text-slate-400"
+                                        >
+                                            {{ relativeCreatedLabel(session.createdAt) }}
+                                        </span>
+                                    </div>
+                                </template>
+
                                 <template #aside>
                                     <!-- Tab switcher: pre-encode (Encode settings / Chapters) -->
                                     <div
