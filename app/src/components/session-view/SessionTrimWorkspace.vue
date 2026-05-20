@@ -82,7 +82,9 @@ const trimToolbarHasVisibleContent = computed(() => {
     if (props.section === 'timeline') return false;
     if (props.showChaptersSidePanel && props.chaptersSaveError) return true;
     if (props.showChaptersSidePanel && !props.showTrimSegmentEditor) return true;
-    return !(props.showTrimSegmentEditor || props.showChaptersSidePanel);
+    if (props.canEditTrimTimeline && !props.showTrimSegmentEditor) return true;
+    if (props.canEditChaptersPlayback && !props.showTrimSegmentEditor && !props.showChaptersSidePanel) return true;
+    return false;
 });
 </script>
 
@@ -129,12 +131,6 @@ const trimToolbarHasVisibleContent = computed(() => {
             <template v-else-if="canEditChaptersPlayback">
                 Chapter titles are edited in the column beside the player (trim cuts use the timeline below when available).
             </template>
-            <template v-else>
-                <strong class="font-semibold text-slate-600 dark:text-slate-300">Trim segments</strong>
-                below choose what gets encoded (until you start the job).
-                <strong class="font-semibold text-slate-600 dark:text-slate-300">Chapters</strong>
-                beside the player are titles only — available once playback loads.
-            </template>
         </p>
     </div>
 
@@ -148,6 +144,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             ref="trimSegmentEditorRef"
             v-model="editorSegments"
             mode="trim"
+            :show-labels="true"
             :title="segmentEditorTimelineTitle"
             :duration="probeDuration"
             :get-current-time="getCurrentTime"

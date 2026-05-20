@@ -77,6 +77,22 @@
     gap: 0.75rem;
 }
 
+.ecf-mode-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.ecf-mode-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #71717a;
+    white-space: nowrap;
+    user-select: none;
+}
+
 .ecf-mode-seg {
     display: inline-flex;
     border-radius: 0.625rem;
