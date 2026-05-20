@@ -229,7 +229,7 @@ watch(isAuthenticated, async (authenticated) => {
             <main
                 class="relative mx-auto w-full transition-[padding,max-width] duration-200"
                 :class="[
-                    headerLayout === 'session-trim'
+                    headerLayout === 'session-trim' || (isSessionDetail && headerLayout !== 'session')
                         ? 'py-0 max-w-none px-0 h-[calc(100dvh-3.5rem)] overflow-hidden'
                         : isSessionDetail
                           ? 'py-0 max-w-7xl px-4 sm:px-6'
