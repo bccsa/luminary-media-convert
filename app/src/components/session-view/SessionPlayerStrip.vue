@@ -55,7 +55,7 @@ defineExpose({
         >
             <!-- Player column: flex-col so shell can be flex-1 and fill exactly, no misalignment -->
             <div
-                class="flex min-h-0 min-w-0 flex-col bg-black flex-3"
+                class="flex min-h-0 min-w-0 flex-col bg-black flex-1"
                 :class="!showAside && activeTab === 'trim' ? 'max-w-[min(100%,60vw)]' : ''"
             >
                 <div
@@ -85,7 +85,7 @@ defineExpose({
             <!-- Aside: bleeds flush to the right edge; thin left border is the separator -->
             <aside
                 v-if="showAside"
-                class="flex min-h-0 flex-col overflow-hidden flex-2"
+                class="flex min-h-0 flex-col overflow-hidden flex-1"
                 :class="activeTab === 'trim'
                     ? 'gap-2 border-l border-slate-200 px-4 pt-3 pb-2 dark:border-slate-700/60 trim-aside'
                     : 'gap-3'"
@@ -117,11 +117,11 @@ defineExpose({
 <style scoped>
 /*
  * Trim: cap the player+aside row to exactly the 16/9 height of the player column.
- * Player column is flex-3 of flex-5 total ≈ 60vw, so 16/9 height = 60vw × 9/16 = 33.75vw.
+ * Player column is flex-1 of flex-2 total ≈ 50vw, so 16/9 height = 50vw × 9/16 = 28.125vw.
  * Also guarded by viewport height minus header and a rough timeline estimate.
  */
 .session-trim-player-row {
-    max-height: min(33.75vw, calc(100dvh - 12rem));
+    max-height: min(28.125vw, calc(100dvh - 12rem));
 }
 
 /* Trim: shell is flex-1 in the column so it grows to exactly fill it. */
