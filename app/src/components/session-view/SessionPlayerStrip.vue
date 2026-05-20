@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watchEffect } from 'vue';
+import { computed, ref } from 'vue';
 import HlsPlayer from '../HlsPlayer.vue';
 import type { AudioTrackInfo, QualityLevelInfo } from '../HlsPlayer.vue';
 import FormSelect from '../FormSelect.vue';
@@ -26,34 +26,6 @@ const angleSelectOptions = computed(() =>
     props.uniqueAnglePlaylists.map((ap, i) => ({ value: i, label: ap.name })),
 );
 
-/** Match aside column height to the player shell so content never extends below the video. */
-const playerShellRef = ref<HTMLElement | null>(null);
-const asideMaxHeightPx = ref<number | null>(null);
-
-watchEffect(
-    (onCleanup) => {
-        const el = playerShellRef.value;
-        if (!el || !props.showAside) {
-            asideMaxHeightPx.value = null;
-            return;
-        }
-        const ro = new ResizeObserver(() => {
-            const h = el.getBoundingClientRect().height;
-            asideMaxHeightPx.value = h > 0 ? Math.round(h * 100) / 100 : null;
-        });
-        ro.observe(el);
-        const h = el.getBoundingClientRect().height;
-        asideMaxHeightPx.value = h > 0 ? Math.round(h * 100) / 100 : null;
-        onCleanup(() => ro.disconnect());
-    },
-    { flush: 'post' },
-);
-
-const asideStyle = computed(() => {
-    if (!props.showAside || asideMaxHeightPx.value == null) return undefined;
-    return { maxHeight: `${asideMaxHeightPx.value}px` };
-});
-
 const emit = defineEmits<{
     qualityLevels: [levels: QualityLevelInfo[]];
     playingChange: [playing: boolean];
@@ -62,6 +34,7 @@ const emit = defineEmits<{
     angleChange: [index: number];
 }>();
 
+const playerShellRef = ref<HTMLElement | null>(null);
 const hlsPlayerRef = ref<InstanceType<typeof HlsPlayer> | null>(null);
 
 defineExpose({
@@ -70,33 +43,24 @@ defineExpose({
 </script>
 
 <template>
-    <div>
+    <div class="flex h-full flex-col">
+        <!-- Player + aside: fill all available height in the trim layout -->
         <div
             v-if="activePlaybackUrl"
-            class="flex flex-col"
-            :class="[
-                activeTab === 'trim' ? 'gap-3' : 'gap-4',
-                showAside ? (activeTab === 'trim' ? 'lg:flex-row lg:items-stretch lg:gap-3' : 'lg:flex-row lg:items-start lg:gap-4') : '',
-            ]"
+            class="flex min-h-0 flex-1"
+            :class="showAside ? 'flex-row' : (activeTab === 'trim' ? 'flex-col items-center justify-center' : 'flex-col gap-4')"
         >
+            <!-- Player column: black bg so letterbox space is invisible; centers player vertically -->
             <div
-                :class="[
-                    showAside
-                        ? 'min-w-0 flex-3'
-                        : 'w-full',
-                    !showAside && activeTab === 'trim' ? 'flex justify-center' : '',
-                ]"
+                class="flex min-h-0 min-w-0 flex-col items-center justify-center bg-black flex-3"
+                :class="!showAside && activeTab === 'trim' ? 'max-w-[min(100%,60vw)]' : ''"
             >
                 <div
                     ref="playerShellRef"
-                    :class="[
-                        'overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5',
-                        'w-full',
-                        activeTab === 'trim' && !isAudioOnly ? 'session-trim-player-cap' : '',
-                        !showAside && activeTab === 'trim'
-                            ? 'lg:max-w-[min(100%,60vw)]'
-                            : '',
-                    ]"
+                    class="bg-black"
+                    :class="activeTab === 'trim'
+                        ? 'session-trim-player-fill'
+                        : 'w-full overflow-hidden rounded-xl shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'"
                 >
                     <HlsPlayer
                         ref="hlsPlayerRef"
@@ -115,19 +79,22 @@ defineExpose({
                 </div>
             </div>
 
+            <!-- Aside: bleeds flush to the right edge; thin left border is the separator -->
             <aside
                 v-if="showAside"
-                class="flex min-h-0 min-w-0 flex-3 flex-col"
-                :class="activeTab === 'trim' ? 'gap-2 overflow-hidden trim-aside' : 'gap-3'"
-                :style="asideStyle"
+                class="flex min-h-0 flex-col overflow-hidden flex-2"
+                :class="activeTab === 'trim'
+                    ? 'gap-2 border-l border-slate-200 px-4 pt-3 pb-2 dark:border-slate-700/60 trim-aside'
+                    : 'gap-3'"
             >
                 <slot name="aside" />
             </aside>
         </div>
 
+        <!-- Angle switcher below player (completed multi-angle) -->
         <div
             v-if="isCompleted && showAngleSwitcher && !hideAngleSwitcher"
-            class="mt-4 flex flex-wrap items-center gap-2"
+            class="shrink-0 flex flex-wrap items-center gap-2 px-4 py-2"
         >
             <label class="playback-slot-label shrink-0">Angle:</label>
             <FormSelect
@@ -145,25 +112,29 @@ defineExpose({
 </template>
 
 <style scoped>
-/* Trim tab: 16/9 matches typical preview/HLS; flex shares favor a wider/bigger player beside the aside. */
-.session-trim-player-cap {
+/*
+ * Trim: shell is 16/9, capped to the column height. CSS aspect-ratio reduces the width
+ * automatically when max-height is hit, so the video never letterboxes — the column's
+ * black background fills any remaining vertical space invisibly.
+ */
+.session-trim-player-fill {
     width: 100%;
     aspect-ratio: 16 / 9;
-    max-height: min(58dvh, 82vh);
+    max-height: 100%;
 }
-.session-trim-player-cap :deep(> div) {
+.session-trim-player-fill :deep(> div) {
     height: 100%;
 }
-.session-trim-player-cap :deep(.video-js.vjs-fluid) {
+.session-trim-player-fill :deep(.video-js.vjs-fluid) {
     padding-top: 0 !important;
     width: 100%;
     height: 100%;
 }
-.session-trim-player-cap :deep(.video-js .vjs-tech) {
-    object-fit: contain;
+.session-trim-player-fill :deep(.video-js .vjs-tech) {
+    object-fit: cover;
 }
 
-/* Force slot content that uses split-list-panel to fill the full aside height. */
+/* Force split-list SegmentEditor to fill the full aside height. */
 .trim-aside :deep(.se-root--split-list) {
     height: 100%;
 }

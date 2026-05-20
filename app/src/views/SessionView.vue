@@ -168,7 +168,7 @@ const sessionId = computed(() => route.params.id as string);
 
 const poller = useSessionPoller();
 const activeUploads = useActiveUploads();
-const { setHeaderLayout } = useAppLayout();
+const { setHeaderLayout, headerLayout } = useAppLayout();
 
 // ---------------------------------------------------------------------------
 // Status badge config
@@ -1664,12 +1664,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="app-view flex min-h-dvh w-full max-w-none flex-col">
+    <div :class="headerLayout === 'session-trim' ? 'flex h-full w-full flex-col' : 'flex min-h-dvh w-full max-w-none flex-col'">
         <div
             class="w-full flex-1 transition-all duration-300"
             :class="
                 session && !loading && activeTab === 'trim'
-                    ? 'min-h-0 flex flex-col justify-center py-4'
+                    ? 'flex flex-1 flex-col min-h-0'
                     : 'pb-8 pt-4'
             "
         >
@@ -1816,26 +1816,19 @@ onUnmounted(() => {
                     v-else
                     :class="[
                         'min-w-0 flex flex-col',
-                        activeTab === 'trim'
-                            ? [
-                                  'min-h-0 flex-1',
-                                  sessionDetailChromeCollapsed
-                                      ? 'gap-0'
-                                      : 'gap-2',
-                              ]
-                            : 'space-y-5',
+                        activeTab === 'trim' ? 'flex-1 min-h-0' : 'space-y-5',
                     ]"
                 >
-                    <!-- On trim: flex order shows progress card above player -->
+                    <!-- On trim: flex order shows progress card above player; player fills remaining height -->
                     <div
                         :class="[
-                            'min-w-0 flex flex-col gap-2',
-                            activeTab === 'trim' ? 'order-2' : '',
+                            'min-w-0 flex flex-col',
+                            activeTab === 'trim' ? 'order-2 flex-1 min-h-0' : '',
                         ]"
                     >
-                        <div class="min-w-0" :class="trimPlayerBreakoutClass">
-                            <SessionPlayerStrip
-                                ref="sessionPlayerStripRef"
+                        <SessionPlayerStrip
+                            ref="sessionPlayerStripRef"
+                            class="flex-1 min-h-0"
                                 :active-playback-url="activePlaybackUrl"
                                 :is-completed="isCompleted"
                                 :thumbnail-vtt-url="thumbnailVttUrl"
@@ -2104,7 +2097,6 @@ onUnmounted(() => {
                                     </div>
                                 </template>
                             </SessionPlayerStrip>
-                        </div>
 
                         <Teleport to="#app-session-workflow-teleport">
                             <!-- Start Encoding button (pre-encode only) -->
@@ -2124,8 +2116,7 @@ onUnmounted(() => {
                     <SessionTrimWorkspace
                         ref="trimTimelineWorkspaceRef"
                         v-if="activeTab === 'trim' && showTrimSegmentEditor"
-                        class="shrink-0"
-                        :class="activeTab === 'trim' ? 'order-3' : ''"
+                        class="order-3 shrink-0"
                         section="timeline"
                         v-model:editor-segments="editorSegments"
                         v-model:selected-audio-track="selectedAudioTrack"
@@ -2139,7 +2130,7 @@ onUnmounted(() => {
                         :waveform-peaks="waveformPeaks"
                         :is-completed="isCompleted"
                         :probe-duration="trimEditorProbeDuration"
-                        :add-gap-above-timeline="sessionDetailChromeCollapsed"
+                        :add-gap-above-timeline="false"
                         :get-current-time="
                             () => playerRef?.getCurrentTime() ?? 0
                         "
@@ -2173,7 +2164,7 @@ onUnmounted(() => {
                         v-if="showSessionDetailCard"
                         :class="[
                             sessionDetailCardSurfaceClass,
-                            `${trimPlayerBreakoutClass} order-1`,
+                            'order-1 mx-auto w-full max-w-384 px-4 sm:px-6',
                         ]"
                     >
                         <!-- Upload / probe progress (pre-encode only) -->

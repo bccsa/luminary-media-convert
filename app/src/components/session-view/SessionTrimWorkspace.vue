@@ -137,8 +137,7 @@ const trimToolbarHasVisibleContent = computed(() => {
     <!-- Timeline: full-width bottom strip for precise trim editing -->
     <div
         v-if="section === 'timeline' && showTrimSegmentEditor"
-        class="relative left-1/2 w-screen max-w-[min(100vw-0.5rem,96rem)] -translate-x-1/2"
-        :class="addGapAboveTimeline ? 'mt-2 sm:mt-3' : ''"
+        class="w-full"
     >
         <SegmentEditor
             ref="trimSegmentEditorRef"
