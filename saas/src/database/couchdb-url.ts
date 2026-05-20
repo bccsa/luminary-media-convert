@@ -36,10 +36,12 @@ export function buildCouchdbUrl(): CouchdbConfig {
     }
 
     if (username && password) {
-        // WHATWG URL setters percent-encode the userinfo, so any byte in the
-        // raw values (including ':', '@', '%', '(', '.') is safely escaped.
-        parsed.username = username;
-        parsed.password = password;
+        // encodeURIComponent first so bare '%' characters become '%25'. The
+        // WHATWG URL setter passes valid '%XX' sequences through unchanged
+        // (it won't double-encode), but on its own does NOT escape a bare '%'
+        // — which would leave the URL malformed.
+        parsed.username = encodeURIComponent(username);
+        parsed.password = encodeURIComponent(password);
     }
 
     return { url: parsed.toString(), dbName };
