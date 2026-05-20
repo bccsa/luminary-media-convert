@@ -8,6 +8,7 @@ work
 .env
 .DS_Store
 .vscode
+.wrangler
 .cursor/**/*.log
 dispatchQueue.json
 jobQueue.json

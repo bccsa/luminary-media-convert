@@ -9,7 +9,7 @@ export class SessionCleanupService {
 
     constructor(private readonly databaseService: DatabaseService) {}
 
-    @Cron(process.env.SESSION_EXPIRY_CRON ?? '0 3 * * *')
+    @Cron(process.env.SESSION_EXPIRY_CRON?.trim() || '0 3 * * *')
     async cleanupExpiredSessions(): Promise<number> {
         const now = new Date().toISOString();
 
