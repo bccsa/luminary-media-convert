@@ -16,6 +16,7 @@ const { headerLayout } = useAppLayout();
 // edge aligns with the player/title left edge at every viewport width.
 const headerInnerClass = computed(() => {
     if (headerLayout.value === 'session-trim') return 'max-w-[min(100vw-2rem,96rem)] px-0';
+    if (isSessionDetail.value) return 'max-w-7xl px-4 sm:px-6';
     return 'max-w-6xl px-4 sm:px-6';
 });
 
@@ -219,8 +220,8 @@ watch(isAuthenticated, async (authenticated) => {
             </header>
 
             <main
-                class="relative mx-auto w-full max-w-6xl px-4 sm:px-6"
-                :class="isSessionDetail ? 'py-0' : 'py-8 sm:py-10'"
+                class="relative mx-auto w-full px-4 sm:px-6"
+                :class="[isSessionDetail ? 'py-0 max-w-7xl' : 'py-8 sm:py-10 max-w-6xl']"
             >
                 <router-view />
             </main>
