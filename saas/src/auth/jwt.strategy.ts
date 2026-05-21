@@ -46,9 +46,13 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     ): Promise<Record<string, unknown>> {
         const sub = payload.sub as string;
         const namespace = process.env.AUTH0_CLAIM_NAMESPACE;
+        const metadata = (namespace
+            ? payload[`${namespace}/metadata`]
+            : undefined) as { email?: string } | undefined;
         const email = (payload.email ||
             (namespace ? payload[`${namespace}/email`] : undefined) ||
-            payload[`https://${process.env.AUTH0_DOMAIN}/email`]) as string;
+            payload[`https://${process.env.AUTH0_DOMAIN}/email`] ||
+            metadata?.email) as string;
 
         this.logger.debug(
             `JWT payload claims: ${JSON.stringify(Object.keys(payload))}`,

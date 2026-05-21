@@ -511,9 +511,10 @@ saas/
 │   └── database/
 │       ├── database.module.ts        # CouchDB connection + nano client
 │       ├── database.service.ts       # Generic CouchDB operations
-│       └── indexes.ts                # Mango index definitions (created on startup)
-├── scripts/
-│   └── seed-admin.ts                 # CLI: npm -w saas run seed:admin --email ... --name ...
+│       ├── indexes.ts                # Mango index definitions (created on startup)
+│       └── couchdb-url.ts            # CouchDB URL/auth builder (shared with seed CLI)
+│   └── scripts/
+│       └── seed-admin.ts             # CLI: npm -w saas run seed:admin --email ... --name ... (compiled to dist/scripts/seed-admin.js)
 ├── package.json
 └── tsconfig.json
 ```
@@ -775,6 +776,11 @@ async cleanupExpiredSessions(): Promise<void> {
 
 ```
 npm -w saas run seed:admin -- --email admin@example.com --name "Admin User"
+
+# Implementation lives at saas/src/scripts/seed-admin.ts and is compiled to
+# saas/dist/scripts/seed-admin.js as part of `npm -w saas run build`. The
+# script is invoked with plain `node`, so it works inside the production
+# Docker image where devDependencies (including `tsx`) are pruned.
 
 1. Connect to CouchDB
 2. Check if a user with this email already exists → error if so
