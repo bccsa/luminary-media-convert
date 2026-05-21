@@ -1,7 +1,8 @@
 import nano from 'nano';
 import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
-import { buildCouchdbUrl } from '../src/database/couchdb-url.js';
+import { buildCouchdbUrl } from '../database/couchdb-url.js';
+import type { UserDocument } from '../users/interfaces/user-document.interface.js';
 
 dotenv.config();
 
@@ -20,7 +21,7 @@ function parseArgs(args: string[]): { email: string; name: string } {
     }
 
     if (!email || !name) {
-        console.error('Usage: tsx scripts/seed-admin.ts --email <email> --name <name>');
+        console.error('Usage: npm -w saas run seed:admin -- --email <email> --name <name>');
         process.exit(1);
     }
 
@@ -61,7 +62,7 @@ async function main() {
     const now = new Date().toISOString();
     const id = `user:${uuidv4()}`;
 
-    await db.insert({
+    const doc: UserDocument = {
         _id: id,
         docType: 'user',
         auth0Id: null,
@@ -77,7 +78,9 @@ async function main() {
         lastApiAccessAt: null,
         createdAt: now,
         updatedAt: now,
-    });
+    };
+
+    await db.insert(doc);
 
     console.log(`Admin user created successfully:`);
     console.log(`  ID:    ${id}`);

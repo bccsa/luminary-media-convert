@@ -82,6 +82,8 @@ npm run seed:admin -- --email admin@example.com --name "Admin User"
 
 The admin user's Auth0 account is linked automatically on first login via email matching.
 
+The seed CLI runs from compiled JavaScript (`saas/dist/scripts/seed-admin.js`), so it works inside the production Docker image (`saas/Dockerfile`) where devDependencies are pruned. From a fresh checkout, run `npm -w saas run build` once before invoking `seed:admin`.
+
 ## Documentation
 
 - [Encoding API Reference](api/README.md) -- Full API documentation, authentication, webhooks, encoding workflow

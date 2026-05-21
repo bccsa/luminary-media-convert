@@ -116,6 +116,8 @@ npm run seed:admin -- --email admin@example.com --name "Admin User"
 
 This creates an admin user document in CouchDB. The user's Auth0 account is linked automatically on first login via email matching.
 
+The script lives at `saas/src/scripts/seed-admin.ts` and runs from compiled output (`saas/dist/scripts/seed-admin.js`), so it works inside the production Docker image where `devDependencies` are pruned. From a fresh checkout, run `npm -w saas run build` once before invoking `seed:admin` (any prior `npm -w saas run dev` or full `npm run dev` already keeps `dist/` populated).
+
 ## API Endpoints
 
 Interactive Swagger/OpenAPI documentation is available at `/saas/docs` when the server is running.
