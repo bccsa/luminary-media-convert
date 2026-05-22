@@ -61,6 +61,11 @@ interface Props {
     /** Hide label inputs and remove buttons — use when the list is informational only. */
     readOnly?: boolean;
     /**
+     * Trim/NLE layout: combine marks, zoom, dropdowns, and play/jog controls into a single row
+     * directly below the timeline (instead of a toolbar above + playback row below).
+     */
+    combinedControls?: boolean;
+    /**
      * URL of `thumbnails.vtt` (HLS sprite storyboard). In trim mode, hovering the timeline shows the matching thumbnail.
      */
     thumbnailVttUrl?: string | null;
@@ -91,6 +96,7 @@ const props = withDefaults(defineProps<Props>(), {
     splitListPanel: false,
     embedded: false,
     readOnly: false,
+    combinedControls: false,
 });
 
 const emit = defineEmits<{
@@ -125,6 +131,14 @@ const listOnlySplitPanel = computed(
         !props.showToolbar &&
         !props.showTimeline &&
         !props.showPlaybackControls,
+);
+
+/** Combine marks, zoom, dropdowns and play/jog controls into one row below the timeline. */
+const combinedControlsBar = computed(
+    () =>
+        props.combinedControls &&
+        props.showTimeline &&
+        (props.showToolbar || props.showPlaybackControls),
 );
 
 /** `focus` keyboard: timeline has tabindex, or list-only panel uses the root (no timeline row). */
@@ -1149,7 +1163,7 @@ defineExpose({
         </div>
 
         <div
-            v-if="showToolbar"
+            v-if="showToolbar && !combinedControlsBar"
             class="se-toolbar"
             :class="{ 'se-toolbar--no-timeline': !showTimeline }"
         >
@@ -1229,7 +1243,7 @@ defineExpose({
             </div>
         </div>
 
-        <div v-if="showPlaybackControls" class="se-time-above">
+        <div v-if="showPlaybackControls && !combinedControlsBar" class="se-time-above">
             {{ formatTime(playheadSec) }} / {{ formatTime(duration) }}
         </div>
 
@@ -1340,7 +1354,7 @@ defineExpose({
         </div>
 
         <div
-            v-if="showPlaybackControls && (onPlayPause || onSeek)"
+            v-if="showPlaybackControls && (onPlayPause || onSeek) && !combinedControlsBar"
             class="se-playback-controls"
         >
             <div class="se-playback-controls__center">
@@ -1412,6 +1426,165 @@ defineExpose({
                 >
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>
                 </button>
+            </div>
+        </div>
+
+        <!--
+            Trim mode: one row below the timeline with playback (back/play/forward),
+            mark in/out, add, undo, redo, clear-all, zoom, and the audio/quality slots.
+        -->
+        <div
+            v-if="combinedControlsBar"
+            class="se-controls-bar"
+        >
+            <div
+                v-if="showPlaybackControls && (onPlayPause || onSeek)"
+                class="se-controls-bar__playback"
+            >
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Back 1 second · Left Arrow — Hold 1, 2, or 3 before ← for 10s, 30s, or 60s steps"
+                    aria-label="Back 1 second"
+                    @click="stepSeek(-1)"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
+                </button>
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Back 10 seconds · J"
+                    aria-label="Back 10 seconds (J)"
+                    @click="stepSeek(-1, 10)"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 7 13 12 18 17" /><polyline points="11 7 6 12 11 17" /></svg>
+                </button>
+                <button
+                    v-if="onPlayPause"
+                    type="button"
+                    class="se-btn se-btn--playback"
+                    title="Play or pause · Space — Also K"
+                    :aria-label="isPlaying ? 'Pause' : 'Play'"
+                    :aria-pressed="isPlaying"
+                    @click="onPlayPause"
+                >
+                    <svg
+                        v-if="!isPlaying"
+                        class="se-icon"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    ><path d="M9 7.5L9 16.5L18 12L9 7.5z" /></svg>
+                    <svg
+                        v-else
+                        class="se-icon"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    ><path d="M8 8h3v8H8V8Zm5 0h3v8h-3V8z" /></svg>
+                </button>
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Forward 10 seconds · L"
+                    aria-label="Forward 10 seconds (L)"
+                    @click="stepSeek(1, 10)"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 7 11 12 6 17" /><polyline points="13 7 18 12 13 17" /></svg>
+                </button>
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Forward 1 second · Right Arrow — Hold 1, 2, or 3 before → for 10s, 30s, or 60s steps"
+                    aria-label="Forward 1 second"
+                    @click="stepSeek(1)"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>
+                </button>
+            </div>
+
+            <div v-if="showPlaybackControls" class="se-controls-bar__time">
+                {{ formatTime(playheadSec) }} / {{ formatTime(duration) }}
+            </div>
+
+            <div v-if="showToolbar" class="se-controls-bar__marks">
+                <button type="button" class="se-btn se-btn--squish" @click="markIn" title="Mark In at playhead ( I or [ )">
+                    <span aria-hidden="true">[</span>
+                </button>
+                <button type="button" class="se-btn se-btn--squish" @click="markOut" title="Mark Out at playhead ( O or ] )">
+                    <span aria-hidden="true">]</span>
+                </button>
+                <button type="button" class="se-btn" @click="addSegmentAtPlayhead" title="Add a 10-second segment at playhead">
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                    Add
+                </button>
+                <button
+                    type="button"
+                    class="se-btn se-btn--squish"
+                    :disabled="history.length === 0"
+                    @click="undo"
+                    title="Undo"
+                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                <button
+                    type="button"
+                    class="se-btn se-btn--squish"
+                    :disabled="redoStack.length === 0"
+                    @click="redo"
+                    title="Redo"
+                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
+                <slot name="toolbar-before-clear" />
+                <button
+                    v-if="segments.length > 0"
+                    type="button"
+                    class="se-btn se-btn--danger"
+                    @click="clearAll"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
+                    Clear All
+                </button>
+                <span v-if="pendingInSec !== null" class="se-pending">
+                    In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
+                    · <span class="se-pending-cancel">Esc cancels</span>
+                </span>
+                <label class="se-zoom">
+                    Zoom
+                    <input
+                        type="range"
+                        min="1"
+                        :max="maxZoom"
+                        step="0.1"
+                        :value="zoom"
+                        @input="(e) => setZoom(parseFloat((e.target as HTMLInputElement).value), playheadSec)"
+                    />
+                    <span>{{ zoom.toFixed(1) }}×</span>
+                </label>
+                <slot name="toolbar-end" />
+            </div>
+
+            <div
+                v-if="$slots['playback-start'] || $slots['playback-end']"
+                class="se-controls-bar__options"
+            >
+                <div
+                    v-if="$slots['playback-start']"
+                    class="se-playback-controls__slot se-playback-controls__slot--start"
+                >
+                    <slot name="playback-start" />
+                </div>
+                <div
+                    v-if="$slots['playback-end']"
+                    class="se-playback-controls__slot se-playback-controls__slot--end"
+                >
+                    <slot name="playback-end" />
+                </div>
             </div>
         </div>
 

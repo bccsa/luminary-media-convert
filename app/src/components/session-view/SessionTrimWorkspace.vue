@@ -155,6 +155,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             :fps="segmentEditorProbeFps"
             :thumbnail-vtt-url="thumbnailVttUrl"
             :waveform-peaks="waveformPeaks"
+            combined-controls
         >
             <template v-if="showChaptersSidePanel" #toolbar-before-clear>
                 <span

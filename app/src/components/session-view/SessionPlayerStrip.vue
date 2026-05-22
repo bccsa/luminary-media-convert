@@ -61,12 +61,15 @@ defineExpose({
             <!-- Player column: shell anchored to the top, empty space below shows page background -->
             <div
                 class="flex min-h-0 min-w-0 flex-col flex-1"
-                :class="!showAside && activeTab === 'trim' ? 'max-w-[min(100%,60vw)]' : ''"
+                :class="[
+                    !showAside && activeTab === 'trim' ? 'max-w-[min(100%,60vw)]' : '',
+                    activeTab === 'trim' ? 'pt-3 pr-3 pl-3' : '',
+                ]"
             >
                 <div
                     ref="playerShellRef"
                     :class="activeTab === 'trim'
-                        ? 'session-trim-player-shell bg-black'
+                        ? 'session-trim-player-shell overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'
                         : 'w-full overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'"
                 >
                     <HlsPlayer
