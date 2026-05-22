@@ -228,6 +228,12 @@ const trimToolbarHasVisibleContent = computed(() => {
 </template>
 
 <style scoped>
+.se-timeline-wrap {
+    /* Override the general .se-timeline-wrap rule that adds margin-bottom — we want
+       the editor card to bleed flush to the column's bottom edge. */
+    margin-bottom: 0;
+}
+
 .se-timeline-wrap :deep(.se-root) {
     border-radius: 0;
 }

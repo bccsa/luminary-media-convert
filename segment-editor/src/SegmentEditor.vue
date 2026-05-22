@@ -1136,7 +1136,11 @@ defineExpose({
         ref="rootElRef"
         class="se-root"
         :data-mode="mode"
-        :class="{ 'se-root--split-list': splitListPanel, 'se-root--embedded': embedded }"
+        :class="{
+            'se-root--split-list': splitListPanel,
+            'se-root--embedded': embedded,
+            'se-root--combined-controls': combinedControlsBar,
+        }"
         :tabindex="keyboardRootTabindex"
         @keydown="onKeyboardRootKeyDown"
         @keyup="onKeyboardRootKeyUp"
@@ -1540,7 +1544,6 @@ defineExpose({
                     @click="redo"
                     title="Redo"
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
-                <slot name="toolbar-before-clear" />
                 <button
                     v-if="segments.length > 0"
                     type="button"
@@ -1554,6 +1557,9 @@ defineExpose({
                     In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
                     · <span class="se-pending-cancel">Esc cancels</span>
                 </span>
+            </div>
+
+            <div v-if="showToolbar" class="se-controls-bar__zoom">
                 <label class="se-zoom">
                     Zoom
                     <input
@@ -1567,6 +1573,13 @@ defineExpose({
                     <span>{{ zoom.toFixed(1) }}×</span>
                 </label>
                 <slot name="toolbar-end" />
+            </div>
+
+            <div
+                v-if="showToolbar && $slots['toolbar-before-clear']"
+                class="se-controls-bar__actions"
+            >
+                <slot name="toolbar-before-clear" />
             </div>
 
             <div

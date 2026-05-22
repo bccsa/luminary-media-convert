@@ -598,9 +598,10 @@ html.dark .se-root {
     padding-top: 0.25rem;
 }
 
-/* Trim timeline: tighter vertical rhythm in session view; no trailing whitespace */
+/* Trim timeline: tighter vertical rhythm in session view; slightly more
+   bottom padding so the controls bar has breathing room above the page edge. */
 .se-root[data-mode='trim']:not(.se-root--embedded) {
-    padding: 0.875rem 1rem 0;
+    padding: 0.875rem 1rem 0.5rem;
 }
 
 .se-root[data-mode='trim'] .se-header {
@@ -689,7 +690,23 @@ html.dark .se-root {
     flex-wrap: wrap;
     align-items: center;
     gap: 0.4rem 0.6rem;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.se-controls-bar__zoom {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem 0.6rem;
+    flex: 0 0 auto;
+}
+
+.se-controls-bar__actions {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.5rem;
+    flex: 0 1 auto;
     min-width: 0;
 }
 
