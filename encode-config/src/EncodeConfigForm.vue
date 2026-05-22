@@ -524,7 +524,6 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                         :disabled="editableVideoTracks.length === 0"
                         @click="encodingType.value = 'video'"
                     >
-                        <svg class="ecf-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" /></svg>
                         Video
                     </button>
                     <button
@@ -534,7 +533,6 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                         :class="['ecf-mode-opt', encodingType.value === 'audio' && 'ecf-mode-opt--on']"
                         @click="encodingType.value = 'audio'"
                     >
-                        <svg class="ecf-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53L6.75 15.75H4.5a.75.75 0 01-.75-.75v-6a.75.75 0 01.75-.75h2.25z" /></svg>
                         Audio only
                     </button>
                 </div>
