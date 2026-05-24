@@ -37,6 +37,100 @@ const emit = defineEmits<{
 const playerShellRef = ref<HTMLElement | null>(null);
 const hlsPlayerRef = ref<InstanceType<typeof HlsPlayer> | null>(null);
 
+// ---- Split resizer (player ↔ aside) ----
+const SPLIT_KEY = 'lmc:session-player-split';
+const SPLIT_MIN = 25;
+const SPLIT_MAX = 75;
+
+const splitPercent = ref<number>((() => {
+    try {
+        const raw = localStorage.getItem(SPLIT_KEY);
+        const n = raw == null ? NaN : Number(raw);
+        return Number.isFinite(n) && n >= SPLIT_MIN && n <= SPLIT_MAX ? n : 50;
+    } catch {
+        return 50;
+    }
+})());
+
+const splitRowRef = ref<HTMLElement | null>(null);
+const isResizing = ref(false);
+
+const clamp = (n: number) => Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, n));
+
+function persistSplit() {
+    try {
+        localStorage.setItem(SPLIT_KEY, String(Math.round(splitPercent.value)));
+    } catch {
+        // ignore — non-critical UX state
+    }
+}
+
+function onResizeStart(e: PointerEvent) {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    e.preventDefault();
+    const handle = e.currentTarget as HTMLElement;
+    handle.setPointerCapture(e.pointerId);
+    isResizing.value = true;
+
+    let raf = 0;
+    const onMove = (ev: PointerEvent) => {
+        const row = splitRowRef.value;
+        if (!row) return;
+        const rect = row.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        const next = clamp(((ev.clientX - rect.left) / rect.width) * 100);
+        if (raf) cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => {
+            splitPercent.value = next;
+        });
+    };
+    const onEnd = (ev: PointerEvent) => {
+        isResizing.value = false;
+        if (raf) cancelAnimationFrame(raf);
+        try { handle.releasePointerCapture(ev.pointerId); } catch {}
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onEnd);
+        handle.removeEventListener('pointercancel', onEnd);
+        persistSplit();
+    };
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onEnd);
+    handle.addEventListener('pointercancel', onEnd);
+}
+
+function onResizeReset() {
+    splitPercent.value = 50;
+    persistSplit();
+}
+
+function onResizeKey(e: KeyboardEvent) {
+    const step = e.shiftKey ? 5 : 2;
+    if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        splitPercent.value = clamp(splitPercent.value - step);
+        persistSplit();
+    } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        splitPercent.value = clamp(splitPercent.value + step);
+        persistSplit();
+    } else if (e.key === 'Home') {
+        e.preventDefault();
+        splitPercent.value = SPLIT_MIN;
+        persistSplit();
+    } else if (e.key === 'End') {
+        e.preventDefault();
+        splitPercent.value = SPLIT_MAX;
+        persistSplit();
+    }
+}
+
+const playerColStyle = computed(() =>
+    props.showAside ? { flex: `0 0 ${splitPercent.value}%` } : undefined,
+);
+const asideColStyle = computed(() =>
+    props.showAside ? { flex: `0 0 ${100 - splitPercent.value}%` } : undefined,
+);
+
 defineExpose({
     playerRef: hlsPlayerRef,
 });
@@ -53,18 +147,23 @@ defineExpose({
         -->
         <div
             v-if="activePlaybackUrl"
+            ref="splitRowRef"
             class="flex min-h-0 flex-1"
             :class="[
                 showAside ? 'flex-row' : (activeTab === 'trim' ? 'flex-col items-center justify-center' : 'flex-col gap-4'),
+                isResizing ? 'select-none' : '',
             ]"
         >
             <!-- Player column: shell anchored to the top, empty space below shows page background -->
             <div
-                class="flex min-h-0 min-w-0 flex-col flex-1"
+                class="flex min-h-0 min-w-0 flex-col"
                 :class="[
+                    showAside ? '' : 'flex-1',
                     !showAside && activeTab === 'trim' ? 'max-w-[min(100%,60vw)]' : '',
-                    activeTab === 'trim' ? 'pt-3 pr-3 pl-3' : '',
+                    activeTab === 'trim' ? 'pt-3 pl-3' : '',
+                    activeTab === 'trim' && !showAside ? 'pr-3' : '',
                 ]"
+                :style="playerColStyle"
             >
                 <div
                     ref="playerShellRef"
@@ -100,13 +199,37 @@ defineExpose({
                 </div>
             </div>
 
-            <!-- Aside: bleeds flush to the right edge; thin left border is the separator -->
+            <!-- Resize handle: drag to repartition player ↔ aside -->
+            <div
+                v-if="showAside"
+                class="session-split-handle"
+                :class="{ 'session-split-handle--active': isResizing }"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize player and side panel"
+                :aria-valuenow="Math.round(splitPercent)"
+                :aria-valuemin="25"
+                :aria-valuemax="75"
+                tabindex="0"
+                title="Drag to resize · Double-click to reset · ←/→ to nudge"
+                @pointerdown="onResizeStart"
+                @dblclick="onResizeReset"
+                @keydown="onResizeKey"
+            >
+                <span class="session-split-handle__bar" aria-hidden="true"></span>
+                <span class="session-split-handle__grip" aria-hidden="true">
+                    <span></span><span></span><span></span><span></span><span></span><span></span>
+                </span>
+            </div>
+
+            <!-- Aside: bleeds flush to the right edge -->
             <aside
                 v-if="showAside"
-                class="flex min-h-0 flex-col overflow-hidden flex-1"
+                class="flex min-h-0 flex-col overflow-hidden"
                 :class="activeTab === 'trim'
-                    ? 'gap-2 border-l border-slate-200 px-4 pt-3 pb-2 dark:border-slate-700/60 trim-aside'
+                    ? 'gap-2 px-4 pt-3 pb-2 trim-aside'
                     : 'gap-3'"
+                :style="asideColStyle"
             >
                 <slot name="aside" />
             </aside>
@@ -168,5 +291,102 @@ defineExpose({
 .trim-aside :deep(.se-list-section--split) {
     flex: 1 1 0%;
     max-height: none;
+}
+
+/* ---- Resize handle between player column and aside ----
+ * Large hit area (10px), slim 1px bar at rest, thickens to 2px in sky-500 on
+ * hover / focus / active. A small grip pill (dots) fades in to communicate
+ * draggability.
+ */
+.session-split-handle {
+    position: relative;
+    flex: 0 0 10px;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: col-resize;
+    touch-action: none;
+    outline: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.session-split-handle__bar {
+    width: 1px;
+    height: 100%;
+    background: rgb(226 232 240); /* slate-200 */
+    transition: background 0.14s ease, width 0.14s ease;
+    pointer-events: none;
+}
+:global(html.dark) .session-split-handle__bar {
+    background: rgb(51 65 85 / 0.6); /* slate-700/60 */
+}
+
+.session-split-handle:hover .session-split-handle__bar,
+.session-split-handle:focus-visible .session-split-handle__bar,
+.session-split-handle--active .session-split-handle__bar {
+    background: rgb(2 132 199); /* sky-600 */
+    width: 2px;
+}
+:global(html.dark) .session-split-handle:hover .session-split-handle__bar,
+:global(html.dark) .session-split-handle:focus-visible .session-split-handle__bar,
+:global(html.dark) .session-split-handle--active .session-split-handle__bar {
+    background: rgb(14 165 233); /* sky-500 */
+}
+
+.session-split-handle__grip {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.94);
+    display: grid;
+    grid-template-columns: repeat(2, 4px);
+    grid-auto-rows: 4px;
+    gap: 3px;
+    padding: 7px 5px;
+    border-radius: 8px;
+    background: #fff;
+    border: 1px solid rgb(203 213 225); /* slate-300 */
+    box-shadow: 0 1px 3px rgb(15 23 42 / 0.12), 0 1px 2px rgb(15 23 42 / 0.06);
+    opacity: 0;
+    transition: opacity 0.12s ease, transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+    pointer-events: none;
+}
+:global(html.dark) .session-split-handle__grip {
+    background: rgb(30 41 59); /* slate-800 */
+    border-color: rgb(71 85 105); /* slate-600 */
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+}
+
+.session-split-handle__grip > span {
+    width: 4px;
+    height: 4px;
+    border-radius: 9999px;
+    background: rgb(148 163 184); /* slate-400 */
+}
+:global(html.dark) .session-split-handle__grip > span {
+    background: rgb(100 116 139); /* slate-500 */
+}
+
+.session-split-handle:hover .session-split-handle__grip,
+.session-split-handle:focus-visible .session-split-handle__grip,
+.session-split-handle--active .session-split-handle__grip {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.session-split-handle--active .session-split-handle__grip {
+    border-color: rgb(2 132 199); /* sky-600 */
+    box-shadow: 0 2px 6px rgb(2 132 199 / 0.25);
+}
+.session-split-handle--active .session-split-handle__grip > span {
+    background: rgb(2 132 199); /* sky-600 */
+}
+:global(html.dark) .session-split-handle--active .session-split-handle__grip {
+    border-color: rgb(14 165 233); /* sky-500 */
+}
+:global(html.dark) .session-split-handle--active .session-split-handle__grip > span {
+    background: rgb(14 165 233);
 }
 </style>
