@@ -511,29 +511,36 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
 <template>
     <div class="ecf-root" :class="{ 'ecf-root--session': props.appearance === 'session' }">
 
-        <!-- ① Mode segmented control + optional segment duration -->
+        <!-- ① Mode card pair + optional segment duration -->
         <div class="ecf-modebar">
             <div class="ecf-mode-wrap">
                 <span class="ecf-mode-label">Output mode</span>
-                <div class="ecf-mode-seg" role="radiogroup" aria-label="Output encoding mode">
+                <div class="ecf-mode-cards" role="radiogroup" aria-label="Output encoding mode">
                     <button
                         type="button"
                         role="radio"
                         :aria-checked="encodingType.value === 'video'"
-                        :class="['ecf-mode-opt', encodingType.value === 'video' && 'ecf-mode-opt--on']"
+                        :class="['ecf-mode-card', encodingType.value === 'video' && 'ecf-mode-card--on']"
                         :disabled="editableVideoTracks.length === 0"
+                        :title="editableVideoTracks.length === 0 ? 'No video tracks detected' : undefined"
                         @click="encodingType.value = 'video'"
                     >
-                        Video
+                        <span class="ecf-mode-card__title">Video</span>
+                        <span class="ecf-mode-card__check" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11" /></svg>
+                        </span>
                     </button>
                     <button
                         type="button"
                         role="radio"
                         :aria-checked="encodingType.value === 'audio'"
-                        :class="['ecf-mode-opt', encodingType.value === 'audio' && 'ecf-mode-opt--on']"
+                        :class="['ecf-mode-card', encodingType.value === 'audio' && 'ecf-mode-card--on']"
                         @click="encodingType.value = 'audio'"
                     >
-                        Audio only
+                        <span class="ecf-mode-card__title">Audio only</span>
+                        <span class="ecf-mode-card__check" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-11" /></svg>
+                        </span>
                     </button>
                 </div>
             </div>
