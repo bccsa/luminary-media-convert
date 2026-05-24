@@ -733,6 +733,15 @@ html.dark .se-root {
     max-width: min(28rem, calc(100vw - 4rem));
 }
 
+.se-controls-bar__help {
+    flex-shrink: 0;
+}
+
+/* No options dropdowns present — help button takes the right-aligned slot itself. */
+.se-controls-bar__help--alone {
+    margin-left: auto;
+}
+
 .se-playback-controls__center {
     display: inline-flex;
     gap: 0.35rem;

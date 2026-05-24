@@ -61,39 +61,88 @@ const emit = defineEmits<{
 <template>
     <div class="space-y-3">
         <template v-if="!showProbeConfig && !submitting && !(showEncoding || isCompleted || currentStatus === 'failed')">
-            <div v-if="showUploadProgress && activeUploadProgress != null">
+            <div
+                v-if="showUploadProgress && activeUploadProgress != null"
+                class="flex flex-col items-center gap-5 px-2 py-4 text-center"
+            >
+                <div class="flex h-14 w-14 items-center justify-center rounded-full bg-sky-100 text-sky-600 ring-[6px] ring-sky-50/80 dark:bg-sky-500/20 dark:text-sky-300 dark:ring-sky-500/10">
+                    <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                </div>
+                <div class="space-y-1">
+                    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">
+                        {{ activeUploadProgress >= 100 ? 'Finalizing upload' : 'Uploading your file' }}
+                    </h2>
+                    <p class="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                        Encoding options will appear as soon as the upload finishes.
+                    </p>
+                </div>
                 <ProgressBar
-                    :label="activeUploadProgress >= 100 ? 'Finalizing upload…' : 'Uploading…'"
+                    class="w-full max-w-md"
+                    label="Upload progress"
                     :progress="activeUploadProgress"
                     :indeterminate="activeUploadProgress >= 100"
                 />
-                <div class="flex justify-end pt-2">
-                    <button
-                        v-if="activeUploadCanCancel"
-                        type="button"
-                        class="cursor-pointer rounded-lg border border-slate-300 px-4 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700"
-                        @click="emit('cancelUpload')"
-                    >
-                        Cancel
-                    </button>
+                <button
+                    v-if="activeUploadCanCancel"
+                    type="button"
+                    class="cursor-pointer rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-transparent dark:text-slate-400 dark:hover:bg-slate-800"
+                    @click="emit('cancelUpload')"
+                >
+                    Cancel upload
+                </button>
+            </div>
+            <div
+                v-else-if="showUploadDoneWaiting"
+                class="flex flex-col items-center gap-5 px-2 py-4 text-center"
+            >
+                <div class="flex h-14 w-14 items-center justify-center rounded-full bg-sky-100 text-sky-600 ring-[6px] ring-sky-50/80 dark:bg-sky-500/20 dark:text-sky-300 dark:ring-sky-500/10">
+                    <svg class="h-6 w-6 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
+                        <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
                 </div>
+                <div class="space-y-1">
+                    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Analyzing your file</h2>
+                    <p class="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                        Probing video and audio tracks…
+                    </p>
+                </div>
+                <ProgressBar class="w-full max-w-md" label="Analysis" indeterminate />
             </div>
-            <div v-else-if="showUploadDoneWaiting">
-                <ProgressBar label="Analyzing…" indeterminate />
-            </div>
-            <div v-else-if="showUploadRemoteMessage">
-                <p v-if="ingestEtaDisplay" class="mb-2 text-right text-xs text-slate-500">{{ ingestEtaDisplay }}</p>
+            <div
+                v-else-if="showUploadRemoteMessage"
+                class="flex flex-col items-center gap-5 px-2 py-4 text-center"
+            >
+                <div class="flex h-14 w-14 items-center justify-center rounded-full bg-sky-100 text-sky-600 ring-[6px] ring-sky-50/80 dark:bg-sky-500/20 dark:text-sky-300 dark:ring-sky-500/10">
+                    <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                    </svg>
+                </div>
+                <div class="space-y-1">
+                    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Fetching your file</h2>
+                    <p class="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                        Downloading from the source URL — encoding options will appear once it finishes.
+                    </p>
+                </div>
                 <ProgressBar
                     v-if="remoteIngestProgress !== undefined"
+                    class="w-full max-w-md"
                     :label="remoteIngestLabel"
                     :progress="remoteIngestProgress"
                 />
                 <ProgressBar
                     v-else-if="pollerIngestTotalBytes != null"
+                    class="w-full max-w-md"
                     :label="remoteIngestLabel"
                     indeterminate
                 />
-                <ProgressBar v-else label="Uploading…" indeterminate subtitle="Started elsewhere" />
+                <ProgressBar v-else class="w-full max-w-md" label="Uploading…" indeterminate subtitle="Started elsewhere" />
+                <p v-if="ingestEtaDisplay" class="text-[11px] text-slate-500 dark:text-slate-400">{{ ingestEtaDisplay }}</p>
             </div>
             <div v-else-if="currentStatus === 'uploaded' && probeLoading" class="flex flex-col items-center gap-3 py-10">
                 <svg class="h-8 w-8 animate-spin text-slate-400" fill="none" viewBox="0 0 24 24">
@@ -105,12 +154,24 @@ const emit = defineEmits<{
         </template>
 
         <template v-if="showProbeConfig">
-            <div v-if="showUploadProgress && activeUploadProgress != null">
-                <ProgressBar
-                    :label="activeUploadProgress >= 100 ? 'Finalizing upload…' : 'Uploading…'"
-                    :progress="activeUploadProgress"
-                    :indeterminate="activeUploadProgress >= 100"
-                />
+            <div
+                v-if="showUploadProgress && activeUploadProgress != null"
+                class="upload-card flex items-start gap-3 rounded-xl border border-sky-100 bg-linear-to-br from-sky-50/60 to-white p-4 dark:border-sky-500/15 dark:from-sky-500/5 dark:to-slate-900/20"
+            >
+                <div class="upload-card__icon mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-600 dark:bg-sky-500/15 dark:text-sky-400">
+                    <svg class="h-4.5 w-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                </div>
+                <div class="min-w-0 flex-1">
+                    <ProgressBar
+                        :label="activeUploadProgress >= 100 ? 'Finalizing upload…' : 'Uploading…'"
+                        :progress="activeUploadProgress"
+                        :indeterminate="activeUploadProgress >= 100"
+                    />
+                </div>
             </div>
         </template>
 

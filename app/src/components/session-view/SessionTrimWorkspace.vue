@@ -145,6 +145,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             mode="trim"
             :show-labels="true"
             :title="segmentEditorTimelineTitle"
+            :show-header="false"
             :duration="probeDuration"
             :get-current-time="getCurrentTime"
             :on-seek="onSeek"

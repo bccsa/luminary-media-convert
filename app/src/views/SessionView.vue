@@ -1855,8 +1855,10 @@ onUnmounted(() => {
                         activeTab === 'trim' ? 'flex-1 min-h-0' : 'space-y-5',
                     ]"
                 >
-                    <!-- On trim: flex order shows progress card above player; player fills remaining height -->
+                    <!-- On trim: flex order shows progress card above player; player fills remaining height.
+                         Hidden during pure upload/probe-loading state so the centered upload card can use the full viewport. -->
                     <div
+                        v-if="!showSessionDetailCard"
                         :class="[
                             'min-w-0 flex flex-col',
                             activeTab === 'trim' ? 'order-2 flex-1 min-h-0' : '',
@@ -2263,14 +2265,12 @@ onUnmounted(() => {
 
                     <div
                         v-if="showSessionDetailCard"
-                        :class="[
-                            sessionDetailCardSurfaceClass,
-                            'order-1 mx-auto w-full max-w-384 px-4 sm:px-6',
-                        ]"
+                        class="order-1 flex w-full flex-1 flex-col"
                     >
-                        <!-- Upload / probe progress (pre-encode only) -->
-                        <div class="mt-2">
-                            <SessionWorkflowPanel
+                        <!-- Upload / probe progress (pre-encode only) — centered card in the viewport. -->
+                        <div class="flex w-full flex-1 items-center justify-center px-4 py-10 sm:px-6 min-h-[70dvh]">
+                            <div :class="[sessionDetailCardSurfaceClass, 'w-full max-w-lg']">
+                                <SessionWorkflowPanel
                                 :show-probe-config="showProbeConfig"
                                 :submitting="submitting"
                                 :show-encoding="showEncoding"
@@ -2303,7 +2303,8 @@ onUnmounted(() => {
                                 @switch-tab="completedAsideTab = 'delivery'"
                                 @cancel-upload="cancelUpload"
                                 @cancel-encode="onCancelEncode"
-                            />
+                                />
+                            </div>
                         </div>
 
                         <!-- Chapter-only toolbar when trim timeline is not mounted -->
