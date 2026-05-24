@@ -1975,7 +1975,7 @@ onUnmounted(() => {
                                             :class="encodeSidePanelTab === 'chapters' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
                                             @click="encodeSidePanelTab = 'chapters'"
                                         >
-                                            Chapters
+                                            Clips
                                         </button>
                                     </div>
 
@@ -2138,7 +2138,9 @@ onUnmounted(() => {
                                             :show-playback-controls="false"
                                             :show-help="false"
                                             :read-only="showProbeConfig"
-                                            title="Chapters"
+                                            :title="showProbeConfig ? 'Clips' : 'Chapters'"
+                                            :empty-title="showProbeConfig ? 'No clips yet' : 'No chapters yet'"
+                                            :empty-hint="showProbeConfig ? 'Use the trim timeline below to add in/out marks for the ranges you want to keep.' : 'Use the trim timeline below to add in/out marks, or load chapters from a VTT sidecar.'"
                                             keyboard-scope="focus"
                                             :fps="segmentEditorProbeFps"
                                         />

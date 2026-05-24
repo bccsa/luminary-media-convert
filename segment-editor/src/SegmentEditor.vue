@@ -75,6 +75,10 @@ interface Props {
     waveformPeaks?: number[] | null;
     /** Color for waveform visualization. Defaults to CSS variable --se-waveform or rgba(255,255,255,0.35). */
     waveformColor?: string | null;
+    /** Override the empty-state heading shown when there are no segments yet (split-list panel only). */
+    emptyTitle?: string;
+    /** Override the empty-state hint shown under the heading (split-list panel only). */
+    emptyHint?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -1766,9 +1770,9 @@ defineExpose({
                             <path d="M8 7h8M8 11h5" />
                         </svg>
                     </div>
-                    <p class="se-list-empty__title">No chapters yet</p>
+                    <p class="se-list-empty__title">{{ emptyTitle ?? 'No chapters yet' }}</p>
                     <p class="se-list-empty__hint">
-                        Use the trim timeline below to add in/out marks, or load chapters from a VTT sidecar.
+                        {{ emptyHint ?? 'Use the trim timeline below to add in/out marks, or load chapters from a VTT sidecar.' }}
                     </p>
                 </div>
             </div>
