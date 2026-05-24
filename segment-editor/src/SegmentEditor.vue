@@ -1059,9 +1059,22 @@ function drawWaveform(): void {
 
 watch(
     () => props.waveformPeaks,
-    () => {
+    (peaks) => {
+        // `flush: 'post'` runs after Vue applies DOM updates so the
+        // `v-if="waveformPeaks?.length"` canvas exists on the first transition
+        // from null/empty to populated.
+        if (peaks?.length && !waveformResizeObserver) {
+            const container = timelineMetricsEl();
+            if (container) {
+                waveformResizeObserver = new ResizeObserver(() => {
+                    drawWaveform();
+                });
+                waveformResizeObserver.observe(container);
+            }
+        }
         drawWaveform();
     },
+    { flush: 'post' },
 );
 
 watch(

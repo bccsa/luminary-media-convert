@@ -1395,6 +1395,7 @@ watch(
             // Poll encoding API for probe results after upload completes
             if (encodingApiUrl.value && sessionToken.value) {
                 fetchProbeResults();
+                fetchWaveform();
             }
         }
     }
@@ -1413,6 +1414,7 @@ watch(
         ) {
             if (encodingApiUrl.value && sessionToken.value) {
                 fetchProbeResults();
+                fetchWaveform();
             }
         }
     }
