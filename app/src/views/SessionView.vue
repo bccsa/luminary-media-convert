@@ -782,20 +782,6 @@ const previewAngleSelectOptions = computed(() =>
     uniqueAnglePlaylists.value.map((ap, i) => ({ value: i, label: ap.name }))
 );
 
-/** Multi-angle dropdown lives in trim timeline next to audio; hide duplicate under player. */
-const anglesEmbeddedInTrimToolbar = computed(
-    () =>
-        isCompleted.value &&
-        showAngleSwitcher.value &&
-        showTrimSegmentEditor.value &&
-        activeTab.value === 'trim'
-);
-
-/** Below-player angle only on Trim when not in timeline; hide on Workflow, Encode, Delivery. */
-const hideAngleBelowPlayer = computed(
-    () => anglesEmbeddedInTrimToolbar.value || activeTab.value !== 'trim'
-);
-
 const currentAngleIsAudioOnly = computed(() => {
     const lists = uniqueAnglePlaylists.value;
     if (!lists.length) return false;
@@ -1907,9 +1893,22 @@ onUnmounted(() => {
                             :show-aside="showAside"
                             :active-tab="activeTab"
                             :show-angle-switcher="showAngleSwitcher"
-                            :hide-angle-switcher="hideAngleBelowPlayer"
                             :unique-angle-playlists="uniqueAnglePlaylists"
                             :current-angle-index="currentAngleIndex"
+                            :show-audio-select="previewAudioTracks.length > 1"
+                            :preview-audio-select-options="
+                                previewAudioSelectOptions
+                            "
+                            :show-quality-select="
+                                previewQualityLevels.length >= 1 &&
+                                encodingType !== 'audio'
+                            "
+                            :preview-quality-select-options="
+                                previewQualitySelectOptions
+                            "
+                            v-model:selected-audio-track="selectedAudioTrack"
+                            v-model:selected-quality-id="selectedQualityId"
+                            @update:selected-quality-id="onTrimQualityChange"
                             @quality-levels="onPreviewQualityLevels"
                             @playing-change="isPreviewPlaying = $event"
                             @duration-change="playerDuration = $event"
@@ -2364,8 +2363,6 @@ onUnmounted(() => {
                         class="order-3 shrink-0"
                         section="timeline"
                         v-model:editor-segments="editorSegments"
-                        v-model:selected-audio-track="selectedAudioTrack"
-                        v-model:selected-quality-id="selectedQualityId"
                         :show-chapters-side-panel="showChaptersBesidePlayer"
                         :chapters-is-dirty="chapters.isDirty.value"
                         :chapters-is-saving="chapters.isSaving.value"
@@ -2383,24 +2380,6 @@ onUnmounted(() => {
                         :on-play-pause="() => playerRef?.togglePlay()"
                         :is-preview-playing="isPreviewPlaying"
                         :segment-editor-probe-fps="segmentEditorProbeFps"
-                        :show-audio-select="previewAudioTracks.length > 1"
-                        :preview-audio-select-options="
-                            previewAudioSelectOptions
-                        "
-                        :show-angle-select="isCompleted && showAngleSwitcher"
-                        :angle-index="currentAngleIndex"
-                        :preview-angle-select-options="
-                            previewAngleSelectOptions
-                        "
-                        :show-quality-select="
-                            previewQualityLevels.length >= 1 &&
-                            encodingType !== 'audio'
-                        "
-                        :preview-quality-select-options="
-                            previewQualitySelectOptions
-                        "
-                        @update:selected-quality-id="onTrimQualityChange"
-                        @angle-change="switchToAngle"
                         @discard-chapters="onDiscardChapters"
                         @save-chapters="onSaveChapters"
                     />
@@ -2487,8 +2466,6 @@ onUnmounted(() => {
                             v-show="!showTrimSegmentEditor"
                             section="toolbar"
                             v-model:editor-segments="editorSegments"
-                            v-model:selected-audio-track="selectedAudioTrack"
-                            v-model:selected-quality-id="selectedQualityId"
                             :show-chapters-side-panel="showChaptersBesidePlayer"
                             :chapters-is-dirty="chapters.isDirty.value"
                             :chapters-is-saving="chapters.isSaving.value"
@@ -2509,18 +2486,6 @@ onUnmounted(() => {
                             :on-play-pause="() => playerRef?.togglePlay()"
                             :is-preview-playing="isPreviewPlaying"
                             :segment-editor-probe-fps="segmentEditorProbeFps"
-                            :show-audio-select="previewAudioTracks.length > 1"
-                            :preview-audio-select-options="
-                                previewAudioSelectOptions
-                            "
-                            :show-quality-select="
-                                previewQualityLevels.length >= 1 &&
-                                encodingType !== 'audio'
-                            "
-                            :preview-quality-select-options="
-                                previewQualitySelectOptions
-                            "
-                            @update:selected-quality-id="onTrimQualityChange"
                             @discard-chapters="onDiscardChapters"
                             @save-chapters="onSaveChapters"
                         />

@@ -18,12 +18,27 @@ const props = defineProps<{
     showAngleSwitcher: boolean;
     uniqueAnglePlaylists: { name: string; key: string }[];
     currentAngleIndex: number;
-    /** When true, hide the below-player angle row (trim toolbar carries it, or another tab is active). */
+    /** When true, hide the below-player angle row (e.g. on tabs other than the player view). */
     hideAngleSwitcher?: boolean;
+    showAudioSelect: boolean;
+    previewAudioSelectOptions: { value: number; label: string }[];
+    showQualitySelect: boolean;
+    previewQualitySelectOptions: { value: string; label: string }[];
 }>();
+
+const selectedAudioTrack = defineModel<number>('selectedAudioTrack', { required: true });
+const selectedQualityId = defineModel<string | null>('selectedQualityId', { required: true });
 
 const angleSelectOptions = computed(() =>
     props.uniqueAnglePlaylists.map((ap, i) => ({ value: i, label: ap.name })),
+);
+
+const showAngleRow = computed(
+    () => props.isCompleted && props.showAngleSwitcher && !props.hideAngleSwitcher,
+);
+
+const showPlaybackControlsRow = computed(
+    () => showAngleRow.value || props.showAudioSelect || props.showQualitySelect,
 );
 
 const emit = defineEmits<{
@@ -187,15 +202,71 @@ defineExpose({
                     />
                 </div>
                 <!--
-                    Meta strip sits in the player column under the shell, so on
-                    trim it occupies the page-background space below the 16/9
-                    player instead of leaving it blank.
+                    Below-player row: session title/status on the left,
+                    Angle / Audio / Quality dropdowns on the right.
+                    Title truncates first; if the container is too narrow to
+                    fit the dropdowns alongside, the row wraps and the
+                    dropdowns slide to a second line, still right-aligned.
                 -->
                 <div
-                    v-if="$slots['below-player']"
-                    class="shrink-0 px-4 pt-3"
+                    v-if="showPlaybackControlsRow || $slots['below-player']"
+                    class="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 pt-3"
                 >
-                    <slot name="below-player" />
+                    <div
+                        v-if="$slots['below-player']"
+                        class="min-w-0 flex-1"
+                    >
+                        <slot name="below-player" />
+                    </div>
+                    <div
+                        v-if="showPlaybackControlsRow"
+                        class="shrink-0 ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2"
+                    >
+                        <span
+                            v-if="showAngleRow"
+                            class="inline-flex shrink-0 items-center gap-1.5"
+                        >
+                            <label class="playback-slot-label shrink-0">Angle:</label>
+                            <FormSelect
+                                variant="playback"
+                                presentation="custom"
+                                numeric
+                                wrapper-class="min-w-[10rem] max-w-[min(100%,20rem)]"
+                                :model-value="currentAngleIndex"
+                                :options="angleSelectOptions"
+                                aria-label="Camera angle"
+                                @update:model-value="emit('angleChange', Number($event))"
+                            />
+                        </span>
+                        <span
+                            v-if="showAudioSelect"
+                            class="inline-flex shrink-0 items-center gap-1.5"
+                        >
+                            <label class="playback-slot-label shrink-0">Audio:</label>
+                            <FormSelect
+                                variant="playback"
+                                presentation="custom"
+                                numeric
+                                v-model="selectedAudioTrack"
+                                :options="previewAudioSelectOptions"
+                                aria-label="Audio track"
+                            />
+                        </span>
+                        <span
+                            v-if="showQualitySelect"
+                            class="inline-flex shrink-0 items-center gap-1.5"
+                        >
+                            <label class="playback-slot-label shrink-0">Quality:</label>
+                            <FormSelect
+                                variant="playback"
+                                presentation="custom"
+                                :model-value="selectedQualityId ?? ''"
+                                :options="previewQualitySelectOptions"
+                                aria-label="Quality"
+                                @update:model-value="selectedQualityId = $event === '' ? null : String($event)"
+                            />
+                        </span>
+                    </div>
                 </div>
             </div>
 
@@ -233,24 +304,6 @@ defineExpose({
             >
                 <slot name="aside" />
             </aside>
-        </div>
-
-        <!-- Angle switcher below player (completed multi-angle) -->
-        <div
-            v-if="isCompleted && showAngleSwitcher && !hideAngleSwitcher"
-            class="shrink-0 flex flex-wrap items-center gap-2 px-4 py-2"
-        >
-            <label class="playback-slot-label shrink-0">Angle:</label>
-            <FormSelect
-                variant="playback"
-                presentation="custom"
-                numeric
-                wrapper-class="min-w-[10rem] max-w-[min(100%,20rem)]"
-                :model-value="currentAngleIndex"
-                :options="angleSelectOptions"
-                aria-label="Camera angle"
-                @update:model-value="emit('angleChange', Number($event))"
-            />
         </div>
     </div>
 </template>
