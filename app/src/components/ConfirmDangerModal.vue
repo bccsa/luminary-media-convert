@@ -21,7 +21,7 @@ const props = withDefaults(
         cancelLabel: 'Cancel',
         loadingLabel: 'Working…',
         loading: false,
-    },
+    }
 );
 
 const emit = defineEmits<{
@@ -37,7 +37,7 @@ watch(
     () => props.open,
     (isOpen) => {
         if (isOpen) optionChecked.value = false;
-    },
+    }
 );
 
 function close() {
@@ -66,7 +66,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown));
     <Teleport to="body">
         <div
             v-if="open"
-            class="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            class="fixed inset-0 z-100 flex items-center justify-center p-4"
             aria-modal="true"
             role="dialog"
             :aria-labelledby="titleId"

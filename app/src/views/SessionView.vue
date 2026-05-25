@@ -1596,7 +1596,10 @@ watch(
 const showAside = computed(
     () =>
         activeTab.value === 'trim' &&
-        (showProbeConfig.value || showChaptersBesidePlayer.value || showEncoding.value || isCompleted.value)
+        (showProbeConfig.value ||
+            showChaptersBesidePlayer.value ||
+            showEncoding.value ||
+            isCompleted.value)
 );
 
 /** Chapter card is shown whenever we have a duration to work with, regardless of playback URL. */
@@ -1634,9 +1637,7 @@ const trimPlayerBreakoutClass = computed(() => {
 });
 
 /** Primary editing tab: timeline + trim before encode; chapters after. */
-const trimTabLabel = computed(() =>
-    isCompleted.value ? 'Chapters' : 'Trim'
-);
+const trimTabLabel = computed(() => (isCompleted.value ? 'Chapters' : 'Trim'));
 
 // Lock page scroll and fix header max-width to the trim layout (single view now).
 watch(
@@ -1691,7 +1692,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div :class="headerLayout === 'session-trim' ? 'flex h-full w-full flex-col' : 'flex min-h-dvh w-full max-w-none flex-col'">
+    <div
+        :class="
+            headerLayout === 'session-trim'
+                ? 'flex h-full w-full flex-col'
+                : 'flex min-h-dvh w-full max-w-none flex-col'
+        "
+    >
         <div
             class="w-full flex-1 transition-all duration-300"
             :class="
@@ -1746,8 +1753,19 @@ onUnmounted(() => {
                         class="inline-flex shrink-0 items-center justify-center rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                         title="Back to sessions"
                     >
-                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.25" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+                        <svg
+                            class="h-6 w-6"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            stroke-width="2.25"
+                            aria-hidden="true"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M15 19l-7-7 7-7"
+                            />
                         </svg>
                         <span class="sr-only">Back to sessions</span>
                     </router-link>
@@ -1767,7 +1785,9 @@ onUnmounted(() => {
                     <div
                         class="w-full max-w-md rounded-2xl border border-slate-200/90 bg-white/90 p-8 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10"
                     >
-                        <div class="flex flex-col items-center gap-4 text-center">
+                        <div
+                            class="flex flex-col items-center gap-4 text-center"
+                        >
                             <div
                                 class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800/80"
                             >
@@ -1790,7 +1810,9 @@ onUnmounted(() => {
                             >
                                 Session expired
                             </h2>
-                            <p class="text-xs text-slate-500 dark:text-slate-400">
+                            <p
+                                class="text-xs text-slate-500 dark:text-slate-400"
+                            >
                                 The encoding session is no longer active and
                                 cannot be interacted with.
                             </p>
@@ -1809,8 +1831,8 @@ onUnmounted(() => {
                                         class="text-sm text-slate-800 dark:text-slate-200"
                                     >
                                         {{
-                                            statusConfig[session.status]?.label ??
-                                            session.status
+                                            statusConfig[session.status]
+                                                ?.label ?? session.status
                                         }}
                                     </p>
                                 </div>
@@ -1829,7 +1851,9 @@ onUnmounted(() => {
                                     </p>
                                 </div>
                             </div>
-                            <div class="mt-2 flex w-full flex-col gap-2 sm:flex-row">
+                            <div
+                                class="mt-2 flex w-full flex-col gap-2 sm:flex-row"
+                            >
                                 <button
                                     type="button"
                                     class="flex-1 cursor-pointer rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
@@ -1863,347 +1887,455 @@ onUnmounted(() => {
                         v-if="!showSessionDetailCard"
                         :class="[
                             'min-w-0 flex flex-col',
-                            activeTab === 'trim' ? 'order-2 flex-1 min-h-0' : '',
+                            activeTab === 'trim'
+                                ? 'order-2 flex-1 min-h-0'
+                                : '',
                         ]"
                     >
                         <SessionPlayerStrip
                             ref="sessionPlayerStripRef"
                             class="flex-1 min-h-0"
-                                :active-playback-url="activePlaybackUrl"
-                                :is-completed="isCompleted"
-                                :thumbnail-vtt-url="thumbnailVttUrl"
-                                :encoding-type="encodingType"
-                                :is-audio-only="isAudioOnly"
-                                :encryption-key-hex="encryptionKeyHex"
-                                :poller-encryption-key-hex="
-                                    poller.encryptionKeyHex.value ?? undefined
-                                "
-                                :show-aside="showAside"
-                                :active-tab="activeTab"
-                                :show-angle-switcher="showAngleSwitcher"
-                                :hide-angle-switcher="hideAngleBelowPlayer"
-                                :unique-angle-playlists="uniqueAnglePlaylists"
-                                :current-angle-index="currentAngleIndex"
-                                @quality-levels="onPreviewQualityLevels"
-                                @playing-change="isPreviewPlaying = $event"
-                                @duration-change="playerDuration = $event"
-                                @audio-tracks="onNativeAudioTracks"
-                                @angle-change="switchToAngle"
-                            >
-                                <!--
+                            :active-playback-url="activePlaybackUrl"
+                            :is-completed="isCompleted"
+                            :thumbnail-vtt-url="thumbnailVttUrl"
+                            :encoding-type="encodingType"
+                            :is-audio-only="isAudioOnly"
+                            :encryption-key-hex="encryptionKeyHex"
+                            :poller-encryption-key-hex="
+                                poller.encryptionKeyHex.value ?? undefined
+                            "
+                            :show-aside="showAside"
+                            :active-tab="activeTab"
+                            :show-angle-switcher="showAngleSwitcher"
+                            :hide-angle-switcher="hideAngleBelowPlayer"
+                            :unique-angle-playlists="uniqueAnglePlaylists"
+                            :current-angle-index="currentAngleIndex"
+                            @quality-levels="onPreviewQualityLevels"
+                            @playing-change="isPreviewPlaying = $event"
+                            @duration-change="playerDuration = $event"
+                            @audio-tracks="onNativeAudioTracks"
+                            @angle-change="switchToAngle"
+                        >
+                            <!--
                                     Session title + status + relative created label,
                                     shown directly under the player so the page
                                     header stays minimal (just the back arrow).
                                     Clicking the title swaps in an inline rename
                                     field (Enter to save, Esc to cancel).
                                 -->
-                                <template #below-player>
-                                    <div
-                                        v-if="editingName"
-                                        class="flex min-w-0 flex-wrap items-center gap-2"
+                            <template #below-player>
+                                <div
+                                    v-if="editingName"
+                                    class="flex min-w-0 flex-wrap items-center gap-2"
+                                >
+                                    <input
+                                        v-model="nameInput"
+                                        type="text"
+                                        class="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-base font-semibold text-slate-800 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                                        placeholder="Session name"
+                                        autofocus
+                                        @keyup.enter="saveName"
+                                        @keyup.escape="cancelEditName"
+                                    />
+                                    <button
+                                        type="button"
+                                        class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+                                        :disabled="savingName"
+                                        @click="saveName"
                                     >
-                                        <input
-                                            v-model="nameInput"
-                                            type="text"
-                                            class="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-base font-semibold text-slate-800 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                                            placeholder="Session name"
-                                            autofocus
-                                            @keyup.enter="saveName"
-                                            @keyup.escape="cancelEditName"
+                                        {{ savingName ? '…' : 'Save' }}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
+                                        @click="cancelEditName"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                                <div
+                                    v-else
+                                    class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"
+                                >
+                                    <button
+                                        type="button"
+                                        class="min-w-0 truncate text-base font-semibold text-slate-800 transition-colors hover:text-slate-600 dark:text-slate-100 dark:hover:text-slate-300 cursor-pointer"
+                                        :title="
+                                            sessionName
+                                                ? 'Click to rename'
+                                                : 'Click to add a name'
+                                        "
+                                        @click="startEditName"
+                                    >
+                                        {{ sessionName || 'Untitled session' }}
+                                    </button>
+                                    <StatusBadge
+                                        v-if="currentStatus"
+                                        class="shrink-0"
+                                        :label="
+                                            statusConfig[currentStatus]
+                                                ?.label ?? currentStatus
+                                        "
+                                        :color="
+                                            statusConfig[currentStatus]?.color
+                                        "
+                                        :border-color="
+                                            statusConfig[currentStatus]
+                                                ?.borderColor
+                                        "
+                                    />
+                                    <span
+                                        v-if="session?.createdAt"
+                                        class="shrink-0 text-xs text-slate-500 dark:text-slate-400"
+                                    >
+                                        {{
+                                            relativeCreatedLabel(
+                                                session.createdAt
+                                            )
+                                        }}
+                                    </span>
+                                </div>
+                            </template>
+
+                            <template #aside>
+                                <!-- Tab switcher: pre-encode (Encode settings / Chapters) -->
+                                <div
+                                    v-if="
+                                        showProbeConfig &&
+                                        showChaptersBesidePlayer
+                                    "
+                                    class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
+                                >
+                                    <button
+                                        type="button"
+                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                        :class="
+                                            encodeSidePanelTab === 'encode'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                        "
+                                        @click="encodeSidePanelTab = 'encode'"
+                                    >
+                                        Encode settings
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                        :class="
+                                            encodeSidePanelTab === 'chapters'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                        "
+                                        @click="encodeSidePanelTab = 'chapters'"
+                                    >
+                                        Clips
+                                    </button>
+                                </div>
+
+                                <!-- Tab switcher: encoding phase (Progress / Chapters) — hidden once completed -->
+                                <div
+                                    v-if="
+                                        showEncoding && showChaptersBesidePlayer
+                                    "
+                                    class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
+                                >
+                                    <button
+                                        type="button"
+                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                        :class="
+                                            encodingAsideTab === 'progress'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                        "
+                                        @click="encodingAsideTab = 'progress'"
+                                    >
+                                        Progress
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                        :class="
+                                            encodingAsideTab === 'chapters'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                        "
+                                        @click="encodingAsideTab = 'chapters'"
+                                    >
+                                        Chapters
+                                    </button>
+                                </div>
+
+                                <!-- Encoding progress panel -->
+                                <div
+                                    v-if="
+                                        showEncoding &&
+                                        (!showChaptersBesidePlayer ||
+                                            encodingAsideTab === 'progress')
+                                    "
+                                    class="min-h-0 flex-1 overflow-y-auto space-y-3"
+                                >
+                                    <div
+                                        v-if="
+                                            poller.status.value === 'queued' &&
+                                            poller.queuePosition.value != null
+                                        "
+                                        class="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-400 inline-block"
+                                    >
+                                        Queue position #{{
+                                            poller.queuePosition.value
+                                        }}
+                                    </div>
+                                    <p
+                                        v-if="etaDisplay"
+                                        class="text-right text-xs text-slate-500"
+                                    >
+                                        {{ etaDisplay }}
+                                    </p>
+                                    <div
+                                        class="space-y-3 rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-3 dark:border-slate-700/50 dark:bg-slate-800/30"
+                                    >
+                                        <ProgressBar
+                                            label="Encoding"
+                                            :progress="
+                                                poller.pipelineProgress.value
+                                                    ?.encoding ??
+                                                poller.progress.value
+                                            "
                                         />
-                                        <button
-                                            type="button"
-                                            class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
-                                            :disabled="savingName"
-                                            @click="saveName"
-                                        >
-                                            {{ savingName ? '…' : 'Save' }}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
-                                            @click="cancelEditName"
-                                        >
-                                            Cancel
-                                        </button>
-                                    </div>
-                                    <div
-                                        v-else
-                                        class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"
-                                    >
-                                        <button
-                                            type="button"
-                                            class="min-w-0 truncate text-base font-semibold text-slate-800 transition-colors hover:text-slate-600 dark:text-slate-100 dark:hover:text-slate-300 cursor-pointer"
-                                            :title="sessionName ? 'Click to rename' : 'Click to add a name'"
-                                            @click="startEditName"
-                                        >
-                                            {{ sessionName || 'Untitled session' }}
-                                        </button>
-                                        <StatusBadge
-                                            v-if="currentStatus"
-                                            class="shrink-0"
-                                            :label="statusConfig[currentStatus]?.label ?? currentStatus"
-                                            :color="statusConfig[currentStatus]?.color"
-                                            :border-color="statusConfig[currentStatus]?.borderColor"
-                                        />
-                                        <span
-                                            v-if="session?.createdAt"
-                                            class="shrink-0 text-xs text-slate-500 dark:text-slate-400"
-                                        >
-                                            {{ relativeCreatedLabel(session.createdAt) }}
-                                        </span>
-                                    </div>
-                                </template>
-
-                                <template #aside>
-                                    <!-- Tab switcher: pre-encode (Encode settings / Chapters) -->
-                                    <div
-                                        v-if="showProbeConfig && showChaptersBesidePlayer"
-                                        class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
-                                    >
-                                        <button
-                                            type="button"
-                                            class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                            :class="encodeSidePanelTab === 'encode' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
-                                            @click="encodeSidePanelTab = 'encode'"
-                                        >
-                                            Encode settings
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                            :class="encodeSidePanelTab === 'chapters' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
-                                            @click="encodeSidePanelTab = 'chapters'"
-                                        >
-                                            Clips
-                                        </button>
-                                    </div>
-
-                                    <!-- Tab switcher: encoding phase (Progress / Chapters) — hidden once completed -->
-                                    <div
-                                        v-if="showEncoding && showChaptersBesidePlayer"
-                                        class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
-                                    >
-                                        <button
-                                            type="button"
-                                            class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                            :class="encodingAsideTab === 'progress' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
-                                            @click="encodingAsideTab = 'progress'"
-                                        >
-                                            Progress
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                            :class="encodingAsideTab === 'chapters' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
-                                            @click="encodingAsideTab = 'chapters'"
-                                        >
-                                            Chapters
-                                        </button>
-                                    </div>
-
-                                    <!-- Encoding progress panel -->
-                                    <div
-                                        v-if="showEncoding && (!showChaptersBesidePlayer || encodingAsideTab === 'progress')"
-                                        class="min-h-0 flex-1 overflow-y-auto space-y-3"
-                                    >
-                                        <div
+                                        <ProgressBar
                                             v-if="
-                                                poller.status.value === 'queued' &&
-                                                poller.queuePosition.value != null
+                                                poller.pipelineProgress.value
+                                                    ?.encrypting != null
                                             "
-                                            class="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-400 inline-block"
-                                        >
-                                            Queue position #{{ poller.queuePosition.value }}
-                                        </div>
-                                        <p
-                                            v-if="etaDisplay"
-                                            class="text-right text-xs text-slate-500"
-                                        >
-                                            {{ etaDisplay }}
-                                        </p>
-                                        <div class="space-y-3 rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-3 dark:border-slate-700/50 dark:bg-slate-800/30">
-                                            <ProgressBar
-                                                label="Encoding"
-                                                :progress="
-                                                    poller.pipelineProgress.value?.encoding ??
-                                                    poller.progress.value
-                                                "
-                                            />
-                                            <ProgressBar
-                                                v-if="poller.pipelineProgress.value?.encrypting != null"
-                                                label="Encrypting"
-                                                :progress="poller.pipelineProgress.value.encrypting"
-                                            />
-                                            <ProgressBar
-                                                v-if="poller.pipelineProgress.value?.uploading != null"
-                                                label="S3 upload"
-                                                :progress="poller.pipelineProgress.value.uploading"
-                                            />
-                                        </div>
-                                        <div v-if="poller.status.value === 'queued' || poller.status.value === 'encoding' || poller.status.value === 'encrypting'">
-                                            <button
-                                                type="button"
-                                                class="cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/40"
-                                                @click="onCancelEncode"
-                                            >
-                                                Cancel encoding
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <!-- Encode config panel -->
-                                    <div
-                                        v-if="
-                                            showProbeConfig &&
-                                            (!showChaptersBesidePlayer ||
-                                                encodeSidePanelTab === 'encode')
-                                        "
-                                        class="min-h-0 flex-1 overflow-y-auto"
-                                    >
-                                        <SessionOutputPanel
-                                            ref="outputPanelRef"
-                                            :show-probe-config="showProbeConfig"
-                                            :probe-result="probeResult"
-                                            :byte-range-enabled="
-                                                byteRangeEnabled
+                                            label="Encrypting"
+                                            :progress="
+                                                poller.pipelineProgress.value
+                                                    .encrypting
                                             "
-                                            encode-primary-action="start-encoding"
-                                            appearance="session"
-                                            @submit="onEncodeSubmit"
-                                            @can-submit-change="
-                                                onEncodeCanSubmitChange
+                                        />
+                                        <ProgressBar
+                                            v-if="
+                                                poller.pipelineProgress.value
+                                                    ?.uploading != null
+                                            "
+                                            label="S3 upload"
+                                            :progress="
+                                                poller.pipelineProgress.value
+                                                    .uploading
                                             "
                                         />
                                     </div>
-
-                                    <!-- Tab switcher: completed phase (Chapters / Delivery) -->
                                     <div
-                                        v-if="isCompleted && showChaptersBesidePlayer"
-                                        class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
+                                        v-if="
+                                            poller.status.value === 'queued' ||
+                                            poller.status.value ===
+                                                'encoding' ||
+                                            poller.status.value === 'encrypting'
+                                        "
                                     >
                                         <button
                                             type="button"
-                                            class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                            :class="completedAsideTab === 'chapters' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
-                                            @click="completedAsideTab = 'chapters'"
+                                            class="cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/40"
+                                            @click="onCancelEncode"
                                         >
-                                            Chapters
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                            :class="completedAsideTab === 'delivery' ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100' : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'"
-                                            @click="completedAsideTab = 'delivery'"
-                                        >
-                                            Delivery
+                                            Cancel encoding
                                         </button>
                                     </div>
+                                </div>
 
-                                    <!-- Chapter list panel -->
-                                    <div
-                                        v-if="
-                                            showChaptersBesidePlayer &&
-                                            (!showProbeConfig || encodeSidePanelTab === 'chapters') &&
-                                            (!showEncoding || encodingAsideTab === 'chapters') &&
-                                            (!isCompleted || completedAsideTab === 'chapters')
+                                <!-- Encode config panel -->
+                                <div
+                                    v-if="
+                                        showProbeConfig &&
+                                        (!showChaptersBesidePlayer ||
+                                            encodeSidePanelTab === 'encode')
+                                    "
+                                    class="min-h-0 flex-1 overflow-y-auto"
+                                >
+                                    <SessionOutputPanel
+                                        ref="outputPanelRef"
+                                        :show-probe-config="showProbeConfig"
+                                        :probe-result="probeResult"
+                                        :byte-range-enabled="byteRangeEnabled"
+                                        encode-primary-action="start-encoding"
+                                        appearance="session"
+                                        @submit="onEncodeSubmit"
+                                        @can-submit-change="
+                                            onEncodeCanSubmitChange
                                         "
-                                        class="min-h-0 flex-1 flex flex-col overflow-hidden"
-                                    >
-                                        <SegmentEditor
-                                            ref="chapterSegmentEditorRef"
-                                            v-model="chapterSegments"
-                                            class="min-h-0 flex-1 overflow-hidden"
-                                            mode="chapters"
-                                            split-list-panel
-                                            :duration="
-                                                chaptersSidePanelDuration
-                                            "
-                                            :get-current-time="
-                                                () =>
-                                                    playerRef?.getCurrentTime() ??
-                                                    0
-                                            "
-                                            :on-seek="
-                                                (t: number) =>
-                                                    playerRef?.seek(t)
-                                            "
-                                            :on-play-pause="
-                                                () => playerRef?.togglePlay()
-                                            "
-                                            :is-playing="isPreviewPlaying"
-                                            :ripple-edit="false"
-                                            :show-timeline="false"
-                                            :show-toolbar="false"
-                                            :show-playback-controls="false"
-                                            :show-help="false"
-                                            :read-only="showProbeConfig"
-                                            :title="showProbeConfig ? 'Clips' : 'Chapters'"
-                                            :empty-title="showProbeConfig ? 'No clips yet' : 'No chapters yet'"
-                                            :empty-hint="showProbeConfig ? 'Use the trim timeline below to add in/out marks for the ranges you want to keep.' : 'Use the trim timeline below to add in/out marks, or load chapters from a VTT sidecar.'"
-                                            keyboard-scope="focus"
-                                            :fps="segmentEditorProbeFps"
-                                        />
-                                        <p
-                                            v-if="chaptersSaveError"
-                                            class="shrink-0 text-xs text-red-600 dark:text-red-400"
-                                        >
-                                            {{ chaptersSaveError }}
-                                        </p>
-                                    </div>
+                                    />
+                                </div>
 
-                                    <!-- Delivery panel (post-encode, in aside) -->
-                                    <div
-                                        v-if="isCompleted && completedAsideTab === 'delivery'"
-                                        class="min-h-0 flex-1 overflow-y-auto"
+                                <!-- Tab switcher: completed phase (Chapters / Delivery) -->
+                                <div
+                                    v-if="
+                                        isCompleted && showChaptersBesidePlayer
+                                    "
+                                    class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
+                                >
+                                    <button
+                                        type="button"
+                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                        :class="
+                                            completedAsideTab === 'chapters'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                        "
+                                        @click="completedAsideTab = 'chapters'"
                                     >
-                                        <SessionPostProcessPanel
-                                            v-model:show-files="showFiles"
-                                            v-model:selected-target-config-id="selectedTargetConfigId"
-                                            v-model:move-new-prefix="moveNewPrefix"
-                                            v-model:move-confirmed-overwrite="moveConfirmedOverwrite"
-                                            v-model:rename-new-prefix="renameNewPrefix"
-                                            v-model:rename-confirmed-overwrite="renameConfirmedOverwrite"
-                                            :is-completed="isCompleted"
-                                            :is-terminal="isTerminal"
-                                            :current-status="currentStatus"
-                                            :display-master-playlist="displayMasterPlaylist"
-                                            :s3-url="s3Url"
-                                            :copied="copied"
-                                            :is-encrypted="isEncrypted"
-                                            :encryption-key-hex="encryptionKeyHex"
-                                            :copied-key="copiedKey"
-                                            :display-files="displayFiles"
-                                            :should-collapse-files="shouldCollapseFiles"
-                                            :session="session"
-                                            :has-s3-files="hasS3Files"
-                                            :show-move-form="showMoveForm"
-                                            :show-rename-form="showRenameForm"
-                                            :move-target-s3-select-options="moveTargetS3SelectOptions"
-                                            :move-prefix-warning="movePrefixWarning"
-                                            :move-error="moveError"
-                                            :can-move="canMove"
-                                            :moving="moving"
-                                            :rename-prefix-warning="renamePrefixWarning"
-                                            :rename-error="renameError"
-                                            :can-rename="canRename"
-                                            :renaming="renaming"
-                                            @copy-playback-url="copyPlaybackUrl"
-                                            @copy-encryption-key="copyEncryptionKey"
-                                            @copy-output-object-key="copyOutputObjectKey"
-                                            @open-move-form="openMoveForm"
-                                            @open-rename-form="openRenameForm"
-                                            @check-move-prefix="checkMovePrefix"
-                                            @confirm-move="confirmMove"
-                                            @cancel-move="showMoveForm = false"
-                                            @check-rename-prefix="checkRenamePrefix"
-                                            @confirm-rename="confirmRename"
-                                            @cancel-rename="showRenameForm = false"
-                                            @delete-session="deleteModalOpen = true"
-                                        />
-                                    </div>
-                                </template>
-                            </SessionPlayerStrip>
+                                        Chapters
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                                        :class="
+                                            completedAsideTab === 'delivery'
+                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
+                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                                        "
+                                        @click="completedAsideTab = 'delivery'"
+                                    >
+                                        Delivery
+                                    </button>
+                                </div>
+
+                                <!-- Chapter list panel -->
+                                <div
+                                    v-if="
+                                        showChaptersBesidePlayer &&
+                                        (!showProbeConfig ||
+                                            encodeSidePanelTab ===
+                                                'chapters') &&
+                                        (!showEncoding ||
+                                            encodingAsideTab === 'chapters') &&
+                                        (!isCompleted ||
+                                            completedAsideTab === 'chapters')
+                                    "
+                                    class="min-h-0 flex-1 flex flex-col overflow-hidden"
+                                >
+                                    <SegmentEditor
+                                        ref="chapterSegmentEditorRef"
+                                        v-model="chapterSegments"
+                                        class="min-h-0 flex-1 overflow-hidden"
+                                        mode="chapters"
+                                        split-list-panel
+                                        :duration="chaptersSidePanelDuration"
+                                        :get-current-time="
+                                            () =>
+                                                playerRef?.getCurrentTime() ?? 0
+                                        "
+                                        :on-seek="
+                                            (t: number) => playerRef?.seek(t)
+                                        "
+                                        :on-play-pause="
+                                            () => playerRef?.togglePlay()
+                                        "
+                                        :is-playing="isPreviewPlaying"
+                                        :ripple-edit="false"
+                                        :show-timeline="false"
+                                        :show-toolbar="false"
+                                        :show-playback-controls="false"
+                                        :show-help="false"
+                                        :read-only="showProbeConfig"
+                                        :title="
+                                            showProbeConfig
+                                                ? 'Clips'
+                                                : 'Chapters'
+                                        "
+                                        :empty-title="
+                                            showProbeConfig
+                                                ? 'No clips yet'
+                                                : 'No chapters yet'
+                                        "
+                                        :empty-hint="
+                                            showProbeConfig
+                                                ? 'Use the timeline below to add in/out marks for the ranges you want to keep. If nothing is selected, it will take the whole timline '
+                                                : 'Use the trim timeline below to add in/out marks, or load chapters from a VTT sidecar.'
+                                        "
+                                        keyboard-scope="focus"
+                                        :fps="segmentEditorProbeFps"
+                                    />
+                                    <p
+                                        v-if="chaptersSaveError"
+                                        class="shrink-0 text-xs text-red-600 dark:text-red-400"
+                                    >
+                                        {{ chaptersSaveError }}
+                                    </p>
+                                </div>
+
+                                <!-- Delivery panel (post-encode, in aside) -->
+                                <div
+                                    v-if="
+                                        isCompleted &&
+                                        completedAsideTab === 'delivery'
+                                    "
+                                    class="min-h-0 flex-1 overflow-y-auto"
+                                >
+                                    <SessionPostProcessPanel
+                                        v-model:show-files="showFiles"
+                                        v-model:selected-target-config-id="
+                                            selectedTargetConfigId
+                                        "
+                                        v-model:move-new-prefix="moveNewPrefix"
+                                        v-model:move-confirmed-overwrite="
+                                            moveConfirmedOverwrite
+                                        "
+                                        v-model:rename-new-prefix="
+                                            renameNewPrefix
+                                        "
+                                        v-model:rename-confirmed-overwrite="
+                                            renameConfirmedOverwrite
+                                        "
+                                        :is-completed="isCompleted"
+                                        :is-terminal="isTerminal"
+                                        :current-status="currentStatus"
+                                        :display-master-playlist="
+                                            displayMasterPlaylist
+                                        "
+                                        :s3-url="s3Url"
+                                        :copied="copied"
+                                        :is-encrypted="isEncrypted"
+                                        :encryption-key-hex="encryptionKeyHex"
+                                        :copied-key="copiedKey"
+                                        :display-files="displayFiles"
+                                        :should-collapse-files="
+                                            shouldCollapseFiles
+                                        "
+                                        :session="session"
+                                        :has-s3-files="hasS3Files"
+                                        :show-move-form="showMoveForm"
+                                        :show-rename-form="showRenameForm"
+                                        :move-target-s3-select-options="
+                                            moveTargetS3SelectOptions
+                                        "
+                                        :move-prefix-warning="movePrefixWarning"
+                                        :move-error="moveError"
+                                        :can-move="canMove"
+                                        :moving="moving"
+                                        :rename-prefix-warning="
+                                            renamePrefixWarning
+                                        "
+                                        :rename-error="renameError"
+                                        :can-rename="canRename"
+                                        :renaming="renaming"
+                                        @copy-playback-url="copyPlaybackUrl"
+                                        @copy-encryption-key="copyEncryptionKey"
+                                        @copy-output-object-key="
+                                            copyOutputObjectKey
+                                        "
+                                        @open-move-form="openMoveForm"
+                                        @open-rename-form="openRenameForm"
+                                        @check-move-prefix="checkMovePrefix"
+                                        @confirm-move="confirmMove"
+                                        @cancel-move="showMoveForm = false"
+                                        @check-rename-prefix="checkRenamePrefix"
+                                        @confirm-rename="confirmRename"
+                                        @cancel-rename="showRenameForm = false"
+                                        @delete-session="deleteModalOpen = true"
+                                    />
+                                </div>
+                            </template>
+                        </SessionPlayerStrip>
 
                         <Teleport to="#app-session-workflow-teleport">
                             <!-- Start Encoding button (pre-encode only) -->
@@ -2212,10 +2344,16 @@ onUnmounted(() => {
                                 type="button"
                                 class="cursor-pointer rounded-lg bg-sky-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600 sm:px-3 sm:py-1.5 sm:text-xs"
                                 :disabled="!encodeConfigCanSubmit || submitting"
-                                :title="!encodeConfigCanSubmit && !submitting ? 'Open Encode settings and complete the ladder (all required options) first.' : undefined"
+                                :title="
+                                    !encodeConfigCanSubmit && !submitting
+                                        ? 'Open Encode settings and complete the ladder (all required options) first.'
+                                        : undefined
+                                "
                                 @click="onStartEncodingFromTrim"
                             >
-                                {{ submitting ? 'Starting…' : 'Start encoding' }}
+                                {{
+                                    submitting ? 'Starting…' : 'Start encoding'
+                                }}
                             </button>
                         </Teleport>
                     </div>
@@ -2272,41 +2410,74 @@ onUnmounted(() => {
                         class="order-1 flex w-full flex-1 flex-col"
                     >
                         <!-- Upload / probe progress (pre-encode only) — centered card in the viewport. -->
-                        <div class="flex w-full flex-1 items-center justify-center px-4 py-10 sm:px-6 min-h-[70dvh]">
-                            <div :class="[sessionDetailCardSurfaceClass, 'w-full max-w-lg']">
+                        <div
+                            class="flex w-full flex-1 items-center justify-center px-4 py-10 sm:px-6 min-h-[70dvh]"
+                        >
+                            <div
+                                :class="[
+                                    sessionDetailCardSurfaceClass,
+                                    'w-full max-w-lg',
+                                ]"
+                            >
                                 <SessionWorkflowPanel
-                                :show-probe-config="showProbeConfig"
-                                :submitting="submitting"
-                                :show-encoding="showEncoding"
-                                :is-completed="isCompleted"
-                                :current-status="currentStatus"
-                                :show-upload-progress="showUploadProgress"
-                                :show-upload-done-waiting="showUploadDoneWaiting"
-                                :show-upload-remote-message="showUploadRemoteMessage"
-                                :active-upload-progress="activeUpload?.progress"
-                                :active-upload-can-cancel="activeUpload ? activeUpload.progress < 100 : false"
-                                :remote-ingest-progress="remoteIngestProgress"
-                                :remote-ingest-label="remoteIngestLabel"
-                                :ingest-eta-display="ingestEtaDisplay"
-                                :poller-ingest-total-bytes="poller.ingestTotalBytes.value"
-                                :probe-loading="probeLoading"
-                                :session-error="session?.error"
-                                :encoder-label="displayEncoderLabel"
-                                :display-segment-format="displaySegmentFormat"
-                                :encoding-type="encodingType"
-                                :eta-display="etaDisplay"
-                                :poller-status="poller.status.value"
-                                :poller-queue-position="poller.queuePosition.value"
-                                :pipeline-encoding="poller.pipelineProgress.value?.encoding ?? poller.progress.value"
-                                :pipeline-encrypting="poller.pipelineProgress.value?.encrypting"
-                                :pipeline-uploading="poller.pipelineProgress.value?.uploading"
-                                :poller-progress="poller.progress.value"
-                                :poller-error="poller.error.value"
-                                :is-encrypted="isEncrypted"
-                                :imported-session="!!session?.imported"
-                                @switch-tab="completedAsideTab = 'delivery'"
-                                @cancel-upload="cancelUpload"
-                                @cancel-encode="onCancelEncode"
+                                    :show-probe-config="showProbeConfig"
+                                    :submitting="submitting"
+                                    :show-encoding="showEncoding"
+                                    :is-completed="isCompleted"
+                                    :current-status="currentStatus"
+                                    :show-upload-progress="showUploadProgress"
+                                    :show-upload-done-waiting="
+                                        showUploadDoneWaiting
+                                    "
+                                    :show-upload-remote-message="
+                                        showUploadRemoteMessage
+                                    "
+                                    :active-upload-progress="
+                                        activeUpload?.progress
+                                    "
+                                    :active-upload-can-cancel="
+                                        activeUpload
+                                            ? activeUpload.progress < 100
+                                            : false
+                                    "
+                                    :remote-ingest-progress="
+                                        remoteIngestProgress
+                                    "
+                                    :remote-ingest-label="remoteIngestLabel"
+                                    :ingest-eta-display="ingestEtaDisplay"
+                                    :poller-ingest-total-bytes="
+                                        poller.ingestTotalBytes.value
+                                    "
+                                    :probe-loading="probeLoading"
+                                    :session-error="session?.error"
+                                    :encoder-label="displayEncoderLabel"
+                                    :display-segment-format="
+                                        displaySegmentFormat
+                                    "
+                                    :encoding-type="encodingType"
+                                    :eta-display="etaDisplay"
+                                    :poller-status="poller.status.value"
+                                    :poller-queue-position="
+                                        poller.queuePosition.value
+                                    "
+                                    :pipeline-encoding="
+                                        poller.pipelineProgress.value
+                                            ?.encoding ?? poller.progress.value
+                                    "
+                                    :pipeline-encrypting="
+                                        poller.pipelineProgress.value
+                                            ?.encrypting
+                                    "
+                                    :pipeline-uploading="
+                                        poller.pipelineProgress.value?.uploading
+                                    "
+                                    :poller-progress="poller.progress.value"
+                                    :poller-error="poller.error.value"
+                                    :is-encrypted="isEncrypted"
+                                    :imported-session="!!session?.imported"
+                                    @switch-tab="completedAsideTab = 'delivery'"
+                                    @cancel-upload="cancelUpload"
+                                    @cancel-encode="onCancelEncode"
                                 />
                             </div>
                         </div>
