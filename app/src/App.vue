@@ -194,6 +194,18 @@ watch(isAuthenticated, async (authenticated) => {
                     class="mx-auto flex min-h-14 w-full items-center gap-1.5 py-2 sm:gap-2 transition-[padding,max-width] duration-200"
                     :class="headerInnerClass"
                 >
+                    <!-- Session detail: back arrow teleported in from SessionView, sits before the brand -->
+                    <div
+                        v-if="isSessionDetail"
+                        id="app-session-meta-teleport"
+                        class="flex shrink-0 items-center"
+                    />
+                    <span
+                        v-if="isSessionDetail"
+                        class="shrink-0 select-none text-base font-light text-slate-300 dark:text-slate-600 sm:text-lg"
+                        aria-hidden="true"
+                    >|</span>
+
                     <router-link
                         to="/sessions"
                         class="flex shrink-0 items-center text-base font-bold tracking-tight text-slate-900 dark:text-slate-100 sm:text-lg"
@@ -201,13 +213,6 @@ watch(isAuthenticated, async (authenticated) => {
                         <span class="sm:hidden">Luminary</span>
                         <span class="hidden sm:inline">Luminary Media Convert</span>
                     </router-link>
-
-                    <!-- Session detail: back arrow + session name/status (teleported from SessionView) -->
-                    <div
-                        v-if="isSessionDetail"
-                        id="app-session-meta-teleport"
-                        class="flex min-w-0 items-center gap-1.5 overflow-hidden"
-                    />
 
                     <AppPrimaryNav />
 
