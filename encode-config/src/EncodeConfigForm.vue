@@ -262,7 +262,6 @@ function reanalyzeVideo() {
                 videoBitrateKbps: rung.bitrateKbps,
                 copyStream: false,
                 audioGroupId,
-                label: rung.label,
                 vbr: true,
             };
         });
@@ -729,7 +728,7 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
             </summary>
             <fieldset class="ecf-detect-body ecf-fieldset">
                 <div v-if="editableVideoTracks.length > 0">
-                    <p class="ecf-detect-sub">Video tracks</p>
+                    <p class="ecf-detect-sub">Angle</p>
                     <div class="ecf-table-wrap">
                         <table class="ecf-table">
                             <thead class="ecf-thead">
