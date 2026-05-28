@@ -1093,9 +1093,17 @@ describe('SegmentEditor — exposed methods', () => {
         await buttons[2].trigger('click'); // Add
         await flush();
         expect(latestSegments(w)).toHaveLength(2);
-        // Clear All becomes visible with segments present.
+        // Clear All becomes visible with segments present; clicking it opens a
+        // confirm dialog rather than clearing immediately.
         const clear = w.findAll('.se-btn--danger')[0];
         await clear.trigger('click');
+        await flush();
+        expect(latestSegments(w)).toHaveLength(2);
+        const confirm = document.body.querySelector(
+            '.se-confirm-btn--danger',
+        ) as HTMLElement | null;
+        expect(confirm).not.toBeNull();
+        confirm!.click();
         await flush();
         expect(latestSegments(w)).toHaveLength(0);
     });

@@ -1028,6 +1028,68 @@ html.dark .se-help {
     vertical-align: middle;
 }
 
+/* Confirm dialog — portaled to body, so it must define its own tokens. */
+.se-confirm {
+    --se-kbd-bg: rgb(250 250 250);
+    --se-kbd-border: rgb(228 228 231);
+    --se-radius: 10px;
+}
+
+html.dark .se-confirm {
+    --se-kbd-bg: rgb(15 23 42 / 0.45);
+    --se-kbd-border: rgb(71 85 105 / 0.55);
+}
+
+.se-confirm-panel {
+    max-width: min(26rem, calc(100vw - 2rem));
+}
+
+.se-confirm-text {
+    margin: 0 0 1.25rem 0;
+    color: var(--se-text-dim);
+    line-height: 1.5;
+}
+
+.se-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.se-confirm-btn {
+    appearance: none;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    font-family: inherit;
+    color: var(--se-text);
+    background: transparent;
+    border: 1px solid var(--se-help-surface-border);
+    border-radius: var(--se-radius-sm, 6px);
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.se-confirm-btn:hover {
+    background: rgb(148 163 184 / 0.15);
+}
+
+.se-confirm-btn:focus-visible {
+    outline: 2px solid var(--se-accent);
+    outline-offset: 2px;
+}
+
+.se-confirm-btn--danger {
+    color: #fff;
+    background: rgb(220 38 38);
+    border-color: rgb(220 38 38);
+}
+
+.se-confirm-btn--danger:hover {
+    background: rgb(185 28 28);
+    border-color: rgb(185 28 28);
+}
+
 /* --------------------------------------------------------------------------
    List block (trim / chapters / subtitles) — heading + scroll area
    -------------------------------------------------------------------------- */

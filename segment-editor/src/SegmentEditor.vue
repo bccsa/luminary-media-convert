@@ -126,6 +126,14 @@ const modeTitle = computed(() => {
     }
 });
 
+const clearNoun = computed(() => {
+    switch (props.mode) {
+        case 'chapters': return 'chapters';
+        case 'subtitles': return 'subtitle cues';
+        default: return 'clips';
+    }
+});
+
 /** Hint row under playback: off for trim (header ? opens the same help); on for chapters/subtitles unless overridden. */
 const shortcutsStripVisible = computed(
     () => props.showTimeline && (props.showShortcutsStrip ?? props.mode !== 'trim'),
@@ -648,6 +656,11 @@ function clearAll() {
     pendingInSec.value = null;
 }
 
+function performClearAll() {
+    clearAll();
+    confirmClearOpen.value = false;
+}
+
 function clampTime(sec: number): number {
     return Math.max(0, Math.min(props.duration, sec));
 }
@@ -706,6 +719,7 @@ function onLabelBlur(e: FocusEvent) {
 
 const stepMultiplier = ref(1);
 const helpOpen = ref(false);
+const confirmClearOpen = ref(false);
 
 function onKeyDown(e: KeyboardEvent) {
     const target = e.target as HTMLElement | null;
@@ -779,6 +793,7 @@ function onKeyDown(e: KeyboardEvent) {
             clearSelection();
             pendingInSec.value = null;
             helpOpen.value = false;
+            confirmClearOpen.value = false;
             return;
         }
         case '?': { helpOpen.value = !helpOpen.value; return; }
@@ -1221,7 +1236,7 @@ defineExpose({
                     v-if="segments.length > 0"
                     type="button"
                     class="se-btn se-btn--danger"
-                    @click="clearAll"
+                    @click="confirmClearOpen = true"
                 >
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
                     Clear All
@@ -1568,7 +1583,7 @@ defineExpose({
                     v-if="segments.length > 0"
                     type="button"
                     class="se-btn se-btn--danger"
-                    @click="clearAll"
+                    @click="confirmClearOpen = true"
                 >
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
                     Clear All
@@ -1823,6 +1838,28 @@ defineExpose({
                         <dt>Esc</dt><dd>Clear selection / close</dd>
                         <dt>?</dt><dd>Toggle this help</dd>
                     </dl>
+                </div>
+            </div>
+        </Teleport>
+
+        <Teleport to="body">
+            <div
+                v-if="confirmClearOpen"
+                class="se-help se-confirm"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="se-confirm-heading"
+                @click.self="confirmClearOpen = false"
+            >
+                <div class="se-help-panel se-confirm-panel">
+                    <h4 id="se-confirm-heading">Clear all {{ clearNoun }}?</h4>
+                    <p class="se-confirm-text">
+                        This removes all {{ segments.length }} {{ clearNoun }} from the timeline. You can undo with <span class="se-kbd">⌘/Ctrl</span> + <span class="se-kbd">Z</span>.
+                    </p>
+                    <div class="se-confirm-actions">
+                        <button type="button" class="se-confirm-btn" @click="confirmClearOpen = false">Cancel</button>
+                        <button type="button" class="se-confirm-btn se-confirm-btn--danger" @click="performClearAll">Clear All</button>
+                    </div>
                 </div>
             </div>
         </Teleport>
