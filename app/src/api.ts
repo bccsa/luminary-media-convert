@@ -1,14 +1,80 @@
 import * as tus from 'tus-js-client';
+import type { HlsParsedMaster } from '@luminary-media-converter/hls';
 import type {
     CreateSessionRequest,
     SaasSessionResponse,
     EncodeConfig,
     EncodeStartResponse,
     SessionStatusResponse,
+    ApiKeyResponse,
+    S3ConfigSummary,
+    S3ConfigDetail,
+    ImportSessionResponse,
+    SessionDetailResponse,
+    SessionListResponse,
 } from './types';
 
 // SaaS Service — session lifecycle (authenticated)
 const SAAS_URL = import.meta.env.VITE_SAAS_SERVICE_URL;
+
+// ---------------------------------------------------------------------------
+// Fetch helpers
+//
+// Every endpoint shares the same shape: bearer auth, optional JSON body, and an
+// error path that reads `{ message }` off the response (falling back to a
+// "<prefix> (<status>)" string). These helpers collapse that boilerplate.
+// ---------------------------------------------------------------------------
+
+interface RequestSpec {
+    /** HTTP method; omit for GET. */
+    method?: string;
+    /** Bearer token (Auth0 access token or session token). */
+    token?: string;
+    /** JSON request body; when set, serializes and adds the Content-Type header. */
+    body?: unknown;
+    /** Message prefix for thrown errors, e.g. `'Session creation failed'`. */
+    errorPrefix: string;
+}
+
+function buildInit(spec: RequestSpec): RequestInit {
+    const headers: Record<string, string> = {};
+    if (spec.body !== undefined) headers['Content-Type'] = 'application/json';
+    if (spec.token) headers.Authorization = `Bearer ${spec.token}`;
+
+    const init: RequestInit = { headers };
+    if (spec.method) init.method = spec.method;
+    if (spec.body !== undefined) init.body = JSON.stringify(spec.body);
+    return init;
+}
+
+async function fail(res: Response, errorPrefix: string): Promise<never> {
+    const body = await res.json().catch(() => ({}) as { message?: string });
+    throw new Error(body.message || `${errorPrefix} (${res.status})`);
+}
+
+/** Fetch + parse JSON, throwing a normalized Error on a non-ok response. */
+async function requestJson<T>(url: string, spec: RequestSpec): Promise<T> {
+    const res = await fetch(url, buildInit(spec));
+    if (!res.ok) await fail(res, spec.errorPrefix);
+    return res.json() as Promise<T>;
+}
+
+/** Fetch with no response body, throwing a normalized Error on a non-ok response. */
+async function requestVoid(url: string, spec: RequestSpec): Promise<void> {
+    const res = await fetch(url, buildInit(spec));
+    if (!res.ok) await fail(res, spec.errorPrefix);
+}
+
+/** Like {@link requestJson} but returns null on a 404 instead of throwing. */
+async function requestJsonOrNull<T>(
+    url: string,
+    spec: RequestSpec,
+): Promise<T | null> {
+    const res = await fetch(url, buildInit(spec));
+    if (res.status === 404) return null;
+    if (!res.ok) await fail(res, spec.errorPrefix);
+    return res.json() as Promise<T>;
+}
 
 // ---------------------------------------------------------------------------
 // SaaS Service calls (access token)
@@ -17,39 +83,22 @@ const SAAS_URL = import.meta.env.VITE_SAAS_SERVICE_URL;
 export async function checkIdentity(
     accessToken: string,
 ): Promise<{ id: string; email: string; name: string; status: string; encodingApiUrl?: string }> {
-    const res = await fetch(`${SAAS_URL}/saas/me`, {
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-        },
+    return requestJson(`${SAAS_URL}/saas/me`, {
+        token: accessToken,
+        errorPrefix: 'Identity check failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Identity check failed (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function createSession(
     config: CreateSessionRequest,
     accessToken: string,
 ): Promise<SaasSessionResponse> {
-    const res = await fetch(`${SAAS_URL}/saas/sessions`, {
+    return requestJson(`${SAAS_URL}/saas/sessions`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(config),
+        token: accessToken,
+        body: config,
+        errorPrefix: 'Session creation failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Session creation failed (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function startUrlUpload(
@@ -58,19 +107,12 @@ export async function startUrlUpload(
     accessToken: string,
     filename?: string,
 ): Promise<void> {
-    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/url-upload`, {
+    return requestVoid(`${SAAS_URL}/saas/sessions/${sessionId}/url-upload`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ url, filename }),
+        token: accessToken,
+        body: { url, filename },
+        errorPrefix: 'URL ingestion failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `URL ingestion failed (${res.status})`);
-    }
 }
 
 export async function deleteSession(
@@ -79,17 +121,11 @@ export async function deleteSession(
     deleteFiles = false,
 ): Promise<void> {
     const query = deleteFiles ? '?deleteFiles=true' : '';
-    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}${query}`, {
+    return requestVoid(`${SAAS_URL}/saas/sessions/${sessionId}${query}`, {
         method: 'DELETE',
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-        },
+        token: accessToken,
+        errorPrefix: 'Session deletion failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Session deletion failed (${res.status})`);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -144,21 +180,12 @@ export async function startEncode(
     encodeConfig: EncodeConfig,
     sessionToken: string,
 ): Promise<EncodeStartResponse> {
-    const res = await fetch(`${encodingApiUrl}/api/sessions/${sessionId}/encode`, {
+    return requestJson(`${encodingApiUrl}/api/sessions/${sessionId}/encode`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${sessionToken}`,
-        },
-        body: JSON.stringify(encodeConfig),
+        token: sessionToken,
+        body: encodeConfig,
+        errorPrefix: 'Encode start failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Encode start failed (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function getSessionStatus(
@@ -166,18 +193,10 @@ export async function getSessionStatus(
     sessionId: string,
     sessionToken: string,
 ): Promise<SessionStatusResponse> {
-    const res = await fetch(`${encodingApiUrl}/api/sessions/${sessionId}`, {
-        headers: {
-            Authorization: `Bearer ${sessionToken}`,
-        },
+    return requestJson(`${encodingApiUrl}/api/sessions/${sessionId}`, {
+        token: sessionToken,
+        errorPrefix: 'Status poll failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Status poll failed (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export function subscribeSessionEvents(
@@ -225,56 +244,31 @@ export async function createApiKey(
         .map((b) => b.toString(16).padStart(2, '0'))
         .join('');
 
-    const res = await fetch(`${SAAS_URL}/saas/keys`, {
+    const result = await requestJson<{ id: string }>(`${SAAS_URL}/saas/keys`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ name, keyHash, prefix }),
+        token: accessToken,
+        body: { name, keyHash, prefix },
+        errorPrefix: 'API key creation failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `API key creation failed (${res.status})`);
-    }
-
-    const result = await res.json();
     return { id: result.id, key: rawKey };
 }
 
-export async function listApiKeys(
-    accessToken: string,
-): Promise<any[]> {
-    const res = await fetch(`${SAAS_URL}/saas/keys`, {
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-        },
+export async function listApiKeys(accessToken: string): Promise<ApiKeyResponse[]> {
+    return requestJson(`${SAAS_URL}/saas/keys`, {
+        token: accessToken,
+        errorPrefix: 'Failed to list API keys',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Failed to list API keys (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function revokeApiKey(
     accessToken: string,
     keyId: string,
 ): Promise<void> {
-    const res = await fetch(`${SAAS_URL}/saas/keys/${keyId}`, {
+    return requestVoid(`${SAAS_URL}/saas/keys/${keyId}`, {
         method: 'DELETE',
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-        },
+        token: accessToken,
+        errorPrefix: 'API key revocation failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `API key revocation failed (${res.status})`);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -283,97 +277,57 @@ export async function revokeApiKey(
 
 export async function listS3Configs(
     accessToken: string,
-): Promise<{ configs: any[] }> {
-    const res = await fetch(`${SAAS_URL}/saas/s3-configs`, {
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-        },
+): Promise<{ configs: S3ConfigSummary[] }> {
+    return requestJson(`${SAAS_URL}/saas/s3-configs`, {
+        token: accessToken,
+        errorPrefix: 'Failed to list S3 configs',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Failed to list S3 configs (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function createS3Config(
     accessToken: string,
-    data: Record<string, any>,
-): Promise<any> {
-    const res = await fetch(`${SAAS_URL}/saas/s3-configs`, {
+    data: Record<string, unknown>,
+): Promise<{ id: string }> {
+    return requestJson(`${SAAS_URL}/saas/s3-configs`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(data),
+        token: accessToken,
+        body: data,
+        errorPrefix: 'S3 config creation failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `S3 config creation failed (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function getS3Config(
     accessToken: string,
     configId: string,
-): Promise<any> {
-    const res = await fetch(`${SAAS_URL}/saas/s3-configs/${configId}`, {
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-        },
+): Promise<S3ConfigDetail> {
+    return requestJson(`${SAAS_URL}/saas/s3-configs/${configId}`, {
+        token: accessToken,
+        errorPrefix: 'Failed to get S3 config',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Failed to get S3 config (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function updateS3Config(
     accessToken: string,
     configId: string,
-    data: Record<string, any>,
-): Promise<any> {
-    const res = await fetch(`${SAAS_URL}/saas/s3-configs/${configId}`, {
+    data: Record<string, unknown>,
+): Promise<S3ConfigDetail> {
+    return requestJson(`${SAAS_URL}/saas/s3-configs/${configId}`, {
         method: 'PATCH',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(data),
+        token: accessToken,
+        body: data,
+        errorPrefix: 'S3 config update failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `S3 config update failed (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function deleteS3Config(
     accessToken: string,
     configId: string,
 ): Promise<void> {
-    const res = await fetch(`${SAAS_URL}/saas/s3-configs/${configId}`, {
+    return requestVoid(`${SAAS_URL}/saas/s3-configs/${configId}`, {
         method: 'DELETE',
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-        },
+        token: accessToken,
+        errorPrefix: 'S3 config deletion failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `S3 config deletion failed (${res.status})`);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -383,7 +337,7 @@ export async function deleteS3Config(
 export async function listSessions(
     accessToken: string,
     opts?: { limit?: number; skip?: number; status?: string; name?: string },
-): Promise<{ sessions: any[]; total: number }> {
+): Promise<SessionListResponse> {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set('limit', String(opts.limit));
     if (opts?.skip != null) params.set('skip', String(opts.skip));
@@ -391,60 +345,33 @@ export async function listSessions(
     if (opts?.name) params.set('name', opts.name);
 
     const qs = params.toString();
-    const url = `${SAAS_URL}/saas/sessions${qs ? `?${qs}` : ''}`;
-
-    const res = await fetch(url, {
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-        },
+    return requestJson(`${SAAS_URL}/saas/sessions${qs ? `?${qs}` : ''}`, {
+        token: accessToken,
+        errorPrefix: 'Failed to list sessions',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Failed to list sessions (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function getSessionDetail(
     accessToken: string,
     sessionId: string,
-): Promise<any> {
-    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}`, {
-        headers: {
-            Authorization: `Bearer ${accessToken}`,
-        },
+): Promise<SessionDetailResponse> {
+    return requestJson(`${SAAS_URL}/saas/sessions/${sessionId}`, {
+        token: accessToken,
+        errorPrefix: 'Failed to get session detail',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Failed to get session detail (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function updateSessionName(
     accessToken: string,
     sessionId: string,
     name: string,
-): Promise<any> {
-    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/name`, {
+): Promise<unknown> {
+    return requestJson(`${SAAS_URL}/saas/sessions/${sessionId}/name`, {
         method: 'PATCH',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ name }),
+        token: accessToken,
+        body: { name },
+        errorPrefix: 'Failed to update session name',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Failed to update session name (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function checkPrefix(
@@ -453,16 +380,10 @@ export async function checkPrefix(
     prefix: string,
 ): Promise<{ exists: boolean; count: number }> {
     const params = new URLSearchParams({ s3ConfigId, prefix });
-    const res = await fetch(`${SAAS_URL}/saas/sessions/check-prefix?${params}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
+    return requestJson(`${SAAS_URL}/saas/sessions/check-prefix?${params}`, {
+        token: accessToken,
+        errorPrefix: 'Check prefix failed',
     });
-
-    if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || `Check prefix failed (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function moveSessionFiles(
@@ -470,46 +391,26 @@ export async function moveSessionFiles(
     sessionId: string,
     targetS3ConfigId: string,
     newPathPrefix: string,
-): Promise<any> {
-    const body = { targetS3ConfigId, newPathPrefix };
-
-    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/move`, {
+): Promise<unknown> {
+    return requestJson(`${SAAS_URL}/saas/sessions/${sessionId}/move`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(body),
+        token: accessToken,
+        body: { targetS3ConfigId, newPathPrefix },
+        errorPrefix: 'Move failed',
     });
-
-    if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || `Move failed (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function renameSessionPrefix(
     accessToken: string,
     sessionId: string,
     newPathPrefix: string,
-): Promise<any> {
-    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/rename-prefix`, {
+): Promise<unknown> {
+    return requestJson(`${SAAS_URL}/saas/sessions/${sessionId}/rename-prefix`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ newPathPrefix }),
+        token: accessToken,
+        body: { newPathPrefix },
+        errorPrefix: 'Rename prefix failed',
     });
-
-    if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || `Rename prefix failed (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function importSession(
@@ -520,27 +421,16 @@ export async function importSession(
         folderPrefix?: string;
         encryptionKey?: string;
     },
-): Promise<any> {
-    const res = await fetch(`${SAAS_URL}/saas/sessions/import`, {
+): Promise<ImportSessionResponse> {
+    return requestJson(`${SAAS_URL}/saas/sessions/import`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(data),
+        token: accessToken,
+        body: data,
+        errorPrefix: 'Session import failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Session import failed (${res.status})`);
-    }
-
-    return res.json();
 }
 
 // --- HLS sidecar edit bindings -----------------------------------------
-
-import type { HlsParsedMaster } from '@luminary-media-converter/hls';
 
 export interface HlsReadResult {
     master: HlsParsedMaster;
@@ -579,20 +469,11 @@ export async function hlsRead(
     accessToken: string,
     sessionId: string,
 ): Promise<HlsReadResult> {
-    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/hls/read`, {
+    return requestJson(`${SAAS_URL}/saas/sessions/${sessionId}/hls/read`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-        },
+        token: accessToken,
+        errorPrefix: 'HLS read failed',
     });
-
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `HLS read failed (${res.status})`);
-    }
-
-    return res.json();
 }
 
 export async function hlsMutate(
@@ -600,29 +481,26 @@ export async function hlsMutate(
     sessionId: string,
     ifMatch: string,
     operations: HlsMutateOperation[],
-): Promise<any> {
-    const res = await fetch(`${SAAS_URL}/saas/sessions/${sessionId}/hls/mutate`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ ifMatch, operations }),
-    });
+): Promise<unknown> {
+    const res = await fetch(
+        `${SAAS_URL}/saas/sessions/${sessionId}/hls/mutate`,
+        buildInit({
+            method: 'POST',
+            token: accessToken,
+            body: { ifMatch, operations },
+            errorPrefix: 'HLS mutate failed',
+        }),
+    );
 
     if (res.status === 409) {
-        const body = await res.json().catch(() => ({} as { currentEtag?: string; message?: string }));
+        const body = await res.json().catch(() => ({}) as { currentEtag?: string; message?: string });
         throw new HlsConflictError(
             body.message || 'Master playlist was modified since last read',
             body.currentEtag,
         );
     }
 
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `HLS mutate failed (${res.status})`);
-    }
-
+    if (!res.ok) await fail(res, 'HLS mutate failed');
     return res.json();
 }
 
@@ -636,16 +514,10 @@ export async function getSessionChapters(
     sessionId: string,
     lang: string = 'en',
 ): Promise<{ vtt: string } | null> {
-    const res = await fetch(
+    return requestJsonOrNull(
         `${SAAS_URL}/saas/sessions/${sessionId}/chapters?lang=${encodeURIComponent(lang)}`,
-        { headers: { Authorization: `Bearer ${accessToken}` } },
+        { token: accessToken, errorPrefix: 'Get chapters failed' },
     );
-    if (res.status === 404) return null;
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Get chapters failed (${res.status})`);
-    }
-    return res.json();
 }
 
 /**
@@ -662,16 +534,10 @@ export async function getSessionWaveform(
     numPeaks: number;
     peaks: number[];
 } | null> {
-    const res = await fetch(
-        `${SAAS_URL}/saas/sessions/${sessionId}/waveform`,
-        { headers: { Authorization: `Bearer ${accessToken}` } },
-    );
-    if (res.status === 404) return null;
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Get waveform failed (${res.status})`);
-    }
-    return res.json();
+    return requestJsonOrNull(`${SAAS_URL}/saas/sessions/${sessionId}/waveform`, {
+        token: accessToken,
+        errorPrefix: 'Get waveform failed',
+    });
 }
 
 /**
@@ -683,20 +549,13 @@ export async function putSessionChapters(
     vtt: string,
     lang: string = 'en',
 ): Promise<void> {
-    const res = await fetch(
+    return requestVoid(
         `${SAAS_URL}/saas/sessions/${sessionId}/chapters?lang=${encodeURIComponent(lang)}`,
         {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify({ vtt }),
+            token: accessToken,
+            body: { vtt },
+            errorPrefix: 'Save chapters failed',
         },
     );
-    if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.message || `Save chapters failed (${res.status})`);
-    }
 }
-

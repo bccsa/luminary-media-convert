@@ -5,23 +5,15 @@ import { createApiKey, listApiKeys, revokeApiKey } from '../api';
 import ConfirmDangerModal from '../components/ConfirmDangerModal.vue';
 import { formatDate } from '../utils/format';
 import { errorMessage } from '../utils/errors';
+import type { ApiKeyResponse } from '../types';
 
 const encodingApiUrl = inject<Ref<string>>('encodingApiUrl', ref(''));
 const docsUrl = computed(() => (encodingApiUrl.value ? `${encodingApiUrl.value}/api/docs` : ''));
 const showDocs = ref(false);
 
-interface ApiKey {
-    id: string;
-    name: string;
-    prefix: string;
-    status: 'active' | 'revoked';
-    lastUsedAt: string | null;
-    createdAt: string;
-}
-
 const { getAccessTokenSilently } = useAuth0();
 
-const keys = ref<ApiKey[]>([]);
+const keys = ref<ApiKeyResponse[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
@@ -116,7 +108,7 @@ async function copyKey() {
     }, 2000);
 }
 
-function openRevokeModal(key: ApiKey) {
+function openRevokeModal(key: ApiKeyResponse) {
     revokeTarget.value = { id: key.id, name: key.name, prefix: key.prefix };
     revokeModalOpen.value = true;
 }

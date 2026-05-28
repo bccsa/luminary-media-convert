@@ -5,18 +5,7 @@ import { listS3Configs, createS3Config, getS3Config, updateS3Config, deleteS3Con
 import ConfirmDangerModal from '../components/ConfirmDangerModal.vue';
 import { formatDate } from '../utils/format';
 import { errorMessage } from '../utils/errors';
-
-interface S3ConfigEntry {
-    id: string;
-    name: string;
-    endPoint: string;
-    port?: number;
-    useSSL: boolean;
-    bucket: string;
-    region?: string;
-    publicUrl?: string;
-    createdAt: string;
-}
+import type { S3ConfigSummary } from '../types';
 
 interface S3ConfigForm {
     name: string;
@@ -34,7 +23,7 @@ type ProviderTone = 'aws' | 'r2' | 'do' | 'gcs' | 'b2' | 'minio' | 'generic';
 
 const { getAccessTokenSilently } = useAuth0();
 
-const configs = ref<S3ConfigEntry[]>([]);
+const configs = ref<S3ConfigSummary[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
@@ -113,7 +102,7 @@ watch(totalPages, (tp) => {
     if (page.value > tp) page.value = tp;
 });
 
-function endpointDisplay(c: S3ConfigEntry): string {
+function endpointDisplay(c: S3ConfigSummary): string {
     const p = c.port ? `:${c.port}` : '';
     return `${c.endPoint}${p}`;
 }
@@ -142,13 +131,13 @@ function providerIconWrapClass(tone: ProviderTone): string {
     return map[tone];
 }
 
-function regionPill(c: S3ConfigEntry): string {
+function regionPill(c: S3ConfigSummary): string {
     const r = (c.region ?? '').trim();
     if (r) return r;
     return '—';
 }
 
-function isRegionBadgeEmpty(c: S3ConfigEntry): boolean {
+function isRegionBadgeEmpty(c: S3ConfigSummary): boolean {
     return !(c.region ?? '').trim();
 }
 
@@ -263,7 +252,7 @@ async function handleSubmit() {
     }
 }
 
-function openDeleteModal(config: S3ConfigEntry) {
+function openDeleteModal(config: S3ConfigSummary) {
     deleteTarget.value = { id: config.id, name: config.name, bucket: config.bucket };
     deleteModalOpen.value = true;
 }

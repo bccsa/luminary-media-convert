@@ -99,3 +99,59 @@ export interface SessionStatusResponse {
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
 }
+
+// --- SaaS API response shapes ---
+
+export interface ApiKeyResponse {
+    id: string;
+    name: string;
+    prefix: string;
+    status: 'active' | 'revoked';
+    lastUsedAt: string | null;
+    createdAt: string;
+}
+
+export interface S3ConfigSummary {
+    id: string;
+    name: string;
+    endPoint: string;
+    port?: number;
+    useSSL: boolean;
+    bucket: string;
+    region?: string;
+    publicUrl?: string;
+    createdAt: string;
+}
+
+export interface S3ConfigDetail extends S3ConfigSummary {
+    accessKey: string;
+    secretKey: string;
+}
+
+export interface ImportSessionResponse {
+    id?: string;
+    sessionId?: string;
+    chaptersLanguages?: string[];
+}
+
+/**
+ * Partial view of a stored session document. Only the fields read directly off
+ * the API result are typed; the full CouchDB doc carries more (consumed loosely
+ * through reactive `any` state in the views).
+ */
+export interface SessionDetailResponse {
+    sessionId?: string;
+    status: string;
+    name?: string;
+    encodingType?: 'video' | 'audio';
+    byteRange?: boolean;
+    encryptionKeyHex?: string;
+    sessionToken?: string;
+    encodingApiUrl?: string;
+    [key: string]: unknown;
+}
+
+export interface SessionListResponse {
+    sessions: SessionDetailResponse[];
+    total: number;
+}
