@@ -8,12 +8,8 @@ import type { SavedS3Config, SubmitPayload } from '../components/SessionConfigFo
 import { createSession, uploadFile, startUrlUpload, listS3Configs, getS3Config, createS3Config, updateSessionName, checkPrefix } from '../api';
 import { useActiveUploads } from '../composables/useActiveUploads';
 import type { CreateSessionRequest, S3Config } from '../types';
-
-function formatBytes(bytes: number): string {
-    if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / 1024).toFixed(1)} KB`;
-}
+import { formatBytes } from '../utils/format';
+import { errorMessage } from '../utils/errors';
 
 const { getAccessTokenSilently } = useAuth0();
 const router = useRouter();
@@ -173,7 +169,7 @@ async function startUpload(payload: SubmitPayload) {
 
         router.push(`/sessions/${session.sessionId}`);
     } catch (e) {
-        submissionError.value = e instanceof Error ? e.message : String(e);
+        submissionError.value = errorMessage(e);
     } finally {
         submitting.value = false;
     }

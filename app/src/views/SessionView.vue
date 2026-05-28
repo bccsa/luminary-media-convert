@@ -53,6 +53,9 @@ import { useSessionPoller } from '../composables/useSessionPoller';
 import { useActiveUploads } from '../composables/useActiveUploads';
 import { useAppLayout } from '../composables/useAppLayout';
 import type { AccelMode, SegmentFormat } from '../types';
+import { formatBytes, formatDateTime, formatRelative } from '../utils/format';
+import { errorMessage } from '../utils/errors';
+import { statusLabel } from '../utils/status';
 
 const { getAccessTokenSilently } = useAuth0();
 const route = useRoute();
@@ -175,57 +178,47 @@ const { setHeaderLayout, headerLayout } = useAppLayout();
 // Status badge config
 // ---------------------------------------------------------------------------
 
-const statusConfig: Record<
-    string,
-    { label: string; color: string; borderColor: string }
-> = {
+// Status text/border colors for the badge under the player. Labels live in
+// utils/status.ts (shared with the history list); colors stay local because the
+// two surfaces use different visual treatments.
+const statusColors: Record<string, { color: string; borderColor: string }> = {
     created: {
-        label: 'Created',
         color: 'text-slate-700 dark:text-slate-400',
         borderColor: 'border-slate-300 dark:border-slate-700',
     },
     uploading: {
-        label: 'Uploading',
         color: 'text-cyan-700 dark:text-cyan-400',
         borderColor: 'border-cyan-300 dark:border-cyan-700/60',
     },
     uploaded: {
-        label: 'Uploaded',
         color: 'text-slate-700 dark:text-slate-400',
         borderColor: 'border-slate-300 dark:border-slate-700',
     },
     queued: {
-        label: 'Queued',
         color: 'text-amber-700 dark:text-amber-400',
         borderColor: 'border-amber-300 dark:border-amber-700/60',
     },
     encoding: {
-        label: 'Encoding',
         color: 'text-slate-700 dark:text-slate-400',
         borderColor: 'border-slate-300 dark:border-slate-700/60',
     },
     encrypting: {
-        label: 'Encrypting',
         color: 'text-amber-700 dark:text-amber-400',
         borderColor: 'border-amber-300 dark:border-amber-700/60',
     },
     uploading_to_s3: {
-        label: 'Uploading to S3',
         color: 'text-cyan-700 dark:text-cyan-400',
         borderColor: 'border-cyan-300 dark:border-cyan-700/60',
     },
     completed: {
-        label: 'Completed',
         color: 'text-emerald-700 dark:text-emerald-400',
         borderColor: 'border-emerald-300 dark:border-emerald-700/60',
     },
     failed: {
-        label: 'Failed',
         color: 'text-red-700 dark:text-red-400',
         borderColor: 'border-red-300 dark:border-red-700/60',
     },
     imported: {
-        label: 'Imported',
         color: 'text-violet-700 dark:text-violet-400',
         borderColor: 'border-violet-300 dark:border-violet-700/60',
     },
@@ -340,14 +333,6 @@ const remoteIngestProgress = computed<number | undefined>(() => {
     if (typeof p !== 'number' || p <= 0) return undefined;
     return p;
 });
-
-function formatBytes(bytes: number): string {
-    if (bytes >= 1024 * 1024 * 1024)
-        return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${bytes} B`;
-}
 
 const remoteIngestLabel = computed<string>(() => {
     const total = poller.ingestTotalBytes.value;
@@ -879,7 +864,7 @@ async function onConfirmDelete(withFiles: boolean) {
         deleteModalOpen.value = false;
         router.push('/sessions');
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         deleting.value = false;
     }
@@ -915,7 +900,7 @@ async function openMoveForm() {
         const result = await listS3Configs(token);
         s3Configs.value = result.configs ?? result;
     } catch (e) {
-        moveError.value = e instanceof Error ? e.message : String(e);
+        moveError.value = errorMessage(e);
         return;
     }
     selectedTargetConfigId.value = '';
@@ -969,7 +954,7 @@ async function confirmMove() {
         showMoveForm.value = false;
         await fetchSession();
     } catch (e) {
-        moveError.value = e instanceof Error ? e.message : String(e);
+        moveError.value = errorMessage(e);
     } finally {
         moving.value = false;
     }
@@ -1039,7 +1024,7 @@ async function confirmRename() {
         showRenameForm.value = false;
         await fetchSession();
     } catch (e) {
-        renameError.value = e instanceof Error ? e.message : String(e);
+        renameError.value = errorMessage(e);
     } finally {
         renaming.value = false;
     }
@@ -1048,17 +1033,6 @@ async function confirmRename() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatDate(dateStr: string | null | undefined): string {
-    if (!dateStr) return '--';
-    return new Date(dateStr).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-    });
-}
 
 // ---------------------------------------------------------------------------
 // Fetch session detail from SaaS
@@ -1094,7 +1068,7 @@ async function fetchSession() {
         // Route to appropriate behavior based on status
         await handleStatusAfterLoad(detail.status);
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         loading.value = false;
     }
@@ -1159,7 +1133,7 @@ async function fetchProbeResults() {
             encodingType.value = probe.videoTracks.length ? 'video' : 'audio';
         }
     } catch (e) {
-        submissionError.value = e instanceof Error ? e.message : String(e);
+        submissionError.value = errorMessage(e);
     } finally {
         probeLoading.value = false;
     }
@@ -1303,7 +1277,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
         // Start polling for encoding progress
         poller.start(sessionId.value, encodingApiUrl.value, sessionToken.value);
     } catch (e) {
-        submissionError.value = e instanceof Error ? e.message : String(e);
+        submissionError.value = errorMessage(e);
     } finally {
         submitting.value = false;
     }
@@ -1433,7 +1407,7 @@ watch(
             await chapters.load(id);
         } catch (err) {
             chaptersSaveError.value =
-                err instanceof Error ? err.message : String(err);
+                errorMessage(err);
         }
     },
     { immediate: true }
@@ -1445,7 +1419,7 @@ async function onSaveChapters() {
         await chapters.saveRemote();
     } catch (err) {
         chaptersSaveError.value =
-            err instanceof Error ? err.message : String(err);
+            errorMessage(err);
     }
 }
 
@@ -1456,7 +1430,7 @@ async function onDiscardChapters() {
         syncChaptersFromTrim();
     } catch (err) {
         chaptersSaveError.value =
-            err instanceof Error ? err.message : String(err);
+            errorMessage(err);
     }
 }
 
@@ -1646,15 +1620,7 @@ watch(showProbeConfig, (ready) => {
 
 function relativeCreatedLabel(dateStr: string | null | undefined): string {
     if (!dateStr) return '';
-    const then = new Date(dateStr).getTime();
-    const diff = Date.now() - then;
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'Created just now';
-    if (mins < 60) return `Created ${mins} min${mins === 1 ? '' : 's'} ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `Created ${hrs} hr${hrs === 1 ? '' : 's'} ago`;
-    const days = Math.floor(hrs / 24);
-    return `Created ${days} day${days === 1 ? '' : 's'} ago`;
+    return `Created ${formatRelative(dateStr)}`;
 }
 
 async function copyOutputObjectKey(key: string) {
@@ -1816,10 +1782,7 @@ onUnmounted(() => {
                                     <p
                                         class="text-sm text-slate-800 dark:text-slate-200"
                                     >
-                                        {{
-                                            statusConfig[session.status]
-                                                ?.label ?? session.status
-                                        }}
+                                        {{ statusLabel(session.status) }}
                                     </p>
                                 </div>
                                 <div
@@ -1833,7 +1796,7 @@ onUnmounted(() => {
                                     <p
                                         class="text-sm text-slate-800 dark:text-slate-200"
                                     >
-                                        {{ formatDate(session.createdAt) }}
+                                        {{ formatDateTime(session.createdAt) }}
                                     </p>
                                 </div>
                             </div>
@@ -1971,15 +1934,12 @@ onUnmounted(() => {
                                     <StatusBadge
                                         v-if="currentStatus"
                                         class="shrink-0"
-                                        :label="
-                                            statusConfig[currentStatus]
-                                                ?.label ?? currentStatus
-                                        "
+                                        :label="statusLabel(currentStatus)"
                                         :color="
-                                            statusConfig[currentStatus]?.color
+                                            statusColors[currentStatus]?.color
                                         "
                                         :border-color="
-                                            statusConfig[currentStatus]
+                                            statusColors[currentStatus]
                                                 ?.borderColor
                                         "
                                     />

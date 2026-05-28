@@ -3,6 +3,8 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAuth0 } from '@auth0/auth0-vue';
 import { listS3Configs, createS3Config, getS3Config, updateS3Config, deleteS3Config } from '../api';
 import ConfirmDangerModal from '../components/ConfirmDangerModal.vue';
+import { formatDate } from '../utils/format';
+import { errorMessage } from '../utils/errors';
 
 interface S3ConfigEntry {
     id: string;
@@ -162,7 +164,7 @@ async function fetchConfigs() {
         const result = await listS3Configs(token);
         configs.value = result.configs ?? [];
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         loading.value = false;
     }
@@ -193,7 +195,7 @@ async function openEditForm(configId: string) {
         form.accessKey = '';
         form.secretKey = '';
     } catch (e) {
-        formError.value = e instanceof Error ? e.message : String(e);
+        formError.value = errorMessage(e);
     } finally {
         loadingConfig.value = false;
     }
@@ -255,7 +257,7 @@ async function handleSubmit() {
         closeForm();
         await fetchConfigs();
     } catch (e) {
-        formError.value = e instanceof Error ? e.message : String(e);
+        formError.value = errorMessage(e);
     } finally {
         saving.value = false;
     }
@@ -278,18 +280,10 @@ async function confirmDeleteS3Config() {
         deleteTarget.value = null;
         await fetchConfigs();
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         deleting.value = false;
     }
-}
-
-function formatDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-    });
 }
 
 onMounted(() => {

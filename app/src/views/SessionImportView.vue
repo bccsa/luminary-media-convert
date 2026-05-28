@@ -4,6 +4,7 @@ import { useAuth0 } from '@auth0/auth0-vue';
 import { useRouter } from 'vue-router';
 import { listS3Configs, importSession } from '../api';
 import FormSelect from '../components/FormSelect.vue';
+import { errorMessage } from '../utils/errors';
 
 const { getAccessTokenSilently } = useAuth0();
 const router = useRouter();
@@ -52,7 +53,7 @@ async function fetchS3Configs() {
             bucket: c.bucket,
         }));
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         loadingConfigs.value = false;
     }
@@ -95,7 +96,7 @@ async function handleSubmit() {
         }
         router.push(`/sessions/${sessionId}`);
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         submitting.value = false;
     }

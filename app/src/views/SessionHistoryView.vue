@@ -6,6 +6,9 @@ import { listSessions, deleteSession } from '../api';
 import { clearChapterDraftForSession } from '../composables/useChapters';
 import DeleteSessionModal from '../components/DeleteSessionModal.vue';
 import FormSelect from '../components/FormSelect.vue';
+import { formatDateTime } from '../utils/format';
+import { errorMessage } from '../utils/errors';
+import { SESSION_STATUSES, statusLabel } from '../utils/status';
 
 const { getAccessTokenSilently } = useAuth0();
 const router = useRouter();
@@ -21,82 +24,36 @@ const statusFilter = ref('');
 const nameSearch = ref('');
 let nameSearchTimeout: ReturnType<typeof setTimeout> | null = null;
 
-const statusConfig: Record<string, { label: string; color: string }> = {
-    created: {
-        label: 'Created',
-        color:
-            'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400',
-    },
-    uploading: {
-        label: 'Uploading',
-        color:
-            'border-cyan-200 bg-cyan-100 text-cyan-800 dark:border-cyan-600/50 dark:bg-cyan-900/40 dark:text-cyan-400',
-    },
-    uploaded: {
-        label: 'Uploaded',
-        color:
-            'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400',
-    },
-    queued: {
-        label: 'Queued',
-        color:
-            'border-amber-200 bg-amber-100 text-amber-900 dark:border-amber-600/50 dark:bg-amber-900/40 dark:text-amber-400',
-    },
-    encoding: {
-        label: 'Encoding',
-        color:
-            'border-slate-200 bg-slate-100 text-slate-900 dark:border-slate-500/35 dark:bg-slate-900/40 dark:text-slate-400',
-    },
-    encrypting: {
-        label: 'Encrypting',
-        color:
-            'border-amber-200 bg-amber-100 text-amber-900 dark:border-amber-600/50 dark:bg-amber-900/40 dark:text-amber-400',
-    },
-    uploading_to_s3: {
-        label: 'Uploading to S3',
-        color:
-            'border-cyan-200 bg-cyan-100 text-cyan-800 dark:border-cyan-600/50 dark:bg-cyan-900/40 dark:text-cyan-400',
-    },
-    completed: {
-        label: 'Completed',
-        color:
-            'border-emerald-200 bg-emerald-100 text-emerald-900 dark:border-emerald-600/50 dark:bg-emerald-900/40 dark:text-emerald-400',
-    },
-    failed: {
-        label: 'Failed',
-        color:
-            'border-red-200 bg-red-100 text-red-800 dark:border-red-800/50 dark:bg-red-900/40 dark:text-red-400',
-    },
-    imported: {
-        label: 'Imported',
-        color:
-            'border-violet-200 bg-violet-100 text-violet-900 dark:border-violet-600/50 dark:bg-violet-900/40 dark:text-violet-400',
-    },
+// Solid pill colors per status (labels + status order come from utils/status.ts).
+const statusColors: Record<string, string> = {
+    created:
+        'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400',
+    uploading:
+        'border-cyan-200 bg-cyan-100 text-cyan-800 dark:border-cyan-600/50 dark:bg-cyan-900/40 dark:text-cyan-400',
+    uploaded:
+        'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400',
+    queued:
+        'border-amber-200 bg-amber-100 text-amber-900 dark:border-amber-600/50 dark:bg-amber-900/40 dark:text-amber-400',
+    encoding:
+        'border-slate-200 bg-slate-100 text-slate-900 dark:border-slate-500/35 dark:bg-slate-900/40 dark:text-slate-400',
+    encrypting:
+        'border-amber-200 bg-amber-100 text-amber-900 dark:border-amber-600/50 dark:bg-amber-900/40 dark:text-amber-400',
+    uploading_to_s3:
+        'border-cyan-200 bg-cyan-100 text-cyan-800 dark:border-cyan-600/50 dark:bg-cyan-900/40 dark:text-cyan-400',
+    completed:
+        'border-emerald-200 bg-emerald-100 text-emerald-900 dark:border-emerald-600/50 dark:bg-emerald-900/40 dark:text-emerald-400',
+    failed: 'border-red-200 bg-red-100 text-red-800 dark:border-red-800/50 dark:bg-red-900/40 dark:text-red-400',
+    imported:
+        'border-violet-200 bg-violet-100 text-violet-900 dark:border-violet-600/50 dark:bg-violet-900/40 dark:text-violet-400',
 };
-
-const statusOptions = [
-    '',
-    'created',
-    'uploading',
-    'uploaded',
-    'queued',
-    'encoding',
-    'encrypting',
-    'uploading_to_s3',
-    'completed',
-    'failed',
-    'imported',
-];
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / PAGE_SIZE)));
 
 const statusFilterOptions = computed(() =>
-    statusOptions
-        .filter((s): s is string => s !== '')
-        .map((s) => ({
-            value: s,
-            label: statusConfig[s]?.label ?? s,
-        })),
+    SESSION_STATUSES.map((s) => ({
+        value: s,
+        label: statusLabel(s),
+    })),
 );
 
 async function fetchSessions() {
@@ -113,7 +70,7 @@ async function fetchSessions() {
         sessions.value = result.sessions ?? [];
         total.value = result.total ?? 0;
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         loading.value = false;
     }
@@ -196,44 +153,10 @@ async function onDeleteSessionModalConfirm(withFiles: boolean) {
         await fetchSessions();
         deleteModalTarget.value = null;
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         deletingId.value = null;
     }
-}
-
-function formatDate(dateStr: string | null | undefined): string {
-    if (!dateStr) return '—';
-    return new Date(dateStr).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-    });
-}
-
-function formatRelative(dateStr: string | null | undefined): string {
-    if (!dateStr) return '—';
-    const d = new Date(dateStr);
-    const ts = d.getTime();
-    if (Number.isNaN(ts)) return '—';
-    const sec = Math.round((Date.now() - ts) / 1000);
-    if (sec < 0) return formatDate(dateStr);
-    if (sec < 45) return 'just now';
-    if (sec < 3600) {
-        const min = Math.max(1, Math.round(sec / 60));
-        return `${min} min${min === 1 ? '' : 's'} ago`;
-    }
-    if (sec < 86400 * 2) {
-        const hr = Math.round(sec / 3600);
-        return `${hr} hour${hr === 1 ? '' : 's'} ago`;
-    }
-    if (sec < 86400 * 14) {
-        const day = Math.round(sec / 86400);
-        return `${day} day${day === 1 ? '' : 's'} ago`;
-    }
-    return formatDate(dateStr);
 }
 
 const activeStatuses = new Set([
@@ -264,8 +187,10 @@ const showingTo = computed(() =>
 );
 
 function badgeClasses(status: string): string {
-    const cfg = statusConfig[status];
-    return `inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${cfg?.color ?? 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400'}`;
+    const color =
+        statusColors[status] ??
+        'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-400';
+    return `inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${color}`;
 }
 
 onMounted(fetchSessions);
@@ -451,7 +376,7 @@ onMounted(fetchSessions);
                                                         class="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-current opacity-80"
                                                         aria-hidden="true"
                                                     />
-                                                    {{ statusConfig[session.status]?.label ?? session.status }}
+                                                    {{ statusLabel(session.status) }}
                                                 </span>
                                             </div>
                                             <p
@@ -485,10 +410,10 @@ onMounted(fetchSessions);
                                         </div>
                                     </td>
                                     <td class="whitespace-nowrap px-6 py-4 text-slate-600 dark:text-slate-400">
-                                        {{ formatDate(session.createdAt) }}
+                                        {{ formatDateTime(session.createdAt) }}
                                     </td>
                                     <td class="whitespace-nowrap px-6 py-4 text-slate-600 dark:text-slate-400">
-                                        {{ session.completedAt ? formatDate(session.completedAt) : '—' }}
+                                        {{ session.completedAt ? formatDateTime(session.completedAt) : '—' }}
                                     </td>
                                     <td class="px-6 py-4 text-right align-middle" @click.stop>
                                         <button

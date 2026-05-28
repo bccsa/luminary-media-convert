@@ -1,4 +1,5 @@
 import { ref, reactive } from 'vue';
+import { errorMessage } from '../utils/errors';
 
 export interface ActiveUpload {
     progress: number;
@@ -32,7 +33,7 @@ export function useActiveUploads() {
             })
             .catch((err) => {
                 upload.done = true;
-                upload.error = err instanceof Error ? err.message : String(err);
+                upload.error = errorMessage(err);
             });
 
         return upload;
