@@ -3,6 +3,12 @@ import { ref, computed, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { createUser, getUser, updateUser } from '../api';
+import FormSelect from '../components/FormSelect.vue';
+
+const roleSelectOptions = [
+    { value: 'user', label: 'User' },
+    { value: 'admin', label: 'Admin' },
+];
 
 const route = useRoute();
 const router = useRouter();
@@ -158,14 +164,12 @@ onMounted(fetchUser);
                 >
                     Role
                 </label>
-                <select
+                <FormSelect
                     id="role"
+                    variant="admin"
                     v-model="role"
-                    class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none transition-colors focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                >
-                    <option value="user">User</option>
-                    <option value="admin">Admin</option>
-                </select>
+                    :options="roleSelectOptions"
+                />
             </div>
 
             <div class="flex gap-3 pt-2">

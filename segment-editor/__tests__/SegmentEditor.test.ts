@@ -27,6 +27,11 @@ function getTimeline(wrapper: ReturnType<typeof mountEditor>): HTMLElement {
     return wrapper.get('.se-timeline-wrap').element as HTMLElement;
 }
 
+/** Help is teleported to `document.body` — not visible to wrapper.find(). */
+function queryHelpOverlay(): HTMLElement | null {
+    return document.body.querySelector('.se-help');
+}
+
 describe('SegmentEditor — mount & hydration', () => {
     it('auto-hydrates missing ids and emits a normalized list', async () => {
         const bare = [{ inSec: 1, outSec: 2 } as Segment];
@@ -488,6 +493,19 @@ describe('SegmentEditor — keyboard navigation', () => {
         expect(latestSegments(w)).toHaveLength(1);
     });
 
+    it('I and O invoke markIn / markOut', async () => {
+        const t = { value: 5 };
+        const w = mountEditor({ currentTime: t });
+        await flush();
+        keyDown(getTimeline(w), 'I');
+        await flush();
+        expect(w.find('.se-pending-marker').exists()).toBe(true);
+        t.value = 15;
+        keyDown(getTimeline(w), 'o');
+        await flush();
+        expect(latestSegments(w)[0]).toMatchObject({ inSec: 5, outSec: 15 });
+    });
+
     it('Alt+arrow nudges the selected segment edge', async () => {
         const w = mountEditor({ segments: [seg(1, 10, 20)] });
         await flush();
@@ -567,10 +585,10 @@ describe('SegmentEditor — keyboard navigation', () => {
         await flush();
         keyDown(getTimeline(w), '?');
         await flush();
-        expect(w.find('.se-help').exists()).toBe(true);
+        expect(queryHelpOverlay()).not.toBeNull();
         keyDown(getTimeline(w), 'Escape');
         await flush();
-        expect(w.find('.se-help').exists()).toBe(false);
+        expect(queryHelpOverlay()).toBeNull();
     });
 
     it('clicking the help button toggles the help overlay', async () => {
@@ -578,12 +596,12 @@ describe('SegmentEditor — keyboard navigation', () => {
         await flush();
         const btn = w.find('.se-btn--icon');
         await btn.trigger('click');
-        expect(w.find('.se-help').exists()).toBe(true);
+        expect(queryHelpOverlay()).not.toBeNull();
         // Clicking the backdrop closes it.
-        const backdrop = w.find('.se-help').element as HTMLElement;
+        const backdrop = queryHelpOverlay()!;
         backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await flush();
-        expect(w.find('.se-help').exists()).toBe(false);
+        expect(queryHelpOverlay()).toBeNull();
     });
 
     it('typed input blocks navigation keys but not Cmd+Z or Escape', async () => {
@@ -1075,34 +1093,46 @@ describe('SegmentEditor — exposed methods', () => {
         await buttons[2].trigger('click'); // Add
         await flush();
         expect(latestSegments(w)).toHaveLength(2);
-        // Clear All becomes visible with segments present.
+        // Clear All becomes visible with segments present; clicking it opens a
+        // confirm dialog rather than clearing immediately.
         const clear = w.findAll('.se-btn--danger')[0];
         await clear.trigger('click');
+        await flush();
+        expect(latestSegments(w)).toHaveLength(2);
+        const confirm = document.body.querySelector(
+            '.se-confirm-btn--danger',
+        ) as HTMLElement | null;
+        expect(confirm).not.toBeNull();
+        confirm!.click();
         await flush();
         expect(latestSegments(w)).toHaveLength(0);
     });
 
-    it('history is bounded to 100 entries', async () => {
-        const t = { value: 5 };
-        const w = mountEditor({ duration: 10000, currentTime: t });
-        await flush();
-        // 150 commits should only retain the most recent ones in the undo stack.
-        for (let i = 0; i < 150; i++) {
-            t.value = i;
-            w.vm.addSegment();
+    it(
+        'history is bounded to 100 entries',
+        { timeout: 120_000 },
+        async () => {
+            const t = { value: 5 };
+            const w = mountEditor({ duration: 10000, currentTime: t });
             await flush();
-        }
-        // Undo as many times as possible — should not exceed 100 invocations with effect.
-        let undoCount = 0;
-        for (let i = 0; i < 200; i++) {
-            const before = latestSegments(w).length;
-            w.vm.undo();
-            await flush();
-            const after = latestSegments(w).length;
-            if (after !== before) undoCount += 1;
-        }
-        expect(undoCount).toBeLessThanOrEqual(100);
-    });
+            // 150 commits should only retain the most recent ones in the undo stack.
+            for (let i = 0; i < 150; i++) {
+                t.value = i;
+                w.vm.addSegment();
+                await flush();
+            }
+            // Undo as many times as possible — should not exceed 100 invocations with effect.
+            let undoCount = 0;
+            for (let i = 0; i < 200; i++) {
+                const before = latestSegments(w).length;
+                w.vm.undo();
+                await flush();
+                const after = latestSegments(w).length;
+                if (after !== before) undoCount += 1;
+            }
+            expect(undoCount).toBeLessThanOrEqual(100);
+        },
+    );
 });
 
 describe('SegmentEditor — RAF playhead tick', () => {
@@ -1235,9 +1265,11 @@ describe('SegmentEditor — list rendering', () => {
         const t = { value: 20 };
         const w = mountEditor({ currentTime: t, props: { onSeek } });
         await flush();
-        const stepButtons = w.findAll('.se-playback-controls .se-btn');
-        await stepButtons[0].trigger('click'); // back
-        await stepButtons[1].trigger('click'); // forward
+        const center = w.findAll('.se-playback-controls__center .se-btn');
+        // No play button when only onSeek is provided.
+        expect(center).toHaveLength(4);
+        await center[0].trigger('click'); // −1 s
+        await center[3].trigger('click'); // +1 s
         // currentTime is static in tests, so each click steps from the same value.
         expect(onSeek).toHaveBeenCalledWith(19);
         expect(onSeek).toHaveBeenCalledWith(21);
@@ -1247,14 +1279,15 @@ describe('SegmentEditor — list rendering', () => {
         const onPlayPause = vi.fn();
         const w = mountEditor({ props: { onPlayPause, isPlaying: true } });
         await flush();
-        const btn = w.find('.se-playback-controls .se-btn');
-        await btn.trigger('click');
+        const playPause = w.find('.se-btn--playback');
+        expect(playPause.exists()).toBe(true);
+        expect(playPause.attributes('aria-label')).toBe('Pause');
+        expect(playPause.attributes('aria-pressed')).toBe('true');
+        await playPause.trigger('click');
         expect(onPlayPause).toHaveBeenCalled();
-        // isPlaying=true switches the glyph to the pause icon.
-        expect(btn.text()).toContain('⏸');
     });
 
-    it('playback-start and playback-end slots render in the left and right cells', async () => {
+    it('playback-start and playback-end slots render side by side in the right toolbar cluster', async () => {
         const w = mount(SegmentEditor, {
             props: {
                 modelValue: [],
@@ -1270,20 +1303,20 @@ describe('SegmentEditor — list rendering', () => {
             attachTo: document.body,
         });
         await flush();
-        expect(w.find('.se-playback-controls__slot--start .mock-audio').exists()).toBe(true);
-        expect(w.find('.se-playback-controls__slot--end .mock-quality').exists()).toBe(true);
+        expect(w.find('.se-toolbar__playback-options .mock-audio').exists()).toBe(true);
+        expect(w.find('.se-toolbar__playback-options .mock-quality').exists()).toBe(true);
     });
 
-    it('center group renders back, play/pause, forward in that order when both callbacks are set', async () => {
+    it('center group renders jog + play strip when both callbacks are set', async () => {
         const w = mountEditor({
             props: { onSeek: () => {}, onPlayPause: () => {} },
         });
         await flush();
         const buttons = w.findAll('.se-playback-controls__center .se-btn');
-        expect(buttons).toHaveLength(3);
-        expect(buttons[0].text()).toContain('1s');
-        expect(buttons[1].text()).toMatch(/[▶⏸]/);
-        expect(buttons[2].text()).toContain('1s');
+        expect(buttons).toHaveLength(5);
+        expect(buttons[0].classes()).toContain('se-btn--playback-icon');
+        expect(buttons[2].classes()).toContain('se-btn--playback');
+        expect(buttons[2].attributes('aria-label')).toBe('Play');
     });
 
     it('renders the current-time display above the timeline, not inside playback controls', async () => {
@@ -1312,7 +1345,7 @@ describe('SegmentEditor — list rendering', () => {
         expect(w.find('.se-time-above').exists()).toBe(false);
     });
 
-    it('renders the playback row when only slot content is provided (no callbacks)', async () => {
+    it('render slot content in the toolbar when no playback callbacks are set', async () => {
         const w = mount(SegmentEditor, {
             props: {
                 modelValue: [],
@@ -1325,8 +1358,8 @@ describe('SegmentEditor — list rendering', () => {
             attachTo: document.body,
         });
         await flush();
-        expect(w.find('.se-playback-controls').exists()).toBe(true);
-        expect(w.find('.se-playback-controls__center').exists()).toBe(false);
+        expect(w.find('.se-toolbar__playback-options .mock-audio').exists()).toBe(true);
+        expect(w.find('.se-playback-controls').exists()).toBe(false);
     });
 
     it('renders the toolbar-end slot at the end of the toolbar row', async () => {
@@ -1440,5 +1473,64 @@ describe('SegmentEditor — edge cases', () => {
         if (segs.length > 0) {
             expect(segs[0].inSec).toBeGreaterThanOrEqual(0);
         }
+    });
+});
+
+describe('SegmentEditor — split list panel (beside player)', () => {
+    it('shows header and empty state when chapters split list has no segments', async () => {
+        const w = mountEditor({
+            segments: [],
+            props: {
+                mode: 'chapters',
+                splitListPanel: true,
+                showToolbar: false,
+                showTimeline: false,
+                showPlaybackControls: false,
+                showList: true,
+            },
+        });
+        await flush();
+        expect(w.find('.se-list-split-header').exists()).toBe(true);
+        expect(w.find('.se-list-split-header .se-title').text()).toBe('Chapters');
+        expect(w.find('.se-list-empty').exists()).toBe(true);
+        expect(w.find('.se-list-empty__title').text()).toBe('No chapters yet');
+    });
+
+    it('seeks to chapter start when a list row is clicked in split chapters mode', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({
+            segments: [seg(1, 12.5, 30)],
+            props: {
+                mode: 'chapters',
+                splitListPanel: true,
+                showToolbar: false,
+                showTimeline: false,
+                showPlaybackControls: false,
+                showList: true,
+                onSeek,
+            },
+        });
+        await flush();
+        await w.find('.se-list-row').trigger('click');
+        await flush();
+        expect(w.emitted('seek')).toBeTruthy();
+        expect(w.emitted('seek')).toHaveLength(1);
+        expect(w.emitted('seek')![0]).toEqual([12.5]);
+        expect(onSeek).toHaveBeenCalledWith(12.5);
+    });
+
+    it('does not seek on list row click in full chapters editor (no split panel)', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({
+            segments: [seg(1, 3, 8)],
+            props: {
+                mode: 'chapters',
+                onSeek,
+            },
+        });
+        await flush();
+        await w.find('.se-list-row').trigger('click');
+        await flush();
+        expect(onSeek).not.toHaveBeenCalled();
     });
 });

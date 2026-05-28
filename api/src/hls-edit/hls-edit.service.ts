@@ -188,6 +188,32 @@ export class HlsEditService {
     }
 
     /**
+     * Fetch the waveform sidecar at `{folderPrefix}waveform.json`.
+     * Returns null when the object does not exist (e.g. imported sessions
+     * never had one written) — caller surfaces 404, client skips render.
+     */
+    async readWaveform(
+        s3: S3ConfigDto,
+        folderPrefix: string,
+    ): Promise<{
+        version: number;
+        sampleRate: number;
+        numPeaks: number;
+        peaks: number[];
+    } | null> {
+        const key = waveformKey(folderPrefix);
+        try {
+            const { body } = await this.s3EtagService.getObjectWithEtag(s3, key);
+            const parsed = JSON.parse(body.toString('utf-8'));
+            // Trust the sidecar shape — the encode pipeline is the only writer.
+            return parsed;
+        } catch (err) {
+            if (isNoSuchKey(err)) return null;
+            throw err;
+        }
+    }
+
+    /**
      * Write a WebVTT chapter sidecar to `{folderPrefix}chapters/{lang}.vtt`.
      * Validates language code, body size, and `WEBVTT` magic before uploading.
      */
@@ -243,6 +269,11 @@ function folderOf(key: string): string {
 function chaptersKey(folderPrefix: string, lang: string): string {
     const prefix = folderPrefix.endsWith('/') ? folderPrefix : folderPrefix + '/';
     return `${prefix}chapters/${lang}.vtt`;
+}
+
+function waveformKey(folderPrefix: string): string {
+    const prefix = folderPrefix.endsWith('/') ? folderPrefix : folderPrefix + '/';
+    return `${prefix}waveform.json`;
 }
 
 function collectChaptersLanguages(keys: string[], folderPrefix: string): string[] {

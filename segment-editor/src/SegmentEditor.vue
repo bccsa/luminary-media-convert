@@ -4,6 +4,11 @@ import type { Segment, SegmentEditorMode } from './types';
 import { createSegmentId } from './types';
 import { formatDuration, formatTime, parseTime } from './time';
 import { exportChaptersVtt, exportSubtitlesVtt, parseVtt } from './vtt';
+import {
+    findThumbnailCue,
+    parseThumbnailVtt,
+    type ThumbnailSpriteCue,
+} from './thumbnailVtt';
 import './styles.css';
 
 type KeyboardScope = 'focus' | 'global' | 'off';
@@ -32,6 +37,8 @@ interface Props {
     /** Optional frame rate; enables `,` / `.` frame stepping. */
     fps?: number;
     title?: string;
+    /** Show the title + segment-count header row above the editor. */
+    showHeader?: boolean;
     /** Show the built-in toolbar. */
     showToolbar?: boolean;
     /** Show built-in play/pause + step controls. */
@@ -42,6 +49,36 @@ interface Props {
     showHelp?: boolean;
     /** Max/min zoom (1 = fit to duration, 2 = 2× zoom, ...). */
     maxZoom?: number;
+    /** Compact NLE-style hint row below playback controls (In/Out keys, jog, zoom). */
+    showShortcutsStrip?: boolean;
+    /** When false, hides the timeline, zoom, and in/out mark controls (list + slim toolbar only). */
+    showTimeline?: boolean;
+    /**
+     * When true, the segment list is in a separate card below the main block (header, timeline, etc.).
+     * The root becomes a transparent column; use beside a video player with independent scroll areas.
+     */
+    splitListPanel?: boolean;
+    /** No outer panel border/shadow — use when the editor sits on the app’s own card or page background. */
+    embedded?: boolean;
+    /** Hide label inputs and remove buttons — use when the list is informational only. */
+    readOnly?: boolean;
+    /**
+     * Trim/NLE layout: combine marks, zoom, dropdowns, and play/jog controls into a single row
+     * directly below the timeline (instead of a toolbar above + playback row below).
+     */
+    combinedControls?: boolean;
+    /**
+     * URL of `thumbnails.vtt` (HLS sprite storyboard). In trim mode, hovering the timeline shows the matching thumbnail.
+     */
+    thumbnailVttUrl?: string | null;
+    /** Audio waveform peaks (normalized 0–1 amplitude). When provided, rendered as a canvas background in the timeline. */
+    waveformPeaks?: number[] | null;
+    /** Color for waveform visualization. Defaults to CSS variable --se-waveform or rgba(255,255,255,0.35). */
+    waveformColor?: string | null;
+    /** Override the empty-state heading shown when there are no segments yet (split-list panel only). */
+    emptyTitle?: string;
+    /** Override the empty-state hint shown under the heading (split-list panel only). */
+    emptyHint?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -52,15 +89,21 @@ const props = withDefaults(defineProps<Props>(), {
     throttleSeekMs: 33,
     fps: 0,
     title: undefined,
+    showHeader: true,
     showToolbar: true,
     showPlaybackControls: true,
     showList: true,
     showHelp: true,
+    showTimeline: true,
     maxZoom: 40,
     isPlaying: false,
     rippleEdit: true,
     showLabels: undefined,
     allowOverlap: undefined,
+    splitListPanel: false,
+    embedded: false,
+    readOnly: false,
+    combinedControls: false,
 });
 
 const emit = defineEmits<{
@@ -82,6 +125,54 @@ const modeTitle = computed(() => {
         default: return 'Trim Segments';
     }
 });
+
+const clearNoun = computed(() => {
+    switch (props.mode) {
+        case 'chapters': return 'chapters';
+        case 'subtitles': return 'subtitle cues';
+        default: return 'clips';
+    }
+});
+
+/** Hint row under playback: off for trim (header ? opens the same help); on for chapters/subtitles unless overridden. */
+const shortcutsStripVisible = computed(
+    () => props.showTimeline && (props.showShortcutsStrip ?? props.mode !== 'trim'),
+);
+
+/** Chapter/subtitle list beside player only: one card — title + meta live in the list header, not a separate panel. */
+const listOnlySplitPanel = computed(
+    () =>
+        props.splitListPanel &&
+        !props.showToolbar &&
+        !props.showTimeline &&
+        !props.showPlaybackControls,
+);
+
+/** Combine marks, zoom, dropdowns and play/jog controls into one row below the timeline. */
+const combinedControlsBar = computed(
+    () =>
+        props.combinedControls &&
+        props.showTimeline &&
+        (props.showToolbar || props.showPlaybackControls),
+);
+
+/** `focus` keyboard: timeline has tabindex, or list-only panel uses the root (no timeline row). */
+const keyboardRootTabindex = computed(() => {
+    if (props.keyboardScope !== 'focus' || !listOnlySplitPanel.value) return -1;
+    return 0;
+});
+
+const rootElRef = ref<HTMLDivElement | null>(null);
+
+function onKeyboardRootKeyDown(e: KeyboardEvent) {
+    if (props.keyboardScope !== 'focus' || !listOnlySplitPanel.value) return;
+    onKeyDown(e);
+}
+
+function onKeyboardRootKeyUp(e: KeyboardEvent) {
+    if (props.keyboardScope !== 'focus' || !listOnlySplitPanel.value) return;
+    onKeyUp(e);
+}
 
 // -------------- id hygiene --------------
 // Ensure every incoming segment has a stable id; re-emit once with ids if the consumer omitted them.
@@ -109,6 +200,14 @@ function setSelection(ids: string[]) {
     selectedIds.value = new Set(ids);
     emit('select', ids);
 }
+
+/** List row activation: select, and beside-player chapters jump playhead to cue start (full editor keeps selection-only). */
+function onListRowActivate(seg: Segment) {
+    setSelection([seg.id]);
+    if (props.mode === 'chapters' && props.splitListPanel && props.onSeek) {
+        emitSeek(seg.inSec, true);
+    }
+}
 function toggleSelection(id: string) {
     const next = new Set(selectedIds.value);
     if (next.has(id)) next.delete(id);
@@ -128,6 +227,11 @@ const primarySelectedId = computed(() => {
     // Primary = first in time order.
     return segments.value.find((s) => ids.includes(s.id))?.id ?? null;
 });
+
+/** Seek / jog controls need a positive duration and an onSeek handler. */
+const canSeekPlayback = computed(
+    () => props.duration > 0 && typeof props.onSeek === 'function',
+);
 
 // -------------- viewport / zoom --------------
 
@@ -178,10 +282,17 @@ const playheadPercent = computed(() => {
 // -------------- timeline measurement --------------
 
 const timelineRef = ref<HTMLDivElement | null>(null);
+const timelineTrackRef = ref<HTMLDivElement | null>(null);
+const waveformCanvas = ref<HTMLCanvasElement | null>(null);
+
+function timelineMetricsEl(): HTMLDivElement | null {
+    return timelineTrackRef.value ?? timelineRef.value;
+}
 
 function pxToTime(clientX: number): number {
-    if (!timelineRef.value) return 0;
-    const rect = timelineRef.value.getBoundingClientRect();
+    const el = timelineMetricsEl();
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     return viewStart.value + ratio * visibleSpan.value;
 }
@@ -292,9 +403,10 @@ function beginPan(e: MouseEvent) {
     const startX = e.clientX;
     const startPan = panStartSec.value;
     const onMove = (ev: MouseEvent) => {
-        if (!timelineRef.value) return;
+        const track = timelineMetricsEl();
+        if (!track) return;
         const dx = ev.clientX - startX;
-        const width = timelineRef.value.getBoundingClientRect().width;
+        const width = track.getBoundingClientRect().width;
         const deltaSec = (-dx / width) * visibleSpan.value;
         panStartSec.value = clampPan(startPan + deltaSec);
     };
@@ -350,8 +462,9 @@ function onSegmentMouseDown(seg: Segment, e: MouseEvent) {
     dragMode.value = 'segment';
     dragContext.value = { id: seg.id, originIn: startIn, originOut: startOut };
     const onMove = (ev: MouseEvent) => {
-        if (!timelineRef.value) return;
-        const rect = timelineRef.value.getBoundingClientRect();
+        const track = timelineMetricsEl();
+        if (!track) return;
+        const rect = track.getBoundingClientRect();
         const dx = ev.clientX - startX;
         if (!moved && Math.abs(dx) < 2) return;
         if (!moved) { pushHistory(cloneSegments()); moved = true; }
@@ -543,6 +656,11 @@ function clearAll() {
     pendingInSec.value = null;
 }
 
+function performClearAll() {
+    clearAll();
+    confirmClearOpen.value = false;
+}
+
 function clampTime(sec: number): number {
     return Math.max(0, Math.min(props.duration, sec));
 }
@@ -561,22 +679,39 @@ function updateTimeInput(id: string, field: 'inSec' | 'outSec', value: string) {
     emit('segment-commit', segments.value);
 }
 
+function syncLabelFieldHeight(el: HTMLTextAreaElement) {
+    const styles = getComputedStyle(el);
+    const minPx = Math.ceil(parseFloat(styles.minHeight) || 0);
+    const maxRaw = parseFloat(styles.maxHeight);
+    const maxPx =
+        Number.isFinite(maxRaw) && maxRaw > 0 ? Math.floor(maxRaw) : Number.POSITIVE_INFINITY;
+
+    el.style.height = '0';
+    const contentPx = el.scrollHeight;
+    const targetPx = Math.min(Math.max(contentPx, minPx || 0), maxPx);
+    el.style.height = `${targetPx}px`;
+    el.style.overflowY = contentPx > targetPx + 1 ? 'auto' : 'hidden';
+}
+
 /**
  * Push a single history snapshot when the user focuses a label, before any
  * keystrokes mutate it. Per-keystroke history would make Undo roll back one
  * character at a time, which is unusable.
  */
-function onLabelFocus() {
+function onLabelFocus(e: FocusEvent) {
     pushHistory(cloneSegments());
+    syncLabelFieldHeight(e.target as HTMLTextAreaElement);
 }
 
-function updateLabel(id: string, value: string) {
-    // History is pushed once on focus; per-keystroke commits skip it.
-    commitSegmentChange(id, { label: value }, { history: false });
+function onLabelInput(e: Event, id: string) {
+    const el = e.target as HTMLTextAreaElement;
+    commitSegmentChange(id, { label: el.value }, { history: false });
+    syncLabelFieldHeight(el);
 }
 
 /** Fire the user-intentioned commit signal once when a label edit ends. */
-function onLabelBlur() {
+function onLabelBlur(e: FocusEvent) {
+    syncLabelFieldHeight(e.target as HTMLTextAreaElement);
     emit('segment-commit', segments.value);
 }
 
@@ -584,10 +719,16 @@ function onLabelBlur() {
 
 const stepMultiplier = ref(1);
 const helpOpen = ref(false);
+const confirmClearOpen = ref(false);
 
 function onKeyDown(e: KeyboardEvent) {
     const target = e.target as HTMLElement | null;
-    const isTyping = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+    const isTyping =
+        target
+        && (target.tagName === 'INPUT'
+            || target.tagName === 'TEXTAREA'
+            || target.tagName === 'SELECT'
+            || target.isContentEditable);
     if (isTyping) {
         // Allow Cmd+Z / Esc even when typing; otherwise let the input handle it.
         if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) { /* fall through */ } else if (e.key === 'Escape') { (target as HTMLElement).blur(); return; } else return;
@@ -605,6 +746,15 @@ function onKeyDown(e: KeyboardEvent) {
         }
         case '[': { e.preventDefault(); markIn(); return; }
         case ']': { e.preventDefault(); markOut(); return; }
+        // NLE convention (DaVinci Resolve-style) alongside brackets.
+        case 'i': case 'I': {
+            if (e.altKey || e.ctrlKey || e.metaKey) return;
+            e.preventDefault(); markIn(); return;
+        }
+        case 'o': case 'O': {
+            if (e.altKey || e.ctrlKey || e.metaKey) return;
+            e.preventDefault(); markOut(); return;
+        }
         case 'ArrowLeft': {
             e.preventDefault();
             if (e.altKey && primarySelectedId.value) return nudgeEdge(-1);
@@ -643,6 +793,7 @@ function onKeyDown(e: KeyboardEvent) {
             clearSelection();
             pendingInSec.value = null;
             helpOpen.value = false;
+            confirmClearOpen.value = false;
             return;
         }
         case '?': { helpOpen.value = !helpOpen.value; return; }
@@ -712,9 +863,11 @@ function onTouchMove(e: TouchEvent) {
         e.preventDefault();
         const ratio = touchDistance(e.touches) / pinchStart.dist;
         setZoom(pinchStart.zoom * ratio, pinchStart.anchorSec);
-    } else if (e.touches.length === 1 && swipeStart && timelineRef.value) {
+    } else if (e.touches.length === 1 && swipeStart) {
+        const track = timelineMetricsEl();
+        if (!track) return;
         const dx = e.touches[0].clientX - swipeStart.x;
-        const width = timelineRef.value.getBoundingClientRect().width;
+        const width = track.getBoundingClientRect().width;
         panStartSec.value = clampPan(swipeStart.pan - (dx / width) * visibleSpan.value);
     }
 }
@@ -784,20 +937,195 @@ function formatTickLabel(sec: number): string {
     return `${sec.toFixed(sec < 10 ? 1 : 0)}s`;
 }
 
+// -------------- timeline thumbnail hover (trim + thumbnails.vtt) --------------
+
+const thumbnailCues = ref<ThumbnailSpriteCue[]>([]);
+const thumbPreviewStyle = ref<Record<string, string>>({ display: 'none' });
+let thumbnailFetchAbort: AbortController | null = null;
+
+function preloadThumbnailSprites(cues: ThumbnailSpriteCue[]) {
+    const seen = new Set<string>();
+    for (const c of cues) {
+        if (seen.has(c.spriteUrl)) continue;
+        seen.add(c.spriteUrl);
+        const img = new Image();
+        img.src = c.spriteUrl;
+    }
+}
+
+watch(
+    () => [props.thumbnailVttUrl, props.mode] as const,
+    async ([url, mode]) => {
+        thumbnailFetchAbort?.abort();
+        thumbnailFetchAbort = null;
+        thumbnailCues.value = [];
+        thumbPreviewStyle.value = { display: 'none' };
+        if (!url || mode !== 'trim') return;
+        const ac = new AbortController();
+        thumbnailFetchAbort = ac;
+        try {
+            const res = await fetch(url, { signal: ac.signal });
+            if (!res.ok) return;
+            const text = await res.text();
+            const baseUrl = url.substring(0, url.lastIndexOf('/'));
+            const cues = parseThumbnailVtt(text, baseUrl);
+            if (ac.signal.aborted) return;
+            thumbnailCues.value = cues;
+            preloadThumbnailSprites(cues);
+        } catch (e) {
+            if ((e as Error).name === 'AbortError') return;
+        }
+    },
+    { immediate: true },
+);
+
+function hideThumbPreview() {
+    thumbPreviewStyle.value = { display: 'none' };
+}
+
+function onTimelineHoverMove(e: MouseEvent) {
+    if (props.mode !== 'trim' || !props.thumbnailVttUrl) return;
+    if (dragMode.value !== null) {
+        hideThumbPreview();
+        return;
+    }
+    if (!thumbnailCues.value.length || !timelineRef.value) return;
+    const t = pxToTime(e.clientX);
+    const cue = findThumbnailCue(thumbnailCues.value, t);
+    if (!cue?.w || !cue?.h) {
+        hideThumbPreview();
+        return;
+    }
+    const wrap = timelineRef.value.getBoundingClientRect();
+    let left = e.clientX - wrap.left - cue.w / 2;
+    left = Math.max(0, Math.min(left, wrap.width - cue.w));
+    thumbPreviewStyle.value = {
+        display: 'block',
+        left: `${left}px`,
+        bottom: '100%',
+        marginBottom: '6px',
+        width: `${cue.w}px`,
+        height: `${cue.h}px`,
+        backgroundImage: `url(${JSON.stringify(cue.spriteUrl)})`,
+        backgroundPosition: `-${cue.x}px -${cue.y}px`,
+        backgroundRepeat: 'no-repeat',
+    };
+}
+
+function onTimelineHoverLeave() {
+    hideThumbPreview();
+}
+
 // -------------- lifecycle --------------
+
+watch(
+    () => props.keyboardScope,
+    (scope) => {
+        window.removeEventListener('keydown', onKeyDown);
+        window.removeEventListener('keyup', onKeyUp);
+        if (scope === 'global') {
+            window.addEventListener('keydown', onKeyDown);
+            window.addEventListener('keyup', onKeyUp);
+        }
+    },
+    { immediate: true },
+);
+
+// -------------- waveform rendering --------------
+
+let waveformResizeObserver: ResizeObserver | null = null;
+
+function drawWaveform(): void {
+    const canvas = waveformCanvas.value;
+    if (!canvas || !props.waveformPeaks?.length) return;
+
+    const container = timelineMetricsEl();
+    if (!container) return;
+
+    canvas.width = container.clientWidth;
+    canvas.height = container.clientHeight;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const peaks = props.waveformPeaks;
+    const canvasHeight = canvas.height;
+    const canvasWidth = canvas.width;
+    const centerY = canvasHeight / 2;
+
+    const rootEl = rootElRef.value || document.documentElement;
+    const color = props.waveformColor || getComputedStyle(rootEl).getPropertyValue('--se-waveform').trim() || 'rgba(255,255,255,0.35)';
+    ctx.fillStyle = color;
+
+    const startIdx = Math.floor((viewStart.value / props.duration) * peaks.length);
+    const endIdx = Math.ceil(((viewStart.value + visibleSpan.value) / props.duration) * peaks.length);
+    const rangeLen = Math.max(1, endIdx - startIdx);
+
+    for (let x = 0; x < canvasWidth; x++) {
+        const peakIdx = startIdx + (x / canvasWidth) * rangeLen;
+        const idx1 = Math.floor(peakIdx);
+        const idx2 = Math.ceil(peakIdx);
+        const t = peakIdx - idx1;
+
+        const peak1 = peaks[Math.min(idx1, peaks.length - 1)] || 0;
+        const peak2 = peaks[Math.min(idx2, peaks.length - 1)] || 0;
+        const peak = peak1 * (1 - t) + peak2 * t;
+
+        const barHeight = Math.max(1, peak * (canvasHeight * 0.9));
+        ctx.fillRect(x, centerY - barHeight / 2, 1, barHeight);
+    }
+}
+
+watch(
+    () => props.waveformPeaks,
+    (peaks) => {
+        // `flush: 'post'` runs after Vue applies DOM updates so the
+        // `v-if="waveformPeaks?.length"` canvas exists on the first transition
+        // from null/empty to populated.
+        if (peaks?.length && !waveformResizeObserver) {
+            const container = timelineMetricsEl();
+            if (container) {
+                waveformResizeObserver = new ResizeObserver(() => {
+                    drawWaveform();
+                });
+                waveformResizeObserver.observe(container);
+            }
+        }
+        drawWaveform();
+    },
+    { flush: 'post' },
+);
+
+watch(
+    [viewStart, visibleSpan],
+    () => {
+        drawWaveform();
+    },
+);
 
 onMounted(() => {
     rafId = requestAnimationFrame(tick);
-    if (props.keyboardScope === 'global') {
-        window.addEventListener('keydown', onKeyDown);
-        window.addEventListener('keyup', onKeyUp);
+
+    const canvas = waveformCanvas.value;
+    const container = timelineMetricsEl();
+    if (canvas && container && props.waveformPeaks?.length) {
+        waveformResizeObserver = new ResizeObserver(() => {
+            drawWaveform();
+        });
+        waveformResizeObserver.observe(container);
+        drawWaveform();
     }
 });
 onBeforeUnmount(() => {
+    thumbnailFetchAbort?.abort();
+    thumbnailFetchAbort = null;
     cancelAnimationFrame(rafId);
-    if (props.keyboardScope === 'global') {
-        window.removeEventListener('keydown', onKeyDown);
-        window.removeEventListener('keyup', onKeyUp);
+    window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('keyup', onKeyUp);
+
+    if (waveformResizeObserver) {
+        waveformResizeObserver.disconnect();
+        waveformResizeObserver = null;
     }
 });
 
@@ -826,13 +1154,36 @@ defineExpose({
     zoomTo,
     exportVtt,
     importVtt,
-    focus: () => timelineRef.value?.focus(),
+    focus: () => {
+        if (timelineRef.value) {
+            timelineRef.value.focus({ preventScroll: true });
+            return;
+        }
+        if (props.keyboardScope === 'focus' && listOnlySplitPanel.value) {
+            rootElRef.value?.focus({ preventScroll: true });
+        }
+    },
 });
 </script>
 
 <template>
-    <div class="se-root" :data-mode="mode">
-        <div class="se-header">
+    <div
+        ref="rootElRef"
+        class="se-root"
+        :data-mode="mode"
+        :class="{
+            'se-root--split-list': splitListPanel,
+            'se-root--embedded': embedded,
+            'se-root--combined-controls': combinedControlsBar,
+        }"
+        :tabindex="keyboardRootTabindex"
+        @keydown="onKeyboardRootKeyDown"
+        @keyup="onKeyboardRootKeyUp"
+    >
+        <div
+            :class="splitListPanel && !listOnlySplitPanel ? 'se-split-main' : 'se-split-main--contents'"
+        >
+            <div v-if="!listOnlySplitPanel && showHeader" class="se-header">
             <h3 class="se-title">{{ modeTitle }}</h3>
             <div class="se-meta">
                 <span v-if="segments.length > 0">
@@ -846,64 +1197,97 @@ defineExpose({
                     class="se-btn se-btn--icon"
                     title="Keyboard shortcuts (?)"
                     @click="helpOpen = !helpOpen"
-                >?</button>
+                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
             </div>
         </div>
 
-        <div v-if="showToolbar" class="se-toolbar">
-            <button type="button" class="se-btn" @click="markIn" title="Set in-point at playhead">
-                Mark In<span class="se-kbd">[</span>
-            </button>
-            <button type="button" class="se-btn" @click="markOut" title="Set out-point at playhead">
-                Mark Out<span class="se-kbd">]</span>
-            </button>
-            <button type="button" class="se-btn" @click="addSegmentAtPlayhead" title="Add a 10-second segment at playhead">
-                + Add
-            </button>
-            <button
-                type="button"
-                class="se-btn"
-                :disabled="history.length === 0"
-                @click="undo"
-                title="Undo"
-            >↶</button>
-            <button
-                type="button"
-                class="se-btn"
-                :disabled="redoStack.length === 0"
-                @click="redo"
-                title="Redo"
-            >↷</button>
-            <button
-                v-if="segments.length > 0"
-                type="button"
-                class="se-btn se-btn--danger"
-                @click="clearAll"
-            >Clear All</button>
-            <span v-if="pendingInSec !== null" class="se-pending">
-                In: {{ formatTime(pendingInSec) }} — press <span class="se-kbd">]</span> to close (Esc to cancel)
-            </span>
-            <div class="se-spacer" />
-            <label class="se-zoom">
-                Zoom
-                <input
-                    type="range"
-                    min="1"
-                    :max="maxZoom"
-                    step="0.1"
-                    :value="zoom"
-                    @input="(e) => setZoom(parseFloat((e.target as HTMLInputElement).value), playheadSec)"
-                />
-                <span>{{ zoom.toFixed(1) }}×</span>
-            </label>
-            <slot name="toolbar-end" />
+        <div
+            v-if="showToolbar && !combinedControlsBar"
+            class="se-toolbar"
+            :class="{ 'se-toolbar--no-timeline': !showTimeline }"
+        >
+            <div v-if="showTimeline" class="se-toolbar__marks">
+                <button type="button" class="se-btn se-btn--squish" @click="markIn" title="Mark In at playhead ( I or [ )">
+                    <span aria-hidden="true">[</span>
+                </button>
+                <button type="button" class="se-btn se-btn--squish" @click="markOut" title="Mark Out at playhead ( O or ] )">
+                    <span aria-hidden="true">]</span>
+                </button>
+                <button type="button" class="se-btn" @click="addSegmentAtPlayhead" title="Add a 10-second segment at playhead">
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                    Add
+                </button>
+                <button
+                    type="button"
+                    class="se-btn se-btn--squish"
+                    :disabled="history.length === 0"
+                    @click="undo"
+                    title="Undo"
+                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                <button
+                    type="button"
+                    class="se-btn se-btn--squish"
+                    :disabled="redoStack.length === 0"
+                    @click="redo"
+                    title="Redo"
+                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
+                <slot name="toolbar-before-clear" />
+                <button
+                    v-if="segments.length > 0"
+                    type="button"
+                    class="se-btn se-btn--danger"
+                    @click="confirmClearOpen = true"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
+                    Clear All
+                </button>
+                <span v-if="pendingInSec !== null" class="se-pending">
+                    In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
+                    · <span class="se-pending-cancel">Esc cancels</span>
+                </span>
+                <label v-if="showTimeline" class="se-zoom">
+                    Zoom
+                    <input
+                        type="range"
+                        min="1"
+                        :max="maxZoom"
+                        step="0.1"
+                        :value="zoom"
+                        @input="(e) => setZoom(parseFloat((e.target as HTMLInputElement).value), playheadSec)"
+                    />
+                    <span>{{ zoom.toFixed(1) }}×</span>
+                </label>
+                <slot name="toolbar-end" />
+            </div>
+            <div
+                v-if="$slots['playback-start'] || $slots['playback-end']"
+                class="se-toolbar__playback-options"
+                :class="{ 'se-toolbar__playback-options--stacked': !showTimeline }"
+            >
+                <div
+                    v-if="$slots['playback-start']"
+                    class="se-playback-controls__slot se-playback-controls__slot--start"
+                >
+                    <slot name="playback-start" />
+                </div>
+                <div
+                    v-if="$slots['playback-end']"
+                    class="se-playback-controls__slot se-playback-controls__slot--end"
+                >
+                    <slot name="playback-end" />
+                </div>
+            </div>
+            <div v-if="!showTimeline" class="se-toolbar__marks se-toolbar__marks--list-only">
+                <slot name="toolbar-end" />
+            </div>
         </div>
 
-        <div v-if="showPlaybackControls" class="se-time-above">
+        <div v-if="showPlaybackControls && !combinedControlsBar" class="se-time-above">
             {{ formatTime(playheadSec) }} / {{ formatTime(duration) }}
         </div>
 
         <div
+            v-if="showTimeline"
             ref="timelineRef"
             class="se-timeline-wrap"
             :tabindex="keyboardScope === 'off' ? -1 : 0"
@@ -911,9 +1295,17 @@ defineExpose({
             @keyup="keyboardScope === 'focus' ? onKeyUp($event) : undefined"
         >
             <div
+                v-if="thumbnailVttUrl && mode === 'trim'"
+                class="se-thumb-preview"
+                :style="thumbPreviewStyle"
+            />
+            <div
+                ref="timelineTrackRef"
                 class="se-timeline"
                 :class="{ 'se-timeline--subtitles': mode === 'subtitles' }"
                 @mousedown="onTimelineMouseDown"
+                @mousemove="onTimelineHoverMove"
+                @mouseleave="onTimelineHoverLeave"
                 @wheel="onWheel"
                 @touchstart.passive="onTouchStart"
                 @touchmove="onTouchMove"
@@ -924,6 +1316,12 @@ defineExpose({
                 :aria-valuenow="playheadSec"
                 :aria-label="`${modeTitle} timeline`"
             >
+                <canvas
+                    v-if="waveformPeaks?.length"
+                    ref="waveformCanvas"
+                    class="se-waveform-canvas"
+                />
+
                 <div class="se-ruler">
                     <template v-for="tick in rulerTicks" :key="tick.sec">
                         <div
@@ -980,7 +1378,7 @@ defineExpose({
                     v-if="pendingInSec !== null"
                     class="se-pending-marker"
                     :style="{ left: `${timeToPercent(pendingInSec)}%` }"
-                    :title="`Pending In: ${formatTime(pendingInSec)} — press ] to close`"
+                    :title="`In at ${formatTime(pendingInSec)} — Mark Out with O or ]`"
                 />
             </div>
 
@@ -995,78 +1393,414 @@ defineExpose({
         </div>
 
         <div
-            v-if="showPlaybackControls && (onPlayPause || onSeek || $slots['playback-start'] || $slots['playback-end'])"
+            v-if="showPlaybackControls && (onPlayPause || onSeek) && !combinedControlsBar"
             class="se-playback-controls"
         >
-            <div class="se-playback-controls__slot se-playback-controls__slot--start">
-                <slot name="playback-start" />
-            </div>
-            <div v-if="onPlayPause || onSeek" class="se-playback-controls__center">
+            <div class="se-playback-controls__center">
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Back 1 second · Left Arrow — Hold 1, 2, or 3 before ← for 10s, 30s, or 60s steps"
+                    aria-label="Back 1 second"
                     @click="stepSeek(-1)"
-                    title="Back (←)"
-                >⟵ 1s</button>
-                <button v-if="onPlayPause" type="button" class="se-btn" @click="onPlayPause">
-                    {{ isPlaying ? '⏸' : '▶' }}
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
                 </button>
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Back 10 seconds · J"
+                    aria-label="Back 10 seconds (J)"
+                    @click="stepSeek(-1, 10)"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 7 13 12 18 17" /><polyline points="11 7 6 12 11 17" /></svg>
+                </button>
+                <button
+                    v-if="onPlayPause"
+                    type="button"
+                    class="se-btn se-btn--playback"
+                    title="Play or pause · Space — Also K"
+                    :aria-label="isPlaying ? 'Pause' : 'Play'"
+                    :aria-pressed="isPlaying"
+                    @click="onPlayPause"
+                >
+                    <svg
+                        v-if="!isPlaying"
+                        class="se-icon"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    ><path d="M9 7.5L9 16.5L18 12L9 7.5z" /></svg>
+                    <svg
+                        v-else
+                        class="se-icon"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    ><path d="M8 8h3v8H8V8Zm5 0h3v8h-3V8z" /></svg>
+                </button>
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Forward 10 seconds · L"
+                    aria-label="Forward 10 seconds (L)"
+                    @click="stepSeek(1, 10)"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 7 11 12 6 17" /><polyline points="13 7 18 12 13 17" /></svg>
+                </button>
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Forward 1 second · Right Arrow — Hold 1, 2, or 3 before → for 10s, 30s, or 60s steps"
+                    aria-label="Forward 1 second"
                     @click="stepSeek(1)"
-                    title="Forward (→)"
-                >1s ⟶</button>
-            </div>
-            <div class="se-playback-controls__slot se-playback-controls__slot--end">
-                <slot name="playback-end" />
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>
+                </button>
             </div>
         </div>
 
-        <div v-if="showList && segments.length > 0" class="se-list">
+        <!--
+            Trim mode: one row below the timeline with playback (back/play/forward),
+            mark in/out, add, undo, redo, clear-all, zoom, and the audio/quality slots.
+        -->
+        <div
+            v-if="combinedControlsBar"
+            class="se-controls-bar"
+        >
             <div
-                v-for="(seg, i) in segments"
-                :key="seg.id"
-                class="se-list-row"
-                :class="{ 'se-list-row--selected': isSelected(seg.id) }"
-                @click="setSelection([seg.id])"
+                v-if="showPlaybackControls && (onPlayPause || onSeek)"
+                class="se-controls-bar__playback"
             >
-                <span class="se-list-index">{{ i + 1 }}</span>
-                <input
-                    type="text"
-                    class="se-input se-input--time"
-                    :value="formatTime(seg.inSec)"
-                    @change="updateTimeInput(seg.id, 'inSec', ($event.target as HTMLInputElement).value)"
-                    @click.stop
-                />
-                <span class="se-list-sep">—</span>
-                <input
-                    type="text"
-                    class="se-input se-input--time"
-                    :value="formatTime(seg.outSec)"
-                    @change="updateTimeInput(seg.id, 'outSec', ($event.target as HTMLInputElement).value)"
-                    @click.stop
-                />
-                <textarea
-                    v-if="labelsVisible"
-                    class="se-label-field"
-                    :value="seg.label || ''"
-                    :placeholder="mode === 'chapters' ? 'Chapter title…' : 'Subtitle text…'"
-                    rows="1"
-                    @focus="onLabelFocus"
-                    @input="updateLabel(seg.id, ($event.target as HTMLTextAreaElement).value)"
-                    @blur="onLabelBlur"
-                    @click.stop
-                />
-                <span class="se-list-duration">{{ formatDuration(seg.outSec - seg.inSec) }}</span>
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Back 1 second · Left Arrow — Hold 1, 2, or 3 before ← for 10s, 30s, or 60s steps"
+                    aria-label="Back 1 second"
+                    @click="stepSeek(-1)"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
+                </button>
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Back 10 seconds · J"
+                    aria-label="Back 10 seconds (J)"
+                    @click="stepSeek(-1, 10)"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 7 13 12 18 17" /><polyline points="11 7 6 12 11 17" /></svg>
+                </button>
+                <button
+                    v-if="onPlayPause"
+                    type="button"
+                    class="se-btn se-btn--playback"
+                    title="Play or pause · Space — Also K"
+                    :aria-label="isPlaying ? 'Pause' : 'Play'"
+                    :aria-pressed="isPlaying"
+                    @click="onPlayPause"
+                >
+                    <svg
+                        v-if="!isPlaying"
+                        class="se-icon"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    ><path d="M9 7.5L9 16.5L18 12L9 7.5z" /></svg>
+                    <svg
+                        v-else
+                        class="se-icon"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                    ><path d="M8 8h3v8H8V8Zm5 0h3v8h-3V8z" /></svg>
+                </button>
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Forward 10 seconds · L"
+                    aria-label="Forward 10 seconds (L)"
+                    @click="stepSeek(1, 10)"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 7 11 12 6 17" /><polyline points="13 7 18 12 13 17" /></svg>
+                </button>
+                <button
+                    v-if="onSeek"
+                    type="button"
+                    class="se-btn se-btn--playback-icon"
+                    :disabled="!canSeekPlayback"
+                    title="Forward 1 second · Right Arrow — Hold 1, 2, or 3 before → for 10s, 30s, or 60s steps"
+                    aria-label="Forward 1 second"
+                    @click="stepSeek(1)"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>
+                </button>
+            </div>
+
+            <div v-if="showPlaybackControls" class="se-controls-bar__time">
+                {{ formatTime(playheadSec) }} / {{ formatTime(duration) }}
+            </div>
+
+            <div v-if="showToolbar" class="se-controls-bar__marks">
+                <button type="button" class="se-btn se-btn--squish" @click="markIn" title="Mark In at playhead ( I or [ )">
+                    <span aria-hidden="true">[</span>
+                </button>
+                <button type="button" class="se-btn se-btn--squish" @click="markOut" title="Mark Out at playhead ( O or ] )">
+                    <span aria-hidden="true">]</span>
+                </button>
+                <button type="button" class="se-btn" @click="addSegmentAtPlayhead" title="Add a 10-second segment at playhead">
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                    Add
+                </button>
                 <button
                     type="button"
-                    class="se-remove"
-                    title="Remove segment"
-                    @click.stop="removeSegment(seg.id)"
-                >×</button>
+                    class="se-btn se-btn--squish"
+                    :disabled="history.length === 0"
+                    @click="undo"
+                    title="Undo"
+                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                <button
+                    type="button"
+                    class="se-btn se-btn--squish"
+                    :disabled="redoStack.length === 0"
+                    @click="redo"
+                    title="Redo"
+                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
+                <button
+                    v-if="segments.length > 0"
+                    type="button"
+                    class="se-btn se-btn--danger"
+                    @click="confirmClearOpen = true"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
+                    Clear All
+                </button>
+                <span v-if="pendingInSec !== null" class="se-pending">
+                    In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
+                    · <span class="se-pending-cancel">Esc cancels</span>
+                </span>
+            </div>
+
+            <div v-if="showToolbar" class="se-controls-bar__zoom">
+                <label class="se-zoom">
+                    Zoom
+                    <input
+                        type="range"
+                        min="1"
+                        :max="maxZoom"
+                        step="0.1"
+                        :value="zoom"
+                        @input="(e) => setZoom(parseFloat((e.target as HTMLInputElement).value), playheadSec)"
+                    />
+                    <span>{{ zoom.toFixed(1) }}×</span>
+                </label>
+                <slot name="toolbar-end" />
+            </div>
+
+            <div
+                v-if="showToolbar && $slots['toolbar-before-clear']"
+                class="se-controls-bar__actions"
+            >
+                <slot name="toolbar-before-clear" />
+            </div>
+
+            <div
+                v-if="$slots['playback-start'] || $slots['playback-end']"
+                class="se-controls-bar__options"
+            >
+                <div
+                    v-if="$slots['playback-start']"
+                    class="se-playback-controls__slot se-playback-controls__slot--start"
+                >
+                    <slot name="playback-start" />
+                </div>
+                <div
+                    v-if="$slots['playback-end']"
+                    class="se-playback-controls__slot se-playback-controls__slot--end"
+                >
+                    <slot name="playback-end" />
+                </div>
+            </div>
+
+            <!-- When the header is suppressed, the keyboard-shortcuts button moves to the
+                 far right of the controls bar (so users still have a way to open help). -->
+            <button
+                v-if="showHelp && !showHeader"
+                type="button"
+                class="se-btn se-btn--icon se-controls-bar__help"
+                :class="{ 'se-controls-bar__help--alone': !$slots['playback-start'] && !$slots['playback-end'] }"
+                title="Keyboard shortcuts (?)"
+                @click="helpOpen = !helpOpen"
+            ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
+        </div>
+
+        <div
+            v-if="shortcutsStripVisible && showPlaybackControls && (onPlayPause || onSeek)"
+            class="se-shortcuts-strip"
+            role="note"
+            aria-label="Keyboard shortcuts"
+        >
+            <span class="se-shortcuts-strip__group">
+                <strong class="se-shortcuts-strip__title">In / Out</strong>
+                <span class="se-kbd">I</span><span class="se-kbd">[</span>
+                <span class="se-shortcuts-strip__sep">·</span>
+                <span class="se-kbd">O</span><span class="se-kbd">]</span>
+            </span>
+            <span class="se-shortcuts-strip__group">
+                <strong class="se-shortcuts-strip__title">Play</strong>
+                <span class="se-kbd">Space</span><span class="se-kbd">K</span>
+            </span>
+            <span class="se-shortcuts-strip__group">
+                <strong class="se-shortcuts-strip__title">Jog</strong>
+                <span class="se-kbd">←</span><span class="se-kbd">→</span>
+                <span class="se-shortcuts-strip__dim">1 s</span>
+                <span class="se-shortcuts-strip__sep">·</span>
+                <span class="se-kbd">J</span><span class="se-kbd">L</span>
+                <span class="se-shortcuts-strip__dim">10 s</span>
+                <span v-if="fps > 0" class="se-shortcuts-strip__frame-hint">
+                    <span class="se-shortcuts-strip__sep">·</span>
+                    <span class="se-kbd">,</span><span class="se-kbd">.</span>
+                    <span class="se-shortcuts-strip__dim">frame ({{ fps }}&nbsp;fps)</span>
+                </span>
+            </span>
+            <span class="se-shortcuts-strip__group">
+                <strong class="se-shortcuts-strip__title">Zoom</strong>
+                <span class="se-kbd">+</span><span class="se-kbd">−</span>
+                <span class="se-shortcuts-strip__sep">·</span>
+                <span class="se-kbd">0</span>
+                <span class="se-shortcuts-strip__dim">fit</span>
+            </span>
+            <span class="se-shortcuts-strip__more">
+                <button type="button" class="se-shortcuts-strip__help-link" @click="helpOpen = true">All shortcuts (?)</button>
+            </span>
+        </div>
+
+        </div>
+
+        <div
+            v-if="showList && (segments.length > 0 || listOnlySplitPanel)"
+            class="se-list-section"
+            :class="{ 'se-list-section--split': splitListPanel }"
+        >
+            <div
+                v-if="
+                    listOnlySplitPanel && labelsVisible && (mode === 'chapters' || mode === 'subtitles')
+                "
+                class="se-list-split-header"
+            >
+                <h3 class="se-title">{{ modeTitle }}</h3>
+                <div class="se-meta">
+                    <span v-if="segments.length > 0">
+                        {{ segments.length }} segment{{ segments.length !== 1 ? 's' : '' }}
+                        · {{ formatDuration(totalSelectedDuration) }}
+                    </span>
+                    <span v-else>No segments</span>
+                </div>
+            </div>
+            <p
+                v-else-if="labelsVisible && (mode === 'chapters' || mode === 'subtitles')"
+                class="se-list-heading"
+            >
+                {{ mode === 'chapters' ? 'Chapter list' : 'Subtitle cues' }}
+            </p>
+            <div v-if="segments.length > 0" class="se-list">
+                <div
+                    v-for="(seg, i) in segments"
+                    :key="seg.id"
+                    class="se-list-row"
+                    :class="{ 'se-list-row--selected': isSelected(seg.id) }"
+                    @click="onListRowActivate(seg)"
+                >
+                    <span class="se-list-index">{{ i + 1 }}</span>
+                    <input
+                        type="text"
+                        class="se-input se-input--time"
+                        :value="formatTime(seg.inSec)"
+                        @change="updateTimeInput(seg.id, 'inSec', ($event.target as HTMLInputElement).value)"
+                        @click.stop
+                    />
+                    <span class="se-list-sep">—</span>
+                    <input
+                        type="text"
+                        class="se-input se-input--time"
+                        :value="formatTime(seg.outSec)"
+                        @change="updateTimeInput(seg.id, 'outSec', ($event.target as HTMLInputElement).value)"
+                        @click.stop
+                    />
+                    <textarea
+                        v-if="labelsVisible && !readOnly"
+                        class="se-label-field"
+                        :value="seg.label || ''"
+                        :placeholder="mode === 'chapters' ? 'Chapter title…' : 'Subtitle text…'"
+                        rows="1"
+                        @focus="onLabelFocus"
+                        @input="onLabelInput($event, seg.id)"
+                        @blur="onLabelBlur"
+                        @click.stop
+                    />
+                    <span class="se-list-end">
+                        <span class="se-list-duration">{{ formatDuration(seg.outSec - seg.inSec) }}</span>
+                        <button
+                            type="button"
+                            class="se-remove"
+                            title="Remove segment"
+                            aria-label="Remove segment"
+                            @click.stop="removeSegment(seg.id)"
+                        >
+                            <svg
+                                class="se-icon"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                aria-hidden="true"
+                            ><path d="M8 8l8 8M16 8l-8 8"/></svg>
+                        </button>
+                    </span>
+                </div>
+            </div>
+            <div
+                v-else-if="listOnlySplitPanel && labelsVisible && mode === 'chapters'"
+                class="se-list-empty se-list-empty--split"
+            >
+                <div class="se-list-empty__stack">
+                    <div class="se-list-empty__visual" aria-hidden="true">
+                        <svg class="se-list-empty__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                            <path d="M8 7h8M8 11h5" />
+                        </svg>
+                    </div>
+                    <p class="se-list-empty__title">{{ emptyTitle ?? 'No chapters yet' }}</p>
+                    <p class="se-list-empty__hint">
+                        {{ emptyHint ?? 'Use the trim timeline below to add in/out marks, or load chapters from a VTT sidecar.' }}
+                    </p>
+                </div>
+            </div>
+            <div
+                v-else-if="listOnlySplitPanel && labelsVisible && mode === 'subtitles'"
+                class="se-list-empty se-list-empty--split"
+            >
+                <div class="se-list-empty__stack">
+                    <p class="se-list-empty__title">No subtitle cues yet</p>
+                    <p class="se-list-empty__hint">
+                        Add cues using the timeline below.
+                    </p>
+                </div>
             </div>
         </div>
 
@@ -1074,28 +1808,60 @@ defineExpose({
             Segments overlap — adjust the in/out points.
         </div>
 
-        <div v-if="helpOpen" class="se-help" @click.self="helpOpen = false">
-            <div class="se-help-panel">
-                <h4>Keyboard shortcuts</h4>
-                <dl>
-                    <dt>Space / K</dt><dd>Play / pause</dd>
-                    <dt>← / →</dt><dd>Step 1 second back / forward</dd>
-                    <dt>1 / 2 / 3 + arrow</dt><dd>Step 10s / 30s / 60s</dd>
-                    <dt>J / L</dt><dd>Step 10s back / forward</dd>
-                    <dt v-if="fps > 0">, / .</dt><dd v-if="fps > 0">Step one frame ({{ fps }} fps)</dd>
-                    <dt>[</dt><dd>Mark In at playhead</dd>
-                    <dt>]</dt><dd>Mark Out at playhead</dd>
-                    <dt>Alt + ← / →</dt><dd>Nudge nearest edge of selected segment</dd>
-                    <dt>Delete</dt><dd>Remove selected segment(s)</dd>
-                    <dt>⌘ / Ctrl + Z</dt><dd>Undo</dd>
-                    <dt>⌘ / Ctrl + Shift + Z</dt><dd>Redo</dd>
-                    <dt>+ / −</dt><dd>Zoom in / out (0 resets)</dd>
-                    <dt>Ctrl / ⌘ + wheel</dt><dd>Zoom at cursor</dd>
-                    <dt>Shift + drag</dt><dd>Marquee-select segments</dd>
-                    <dt>Esc</dt><dd>Clear selection / close</dd>
-                    <dt>?</dt><dd>Toggle this help</dd>
-                </dl>
+        <Teleport to="body">
+            <div
+                v-if="helpOpen"
+                class="se-help"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="se-help-heading"
+                @click.self="helpOpen = false"
+            >
+                <div class="se-help-panel">
+                    <h4 id="se-help-heading">Keyboard shortcuts</h4>
+                    <dl>
+                        <dt>Space / K</dt><dd>Play / pause</dd>
+                        <dt>← / →</dt><dd>Step 1 second back / forward</dd>
+                        <dt>1 / 2 / 3 + arrow</dt><dd>Step 10s / 30s / 60s</dd>
+                        <dt>J / L</dt><dd>Step 10s back / forward</dd>
+                        <dt v-if="fps > 0">, / .</dt><dd v-if="fps > 0">Step one frame ({{ fps }} fps)</dd>
+                        <dt>I</dt><dd>Mark In at playhead (Resolve-style)</dd>
+                        <dt>O</dt><dd>Mark Out at playhead</dd>
+                        <dt>[ / ]</dt><dd>Mark In / Mark Out (alternate)</dd>
+                        <dt>Alt + ← / →</dt><dd>Nudge nearest edge of selected segment</dd>
+                        <dt>Delete</dt><dd>Remove selected segment(s)</dd>
+                        <dt>⌘ / Ctrl + Z</dt><dd>Undo</dd>
+                        <dt>⌘ / Ctrl + Shift + Z</dt><dd>Redo</dd>
+                        <dt>+ / −</dt><dd>Zoom in / out (0 resets)</dd>
+                        <dt>Ctrl / ⌘ + wheel</dt><dd>Zoom at cursor</dd>
+                        <dt>Shift + drag</dt><dd>Marquee-select segments</dd>
+                        <dt>Esc</dt><dd>Clear selection / close</dd>
+                        <dt>?</dt><dd>Toggle this help</dd>
+                    </dl>
+                </div>
             </div>
-        </div>
+        </Teleport>
+
+        <Teleport to="body">
+            <div
+                v-if="confirmClearOpen"
+                class="se-help se-confirm"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="se-confirm-heading"
+                @click.self="confirmClearOpen = false"
+            >
+                <div class="se-help-panel se-confirm-panel">
+                    <h4 id="se-confirm-heading">Clear all {{ clearNoun }}?</h4>
+                    <p class="se-confirm-text">
+                        This removes all {{ segments.length }} {{ clearNoun }} from the timeline. You can undo with <span class="se-kbd">⌘/Ctrl</span> + <span class="se-kbd">Z</span>.
+                    </p>
+                    <div class="se-confirm-actions">
+                        <button type="button" class="se-confirm-btn" @click="confirmClearOpen = false">Cancel</button>
+                        <button type="button" class="se-confirm-btn se-confirm-btn--danger" @click="performClearAll">Clear All</button>
+                    </div>
+                </div>
+            </div>
+        </Teleport>
     </div>
 </template>

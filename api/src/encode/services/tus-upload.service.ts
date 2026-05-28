@@ -7,12 +7,13 @@ import {
 import { TusdServer } from 'node-tusd';
 import { join, basename } from 'path';
 import { mkdirSync } from 'fs';
-import { rename, copyFile, unlink, mkdir } from 'fs/promises';
+import { rename, copyFile, unlink, mkdir, access } from 'fs/promises';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { SessionService } from './session.service.js';
 import { ProbeService } from './probe.service.js';
 import { PreviewService } from './preview.service.js';
 import { WebhookService } from './webhook.service.js';
+import { WaveformService } from './waveform.service.js';
 import { hasAllowedExtension } from './media-extensions.js';
 
 const DEFAULT_MAX_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
@@ -31,6 +32,7 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
         private readonly probeService: ProbeService,
         private readonly previewService: PreviewService,
         private readonly webhookService: WebhookService,
+        private readonly waveformService: WaveformService,
     ) {
         this.workDir = process.env.WORK_DIR || join(process.cwd(), 'work');
         this.tusDir = join(this.workDir, '.tus-uploads');
@@ -77,7 +79,6 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
             onUploadCreate: async (_req, upload) => {
                 const sessionId = upload.metadata?.sessionId;
                 if (!sessionId) {
-                    // Partial uploads (Concatenation extension) lack metadata — allow them
                     return;
                 }
 
@@ -112,9 +113,16 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
             },
 
             onUploadFinish: async (_req, upload) => {
+                // With parallelUploads > 1, tus-js-client propagates metadata
+                // (including sessionId) to every partial chunk upload. Skip
+                // partial chunks — only act on the final concatenation or on a
+                // plain single-file upload (isPartial=false, isFinal=false).
+                if (upload.isPartial) {
+                    return;
+                }
+
                 const sessionId = upload.metadata?.sessionId;
                 if (!sessionId) {
-                    // Partial upload completed — nothing to do
                     return;
                 }
 
@@ -132,12 +140,27 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                 await mkdir(sessionDir, { recursive: true });
 
                 const destPath = join(sessionDir, filename);
-                try {
-                    await rename(tusFilePath, destPath);
-                } catch {
-                    // Cross-device fallback: copy then delete
-                    await copyFile(tusFilePath, destPath);
-                    await unlink(tusFilePath);
+
+                // Idempotency: if file is already at destination (e.g. duplicate
+                // post-finish delivery from tusd retry), skip the move.
+                const alreadyMoved = await access(destPath).then(() => true).catch(() => false);
+                if (!alreadyMoved) {
+                    try {
+                        await rename(tusFilePath, destPath);
+                    } catch (err: unknown) {
+                        const code = (err as NodeJS.ErrnoException).code;
+                        if (code !== 'EXDEV') {
+                            // Not a cross-device error — log and re-throw so the
+                            // real cause appears in the tusd hook error log.
+                            this.logger.error(
+                                `Failed to move upload file (${code}): ${tusFilePath} → ${destPath}`,
+                            );
+                            throw err;
+                        }
+                        // Cross-device fallback: copy then delete
+                        await copyFile(tusFilePath, destPath);
+                        await unlink(tusFilePath);
+                    }
                 }
 
                 // Clean up tusd metadata sidecar (.info file)
@@ -218,6 +241,19 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
 
         this.sessionService.updateStatus(sessionId, 'uploaded');
         this.sendStatusWebhook(sessionId, 'uploaded');
+
+        // Prime the waveform cache in the background — by the time the user
+        // opens the trim UI, the JSON is already on disk and the HTTP GET
+        // serves from cache. Skipped for files with no audio tracks.
+        if (probeResult.audioTracks.length > 0) {
+            void this.waveformService
+                .getOrComputeCached(sessionId, { inputPath: destPath })
+                .catch((err) => {
+                    this.logger.warn(
+                        `Background waveform prime failed for ${sessionId}: ${(err as Error).message}`,
+                    );
+                });
+        }
 
         this.logger.log(
             `Ingest complete for session ${sessionId}: ` +

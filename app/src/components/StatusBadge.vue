@@ -6,8 +6,8 @@ const props = withDefaults(defineProps<{
     icon?: string;
     title?: string;
 }>(), {
-    color: 'text-zinc-400',
-    borderColor: 'border-zinc-700',
+    color: 'text-slate-400',
+    borderColor: 'border-slate-700',
     icon: undefined,
     title: undefined,
 });

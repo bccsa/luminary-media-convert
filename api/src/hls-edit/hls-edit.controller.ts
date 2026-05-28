@@ -9,6 +9,7 @@ import { HlsMutateRequestDto } from './dto/mutate.dto.js';
 import { HlsDiscoverRequestDto } from './dto/discover.dto.js';
 import { HlsChaptersReadRequestDto, type HlsChaptersReadResult } from './dto/chapters-read.dto.js';
 import { HlsChaptersWriteRequestDto } from './dto/chapters-write.dto.js';
+import { HlsWaveformReadRequestDto, type HlsWaveformReadResult } from './dto/waveform-read.dto.js';
 
 @ApiTags('HLS Edit')
 @Controller('api/hls')
@@ -102,5 +103,24 @@ export class HlsEditController {
     @ApiResponse({ status: 413, description: 'VTT body exceeds 1 MiB.' })
     async chaptersWrite(@Body() dto: HlsChaptersWriteRequestDto): Promise<void> {
         await this.service.writeChapters(dto.s3, dto.folderPrefix, dto.lang, dto.vtt);
+    }
+
+    @Post('waveform/read')
+    @HttpCode(HttpStatus.OK)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('master', 'apikey')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'Read the waveform sidecar JSON for a session prefix',
+        description: 'Stateless — takes inline S3 credentials and a folder prefix. Returns the parsed waveform.json body, or 404 when the sidecar is missing (e.g. imported sessions or sessions encoded before the sidecar landed).',
+    })
+    @ApiResponse({ status: 200, description: 'Waveform sidecar body.' })
+    @ApiResponse({ status: 400, description: 'Invalid request.' })
+    @ApiResponse({ status: 401, description: 'Unauthorized.' })
+    @ApiResponse({ status: 404, description: 'No waveform.json under the prefix.' })
+    async waveformRead(@Body() dto: HlsWaveformReadRequestDto): Promise<HlsWaveformReadResult> {
+        const result = await this.service.readWaveform(dto.s3, dto.folderPrefix);
+        if (!result) throw new NotFoundException('No waveform sidecar for this session');
+        return result;
     }
 }

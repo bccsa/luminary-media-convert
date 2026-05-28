@@ -2,6 +2,7 @@
 import { ref, watch, onMounted } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { useRouter } from 'vue-router';
+import EncodePipelineAside from '../components/EncodePipelineAside.vue';
 import SessionConfigForm from '../components/SessionConfigForm.vue';
 import type { SavedS3Config, SubmitPayload } from '../components/SessionConfigForm.vue';
 import { createSession, uploadFile, startUrlUpload, listS3Configs, getS3Config, createS3Config, updateSessionName, checkPrefix } from '../api';
@@ -30,7 +31,6 @@ const selectedS3ConfigId = ref('');
 const creatingConfig = ref(false);
 const formPathPrefix = ref('');
 
-// Dismiss the prefix warning if the user edits the prefix directly
 watch(formPathPrefix, () => {
     if (prefixWarning.value) {
         prefixWarning.value = null;
@@ -95,7 +95,6 @@ async function onUploadSubmit(payload: SubmitPayload) {
     prefixWarning.value = null;
     pendingPayload.value = null;
 
-    // Check if the prefix already contains files in the target bucket
     const prefix = payload.config.s3.pathPrefix?.trim();
     if (prefix && payload.s3ConfigId) {
         validating.value = true;
@@ -143,12 +142,12 @@ async function startUpload(payload: SubmitPayload) {
             );
         }
 
-        // Create session via SaaS Service
         const session = await createSession(payload.config, accessToken);
 
-        // Set session name if provided (fire-and-forget)
-        if (payload.sessionName) {
-            updateSessionName(accessToken, session.sessionId, payload.sessionName).catch(() => {});
+        const trimmedName = payload.sessionName?.trim() ?? '';
+        if (trimmedName) {
+            // Must finish before navigate — otherwise SessionView often loads before the name exists.
+            await updateSessionName(accessToken, session.sessionId, trimmedName);
         }
 
         if (payload.source === 'file') {
@@ -158,7 +157,6 @@ async function startUpload(payload: SubmitPayload) {
                 );
             }
 
-            // Start upload via tus — registered in singleton store so it survives navigation
             const tusEndpoint = `${session.encodingApiUrl}/api/tus`;
             const { promise, abort } = uploadFile(
                 tusEndpoint,
@@ -170,11 +168,9 @@ async function startUpload(payload: SubmitPayload) {
 
             registerUpload(session.sessionId, abort, promise);
         } else {
-            // URL ingestion — server-side download. Progress arrives via SSE/poll.
             await startUrlUpload(session.sessionId, payload.url, accessToken, payload.filename);
         }
 
-        // Navigate to unified session view — upload continues in background
         router.push(`/sessions/${session.sessionId}`);
     } catch (e) {
         submissionError.value = e instanceof Error ? e.message : String(e);
@@ -187,61 +183,94 @@ onMounted(fetchSavedS3Configs);
 </script>
 
 <template>
-    <div class="max-w-2xl mx-auto">
-        <div class="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 shadow-xl backdrop-blur">
-            <!-- Prefix overwrite warning -->
-            <div
-                v-if="prefixWarning"
-                class="mb-6 rounded-lg bg-amber-950/40 border border-amber-800/50 p-4 space-y-3"
+    <div class="app-view font-sans">
+        <div class="mb-6 lg:mb-8">
+            <router-link
+                to="/sessions"
+                class="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-600 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
             >
-                <p class="text-sm text-amber-400">{{ prefixWarning }}</p>
-                <div class="flex gap-2">
-                    <button
-                        type="button"
-                        class="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-500 cursor-pointer"
-                        @click="confirmPrefixOverwrite"
-                    >
-                        Continue Anyway
-                    </button>
-                    <button
-                        type="button"
-                        class="rounded-md border border-zinc-700 px-4 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800 cursor-pointer"
-                        @click="dismissPrefixWarning"
-                    >
-                        Revise Prefix
-                    </button>
-                </div>
-            </div>
-
-            <!-- Submission error banner -->
-            <div
-                v-if="submissionError"
-                class="mb-6 rounded-lg bg-red-950/40 border border-red-800/50 p-4"
-            >
-                <p class="text-sm text-red-400">{{ submissionError }}</p>
-            </div>
-
-            <!-- Validating / Submitting spinner -->
-            <div v-if="validating || submitting" class="flex flex-col items-center gap-4 py-16">
-                <svg class="h-8 w-8 animate-spin text-indigo-400" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
                 </svg>
-                <p class="text-sm text-zinc-400">{{ validating ? 'Validating...' : 'Creating session...' }}</p>
+                Back to sessions
+            </router-link>
+            <header class="space-y-2">
+                <h1 class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+                    Create new encoding session
+                </h1>
+                <p class="max-w-2xl text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+                    Choose S3 storage and how you want to ingest source media. After create, we probe the file and prepare
+                    encoding options on the session screen.
+                </p>
+            </header>
+        </div>
+
+        <div class="grid gap-8 lg:grid-cols-12 lg:items-start">
+            <div class="lg:col-span-8">
+                <section
+                    class="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur-md dark:border-slate-700 dark:bg-slate-800/60 dark:shadow-black/20 dark:ring-white/10"
+                >
+                    <div class="p-5 sm:p-6 lg:p-8">
+                        <div
+                            v-if="prefixWarning"
+                            class="mb-6 space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800/50 dark:bg-amber-950/30"
+                        >
+                            <p class="text-sm text-amber-900 dark:text-amber-300">{{ prefixWarning }}</p>
+                            <div class="flex flex-wrap gap-2">
+                                <button
+                                    type="button"
+                                    class="cursor-pointer rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-500"
+                                    @click="confirmPrefixOverwrite"
+                                >
+                                    Continue anyway
+                                </button>
+                                <button
+                                    type="button"
+                                    class="cursor-pointer rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                                    @click="dismissPrefixWarning"
+                                >
+                                    Revise prefix
+                                </button>
+                            </div>
+                        </div>
+
+                        <div
+                            v-if="submissionError"
+                            class="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-900/50 dark:bg-red-950/40"
+                        >
+                            <p class="text-sm text-red-800 dark:text-red-400">{{ submissionError }}</p>
+                        </div>
+
+                        <div v-if="validating || submitting" class="flex flex-col items-center gap-4 py-16">
+                            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-50 dark:bg-slate-950/40">
+                                <svg class="h-6 w-6 animate-spin text-slate-500 dark:text-slate-400" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                </svg>
+                            </div>
+                            <p class="text-sm font-medium text-slate-600 dark:text-slate-400">
+                                {{ validating ? 'Validating prefix…' : 'Creating session…' }}
+                            </p>
+                        </div>
+
+                        <SessionConfigForm
+                            v-show="!validating && !submitting"
+                            v-model:path-prefix="formPathPrefix"
+                            :saved-s3-configs="savedS3Configs"
+                            :loaded-s3-config="loadedS3Config"
+                            :selected-s3-config-id="selectedS3ConfigId"
+                            :creating-config="creatingConfig"
+                            @submit="onUploadSubmit"
+                            @load-s3-config="onLoadS3Config"
+                            @create-s3-config="onCreateS3Config"
+                        />
+                    </div>
+                </section>
             </div>
 
-            <!-- Session config form (kept mounted to preserve file selection) -->
-            <SessionConfigForm
-                v-show="!validating && !submitting"
-                v-model:path-prefix="formPathPrefix"
-                :saved-s3-configs="savedS3Configs"
-                :loaded-s3-config="loadedS3Config"
-                :selected-s3-config-id="selectedS3ConfigId"
-                :creating-config="creatingConfig"
-                @submit="onUploadSubmit"
-                @load-s3-config="onLoadS3Config"
-                @create-s3-config="onCreateS3Config"
-            />
+            <aside class="lg:col-span-4" aria-label="Session overview">
+                <EncodePipelineAside />
+            </aside>
         </div>
     </div>
 </template>

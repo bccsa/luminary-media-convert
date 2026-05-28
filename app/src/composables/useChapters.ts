@@ -48,6 +48,11 @@ function clearLocal(sessionId: string): void {
     }
 }
 
+/** Remove persisted chapter draft for a session (e.g. after delete or from session list). */
+export function clearChapterDraftForSession(sessionId: string): void {
+    clearLocal(sessionId);
+}
+
 export interface UseChaptersOptions {
     /** Default 'en'. */
     lang?: string;
@@ -83,10 +88,14 @@ export function useChapters(opts: UseChaptersOptions) {
     const lastSavedAt: Ref<Date | null> = ref(null);
     const loadError: Ref<string | null> = ref(null);
     const isLoaded = ref(false);
+    /** Session id that `segments` currently reflect; drives reload when route id changes. */
+    const loadedSessionId: Ref<string | null> = ref(null);
 
     let activeSessionId: string | null = null;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     let suppressAutosave = false;
+    /** Bumped by `unload()` and at each `load()` start so stale async work is ignored. */
+    let loadEpoch = 0;
 
     const fetchRemote = opts.fetchRemote
         ?? ((sessionId: string, l: string, token: string) => getSessionChapters(token, sessionId, l));
@@ -95,30 +104,43 @@ export function useChapters(opts: UseChaptersOptions) {
             putSessionChapters(token, sessionId, vtt, l));
 
     async function load(sessionId: string): Promise<void> {
+        const epoch = ++loadEpoch;
         activeSessionId = sessionId;
         loadError.value = null;
         suppressAutosave = true;
 
         const local = readLocal(sessionId);
         if (local) {
+            if (epoch !== loadEpoch || activeSessionId !== sessionId) return;
             segments.value = local.segments;
             isDirty.value = true;
             isLoaded.value = true;
-            queueMicrotask(() => { suppressAutosave = false; });
+            loadedSessionId.value = sessionId;
+            queueMicrotask(() => {
+                suppressAutosave = false;
+            });
             return;
         }
 
         try {
             const token = await getAccessToken();
+            if (epoch !== loadEpoch || activeSessionId !== sessionId) return;
             const remote = await fetchRemote(sessionId, lang, token);
+            if (epoch !== loadEpoch || activeSessionId !== sessionId) return;
             segments.value = remote?.vtt ? parseVtt(remote.vtt) : [];
             isDirty.value = false;
         } catch (err) {
+            if (epoch !== loadEpoch) return;
             segments.value = [];
             loadError.value = err instanceof Error ? err.message : String(err);
         } finally {
-            isLoaded.value = true;
-            queueMicrotask(() => { suppressAutosave = false; });
+            if (epoch === loadEpoch) {
+                isLoaded.value = true;
+                loadedSessionId.value = sessionId;
+                queueMicrotask(() => {
+                    suppressAutosave = false;
+                });
+            }
         }
     }
 
@@ -161,6 +183,8 @@ export function useChapters(opts: UseChaptersOptions) {
     }
 
     function unload(): void {
+        loadEpoch++;
+        suppressAutosave = false;
         if (debounceTimer) {
             clearTimeout(debounceTimer);
             debounceTimer = null;
@@ -172,6 +196,7 @@ export function useChapters(opts: UseChaptersOptions) {
         lastSavedAt.value = null;
         loadError.value = null;
         isLoaded.value = false;
+        loadedSessionId.value = null;
     }
 
     // Autosave — debounced. Mark dirty immediately so the UI reacts; commit
@@ -198,6 +223,7 @@ export function useChapters(opts: UseChaptersOptions) {
         lastSavedAt,
         loadError,
         isLoaded,
+        loadedSessionId,
         load,
         saveRemote,
         discardLocal,

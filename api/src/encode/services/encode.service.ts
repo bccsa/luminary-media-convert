@@ -1,14 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { existsSync } from 'fs';
-import { rm } from 'fs/promises';
+import { copyFile, rm, writeFile } from 'fs/promises';
 import { join, posix } from 'path';
 import { SessionService, type Session } from './session.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import { EncryptionService } from './encryption.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
+import { WaveformService } from './waveform.service.js';
 import { S3Service } from './s3.service.js';
 import { WebhookService } from './webhook.service.js';
-import { SegmentPipelineService, type PipelineProgress } from './segment-pipeline.service.js';
+import {
+    SegmentPipelineService,
+    type PipelineProgress,
+} from './segment-pipeline.service.js';
 
 import type { WebhookPayloadDto } from '../dto/webhook-payload.dto.js';
 
@@ -23,25 +27,27 @@ export class EncodeService {
         private readonly ffmpegService: FfmpegService,
         private readonly encryptionService: EncryptionService,
         private readonly thumbnailService: ThumbnailService,
+        private readonly waveformService: WaveformService,
         private readonly s3Service: S3Service,
         private readonly webhookService: WebhookService,
-        private readonly segmentPipelineService: SegmentPipelineService,
+        private readonly segmentPipelineService: SegmentPipelineService
     ) {}
 
     async processSession(sessionId: string): Promise<void> {
         const session = this.sessionService.get(sessionId);
         if (!session) {
-            this.logger.error(
-                `Session ${sessionId} not found, skipping`,
-            );
+            this.logger.error(`Session ${sessionId} not found, skipping`);
             return;
         }
 
         if (!session.encodeConfig) {
             this.logger.error(
-                `Session ${sessionId} has no encode config, skipping`,
+                `Session ${sessionId} has no encode config, skipping`
             );
-            this.sessionService.setFailed(sessionId, 'No encoding configuration provided');
+            this.sessionService.setFailed(
+                sessionId,
+                'No encoding configuration provided'
+            );
             return;
         }
 
@@ -68,7 +74,10 @@ export class EncodeService {
 
             if (encryptionEnabled) {
                 encryptionSalt = this.encryptionService.generateSalt();
-                encryptionKey = this.encryptionService.deriveKey(sessionId, encryptionSalt);
+                encryptionKey = this.encryptionService.deriveKey(
+                    sessionId,
+                    encryptionSalt
+                );
                 encryptionIV = this.encryptionService.generateIV();
             }
 
@@ -106,15 +115,18 @@ export class EncodeService {
                 encryptionIV,
                 byteRange: session.config.byteRange !== false,
                 byteRangeMaxFileSizeBytes:
-                    (session.config.byteRangeMaxFileSizeMB ?? 500) * 1024 * 1024,
+                    (session.config.byteRangeMaxFileSizeMB ?? 500) *
+                    1024 *
+                    1024,
                 estimatedTotalSegments,
                 onProgress: (pipelineUpdate) => {
-                    if (pipelineUpdate.encrypting != null) currentProgress.encrypting = pipelineUpdate.encrypting;
-                    if (pipelineUpdate.uploading != null) currentProgress.uploading = pipelineUpdate.uploading;
-                    this.sessionService.updatePipelineProgress(
-                        sessionId,
-                        { ...currentProgress },
-                    );
+                    if (pipelineUpdate.encrypting != null)
+                        currentProgress.encrypting = pipelineUpdate.encrypting;
+                    if (pipelineUpdate.uploading != null)
+                        currentProgress.uploading = pipelineUpdate.uploading;
+                    this.sessionService.updatePipelineProgress(sessionId, {
+                        ...currentProgress,
+                    });
                 },
             });
 
@@ -131,14 +143,10 @@ export class EncodeService {
                 preByteRangeHook: undefined,
                 onProgress: (percent) => {
                     currentProgress.encoding = percent;
-                    this.sessionService.updatePipelineProgress(
-                        sessionId,
-                        { ...currentProgress },
-                    );
-                    if (
-                        percent % 5 < 1 ||
-                        percent >= 99
-                    ) {
+                    this.sessionService.updatePipelineProgress(sessionId, {
+                        ...currentProgress,
+                    });
+                    if (percent % 5 < 1 || percent >= 99) {
                         this.sendWebhook(session, {
                             sessionId,
                             status: 'encoding',
@@ -162,7 +170,7 @@ export class EncodeService {
                 await this.encryptionService.injectKeyTagsIntoPlaylists(
                     outputDir,
                     session.config.encryption!.keyUrl!,
-                    encryptionIV!,
+                    encryptionIV!
                 );
             }
 
@@ -175,33 +183,89 @@ export class EncodeService {
                 try {
                     const concatFilePath = join(outputDir, 'concat.txt');
                     const hasConcatFile = existsSync(concatFilePath);
-                    const trimmedDuration = session.encodeConfig.trimSegments?.length
-                        ? session.encodeConfig.trimSegments.reduce((sum, s) => sum + (s.outSec - s.inSec), 0)
+                    const trimmedDuration = session.encodeConfig.trimSegments
+                        ?.length
+                        ? session.encodeConfig.trimSegments.reduce(
+                              (sum, s) => sum + (s.outSec - s.inSec),
+                              0
+                          )
                         : undefined;
 
                     const thumbResult =
                         await this.thumbnailService.generateThumbnails({
                             inputPath: session.filePath!,
                             outputDir,
-                            duration: trimmedDuration
-                                ?? session.probeResult?.format?.duration ?? 0,
+                            duration:
+                                trimmedDuration ??
+                                session.probeResult?.format?.duration ??
+                                0,
                             sourceWidth:
                                 session.probeResult?.videoTracks?.[0]?.width ??
                                 1920,
                             sourceHeight:
                                 session.probeResult?.videoTracks?.[0]?.height ??
                                 1080,
-                            concatFilePath: hasConcatFile ? concatFilePath : undefined,
+                            concatFilePath: hasConcatFile
+                                ? concatFilePath
+                                : undefined,
                         });
                     if (thumbResult) {
                         thumbnailsVttRelPath = thumbResult.vttRelativePath;
                         this.logger.log(
-                            `Generated thumbnail sprites for session ${sessionId}`,
+                            `Generated thumbnail sprites for session ${sessionId}`
                         );
                     }
                 } catch (err) {
                     this.logger.warn(
-                        `Thumbnail generation failed for session ${sessionId}: ${(err as Error).message}`,
+                        `Thumbnail generation failed for session ${sessionId}: ${(err as Error).message}`
+                    );
+                }
+            }
+
+            // Generate waveform sidecar (waveform.json next to master.m3u8).
+            // Works for both video and audio-only encodes; respects trim concat.
+            // Non-fatal: a missing waveform just means the client won't render it.
+            if ((session.probeResult?.audioTracks?.length ?? 0) > 0) {
+                try {
+                    const concatFilePath = join(outputDir, 'concat.txt');
+                    const hasConcatFile = existsSync(concatFilePath);
+                    const outputSidecarPath = join(outputDir, 'waveform.json');
+                    const cachePath =
+                        this.waveformService.cachePath(sessionId);
+
+                    if (!hasConcatFile && existsSync(cachePath)) {
+                        // Upload-time prime already produced peaks for this
+                        // exact source timeline. Reuse instead of running
+                        // ffmpeg a second time.
+                        await copyFile(cachePath, outputSidecarPath);
+                        this.logger.log(
+                            `Reused cached waveform sidecar for session ${sessionId}`
+                        );
+                    } else {
+                        const peaks =
+                            await this.waveformService.generateWaveform({
+                                inputPath: session.filePath!,
+                                concatFilePath: hasConcatFile
+                                    ? concatFilePath
+                                    : undefined,
+                            });
+                        const payload = {
+                            version: 1,
+                            sampleRate: 8000,
+                            numPeaks: peaks.length,
+                            peaks,
+                        };
+                        await writeFile(
+                            outputSidecarPath,
+                            JSON.stringify(payload)
+                        );
+                        this.logger.log(
+                            `Generated waveform sidecar for session ${sessionId} (${peaks.length} peaks)`
+                        );
+                    }
+                } catch (err) {
+                    this.logger.warn(
+                        `Waveform generation failed for session ${sessionId}: ${(err as Error).message}`
                     );
                 }
             }
@@ -226,15 +290,16 @@ export class EncodeService {
                 (ap) => {
                     const key =
                         allKeys.find(
-                            (k) => k.split('/').pop() === ap.filename,
+                            (k) => k.split('/').pop() === ap.filename
                         ) ?? '';
                     return { name: ap.name, key };
-                },
+                }
             );
 
-            const masterPlaylistKey = allKeys.find(
-                (k) => k.split('/').pop() === encodeResult.masterPlaylist,
-            ) ?? '';
+            const masterPlaylistKey =
+                allKeys.find(
+                    (k) => k.split('/').pop() === encodeResult.masterPlaylist
+                ) ?? '';
 
             const effectiveMasterPlaylist =
                 anglePlaylistsWithKeys.length > 0
@@ -242,19 +307,19 @@ export class EncodeService {
                     : masterPlaylistKey;
 
             const thumbnailsVttKey = thumbnailsVttRelPath
-                ? allKeys.find((k) =>
-                      k.endsWith(thumbnailsVttRelPath!),
-                  )
+                ? allKeys.find((k) => k.endsWith(thumbnailsVttRelPath!))
                 : undefined;
 
             this.sessionService.setCompleted(
                 sessionId,
                 allKeys,
                 effectiveMasterPlaylist,
-                anglePlaylistsWithKeys.length > 0 ? anglePlaylistsWithKeys : undefined,
+                anglePlaylistsWithKeys.length > 0
+                    ? anglePlaylistsWithKeys
+                    : undefined,
                 thumbnailsVttKey,
                 encodeResult.segmentFormat,
-                encryptionKey ? encryptionKey.toString('hex') : undefined,
+                encryptionKey ? encryptionKey.toString('hex') : undefined
             );
             await this.sendWebhook(session, {
                 sessionId,
@@ -271,14 +336,13 @@ export class EncodeService {
                 encryptionKeyHex: encryptionKey
                     ? encryptionKey.toString('hex')
                     : undefined,
+                probeResult: session.probeResult ?? undefined,
             });
 
             this.logger.log(`Session ${sessionId} completed successfully`);
         } catch (err) {
             const errorMsg = (err as Error).message || 'Unknown error';
-            this.logger.error(
-                `Session ${sessionId} failed: ${errorMsg}`,
-            );
+            this.logger.error(`Session ${sessionId} failed: ${errorMsg}`);
             this.sessionService.setFailed(sessionId, errorMsg);
             await this.sendWebhook(session, {
                 sessionId,
@@ -296,14 +360,14 @@ export class EncodeService {
 
     private async sendWebhook(
         session: Session,
-        payload: WebhookPayloadDto,
+        payload: WebhookPayloadDto
     ): Promise<void> {
         if (!session.config.webhook) return;
         try {
             await this.webhookService.send(
                 session.config.webhook.url,
                 session.config.webhook.sessionToken,
-                payload,
+                payload
             );
         } catch {
             // Webhook errors are already logged inside WebhookService
@@ -312,17 +376,17 @@ export class EncodeService {
 
     private async cleanupSessionFiles(
         sessionId: string,
-        session: Session,
+        session: Session
     ): Promise<void> {
         try {
             const sessionDir = join(this.workDir, sessionId);
             await rm(sessionDir, { recursive: true, force: true });
             this.logger.debug(
-                `Cleaned up work directory for session ${sessionId}`,
+                `Cleaned up work directory for session ${sessionId}`
             );
         } catch (err) {
             this.logger.warn(
-                `Failed to clean up session ${sessionId}: ${(err as Error).message}`,
+                `Failed to clean up session ${sessionId}: ${(err as Error).message}`
             );
         }
     }

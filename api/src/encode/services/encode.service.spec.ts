@@ -7,6 +7,7 @@ import { SessionService } from './session.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import { EncryptionService } from './encryption.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
+import { WaveformService } from './waveform.service.js';
 import { S3Service } from './s3.service.js';
 import { WebhookService } from './webhook.service.js';
 import { SegmentPipelineService, type SegmentPipeline } from './segment-pipeline.service.js';
@@ -58,6 +59,7 @@ describe('EncodeService', () => {
     let ffmpegService: Mocked<FfmpegService>;
     let encryptionService: Mocked<EncryptionService>;
     let thumbnailService: Mocked<ThumbnailService>;
+    let waveformService: Mocked<WaveformService>;
     let s3Service: Mocked<S3Service>;
     let webhookService: Mocked<WebhookService>;
     let segmentPipelineService: Mocked<SegmentPipelineService>;
@@ -96,6 +98,10 @@ describe('EncodeService', () => {
             }),
         } as any;
 
+        waveformService = {
+            generateWaveform: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+        } as any;
+
         s3Service = {
             uploadDirectory: vi.fn().mockResolvedValue({
                 keys: ['master.m3u8', 'v0/playlist.m3u8', 'v0/segment_000.ts'],
@@ -118,10 +124,10 @@ describe('EncodeService', () => {
             ffmpegService,
             encryptionService,
             thumbnailService,
+            waveformService,
             s3Service,
             webhookService,
             segmentPipelineService,
-            { destroy: vi.fn().mockResolvedValue(undefined) } as any,
         );
     });
 
@@ -612,10 +618,10 @@ describe('EncodeService', () => {
             ffmpegService,
             encryptionService,
             thumbnailService,
+            waveformService,
             s3Service,
             webhookService,
             segmentPipelineService,
-            { destroy: vi.fn().mockResolvedValue(undefined) } as any,
         );
 
         const session = sessionService.create(makeConfig());
@@ -728,10 +734,10 @@ describe('EncodeService', () => {
             ffmpegService,
             encryptionService,
             thumbnailService,
+            waveformService,
             s3Service,
             webhookService,
             segmentPipelineService,
-            { destroy: vi.fn().mockResolvedValue(undefined) } as any,
         );
 
         const loggerWarnSpy = vi.spyOn((service as any).logger, 'warn');

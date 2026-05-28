@@ -51,6 +51,13 @@ export interface HlsChaptersReadResult {
     vtt: string;
 }
 
+export interface HlsWaveformReadResult {
+    version: number;
+    sampleRate: number;
+    numPeaks: number;
+    peaks: number[];
+}
+
 /**
  * Thin HTTP client for the Encoding API's /api/hls/* endpoints.
  * Auth uses the same `ENCODING_API_MASTER_KEY` already used for session create.
@@ -113,6 +120,23 @@ export class HlsEditClient {
         vtt: string,
     ): Promise<void> {
         await this.post<void>('/api/hls/chapters/write', { s3, folderPrefix, lang, vtt });
+    }
+
+    /**
+     * Returns null when no waveform.json sidecar exists (404 from the Encoding API).
+     */
+    async readWaveform(
+        s3: S3ConfigPayload,
+        folderPrefix: string,
+    ): Promise<HlsWaveformReadResult | null> {
+        try {
+            return await this.post<HlsWaveformReadResult>('/api/hls/waveform/read', {
+                s3, folderPrefix,
+            });
+        } catch (err) {
+            if (err instanceof HttpException && err.getStatus() === 404) return null;
+            throw err;
+        }
     }
 
     private async post<T>(path: string, body: unknown): Promise<T> {

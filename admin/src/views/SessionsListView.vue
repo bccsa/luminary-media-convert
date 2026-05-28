@@ -4,7 +4,23 @@ import { useRouter } from 'vue-router';
 import { useAuth0 } from '@auth0/auth0-vue';
 import { listAllSessions, subscribeSessionEvents } from '../api';
 import { statusLabel, statusColor } from '../utils/status';
+import FormSelect from '../components/FormSelect.vue';
 
+const SESSION_STATUS_FILTER_KEYS = [
+    'uploading',
+    'uploaded',
+    'queued',
+    'encoding',
+    'encrypting',
+    'uploading_to_s3',
+    'completed',
+    'failed',
+] as const;
+
+const sessionStatusFilterOptions = SESSION_STATUS_FILTER_KEYS.map((k) => ({
+    value: k,
+    label: statusLabel(k),
+}));
 const router = useRouter();
 const { getAccessTokenSilently } = useAuth0();
 let eventSource: EventSource | null = null;
@@ -129,20 +145,13 @@ onUnmounted(() => {
     <div>
         <div class="mb-6 flex items-center justify-between">
             <h2 class="text-xl font-semibold text-zinc-100">Sessions</h2>
-            <select
+            <FormSelect
                 v-model="statusFilter"
-                class="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-indigo-500"
-            >
-                <option value="">All statuses</option>
-                <option value="uploading">Uploading</option>
-                <option value="uploaded">Uploaded</option>
-                <option value="queued">Queued</option>
-                <option value="encoding">Encoding</option>
-                <option value="encrypting">Encrypting</option>
-                <option value="uploading_to_s3">Uploading to S3</option>
-                <option value="completed">Completed</option>
-                <option value="failed">Failed</option>
-            </select>
+                variant="admin"
+                :options="sessionStatusFilterOptions"
+                placeholder="All statuses"
+                select-class="min-w-[14rem]"
+            />
         </div>
 
         <div

@@ -61,7 +61,7 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
 <template>
     <div class="relative inline-flex items-center gap-2">
         <!-- Loading -->
-        <span v-if="loading" :class="[textSize, 'text-zinc-500']">
+        <span v-if="loading" :class="[textSize, 'text-slate-500 dark:text-slate-500']">
             {{ loadingLabel }}
         </span>
 
@@ -69,7 +69,11 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
         <button
             v-else-if="state === 'idle'"
             type="button"
-            :class="[btnBase, btnSize, 'border border-red-800/50 text-red-400 hover:bg-red-950/30']"
+            :class="[
+                btnBase,
+                btnSize,
+                'border border-red-200 text-red-700 hover:bg-red-50 dark:border-red-800/50 dark:text-red-400 dark:hover:bg-red-950/30',
+            ]"
             @click="start"
         >
             {{ label }}
@@ -78,11 +82,11 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
         <!-- Confirmation overlay — positioned absolute right so it doesn't shift layout -->
         <div
             v-else
-            class="absolute right-0 z-10 flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 shadow-lg"
+            class="absolute right-0 z-10 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-lg ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10"
         >
             <!-- Simple confirm -->
             <template v-if="state === 'confirm'">
-                <span :class="[textSize, 'text-zinc-400 whitespace-nowrap']">{{ prompt }}</span>
+                <span :class="[textSize, 'whitespace-nowrap text-slate-600 dark:text-slate-400']">{{ prompt }}</span>
                 <button
                     type="button"
                     :class="[btnBase, btnSm, 'bg-red-600 text-white hover:bg-red-500']"
@@ -92,7 +96,11 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
                 </button>
                 <button
                     type="button"
-                    :class="[btnBase, btnSm, 'border border-zinc-700 text-zinc-400 hover:bg-zinc-800']"
+                    :class="[
+                        btnBase,
+                        btnSm,
+                        'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700',
+                    ]"
                     @click="cancel"
                 >
                     Cancel
@@ -101,7 +109,7 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
 
             <!-- Secondary choice (e.g., delete S3 files?) -->
             <template v-else-if="state === 'secondary'">
-                <span :class="[textSize, 'text-zinc-400 whitespace-nowrap']">{{ secondaryPrompt }}</span>
+                <span :class="[textSize, 'whitespace-nowrap text-slate-600 dark:text-slate-400']">{{ secondaryPrompt }}</span>
                 <button
                     type="button"
                     :class="[btnBase, btnSm, 'bg-red-600 text-white hover:bg-red-500']"
@@ -111,14 +119,22 @@ const textSize = props.size === 'md' ? 'text-sm' : 'text-xs';
                 </button>
                 <button
                     type="button"
-                    :class="[btnBase, btnSm, 'border border-zinc-700 text-zinc-400 hover:bg-zinc-800']"
+                    :class="[
+                        btnBase,
+                        btnSm,
+                        'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700',
+                    ]"
                     @click="onConfirm(false)"
                 >
                     {{ secondaryDeclineLabel }}
                 </button>
                 <button
                     type="button"
-                    :class="[btnBase, btnSm, 'border border-zinc-700 text-zinc-400 hover:bg-zinc-800']"
+                    :class="[
+                        btnBase,
+                        btnSm,
+                        'border border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-700',
+                    ]"
                     @click="cancel"
                 >
                     Cancel

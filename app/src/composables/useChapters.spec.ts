@@ -94,6 +94,31 @@ describe('useChapters', () => {
             expect(fetchRemote).toHaveBeenCalled();
             expect(c.isDirty.value).toBe(false);
         });
+
+        it('sets loadedSessionId to the session that was loaded', async () => {
+            const fetchRemote = vi.fn().mockResolvedValue(null);
+            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            await c.load('sess-a');
+            expect(c.loadedSessionId.value).toBe('sess-a');
+        });
+
+        it('does not apply results when unload races an in-flight remote load', async () => {
+            let resolveRemote!: (v: { vtt: string } | null) => void;
+            const remotePromise = new Promise<{ vtt: string } | null>((r) => {
+                resolveRemote = r;
+            });
+            const fetchRemote = vi.fn().mockReturnValue(remotePromise);
+            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const p = c.load('sess-old');
+            c.unload();
+            resolveRemote({
+                vtt: 'WEBVTT\n\n00:00:00.000 --> 00:00:30.000\nStale\n',
+            });
+            await p;
+            expect(c.segments.value).toEqual([]);
+            expect(c.isLoaded.value).toBe(false);
+            expect(c.loadedSessionId.value).toBeNull();
+        });
     });
 
     describe('autosave', () => {

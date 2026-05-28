@@ -2,6 +2,7 @@
 import { reactive, computed, ref, watch } from 'vue';
 import type { S3Config, CreateSessionRequest } from '../types';
 import FileDropZone from './FileDropZone.vue';
+import FormSelect from './FormSelect.vue';
 
 export interface SavedS3Config {
     id: string;
@@ -166,6 +167,13 @@ function savePreferences() {
 
 const hasS3Config = computed(() => !!selectedConfigId.value && !!props.loadedS3Config);
 
+const savedS3ConfigOptions = computed(() =>
+    props.savedS3Configs.map((cfg) => ({
+        value: cfg.id,
+        label: `${cfg.name} (${cfg.endPoint}/${cfg.bucket})`,
+    })),
+);
+
 const isValidUrl = computed(() => {
     const raw = sourceUrl.value.trim();
     if (!raw) return false;
@@ -243,200 +251,315 @@ const canCreateConfig = computed(() =>
 </script>
 
 <template>
-    <form @submit.prevent="onSubmit" class="space-y-6">
+    <form @submit.prevent="onSubmit" class="space-y-10">
         <!-- Session name -->
-        <fieldset class="space-y-3">
-            <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Session Name</legend>
+        <section class="space-y-4">
+            <div class="flex items-center gap-3">
+                <span
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-950/60 dark:text-slate-400"
+                    aria-hidden="true"
+                >
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                        />
+                    </svg>
+                </span>
+                <div>
+                    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Session name</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Optional — shown in your session history.</p>
+                </div>
+            </div>
             <input
                 v-model="sessionName"
                 type="text"
                 class="input"
-                placeholder="e.g. My Project — Episode 1"
+                placeholder="e.g. My project — episode 1"
             />
-        </fieldset>
+        </section>
 
-        <!-- Source: file or URL -->
-        <fieldset class="space-y-3">
-            <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">Source</legend>
-            <div class="inline-flex rounded-lg border border-zinc-800 bg-zinc-900/40 p-1 text-sm">
-                <button
-                    type="button"
-                    :class="[
-                        'rounded-md px-4 py-1.5 transition-colors cursor-pointer',
-                        sourceMode === 'file' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200',
-                    ]"
-                    @click="sourceMode = 'file'"
-                >
-                    From disk
-                </button>
-                <button
-                    type="button"
-                    :class="[
-                        'rounded-md px-4 py-1.5 transition-colors cursor-pointer',
-                        sourceMode === 'url' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200',
-                    ]"
-                    @click="sourceMode = 'url'"
-                >
-                    From URL
-                </button>
-            </div>
+        <div class="border-t border-slate-200/90 dark:border-slate-700" aria-hidden="true" />
 
-            <FileDropZone v-if="sourceMode === 'file'" @update:file="f => (file = f)" />
-
-            <div v-else class="space-y-2">
-                <input
-                    v-model="sourceUrl"
-                    type="url"
-                    class="input"
-                    placeholder="https://example.com/recording.mp4"
-                />
-                <input
-                    v-model="urlFilename"
-                    type="text"
-                    class="input"
-                    placeholder="Optional filename override (e.g. meeting.mp4)"
-                />
-                <p class="text-xs text-zinc-500">
-                    The server downloads from this URL using parallel HTTP range requests when supported.
-                    Use a direct-download URL — public file URLs, S3 presigned links, or Google Drive direct download links.
-                </p>
-            </div>
-        </fieldset>
-
-        <!-- S3 Configuration -->
-        <fieldset class="space-y-3">
-            <div class="flex items-center justify-between">
-                <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">S3 Storage</legend>
+        <!-- Storage destination -->
+        <section class="space-y-5">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <span
+                        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-950/60 dark:text-slate-400"
+                        aria-hidden="true"
+                    >
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+                            />
+                        </svg>
+                    </span>
+                    <div>
+                        <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Storage destination</h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Storage output bucket and key prefix for this session.</p>
+                    </div>
+                </div>
                 <button
                     v-if="!showNewConfigForm"
                     type="button"
+                    class="cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                     @click="showNewConfigForm = true"
-                    class="text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer"
                 >
-                    + New config
+                    New config
                 </button>
             </div>
 
-            <!-- Inline new config form -->
-            <div v-if="showNewConfigForm" class="rounded-lg border border-indigo-800/40 bg-indigo-950/20 p-4 space-y-3">
-                <h4 class="text-sm font-medium text-zinc-300">New S3 Configuration</h4>
+            <div
+                v-if="showNewConfigForm"
+                class="space-y-4 rounded-xl border border-slate-200/80 bg-slate-50/60 p-4 dark:border-slate-500/30 dark:bg-slate-950/25"
+            >
+                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">New storage configuration</h3>
                 <div>
-                    <label class="mb-1 block text-xs text-zinc-500">Name</label>
-                    <input v-model="newConfig.name" type="text" class="input" placeholder="e.g. Production S3" />
+                    <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Name</label>
+                    <input v-model="newConfig.name" type="text" class="input" placeholder="e.g. Production bucket" />
                 </div>
                 <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div class="sm:col-span-2">
-                        <label class="mb-1 block text-xs text-zinc-500">Endpoint</label>
+                        <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Endpoint</label>
                         <input v-model="newConfig.endPoint" type="text" class="input" placeholder="s3.amazonaws.com" />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs text-zinc-500">Port</label>
+                        <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Port</label>
                         <input v-model.number="newConfig.port" type="number" class="input" placeholder="443" />
                     </div>
                     <div class="flex items-end pb-1">
-                        <label class="flex items-center gap-2 text-sm">
-                            <input type="checkbox" v-model="newConfig.useSSL" class="accent-indigo-500" />
+                        <label class="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                            <input v-model="newConfig.useSSL" type="checkbox" class="accent-slate-500" />
                             Use SSL
                         </label>
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs text-zinc-500">Bucket</label>
+                        <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Bucket</label>
                         <input v-model="newConfig.bucket" type="text" class="input" />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs text-zinc-500">Region</label>
+                        <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Region</label>
                         <input v-model="newConfig.region" type="text" class="input" placeholder="us-east-1" />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs text-zinc-500">Access Key</label>
-                        <input v-model="newConfig.accessKey" type="text" autocomplete="new-password" data-1p-ignore data-lpignore="true" class="input" />
+                        <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Access key</label>
+                        <input
+                            v-model="newConfig.accessKey"
+                            type="text"
+                            autocomplete="new-password"
+                            data-1p-ignore
+                            data-lpignore="true"
+                            class="input"
+                        />
                     </div>
                     <div>
-                        <label class="mb-1 block text-xs text-zinc-500">Secret Key</label>
-                        <input v-model="newConfig.secretKey" type="text" autocomplete="new-password" data-1p-ignore data-lpignore="true" class="input" />
+                        <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Secret key</label>
+                        <input
+                            v-model="newConfig.secretKey"
+                            type="text"
+                            autocomplete="new-password"
+                            data-1p-ignore
+                            data-lpignore="true"
+                            class="input"
+                        />
                     </div>
                 </div>
-                <div class="flex gap-2">
+                <div class="flex flex-wrap gap-2">
                     <button
                         type="button"
                         :disabled="!canCreateConfig"
-                        @click="onCreateConfig"
-                        :class="[
-                            'rounded-lg px-4 py-2 text-xs font-semibold transition-colors',
+                        class="rounded-xl px-4 py-2 text-xs font-semibold transition-colors"
+                        :class="
                             canCreateConfig
-                                ? 'bg-indigo-600 text-white hover:bg-indigo-500 cursor-pointer'
-                                : 'bg-zinc-800 text-zinc-500 cursor-not-allowed',
-                        ]"
+                                ? 'cursor-pointer bg-sky-600 text-white shadow-sm hover:bg-sky-500 dark:bg-slate-700 dark:hover:bg-slate-600'
+                                : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500'
+                        "
+                        @click="onCreateConfig"
                     >
-                        {{ creatingConfig ? 'Saving...' : 'Save Config' }}
+                        {{ creatingConfig ? 'Saving…' : 'Save config' }}
                     </button>
                     <button
                         type="button"
+                        class="cursor-pointer rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                         @click="showNewConfigForm = false; resetNewConfig()"
-                        class="rounded-lg border border-zinc-700 px-4 py-2 text-xs text-zinc-400 hover:bg-zinc-800 cursor-pointer"
                     >
                         Cancel
                     </button>
                 </div>
             </div>
 
-            <!-- Config selector -->
-            <div v-if="savedS3Configs.length > 0 && !showNewConfigForm">
-                <select
-                    v-model="selectedConfigId"
-                    @change="onSelectConfig"
-                    class="input w-full"
-                >
-                    <option value="">Select an S3 configuration...</option>
-                    <option v-for="cfg in savedS3Configs" :key="cfg.id" :value="cfg.id">
-                        {{ cfg.name }} ({{ cfg.endPoint }}/{{ cfg.bucket }})
-                    </option>
-                </select>
-            </div>
-
-            <div v-if="savedS3Configs.length === 0 && !showNewConfigForm" class="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4 text-center">
-                <p class="text-sm text-zinc-500">No S3 configurations saved yet.</p>
+            <div
+                v-else-if="savedS3Configs.length === 0"
+                class="rounded-xl border border-dashed border-slate-300 bg-slate-50/80 p-6 text-center dark:border-slate-600 dark:bg-slate-800/50"
+            >
+                <p class="text-sm text-slate-600 dark:text-slate-400">No storage configurations saved yet.</p>
                 <button
                     type="button"
+                    class="mt-3 cursor-pointer text-sm font-semibold text-slate-600 hover:text-slate-500 dark:text-slate-400 dark:hover:text-slate-300"
                     @click="showNewConfigForm = true"
-                    class="mt-2 text-xs text-indigo-400 hover:text-indigo-300 cursor-pointer"
                 >
                     Create one now
                 </button>
             </div>
 
-            <!-- Path prefix (per-upload) -->
-            <div v-if="hasS3Config">
-                <label class="mb-1 block text-xs text-zinc-500">Path Prefix (per upload)</label>
-                <input v-model="pathPrefix" type="text" class="input" placeholder="optional/prefix" />
+            <div v-else class="grid gap-4 sm:grid-cols-2">
+                <div>
+                    <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Storage configuration</label>
+                    <FormSelect
+                        v-model="selectedConfigId"
+                        :options="savedS3ConfigOptions"
+                        placeholder="Select a configuration…"
+                        @change="onSelectConfig"
+                    />
+                </div>
+                <div>
+                    <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Path prefix</label>
+                    <input
+                        v-model="pathPrefix"
+                        type="text"
+                        class="input"
+                        placeholder="/encoded/v1/year=2024/"
+                    />
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Output keys are written under this prefix (optional).</p>
+                </div>
             </div>
 
-            <!-- Encoding options -->
-            <div v-if="hasS3Config" class="flex flex-wrap items-center gap-4">
-                <label class="flex items-center gap-2 text-sm">
-                    <input type="checkbox" v-model="byteRange" class="accent-indigo-500" />
+            <div
+                v-if="hasS3Config"
+                class="flex flex-col gap-4 rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 dark:border-slate-700 dark:bg-slate-800/30 sm:flex-row sm:flex-wrap sm:items-center"
+            >
+                <label class="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                    <input v-model="byteRange" type="checkbox" class="accent-slate-500" />
                     Byte-range segments
                 </label>
-                <div v-if="byteRange" class="flex items-center gap-2">
-                    <label class="text-xs text-zinc-500">Max file size (MB)</label>
-                    <input v-model.number="byteRangeMaxFileSizeMB" type="number" min="1" class="input w-24" placeholder="500" />
+                <div v-if="byteRange" class="flex flex-wrap items-center gap-2">
+                    <label class="text-xs font-medium text-slate-500 dark:text-slate-400">Max file size (MB)</label>
+                    <input v-model.number="byteRangeMaxFileSizeMB" type="number" min="1" class="input w-28" placeholder="500" />
                 </div>
-                <label class="flex items-center gap-2 text-sm">
-                    <input type="checkbox" v-model="thumbnails" class="accent-indigo-500" />
+                <label class="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                    <input v-model="thumbnails" type="checkbox" class="accent-slate-500" />
                     Scrubbing thumbnails
                 </label>
             </div>
-        </fieldset>
+        </section>
 
-        <!-- HLS Encryption -->
-        <fieldset v-if="hasS3Config" class="space-y-3">
-            <legend class="text-sm font-semibold uppercase tracking-wider text-zinc-400">HLS Encryption</legend>
-            <label class="flex items-center gap-2 text-sm">
-                <input type="checkbox" v-model="encryptionEnabled" class="accent-indigo-500" />
+        <div class="border-t border-slate-200/90 dark:border-slate-700" aria-hidden="true" />
+
+        <!-- Source ingest -->
+        <section class="space-y-5">
+            <div class="flex items-center gap-3">
+                <span
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-950/60 dark:text-slate-400"
+                    aria-hidden="true"
+                >
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+                        />
+                    </svg>
+                </span>
+                <div>
+                    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">Source ingest</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">HTTPS URL fetch or resumable upload from your machine.</p>
+                </div>
+            </div>
+
+            <div
+                class="inline-flex w-full rounded-xl border border-slate-200 bg-slate-100/90 p-1 dark:border-slate-600 dark:bg-slate-800/80 sm:w-auto"
+                role="group"
+                aria-label="Ingest method"
+            >
+                <button
+                    type="button"
+                    :class="[
+                        'min-w-0 flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer sm:flex-none sm:px-5',
+                        sourceMode === 'url'
+                            ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-300/90 dark:bg-slate-600 dark:text-white dark:ring-0'
+                            : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100',
+                    ]"
+                    :aria-pressed="sourceMode === 'url'"
+                    @click="sourceMode = 'url'"
+                >
+                    HTTP(S) URL
+                </button>
+                <button
+                    type="button"
+                    :class="[
+                        'min-w-0 flex-1 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer sm:flex-none sm:px-5',
+                        sourceMode === 'file'
+                            ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-300/90 dark:bg-slate-600 dark:text-white dark:ring-0'
+                            : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100',
+                    ]"
+                    :aria-pressed="sourceMode === 'file'"
+                    @click="sourceMode = 'file'"
+                >
+                    Direct upload
+                </button>
+            </div>
+
+            <FileDropZone v-if="sourceMode === 'file'" @update:file="f => (file = f)" />
+
+            <div v-else class="space-y-3">
+                <div>
+                    <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Source URL</label>
+                    <input
+                        v-model="sourceUrl"
+                        type="url"
+                        class="input"
+                        placeholder="https://example.com/recording.mp4"
+                    />
+                </div>
+                <div>
+                    <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Filename override (optional)</label>
+                    <input v-model="urlFilename" type="text" class="input" placeholder="e.g. meeting.mp4" />
+                </div>
+                <p class="text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                    Direct-download links work best (public files, presigned S3, or CDN). The server uses parallel range
+                    requests when the origin supports them.
+                </p>
+            </div>
+
+            <p class="text-xs text-slate-500 dark:text-slate-400">
+                Common containers: MP4, MKV, MOV, WebM, and typical audio formats. Direct upload limit:
+                <span class="font-medium text-slate-600 dark:text-slate-300">10 GB</span>
+                per file unless your session quota is lower.
+            </p>
+        </section>
+
+        <div class="border-t border-slate-200/90 dark:border-slate-700" aria-hidden="true" />
+
+        <!-- HLS encryption -->
+        <section v-if="hasS3Config" class="space-y-4">
+            <div class="flex items-center gap-3">
+                <span
+                    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-950/60 dark:text-slate-400"
+                    aria-hidden="true"
+                >
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
+                        />
+                    </svg>
+                </span>
+                <div>
+                    <h2 class="text-base font-semibold text-slate-900 dark:text-slate-100">HLS encryption</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Optional AES-128 for segments (key URL required when enabled).</p>
+                </div>
+            </div>
+            <label class="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                <input v-model="encryptionEnabled" type="checkbox" class="accent-slate-500" />
                 Enable AES-128 encryption
             </label>
             <div v-if="encryptionEnabled">
-                <label class="mb-1 block text-xs text-zinc-500">Key URL (production key-serving endpoint)</label>
+                <label class="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Key URL (production key endpoint)</label>
                 <input
                     v-model="encryptionKeyUrl"
                     type="text"
@@ -444,20 +567,44 @@ const canCreateConfig = computed(() =>
                     placeholder="https://myapp.example.com/keys/{sessionId}"
                 />
             </div>
-        </fieldset>
+        </section>
 
         <!-- Submit -->
-        <button
-            type="submit"
-            :disabled="!canSubmit"
-            :class="[
-                'w-full rounded-lg px-6 py-3 text-sm font-semibold transition-colors',
-                canSubmit
-                    ? 'bg-indigo-600 text-white hover:bg-indigo-500 cursor-pointer'
-                    : 'bg-zinc-800 text-zinc-500 cursor-not-allowed',
-            ]"
+        <div
+            class="flex flex-col gap-4 border-t border-slate-200/90 pt-6 dark:border-slate-700 sm:flex-row sm:items-center sm:justify-between"
         >
-            Upload &amp; Analyze
-        </button>
+            <p class="flex max-w-xl items-start gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <svg
+                    class="mt-0.5 h-4 w-4 shrink-0 text-slate-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    aria-hidden="true"
+                >
+                    <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"
+                    />
+                </svg>
+                <span>
+                    Creating a session starts ingest immediately. You can leave this page — uploads continue in the background.
+                    Configure renditions after probe completes on the session screen.
+                </span>
+            </p>
+            <button
+                type="submit"
+                :disabled="!canSubmit"
+                :class="[
+                    'w-full shrink-0 rounded-xl px-6 py-3.5 text-sm font-semibold shadow-sm transition-colors sm:w-auto sm:min-w-[11rem]',
+                    canSubmit
+                        ? 'cursor-pointer bg-sky-600 text-white shadow-sm hover:bg-sky-500 dark:bg-slate-700 dark:hover:bg-slate-600'
+                        : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-500',
+                ]"
+            >
+                Create session
+            </button>
+        </div>
     </form>
 </template>
