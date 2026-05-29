@@ -73,7 +73,7 @@ VITE_AUTH0_AUDIENCE=https://luminary-media-convert/api
 
 The app is a Progressive Web App via [`vite-plugin-pwa`](https://vite-pwa-org.netlify.app/). The service worker precaches the built app shell (HTML, JS, CSS, icons) only — SaaS, Encoding API, Auth0, and tus traffic stay on the network.
 
-- **Install:** Browsers that support install will offer "Add to Home Screen" when criteria are met (HTTPS, manifest, service worker).
+- **Install:** `PwaInstallPrompt` captures the browser's `beforeinstallprompt` event and fires the **native install modal on the user's first interaction** with the page (the spec forbids triggering it without a user gesture). If the native modal cannot be shown, a fallback card with an Install button appears; iOS shows Share -> Add to Home Screen instructions. Requires a production build over HTTPS with an active service worker — not shown in dev (`devOptions.enabled: false`). Dismissal is remembered in localStorage.
 - **Updates:** When a new build is deployed, `PwaUpdatePrompt` shows a reload banner; the page does not auto-reload (safe during long tus uploads).
 - **Offline:** Cached shell may load without network, but uploads, encoding, and API calls still require connectivity.
 
