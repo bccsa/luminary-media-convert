@@ -5,6 +5,7 @@ import {
     exportChaptersVtt,
 } from '@luminary-media-converter/segment-editor';
 import { getSessionChapters, putSessionChapters } from '../api';
+import { errorMessage } from '../utils/errors';
 
 const STORAGE_KEY_PREFIX = 'luminary_chapters_';
 const AUTOSAVE_DEBOUNCE_MS = 2000;
@@ -132,7 +133,7 @@ export function useChapters(opts: UseChaptersOptions) {
         } catch (err) {
             if (epoch !== loadEpoch) return;
             segments.value = [];
-            loadError.value = err instanceof Error ? err.message : String(err);
+            loadError.value = errorMessage(err);
         } finally {
             if (epoch === loadEpoch) {
                 isLoaded.value = true;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import FormSelect from '../FormSelect.vue';
+import { formatDateTime } from '../../utils/format';
 
 const props = defineProps<{
     isCompleted: boolean;
@@ -62,16 +63,6 @@ function inferOutputFileKind(key: string): string {
     return 'Object';
 }
 
-function formatDate(dateStr: string | null | undefined): string {
-    if (!dateStr) return '--';
-    return new Date(dateStr).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-    });
-}
 </script>
 
 <template>
@@ -200,11 +191,11 @@ function formatDate(dateStr: string | null | undefined): string {
                     </div>
                     <div v-if="session">
                         <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Created</dt>
-                        <dd class="mt-0.5 text-slate-800 dark:text-slate-200">{{ formatDate(session.createdAt) }}</dd>
+                        <dd class="mt-0.5 text-slate-800 dark:text-slate-200">{{ formatDateTime(session.createdAt) }}</dd>
                     </div>
                     <div v-if="session?.completedAt">
                         <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Completed</dt>
-                        <dd class="mt-0.5 text-slate-800 dark:text-slate-200">{{ formatDate(session.completedAt) }}</dd>
+                        <dd class="mt-0.5 text-slate-800 dark:text-slate-200">{{ formatDateTime(session.completedAt) }}</dd>
                     </div>
                 </dl>
             </div>

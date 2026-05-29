@@ -1,6 +1,7 @@
 import { ref, readonly, onUnmounted } from 'vue';
 import { getSessionStatus, subscribeSessionEvents } from '../api';
 import type { AccelMode, PipelineProgress, SegmentFormat, SessionStatus, SessionStatusResponse } from '../types';
+import { errorMessage } from '../utils/errors';
 
 const TERMINAL_STATUSES: SessionStatus[] = ['completed', 'failed'];
 const FALLBACK_POLL_INTERVAL_MS = 5000;
@@ -107,7 +108,7 @@ export function useSessionPoller() {
                 }
             })
             .catch((e) => {
-                error.value = e instanceof Error ? e.message : String(e);
+                error.value = errorMessage(e);
             });
 
         eventSource = subscribeSessionEvents(
@@ -141,7 +142,7 @@ export function useSessionPoller() {
                                 stop();
                             }
                         } catch (e) {
-                            error.value = e instanceof Error ? e.message : String(e);
+                            error.value = errorMessage(e);
                             stop();
                         }
                     }, FALLBACK_POLL_INTERVAL_MS);

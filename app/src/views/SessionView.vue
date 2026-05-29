@@ -43,16 +43,18 @@ import {
     startEncode,
     deleteSession,
     updateSessionName,
-    moveSessionFiles,
-    renameSessionPrefix,
-    listS3Configs,
-    checkPrefix,
     getSessionWaveform,
 } from '../api';
 import { useSessionPoller } from '../composables/useSessionPoller';
 import { useActiveUploads } from '../composables/useActiveUploads';
 import { useAppLayout } from '../composables/useAppLayout';
+import { useEncodeEta } from '../composables/useEncodeEta';
+import { useSessionFileOps } from '../composables/useSessionFileOps';
+import { useChapterTrimSync } from '../composables/useChapterTrimSync';
 import type { AccelMode, SegmentFormat } from '../types';
+import { formatBytes, formatDateTime, formatRelative } from '../utils/format';
+import { errorMessage } from '../utils/errors';
+import { statusLabel } from '../utils/status';
 
 const { getAccessTokenSilently } = useAuth0();
 const route = useRoute();
@@ -175,57 +177,47 @@ const { setHeaderLayout, headerLayout } = useAppLayout();
 // Status badge config
 // ---------------------------------------------------------------------------
 
-const statusConfig: Record<
-    string,
-    { label: string; color: string; borderColor: string }
-> = {
+// Status text/border colors for the badge under the player. Labels live in
+// utils/status.ts (shared with the history list); colors stay local because the
+// two surfaces use different visual treatments.
+const statusColors: Record<string, { color: string; borderColor: string }> = {
     created: {
-        label: 'Created',
         color: 'text-slate-700 dark:text-slate-400',
         borderColor: 'border-slate-300 dark:border-slate-700',
     },
     uploading: {
-        label: 'Uploading',
         color: 'text-cyan-700 dark:text-cyan-400',
         borderColor: 'border-cyan-300 dark:border-cyan-700/60',
     },
     uploaded: {
-        label: 'Uploaded',
         color: 'text-slate-700 dark:text-slate-400',
         borderColor: 'border-slate-300 dark:border-slate-700',
     },
     queued: {
-        label: 'Queued',
         color: 'text-amber-700 dark:text-amber-400',
         borderColor: 'border-amber-300 dark:border-amber-700/60',
     },
     encoding: {
-        label: 'Encoding',
         color: 'text-slate-700 dark:text-slate-400',
         borderColor: 'border-slate-300 dark:border-slate-700/60',
     },
     encrypting: {
-        label: 'Encrypting',
         color: 'text-amber-700 dark:text-amber-400',
         borderColor: 'border-amber-300 dark:border-amber-700/60',
     },
     uploading_to_s3: {
-        label: 'Uploading to S3',
         color: 'text-cyan-700 dark:text-cyan-400',
         borderColor: 'border-cyan-300 dark:border-cyan-700/60',
     },
     completed: {
-        label: 'Completed',
         color: 'text-emerald-700 dark:text-emerald-400',
         borderColor: 'border-emerald-300 dark:border-emerald-700/60',
     },
     failed: {
-        label: 'Failed',
         color: 'text-red-700 dark:text-red-400',
         borderColor: 'border-red-300 dark:border-red-700/60',
     },
     imported: {
-        label: 'Imported',
         color: 'text-violet-700 dark:text-violet-400',
         borderColor: 'border-violet-300 dark:border-violet-700/60',
     },
@@ -340,14 +332,6 @@ const remoteIngestProgress = computed<number | undefined>(() => {
     if (typeof p !== 'number' || p <= 0) return undefined;
     return p;
 });
-
-function formatBytes(bytes: number): string {
-    if (bytes >= 1024 * 1024 * 1024)
-        return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${bytes} B`;
-}
 
 const remoteIngestLabel = computed<string>(() => {
     const total = poller.ingestTotalBytes.value;
@@ -613,116 +597,16 @@ const displaySegmentFormat = computed<SegmentFormat | string | undefined>(
 );
 
 // ---------------------------------------------------------------------------
-// ETA calculation
+// ETA labels — encoding (pipeline) + URL ingest. Each phase keeps its own
+// sample buffer inside useEncodeEta, since their rates differ by orders of
+// magnitude and would otherwise pollute each other.
 // ---------------------------------------------------------------------------
 
-function computeEtaFromSamples(
-    samples: { time: number; progress: number }[],
-    currentProgress: number,
-    now: number
-): { remainingSec: number } | undefined {
-    if (samples.length < 2) return undefined;
-    const oldest = samples[0];
-    const elapsed = (now - oldest.time) / 1000;
-    const progressDelta = currentProgress - oldest.progress;
-    if (progressDelta <= 0 || elapsed <= 0) return undefined;
-    const rate = progressDelta / elapsed;
-    const remainingSec = (100 - currentProgress) / rate;
-    if (remainingSec < 0 || !isFinite(remainingSec)) return undefined;
-    return { remainingSec };
-}
-
-const etaSamples: { time: number; progress: number }[] = [];
-const etaDisplay = ref<string | undefined>();
-
-watch(
+const { etaDisplay } = useEncodeEta(
     () => poller.pipelineProgress.value?.encoding ?? poller.progress.value,
-    (encodingProgress) => {
-        if (encodingProgress == null || encodingProgress <= 0) {
-            etaDisplay.value = undefined;
-            return;
-        }
-
-        const now = Date.now();
-        etaSamples.push({ time: now, progress: encodingProgress });
-
-        // Keep last 30 seconds of samples
-        const cutoff = now - 30_000;
-        while (etaSamples.length > 1 && etaSamples[0].time < cutoff) {
-            etaSamples.shift();
-        }
-
-        const eta = computeEtaFromSamples(etaSamples, encodingProgress, now);
-        if (!eta) {
-            etaDisplay.value = undefined;
-            return;
-        }
-        const { remainingSec } = eta;
-
-        const remainingLabel =
-            remainingSec >= 3600
-                ? `~${Math.round(remainingSec / 3600)} hr remaining`
-                : remainingSec >= 60
-                  ? `~${Math.round(remainingSec / 60)} min remaining`
-                  : `~${Math.round(remainingSec)} sec remaining`;
-
-        const completionTime = new Date(now + remainingSec * 1000);
-        const timeStr = completionTime.toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-
-        etaDisplay.value = `${remainingLabel} \u00B7 Est. completion: ${timeStr}`;
-    }
 );
-
-// URL ingest ETA — separate sample buffer from the encoding ETA so the two
-// phases don't pollute each other (rates differ by orders of magnitude).
-const ingestEtaSamples: { time: number; progress: number }[] = [];
-const ingestEtaDisplay = ref<string | undefined>();
-
-watch(
-    () => ({ status: currentStatus.value, progress: poller.progress.value }),
-    ({ status, progress }) => {
-        if (status !== 'uploading' || progress == null || progress <= 0) {
-            ingestEtaSamples.length = 0;
-            ingestEtaDisplay.value = undefined;
-            return;
-        }
-
-        const now = Date.now();
-        ingestEtaSamples.push({ time: now, progress });
-
-        const cutoff = now - 30_000;
-        while (
-            ingestEtaSamples.length > 1 &&
-            ingestEtaSamples[0].time < cutoff
-        ) {
-            ingestEtaSamples.shift();
-        }
-
-        const eta = computeEtaFromSamples(ingestEtaSamples, progress, now);
-        if (!eta) {
-            ingestEtaDisplay.value = undefined;
-            return;
-        }
-        const { remainingSec } = eta;
-
-        const remainingLabel =
-            remainingSec >= 3600
-                ? `~${Math.round(remainingSec / 3600)} hr remaining`
-                : remainingSec >= 60
-                  ? `~${Math.round(remainingSec / 60)} min remaining`
-                  : `~${Math.round(remainingSec)} sec remaining`;
-
-        const completionTime = new Date(now + remainingSec * 1000);
-        const timeStr = completionTime.toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-
-        ingestEtaDisplay.value = `${remainingLabel} \u00B7 Est. completion: ${timeStr}`;
-    }
+const { etaDisplay: ingestEtaDisplay } = useEncodeEta(() =>
+    currentStatus.value === 'uploading' ? poller.progress.value : null,
 );
 
 // ---------------------------------------------------------------------------
@@ -879,186 +763,47 @@ async function onConfirmDelete(withFiles: boolean) {
         deleteModalOpen.value = false;
         router.push('/sessions');
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         deleting.value = false;
     }
 }
 
 // ---------------------------------------------------------------------------
-// Move files
+// Move + rename output files (post-encode)
 // ---------------------------------------------------------------------------
 
-const showMoveForm = ref(false);
-const moving = ref(false);
-const moveError = ref<string | null>(null);
-const s3Configs = ref<any[]>([]);
-const selectedTargetConfigId = ref('');
-const moveNewPrefix = ref('');
-const movePrefixWarning = ref<string | null>(null);
-const moveConfirmedOverwrite = ref(false);
-const checkingMovePrefix = ref(false);
-
-const moveTargetS3SelectOptions = computed(() =>
-    s3Configs.value.map((c: any) => ({
-        value: c.id,
-        label: `${c.name} (${c.bucket})`,
-    }))
-);
-
-async function openMoveForm() {
-    moveError.value = null;
-    movePrefixWarning.value = null;
-    moveConfirmedOverwrite.value = false;
-    try {
-        const token = await getAccessTokenSilently();
-        const result = await listS3Configs(token);
-        s3Configs.value = result.configs ?? result;
-    } catch (e) {
-        moveError.value = e instanceof Error ? e.message : String(e);
-        return;
-    }
-    selectedTargetConfigId.value = '';
-    moveNewPrefix.value = session.value?.s3Config?.pathPrefix ?? '';
-    showMoveForm.value = true;
-}
-
-async function checkMovePrefix() {
-    movePrefixWarning.value = null;
-    moveConfirmedOverwrite.value = false;
-    if (!selectedTargetConfigId.value || !moveNewPrefix.value.trim()) return;
-    checkingMovePrefix.value = true;
-    try {
-        const token = await getAccessTokenSilently();
-        const result = await checkPrefix(
-            token,
-            selectedTargetConfigId.value,
-            moveNewPrefix.value.trim()
-        );
-        if (result.exists) {
-            movePrefixWarning.value = `This prefix already contains ${result.count} file(s). Moving here will add files alongside existing ones.`;
-        }
-    } catch {
-        // Non-critical — proceed without warning
-    } finally {
-        checkingMovePrefix.value = false;
-    }
-}
-
-const canMove = computed(
-    () =>
-        !!selectedTargetConfigId.value &&
-        !!moveNewPrefix.value.trim() &&
-        !moving.value &&
-        !checkingMovePrefix.value &&
-        (!movePrefixWarning.value || moveConfirmedOverwrite.value)
-);
-
-async function confirmMove() {
-    if (!canMove.value) return;
-    moving.value = true;
-    moveError.value = null;
-    try {
-        const token = await getAccessTokenSilently();
-        await moveSessionFiles(
-            token,
-            sessionId.value,
-            selectedTargetConfigId.value,
-            moveNewPrefix.value.trim()
-        );
-        showMoveForm.value = false;
-        await fetchSession();
-    } catch (e) {
-        moveError.value = e instanceof Error ? e.message : String(e);
-    } finally {
-        moving.value = false;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Rename prefix
-// ---------------------------------------------------------------------------
-
-const showRenameForm = ref(false);
-const renaming = ref(false);
-const renameError = ref<string | null>(null);
-const renameNewPrefix = ref('');
-const renamePrefixWarning = ref<string | null>(null);
-const renameConfirmedOverwrite = ref(false);
-const checkingRenamePrefix = ref(false);
-
-function openRenameForm() {
-    renameError.value = null;
-    renamePrefixWarning.value = null;
-    renameConfirmedOverwrite.value = false;
-    renameNewPrefix.value = session.value?.s3Config?.pathPrefix ?? '';
-    showRenameForm.value = true;
-}
-
-async function checkRenamePrefix() {
-    renamePrefixWarning.value = null;
-    renameConfirmedOverwrite.value = false;
-    if (!renameNewPrefix.value.trim() || !session.value?.s3ConfigId) return;
-    checkingRenamePrefix.value = true;
-    try {
-        const token = await getAccessTokenSilently();
-        const result = await checkPrefix(
-            token,
-            session.value.s3ConfigId,
-            renameNewPrefix.value.trim()
-        );
-        if (result.exists) {
-            renamePrefixWarning.value = `This prefix already contains ${result.count} file(s). Renaming here will add files alongside existing ones.`;
-        }
-    } catch {
-        // Non-critical
-    } finally {
-        checkingRenamePrefix.value = false;
-    }
-}
-
-const canRename = computed(
-    () =>
-        !!renameNewPrefix.value.trim() &&
-        !renaming.value &&
-        !checkingRenamePrefix.value &&
-        (!renamePrefixWarning.value || renameConfirmedOverwrite.value)
-);
-
-async function confirmRename() {
-    if (!canRename.value) return;
-    renaming.value = true;
-    renameError.value = null;
-    try {
-        const token = await getAccessTokenSilently();
-        await renameSessionPrefix(
-            token,
-            sessionId.value,
-            renameNewPrefix.value.trim()
-        );
-        showRenameForm.value = false;
-        await fetchSession();
-    } catch (e) {
-        renameError.value = e instanceof Error ? e.message : String(e);
-    } finally {
-        renaming.value = false;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatDate(dateStr: string | null | undefined): string {
-    if (!dateStr) return '--';
-    return new Date(dateStr).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-    });
-}
+const {
+    showMoveForm,
+    moving,
+    moveError,
+    selectedTargetConfigId,
+    moveNewPrefix,
+    movePrefixWarning,
+    moveConfirmedOverwrite,
+    checkingMovePrefix,
+    moveTargetS3SelectOptions,
+    openMoveForm,
+    checkMovePrefix,
+    canMove,
+    confirmMove,
+    showRenameForm,
+    renaming,
+    renameError,
+    renameNewPrefix,
+    renamePrefixWarning,
+    renameConfirmedOverwrite,
+    checkingRenamePrefix,
+    openRenameForm,
+    checkRenamePrefix,
+    canRename,
+    confirmRename,
+} = useSessionFileOps({
+    getAccessToken: () => getAccessTokenSilently(),
+    sessionId,
+    session,
+    refresh: fetchSession,
+});
 
 // ---------------------------------------------------------------------------
 // Fetch session detail from SaaS
@@ -1094,7 +839,7 @@ async function fetchSession() {
         // Route to appropriate behavior based on status
         await handleStatusAfterLoad(detail.status);
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         loading.value = false;
     }
@@ -1159,7 +904,7 @@ async function fetchProbeResults() {
             encodingType.value = probe.videoTracks.length ? 'video' : 'audio';
         }
     } catch (e) {
-        submissionError.value = e instanceof Error ? e.message : String(e);
+        submissionError.value = errorMessage(e);
     } finally {
         probeLoading.value = false;
     }
@@ -1303,7 +1048,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
         // Start polling for encoding progress
         poller.start(sessionId.value, encodingApiUrl.value, sessionToken.value);
     } catch (e) {
-        submissionError.value = e instanceof Error ? e.message : String(e);
+        submissionError.value = errorMessage(e);
     } finally {
         submitting.value = false;
     }
@@ -1433,7 +1178,7 @@ watch(
             await chapters.load(id);
         } catch (err) {
             chaptersSaveError.value =
-                err instanceof Error ? err.message : String(err);
+                errorMessage(err);
         }
     },
     { immediate: true }
@@ -1445,7 +1190,7 @@ async function onSaveChapters() {
         await chapters.saveRemote();
     } catch (err) {
         chaptersSaveError.value =
-            err instanceof Error ? err.message : String(err);
+            errorMessage(err);
     }
 }
 
@@ -1456,102 +1201,18 @@ async function onDiscardChapters() {
         syncChaptersFromTrim();
     } catch (err) {
         chaptersSaveError.value =
-            err instanceof Error ? err.message : String(err);
+            errorMessage(err);
     }
 }
 
-/** While trim timeline is editable, chapter list mirrors trim ranges (labels preserved by row index). */
-const hadTrimForChapterSync = ref(false);
-
-function segmentTimesAlmostEqual(a: Segment, b: Segment): boolean {
-    return (
-        Math.abs(a.inSec - b.inSec) < 1e-4 &&
-        Math.abs(a.outSec - b.outSec) < 1e-4
-    );
-}
-
-function sameTrimAsChapterBoundaries(trim: Segment[], ch: Segment[]): boolean {
-    if (trim.length !== ch.length) return false;
-    return trim.every((t, i) => segmentTimesAlmostEqual(t, ch[i]!));
-}
-
-/** True when trim timeline and chapter list already match (times + labels, same order). */
-function editorMatchesChapters(ed: Segment[], ch: Segment[]): boolean {
-    if (ed.length !== ch.length) return false;
-    return ed.every((s, i) => {
-        const c = ch[i]!;
-        return (
-            segmentTimesAlmostEqual(s, c) && (s.label ?? '') === (c.label ?? '')
-        );
-    });
-}
-
-/** Keeps the trim timeline in sync with the chapter list whenever trim editing is enabled. */
-function syncEditorFromChaptersIfNeeded() {
-    if (!canEditTrimTimeline.value || !chapters.isLoaded.value) return;
-    if (editorMatchesChapters(editorSegments.value, chapterSegments.value))
-        return;
-    editorSegments.value = chapterSegments.value.map((s) => ({ ...s }));
-}
-
-function syncChaptersFromTrim() {
-    if (!canEditTrimTimeline.value || !chapters.isLoaded.value) return;
-
-    const trim = editorSegments.value;
-    if (trim.length === 0) {
-        if (hadTrimForChapterSync.value) {
-            chapterSegments.value = [];
-            hadTrimForChapterSync.value = false;
-        }
-        return;
-    }
-
-    hadTrimForChapterSync.value = true;
-    const prev = chapterSegments.value;
-    const next: Segment[] = trim.map((t: Segment, i: number) => ({
-        ...t,
-        label: i < prev.length ? (prev[i]!.label ?? '') : '',
-    }));
-
-    if (
-        sameTrimAsChapterBoundaries(trim, prev) &&
-        next.every((s, i) => (s.label ?? '') === (prev[i]?.label ?? ''))
-    ) {
-        return;
-    }
-
-    chapterSegments.value = next;
-}
-
-watch(
+// While trim editing is enabled, the trim timeline and chapter list stay
+// mirrored: trim boundary changes propagate into the chapter list (labels
+// preserved by row index) and chapter edits propagate back.
+const { syncChaptersFromTrim } = useChapterTrimSync({
     editorSegments,
-    () => {
-        syncChaptersFromTrim();
-    },
-    { deep: true }
-);
-
-watch(
-    () => chapters.isLoaded.value,
-    (loaded) => {
-        if (loaded) {
-            syncChaptersFromTrim();
-            syncEditorFromChaptersIfNeeded();
-        }
-    }
-);
-
-watch(
     chapterSegments,
-    () => {
-        syncEditorFromChaptersIfNeeded();
-    },
-    { deep: true }
-);
-
-watch(canEditTrimTimeline, (can) => {
-    if (!can) hadTrimForChapterSync.value = false;
-    else syncEditorFromChaptersIfNeeded();
+    canEditTrimTimeline,
+    chaptersLoaded: chapters.isLoaded,
 });
 
 // ---------------------------------------------------------------------------
@@ -1646,15 +1307,7 @@ watch(showProbeConfig, (ready) => {
 
 function relativeCreatedLabel(dateStr: string | null | undefined): string {
     if (!dateStr) return '';
-    const then = new Date(dateStr).getTime();
-    const diff = Date.now() - then;
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'Created just now';
-    if (mins < 60) return `Created ${mins} min${mins === 1 ? '' : 's'} ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `Created ${hrs} hr${hrs === 1 ? '' : 's'} ago`;
-    const days = Math.floor(hrs / 24);
-    return `Created ${days} day${days === 1 ? '' : 's'} ago`;
+    return `Created ${formatRelative(dateStr)}`;
 }
 
 async function copyOutputObjectKey(key: string) {
@@ -1816,10 +1469,7 @@ onUnmounted(() => {
                                     <p
                                         class="text-sm text-slate-800 dark:text-slate-200"
                                     >
-                                        {{
-                                            statusConfig[session.status]
-                                                ?.label ?? session.status
-                                        }}
+                                        {{ statusLabel(session.status) }}
                                     </p>
                                 </div>
                                 <div
@@ -1833,7 +1483,7 @@ onUnmounted(() => {
                                     <p
                                         class="text-sm text-slate-800 dark:text-slate-200"
                                     >
-                                        {{ formatDate(session.createdAt) }}
+                                        {{ formatDateTime(session.createdAt) }}
                                     </p>
                                 </div>
                             </div>
@@ -1971,15 +1621,12 @@ onUnmounted(() => {
                                     <StatusBadge
                                         v-if="currentStatus"
                                         class="shrink-0"
-                                        :label="
-                                            statusConfig[currentStatus]
-                                                ?.label ?? currentStatus
-                                        "
+                                        :label="statusLabel(currentStatus)"
                                         :color="
-                                            statusConfig[currentStatus]?.color
+                                            statusColors[currentStatus]?.color
                                         "
                                         :border-color="
-                                            statusConfig[currentStatus]
+                                            statusColors[currentStatus]
                                                 ?.borderColor
                                         "
                                     />

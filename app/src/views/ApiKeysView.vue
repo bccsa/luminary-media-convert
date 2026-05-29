@@ -3,23 +3,17 @@ import { ref, computed, inject, onMounted, onBeforeUnmount, watch, type Ref } fr
 import { useAuth0 } from '@auth0/auth0-vue';
 import { createApiKey, listApiKeys, revokeApiKey } from '../api';
 import ConfirmDangerModal from '../components/ConfirmDangerModal.vue';
+import { formatDate } from '../utils/format';
+import { errorMessage } from '../utils/errors';
+import type { ApiKeyResponse } from '../types';
 
 const encodingApiUrl = inject<Ref<string>>('encodingApiUrl', ref(''));
 const docsUrl = computed(() => (encodingApiUrl.value ? `${encodingApiUrl.value}/api/docs` : ''));
 const showDocs = ref(false);
 
-interface ApiKey {
-    id: string;
-    name: string;
-    prefix: string;
-    status: 'active' | 'revoked';
-    lastUsedAt: string | null;
-    createdAt: string;
-}
-
 const { getAccessTokenSilently } = useAuth0();
 
-const keys = ref<ApiKey[]>([]);
+const keys = ref<ApiKeyResponse[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
@@ -80,7 +74,7 @@ async function fetchKeys() {
         const token = await getAccessTokenSilently();
         keys.value = await listApiKeys(token);
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         loading.value = false;
     }
@@ -99,7 +93,7 @@ async function handleCreate() {
         newKeyName.value = '';
         await fetchKeys();
     } catch (e) {
-        createError.value = e instanceof Error ? e.message : String(e);
+        createError.value = errorMessage(e);
     } finally {
         creating.value = false;
     }
@@ -114,7 +108,7 @@ async function copyKey() {
     }, 2000);
 }
 
-function openRevokeModal(key: ApiKey) {
+function openRevokeModal(key: ApiKeyResponse) {
     revokeTarget.value = { id: key.id, name: key.name, prefix: key.prefix };
     revokeModalOpen.value = true;
 }
@@ -131,19 +125,10 @@ async function confirmRevokeKey() {
         revokeTarget.value = null;
         await fetchKeys();
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         revoking.value = false;
     }
-}
-
-function formatDate(dateStr: string | null): string {
-    if (!dateStr) return '—';
-    return new Date(dateStr).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-    });
 }
 
 function formatRelative(iso: string | null): string {

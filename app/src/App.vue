@@ -6,6 +6,7 @@ import { checkIdentity } from './api';
 import AccountMenu from './components/AccountMenu.vue';
 import AppPrimaryNav from './components/AppPrimaryNav.vue';
 import { useAppLayout } from './composables/useAppLayout';
+import { errorMessage } from './utils/errors';
 
 const route = useRoute();
 const isSessionDetail = computed(() => route.name === 'session-detail');
@@ -51,7 +52,7 @@ watch(
             encodingApiUrl.value = identity.encodingApiUrl ?? '';
             identityChecked.value = true;
         } catch (e) {
-            identityError.value = e instanceof Error ? e.message : String(e);
+            identityError.value = errorMessage(e);
         }
     },
     { immediate: true }

@@ -3,18 +3,9 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useAuth0 } from '@auth0/auth0-vue';
 import { listS3Configs, createS3Config, getS3Config, updateS3Config, deleteS3Config } from '../api';
 import ConfirmDangerModal from '../components/ConfirmDangerModal.vue';
-
-interface S3ConfigEntry {
-    id: string;
-    name: string;
-    endPoint: string;
-    port?: number;
-    useSSL: boolean;
-    bucket: string;
-    region?: string;
-    publicUrl?: string;
-    createdAt: string;
-}
+import { formatDate } from '../utils/format';
+import { errorMessage } from '../utils/errors';
+import type { S3ConfigSummary } from '../types';
 
 interface S3ConfigForm {
     name: string;
@@ -32,7 +23,7 @@ type ProviderTone = 'aws' | 'r2' | 'do' | 'gcs' | 'b2' | 'minio' | 'generic';
 
 const { getAccessTokenSilently } = useAuth0();
 
-const configs = ref<S3ConfigEntry[]>([]);
+const configs = ref<S3ConfigSummary[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 
@@ -111,7 +102,7 @@ watch(totalPages, (tp) => {
     if (page.value > tp) page.value = tp;
 });
 
-function endpointDisplay(c: S3ConfigEntry): string {
+function endpointDisplay(c: S3ConfigSummary): string {
     const p = c.port ? `:${c.port}` : '';
     return `${c.endPoint}${p}`;
 }
@@ -140,13 +131,13 @@ function providerIconWrapClass(tone: ProviderTone): string {
     return map[tone];
 }
 
-function regionPill(c: S3ConfigEntry): string {
+function regionPill(c: S3ConfigSummary): string {
     const r = (c.region ?? '').trim();
     if (r) return r;
     return '—';
 }
 
-function isRegionBadgeEmpty(c: S3ConfigEntry): boolean {
+function isRegionBadgeEmpty(c: S3ConfigSummary): boolean {
     return !(c.region ?? '').trim();
 }
 
@@ -162,7 +153,7 @@ async function fetchConfigs() {
         const result = await listS3Configs(token);
         configs.value = result.configs ?? [];
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         loading.value = false;
     }
@@ -193,7 +184,7 @@ async function openEditForm(configId: string) {
         form.accessKey = '';
         form.secretKey = '';
     } catch (e) {
-        formError.value = e instanceof Error ? e.message : String(e);
+        formError.value = errorMessage(e);
     } finally {
         loadingConfig.value = false;
     }
@@ -255,13 +246,13 @@ async function handleSubmit() {
         closeForm();
         await fetchConfigs();
     } catch (e) {
-        formError.value = e instanceof Error ? e.message : String(e);
+        formError.value = errorMessage(e);
     } finally {
         saving.value = false;
     }
 }
 
-function openDeleteModal(config: S3ConfigEntry) {
+function openDeleteModal(config: S3ConfigSummary) {
     deleteTarget.value = { id: config.id, name: config.name, bucket: config.bucket };
     deleteModalOpen.value = true;
 }
@@ -278,18 +269,10 @@ async function confirmDeleteS3Config() {
         deleteTarget.value = null;
         await fetchConfigs();
     } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e);
+        error.value = errorMessage(e);
     } finally {
         deleting.value = false;
     }
-}
-
-function formatDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-    });
 }
 
 onMounted(() => {
