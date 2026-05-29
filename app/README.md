@@ -69,6 +69,22 @@ VITE_AUTH0_CLIENT_ID=your-spa-client-id
 VITE_AUTH0_AUDIENCE=https://luminary-media-convert/api
 ```
 
+## PWA
+
+The app is a Progressive Web App via [`vite-plugin-pwa`](https://vite-pwa-org.netlify.app/). The service worker precaches the built app shell (HTML, JS, CSS, icons) only — SaaS, Encoding API, Auth0, and tus traffic stay on the network.
+
+- **Install:** Browsers that support install will offer "Add to Home Screen" when criteria are met (HTTPS, manifest, service worker).
+- **Updates:** When a new build is deployed, `PwaUpdatePrompt` shows a reload banner; the page does not auto-reload (safe during long tus uploads).
+- **Offline:** Cached shell may load without network, but uploads, encoding, and API calls still require connectivity.
+
+Icons live in `app/public/` (source: `favicon.svg`). Regenerate after changing the logo:
+
+```bash
+npm -w app run generate:pwa-icons
+```
+
+**COOP/COEP headers** (for `SharedArrayBuffer` / future FFmpeg.wasm): set in dev via `vite.config.ts` `server.headers`; in production via `app/public/_headers` (copied to the build output for Cloudflare Workers static assets). Also disables edge caching of `sw.js` and `manifest.webmanifest`.
+
 ## Development
 
 ```bash
@@ -77,6 +93,9 @@ npm -w app run dev
 
 # Production build
 npm -w app run build
+
+# Preview production build (Wrangler)
+npm -w app run preview
 
 # Tests
 npm -w app run test
@@ -91,4 +110,5 @@ npm -w app run test
 - Auth0 Vue SDK
 - Video.js 8 with custom HLS quality selector and thumbnail preview plugins
 - tus-js-client for resumable uploads
+- vite-plugin-pwa (installable PWA, app-shell precache, update prompts)
 - Vitest for testing

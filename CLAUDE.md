@@ -86,6 +86,7 @@ A folder-based npm workspaces monorepo containing:
 - **API communication**: Fetch-based client (`api.ts`) communicates with both the SaaS Service and the Encoding API; file uploads use `tus-js-client` for resumable chunked uploads (50 MB chunks, 5 parallel uploads), or "From URL" mode where the API server downloads the source from a public HTTP/S URL
 - **Real-time updates**: SSE via `GET /api/sessions/:id/events` on the Encoding API for live encoding progress
 - **Shared packages**: `@luminary-media-converter/encode-config` (form, types, layout storage) and `@luminary-media-converter/segment-editor` (chapter editor, WebVTT helpers)
+- **PWA**: `vite-plugin-pwa` — installable manifest, Workbox precache of app shell only, update prompt via `PwaUpdatePrompt.vue`; `app/public/_headers` for COOP/COEP and SW cache control on Cloudflare deploy
 
 ### SaaS Service (`saas/`)
 
@@ -519,6 +520,7 @@ created -> uploading -> uploaded -> queued -> encoding -> encrypting -> uploadin
 - Chapter editing uses `useChapters` (app composable) wrapping the `SegmentEditor` from `@luminary-media-converter/segment-editor`; drafts persist in localStorage and autosave to S3 (debounced ~2 s) via the SaaS chapter proxy
 - Video.js quality selector is a custom plugin (`videojs-quality-selector.ts`) using native ES6 classes — the `videojs-hls-quality-selector` npm package is incompatible with Video.js 8 (Babel `_inheritsLoose` cannot extend native ES6 classes)
 - Vite config uses `resolve.dedupe: ['video.js']` to ensure a single Video.js instance across all modules
+- PWA via `vite-plugin-pwa` in `app/vite.config.ts`: web manifest + Workbox service worker precaches same-origin build assets only; `PwaUpdatePrompt.vue` prompts on new deploys (`registerType: 'prompt'`). Offline shell does not make APIs available. Icons in `app/public/`; regenerate with `npm -w app run generate:pwa-icons`
 
 ## Source File Preview (COOP/COEP Headers)
 
@@ -550,7 +552,8 @@ Cross-Origin-Embedder-Policy: credentialless
   header Cross-Origin-Embedder-Policy "credentialless"
   ```
 
-- **Cloudflare Pages / Workers:** Add headers via `_headers` file in `app/dist/`:
+- **Cloudflare Workers (this repo):** `app/public/_headers` is copied into the build output and sets COOP/COEP on all routes plus `Cache-Control: no-cache` on `sw.js`, `workbox-*.js`, and `manifest.webmanifest`
+- **Cloudflare Pages / Workers (generic):** Add headers via `_headers` in the static assets directory:
   ```
   /*
     Cross-Origin-Opener-Policy: same-origin

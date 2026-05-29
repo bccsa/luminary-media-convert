@@ -5,6 +5,7 @@ import { useAuth0 } from '@auth0/auth0-vue';
 import { checkIdentity } from './api';
 import AccountMenu from './components/AccountMenu.vue';
 import AppPrimaryNav from './components/AppPrimaryNav.vue';
+import PwaUpdatePrompt from './components/PwaUpdatePrompt.vue';
 import { useAppLayout } from './composables/useAppLayout';
 import { errorMessage } from './utils/errors';
 
@@ -380,5 +381,7 @@ watch(
                 <router-view />
             </main>
         </template>
+
+        <PwaUpdatePrompt />
     </div>
 </template>
