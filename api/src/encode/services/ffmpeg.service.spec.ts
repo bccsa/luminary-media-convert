@@ -859,6 +859,29 @@ describe('FfmpegService', () => {
             expect(nameMatches).toEqual(['NAME="eng"', 'NAME="eng"', 'NAME="eng"']);
         });
 
+        it('should normalize uppercase LANGUAGE attributes from FFmpeg output', async () => {
+            const masterContent = [
+                '#EXTM3U',
+                '#EXT-X-VERSION:6',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="audio_6",DEFAULT=YES,LANGUAGE="ENG",CHANNELS="2",URI="stream_hd_English/playlist.m3u8"',
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_hd",NAME="audio_7",DEFAULT=NO,LANGUAGE="FRA",CHANNELS="2",URI="stream_hd_French/playlist.m3u8"',
+            ].join('\n');
+            writeFileSync(join(tmpDir, 'master.m3u8'), masterContent, 'utf-8');
+
+            await fixMasterPlaylist(tmpDir, {
+                type: 'video',
+                audioGroups: [
+                    { id: 'hd', label: 'English', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    { id: 'hd', label: 'French', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'fra' },
+                ],
+            });
+
+            const result = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
+            expect(result).toContain('LANGUAGE="eng"');
+            expect(result).toContain('LANGUAGE="fra"');
+            expect(result).not.toMatch(/LANGUAGE="[A-Z]/);
+        });
+
         it('should use label for NAME when multiple languages are present', async () => {
             const masterContent = [
                 '#EXTM3U',

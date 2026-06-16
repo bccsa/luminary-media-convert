@@ -261,6 +261,19 @@ describe('HlsEditService', () => {
             );
         });
 
+        it('normalizes uppercase lang codes before writing the sidecar path', async () => {
+            etag.putObject.mockResolvedValue({ etag: 'y' });
+
+            await service.writeChapters(s3, 'output/', 'EN', 'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nIntro');
+
+            expect(etag.putObject).toHaveBeenCalledWith(
+                s3,
+                'output/chapters/en.vtt',
+                expect.stringMatching(/^WEBVTT/),
+                'text/vtt',
+            );
+        });
+
         it('rejects bodies that do not start with WEBVTT', async () => {
             await expect(
                 service.writeChapters(s3, 'output/', 'en', 'not vtt'),

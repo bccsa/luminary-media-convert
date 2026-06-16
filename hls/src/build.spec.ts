@@ -32,6 +32,17 @@ describe('buildMasterPlaylist', () => {
         expect(subIdx).toBeGreaterThan(audioIdx);
     });
 
+    it('lowercases LANGUAGE attributes when building media entries', () => {
+        const out = buildMasterPlaylist({
+            variants: [],
+            media: [
+                { type: 'AUDIO', groupId: 'aud', name: 'English', language: 'EN', uri: 'audio/en.m3u8' },
+            ],
+            audioGroups: [],
+        });
+        expect(out).toContain('LANGUAGE="en"');
+    });
+
     it('round-trips parse → build → parse', () => {
         const original = [
             '#EXTM3U',

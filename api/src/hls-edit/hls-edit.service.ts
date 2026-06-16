@@ -223,6 +223,7 @@ export class HlsEditService {
         lang: string,
         vtt: string,
     ): Promise<void> {
+        lang = lang.toLowerCase();
         if (!LANG_PATTERN.test(lang)) {
             throw new BadRequestException('lang must be a BCP-47 language code');
         }
