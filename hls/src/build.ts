@@ -46,7 +46,7 @@ function formatMedia(m: HlsMedia): string {
         `GROUP-ID="${m.groupId}"`,
         `NAME="${m.name}"`,
     ];
-    if (m.language) attrs.push(`LANGUAGE="${m.language}"`);
+    if (m.language) attrs.push(`LANGUAGE="${m.language.toLowerCase()}"`);
     if (m.default) attrs.push('DEFAULT=YES');
     if (m.autoselect) attrs.push('AUTOSELECT=YES');
     if (m.forced) attrs.push('FORCED=YES');

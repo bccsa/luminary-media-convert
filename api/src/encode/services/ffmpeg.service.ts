@@ -535,7 +535,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             const name = this.buildAudioStreamName(group);
             let part = `a:${outputIndex},agroup:${group.id},name:${name}`;
             if (group.language) {
-                part += `,language:${group.language}`;
+                part += `,language:${group.language.toLowerCase()}`;
             }
             const isDefault = !defaultedGroups.has(group.id);
             if (isDefault) defaultedGroups.add(group.id);
@@ -857,6 +857,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
         content = this.fixMasterPlaylistAudioNames(content, config);
         content = this.fixMasterPlaylistVideoGroups(content, config);
+        content = content.replace(
+            /LANGUAGE="([^"]+)"/g,
+            (_, code: string) => `LANGUAGE="${code.toLowerCase()}"`,
+        );
         await writeFile(masterPath, content, 'utf-8');
     }
 
@@ -1086,7 +1090,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 const name = singleLang
                     ? (group.language ?? 'Audio')
                     : (group.label ?? group.language ?? 'Audio');
-                const lang = group.language ? `,LANGUAGE="${group.language}"` : '';
+                const lang = group.language
+                    ? `,LANGUAGE="${group.language.toLowerCase()}"`
+                    : '';
 
                 parts.push(
                     `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="${tierId}",NAME="${name}",DEFAULT=${isFirstInTier ? 'YES' : 'NO'}${lang},URI="${uri}"`,
