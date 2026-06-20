@@ -9,6 +9,7 @@ work
 .DS_Store
 .vscode
 .wrangler
+.claude/worktrees/
 .cursor/**/*.log
 dispatchQueue.json
 jobQueue.json
