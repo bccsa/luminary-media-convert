@@ -1,13 +1,9 @@
 import { onMounted, onUnmounted, ref } from 'vue';
 
-const DISMISS_STORAGE_KEY = 'luminary-pwa-install-dismissed';
-
 interface BeforeInstallPromptEvent extends Event {
     prompt: () => Promise<void>;
     userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
-
-const GESTURE_EVENTS = ['pointerdown', 'keydown', 'touchstart'] as const;
 
 function isStandaloneDisplay(): boolean {
     return (
@@ -16,14 +12,6 @@ function isStandaloneDisplay(): boolean {
         // Safari iOS
         (navigator as Navigator & { standalone?: boolean }).standalone === true
     );
-}
-
-function isDismissed(): boolean {
-    try {
-        return localStorage.getItem(DISMISS_STORAGE_KEY) === '1';
-    } catch {
-        return false;
-    }
 }
 
 function isIosDevice(): boolean {
@@ -38,10 +26,11 @@ function isIosDevice(): boolean {
  *
  * The browser's native install modal cannot be shown without a user gesture
  * (per spec, `BeforeInstallPromptEvent.prompt()` requires transient
- * activation). To make it feel automatic "on open", we capture the deferred
- * event and fire the native modal on the user's first interaction with the
- * page. A custom card is shown only as a fallback (e.g. if firing the native
- * modal throws) and to give iOS users Add to Home Screen instructions.
+ * activation). We capture the deferred event and surface a custom install
+ * card; the native modal is fired only when the user clicks the card's
+ * Install button. iOS has no native modal, so the card shows Add to Home
+ * Screen instructions instead. Installing must remain a deliberate user
+ * choice — we never auto-fire the prompt on incidental page interactions.
  */
 export function usePwaInstall() {
     const visible = ref(false);
@@ -50,51 +39,28 @@ export function usePwaInstall() {
     const canInstall = ref(false);
 
     let deferredPrompt: BeforeInstallPromptEvent | null = null;
-    let autoPromptArmed = false;
 
     function setDeferred(event: BeforeInstallPromptEvent | null) {
         deferredPrompt = event;
         canInstall.value = event !== null;
     }
 
-    function disarmAutoPrompt() {
-        if (!autoPromptArmed) return;
-        autoPromptArmed = false;
-        for (const evt of GESTURE_EVENTS) {
-            window.removeEventListener(evt, onFirstGesture, true);
-        }
-    }
-
-    function onFirstGesture() {
-        disarmAutoPrompt();
-        // Fire the native modal inside the gesture to keep transient activation.
-        void install();
-    }
-
-    function armAutoPrompt() {
-        if (autoPromptArmed || !deferredPrompt) return;
-        autoPromptArmed = true;
-        for (const evt of GESTURE_EVENTS) {
-            window.addEventListener(evt, onFirstGesture, { capture: true, once: true });
-        }
-    }
-
     function onBeforeInstallPrompt(event: Event) {
         // Prevent the browser's default mini-infobar so we control when the
-        // native modal appears (on first user gesture, see armAutoPrompt).
+        // native modal appears (only from the card's Install button).
         event.preventDefault();
         setDeferred(event as BeforeInstallPromptEvent);
-        armAutoPrompt();
+        // Surface the install card; the user decides whether to install.
+        visible.value = true;
     }
 
     function onAppInstalled() {
         setDeferred(null);
-        disarmAutoPrompt();
         visible.value = false;
     }
 
     onMounted(() => {
-        if (isStandaloneDisplay() || isDismissed()) return;
+        if (isStandaloneDisplay()) return;
 
         window.addEventListener('beforeinstallprompt', onBeforeInstallPrompt);
         window.addEventListener('appinstalled', onAppInstalled);
@@ -110,16 +76,11 @@ export function usePwaInstall() {
     onUnmounted(() => {
         window.removeEventListener('beforeinstallprompt', onBeforeInstallPrompt);
         window.removeEventListener('appinstalled', onAppInstalled);
-        disarmAutoPrompt();
     });
 
     function dismiss() {
-        try {
-            localStorage.setItem(DISMISS_STORAGE_KEY, '1');
-        } catch {
-            /* ignore */
-        }
-        disarmAutoPrompt();
+        // Hide for the current session only — the card resurfaces on the next
+        // visit so installing stays available (the choice isn't persisted).
         visible.value = false;
     }
 
