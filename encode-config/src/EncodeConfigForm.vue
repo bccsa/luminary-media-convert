@@ -96,6 +96,24 @@ function getAudioTierForHeight(height: number) {
     return AUDIO_GROUP_TIERS[AUDIO_GROUP_TIERS.length - 1];
 }
 
+// Derive a rendition width from a target height that preserves the source's
+// aspect ratio, rounded to an even number (H.264/yuv420p requires even
+// dimensions). For a 16:9 source this reproduces the ABR_LADDER widths exactly;
+// for non-standard ratios (4:3, 21:9, portrait, …) it avoids stretching the
+// picture into 16:9. Returns at least 2.
+function aspectWidthForHeight(
+    height: number,
+    sourceWidth: number,
+    sourceHeight: number
+): number {
+    if (!sourceWidth || !sourceHeight) return height;
+    // Round to the nearest even number — this reproduces the canonical 16:9
+    // ladder widths exactly (e.g. 480p → 854, 240p → 426) while keeping every
+    // dimension even, as H.264/yuv420p requires.
+    const width = Math.round((height * sourceWidth) / sourceHeight / 2) * 2;
+    return Math.max(2, width);
+}
+
 function mapTierToGroupId(standardGroupId: string, tierIds: string[]): string {
     if (tierIds.includes(standardGroupId)) return standardGroupId;
     const tierIndex =
@@ -257,7 +275,11 @@ function reanalyzeVideo() {
             const tier = getAudioTierForHeight(rung.height);
             const audioGroupId = mapTierToGroupId(tier.groupId, tierIds);
             return {
-                width: rung.width,
+                width: aspectWidthForHeight(
+                    rung.height,
+                    track.width,
+                    track.height
+                ),
                 height: rung.height,
                 videoBitrateKbps: rung.bitrateKbps,
                 copyStream: false,
