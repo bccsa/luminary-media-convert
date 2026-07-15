@@ -59,21 +59,10 @@ jobs:
           docker rm ${{ vars.DOCKER_CONTAINER }} || true
 
       - name: Run new container
-        # Bind-mount a dedicated host directory at /app/work (uploads + FFmpeg
-        # encode temp). Without this, large jobs write into the container's
-        # overlay layer on the host root disk and exhaust it ("no space left on
-        # device" during tus upload / encode). Set the `WORK_DIR_HOST` env var
-        # to a large, dedicated disk on the host; ops must ensure it has capacity
-        # for max_upload_size x concurrent uploads + encode output. If the var is
-        # unset, it falls back to a default path (created on the root disk) so a
-        # deploy never breaks — but capacity is only solved once WORK_DIR_HOST
-        # points at a big disk.
-        run: |
-          WORK_DIR_HOST="${{ vars.WORK_DIR_HOST }}"
-          docker run -d -p "${{ vars.DOCKER_PORT }}":"${{ vars.DOCKER_PORT }}" \
-            --restart unless-stopped \
-            --name=${{ vars.DOCKER_CONTAINER }} \
-            --add-host=host.docker.internal:host-gateway \
-            -v "${WORK_DIR_HOST:-/srv/lmc-work/api-prod}":/app/work \
-            --env-file api/.env \
-            ${{ vars.DOCKER_IMAGE }}
+        run: >
+          docker run -d -p "${{ vars.DOCKER_PORT }}":"${{ vars.DOCKER_PORT }}"
+          --restart unless-stopped
+          --name=${{ vars.DOCKER_CONTAINER }}
+          --add-host=host.docker.internal:host-gateway
+          --env-file api/.env
+          ${{ vars.DOCKER_IMAGE }}
