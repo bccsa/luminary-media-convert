@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import { useAuth0 } from '@auth0/auth0-vue';
-import { listS3Configs, createS3Config, getS3Config, updateS3Config, deleteS3Config } from '../api';
+import { listS3Configs, createS3Config, getS3Config, updateS3Config, deleteS3Config, testS3Config } from '../api';
 import ConfirmDangerModal from '../components/ConfirmDangerModal.vue';
 import { formatDate } from '../utils/format';
 import { errorMessage } from '../utils/errors';
@@ -33,6 +33,9 @@ const saving = ref(false);
 const formError = ref<string | null>(null);
 const loadingConfig = ref(false);
 
+const testing = ref(false);
+const testResult = ref<{ ok: boolean; message: string } | null>(null);
+
 const deleteModalOpen = ref(false);
 const deleteTarget = ref<{ id: string; name: string; bucket: string } | null>(null);
 const deleting = ref(false);
@@ -60,6 +63,7 @@ const form = reactive<S3ConfigForm>(emptyForm());
 function resetForm() {
     Object.assign(form, emptyForm());
     formError.value = null;
+    testResult.value = null;
 }
 
 const tlsEnabledCount = computed(() => configs.value.filter((c) => c.useSSL !== false).length);
@@ -207,6 +211,37 @@ function onFormModalKeydown(e: KeyboardEvent) {
 
 function validateForm(): boolean {
     return !!(form.name.trim() && form.endPoint.trim() && form.bucket.trim());
+}
+
+async function handleTest() {
+    if (!(form.endPoint.trim() && form.bucket.trim())) {
+        testResult.value = { ok: false, message: 'Enter at least an endpoint and bucket first.' };
+        return;
+    }
+    testing.value = true;
+    testResult.value = null;
+    try {
+        const token = await getAccessTokenSilently();
+        const payload: Record<string, unknown> = {
+            endPoint: form.endPoint.trim(),
+            useSSL: form.useSSL,
+            bucket: form.bucket.trim(),
+        };
+        if (form.port) payload.port = form.port;
+        if (form.region.trim()) payload.region = form.region.trim();
+        if (form.accessKey.trim()) payload.accessKey = form.accessKey.trim();
+        if (form.secretKey.trim()) payload.secretKey = form.secretKey.trim();
+        // Edit mode: let the server fall back to stored credentials when the
+        // secret was not re-typed.
+        if (editingId.value) payload.configId = editingId.value;
+
+        const result = await testS3Config(token, payload);
+        testResult.value = { ok: result.ok, message: result.message };
+    } catch (e) {
+        testResult.value = { ok: false, message: errorMessage(e) };
+    } finally {
+        testing.value = false;
+    }
 }
 
 async function handleSubmit() {
@@ -731,7 +766,31 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                             <p class="text-sm text-red-800 dark:text-red-300">{{ formError }}</p>
                         </div>
 
-                        <div class="flex flex-wrap justify-end gap-2 border-t border-slate-200/80 pt-4 dark:border-slate-700/80">
+                        <div
+                            v-if="testResult"
+                            class="flex items-start gap-2 rounded-xl border p-3"
+                            :class="testResult.ok
+                                ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/35'
+                                : 'border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/35'"
+                        >
+                            <span class="mt-0.5 text-sm" :class="testResult.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'">
+                                {{ testResult.ok ? '✓' : '⚠' }}
+                            </span>
+                            <p class="text-sm" :class="testResult.ok ? 'text-emerald-800 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-300'">
+                                {{ testResult.message }}
+                            </p>
+                        </div>
+
+                        <div class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-4 dark:border-slate-700/80">
+                            <button
+                                type="button"
+                                class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                                :disabled="testing || saving || loadingConfig || !form.endPoint.trim() || !form.bucket.trim()"
+                                @click="handleTest"
+                            >
+                                {{ testing ? 'Testing…' : 'Test connection' }}
+                            </button>
+                            <div class="flex flex-wrap justify-end gap-2">
                             <button
                                 type="button"
                                 class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
@@ -762,6 +821,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onFormModalKeydown))
                             >
                                 {{ saving ? 'Saving…' : editingId ? 'Update' : 'Create' }}
                             </button>
+                            </div>
                         </div>
                     </form>
                 </div>

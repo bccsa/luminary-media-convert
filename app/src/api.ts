@@ -296,6 +296,25 @@ export async function createS3Config(
     });
 }
 
+export interface S3ConnectivityResult {
+    ok: boolean;
+    reachable: boolean;
+    bucketExists?: boolean;
+    message: string;
+}
+
+export async function testS3Config(
+    accessToken: string,
+    data: Record<string, unknown>,
+): Promise<S3ConnectivityResult> {
+    return requestJson(`${SAAS_URL}/saas/s3-configs/test`, {
+        method: 'POST',
+        token: accessToken,
+        body: data,
+        errorPrefix: 'Storage connectivity test failed',
+    });
+}
+
 export async function getS3Config(
     accessToken: string,
     configId: string,
