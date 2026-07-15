@@ -1,3 +1,4 @@
+// CI/CD verification: confirm push-to-main auto-deploys api-staging (2026-07-15). Safe to remove.
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
