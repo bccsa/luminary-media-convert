@@ -14,9 +14,13 @@ import {
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { SkipAdmin } from '../auth/skip-admin.decorator.js';
-import { S3ConfigsService } from './s3-configs.service.js';
+import {
+    S3ConfigsService,
+    type S3ConnectivityResult,
+} from './s3-configs.service.js';
 import { CreateS3ConfigDto } from './dto/create-s3-config.dto.js';
 import { UpdateS3ConfigDto } from './dto/update-s3-config.dto.js';
+import { TestS3ConfigDto } from './dto/test-s3-config.dto.js';
 import { S3ConfigResponseDto } from './dto/s3-config-response.dto.js';
 import type { S3ConfigDocument } from './interfaces/s3-config-document.interface.js';
 import type { UserDocument } from '../users/interfaces/user-document.interface.js';
@@ -53,6 +57,15 @@ export class S3ConfigsController {
     ): Promise<S3ConfigResponseDto> {
         const doc = await this.s3ConfigsService.create(req.user._id, dto);
         return toListResponse(doc);
+    }
+
+    @Post('test')
+    @HttpCode(HttpStatus.OK)
+    async test(
+        @Body() dto: TestS3ConfigDto,
+        @Req() req: { user: UserDocument },
+    ): Promise<S3ConnectivityResult> {
+        return this.s3ConfigsService.testConnection(req.user._id, dto);
     }
 
     @Get()

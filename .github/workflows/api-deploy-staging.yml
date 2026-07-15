@@ -71,3 +71,14 @@ jobs:
           --add-host=host.docker.internal:host-gateway
           --env-file api/.env
           ${{ vars.DOCKER_IMAGE }}
+
+      - name: Reclaim old Docker build cache & dangling images
+        # Every deploy runs `docker build`, and Docker never auto-removes the old
+        # cache/images — left unchecked they fill the host disk (this is what
+        # exhausted the box). Drop dangling images and build cache older than 7
+        # days; recent cache is kept so normal deploys stay fast. Never touches
+        # running containers, tagged images in use, or volumes/data.
+        if: always()
+        run: |
+          docker image prune -f
+          docker builder prune -f --filter 'until=168h'

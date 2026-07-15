@@ -132,6 +132,15 @@ export async function deleteSession(
 // Encoding API calls (session token — direct)
 // ---------------------------------------------------------------------------
 
+// Above this size, upload as a single stream instead of parallel parts.
+// Parallel uploads end with a tus concatenation POST that makes the server
+// copy all parts into one file — for multi-GB files that copy takes minutes,
+// which exceeds the reverse proxy's request timeout. The proxy then returns
+// 502, tus-js retries the whole finalize, and every retry leaves another
+// full-size copy on the server's disk until it fills up. A single stream has
+// no concatenation step: only short 50 MB PATCH requests, nothing to time out.
+const PARALLEL_UPLOAD_MAX_FILE_BYTES = 1024 * 1024 * 1024; // 1 GB
+
 export function uploadFile(
     tusEndpoint: string,
     sessionId: string,
@@ -155,7 +164,8 @@ export function uploadFile(
                 Authorization: `Bearer ${sessionToken}`,
             },
             chunkSize: 50 * 1024 * 1024,
-            parallelUploads: 5,
+            parallelUploads:
+                file.size >= PARALLEL_UPLOAD_MAX_FILE_BYTES ? 1 : 5,
             onProgress(bytesUploaded, bytesTotal) {
                 onProgress?.(Math.round((bytesUploaded / bytesTotal) * 100));
             },
@@ -293,6 +303,25 @@ export async function createS3Config(
         token: accessToken,
         body: data,
         errorPrefix: 'S3 config creation failed',
+    });
+}
+
+export interface S3ConnectivityResult {
+    ok: boolean;
+    reachable: boolean;
+    bucketExists?: boolean;
+    message: string;
+}
+
+export async function testS3Config(
+    accessToken: string,
+    data: Record<string, unknown>,
+): Promise<S3ConnectivityResult> {
+    return requestJson(`${SAAS_URL}/saas/s3-configs/test`, {
+        method: 'POST',
+        token: accessToken,
+        body: data,
+        errorPrefix: 'Storage connectivity test failed',
     });
 }
 
