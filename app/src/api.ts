@@ -132,15 +132,6 @@ export async function deleteSession(
 // Encoding API calls (session token — direct)
 // ---------------------------------------------------------------------------
 
-// Above this size, upload as a single stream instead of parallel parts.
-// Parallel uploads end with a tus concatenation POST that makes the server
-// copy all parts into one file — for multi-GB files that copy takes minutes,
-// which exceeds the reverse proxy's request timeout. The proxy then returns
-// 502, tus-js retries the whole finalize, and every retry leaves another
-// full-size copy on the server's disk until it fills up. A single stream has
-// no concatenation step: only short 50 MB PATCH requests, nothing to time out.
-const PARALLEL_UPLOAD_MAX_FILE_BYTES = 1024 * 1024 * 1024; // 1 GB
-
 export function uploadFile(
     tusEndpoint: string,
     sessionId: string,
@@ -164,8 +155,10 @@ export function uploadFile(
                 Authorization: `Bearer ${sessionToken}`,
             },
             chunkSize: 50 * 1024 * 1024,
+            // Set VITE_TUS_PARALLEL_UPLOADS=1 on deployments that handle
+            // multi-GB uploads — see app/.env.example for why.
             parallelUploads:
-                file.size >= PARALLEL_UPLOAD_MAX_FILE_BYTES ? 1 : 5,
+                Number(import.meta.env.VITE_TUS_PARALLEL_UPLOADS) || 5,
             onProgress(bytesUploaded, bytesTotal) {
                 onProgress?.(Math.round((bytesUploaded / bytesTotal) * 100));
             },
