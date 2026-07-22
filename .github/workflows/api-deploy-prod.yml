@@ -59,11 +59,15 @@ jobs:
           docker rm ${{ vars.DOCKER_CONTAINER }} || true
 
       - name: Run new container
+        # DOCKER_GPU_FLAGS (environment variable) is "--gpus all" on hosts with
+        # an NVIDIA GPU + nvidia container runtime, and unset/empty elsewhere so
+        # the container falls back to CPU encoding.
         run: >
           docker run -d -p "${{ vars.DOCKER_PORT }}":"${{ vars.DOCKER_PORT }}"
           --restart unless-stopped
           --name=${{ vars.DOCKER_CONTAINER }}
           --add-host=host.docker.internal:host-gateway
+          ${{ vars.DOCKER_GPU_FLAGS }}
           --env-file api/.env
           ${{ vars.DOCKER_IMAGE }}
 
