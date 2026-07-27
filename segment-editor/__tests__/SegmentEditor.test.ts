@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 import {
@@ -1532,5 +1532,93 @@ describe('SegmentEditor — split list panel (beside player)', () => {
         await w.find('.se-list-row').trigger('click');
         await flush();
         expect(onSeek).not.toHaveBeenCalled();
+    });
+});
+
+describe('SegmentEditor — thumbnail filmstrip', () => {
+    // Ten cues of 10s each, 160x90 frames laid out along one sprite sheet.
+    const VTT = [
+        'WEBVTT',
+        '',
+        ...Array.from({ length: 10 }, (_, i) => {
+            const from = `00:00:${String(i * 10).padStart(2, '0')}.000`;
+            const to = `00:00:${String((i + 1) * 10).padStart(2, '0')}.000`;
+            return `${from} --> ${to}\nsprite.jpg#xywh=${i * 160},0,160,90\n`;
+        }),
+    ].join('\n');
+
+    function mockVttFetch(body = VTT) {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            text: async () => body,
+        });
+        vi.stubGlobal('fetch', fetchMock);
+        return fetchMock;
+    }
+
+    async function mountWithStrip(props: Record<string, unknown> = {}) {
+        const w = mountEditor({
+            props: {
+                mode: 'trim',
+                thumbnailVttUrl: 'https://example.test/thumbs/thumbnails.vtt',
+                ...props,
+            },
+        });
+        await flush();
+        await flush();
+        return w;
+    }
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('tiles thumbnails across the track once cues load', async () => {
+        mockVttFetch();
+        const w = await mountWithStrip();
+        const tiles = w.findAll('.se-thumb-tile');
+        expect(tiles.length).toBeGreaterThan(0);
+        // 90px frames scaled to the 48px strip → 160 * (48/90) ≈ 85.3px per tile.
+        expect(tiles[0].attributes('style')).toContain('width: 85.3');
+        expect(tiles[0].find('img').attributes('src')).toContain('sprite.jpg');
+    });
+
+    it('crops each tile out of the sprite by translating then scaling', async () => {
+        mockVttFetch();
+        const w = await mountWithStrip();
+        const style = w.findAll('.se-thumb-tile')[0].find('img').attributes('style') ?? '';
+        expect(style).toContain('scale(');
+        expect(style).toContain('translate(');
+        expect(style).toContain('transform-origin: 0 0');
+    });
+
+    it('resolves each tile to the cue covering its own position', async () => {
+        mockVttFetch();
+        const w = await mountWithStrip();
+        const tiles = w.findAll('.se-thumb-tile');
+        const offsets = tiles.map((t) => {
+            const m = /translate\((-?[\d.]+)px/.exec(t.find('img').attributes('style') ?? '');
+            return m ? Number(m[1]) : NaN;
+        });
+        // Later tiles sit further along the source, so their sprite offsets grow.
+        expect(offsets[offsets.length - 1]).toBeLessThan(offsets[0]);
+    });
+
+    it('lifts waveform opacity when it is drawn over the filmstrip', async () => {
+        mockVttFetch();
+        const w = await mountWithStrip({ waveformPeaks: [0.1, 0.5, 0.9] });
+        expect(w.find('.se-waveform-canvas--over-thumbs').exists()).toBe(true);
+    });
+
+    it('renders no filmstrip outside trim mode', async () => {
+        mockVttFetch();
+        const w = await mountWithStrip({ mode: 'chapters' });
+        expect(w.findAll('.se-thumb-tile')).toHaveLength(0);
+    });
+
+    it('renders no filmstrip when the VTT cannot be fetched', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, text: async () => '' }));
+        const w = await mountWithStrip();
+        expect(w.findAll('.se-thumb-tile')).toHaveLength(0);
     });
 });

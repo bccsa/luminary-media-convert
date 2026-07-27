@@ -318,6 +318,32 @@ html.dark .se-root {
     height: 3.25rem;
 }
 
+/* Thumbnail filmstrip: sits behind everything in the track, dimmed so the waveform
+   and segment blocks drawn over it stay legible. */
+.se-thumb-strip {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: var(--se-thumb-strip-opacity, 0.55);
+}
+
+.se-thumb-tile {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    overflow: hidden;
+}
+
+.se-thumb-tile img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    max-width: none;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
 .se-waveform-canvas {
     position: absolute;
     inset: 0;
@@ -325,6 +351,11 @@ html.dark .se-root {
     height: 100%;
     pointer-events: none;
     opacity: 0.4;
+}
+
+/* Over a filmstrip the waveform needs more presence to read against the frames. */
+.se-waveform-canvas--over-thumbs {
+    opacity: 0.75;
 }
 
 .se-ruler {
