@@ -51,11 +51,7 @@ import { useAppLayout } from '../composables/useAppLayout';
 import { useEncodeEta } from '../composables/useEncodeEta';
 import { useSessionFileOps } from '../composables/useSessionFileOps';
 import { useChapterTrimSync } from '../composables/useChapterTrimSync';
-import {
-    remapToOutputTimeline,
-    slicePeaksToTrims,
-    trimmedDuration,
-} from '../utils/trimTimeline';
+import { slicePeaksToTrims, trimmedDuration } from '../utils/trimTimeline';
 import type { AccelMode, SegmentFormat } from '../types';
 import { formatBytes, formatDateTime, formatRelative } from '../utils/format';
 import { errorMessage } from '../utils/errors';
@@ -1085,12 +1081,12 @@ async function onEncodeSubmit(config: EncodeConfig) {
             sessionToken.value
         );
 
-        // The trim ranges have now been consumed by the encode. Everything the
-        // session shows from here on lives on the output timeline, so carry the
-        // segments across to output coordinates, where they continue life as
-        // chapters instead of pointing at source positions that no longer exist.
+        // The trim ranges have now been consumed by the encode. They are markers,
+        // not content: they described which parts of the source to keep, and say
+        // nothing about the encoded result. Drop them rather than leaving source
+        // positions drawn over a timeline that no longer matches them.
         if (submittedTrims.length > 0) {
-            editorSegments.value = remapToOutputTimeline(editorSegments.value);
+            editorSegments.value = [];
         }
 
         // Save config for future reuse (strip trimSegments — session-specific)

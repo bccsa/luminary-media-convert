@@ -1,4 +1,3 @@
-import type { Segment } from '@luminary-media-converter/segment-editor';
 import type { TrimSegment } from '../types';
 
 /**
@@ -6,9 +5,9 @@ import type { TrimSegment } from '../types';
  *
  * Before Start Encoding the timeline spans the source file and trim segments mark
  * the ranges to keep. After submission those ranges are all that will exist in the
- * encoded output, so the timeline — duration, waveform and any segments drawn on
- * it — has to switch to the concatenated output timeline instead of continuing to
- * show material that has been cut away.
+ * encoded output, so the timeline — its duration and its waveform — has to switch
+ * to the concatenated output rather than continuing to show material that has been
+ * cut away.
  */
 
 /** Total duration of the encoded output: the retained ranges, concatenated. */
@@ -17,24 +16,6 @@ export function trimmedDuration(trims: readonly TrimSegment[]): number {
         (total, t) => total + Math.max(0, t.outSec - t.inSec),
         0,
     );
-}
-
-/**
- * Map source-timeline ranges onto the output timeline, where they sit end to end
- * from zero. Labels and ids are preserved so a trimmed range keeps its identity
- * as it becomes a chapter.
- */
-export function remapToOutputTimeline(segments: readonly Segment[]): Segment[] {
-    let cursor = 0;
-    return segments
-        .slice()
-        .sort((a, b) => a.inSec - b.inSec)
-        .map((s) => {
-            const length = Math.max(0, s.outSec - s.inSec);
-            const mapped = { ...s, inSec: cursor, outSec: cursor + length };
-            cursor += length;
-            return mapped;
-        });
 }
 
 /**

@@ -1,19 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import {
-    remapToOutputTimeline,
-    slicePeaksToTrims,
-    trimmedDuration,
-} from './trimTimeline';
-import type { Segment } from '@luminary-media-converter/segment-editor';
+import { slicePeaksToTrims, trimmedDuration } from './trimTimeline';
 import type { TrimSegment } from '../types';
 
 const trim = (inSec: number, outSec: number): TrimSegment => ({ inSec, outSec });
-const seg = (id: string, inSec: number, outSec: number, label?: string): Segment => ({
-    id,
-    inSec,
-    outSec,
-    label,
-});
 
 describe('trimmedDuration', () => {
     it('sums the retained ranges', () => {
@@ -26,38 +15,6 @@ describe('trimmedDuration', () => {
 
     it('ignores inverted ranges rather than subtracting them', () => {
         expect(trimmedDuration([trim(10, 20), trim(50, 40)])).toBe(10);
-    });
-});
-
-describe('remapToOutputTimeline', () => {
-    it('lays ranges end to end from zero', () => {
-        const out = remapToOutputTimeline([seg('a', 10, 20), seg('b', 40, 50)]);
-        expect(out.map((s) => [s.inSec, s.outSec])).toEqual([
-            [0, 10],
-            [10, 20],
-        ]);
-    });
-
-    it('preserves ids and labels', () => {
-        const out = remapToOutputTimeline([seg('a', 10, 20, 'Intro')]);
-        expect(out[0].id).toBe('a');
-        expect(out[0].label).toBe('Intro');
-    });
-
-    it('orders by source position before mapping', () => {
-        const out = remapToOutputTimeline([seg('b', 40, 50), seg('a', 10, 20)]);
-        expect(out.map((s) => s.id)).toEqual(['a', 'b']);
-        expect(out[0].outSec).toBe(10);
-    });
-
-    it('does not mutate the input', () => {
-        const input = [seg('a', 10, 20)];
-        remapToOutputTimeline(input);
-        expect(input[0].inSec).toBe(10);
-    });
-
-    it('returns an empty list for no segments', () => {
-        expect(remapToOutputTimeline([])).toEqual([]);
     });
 });
 
