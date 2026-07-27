@@ -1026,8 +1026,8 @@ function onTimelineHoverLeave() {
 /** Filmstrip height in px. The waveform occupies the bottom half over the top of it. */
 const THUMB_STRIP_HEIGHT_PX = 48;
 
-/** Share of the track height the waveform occupies, anchored to the bottom edge. */
-const WAVEFORM_BAND_RATIO = 0.5;
+/** Tallest a peak may reach, as a share of track height. Bars grow up from the floor. */
+const WAVEFORM_MAX_HEIGHT_RATIO = 0.92;
 
 const trackWidthPx = ref(0);
 
@@ -1120,11 +1120,10 @@ function drawWaveform(): void {
     const peaks = props.waveformPeaks;
     const canvasHeight = canvas.height;
     const canvasWidth = canvas.width;
-    // Waveform sits in the bottom half of the track, mirrored around the middle of
-    // that half, so it reads over the thumbnail filmstrip behind it instead of
-    // covering the frames edge to edge.
-    const bandHeight = canvasHeight * WAVEFORM_BAND_RATIO;
-    const centerY = canvasHeight - bandHeight / 2;
+    // Bars stand on the floor of the track and grow upward, so quiet passages leave
+    // the frames behind them clear and loud ones rise over them. Not a band mirrored
+    // around a centre line — that reads as a stripe across the thumbnails.
+    const maxBarHeight = canvasHeight * WAVEFORM_MAX_HEIGHT_RATIO;
 
     const rootEl = rootElRef.value || document.documentElement;
     const color = props.waveformColor || getComputedStyle(rootEl).getPropertyValue('--se-waveform').trim() || 'rgba(255,255,255,0.35)';
@@ -1144,8 +1143,8 @@ function drawWaveform(): void {
         const peak2 = peaks[Math.min(idx2, peaks.length - 1)] || 0;
         const peak = peak1 * (1 - t) + peak2 * t;
 
-        const barHeight = Math.max(1, peak * (bandHeight * 0.9));
-        ctx.fillRect(x, centerY - barHeight / 2, 1, barHeight);
+        const barHeight = Math.max(1, peak * maxBarHeight);
+        ctx.fillRect(x, canvasHeight - barHeight, 1, barHeight);
     }
 }
 

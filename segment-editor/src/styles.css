@@ -31,9 +31,7 @@
     --se-help-surface: #ffffff;
     --se-help-surface-border: rgb(186 230 253);
     --se-scrollbar-thumb-hover: rgb(212 212 216);
-    --se-shadow:
-        0 1px 2px rgb(9 9 11 / 0.04),
-        0 0 0 1px rgb(9 9 11 / 0.06);
+    --se-shadow: 0 1px 2px rgb(9 9 11 / 0.04), 0 0 0 1px rgb(9 9 11 / 0.06);
     --se-pending-bracket-shadow: none;
     --se-radius: 10px;
     --se-radius-sm: 6px;
@@ -82,7 +80,8 @@ html.dark .se-root {
     --se-help-surface: #1e293b;
     --se-help-surface-border: rgb(56 189 248 / 0.2);
     --se-scrollbar-thumb-hover: #64748b;
-    --se-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 8px 30px rgb(0 0 0 / 0.25);
+    --se-shadow:
+        0 0 0 1px rgb(255 255 255 / 0.06), 0 8px 30px rgb(0 0 0 / 0.25);
     --se-pending-bracket-shadow: 0 1px 2px rgb(0 0 0 / 0.8);
 }
 
@@ -227,7 +226,9 @@ html.dark .se-root {
     border: 1px solid var(--se-border);
     border-radius: var(--se-radius-sm);
     cursor: pointer;
-    transition: background 0.12s ease, color 0.12s ease;
+    transition:
+        background 0.12s ease,
+        color 0.12s ease;
 }
 
 .se-btn:hover:not(:disabled) {
@@ -325,7 +326,7 @@ html.dark .se-root {
     inset: 0;
     overflow: hidden;
     pointer-events: none;
-    opacity: var(--se-thumb-strip-opacity, 0.55);
+    opacity: var(--se-thumb-strip-opacity, 0.25);
 }
 
 .se-thumb-tile {
@@ -353,9 +354,9 @@ html.dark .se-root {
     opacity: 0.4;
 }
 
-/* Over a filmstrip the waveform needs more presence to read against the frames. */
+/* Over a filmstrip the waveform carries the reading, so it runs near-opaque. */
 .se-waveform-canvas--over-thumbs {
-    opacity: 0.75;
+    opacity: 0.95;
 }
 
 .se-ruler {
@@ -953,7 +954,9 @@ html.dark .se-root {
     border-radius: var(--se-radius-sm);
     color: var(--se-text-dim);
     cursor: pointer;
-    transition: color 0.12s ease, background 0.12s ease;
+    transition:
+        color 0.12s ease,
+        background 0.12s ease;
 }
 
 .se-remove:hover {
@@ -977,9 +980,7 @@ html.dark .se-root {
     --se-text: rgb(24 24 27);
     --se-text-dim: rgb(100 116 139);
     --se-accent: rgb(2 132 199);
-    --se-shadow:
-        0 1px 2px rgb(9 9 11 / 0.04),
-        0 0 0 1px rgb(9 9 11 / 0.06);
+    --se-shadow: 0 1px 2px rgb(9 9 11 / 0.04), 0 0 0 1px rgb(9 9 11 / 0.06);
     --se-help-backdrop: rgba(9, 9, 11, 0.55);
     --se-help-surface: #ffffff;
     --se-help-surface-border: rgb(186 230 253);
@@ -1002,7 +1003,8 @@ html.dark .se-help {
     --se-text: #e2e8f0;
     --se-text-dim: #94a3b8;
     --se-accent: #7dd3fc;
-    --se-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 8px 30px rgb(0 0 0 / 0.25);
+    --se-shadow:
+        0 0 0 1px rgb(255 255 255 / 0.06), 0 8px 30px rgb(0 0 0 / 0.25);
     --se-help-backdrop: rgb(0 0 0 / 0.75);
     --se-help-surface: #18181b;
     --se-help-surface-border: rgb(63 63 70 / 0.75);
@@ -1098,7 +1100,10 @@ html.dark .se-confirm {
     border: 1px solid var(--se-help-surface-border);
     border-radius: var(--se-radius-sm, 6px);
     cursor: pointer;
-    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    transition:
+        background 0.12s ease,
+        color 0.12s ease,
+        border-color 0.12s ease;
 }
 
 .se-confirm-btn:hover {
@@ -1404,7 +1409,9 @@ html.dark .se-confirm {
     padding-right: 0;
 }
 
-.se-root--split-list[data-mode='chapters'] .se-list-section--split .se-list-row {
+.se-root--split-list[data-mode='chapters']
+    .se-list-section--split
+    .se-list-row {
     gap: 0.5rem;
     padding: 0.625rem 0.5rem;
     margin: 0;
@@ -1413,11 +1420,15 @@ html.dark .se-confirm {
     align-items: center;
 }
 
-.se-root--split-list[data-mode='chapters'] .se-list-section--split .se-list-row:last-child {
+.se-root--split-list[data-mode='chapters']
+    .se-list-section--split
+    .se-list-row:last-child {
     border-bottom: none;
 }
 
-.se-root--split-list[data-mode='chapters'] .se-list-section--split .se-list-index {
+.se-root--split-list[data-mode='chapters']
+    .se-list-section--split
+    .se-list-index {
     flex-shrink: 0;
     width: 1.5rem;
     height: 1.5rem;
@@ -1433,7 +1444,9 @@ html.dark .se-confirm {
     border: 1px solid var(--se-kbd-border);
 }
 
-.se-root--split-list[data-mode='chapters'] .se-list-section--split .se-list-duration {
+.se-root--split-list[data-mode='chapters']
+    .se-list-section--split
+    .se-list-duration {
     flex-shrink: 0;
     padding: 0.2rem 0.5rem;
     min-width: 0;
