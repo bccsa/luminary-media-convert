@@ -748,6 +748,57 @@ describe('SegmentEditor — segment drag & handle drag', () => {
         expect(segs[0].outSec).toBeGreaterThan(20);
     });
 
+    it('moves the playhead with the out-edge being dragged', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ segments: [seg(1, 10, 20)], props: { onSeek } });
+        await flush();
+        const outHandle = w.findAll('.se-segment-handle')[1].element as HTMLElement;
+        mouseAt(outHandle, 'mousedown', 20);
+        mouseAt(document.body, 'mousemove', 30);
+        mouseAt(document.body, 'mouseup', 30);
+        await flush();
+        // Playhead lands on the edge itself, not the raw pointer position.
+        expect(onSeek).toHaveBeenLastCalledWith(latestSegments(w)[0].outSec);
+    });
+
+    it('moves the playhead with the in-edge being dragged', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ segments: [seg(1, 10, 20)], props: { onSeek } });
+        await flush();
+        const inHandle = w.findAll('.se-segment-handle')[0].element as HTMLElement;
+        mouseAt(inHandle, 'mousedown', 10);
+        mouseAt(document.body, 'mousemove', 5);
+        mouseAt(document.body, 'mouseup', 5);
+        await flush();
+        expect(onSeek).toHaveBeenLastCalledWith(latestSegments(w)[0].inSec);
+    });
+
+    it('seeks to the clamped edge, not past the segment minimum', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({
+            segments: [seg(1, 10, 20)],
+            props: { onSeek, minSegmentSec: 2 },
+        });
+        await flush();
+        const outHandle = w.findAll('.se-segment-handle')[1].element as HTMLElement;
+        // Drag the out-edge back past the in-edge: it can only reach inSec + 2.
+        mouseAt(outHandle, 'mousedown', 20);
+        mouseAt(document.body, 'mousemove', 1);
+        mouseAt(document.body, 'mouseup', 1);
+        await flush();
+        expect(onSeek).toHaveBeenLastCalledWith(12);
+    });
+
+    it('does not seek when a handle is pressed without dragging', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ segments: [seg(1, 10, 20)], props: { onSeek } });
+        await flush();
+        const outHandle = w.findAll('.se-segment-handle')[1].element as HTMLElement;
+        mouseAt(outHandle, 'mousedown', 20);
+        mouseAt(document.body, 'mouseup', 20);
+        expect(onSeek).not.toHaveBeenCalled();
+    });
+
     it('snaps a handle drag to a neighboring segment edge within the snap distance', async () => {
         const w = mountEditor({
             // Two segments: dragging the in-handle of the second should snap to the first's outSec (25).

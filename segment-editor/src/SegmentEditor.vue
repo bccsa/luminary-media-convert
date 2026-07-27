@@ -429,17 +429,30 @@ function onHandleMouseDown(seg: Segment, field: 'inSec' | 'outSec', e: MouseEven
     setSelection([seg.id]);
     let moved = false;
 
+    // Playhead rides the edge being dragged, so the player shows the frame at the
+    // new boundary while it is being adjusted rather than after the fact. Tracked
+    // separately because intermediate emits are throttled — the release still has
+    // to land the playhead exactly on the final edge.
+    let lastEdge: number | null = null;
+
     const onMove = (ev: MouseEvent) => {
         if (!moved) { pushHistory(cloneSegments()); moved = true; }
         const raw = pxToTime(ev.clientX);
         const snapped = snapTime(raw, seg.id);
-        updateSegmentEdge(seg.id, field, snapped);
+        const applied = updateSegmentEdge(seg.id, field, snapped);
+        if (applied != null) {
+            lastEdge = applied;
+            emitSeek(applied, false);
+        }
     };
     const onUp = () => {
         snapGuide.value = null;
         dragMode.value = null;
         dragContext.value = {};
-        if (moved) emit('segment-commit', segments.value);
+        if (moved) {
+            emit('segment-commit', segments.value);
+            if (lastEdge != null) emitSeek(lastEdge, true);
+        }
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
     };
@@ -520,14 +533,20 @@ function commitSegmentChange(id: string, patch: Partial<Segment>, opts: { histor
     emit('update:modelValue', next);
 }
 
-function updateSegmentEdge(id: string, field: 'inSec' | 'outSec', sec: number) {
+/** Returns the edge position actually applied after clamping, or null if the segment is gone. */
+function updateSegmentEdge(
+    id: string,
+    field: 'inSec' | 'outSec',
+    sec: number,
+): number | null {
     const seg = segments.value.find((s) => s.id === id);
-    if (!seg) return;
+    if (!seg) return null;
     let inSec = seg.inSec;
     let outSec = seg.outSec;
     if (field === 'inSec') inSec = Math.min(outSec - props.minSegmentSec, Math.max(0, sec));
     else outSec = Math.max(inSec + props.minSegmentSec, Math.min(props.duration, sec));
     commitSegmentChange(id, { inSec, outSec }, { history: false });
+    return field === 'inSec' ? inSec : outSec;
 }
 
 function undo() {
