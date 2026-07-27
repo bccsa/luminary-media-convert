@@ -321,14 +321,17 @@ html.dark .se-root {
     height: 3.25rem;
 }
 
-/* Thumbnail filmstrip: sits behind everything in the track, dimmed so the waveform
-   and segment blocks drawn over it stay legible. */
+/* Thumbnail filmstrip: sits behind everything in the track. Desaturated and dimmed
+   so the frames read as texture you can navigate by, leaving the waveform and the
+   segment blocks as the only saturated things in the track. Contrast is pulled back
+   as well, since burned-in text and hard cuts otherwise fight the waveform. */
 .se-thumb-strip {
     position: absolute;
     inset: 0;
     overflow: hidden;
     pointer-events: none;
     opacity: var(--se-thumb-strip-opacity, 0.25);
+    filter: grayscale(1) contrast(0.8);
 }
 
 .se-thumb-tile {
