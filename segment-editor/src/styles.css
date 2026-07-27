@@ -23,6 +23,7 @@
     --se-segment-label-shadow: none;
     --se-ruler-tick: rgba(100, 116, 139, 0.28);
     --se-waveform: rgba(3, 105, 161, 0.55);
+    --se-waveform-over-thumbs: rgba(2, 90, 138, 0.98);
     --se-list-hover: rgba(14, 165, 233, 0.08);
     --se-list-selected: rgba(14, 165, 233, 0.12);
     --se-kbd-bg: rgb(250 250 250);
@@ -72,6 +73,7 @@ html.dark .se-root {
     --se-segment-label-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
     --se-ruler-tick: rgba(148, 163, 184, 0.22);
     --se-waveform: rgba(226, 232, 240, 0.55);
+    --se-waveform-over-thumbs: rgba(241, 245, 249, 0.98);
     --se-list-hover: rgba(56, 189, 248, 0.08);
     --se-list-selected: rgba(56, 189, 248, 0.14);
     --se-kbd-bg: rgb(15 23 42 / 0.45);
@@ -354,9 +356,10 @@ html.dark .se-root {
     opacity: 0.4;
 }
 
-/* Over a filmstrip the waveform carries the reading, so it runs near-opaque. */
+/* Over a filmstrip the waveform carries the reading, so it runs fully opaque —
+   the colour token supplies whatever softening it needs. */
 .se-waveform-canvas--over-thumbs {
-    opacity: 0.95;
+    opacity: 1;
 }
 
 .se-ruler {

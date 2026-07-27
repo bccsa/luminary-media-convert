@@ -1126,7 +1126,15 @@ function drawWaveform(): void {
     const maxBarHeight = canvasHeight * WAVEFORM_MAX_HEIGHT_RATIO;
 
     const rootEl = rootElRef.value || document.documentElement;
-    const color = props.waveformColor || getComputedStyle(rootEl).getPropertyValue('--se-waveform').trim() || 'rgba(255,255,255,0.35)';
+    // The default token is deliberately soft, which disappears against thumbnails.
+    // With a filmstrip behind it the waveform is what has to be read, so it takes a
+    // near-opaque token instead.
+    const styles = getComputedStyle(rootEl);
+    const token = thumbnailStripTiles.value.length
+        ? styles.getPropertyValue('--se-waveform-over-thumbs').trim() ||
+          styles.getPropertyValue('--se-waveform').trim()
+        : styles.getPropertyValue('--se-waveform').trim();
+    const color = props.waveformColor || token || 'rgba(255,255,255,0.35)';
     ctx.fillStyle = color;
 
     const startIdx = Math.floor((viewStart.value / props.duration) * peaks.length);
@@ -1175,6 +1183,11 @@ watch(
         measureTrackWidth();
         drawWaveform();
     },
+);
+
+watch(
+    () => thumbnailStripTiles.value.length > 0,
+    () => drawWaveform(),
 );
 
 onMounted(() => {
