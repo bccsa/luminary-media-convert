@@ -1027,7 +1027,7 @@ function onTimelineHoverLeave() {
 const THUMB_STRIP_HEIGHT_PX = 48;
 
 /** Tallest a peak may reach, as a share of track height. Bars stand on the floor. */
-const WAVEFORM_MAX_HEIGHT_RATIO = 0.9;
+const WAVEFORM_MAX_HEIGHT_RATIO = 1;
 
 const trackWidthPx = ref(0);
 
