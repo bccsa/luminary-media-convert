@@ -477,11 +477,16 @@ function onSegmentMouseDown(seg: Segment, e: MouseEvent) {
         const newOut = Math.min(props.duration, newIn + length);
         commitSegmentChange(seg.id, { inSec: newIn, outSec: newOut }, { history: false });
     };
-    const onUp = () => {
+    const onUp = (ev: MouseEvent) => {
         snapGuide.value = null;
         dragMode.value = null;
         dragContext.value = {};
         if (moved) emit('segment-commit', segments.value);
+        // A click that never became a drag seeks, exactly like clicking the empty
+        // track. Without this the playhead cannot be positioned inside a marked
+        // range — the one place it is most needed while trimming. Additive clicks
+        // are selection gestures, so they leave the playhead alone.
+        else if (!additive) emitSeek(pxToTime(ev.clientX), true);
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
     };
