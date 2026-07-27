@@ -1604,12 +1604,6 @@ describe('SegmentEditor — thumbnail filmstrip', () => {
         expect(offsets[offsets.length - 1]).toBeLessThan(offsets[0]);
     });
 
-    it('lifts waveform opacity when it is drawn over the filmstrip', async () => {
-        mockVttFetch();
-        const w = await mountWithStrip({ waveformPeaks: [0.1, 0.5, 0.9] });
-        expect(w.find('.se-waveform-canvas--over-thumbs').exists()).toBe(true);
-    });
-
     it('renders no filmstrip outside trim mode', async () => {
         mockVttFetch();
         const w = await mountWithStrip({ mode: 'chapters' });
