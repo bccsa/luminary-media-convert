@@ -9,6 +9,7 @@ import {
     parseThumbnailVtt,
     type ThumbnailSpriteCue,
 } from './thumbnailVtt';
+import { peakBarHeight } from './waveform';
 import './styles.css';
 
 type KeyboardScope = 'focus' | 'global' | 'off';
@@ -1151,7 +1152,7 @@ function drawWaveform(): void {
         const peak2 = peaks[Math.min(idx2, peaks.length - 1)] || 0;
         const peak = peak1 * (1 - t) + peak2 * t;
 
-        const barHeight = Math.max(1, peak * maxBarHeight);
+        const barHeight = peakBarHeight(peak, maxBarHeight);
         ctx.fillRect(x, canvasHeight - barHeight, 1, barHeight);
     }
 }
