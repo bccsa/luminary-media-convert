@@ -202,4 +202,18 @@ export class SessionStatusDto {
     })
     @Expose()
     ingestTotalBytes?: number;
+
+    @ApiPropertyOptional({
+        description:
+            'Trim ranges submitted with the encode config, in source-timeline seconds. ' +
+            'Present once encoding has been requested and the config specified trimming. ' +
+            'Clients use these to render the output timeline (duration, waveform) rather ' +
+            'than the source timeline, including after a page reload.',
+        example: [
+            { inSec: 10, outSec: 20 },
+            { inSec: 40, outSec: 50 },
+        ],
+    })
+    @Expose()
+    trimSegments?: { inSec: number; outSec: number }[];
 }

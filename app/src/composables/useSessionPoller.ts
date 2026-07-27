@@ -1,6 +1,6 @@
 import { ref, readonly, onUnmounted } from 'vue';
 import { getSessionStatus, subscribeSessionEvents } from '../api';
-import type { AccelMode, PipelineProgress, SegmentFormat, SessionStatus, SessionStatusResponse } from '../types';
+import type { AccelMode, PipelineProgress, SegmentFormat, SessionStatus, SessionStatusResponse, TrimSegment } from '../types';
 import { errorMessage } from '../utils/errors';
 
 const TERMINAL_STATUSES: SessionStatus[] = ['completed', 'failed'];
@@ -33,6 +33,7 @@ export function useSessionPoller() {
     const thumbnailsVtt = ref<string | undefined>();
     const encryptionKeyHex = ref<string | undefined>();
     const ingestTotalBytes = ref<number | undefined>();
+    const trimSegments = ref<TrimSegment[] | undefined>();
     const polling = ref(false);
 
     let eventSource: EventSource | null = null;
@@ -64,6 +65,11 @@ export function useSessionPoller() {
         // clear it on subsequent events that omit the field.
         if (data.ingestTotalBytes != null) {
             ingestTotalBytes.value = data.ingestTotalBytes;
+        }
+        // Submitted trim ranges are config, not progress: once reported they hold
+        // for the rest of the session, so don't clear them on events that omit them.
+        if (data.trimSegments?.length) {
+            trimSegments.value = data.trimSegments;
         }
     }
 
@@ -97,6 +103,7 @@ export function useSessionPoller() {
         thumbnailsVtt.value = undefined;
         encryptionKeyHex.value = undefined;
         ingestTotalBytes.value = undefined;
+        trimSegments.value = undefined;
 
         polling.value = true;
 
@@ -167,6 +174,7 @@ export function useSessionPoller() {
         thumbnailsVtt: readonly(thumbnailsVtt),
         encryptionKeyHex: readonly(encryptionKeyHex),
         ingestTotalBytes: readonly(ingestTotalBytes),
+        trimSegments: readonly(trimSegments),
         polling: readonly(polling),
         start,
         stop,

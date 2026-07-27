@@ -51,6 +51,11 @@ import { useAppLayout } from '../composables/useAppLayout';
 import { useEncodeEta } from '../composables/useEncodeEta';
 import { useSessionFileOps } from '../composables/useSessionFileOps';
 import { useChapterTrimSync } from '../composables/useChapterTrimSync';
+import {
+    remapToOutputTimeline,
+    slicePeaksToTrims,
+    trimmedDuration,
+} from '../utils/trimTimeline';
 import type { AccelMode, SegmentFormat } from '../types';
 import { formatBytes, formatDateTime, formatRelative } from '../utils/format';
 import { errorMessage } from '../utils/errors';
@@ -576,10 +581,59 @@ const showTrimSegmentEditor = computed(
         )
 );
 
+/**
+ * Trim ranges the encode was submitted with, echoed back by the API so the output
+ * timeline still renders correctly after a page reload mid-encode.
+ */
+const submittedTrimSegments = computed<TrimSegment[]>(
+    () => (poller.trimSegments.value as TrimSegment[] | undefined) ?? []
+);
+
+/**
+ * True once trimming has been applied — the timeline then represents the encoded
+ * output (the retained ranges, concatenated), not the source file.
+ */
+const showsOutputTimeline = computed(
+    () => !showProbeConfig.value && submittedTrimSegments.value.length > 0
+);
+
+/** Source-file duration — the scale the waveform peaks were computed against. */
+const sourceProbeDuration = computed(() => {
+    const pr = probeResult.value?.format?.duration;
+    if (typeof pr === 'number' && pr > 0) return pr;
+    const sp = (session.value?.probeResult as ProbeResult | undefined)?.format
+        ?.duration;
+    return typeof sp === 'number' && sp > 0 ? sp : 0;
+});
+
 const trimEditorProbeDuration = computed(() => {
     // Prefer player-reported duration (reflects encoded trim cuts); fall back through
     // in-memory probe then session-doc probe so completed sessions always get a value.
+    if (showsOutputTimeline.value) {
+        const player = playerDuration.value;
+        if (player != null && player > 0) return player;
+        // Playback not ready yet: use the retained ranges rather than letting the
+        // fallbacks stretch the timeline back out to the full source duration.
+        return trimmedDuration(submittedTrimSegments.value);
+    }
     return chaptersSidePanelDuration.value;
+});
+
+/**
+ * Waveform drawn under the timeline. Peaks are computed from the source file
+ * pre-encode, so once trimming is applied they have to be sliced down to the
+ * retained ranges. After completion the sidecar fetched from S3 is generated from
+ * the concat list and is already trimmed — slicing again would cut it twice.
+ */
+const timelineWaveformPeaks = computed(() => {
+    if (!showsOutputTimeline.value || isCompleted.value) {
+        return waveformPeaks.value;
+    }
+    return slicePeaksToTrims(
+        waveformPeaks.value,
+        sourceProbeDuration.value,
+        submittedTrimSegments.value
+    );
 });
 
 // Display metadata from the session detail or poller
@@ -1019,9 +1073,10 @@ async function onEncodeSubmit(config: EncodeConfig) {
 
         // Strip audioTrackMetadata before sending to API, add trim segments
         const { audioTrackMetadata: _, ...apiConfig } = config;
+        const submittedTrims = trimSegments.value;
         const submitConfig =
-            trimSegments.value.length > 0
-                ? { ...apiConfig, trimSegments: trimSegments.value }
+            submittedTrims.length > 0
+                ? { ...apiConfig, trimSegments: submittedTrims }
                 : apiConfig;
         await startEncode(
             encodingApiUrl.value,
@@ -1029,6 +1084,14 @@ async function onEncodeSubmit(config: EncodeConfig) {
             submitConfig,
             sessionToken.value
         );
+
+        // The trim ranges have now been consumed by the encode. Everything the
+        // session shows from here on lives on the output timeline, so carry the
+        // segments across to output coordinates, where they continue life as
+        // chapters instead of pointing at source positions that no longer exist.
+        if (submittedTrims.length > 0) {
+            editorSegments.value = remapToOutputTimeline(editorSegments.value);
+        }
 
         // Save config for future reuse (strip trimSegments — session-specific)
         if (probeResult.value) {
@@ -2016,7 +2079,7 @@ onUnmounted(() => {
                         :chapters-save-error="chaptersSaveError"
                         :show-trim-segment-editor="showTrimSegmentEditor"
                         :thumbnail-vtt-url="thumbnailVttUrl"
-                        :waveform-peaks="waveformPeaks"
+                        :waveform-peaks="timelineWaveformPeaks"
                         :is-completed="isCompleted"
                         :probe-duration="trimEditorProbeDuration"
                         :add-gap-above-timeline="false"
@@ -2119,7 +2182,7 @@ onUnmounted(() => {
                             :chapters-save-error="chaptersSaveError"
                             :show-trim-segment-editor="showTrimSegmentEditor"
                             :thumbnail-vtt-url="thumbnailVttUrl"
-                            :waveform-peaks="waveformPeaks"
+                            :waveform-peaks="timelineWaveformPeaks"
                             :is-completed="isCompleted"
                             :can-edit-trim-timeline="canEditTrimTimeline"
                             :can-edit-chapters-playback="
