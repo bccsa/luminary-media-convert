@@ -6,6 +6,11 @@ import type { Segment } from '@luminary-media-converter/segment-editor';
 const props = withDefaults(
     defineProps<{
         showChaptersSidePanel: boolean;
+        /**
+         * Chapters can be written to S3. False while the timeline still holds
+         * pre-encode trim markers — those are ephemeral and must not be savable.
+         */
+        canSaveChapters?: boolean;
         chaptersIsDirty: boolean;
         chaptersIsSaving: boolean;
         chaptersSaveError: string | null;
@@ -38,6 +43,7 @@ const props = withDefaults(
         section: undefined,
         addGapAboveTimeline: false,
         isCompleted: false,
+        canSaveChapters: false,
     },
 );
 
@@ -65,8 +71,8 @@ defineExpose({
 /** Avoid an empty mt-5 wrapper (looked like stray margin / empty card in the session panel). */
 const trimToolbarHasVisibleContent = computed(() => {
     if (props.section === 'timeline') return false;
-    if (props.showChaptersSidePanel && props.chaptersSaveError) return true;
-    if (props.showChaptersSidePanel && !props.showTrimSegmentEditor) return true;
+    if (props.canSaveChapters && props.chaptersSaveError) return true;
+    if (props.canSaveChapters && !props.showTrimSegmentEditor) return true;
     if (props.canEditTrimTimeline && !props.showTrimSegmentEditor) return true;
     if (props.canEditChaptersPlayback && !props.showTrimSegmentEditor && !props.showChaptersSidePanel) return true;
     return false;
@@ -78,12 +84,12 @@ const trimToolbarHasVisibleContent = computed(() => {
     <!-- Toolbar: chapter actions + empty state only (trim UI lives in `section="timeline"`) -->
     <div v-if="showToolbarSection() && trimToolbarHasVisibleContent" class="mt-5 space-y-5">
         <p
-            v-if="showChaptersSidePanel && chaptersSaveError"
+            v-if="canSaveChapters && chaptersSaveError"
             class="text-xs text-red-600 dark:text-red-400"
         >{{ chaptersSaveError }}</p>
 
         <div
-            v-if="showChaptersSidePanel && !showTrimSegmentEditor"
+            v-if="canSaveChapters && !showTrimSegmentEditor"
             class="flex flex-wrap items-center gap-2"
         >
             <span
@@ -143,7 +149,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             :waveform-peaks="waveformPeaks"
             combined-controls
         >
-            <template v-if="showChaptersSidePanel" #toolbar-before-clear>
+            <template v-if="canSaveChapters" #toolbar-before-clear>
                 <span
                     v-if="chaptersIsDirty"
                     class="chapter-unsaved-pill"
