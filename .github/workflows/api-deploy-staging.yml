@@ -56,25 +56,80 @@ jobs:
           ENV_EOF
 
       - name: Build Docker image
-        run: docker build -f api/Dockerfile . -t ${{ vars.DOCKER_IMAGE }}
-
-      - name: Stop and remove old container
+        # Tagged by commit as well as `latest`: `latest` is overwritten every
+        # deploy, and without an immutable tag the previous image is orphaned and
+        # then pruned, leaving nothing to roll back to.
         run: |
-          docker stop ${{ vars.DOCKER_CONTAINER }} || true
-          docker rm ${{ vars.DOCKER_CONTAINER }} || true
+          docker build -f api/Dockerfile . \
+            -t ${{ vars.DOCKER_IMAGE }}:${{ github.sha }} \
+            -t ${{ vars.DOCKER_IMAGE }}:latest
 
-      - name: Run new container
-        # DOCKER_GPU_FLAGS (environment variable) is "--gpus all" on hosts with
-        # an NVIDIA GPU + nvidia container runtime, and unset/empty elsewhere so
-        # the container falls back to CPU encoding.
-        run: >
-          docker run -d -p "${{ vars.DOCKER_PORT }}":"${{ vars.DOCKER_PORT }}"
-          --restart unless-stopped
-          --name=${{ vars.DOCKER_CONTAINER }}
-          --add-host=host.docker.internal:host-gateway
-          ${{ vars.DOCKER_GPU_FLAGS }}
-          --env-file api/.env
-          ${{ vars.DOCKER_IMAGE }}
+      - name: Deploy with rollback
+        # The running container is parked under -prev rather than destroyed, so a
+        # container that refuses to start, or starts and then crashes, restores the
+        # previous one instead of leaving the host with nothing serving.
+        run: |
+          set -uo pipefail
+          C='${{ vars.DOCKER_CONTAINER }}'
+          IMG='${{ vars.DOCKER_IMAGE }}:${{ github.sha }}'
+          PORT='${{ vars.DOCKER_PORT }}'
+          PREV="${C}-prev"
+
+          docker rm -f "$PREV" >/dev/null 2>&1 || true
+          HAD_PREV=0
+          if docker inspect "$C" >/dev/null 2>&1; then
+            # Bail before anything is destroyed: past this point "$C" names the new
+            # container, which is what makes removing it during rollback safe.
+            docker rename "$C" "$PREV" || {
+              echo "::error::could not park the running container - aborting, service untouched"
+              exit 1
+            }
+            HAD_PREV=1
+            docker stop "$PREV" >/dev/null 2>&1 || true
+          fi
+
+          rollback() {
+            echo "::error::deploy failed - rolling back to the previous container"
+            docker logs --tail 50 "$C" 2>&1 || true
+            docker rm -f "$C" >/dev/null 2>&1 || true
+            if [ "$HAD_PREV" = 1 ]; then
+              docker rename "$PREV" "$C" && docker start "$C" \
+                && echo "previous container restored" \
+                || echo "::error::rollback failed - service is down"
+            else
+              echo "::warning::no previous container to restore"
+            fi
+            exit 1
+          }
+
+          docker run -d -p "$PORT":"$PORT" \
+            --restart unless-stopped \
+            --name="$C" \
+            --add-host=host.docker.internal:host-gateway \
+            ${{ vars.DOCKER_GPU_FLAGS }} \
+            --env-file api/.env \
+            "$IMG" || rollback
+
+          # Judge success on the app answering, not on `docker run` exiting 0.
+          for i in $(seq 1 30); do
+            if curl -fsS -m 3 "http://localhost:${PORT}/api/docs" >/dev/null 2>&1; then
+              echo "healthy after $((i * 2))s"
+              docker rm -f "$PREV" >/dev/null 2>&1 || true
+              exit 0
+            fi
+            if [ "$(docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null)" != "true" ]; then
+              rollback
+            fi
+            # No curl on the runner: settle for the container staying up, rather
+            # than rolling back a deploy that is probably fine.
+            if ! command -v curl >/dev/null 2>&1 && [ "$i" -ge 5 ]; then
+              echo "::warning::curl unavailable - accepted on liveness alone"
+              docker rm -f "$PREV" >/dev/null 2>&1 || true
+              exit 0
+            fi
+            sleep 2
+          done
+          rollback
 
       - name: Reclaim old Docker build cache & dangling images
         # Every deploy runs `docker build`, and Docker never auto-removes the old
@@ -82,7 +137,7 @@ jobs:
         # exhausted the box). Drop dangling images and build cache older than 7
         # days; recent cache is kept so normal deploys stay fast. Never touches
         # running containers, tagged images in use, or volumes/data.
-        if: always()
+        if: success()
         run: |
-          docker image prune -f
+          docker image prune -f --filter 'until=168h'
           docker builder prune -f --filter 'until=168h'
