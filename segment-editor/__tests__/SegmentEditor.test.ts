@@ -661,6 +661,17 @@ describe('SegmentEditor — timeline interaction', () => {
         expect(latestSegments(w)[0].inSec).toBeGreaterThan(10);
     });
 
+    it('does not seek on a non-primary click inside a segment', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ segments: [seg(1, 10, 20)], props: { onSeek } });
+        await flush();
+        const segEl = w.get('.se-segment').element as HTMLElement;
+        // Right-click: the context menu opens, the playhead should stay put.
+        mouseAt(segEl, 'mousedown', 15, { button: 2 });
+        mouseAt(document.body, 'mouseup', 15, { button: 2 });
+        expect(onSeek).not.toHaveBeenCalled();
+    });
+
     it('additive click inside a segment selects without seeking', async () => {
         const onSeek = vi.fn();
         const w = mountEditor({

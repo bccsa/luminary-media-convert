@@ -485,8 +485,10 @@ function onSegmentMouseDown(seg: Segment, e: MouseEvent) {
         // A click that never became a drag seeks, exactly like clicking the empty
         // track. Without this the playhead cannot be positioned inside a marked
         // range — the one place it is most needed while trimming. Additive clicks
-        // are selection gestures, so they leave the playhead alone.
-        else if (!additive) emitSeek(pxToTime(ev.clientX), true);
+        // are selection gestures, so they leave the playhead alone, and only the
+        // primary button seeks: the empty track ignores other buttons too, and a
+        // right-click opening a context menu should not move the playhead.
+        else if (!additive && ev.button === 0) emitSeek(pxToTime(ev.clientX), true);
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
     };
