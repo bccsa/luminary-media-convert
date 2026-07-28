@@ -106,8 +106,11 @@ jobs:
             "$IMG" || rollback
 
           # Judge success on the app answering, not on `docker run` exiting 0.
+          # Any HTTP response counts, including 404: routes differ per service and
+          # the SaaS docs route is env-gated, so requiring a specific path made the
+          # gate reject healthy containers. This asks only "is it serving HTTP".
           for i in $(seq 1 30); do
-            if curl -fsS -m 3 "http://localhost:${PORT}/api/docs" >/dev/null 2>&1; then
+            if curl -sS -m 3 -o /dev/null "http://localhost:${PORT}/" 2>/dev/null; then
               echo "healthy after $((i * 2))s"
               docker rm -f "$PREV" >/dev/null 2>&1 || true
               exit 0
