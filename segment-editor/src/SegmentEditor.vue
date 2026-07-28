@@ -304,11 +304,19 @@ function timeToPercent(sec: number): number {
 
 // -------------- seek throttle --------------
 
+/**
+ * Floor for seeks emitted while dragging a segment edge. The scrub default of
+ * 33ms is ~30 seeks a second, which is more than an HLS player wants to service
+ * mid-drag; a coarser cadence still tracks the edge smoothly enough to see.
+ */
+const HANDLE_DRAG_SEEK_MS = 100;
+
 let lastSeekEmit = 0;
-function emitSeek(sec: number, final: boolean) {
+function emitSeek(sec: number, final: boolean, minIntervalMs?: number) {
     const clamped = Math.max(0, Math.min(props.duration, sec));
     const now = performance.now();
-    if (!final && now - lastSeekEmit < props.throttleSeekMs) return;
+    const interval = Math.max(props.throttleSeekMs, minIntervalMs ?? 0);
+    if (!final && now - lastSeekEmit < interval) return;
     lastSeekEmit = now;
     emit('seek', clamped);
     props.onSeek?.(clamped);
@@ -429,17 +437,30 @@ function onHandleMouseDown(seg: Segment, field: 'inSec' | 'outSec', e: MouseEven
     setSelection([seg.id]);
     let moved = false;
 
+    // Playhead rides the edge being dragged, so the player shows the frame at the
+    // new boundary while it is being adjusted rather than after the fact. Tracked
+    // separately because intermediate emits are throttled — the release still has
+    // to land the playhead exactly on the final edge.
+    let lastEdge: number | null = null;
+
     const onMove = (ev: MouseEvent) => {
         if (!moved) { pushHistory(cloneSegments()); moved = true; }
         const raw = pxToTime(ev.clientX);
         const snapped = snapTime(raw, seg.id);
-        updateSegmentEdge(seg.id, field, snapped);
+        const applied = updateSegmentEdge(seg.id, field, snapped);
+        if (applied != null) {
+            lastEdge = applied;
+            emitSeek(applied, false, HANDLE_DRAG_SEEK_MS);
+        }
     };
     const onUp = () => {
         snapGuide.value = null;
         dragMode.value = null;
         dragContext.value = {};
-        if (moved) emit('segment-commit', segments.value);
+        if (moved) {
+            emit('segment-commit', segments.value);
+            if (lastEdge != null) emitSeek(lastEdge, true);
+        }
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
     };
@@ -527,14 +548,20 @@ function commitSegmentChange(id: string, patch: Partial<Segment>, opts: { histor
     emit('update:modelValue', next);
 }
 
-function updateSegmentEdge(id: string, field: 'inSec' | 'outSec', sec: number) {
+/** Returns the edge position actually applied after clamping, or null if the segment is gone. */
+function updateSegmentEdge(
+    id: string,
+    field: 'inSec' | 'outSec',
+    sec: number,
+): number | null {
     const seg = segments.value.find((s) => s.id === id);
-    if (!seg) return;
+    if (!seg) return null;
     let inSec = seg.inSec;
     let outSec = seg.outSec;
     if (field === 'inSec') inSec = Math.min(outSec - props.minSegmentSec, Math.max(0, sec));
     else outSec = Math.max(inSec + props.minSegmentSec, Math.min(props.duration, sec));
     commitSegmentChange(id, { inSec, outSec }, { history: false });
+    return field === 'inSec' ? inSec : outSec;
 }
 
 function undo() {
