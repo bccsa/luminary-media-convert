@@ -1259,6 +1259,22 @@ const showChaptersBesidePlayer = computed(
         canEditChaptersPlayback.value
 );
 
+/**
+ * Chapters become persistable only once an encode has been submitted. Before that
+ * the timeline holds trim markers: ephemeral ranges that decide what gets encoded
+ * when Start Encoding is pressed, and are meaningless afterwards. Offering to save
+ * them would write that throwaway state to S3 as the session's chapters.vtt.
+ */
+const canSaveChapters = computed(
+    () =>
+        showChaptersBesidePlayer.value &&
+        !showProbeConfig.value &&
+        // showProbeConfig also goes false while the encode request is in flight,
+        // which would flash the save controls back on during exactly the phase
+        // this is meant to cover.
+        !submitting.value
+);
+
 /** Detail card: only visible during pre-encode upload/probe flow (progress below the player). */
 const showSessionDetailCard = computed(
     () =>
@@ -2011,6 +2027,7 @@ onUnmounted(() => {
                         section="timeline"
                         v-model:editor-segments="editorSegments"
                         :show-chapters-side-panel="showChaptersBesidePlayer"
+                        :can-save-chapters="canSaveChapters"
                         :chapters-is-dirty="chapters.isDirty.value"
                         :chapters-is-saving="chapters.isSaving.value"
                         :chapters-save-error="chaptersSaveError"
@@ -2114,6 +2131,7 @@ onUnmounted(() => {
                             section="toolbar"
                             v-model:editor-segments="editorSegments"
                             :show-chapters-side-panel="showChaptersBesidePlayer"
+                            :can-save-chapters="canSaveChapters"
                             :chapters-is-dirty="chapters.isDirty.value"
                             :chapters-is-saving="chapters.isSaving.value"
                             :chapters-save-error="chaptersSaveError"
