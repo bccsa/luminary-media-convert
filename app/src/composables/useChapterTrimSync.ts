@@ -8,6 +8,13 @@ interface ChapterTrimSyncDeps {
     chapterSegments: Ref<Segment[]>;
     /** True when the trim timeline is currently editable. */
     canEditTrimTimeline: Readonly<Ref<boolean>>;
+    /**
+     * True while trim markers are still live and may seed the chapter list. Goes
+     * false once the encode is submitted: the markers are dropped at that point,
+     * and an emptied trim list must not be read as "the chapters were deleted".
+     * Defaults to `canEditTrimTimeline` when omitted.
+     */
+    trimSeedsChapters?: Readonly<Ref<boolean>>;
     /** True when the chapter sidecar has been loaded for the current session. */
     chaptersLoaded: Readonly<Ref<boolean>>;
 }
@@ -46,6 +53,7 @@ function editorMatchesChapters(ed: Segment[], ch: Segment[]): boolean {
 export function useChapterTrimSync(deps: ChapterTrimSyncDeps) {
     const { editorSegments, chapterSegments, canEditTrimTimeline, chaptersLoaded } =
         deps;
+    const trimSeedsChapters = deps.trimSeedsChapters ?? canEditTrimTimeline;
 
     const hadTrimForChapterSync = ref(false);
 
@@ -57,7 +65,7 @@ export function useChapterTrimSync(deps: ChapterTrimSyncDeps) {
     }
 
     function syncChaptersFromTrim() {
-        if (!canEditTrimTimeline.value || !chaptersLoaded.value) return;
+        if (!trimSeedsChapters.value || !chaptersLoaded.value) return;
 
         const trim = editorSegments.value;
         if (trim.length === 0) {

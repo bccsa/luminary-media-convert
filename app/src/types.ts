@@ -8,9 +8,9 @@ export type {
     AudioGroup,
 } from '@luminary-media-converter/encode-config';
 
-// Import + re-export ProbeResult (also used by SessionStatusResponse below)
-import type { ProbeResult } from '@luminary-media-converter/encode-config';
-export type { ProbeResult } from '@luminary-media-converter/encode-config';
+// Import + re-export ProbeResult and TrimSegment (both used by SessionStatusResponse below)
+import type { ProbeResult, TrimSegment } from '@luminary-media-converter/encode-config';
+export type { ProbeResult, TrimSegment } from '@luminary-media-converter/encode-config';
 
 // --- S3 & Webhook Config ---
 
@@ -98,6 +98,8 @@ export interface SessionStatusResponse {
     encoder?: AccelMode;
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
+    /** Trim ranges submitted with the encode config, in source-timeline seconds. */
+    trimSegments?: TrimSegment[];
 }
 
 // --- SaaS API response shapes ---

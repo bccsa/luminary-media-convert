@@ -374,6 +374,16 @@ export class EncodeController {
             result.probeResult = session.probeResult as any;
         }
 
+        // Trim ranges are part of the submitted encode config, so they outlive the
+        // client that sent them. Reporting them lets the UI keep showing the output
+        // timeline (duration, waveform) after a reload mid-encode.
+        if (session.encodeConfig?.trimSegments?.length) {
+            result.trimSegments = session.encodeConfig.trimSegments.map((t) => ({
+                inSec: t.inSec,
+                outSec: t.outSec,
+            }));
+        }
+
         if (session.status === 'queued') {
             result.queuePosition =
                 this.queueService.getPosition(sessionId) ?? undefined;

@@ -238,6 +238,34 @@ describe('EncodeController', () => {
             expect(result.error).toBe('FFmpeg crashed');
         });
 
+        it('should include trimSegments from the submitted encode config', () => {
+            const session = sessionService.create(makeConfig());
+            const config = makeEncodeConfig();
+            config.trimSegments = [
+                { inSec: 10, outSec: 20 },
+                { inSec: 40, outSec: 50 },
+            ];
+            sessionService.setEncodeConfig(session.id, config);
+            sessionService.updateStatus(session.id, 'encoding');
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.trimSegments).toEqual([
+                { inSec: 10, outSec: 20 },
+                { inSec: 40, outSec: 50 },
+            ]);
+        });
+
+        it('should omit trimSegments when the encode config has none', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+            sessionService.updateStatus(session.id, 'encoding');
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.trimSegments).toBeUndefined();
+        });
+
         it('should throw NotFoundException for unknown session', () => {
             expect(() => controller.getStatus('nonexistent', makeRequest())).toThrow(
                 NotFoundException,
