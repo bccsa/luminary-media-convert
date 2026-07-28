@@ -356,7 +356,7 @@ html.dark .se-root {
     pointer-events: none;
     /* Sitting behind greyed thumbnails, the waveform needs more weight than the
        0.4 it carried when the track was otherwise empty. */
-    opacity: 0.7;
+    opacity: 0.9;
 }
 
 .se-ruler {
