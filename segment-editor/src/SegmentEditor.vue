@@ -304,11 +304,19 @@ function timeToPercent(sec: number): number {
 
 // -------------- seek throttle --------------
 
+/**
+ * Floor for seeks emitted while dragging a segment edge. The scrub default of
+ * 33ms is ~30 seeks a second, which is more than an HLS player wants to service
+ * mid-drag; a coarser cadence still tracks the edge smoothly enough to see.
+ */
+const HANDLE_DRAG_SEEK_MS = 100;
+
 let lastSeekEmit = 0;
-function emitSeek(sec: number, final: boolean) {
+function emitSeek(sec: number, final: boolean, minIntervalMs?: number) {
     const clamped = Math.max(0, Math.min(props.duration, sec));
     const now = performance.now();
-    if (!final && now - lastSeekEmit < props.throttleSeekMs) return;
+    const interval = Math.max(props.throttleSeekMs, minIntervalMs ?? 0);
+    if (!final && now - lastSeekEmit < interval) return;
     lastSeekEmit = now;
     emit('seek', clamped);
     props.onSeek?.(clamped);
@@ -442,7 +450,7 @@ function onHandleMouseDown(seg: Segment, field: 'inSec' | 'outSec', e: MouseEven
         const applied = updateSegmentEdge(seg.id, field, snapped);
         if (applied != null) {
             lastEdge = applied;
-            emitSeek(applied, false);
+            emitSeek(applied, false, HANDLE_DRAG_SEEK_MS);
         }
     };
     const onUp = () => {
