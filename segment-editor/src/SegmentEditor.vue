@@ -1064,7 +1064,10 @@ const thumbnailStripTiles = computed(() => {
         const cue = findThumbnailCue(cues, t);
         if (!cue?.w || !cue?.h) continue;
         tiles.push({
-            key: `${i}-${cue.spriteUrl}-${cue.x}-${cue.y}`,
+            // Keyed by slot, not by cue: panning changes which frame each slot
+            // shows, and a cue-derived key would tear down and rebuild every <img>
+            // on each frame of a pan instead of just updating src and transform.
+            key: `tile-${i}`,
             left,
             width: tileWidth,
             // Cues may span several sprite sheets, so each tile carries its own.
