@@ -1271,6 +1271,12 @@ const { syncChaptersFromTrim } = useChapterTrimSync({
     editorSegments,
     chapterSegments,
     canEditTrimTimeline,
+    // Trim markers seed chapters only while they are still live. After submit they
+    // are dropped, and without this the sync would read the emptied trim list as a
+    // chapter deletion and wipe any chapters already authored for the session.
+    trimSeedsChapters: computed(
+        () => canEditTrimTimeline.value && showProbeConfig.value
+    ),
     chaptersLoaded: chapters.isLoaded,
 });
 
