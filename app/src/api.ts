@@ -68,7 +68,7 @@ async function requestVoid(url: string, spec: RequestSpec): Promise<void> {
 /** Like {@link requestJson} but returns null on a 404 instead of throwing. */
 async function requestJsonOrNull<T>(
     url: string,
-    spec: RequestSpec,
+    spec: RequestSpec
 ): Promise<T | null> {
     const res = await fetch(url, buildInit(spec));
     if (res.status === 404) return null;
@@ -81,8 +81,14 @@ async function requestJsonOrNull<T>(
 // ---------------------------------------------------------------------------
 
 export async function checkIdentity(
-    accessToken: string,
-): Promise<{ id: string; email: string; name: string; status: string; encodingApiUrl?: string }> {
+    accessToken: string
+): Promise<{
+    id: string;
+    email: string;
+    name: string;
+    status: string;
+    encodingApiUrl?: string;
+}> {
     return requestJson(`${SAAS_URL}/saas/me`, {
         token: accessToken,
         errorPrefix: 'Identity check failed',
@@ -91,7 +97,7 @@ export async function checkIdentity(
 
 export async function createSession(
     config: CreateSessionRequest,
-    accessToken: string,
+    accessToken: string
 ): Promise<SaasSessionResponse> {
     return requestJson(`${SAAS_URL}/saas/sessions`, {
         method: 'POST',
@@ -105,7 +111,7 @@ export async function startUrlUpload(
     sessionId: string,
     url: string,
     accessToken: string,
-    filename?: string,
+    filename?: string
 ): Promise<void> {
     return requestVoid(`${SAAS_URL}/saas/sessions/${sessionId}/url-upload`, {
         method: 'POST',
@@ -118,7 +124,7 @@ export async function startUrlUpload(
 export async function deleteSession(
     sessionId: string,
     accessToken: string,
-    deleteFiles = false,
+    deleteFiles = false
 ): Promise<void> {
     const query = deleteFiles ? '?deleteFiles=true' : '';
     return requestVoid(`${SAAS_URL}/saas/sessions/${sessionId}${query}`, {
@@ -132,21 +138,12 @@ export async function deleteSession(
 // Encoding API calls (session token — direct)
 // ---------------------------------------------------------------------------
 
-// Above this size, upload as a single stream instead of parallel parts.
-// Parallel uploads end with a tus concatenation POST that makes the server
-// copy all parts into one file — for multi-GB files that copy takes minutes,
-// which exceeds the reverse proxy's request timeout. The proxy then returns
-// 502, tus-js retries the whole finalize, and every retry leaves another
-// full-size copy on the server's disk until it fills up. A single stream has
-// no concatenation step: only short 50 MB PATCH requests, nothing to time out.
-const PARALLEL_UPLOAD_MAX_FILE_BYTES = 1024 * 1024 * 1024; // 1 GB
-
 export function uploadFile(
     tusEndpoint: string,
     sessionId: string,
     sessionToken: string,
     file: File,
-    onProgress?: (percent: number) => void,
+    onProgress?: (percent: number) => void
 ): { promise: Promise<void>; abort: () => void } {
     let abortFn: () => void = () => {};
 
@@ -165,7 +162,7 @@ export function uploadFile(
             },
             chunkSize: 50 * 1024 * 1024,
             parallelUploads:
-                file.size >= PARALLEL_UPLOAD_MAX_FILE_BYTES ? 1 : 5,
+                Number(import.meta.env.VITE_TUS_PARALLEL_UPLOADS) || 5,
             onProgress(bytesUploaded, bytesTotal) {
                 onProgress?.(Math.round((bytesUploaded / bytesTotal) * 100));
             },
@@ -188,7 +185,7 @@ export async function startEncode(
     encodingApiUrl: string,
     sessionId: string,
     encodeConfig: EncodeConfig,
-    sessionToken: string,
+    sessionToken: string
 ): Promise<EncodeStartResponse> {
     return requestJson(`${encodingApiUrl}/api/sessions/${sessionId}/encode`, {
         method: 'POST',
@@ -201,7 +198,7 @@ export async function startEncode(
 export async function getSessionStatus(
     encodingApiUrl: string,
     sessionId: string,
-    sessionToken: string,
+    sessionToken: string
 ): Promise<SessionStatusResponse> {
     return requestJson(`${encodingApiUrl}/api/sessions/${sessionId}`, {
         token: sessionToken,
@@ -214,7 +211,7 @@ export function subscribeSessionEvents(
     sessionId: string,
     sessionToken: string,
     onEvent: (event: SessionStatusResponse) => void,
-    onError?: (error: Event) => void,
+    onError?: (error: Event) => void
 ): EventSource {
     const url = `${encodingApiUrl}/api/sessions/${sessionId}/events?token=${encodeURIComponent(sessionToken)}`;
     const es = new EventSource(url);
@@ -237,18 +234,22 @@ export function subscribeSessionEvents(
 
 export async function createApiKey(
     accessToken: string,
-    name: string,
+    name: string
 ): Promise<{ id: string; key: string }> {
     // Generate key client-side — the raw key never leaves the browser
     const rawBytes = crypto.getRandomValues(new Uint8Array(32));
-    const rawKey = 'lmc_' + btoa(String.fromCharCode(...rawBytes))
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const rawKey =
+        'lmc_' +
+        btoa(String.fromCharCode(...rawBytes))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, '');
     const prefix = rawKey.substring(0, 12);
 
     // SHA-256 hash — only this is sent to the server
     const hashBuffer = await crypto.subtle.digest(
         'SHA-256',
-        new TextEncoder().encode(rawKey),
+        new TextEncoder().encode(rawKey)
     );
     const keyHash = Array.from(new Uint8Array(hashBuffer))
         .map((b) => b.toString(16).padStart(2, '0'))
@@ -263,7 +264,9 @@ export async function createApiKey(
     return { id: result.id, key: rawKey };
 }
 
-export async function listApiKeys(accessToken: string): Promise<ApiKeyResponse[]> {
+export async function listApiKeys(
+    accessToken: string
+): Promise<ApiKeyResponse[]> {
     return requestJson(`${SAAS_URL}/saas/keys`, {
         token: accessToken,
         errorPrefix: 'Failed to list API keys',
@@ -272,7 +275,7 @@ export async function listApiKeys(accessToken: string): Promise<ApiKeyResponse[]
 
 export async function revokeApiKey(
     accessToken: string,
-    keyId: string,
+    keyId: string
 ): Promise<void> {
     return requestVoid(`${SAAS_URL}/saas/keys/${keyId}`, {
         method: 'DELETE',
@@ -286,7 +289,7 @@ export async function revokeApiKey(
 // ---------------------------------------------------------------------------
 
 export async function listS3Configs(
-    accessToken: string,
+    accessToken: string
 ): Promise<{ configs: S3ConfigSummary[] }> {
     return requestJson(`${SAAS_URL}/saas/s3-configs`, {
         token: accessToken,
@@ -296,7 +299,7 @@ export async function listS3Configs(
 
 export async function createS3Config(
     accessToken: string,
-    data: Record<string, unknown>,
+    data: Record<string, unknown>
 ): Promise<{ id: string }> {
     return requestJson(`${SAAS_URL}/saas/s3-configs`, {
         method: 'POST',
@@ -315,7 +318,7 @@ export interface S3ConnectivityResult {
 
 export async function testS3Config(
     accessToken: string,
-    data: Record<string, unknown>,
+    data: Record<string, unknown>
 ): Promise<S3ConnectivityResult> {
     return requestJson(`${SAAS_URL}/saas/s3-configs/test`, {
         method: 'POST',
@@ -327,7 +330,7 @@ export async function testS3Config(
 
 export async function getS3Config(
     accessToken: string,
-    configId: string,
+    configId: string
 ): Promise<S3ConfigDetail> {
     return requestJson(`${SAAS_URL}/saas/s3-configs/${configId}`, {
         token: accessToken,
@@ -338,7 +341,7 @@ export async function getS3Config(
 export async function updateS3Config(
     accessToken: string,
     configId: string,
-    data: Record<string, unknown>,
+    data: Record<string, unknown>
 ): Promise<S3ConfigDetail> {
     return requestJson(`${SAAS_URL}/saas/s3-configs/${configId}`, {
         method: 'PATCH',
@@ -350,7 +353,7 @@ export async function updateS3Config(
 
 export async function deleteS3Config(
     accessToken: string,
-    configId: string,
+    configId: string
 ): Promise<void> {
     return requestVoid(`${SAAS_URL}/saas/s3-configs/${configId}`, {
         method: 'DELETE',
@@ -365,7 +368,7 @@ export async function deleteS3Config(
 
 export async function listSessions(
     accessToken: string,
-    opts?: { limit?: number; skip?: number; status?: string; name?: string },
+    opts?: { limit?: number; skip?: number; status?: string; name?: string }
 ): Promise<SessionListResponse> {
     const params = new URLSearchParams();
     if (opts?.limit != null) params.set('limit', String(opts.limit));
@@ -382,7 +385,7 @@ export async function listSessions(
 
 export async function getSessionDetail(
     accessToken: string,
-    sessionId: string,
+    sessionId: string
 ): Promise<SessionDetailResponse> {
     return requestJson(`${SAAS_URL}/saas/sessions/${sessionId}`, {
         token: accessToken,
@@ -393,7 +396,7 @@ export async function getSessionDetail(
 export async function updateSessionName(
     accessToken: string,
     sessionId: string,
-    name: string,
+    name: string
 ): Promise<unknown> {
     return requestJson(`${SAAS_URL}/saas/sessions/${sessionId}/name`, {
         method: 'PATCH',
@@ -406,7 +409,7 @@ export async function updateSessionName(
 export async function checkPrefix(
     accessToken: string,
     s3ConfigId: string,
-    prefix: string,
+    prefix: string
 ): Promise<{ exists: boolean; count: number }> {
     const params = new URLSearchParams({ s3ConfigId, prefix });
     return requestJson(`${SAAS_URL}/saas/sessions/check-prefix?${params}`, {
@@ -419,7 +422,7 @@ export async function moveSessionFiles(
     accessToken: string,
     sessionId: string,
     targetS3ConfigId: string,
-    newPathPrefix: string,
+    newPathPrefix: string
 ): Promise<unknown> {
     return requestJson(`${SAAS_URL}/saas/sessions/${sessionId}/move`, {
         method: 'POST',
@@ -432,7 +435,7 @@ export async function moveSessionFiles(
 export async function renameSessionPrefix(
     accessToken: string,
     sessionId: string,
-    newPathPrefix: string,
+    newPathPrefix: string
 ): Promise<unknown> {
     return requestJson(`${SAAS_URL}/saas/sessions/${sessionId}/rename-prefix`, {
         method: 'POST',
@@ -449,7 +452,7 @@ export async function importSession(
         masterPlaylistKey?: string;
         folderPrefix?: string;
         encryptionKey?: string;
-    },
+    }
 ): Promise<ImportSessionResponse> {
     return requestJson(`${SAAS_URL}/saas/sessions/import`, {
         method: 'POST',
@@ -469,7 +472,11 @@ export interface HlsReadResult {
 }
 
 export interface HlsMutateOperation {
-    type: 'upsertSubtitle' | 'removeSubtitle' | 'upsertChapters' | 'removeChapters';
+    type:
+        | 'upsertSubtitle'
+        | 'removeSubtitle'
+        | 'upsertChapters'
+        | 'removeChapters';
     language?: string;
     name?: string;
     vttBase64?: string;
@@ -487,7 +494,7 @@ export class HlsConflictError extends Error {
     readonly status = 409;
     constructor(
         message: string,
-        public readonly currentEtag: string | undefined,
+        public readonly currentEtag: string | undefined
     ) {
         super(message);
         this.name = 'HlsConflictError';
@@ -496,7 +503,7 @@ export class HlsConflictError extends Error {
 
 export async function hlsRead(
     accessToken: string,
-    sessionId: string,
+    sessionId: string
 ): Promise<HlsReadResult> {
     return requestJson(`${SAAS_URL}/saas/sessions/${sessionId}/hls/read`, {
         method: 'POST',
@@ -509,7 +516,7 @@ export async function hlsMutate(
     accessToken: string,
     sessionId: string,
     ifMatch: string,
-    operations: HlsMutateOperation[],
+    operations: HlsMutateOperation[]
 ): Promise<unknown> {
     const res = await fetch(
         `${SAAS_URL}/saas/sessions/${sessionId}/hls/mutate`,
@@ -518,14 +525,16 @@ export async function hlsMutate(
             token: accessToken,
             body: { ifMatch, operations },
             errorPrefix: 'HLS mutate failed',
-        }),
+        })
     );
 
     if (res.status === 409) {
-        const body = await res.json().catch(() => ({}) as { currentEtag?: string; message?: string });
+        const body = await res
+            .json()
+            .catch(() => ({}) as { currentEtag?: string; message?: string });
         throw new HlsConflictError(
             body.message || 'Master playlist was modified since last read',
-            body.currentEtag,
+            body.currentEtag
         );
     }
 
@@ -541,11 +550,11 @@ export async function hlsMutate(
 export async function getSessionChapters(
     accessToken: string,
     sessionId: string,
-    lang: string = 'en',
+    lang: string = 'en'
 ): Promise<{ vtt: string } | null> {
     return requestJsonOrNull(
         `${SAAS_URL}/saas/sessions/${sessionId}/chapters?lang=${encodeURIComponent(lang)}`,
-        { token: accessToken, errorPrefix: 'Get chapters failed' },
+        { token: accessToken, errorPrefix: 'Get chapters failed' }
     );
 }
 
@@ -556,17 +565,20 @@ export async function getSessionChapters(
  */
 export async function getSessionWaveform(
     accessToken: string,
-    sessionId: string,
+    sessionId: string
 ): Promise<{
     version: number;
     sampleRate: number;
     numPeaks: number;
     peaks: number[];
 } | null> {
-    return requestJsonOrNull(`${SAAS_URL}/saas/sessions/${sessionId}/waveform`, {
-        token: accessToken,
-        errorPrefix: 'Get waveform failed',
-    });
+    return requestJsonOrNull(
+        `${SAAS_URL}/saas/sessions/${sessionId}/waveform`,
+        {
+            token: accessToken,
+            errorPrefix: 'Get waveform failed',
+        }
+    );
 }
 
 /**
@@ -576,7 +588,7 @@ export async function putSessionChapters(
     accessToken: string,
     sessionId: string,
     vtt: string,
-    lang: string = 'en',
+    lang: string = 'en'
 ): Promise<void> {
     return requestVoid(
         `${SAAS_URL}/saas/sessions/${sessionId}/chapters?lang=${encodeURIComponent(lang)}`,
@@ -585,6 +597,6 @@ export async function putSessionChapters(
             token: accessToken,
             body: { vtt },
             errorPrefix: 'Save chapters failed',
-        },
+        }
     );
 }
