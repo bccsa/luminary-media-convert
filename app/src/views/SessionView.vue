@@ -1266,7 +1266,13 @@ const showChaptersBesidePlayer = computed(
  * them would write that throwaway state to S3 as the session's chapters.vtt.
  */
 const canSaveChapters = computed(
-    () => showChaptersBesidePlayer.value && !showProbeConfig.value
+    () =>
+        showChaptersBesidePlayer.value &&
+        !showProbeConfig.value &&
+        // showProbeConfig also goes false while the encode request is in flight,
+        // which would flash the save controls back on during exactly the phase
+        // this is meant to cover.
+        !submitting.value
 );
 
 /** Detail card: only visible during pre-encode upload/probe flow (progress below the player). */
