@@ -638,6 +638,53 @@ describe('SegmentEditor — timeline interaction', () => {
         expect(onSeek).toHaveBeenCalledWith(40);
     });
 
+    it('click inside a segment seeks the player', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ segments: [seg(1, 10, 20)], props: { onSeek } });
+        await flush();
+        const segEl = w.get('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 15);
+        mouseAt(document.body, 'mouseup', 15);
+        expect(onSeek).toHaveBeenCalledWith(15);
+    });
+
+    it('dragging a segment moves it without seeking', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ segments: [seg(1, 10, 20)], props: { onSeek } });
+        await flush();
+        const segEl = w.get('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 15);
+        mouseAt(document.body, 'mousemove', 25);
+        mouseAt(document.body, 'mouseup', 25);
+        await flush();
+        expect(onSeek).not.toHaveBeenCalled();
+        expect(latestSegments(w)[0].inSec).toBeGreaterThan(10);
+    });
+
+    it('does not seek on a non-primary click inside a segment', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ segments: [seg(1, 10, 20)], props: { onSeek } });
+        await flush();
+        const segEl = w.get('.se-segment').element as HTMLElement;
+        // Right-click: the context menu opens, the playhead should stay put.
+        mouseAt(segEl, 'mousedown', 15, { button: 2 });
+        mouseAt(document.body, 'mouseup', 15, { button: 2 });
+        expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it('additive click inside a segment selects without seeking', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({
+            segments: [seg(1, 10, 20), seg(2, 30, 40)],
+            props: { onSeek, mode: 'subtitles' },
+        });
+        await flush();
+        const segEls = w.findAll('.se-segment');
+        mouseAt(segEls[0].element as HTMLElement, 'mousedown', 15, { shiftKey: true });
+        mouseAt(document.body, 'mouseup', 15, { shiftKey: true });
+        expect(onSeek).not.toHaveBeenCalled();
+    });
+
     it('scrub updates throttle intermediate seeks', async () => {
         const onSeek = vi.fn();
         const w = mountEditor({ props: { onSeek, throttleSeekMs: 10000 } });
