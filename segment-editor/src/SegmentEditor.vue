@@ -1050,6 +1050,73 @@ function onTimelineHoverLeave() {
     hideThumbPreview();
 }
 
+// -------------- thumbnail filmstrip (background of the track) --------------
+
+/**
+ * Thumbnails tiled across the visible span, behind the waveform. Each tile crops
+ * its frame out of the sprite sheet by translating the image and scaling it to the
+ * strip height — no sprite dimensions needed, unlike a background-size approach.
+ */
+/** Filmstrip height in px. The waveform occupies the bottom half over the top of it. */
+const THUMB_STRIP_HEIGHT_PX = 48;
+
+/** Tallest a peak may reach, as a share of track height. Bars stand on the floor. */
+const WAVEFORM_MAX_HEIGHT_RATIO = 1;
+
+const trackWidthPx = ref(0);
+
+function measureTrackWidth() {
+    // Measured the same way pxToTime measures, so tile positions line up exactly
+    // with the time mapping used everywhere else in the track.
+    trackWidthPx.value = timelineMetricsEl()?.getBoundingClientRect().width ?? 0;
+}
+
+const thumbnailStripTiles = computed(() => {
+    if (props.mode !== 'trim') return [];
+    const cues = thumbnailCues.value;
+    const width = trackWidthPx.value;
+    if (!cues.length || width <= 0 || visibleSpan.value <= 0) return [];
+
+    const sample = cues.find((c) => c.w > 0 && c.h > 0);
+    if (!sample) return [];
+
+    const scale = THUMB_STRIP_HEIGHT_PX / sample.h;
+    const tileWidth = Math.max(8, sample.w * scale);
+    const count = Math.ceil(width / tileWidth);
+
+    const tiles: {
+        key: string;
+        left: number;
+        width: number;
+        src: string;
+        imgStyle: Record<string, string>;
+    }[] = [];
+
+    for (let i = 0; i < count; i++) {
+        const left = i * tileWidth;
+        const t = viewStart.value + (left / width) * visibleSpan.value;
+        const cue = findThumbnailCue(cues, t);
+        if (!cue?.w || !cue?.h) continue;
+        tiles.push({
+            // Keyed by slot, not by cue: panning changes which frame each slot
+            // shows, and a cue-derived key would tear down and rebuild every <img>
+            // on each frame of a pan instead of just updating src and transform.
+            key: `tile-${i}`,
+            left,
+            width: tileWidth,
+            // Cues may span several sprite sheets, so each tile carries its own.
+            src: cue.spriteUrl,
+            imgStyle: {
+                // translate first, then scale (CSS applies right to left), so the
+                // sprite offset ends up scaled by the same factor as the frame.
+                transform: `scale(${scale}) translate(${-cue.x}px, ${-cue.y}px)`,
+                transformOrigin: '0 0',
+            },
+        });
+    }
+    return tiles;
+});
+
 // -------------- lifecycle --------------
 
 watch(
@@ -1069,6 +1136,11 @@ watch(
 
 let waveformResizeObserver: ResizeObserver | null = null;
 
+/** jsdom and older browsers have no ResizeObserver; the editor works without it. */
+function canObserveResize(): boolean {
+    return typeof ResizeObserver !== 'undefined';
+}
+
 function drawWaveform(): void {
     const canvas = waveformCanvas.value;
     if (!canvas || !props.waveformPeaks?.length) return;
@@ -1085,7 +1157,10 @@ function drawWaveform(): void {
     const peaks = props.waveformPeaks;
     const canvasHeight = canvas.height;
     const canvasWidth = canvas.width;
-    const centerY = canvasHeight / 2;
+    // Every bar stands on the bottom edge of the track and grows upward, so the
+    // waveform reads as one shape sitting under the thumbnails. Amplitude scaling
+    // and colour are unchanged from how the waveform has always drawn.
+    const maxBarHeight = canvasHeight * WAVEFORM_MAX_HEIGHT_RATIO;
 
     const rootEl = rootElRef.value || document.documentElement;
     const color = props.waveformColor || getComputedStyle(rootEl).getPropertyValue('--se-waveform').trim() || 'rgba(255,255,255,0.35)';
@@ -1105,8 +1180,8 @@ function drawWaveform(): void {
         const peak2 = peaks[Math.min(idx2, peaks.length - 1)] || 0;
         const peak = peak1 * (1 - t) + peak2 * t;
 
-        const barHeight = Math.max(1, peak * (canvasHeight * 0.9));
-        ctx.fillRect(x, centerY - barHeight / 2, 1, barHeight);
+        const barHeight = Math.max(1, peak * maxBarHeight);
+        ctx.fillRect(x, canvasHeight - barHeight, 1, barHeight);
     }
 }
 
@@ -1116,10 +1191,11 @@ watch(
         // `flush: 'post'` runs after Vue applies DOM updates so the
         // `v-if="waveformPeaks?.length"` canvas exists on the first transition
         // from null/empty to populated.
-        if (peaks?.length && !waveformResizeObserver) {
+        if (peaks?.length && !waveformResizeObserver && canObserveResize()) {
             const container = timelineMetricsEl();
             if (container) {
                 waveformResizeObserver = new ResizeObserver(() => {
+                    measureTrackWidth();
                     drawWaveform();
                 });
                 waveformResizeObserver.observe(container);
@@ -1133,22 +1209,27 @@ watch(
 watch(
     [viewStart, visibleSpan],
     () => {
+        measureTrackWidth();
         drawWaveform();
     },
 );
 
+
 onMounted(() => {
     rafId = requestAnimationFrame(tick);
+    measureTrackWidth();
 
-    const canvas = waveformCanvas.value;
+    // Observe the track whether or not there are peaks: the thumbnail filmstrip
+    // needs the measured width to decide how many tiles to lay down.
     const container = timelineMetricsEl();
-    if (canvas && container && props.waveformPeaks?.length) {
+    if (container && !waveformResizeObserver && canObserveResize()) {
         waveformResizeObserver = new ResizeObserver(() => {
+            measureTrackWidth();
             drawWaveform();
         });
         waveformResizeObserver.observe(container);
-        drawWaveform();
     }
+    if (props.waveformPeaks?.length) drawWaveform();
 });
 onBeforeUnmount(() => {
     thumbnailFetchAbort?.abort();
@@ -1350,6 +1431,21 @@ defineExpose({
                 :aria-valuenow="playheadSec"
                 :aria-label="`${modeTitle} timeline`"
             >
+                <div
+                    v-if="thumbnailStripTiles.length"
+                    class="se-thumb-strip"
+                    aria-hidden="true"
+                >
+                    <div
+                        v-for="tile in thumbnailStripTiles"
+                        :key="tile.key"
+                        class="se-thumb-tile"
+                        :style="{ left: `${tile.left}px`, width: `${tile.width}px` }"
+                    >
+                        <img :src="tile.src" :style="tile.imgStyle" alt="" draggable="false" />
+                    </div>
+                </div>
+
                 <canvas
                     v-if="waveformPeaks?.length"
                     ref="waveformCanvas"
