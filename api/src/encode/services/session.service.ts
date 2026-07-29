@@ -10,6 +10,12 @@ import type { SegmentFormat } from './ffmpeg.service.js';
 import type { PipelineProgress } from './segment-pipeline.service.js';
 import { SessionEventsService, type SessionEvent } from './session-events.service.js';
 
+/**
+ * The persisted session record, inside the session's own work directory. Anything
+ * clearing that directory has to spare this file or the session stops existing.
+ */
+export const SESSION_STATE_FILENAME = 'session.json';
+
 export interface AnglePlaylistInfo {
     name: string;
     key: string;
@@ -66,7 +72,7 @@ export class SessionService implements OnModuleInit {
     }
 
     private sessionFile(id: string): string {
-        return join(this.workDir, id, 'session.json');
+        return join(this.workDir, id, SESSION_STATE_FILENAME);
     }
 
     /**

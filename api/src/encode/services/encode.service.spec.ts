@@ -1,5 +1,5 @@
 import { type Mocked } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { EncodeService } from './encode.service.js';
@@ -657,6 +657,68 @@ describe('EncodeService', () => {
 
         const updated = sessionService.get(session.id)!;
         expect(updated.status).toBe('completed');
+    });
+
+    describe('work directory cleanup', () => {
+        /** Put a source upload and a preview cache where a real session would have them. */
+        function seedSessionFiles(sessionId: string): {
+            sourcePath: string;
+            previewDir: string;
+            statePath: string;
+        } {
+            const sessionDir = join(testWorkDir, sessionId);
+            const previewDir = join(sessionDir, 'preview');
+            mkdirSync(previewDir, { recursive: true });
+            const sourcePath = join(sessionDir, 'input.mp4');
+            writeFileSync(sourcePath, 'source bytes');
+            writeFileSync(join(previewDir, 'r0.ts'), 'preview bytes');
+            return {
+                sourcePath,
+                previewDir,
+                statePath: join(sessionDir, 'session.json'),
+            };
+        }
+
+        it('drops the source upload and preview cache once the encode completes', async () => {
+            const session = sessionService.create(makeConfig());
+            const { sourcePath, previewDir } = seedSessionFiles(session.id);
+            sessionService.setFilePath(session.id, sourcePath);
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+            await service.processSession(session.id);
+
+            expect(sessionService.get(session.id)!.status).toBe('completed');
+            expect(existsSync(sourcePath)).toBe(false);
+            expect(existsSync(previewDir)).toBe(false);
+        });
+
+        it('keeps the session record, so a completed session survives a restart', async () => {
+            const session = sessionService.create(makeConfig());
+            const { statePath } = seedSessionFiles(session.id);
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+            await service.processSession(session.id);
+
+            // Clearing the whole directory used to take this with it, which left
+            // the client being told its just-completed session had expired.
+            expect(existsSync(statePath)).toBe(true);
+        });
+
+        it('keeps the source when the encode fails, so the input can be inspected', async () => {
+            ffmpegService.encode.mockRejectedValue(new Error('boom'));
+
+            const session = sessionService.create(makeConfig());
+            const { sourcePath } = seedSessionFiles(session.id);
+            sessionService.setFilePath(session.id, sourcePath);
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+            await service.processSession(session.id);
+
+            expect(sessionService.get(session.id)!.status).toBe('failed');
+            // Reclaimed by the scheduled sweep once it ages out, not here.
+            expect(existsSync(sourcePath)).toBe(true);
+        });
     });
 
     it('should invoke pipeline onProgress and update session pipeline progress', async () => {
