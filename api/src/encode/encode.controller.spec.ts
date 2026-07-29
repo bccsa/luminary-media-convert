@@ -1070,3 +1070,127 @@ describe('EncodeController', () => {
         });
     });
 });
+
+describe('EncodeController — source storyboard', () => {
+    let sessionService: SessionService;
+    let thumbnailService: any;
+    let ctrl: EncodeController;
+
+    const VTT = [
+        'WEBVTT',
+        '',
+        '00:00:00.000 --> 00:00:05.000',
+        'sprite_000.webp#xywh=0,0,160,90',
+        '',
+    ].join('\n');
+
+    function makeRes() {
+        return {
+            set: vi.fn(),
+            send: vi.fn(),
+        } as any;
+    }
+
+    const req = {
+        protocol: 'http',
+        get: () => 'api.test:3000',
+    } as any;
+
+    function uploadedSession() {
+        const session = sessionService.create(makeConfig());
+        (session as any).filePath = '/tmp/source.mp4';
+        (session as any).probeResult = {
+            format: { duration: 120 },
+            videoTracks: [{ width: 1920, height: 1080 }],
+            audioTracks: [],
+        };
+        return session;
+    }
+
+    beforeEach(() => {
+        sessionService = new SessionService();
+        thumbnailService = {
+            getOrGeneratePreview: vi.fn().mockResolvedValue({ vtt: VTT, dir: '/tmp/x' }),
+            previewDir: vi.fn().mockReturnValue('/tmp/preview-thumbnails'),
+        };
+        ctrl = new EncodeController(
+            sessionService,
+            { emit: vi.fn(), forSession: vi.fn() } as any,
+            { getPosition: vi.fn() } as any,
+            { getAccelMode: vi.fn().mockReturnValue('cpu') } as any,
+            { checkAuthorization: vi.fn() } as any,
+            {} as any,
+            {} as any,
+            {} as any,
+            thumbnailService,
+        );
+    });
+
+    it('rejects a request without the session token', async () => {
+        const session = uploadedSession();
+        await expect(
+            ctrl.getPreviewThumbnailVtt(session.id, 'wrong-token', req, makeRes()),
+        ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('has no storyboard before the source is uploaded', async () => {
+        const session = sessionService.create(makeConfig());
+        await expect(
+            ctrl.getPreviewThumbnailVtt(session.id, session.sessionToken, req, makeRes()),
+        ).rejects.toThrow(NotFoundException);
+    });
+
+    it('has no storyboard for a source without video', async () => {
+        const session = uploadedSession();
+        (session as any).probeResult.videoTracks = [];
+        await expect(
+            ctrl.getPreviewThumbnailVtt(session.id, session.sessionToken, req, makeRes()),
+        ).rejects.toThrow(NotFoundException);
+    });
+
+    it('points sprite references at the sprite route, token included', async () => {
+        const session = uploadedSession();
+        const res = makeRes();
+        await ctrl.getPreviewThumbnailVtt(session.id, session.sessionToken, req, res);
+
+        const sent: string = res.send.mock.calls[0][0];
+        // A bare filename would be resolved against the VTT URL and lose the token.
+        expect(sent).toContain(
+            `http://api.test:3000/api/sessions/${session.id}/thumbnails/sprite_000.webp?token=${session.sessionToken}`,
+        );
+        expect(sent).toContain('#xywh=0,0,160,90');
+        expect(res.set).toHaveBeenCalledWith(
+            expect.objectContaining({ 'Content-Type': 'text/vtt' }),
+        );
+    });
+
+    it('generates from the probed source dimensions and duration', async () => {
+        const session = uploadedSession();
+        await ctrl.getPreviewThumbnailVtt(session.id, session.sessionToken, req, makeRes());
+        expect(thumbnailService.getOrGeneratePreview).toHaveBeenCalledWith(
+            session.id,
+            expect.objectContaining({
+                inputPath: '/tmp/source.mp4',
+                duration: 120,
+                sourceWidth: 1920,
+                sourceHeight: 1080,
+            }),
+        );
+    });
+
+    it('refuses a sprite name that is not one it produces', async () => {
+        const session = uploadedSession();
+        for (const name of ['../../../etc/passwd', 'sprite_000.svg', 'evil.webp']) {
+            await expect(
+                ctrl.getPreviewThumbnailSprite(session.id, name, session.sessionToken, makeRes()),
+            ).rejects.toThrow(NotFoundException);
+        }
+    });
+
+    it('refuses a sprite request without the session token', async () => {
+        const session = uploadedSession();
+        await expect(
+            ctrl.getPreviewThumbnailSprite(session.id, 'sprite_000.webp', 'nope', makeRes()),
+        ).rejects.toThrow(UnauthorizedException);
+    });
+});

@@ -14,6 +14,7 @@ import { ProbeService } from './probe.service.js';
 import { PreviewService } from './preview.service.js';
 import { WebhookService } from './webhook.service.js';
 import { WaveformService } from './waveform.service.js';
+import { ThumbnailService } from './thumbnail.service.js';
 import { hasAllowedExtension } from './media-extensions.js';
 
 const DEFAULT_MAX_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
@@ -33,6 +34,7 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
         private readonly previewService: PreviewService,
         private readonly webhookService: WebhookService,
         private readonly waveformService: WaveformService,
+        private readonly thumbnailService: ThumbnailService,
     ) {
         this.workDir = process.env.WORK_DIR || join(process.cwd(), 'work');
         this.tusDir = join(this.workDir, '.tus-uploads');
@@ -251,6 +253,25 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                 .catch((err) => {
                     this.logger.warn(
                         `Background waveform prime failed for ${sessionId}: ${(err as Error).message}`,
+                    );
+                });
+        }
+
+        // Same for the storyboard: the trim timeline wants frames as soon as it
+        // opens, and generating them takes an ffmpeg pass over the whole file.
+        const video = probeResult.videoTracks[0];
+        const duration = probeResult.format?.duration ?? 0;
+        if (video?.width && video?.height && duration > 0) {
+            void this.thumbnailService
+                .getOrGeneratePreview(sessionId, {
+                    inputPath: destPath,
+                    duration,
+                    sourceWidth: video.width,
+                    sourceHeight: video.height,
+                })
+                .catch((err) => {
+                    this.logger.warn(
+                        `Background storyboard prime failed for ${sessionId}: ${(err as Error).message}`,
                     );
                 });
         }

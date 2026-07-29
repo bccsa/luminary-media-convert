@@ -31,6 +31,7 @@ import {
 import { SkipThrottle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { Observable, map } from 'rxjs';
+import { createReadStream, existsSync } from 'fs';
 import { rm } from 'fs/promises';
 import { join } from 'path';
 import { AuthResolverGuard } from '../auth/auth-resolver.guard.js';
@@ -49,6 +50,7 @@ import { EncodeConfigDto } from './dto/encode-config.dto.js';
 import { UrlUploadDto } from './dto/url-upload.dto.js';
 import { UrlFetchService } from './services/url-fetch.service.js';
 import { WaveformService } from './services/waveform.service.js';
+import { ThumbnailService } from './services/thumbnail.service.js';
 import {
     SessionResponseDto,
     EncodeStartResponseDto,
@@ -78,7 +80,8 @@ export class EncodeController {
         private readonly authorizationWebhookService: AuthorizationWebhookService,
         private readonly previewService: PreviewService,
         private readonly urlFetchService: UrlFetchService,
-        private readonly waveformService: WaveformService
+        private readonly waveformService: WaveformService,
+        private readonly thumbnailService: ThumbnailService
     ) {}
 
     @Post()
@@ -665,6 +668,97 @@ export class EncodeController {
             'Cache-Control': 'public, max-age=3600',
         });
         result.stream.pipe(res);
+    }
+
+    @Get(':sessionId/thumbnails/thumbnails.vtt')
+    @SkipThrottle()
+    @ApiOperation({
+        summary: 'Get the storyboard for the uploaded source',
+        description:
+            'WebVTT storyboard generated from the source file before any encode, so ' +
+            'the trim timeline can show frames while the user is still choosing what ' +
+            'to keep. Generated on first request and cached for the session; sprite ' +
+            'references are absolute so they carry the session token.',
+    })
+    @ApiResponse({ status: 200, description: 'WebVTT storyboard.' })
+    @ApiResponse({ status: 404, description: 'No storyboard available.' })
+    async getPreviewThumbnailVtt(
+        @Param('sessionId') sessionId: string,
+        @Query('token') token: string,
+        @Req() req: Request,
+        @Res() res: Response,
+    ): Promise<void> {
+        this.validatePreviewToken(sessionId, token);
+
+        const session = this.sessionService.get(sessionId);
+        if (!session?.filePath) {
+            throw new NotFoundException('Source file not yet uploaded');
+        }
+
+        const video = session.probeResult?.videoTracks?.[0];
+        const duration = session.probeResult?.format?.duration ?? 0;
+        if (!video?.width || !video?.height || duration <= 0) {
+            throw new NotFoundException('Source has no usable video track');
+        }
+
+        const result = await this.thumbnailService.getOrGeneratePreview(
+            sessionId,
+            {
+                inputPath: session.filePath,
+                duration,
+                sourceWidth: video.width,
+                sourceHeight: video.height,
+            },
+        );
+        if (!result) throw new NotFoundException('Storyboard unavailable');
+
+        // Cues carry bare filenames; a client resolving them against the VTT URL
+        // would drop the token and be turned away. Point them at the sprite route
+        // outright instead.
+        const base = `${req.protocol}://${req.get('host')}/api/sessions/${sessionId}/thumbnails`;
+        const vtt = result.vtt.replace(
+            /^(sprite_\d+\.\w+)(#.*)?$/gm,
+            (_m, file: string, frag = '') =>
+                `${base}/${file}?token=${encodeURIComponent(token)}${frag}`,
+        );
+
+        res.set({
+            'Content-Type': 'text/vtt',
+            'Cache-Control': 'private, max-age=300',
+        });
+        res.send(vtt);
+    }
+
+    @Get(':sessionId/thumbnails/:filename')
+    @SkipThrottle()
+    @ApiOperation({ summary: 'Get a storyboard sprite sheet for the source' })
+    @ApiResponse({ status: 200, description: 'Sprite sheet image.' })
+    @ApiResponse({ status: 404, description: 'Sprite not found.' })
+    async getPreviewThumbnailSprite(
+        @Param('sessionId') sessionId: string,
+        @Param('filename') filename: string,
+        @Query('token') token: string,
+        @Res() res: Response,
+    ): Promise<void> {
+        this.validatePreviewToken(sessionId, token);
+
+        // Only ever the files this service produces: the name is part of a path,
+        // so anything else could walk out of the directory.
+        const match = filename.match(/^sprite_\d+\.(webp|jpg|jpeg|png)$/);
+        if (!match) throw new NotFoundException('Invalid sprite filename');
+
+        const path = join(
+            this.thumbnailService.previewDir(sessionId),
+            'thumbnails',
+            filename,
+        );
+        if (!existsSync(path)) throw new NotFoundException('Sprite not found');
+
+        res.set({
+            'Content-Type': match[1] === 'webp' ? 'image/webp' : `image/${match[1]}`,
+            'Cache-Control': 'private, max-age=3600',
+        });
+        createReadStream(path).pipe(res);
     }
 
     private validatePreviewToken(sessionId: string, token: string): void {

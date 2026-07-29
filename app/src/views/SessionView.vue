@@ -875,6 +875,16 @@ const playbackUrl = computed(() => {
 });
 
 const thumbnailVttUrl = computed(() => {
+    // Before the encode there is no storyboard in S3 — the encode is what writes
+    // one. The API generates a storyboard for the source instead, so the trim
+    // timeline has frames while the user is still choosing what to keep.
+    if (showProbeConfig.value) {
+        if (!encodingApiUrl.value || !sessionToken.value) return null;
+        return (
+            `${encodingApiUrl.value}/api/sessions/${sessionId.value}` +
+            `/thumbnails/thumbnails.vtt?token=${encodeURIComponent(sessionToken.value)}`
+        );
+    }
     if (!displayThumbnailsVtt.value || !s3PublicBaseUrl.value) return null;
     return `${s3PublicBaseUrl.value}/${displayThumbnailsVtt.value}`;
 });
