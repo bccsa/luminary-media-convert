@@ -14,8 +14,16 @@ import {
 import type { Segment } from '@luminary-media-converter/segment-editor';
 import type { TrimSegment } from '../types';
 
-const trim = (inSec: number, outSec: number): TrimSegment => ({ inSec, outSec });
-const seg = (id: string, inSec: number, outSec: number, label = ''): Segment => ({
+const trim = (inSec: number, outSec: number): TrimSegment => ({
+    inSec,
+    outSec,
+});
+const seg = (
+    id: string,
+    inSec: number,
+    outSec: number,
+    label = ''
+): Segment => ({
     id,
     inSec,
     outSec,
@@ -76,7 +84,9 @@ describe('slicePeaksToTrims', () => {
 
     it('falls back on a missing or nonsensical duration', () => {
         expect(slicePeaksToTrims(peaks, 0, [trim(10, 20)])).toEqual(peaks);
-        expect(slicePeaksToTrims(peaks, Number.NaN, [trim(10, 20)])).toEqual(peaks);
+        expect(slicePeaksToTrims(peaks, Number.NaN, [trim(10, 20)])).toEqual(
+            peaks
+        );
     });
 
     it('passes null through and never mutates the input', () => {
@@ -127,7 +137,9 @@ describe('outputToSource', () => {
 
     it('round-trips with sourceToOutput', () => {
         for (const t of [10, 12.5, 19.9, 40, 47]) {
-            expect(outputToSource(sourceToOutput(t, ranges)!, ranges)).toBeCloseTo(t, 6);
+            expect(
+                outputToSource(sourceToOutput(t, ranges)!, ranges)
+            ).toBeCloseTo(t, 6);
         }
     });
 });
@@ -135,7 +147,10 @@ describe('outputToSource', () => {
 describe('toOutputSegments', () => {
     it('lays the ranges end to end from zero', () => {
         const out = toOutputSegments([seg('a', 10, 20), seg('b', 40, 50)]);
-        expect(out.map((s) => [s.inSec, s.outSec])).toEqual([[0, 10], [10, 20]]);
+        expect(out.map((s) => [s.inSec, s.outSec])).toEqual([
+            [0, 10],
+            [10, 20],
+        ]);
     });
 
     it('keeps ids and labels', () => {
@@ -155,7 +170,10 @@ describe('applyOutputEdit', () => {
 
     it('is a no-op when nothing moved', () => {
         const out = applyOutputEdit(source, toOutputSegments(source));
-        expect(out.map((s) => [s.inSec, s.outSec])).toEqual([[10, 20], [40, 50]]);
+        expect(out.map((s) => [s.inSec, s.outSec])).toEqual([
+            [10, 20],
+            [40, 50],
+        ]);
     });
 
     it('folds a lengthened block back onto its source out-point', () => {
@@ -244,7 +262,10 @@ describe('mapSegmentsToTimeline / mapSegmentsFromTimeline', () => {
     const remaining = invertRanges([trim(60, 70)], 120);
 
     it('shifts segments after the removal earlier', () => {
-        const mapped = mapSegmentsToTimeline([seg('a', 10, 20), seg('b', 80, 90)], remaining);
+        const mapped = mapSegmentsToTimeline(
+            [seg('a', 10, 20), seg('b', 80, 90)],
+            remaining
+        );
         expect(mapped[0].inSec).toBe(10);
         expect(mapped[1].inSec).toBe(70);
         expect(mapped[1].outSec).toBe(80);
@@ -257,14 +278,34 @@ describe('mapSegmentsToTimeline / mapSegmentsFromTimeline', () => {
 
     it('round-trips back to source positions', () => {
         const source = [seg('a', 10, 20), seg('b', 80, 90)];
-        const back = mapSegmentsFromTimeline(mapSegmentsToTimeline(source, remaining), remaining);
-        expect(back.map((s) => [s.inSec, s.outSec])).toEqual([[10, 20], [80, 90]]);
+        const back = mapSegmentsFromTimeline(
+            mapSegmentsToTimeline(source, remaining),
+            remaining
+        );
+        expect(back.map((s) => [s.inSec, s.outSec])).toEqual([
+            [10, 20],
+            [80, 90],
+        ]);
     });
 
     it('keeps ids and labels through both directions', () => {
-        const mapped = mapSegmentsToTimeline([seg('a', 80, 90, 'Outro')], remaining);
+        const mapped = mapSegmentsToTimeline(
+            [seg('a', 80, 90, 'Outro')],
+            remaining
+        );
         expect(mapped[0].id).toBe('a');
         expect(mapped[0].label).toBe('Outro');
+    });
+
+    it('resolves a second deletion against the shortened timeline, not the source', () => {
+        const afterFirstDeletion = invertRanges([trim(10, 20)], 120);
+
+        const [recorded] = mapSegmentsFromTimeline(
+            [seg('second', 10, 20)],
+            afterFirstDeletion
+        );
+
+        expect([recorded.inSec, recorded.outSec]).toEqual([20, 30]);
     });
 });
 

@@ -19,7 +19,10 @@ import type {
     EncodeConfig,
     TrimSegment,
 } from '@luminary-media-converter/encode-config';
-import { SegmentEditor, formatTime } from '@luminary-media-converter/segment-editor';
+import {
+    SegmentEditor,
+    formatTime,
+} from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
 import {
     useChapters,
@@ -112,13 +115,15 @@ const trimDeletions = useTrimDeletions(editorSegments);
  */
 function onTimelineSegmentRemoved(segment: Segment) {
     if (!showProbeConfig.value) return;
-    trimDeletions.record(segment);
+    const [inSourceTime] = timelineIsShortened.value
+        ? mapSegmentsFromTimeline([segment], timelineRanges.value)
+        : [segment];
+    trimDeletions.record(inSourceTime);
 }
 
 const removedTrimSegments = computed(() =>
     showProbeConfig.value ? trimDeletions.removed.value : []
 );
-
 
 const outputPanelRef = ref<InstanceType<typeof SessionOutputPanel> | null>(
     null
@@ -708,10 +713,10 @@ const displaySegmentFormat = computed<SegmentFormat | string | undefined>(
 // ---------------------------------------------------------------------------
 
 const { etaDisplay } = useEncodeEta(
-    () => poller.pipelineProgress.value?.encoding ?? poller.progress.value,
+    () => poller.pipelineProgress.value?.encoding ?? poller.progress.value
 );
 const { etaDisplay: ingestEtaDisplay } = useEncodeEta(() =>
-    currentStatus.value === 'uploading' ? poller.progress.value : null,
+    currentStatus.value === 'uploading' ? poller.progress.value : null
 );
 
 // ---------------------------------------------------------------------------
@@ -756,7 +761,10 @@ const effectiveKeepRanges = computed<TrimSegment[]>(() => {
 });
 
 const deletedRanges = computed<TrimSegment[]>(() =>
-    trimDeletions.removed.value.map((s) => ({ inSec: s.inSec, outSec: s.outSec }))
+    trimDeletions.removed.value.map((s) => ({
+        inSec: s.inSec,
+        outSec: s.outSec,
+    }))
 );
 
 const timelineRanges = computed<TrimSegment[]>(() =>
@@ -1377,8 +1385,7 @@ watch(
             chaptersSaveError.value = null;
             await chapters.load(id);
         } catch (err) {
-            chaptersSaveError.value =
-                errorMessage(err);
+            chaptersSaveError.value = errorMessage(err);
         }
     },
     { immediate: true }
@@ -1389,8 +1396,7 @@ async function onSaveChapters() {
     try {
         await chapters.saveRemote();
     } catch (err) {
-        chaptersSaveError.value =
-            errorMessage(err);
+        chaptersSaveError.value = errorMessage(err);
     }
 }
 
@@ -1400,8 +1406,7 @@ async function onDiscardChapters() {
         await chapters.discardLocal();
         syncChaptersFromTimeline();
     } catch (err) {
-        chaptersSaveError.value =
-            errorMessage(err);
+        chaptersSaveError.value = errorMessage(err);
     }
 }
 
@@ -2011,12 +2016,19 @@ onUnmounted(() => {
                                     </div>
                                 </div>
 
-                                <!-- Encode config panel -->
+                                <!--
+                                    Encode config panel — hidden rather than
+                                    unmounted when the aside shows another tab.
+                                    Start Encoding reads the config straight off
+                                    this form, so unmounting it made a perfectly
+                                    valid config look invalid to anyone who
+                                    started their encode from the Clips tab.
+                                -->
                                 <div
-                                    v-if="
-                                        showProbeConfig &&
-                                        (!showChaptersBesidePlayer ||
-                                            encodeSidePanelTab === 'encode')
+                                    v-if="showProbeConfig"
+                                    v-show="
+                                        !showChaptersBesidePlayer ||
+                                        encodeSidePanelTab === 'encode'
                                     "
                                     class="min-h-0 flex-1 overflow-y-auto"
                                 >
@@ -2129,31 +2141,58 @@ onUnmounted(() => {
                                         v-if="removedTrimSegments.length > 0"
                                         class="shrink-0 mt-3 rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-800/50"
                                     >
-                                        <div class="mb-2 flex items-center justify-between gap-2">
-                                            <span class="text-xs font-medium text-slate-600 dark:text-slate-300">
-                                                Removed ({{ removedTrimSegments.length }})
+                                        <div
+                                            class="mb-2 flex items-center justify-between gap-2"
+                                        >
+                                            <span
+                                                class="text-xs font-medium text-slate-600 dark:text-slate-300"
+                                            >
+                                                Removed ({{
+                                                    removedTrimSegments.length
+                                                }})
                                             </span>
                                             <button
-                                                v-if="removedTrimSegments.length > 1"
+                                                v-if="
+                                                    removedTrimSegments.length >
+                                                    1
+                                                "
                                                 type="button"
                                                 class="chapter-toolbar-muted"
-                                                @click="trimDeletions.restoreAll"
-                                            >Restore all</button>
+                                                @click="
+                                                    trimDeletions.restoreAll
+                                                "
+                                            >
+                                                Restore all
+                                            </button>
                                         </div>
-                                        <ul class="max-h-40 space-y-1 overflow-y-auto">
+                                        <ul
+                                            class="max-h-40 space-y-1 overflow-y-auto"
+                                        >
                                             <li
                                                 v-for="seg in removedTrimSegments"
                                                 :key="seg.id"
                                                 class="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1 dark:bg-slate-900/40"
                                             >
-                                                <span class="font-mono text-xs text-slate-600 dark:text-slate-300">
-                                                    {{ formatTime(seg.inSec) }} – {{ formatTime(seg.outSec) }}
+                                                <span
+                                                    class="font-mono text-xs text-slate-600 dark:text-slate-300"
+                                                >
+                                                    {{
+                                                        formatTime(seg.inSec)
+                                                    }}
+                                                    –
+                                                    {{ formatTime(seg.outSec) }}
                                                 </span>
                                                 <button
                                                     type="button"
                                                     class="chapter-toolbar-muted"
-                                                    @click="trimDeletions.restore(seg.id)"
-                                                >Undo</button>
+                                                    @click="
+                                                        trimDeletions.restore(
+                                                            seg.id
+                                                        )
+                                                    "
+                                                >
+                                                    Undo
+                                                </button>
                                             </li>
                                         </ul>
                                     </div>
@@ -2378,8 +2417,8 @@ onUnmounted(() => {
                             :show-trim-segment-editor="showTrimSegmentEditor"
                             :thumbnail-vtt-url="thumbnailVttUrl"
                             :waveform-peaks="timelineWaveformPeaks"
-                                @segment-removed="onTimelineSegmentRemoved"
-                                    :is-completed="isCompleted"
+                            @segment-removed="onTimelineSegmentRemoved"
+                            :is-completed="isCompleted"
                             :can-edit-trim-timeline="canEditTrimTimeline"
                             :can-edit-chapters-playback="
                                 canEditChaptersPlayback
