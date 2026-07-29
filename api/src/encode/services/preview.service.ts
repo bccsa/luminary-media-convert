@@ -588,9 +588,18 @@ export class PreviewService {
             return args;
         }
 
-        // HW accel input flags must come before -i
+        // HW accel input flags must come before -i.
+        //
+        // `-hwaccel_output_format` is not optional here: without it CUDA decodes
+        // on the GPU and then hands back software frames, while `scale_cuda`
+        // below only accepts frames that stayed on the device. FFmpeg cannot
+        // bridge the two and refuses to build the filter graph ("Impossible to
+        // convert between the formats supported by the filter ... and
+        // auto_scale_0"), so every segment failed over to CPU. Copy-mode
+        // renditions never reach the filter, which is why this only showed on
+        // sources that have to be transcoded — HEVC and the like.
         if (useGpu && accelMode === 'nvidia') {
-            args.push('-hwaccel', 'cuda');
+            args.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda');
         } else if (useGpu && accelMode === 'apple') {
             args.push('-hwaccel', 'videotoolbox', '-hwaccel_output_format', 'videotoolbox_vld');
         }

@@ -1664,6 +1664,28 @@ describe('PreviewService', () => {
             expect(args[vfIdx + 1]).toMatch(/^scale_cuda=/);
         });
 
+        it('keeps decoded frames on the GPU, so scale_cuda can accept them', async () => {
+            // Asserting `-hwaccel cuda` alone is what let this ship broken:
+            // without an output format CUDA decodes on the device and hands back
+            // software frames, `scale_cuda` refuses them, and every segment
+            // failed over to CPU while still claiming to be running on nvidia.
+            const svc = await initHevcService('nvidia');
+
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+            await svc.getSegmentStream('s1', 0, 0);
+
+            const args = mockExecFile.mock.calls[0][1] as string[];
+            const fmtIdx = args.indexOf('-hwaccel_output_format');
+            expect(fmtIdx).toBeGreaterThan(-1);
+            expect(args[fmtIdx + 1]).toBe('cuda');
+            // Input flags only count before -i.
+            expect(fmtIdx).toBeLessThan(args.indexOf('-i'));
+        });
+
         it('should use h264_videotoolbox and scale_vt for apple mode', async () => {
             const svc = await initHevcService('apple');
 
