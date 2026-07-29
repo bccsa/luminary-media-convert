@@ -348,8 +348,35 @@ describe('SegmentEditor — selection', () => {
         expect(selAll[selAll.length - 1][0]).toEqual([]);
     });
 
+    it('keeps the selection to one clip in trim, whatever modifier is held', async () => {
+        // Trimming picks one clip, adjusts it, keeps or drops it. A stray
+        // modifier-click adding a second would put it in the firing line of the
+        // next delete.
+        const w = mountEditor({
+            segments: [seg(1, 0, 5), seg(2, 10, 15)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        const segEls = w.findAll('.se-segment');
+        mouseAt(segEls[0].element as HTMLElement, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+        mouseAt(segEls[1].element as HTMLElement, 'mousedown', 12, { shiftKey: true });
+        mouseAt(document.body, 'mouseup', 12);
+        await flush();
+
+        const selectEvents = w.emitted('select')!;
+        const latest = selectEvents[selectEvents.length - 1][0] as string[];
+        expect(latest).toEqual(['seg-2']);
+    });
+
     it('toggles selection additively with shift / meta / ctrl', async () => {
-        const w = mountEditor({ segments: [seg(1, 0, 5), seg(2, 10, 15)] });
+        // Chapters and subtitles keep multi-select: relabelling or clearing a run
+        // of cues at once is worth the modifier.
+        const w = mountEditor({
+            segments: [seg(1, 0, 5), seg(2, 10, 15)],
+            props: { mode: 'chapters' },
+        });
         await flush();
         const segEls = w.findAll('.se-segment');
         mouseAt(segEls[0].element as HTMLElement, 'mousedown', 2);
@@ -1191,6 +1218,16 @@ describe('SegmentEditor — exposed methods', () => {
         await buttons[2].trigger('click'); // Add
         await flush();
         expect(latestSegments(w)).toHaveLength(2);
+    });
+
+    it('clears everything from the toolbar, behind a confirm', async () => {
+        // Chapters and subtitles keep Clear All; trim replaced it with a delete
+        // that acts on the selection.
+        const w = mountEditor({
+            segments: [seg(1, 10, 20), seg(2, 30, 40)],
+            props: { mode: 'chapters' },
+        });
+        await flush();
         // Clear All becomes visible with segments present; clicking it opens a
         // confirm dialog rather than clearing immediately.
         const clear = w.findAll('.se-btn--danger')[0];
@@ -1742,7 +1779,10 @@ describe('SegmentEditor — removing segments', () => {
     it('offers a delete control on the segment', async () => {
         // Present in the DOM for every wide-enough block; revealed on hover or
         // selection by CSS, which jsdom does not evaluate.
-        const w = mountEditor({ segments: [seg(1, 10, 40)] });
+        const w = mountEditor({
+            segments: [seg(1, 10, 40)],
+            props: { mode: 'chapters' },
+        });
         await flush();
         expect(w.find('.se-segment-delete').exists()).toBe(true);
 
@@ -1754,17 +1794,108 @@ describe('SegmentEditor — removing segments', () => {
 
     it('leaves the control off blocks too narrow to hold it', async () => {
         // 1s of a 100s span is ~1% wide — a button there would cover the block.
-        const w = mountEditor({ segments: [seg(1, 10, 11)] });
+        const w = mountEditor({
+            segments: [seg(1, 10, 11)],
+            props: { mode: 'chapters' },
+        });
         await flush();
         expect(w.find('.se-segment-delete').exists()).toBe(false);
     });
 
     it('does not seek or start a drag when the delete control is pressed', async () => {
         const onSeek = vi.fn();
-        const w = mountEditor({ segments: [seg(1, 10, 40)], props: { onSeek } });
+        const w = mountEditor({
+            segments: [seg(1, 10, 40)],
+            props: { mode: 'chapters', onSeek },
+        });
         await flush();
         await w.find('.se-segment-delete').trigger('mousedown');
         expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it('keeps the hover delete control off trim clips entirely', async () => {
+        // The clip is where trimming drags and resizes happen; a remove button
+        // appearing under the cursor there was too easy to hit by accident. The
+        // controls bar carries the delete instead.
+        const w = mountEditor({
+            segments: [seg(1, 10, 40)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        expect(w.find('.se-segment-delete').exists()).toBe(false);
+    });
+});
+
+describe('SegmentEditor — the trim delete button', () => {
+    /** The single danger button in the trim toolbar. */
+    const deleteBtn = (w: ReturnType<typeof mountEditor>) =>
+        w.findAll('.se-toolbar .se-btn--danger')[0];
+
+    it('is disabled until a clip is selected', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        expect(deleteBtn(w).attributes('disabled')).toBeDefined();
+    });
+
+    it('deletes the selected clip and says which one went', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20), seg(2, 30, 40)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        const segEls = w.findAll('.se-segment');
+        mouseAt(segEls[0].element as HTMLElement, 'mousedown', 12);
+        mouseAt(document.body, 'mouseup', 12);
+        await flush();
+
+        expect(deleteBtn(w).attributes('disabled')).toBeUndefined();
+        await deleteBtn(w).trigger('click');
+        await flush();
+
+        expect(latestSegments(w).map((s) => s.id)).toEqual(['seg-2']);
+        // The removed-clips list beside the timeline is built from this.
+        expect(w.emitted('segment-removed')![0][0]).toMatchObject({ id: 'seg-1' });
+    });
+
+    it('leaves the deletion undoable', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20), seg(2, 30, 40)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        const segEls = w.findAll('.se-segment');
+        mouseAt(segEls[0].element as HTMLElement, 'mousedown', 12);
+        mouseAt(document.body, 'mouseup', 12);
+        await flush();
+        await deleteBtn(w).trigger('click');
+        await flush();
+
+        (w.vm as unknown as { undo: () => void }).undo();
+        await flush();
+        expect(latestSegments(w).map((s) => s.id)).toEqual(['seg-1', 'seg-2']);
+    });
+
+    it('announces a keyboard deletion too, not just a clicked one', async () => {
+        // The Delete key removed the clip without telling anyone, so anything
+        // tracking what had been cut missed keyboard deletions entirely.
+        const w = mountEditor({
+            segments: [seg(1, 10, 20)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        const segEls = w.findAll('.se-segment');
+        mouseAt(segEls[0].element as HTMLElement, 'mousedown', 12);
+        mouseAt(document.body, 'mouseup', 12);
+        await flush();
+
+        await w.find('.se-timeline').trigger('keydown', { key: 'Delete' });
+        await flush();
+
+        expect(latestSegments(w)).toHaveLength(0);
+        expect(w.emitted('segment-removed')![0][0]).toMatchObject({ id: 'seg-1' });
     });
 });
 

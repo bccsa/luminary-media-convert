@@ -223,6 +223,33 @@ function clearSelection() {
     emit('select', []);
 }
 
+const hasSelection = computed(() => selectedIds.value.size > 0);
+
+/**
+ * Trimming is a single-selection activity: one clip is picked, adjusted, and
+ * kept or dropped. Multi-select existed for chapters and subtitles, where
+ * relabelling or clearing a run of cues at once is useful, and it only made
+ * trimming easier to get wrong — a stray modifier-click could add a second clip
+ * to the selection and the next delete would take both.
+ */
+const multiSelectAllowed = computed(() => props.mode !== 'trim');
+
+/**
+ * Removes whatever is selected, as one undoable step.
+ *
+ * Shared by the delete button and the Delete/Backspace keys so both behave
+ * identically. Each removal is announced, which the keyboard path previously
+ * did not do — consumers tracking what was cut (the removed-clips list beside
+ * the timeline) silently missed anything deleted with the keyboard.
+ */
+function deleteSelected() {
+    if (selectedIds.value.size === 0) return;
+    const removed = segments.value.filter((s) => selectedIds.value.has(s.id));
+    commitSegments(segments.value.filter((s) => !selectedIds.value.has(s.id)));
+    clearSelection();
+    for (const seg of removed) emit('segment-removed', { ...seg });
+}
+
 const primarySelectedId = computed(() => {
     if (selectedIds.value.size === 0) return null;
     const ids = Array.from(selectedIds.value);
@@ -474,7 +501,8 @@ function onSegmentMouseDown(seg: Segment, e: MouseEvent) {
     if ((e.target as HTMLElement).closest('.se-segment-handle')) return;
     e.stopPropagation();
     (timelineRef.value as HTMLDivElement | null)?.focus();
-    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    const additive =
+        multiSelectAllowed.value && (e.shiftKey || e.metaKey || e.ctrlKey);
     if (additive) toggleSelection(seg.id);
     else setSelection([seg.id]);
 
@@ -839,9 +867,7 @@ function onKeyDown(e: KeyboardEvent) {
         case 'Delete': case 'Backspace': {
             if (selectedIds.value.size > 0) {
                 e.preventDefault();
-                const keep = segments.value.filter((s) => !selectedIds.value.has(s.id));
-                commitSegments(keep);
-                clearSelection();
+                deleteSelected();
             }
             return;
         }
@@ -1371,7 +1397,18 @@ defineExpose({
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
                 <slot name="toolbar-before-clear" />
                 <button
-                    v-if="segments.length > 0"
+                    v-if="mode === 'trim'"
+                    type="button"
+                    class="se-btn se-btn--danger"
+                    :disabled="!hasSelection"
+                    :title="hasSelection ? 'Delete the selected clip · Delete — undo with ⌘/Ctrl + Z' : 'Select a clip on the timeline to delete it'"
+                    @click="deleteSelected"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
+                    Delete
+                </button>
+                <button
+                    v-else-if="segments.length > 0"
                     type="button"
                     class="se-btn se-btn--danger"
                     @click="confirmClearOpen = true"
@@ -1515,8 +1552,14 @@ defineExpose({
                         v-if="labelsVisible && ((seg.outSec - seg.inSec) / visibleSpan) * 100 > 4"
                         class="se-segment-label"
                     >{{ seg.label || `#${segments.indexOf(seg) + 1}` }}</span>
+                    <!--
+                        Not in trim: the controls bar carries a delete button that
+                        acts on the selection, and a second way to remove a clip —
+                        one that fires on hover, right where the clip is dragged
+                        and resized — was too easy to hit by accident.
+                    -->
                     <button
-                        v-if="((seg.outSec - seg.inSec) / visibleSpan) * 100 > 6"
+                        v-if="mode !== 'trim' && ((seg.outSec - seg.inSec) / visibleSpan) * 100 > 6"
                         type="button"
                         class="se-segment-delete"
                         title="Remove segment"
@@ -1754,7 +1797,18 @@ defineExpose({
                     title="Redo"
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
                 <button
-                    v-if="segments.length > 0"
+                    v-if="mode === 'trim'"
+                    type="button"
+                    class="se-btn se-btn--danger"
+                    :disabled="!hasSelection"
+                    :title="hasSelection ? 'Delete the selected clip · Delete — undo with ⌘/Ctrl + Z' : 'Select a clip on the timeline to delete it'"
+                    @click="deleteSelected"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
+                    Delete
+                </button>
+                <button
+                    v-else-if="segments.length > 0"
                     type="button"
                     class="se-btn se-btn--danger"
                     @click="confirmClearOpen = true"
