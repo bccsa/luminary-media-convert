@@ -41,13 +41,31 @@ describe('formatVttTime', () => {
 describe('ThumbnailService', () => {
     let service: ThumbnailService;
 
+    /**
+     * The sprite-generation invocation, found by what it writes rather than by
+     * position: capability probes run before it, and counting them made every
+     * assertion here break the moment one was added.
+     */
+    function spriteCall(): string[] {
+        const call = mockExecFile.mock.calls.find((c: any[]) =>
+            (c[1] as string[])?.some(
+                (a) => typeof a === 'string' && a.includes('sprite_%03d')
+            )
+        );
+        if (!call) throw new Error('ffmpeg was never asked to write sprites');
+        return call[1] as string[];
+    }
+
     beforeEach(() => {
         service = new ThumbnailService();
         mockExecFile.mockReset();
         // Default mock: detectSpriteFormat resolves with libwebp
         mockExecFile.mockImplementation((...args: any[]) => {
             const cb = args[args.length - 1];
-            cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+            cb(null, {
+                stdout: ' V..... libwebp          libwebp WebP',
+                stderr: '',
+            });
         });
     });
 
@@ -120,8 +138,136 @@ describe('ThumbnailService', () => {
             const spriteFiles = ['sprite_001.webp'];
             const vtt = service.buildVtt(130, spriteFiles, 160, 90);
 
-            const timeLines = vtt.split('\n').filter((l) => l.includes(' --> '));
+            const timeLines = vtt
+                .split('\n')
+                .filter((l) => l.includes(' --> '));
             expect(timeLines).toHaveLength(25);
+        });
+    });
+
+    describe('decode acceleration and timeout', () => {
+        /** Drive a generation run, controlling what `ffmpeg -hwaccels` reports. */
+        async function run(opts: {
+            hwaccels: string;
+            duration?: number;
+            failAccelerated?: boolean;
+        }) {
+            const tmpDir = mkdtempSync(join(tmpdir(), 'thumb-accel-'));
+            mockExecFile.mockImplementation((...args: any[]) => {
+                const cb = args[args.length - 1];
+                const ffargs = args[1] as string[];
+                if (ffargs[0] === '-encoders') {
+                    cb(null, {
+                        stdout: ' V..... libwebp libwebp WebP',
+                        stderr: '',
+                    });
+                    return;
+                }
+                if (ffargs[0] === '-hwaccels') {
+                    cb(null, { stdout: opts.hwaccels, stderr: '' });
+                    return;
+                }
+                if (opts.failAccelerated && ffargs.includes('-hwaccel')) {
+                    cb(new Error('Function not implemented'), null);
+                    return;
+                }
+                writeFileSync(
+                    join(tmpDir, 'thumbnails', 'sprite_001.webp'),
+                    'fake-sprite'
+                );
+                cb(null, { stdout: '', stderr: '' });
+            });
+
+            const result = await service.generateThumbnails({
+                inputPath: '/tmp/test.mkv',
+                outputDir: tmpDir,
+                duration: opts.duration ?? 60,
+                sourceWidth: 1920,
+                sourceHeight: 1080,
+            });
+            rmSync(tmpDir, { recursive: true, force: true });
+            return result;
+        }
+
+        it('decodes on the GPU when CUDA is available', async () => {
+            await run({
+                hwaccels: 'Hardware acceleration methods:\ncuda\nvaapi\n',
+            });
+
+            const args = spriteCall();
+            expect(args.slice(0, 2)).toEqual(['-hwaccel', 'cuda']);
+        });
+
+        it('never asks CUDA to keep the frames on the device', async () => {
+            // scale and tile are software filters, so the frames have to come
+            // back to system memory. Requesting a CUDA output format here would
+            // break the filter graph — the mirror image of the preview encoder,
+            // where omitting it is what breaks scale_cuda.
+            await run({ hwaccels: 'cuda\n' });
+
+            expect(spriteCall()).not.toContain('-hwaccel_output_format');
+        });
+
+        it('decodes in software when no acceleration is offered', async () => {
+            await run({ hwaccels: 'Hardware acceleration methods:\n' });
+
+            expect(spriteCall()).not.toContain('-hwaccel');
+        });
+
+        it('retries in software when the GPU cannot decode the source', async () => {
+            // A GPU that does not handle this codec should cost the storyboard
+            // nothing — it should fall back, not give up.
+            const result = await run({
+                hwaccels: 'cuda\n',
+                failAccelerated: true,
+            });
+
+            expect(result).toEqual({
+                vttRelativePath: 'thumbnails/thumbnails.vtt',
+            });
+            const attempts = mockExecFile.mock.calls.filter((c: any[]) =>
+                (c[1] as string[])?.some(
+                    (a) => typeof a === 'string' && a.includes('sprite_%03d')
+                )
+            );
+            expect(attempts).toHaveLength(2);
+            expect(attempts[0][1]).toContain('-hwaccel');
+            expect(attempts[1][1]).not.toContain('-hwaccel');
+        });
+
+        it('gives a long source proportionally longer to finish', async () => {
+            // The pass walks the whole file, so a fixed cap cut an hour-long
+            // video off after a third of it and left the timeline half-drawn.
+            await run({ hwaccels: '', duration: 3600 });
+
+            const call = mockExecFile.mock.calls.find((c: any[]) =>
+                (c[1] as string[])?.some(
+                    (a) => typeof a === 'string' && a.includes('sprite_%03d')
+                )
+            );
+            expect(call[2].timeout).toBe(900_000);
+        });
+
+        it('keeps the old five minutes as the floor for short clips', async () => {
+            await run({ hwaccels: '', duration: 30 });
+
+            const call = mockExecFile.mock.calls.find((c: any[]) =>
+                (c[1] as string[])?.some(
+                    (a) => typeof a === 'string' && a.includes('sprite_%03d')
+                )
+            );
+            expect(call[2].timeout).toBe(300_000);
+        });
+
+        it('caps the budget so a pathological source cannot hang forever', async () => {
+            await run({ hwaccels: '', duration: 36_000 });
+
+            const call = mockExecFile.mock.calls.find((c: any[]) =>
+                (c[1] as string[])?.some(
+                    (a) => typeof a === 'string' && a.includes('sprite_%03d')
+                )
+            );
+            expect(call[2].timeout).toBe(1_800_000);
         });
     });
 
@@ -135,13 +281,24 @@ describe('ThumbnailService', () => {
                 mockExecFile.mockImplementation((...args: any[]) => {
                     const cb = args[args.length - 1];
                     callCount++;
-                    if (callCount === 1) {
+                    const ffargs = args[1] as string[];
+                    if (ffargs[0] === '-hwaccels') {
+                        cb(null, { stdout: '', stderr: '' });
+                        return;
+                    }
+                    if (ffargs[0] === '-encoders') {
                         // detectSpriteFormat: ffmpeg -encoders
-                        cb(null, { stdout: ' V..... libwebp          libwebp WebP image', stderr: '' });
+                        cb(null, {
+                            stdout: ' V..... libwebp          libwebp WebP image',
+                            stderr: '',
+                        });
                     } else {
                         // ffmpeg sprite generation — create a sprite file to simulate output
                         const thumbnailDir = join(tmpDir, 'thumbnails');
-                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        writeFileSync(
+                            join(thumbnailDir, 'sprite_001.webp'),
+                            'fake-sprite'
+                        );
                         cb(null, { stdout: '', stderr: '' });
                     }
                 });
@@ -154,14 +311,16 @@ describe('ThumbnailService', () => {
                     sourceHeight: 1080,
                 });
 
-                expect(result).toEqual({ vttRelativePath: 'thumbnails/thumbnails.vtt' });
+                expect(result).toEqual({
+                    vttRelativePath: 'thumbnails/thumbnails.vtt',
+                });
 
                 // Verify the first call was ffmpeg -encoders
                 expect(mockExecFile.mock.calls[0][0]).toBe('ffmpeg');
                 expect(mockExecFile.mock.calls[0][1]).toEqual(['-encoders']);
 
                 // Verify the second call used libwebp encoder
-                const spriteArgs = mockExecFile.mock.calls[1][1];
+                const spriteArgs = spriteCall();
                 expect(spriteArgs).toContain('libwebp');
 
                 // Verify sprite pattern uses .webp extension
@@ -179,11 +338,22 @@ describe('ThumbnailService', () => {
                 mockExecFile.mockImplementation((...args: any[]) => {
                     const cb = args[args.length - 1];
                     callCount++;
-                    if (callCount === 1) {
-                        cb(null, { stdout: ' V..... mjpeg            MJPEG encoder', stderr: '' });
+                    const ffargs = args[1] as string[];
+                    if (ffargs[0] === '-hwaccels') {
+                        cb(null, { stdout: '', stderr: '' });
+                        return;
+                    }
+                    if (ffargs[0] === '-encoders') {
+                        cb(null, {
+                            stdout: ' V..... mjpeg            MJPEG encoder',
+                            stderr: '',
+                        });
                     } else {
                         const thumbnailDir = join(tmpDir, 'thumbnails');
-                        writeFileSync(join(thumbnailDir, 'sprite_001.jpg'), 'fake-sprite');
+                        writeFileSync(
+                            join(thumbnailDir, 'sprite_001.jpg'),
+                            'fake-sprite'
+                        );
                         cb(null, { stdout: '', stderr: '' });
                     }
                 });
@@ -196,10 +366,12 @@ describe('ThumbnailService', () => {
                     sourceHeight: 1080,
                 });
 
-                expect(result).toEqual({ vttRelativePath: 'thumbnails/thumbnails.vtt' });
+                expect(result).toEqual({
+                    vttRelativePath: 'thumbnails/thumbnails.vtt',
+                });
 
                 // Verify mjpeg encoder was used
-                const spriteArgs = mockExecFile.mock.calls[1][1];
+                const spriteArgs = spriteCall();
                 expect(spriteArgs).toContain('mjpeg');
 
                 // Verify sprite pattern uses .jpg extension
@@ -213,7 +385,10 @@ describe('ThumbnailService', () => {
         it('should return null when no suitable encoder is available', async () => {
             mockExecFile.mockImplementation((...args: any[]) => {
                 const cb = args[args.length - 1];
-                cb(null, { stdout: ' V..... libx264          H.264 encoder', stderr: '' });
+                cb(null, {
+                    stdout: ' V..... libx264          H.264 encoder',
+                    stderr: '',
+                });
             });
 
             const result = await service.generateThumbnails({
@@ -253,13 +428,24 @@ describe('ThumbnailService', () => {
                 mockExecFile.mockImplementation((...args: any[]) => {
                     const cb = args[args.length - 1];
                     callCount++;
-                    if (callCount === 1) {
+                    const ffargs = args[1] as string[];
+                    if (ffargs[0] === '-hwaccels') {
+                        cb(null, { stdout: '', stderr: '' });
+                        return;
+                    }
+                    if (ffargs[0] === '-encoders') {
                         // First call: detectSpriteFormat
-                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                        cb(null, {
+                            stdout: ' V..... libwebp          libwebp WebP',
+                            stderr: '',
+                        });
                     } else {
                         // All subsequent calls: sprite generation — create sprite files
                         const thumbnailDir = join(tmpDir, 'thumbnails');
-                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        writeFileSync(
+                            join(thumbnailDir, 'sprite_001.webp'),
+                            'fake-sprite'
+                        );
                         cb(null, { stdout: '', stderr: '' });
                     }
                 });
@@ -273,7 +459,8 @@ describe('ThumbnailService', () => {
                     sourceHeight: 1080,
                 });
 
-                expect(mockExecFile).toHaveBeenCalledTimes(2); // detect + generate
+                // encoder probe + hwaccel probe + generate
+                expect(mockExecFile).toHaveBeenCalledTimes(3);
 
                 // Reset call count tracking but keep the mock
                 const prevCallCount = mockExecFile.mock.calls.length;
@@ -284,7 +471,10 @@ describe('ThumbnailService', () => {
                 mockExecFile.mockImplementation((...args: any[]) => {
                     const cb = args[args.length - 1];
                     const thumbnailDir = join(tmpDir2, 'thumbnails');
-                    writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                    writeFileSync(
+                        join(thumbnailDir, 'sprite_001.webp'),
+                        'fake-sprite'
+                    );
                     cb(null, { stdout: '', stderr: '' });
                 });
 
@@ -300,7 +490,8 @@ describe('ThumbnailService', () => {
                 expect(mockExecFile).toHaveBeenCalledTimes(prevCallCount + 1);
 
                 // That call should NOT be ffmpeg -encoders
-                const lastCall = mockExecFile.mock.calls[mockExecFile.mock.calls.length - 1];
+                const lastCall =
+                    mockExecFile.mock.calls[mockExecFile.mock.calls.length - 1];
                 expect(lastCall[1]).not.toEqual(['-encoders']);
 
                 rmSync(tmpDir2, { recursive: true, force: true });
@@ -369,8 +560,16 @@ describe('ThumbnailService', () => {
                 mockExecFile.mockImplementation((...args: any[]) => {
                     const cb = args[args.length - 1];
                     callCount++;
-                    if (callCount === 1) {
-                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    const ffargs = args[1] as string[];
+                    if (ffargs[0] === '-hwaccels') {
+                        cb(null, { stdout: '', stderr: '' });
+                        return;
+                    }
+                    if (ffargs[0] === '-encoders') {
+                        cb(null, {
+                            stdout: ' V..... libwebp          libwebp WebP',
+                            stderr: '',
+                        });
                     } else {
                         cb(new Error('ffmpeg exited with code 1'), null, null);
                     }
@@ -397,8 +596,16 @@ describe('ThumbnailService', () => {
                 mockExecFile.mockImplementation((...args: any[]) => {
                     const cb = args[args.length - 1];
                     callCount++;
-                    if (callCount === 1) {
-                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    const ffargs = args[1] as string[];
+                    if (ffargs[0] === '-hwaccels') {
+                        cb(null, { stdout: '', stderr: '' });
+                        return;
+                    }
+                    if (ffargs[0] === '-encoders') {
+                        cb(null, {
+                            stdout: ' V..... libwebp          libwebp WebP',
+                            stderr: '',
+                        });
                     } else {
                         // ffmpeg succeeds but produces no sprite files
                         cb(null, { stdout: '', stderr: '' });
@@ -426,11 +633,22 @@ describe('ThumbnailService', () => {
                 mockExecFile.mockImplementation((...args: any[]) => {
                     const cb = args[args.length - 1];
                     callCount++;
-                    if (callCount === 1) {
-                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    const ffargs = args[1] as string[];
+                    if (ffargs[0] === '-hwaccels') {
+                        cb(null, { stdout: '', stderr: '' });
+                        return;
+                    }
+                    if (ffargs[0] === '-encoders') {
+                        cb(null, {
+                            stdout: ' V..... libwebp          libwebp WebP',
+                            stderr: '',
+                        });
                     } else {
                         const thumbnailDir = join(tmpDir, 'thumbnails');
-                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        writeFileSync(
+                            join(thumbnailDir, 'sprite_001.webp'),
+                            'fake-sprite'
+                        );
                         cb(null, { stdout: '', stderr: '' });
                     }
                 });
@@ -444,7 +662,7 @@ describe('ThumbnailService', () => {
                     sourceHeight: 1080,
                 });
 
-                const spriteArgs = mockExecFile.mock.calls[1][1] as string[];
+                const spriteArgs = spriteCall() as string[];
                 const vfArg = spriteArgs[spriteArgs.indexOf('-vf') + 1];
                 expect(vfArg).toContain('scale=160:90');
             } finally {
@@ -459,11 +677,22 @@ describe('ThumbnailService', () => {
                 mockExecFile.mockImplementation((...args: any[]) => {
                     const cb = args[args.length - 1];
                     callCount++;
-                    if (callCount === 1) {
-                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    const ffargs = args[1] as string[];
+                    if (ffargs[0] === '-hwaccels') {
+                        cb(null, { stdout: '', stderr: '' });
+                        return;
+                    }
+                    if (ffargs[0] === '-encoders') {
+                        cb(null, {
+                            stdout: ' V..... libwebp          libwebp WebP',
+                            stderr: '',
+                        });
                     } else {
                         const thumbnailDir = join(tmpDir, 'thumbnails');
-                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        writeFileSync(
+                            join(thumbnailDir, 'sprite_001.webp'),
+                            'fake-sprite'
+                        );
                         cb(null, { stdout: '', stderr: '' });
                     }
                 });
@@ -477,7 +706,7 @@ describe('ThumbnailService', () => {
                     sourceHeight: 720,
                 });
 
-                const spriteArgs = mockExecFile.mock.calls[1][1] as string[];
+                const spriteArgs = spriteCall() as string[];
                 const vfArg = spriteArgs[spriteArgs.indexOf('-vf') + 1];
                 expect(vfArg).toContain('scale=160:90');
             } finally {
@@ -492,11 +721,22 @@ describe('ThumbnailService', () => {
                 mockExecFile.mockImplementation((...args: any[]) => {
                     const cb = args[args.length - 1];
                     callCount++;
-                    if (callCount === 1) {
-                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    const ffargs = args[1] as string[];
+                    if (ffargs[0] === '-hwaccels') {
+                        cb(null, { stdout: '', stderr: '' });
+                        return;
+                    }
+                    if (ffargs[0] === '-encoders') {
+                        cb(null, {
+                            stdout: ' V..... libwebp          libwebp WebP',
+                            stderr: '',
+                        });
                     } else {
                         const thumbnailDir = join(tmpDir, 'thumbnails');
-                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        writeFileSync(
+                            join(thumbnailDir, 'sprite_001.webp'),
+                            'fake-sprite'
+                        );
                         cb(null, { stdout: '', stderr: '' });
                     }
                 });
@@ -511,7 +751,7 @@ describe('ThumbnailService', () => {
                     sourceHeight: 200,
                 });
 
-                const spriteArgs = mockExecFile.mock.calls[1][1] as string[];
+                const spriteArgs = spriteCall() as string[];
                 const vfArg = spriteArgs[spriteArgs.indexOf('-vf') + 1];
                 expect(vfArg).toContain('scale=160:108');
 
@@ -530,11 +770,22 @@ describe('ThumbnailService', () => {
                 mockExecFile.mockImplementation((...args: any[]) => {
                     const cb = args[args.length - 1];
                     callCount++;
-                    if (callCount === 1) {
-                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    const ffargs = args[1] as string[];
+                    if (ffargs[0] === '-hwaccels') {
+                        cb(null, { stdout: '', stderr: '' });
+                        return;
+                    }
+                    if (ffargs[0] === '-encoders') {
+                        cb(null, {
+                            stdout: ' V..... libwebp          libwebp WebP',
+                            stderr: '',
+                        });
                     } else {
                         const thumbnailDir = join(tmpDir, 'thumbnails');
-                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        writeFileSync(
+                            join(thumbnailDir, 'sprite_001.webp'),
+                            'fake-sprite'
+                        );
                         cb(null, { stdout: '', stderr: '' });
                     }
                 });
@@ -547,7 +798,9 @@ describe('ThumbnailService', () => {
                     sourceHeight: 1080,
                 });
 
-                expect(result).toEqual({ vttRelativePath: 'thumbnails/thumbnails.vtt' });
+                expect(result).toEqual({
+                    vttRelativePath: 'thumbnails/thumbnails.vtt',
+                });
 
                 // Verify thumbnails directory was created
                 const thumbnailDir = join(tmpDir, 'thumbnails');
@@ -556,7 +809,10 @@ describe('ThumbnailService', () => {
 
                 // Verify VTT content
                 const { readFileSync } = await import('fs');
-                const vttContent = readFileSync(join(thumbnailDir, 'thumbnails.vtt'), 'utf-8');
+                const vttContent = readFileSync(
+                    join(thumbnailDir, 'thumbnails.vtt'),
+                    'utf-8'
+                );
                 expect(vttContent).toContain('WEBVTT');
                 expect(vttContent).toContain('sprite_001.webp');
             } finally {
@@ -571,11 +827,22 @@ describe('ThumbnailService', () => {
                 mockExecFile.mockImplementation((...args: any[]) => {
                     const cb = args[args.length - 1];
                     callCount++;
-                    if (callCount === 1) {
-                        cb(null, { stdout: ' V..... libwebp          libwebp WebP', stderr: '' });
+                    const ffargs = args[1] as string[];
+                    if (ffargs[0] === '-hwaccels') {
+                        cb(null, { stdout: '', stderr: '' });
+                        return;
+                    }
+                    if (ffargs[0] === '-encoders') {
+                        cb(null, {
+                            stdout: ' V..... libwebp          libwebp WebP',
+                            stderr: '',
+                        });
                     } else {
                         const thumbnailDir = join(tmpDir, 'thumbnails');
-                        writeFileSync(join(thumbnailDir, 'sprite_001.webp'), 'fake-sprite');
+                        writeFileSync(
+                            join(thumbnailDir, 'sprite_001.webp'),
+                            'fake-sprite'
+                        );
                         cb(null, { stdout: '', stderr: '' });
                     }
                 });
@@ -589,7 +856,15 @@ describe('ThumbnailService', () => {
                 });
 
                 // Verify sprite generation call args
-                const [cmd, args, opts] = mockExecFile.mock.calls[1];
+                const spriteIdx = mockExecFile.mock.calls.findIndex(
+                    (c: any[]) =>
+                        (c[1] as string[])?.some(
+                            (a) =>
+                                typeof a === 'string' &&
+                                a.includes('sprite_%03d')
+                        )
+                );
+                const [cmd, args, opts] = mockExecFile.mock.calls[spriteIdx];
                 expect(cmd).toBe('ffmpeg');
                 expect(args).toContain('-i');
                 expect(args).toContain('/tmp/test.mp4');
@@ -619,11 +894,22 @@ describe('ThumbnailService', () => {
                 mockExecFile.mockImplementation((...args: any[]) => {
                     const cb = args[args.length - 1];
                     callCount++;
-                    if (callCount === 1) {
-                        cb(null, { stdout: ' V..... mjpeg            MJPEG encoder', stderr: '' });
+                    const ffargs = args[1] as string[];
+                    if (ffargs[0] === '-hwaccels') {
+                        cb(null, { stdout: '', stderr: '' });
+                        return;
+                    }
+                    if (ffargs[0] === '-encoders') {
+                        cb(null, {
+                            stdout: ' V..... mjpeg            MJPEG encoder',
+                            stderr: '',
+                        });
                     } else {
                         const thumbnailDir = join(tmpDir, 'thumbnails');
-                        writeFileSync(join(thumbnailDir, 'sprite_001.jpg'), 'fake-sprite');
+                        writeFileSync(
+                            join(thumbnailDir, 'sprite_001.jpg'),
+                            'fake-sprite'
+                        );
                         cb(null, { stdout: '', stderr: '' });
                     }
                 });
@@ -636,7 +922,7 @@ describe('ThumbnailService', () => {
                     sourceHeight: 1080,
                 });
 
-                const spriteArgs = mockExecFile.mock.calls[1][1] as string[];
+                const spriteArgs = spriteCall() as string[];
                 expect(spriteArgs).toContain('mjpeg');
                 expect(spriteArgs).toContain('-q:v');
                 expect(spriteArgs).toContain('8');
