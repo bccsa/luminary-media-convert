@@ -12,6 +12,7 @@ import { EncodeService } from './services/encode.service.js';
 import { EncryptionService } from './services/encryption.service.js';
 import { ThumbnailService } from './services/thumbnail.service.js';
 import { SessionCleanupService } from './services/session-cleanup.service.js';
+import { RestartNotifierService } from './services/restart-notifier.service.js';
 import { ProbeService } from './services/probe.service.js';
 import { TusUploadService } from './services/tus-upload.service.js';
 import { UrlFetchService } from './services/url-fetch.service.js';
@@ -34,6 +35,7 @@ import { AuthorizationWebhookService } from '../auth/authorization-webhook.servi
         EncryptionService,
         ThumbnailService,
         SessionCleanupService,
+        RestartNotifierService,
         ProbeService,
         TusUploadService,
         UrlFetchService,

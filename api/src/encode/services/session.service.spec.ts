@@ -338,6 +338,36 @@ describe('SessionService — surviving a restart', () => {
         expect(restored?.error).toMatch(/restarted/i);
     });
 
+    it('offers up the sessions the restart killed, so they can be reported', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        service.updateStatus(session.id, 'encoding');
+
+        // Nothing else tells the holder of the other half of this session that it
+        // stopped, and the record would otherwise read `encoding` forever.
+        expect(restart().takeRestartFailures().map((s) => s.id)).toEqual([
+            session.id,
+        ]);
+    });
+
+    it('offers each killed session only once', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        service.updateStatus(session.id, 'encoding');
+
+        const after = restart();
+        after.takeRestartFailures();
+        expect(after.takeRestartFailures()).toEqual([]);
+    });
+
+    it('has nothing to report when every session was already finished', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        service.setCompleted(session.id, ['master.m3u8'], 'master.m3u8');
+
+        expect(restart().takeRestartFailures()).toEqual([]);
+    });
+
     it.each(['uploading', 'queued', 'encrypting', 'uploading_to_s3'] as const)(
         'does the same for a session left in %s',
         (status) => {

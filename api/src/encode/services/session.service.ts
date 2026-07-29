@@ -60,7 +60,26 @@ export class SessionService implements OnModuleInit {
     private readonly workDir =
         process.env.WORK_DIR || join(process.cwd(), 'work');
 
+    /**
+     * Sessions that `restore()` found mid-encode and marked failed, waiting to be
+     * reported outward. Kept here rather than sent from here: this service owns
+     * session state and has no business making outbound HTTP calls, and it is
+     * constructed directly in a great many tests that should not need a webhook
+     * client to exist.
+     */
+    private restartFailures: Session[] = [];
+
     constructor(private readonly sessionEvents: SessionEventsService) {}
+
+    /**
+     * Hands over the sessions abandoned by a restart, clearing them so they are
+     * reported once. Empty on every call but the first after startup.
+     */
+    takeRestartFailures(): Session[] {
+        const failures = this.restartFailures;
+        this.restartFailures = [];
+        return failures;
+    }
 
     /**
      * Sessions outlive the process. Without this, restarting the API — which every
@@ -132,6 +151,10 @@ export class SessionService implements OnModuleInit {
                     session.status = 'failed';
                     session.error =
                         'The encoder restarted while this session was in progress.';
+                    // Whoever holds the other half of this session still believes
+                    // it is running, and nothing else will ever tell them
+                    // otherwise. Handed to the notifier once the app is up.
+                    this.restartFailures.push(session);
                     abandoned++;
                 }
 
