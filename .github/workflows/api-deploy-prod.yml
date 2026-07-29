@@ -35,7 +35,7 @@ jobs:
           cat > api/.env <<'ENV_EOF'
           PORT=${{ vars.DOCKER_PORT }}
           CORS_ORIGIN=${{ vars.CORS_ORIGIN }}
-          WORK_DIR=${{ vars.WORK_DIR }}
+          WORK_DIR=${{ vars.WORK_DIR || '/work' }}
           FFMPEG_TIMEOUT_MS=${{ vars.FFMPEG_TIMEOUT_MS }}
           FFMPEG_THREADS=${{ vars.FFMPEG_THREADS }}
           MAX_UPLOAD_SIZE=${{ vars.MAX_UPLOAD_SIZE }}
@@ -71,6 +71,8 @@ jobs:
           IMG='${{ vars.DOCKER_IMAGE }}:${{ github.sha }}'
           PORT='${{ vars.DOCKER_PORT }}'
           PREV="${C}-prev"
+          WORK_DIR_PATH='${{ vars.WORK_DIR || '/work' }}'
+          VOL="${C}-work"
 
           docker rm -f "$PREV" >/dev/null 2>&1 || true
           HAD_PREV=0
@@ -103,6 +105,7 @@ jobs:
             --restart unless-stopped \
             --name="$C" \
             --add-host=host.docker.internal:host-gateway \
+            -v "$VOL":"$WORK_DIR_PATH" \
             ${{ vars.DOCKER_GPU_FLAGS }} \
             --env-file api/.env \
             "$IMG" || rollback
