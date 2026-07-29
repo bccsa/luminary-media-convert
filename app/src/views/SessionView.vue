@@ -1953,48 +1953,66 @@ onUnmounted(() => {
                                     class="min-h-0 flex-1 overflow-y-auto space-y-3"
                                 >
                                     <!--
-                                        Which encoder is doing the work. Only
-                                        meaningful while it is running, and the
-                                        panel that used to carry it is hidden
-                                        for exactly that state.
+                                        Status row: what is doing the work on the
+                                        left, how long it has left on the right.
+                                        Wraps rather than overflows when the panel
+                                        is narrow.
                                     -->
                                     <div
-                                        v-if="displayEncoderLabel"
-                                        class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300"
-                                        :title="`Encoding is running on ${displayEncoderLabel}`"
+                                        class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2"
                                     >
-                                        <svg
-                                            v-if="displayEncoderIcon"
-                                            class="h-3.5 w-3.5 text-slate-500 dark:text-slate-400"
-                                            fill="none"
-                                            viewBox="0 0 24 24"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            aria-hidden="true"
+                                        <div
+                                            class="flex flex-wrap items-center gap-2"
                                         >
-                                            <path :d="displayEncoderIcon" />
-                                        </svg>
-                                        {{ displayEncoderLabel }}
+                                            <!--
+                                                Which encoder is doing the work.
+                                                Only meaningful while it runs, and
+                                                the panel that used to carry it is
+                                                hidden for exactly that state.
+                                            -->
+                                            <span
+                                                v-if="displayEncoderLabel"
+                                                class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300"
+                                                :title="`Encoding is running on ${displayEncoderLabel}`"
+                                            >
+                                                <svg
+                                                    v-if="displayEncoderIcon"
+                                                    class="h-3.5 w-3.5 text-slate-500 dark:text-slate-400"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                    stroke-width="2"
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    aria-hidden="true"
+                                                >
+                                                    <path
+                                                        :d="displayEncoderIcon"
+                                                    />
+                                                </svg>
+                                                {{ displayEncoderLabel }}
+                                            </span>
+                                            <span
+                                                v-if="
+                                                    poller.status.value ===
+                                                        'queued' &&
+                                                    poller.queuePosition
+                                                        .value != null
+                                                "
+                                                class="inline-block rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-400"
+                                            >
+                                                Queue position #{{
+                                                    poller.queuePosition.value
+                                                }}
+                                            </span>
+                                        </div>
+                                        <p
+                                            v-if="etaDisplay"
+                                            class="ml-auto text-xs text-slate-500"
+                                        >
+                                            {{ etaDisplay }}
+                                        </p>
                                     </div>
-                                    <div
-                                        v-if="
-                                            poller.status.value === 'queued' &&
-                                            poller.queuePosition.value != null
-                                        "
-                                        class="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-400 inline-block"
-                                    >
-                                        Queue position #{{
-                                            poller.queuePosition.value
-                                        }}
-                                    </div>
-                                    <p
-                                        v-if="etaDisplay"
-                                        class="text-right text-xs text-slate-500"
-                                    >
-                                        {{ etaDisplay }}
-                                    </p>
                                     <div
                                         class="space-y-3 rounded-lg border border-slate-200/80 bg-slate-50/60 px-3 py-3 dark:border-slate-700/50 dark:bg-slate-800/30"
                                     >
