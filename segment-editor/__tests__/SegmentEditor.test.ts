@@ -1714,3 +1714,59 @@ describe('SegmentEditor — thumbnail filmstrip', () => {
         expect(w.findAll('.se-thumb-tile')).toHaveLength(0);
     });
 });
+
+describe('SegmentEditor — removing segments', () => {
+    it('announces the removed segment so consumers can offer an undo', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 20, 'Gone'), seg(2, 30, 40)] });
+        await flush();
+        w.vm.removeSegment('seg-1');
+        await flush();
+        const removed = w.emitted('segment-removed');
+        expect(removed).toBeTruthy();
+        expect((removed![0][0] as Segment).id).toBe('seg-1');
+        expect((removed![0][0] as Segment).label).toBe('Gone');
+        expect(latestSegments(w).map((s) => s.id)).toEqual(['seg-2']);
+    });
+
+    it('carries a copy, not a live reference to the editor state', async () => {
+        const original = seg(1, 10, 20, 'Snapshot');
+        const w = mountEditor({ segments: [original] });
+        await flush();
+        w.vm.removeSegment('seg-1');
+        await flush();
+        const payload = w.emitted('segment-removed')![0][0] as Segment;
+        expect(payload).not.toBe(original);
+        expect(payload.inSec).toBe(10);
+    });
+
+    it('offers a delete control on the selected segment', async () => {
+        const w = mountEditor({ segments: [seg(1, 10, 40)] });
+        await flush();
+        expect(w.find('.se-segment-delete').exists()).toBe(false);
+
+        const segEl = w.get('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 20);
+        mouseAt(document.body, 'mouseup', 20);
+        await flush();
+
+        expect(w.find('.se-segment-delete').exists()).toBe(true);
+        await w.find('.se-segment-delete').trigger('click');
+        await flush();
+        expect(latestSegments(w)).toHaveLength(0);
+        expect(w.emitted('segment-removed')).toBeTruthy();
+    });
+
+    it('does not seek or start a drag when the delete control is pressed', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ segments: [seg(1, 10, 40)], props: { onSeek } });
+        await flush();
+        const segEl = w.get('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 20);
+        mouseAt(document.body, 'mouseup', 20);
+        await flush();
+        onSeek.mockClear();
+
+        await w.find('.se-segment-delete').trigger('mousedown');
+        expect(onSeek).not.toHaveBeenCalled();
+    });
+});

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { SegmentEditor } from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
+import { formatTime } from '@luminary-media-converter/segment-editor';
 
 const props = withDefaults(
     defineProps<{
@@ -31,6 +32,8 @@ const props = withDefaults(
         thumbnailVttUrl?: string | null;
         /** Audio waveform peaks (normalized 0–1 amplitude). */
         waveformPeaks?: number[] | null;
+        /** Trim ranges removed from the timeline, restorable until the encode is submitted. */
+        removedTrimSegments?: Segment[];
         /** After encode completes — timeline title is for chapter editing, not pre-encode trim. */
         isCompleted?: boolean;
         /**
@@ -44,6 +47,7 @@ const props = withDefaults(
         addGapAboveTimeline: false,
         isCompleted: false,
         canSaveChapters: false,
+        removedTrimSegments: () => [],
     },
 );
 
@@ -52,7 +56,14 @@ const editorSegments = defineModel<Segment[]>('editorSegments', { required: true
 const emit = defineEmits<{
     discardChapters: [];
     saveChapters: [];
+    segmentRemoved: [segment: Segment];
+    restoreTrimSegment: [id: string];
+    restoreAllTrimSegments: [];
 }>();
+
+function formatRange(seg: Segment): string {
+    return `${formatTime(seg.inSec)} – ${formatTime(seg.outSec)}`;
+}
 
 const showToolbarSection = () => props.section !== 'timeline';
 
@@ -75,6 +86,7 @@ const trimToolbarHasVisibleContent = computed(() => {
     if (props.canSaveChapters && !props.showTrimSegmentEditor) return true;
     if (props.canEditTrimTimeline && !props.showTrimSegmentEditor) return true;
     if (props.canEditChaptersPlayback && !props.showTrimSegmentEditor && !props.showChaptersSidePanel) return true;
+    if (props.removedTrimSegments.length > 0) return true;
     return false;
 });
 </script>
@@ -110,6 +122,40 @@ const trimToolbarHasVisibleContent = computed(() => {
                 :disabled="!chaptersIsDirty || chaptersIsSaving"
                 @click="emit('saveChapters')"
             >{{ chaptersIsSaving ? 'Saving…' : 'Save chapters' }}</button>
+        </div>
+
+
+        <!-- Removed trim ranges: dropped from the encode, restorable until it is submitted -->
+        <div
+            v-if="removedTrimSegments.length > 0"
+            class="rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-800/50"
+        >
+            <div class="mb-2 flex items-center justify-between gap-2">
+                <span class="text-xs font-medium text-slate-600 dark:text-slate-300">
+                    Removed from the encode ({{ removedTrimSegments.length }})
+                </span>
+                <button
+                    v-if="removedTrimSegments.length > 1"
+                    type="button"
+                    class="chapter-toolbar-muted"
+                    @click="emit('restoreAllTrimSegments')"
+                >Restore all</button>
+            </div>
+            <ul class="space-y-1">
+                <li
+                    v-for="seg in removedTrimSegments"
+                    :key="seg.id"
+                    class="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1 dark:bg-slate-900/40"
+                >
+                    <span class="font-mono text-xs text-slate-600 dark:text-slate-300">{{ formatRange(seg) }}</span>
+                    <button
+                        type="button"
+                        class="chapter-toolbar-muted"
+                        :title="`Restore ${formatRange(seg)}`"
+                        @click="emit('restoreTrimSegment', seg.id)"
+                    >Undo</button>
+                </li>
+            </ul>
         </div>
 
         <p
@@ -148,6 +194,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             :thumbnail-vtt-url="thumbnailVttUrl"
             :waveform-peaks="waveformPeaks"
             combined-controls
+            @segment-removed="emit('segmentRemoved', $event)"
         >
             <template v-if="canSaveChapters" #toolbar-before-clear>
                 <span

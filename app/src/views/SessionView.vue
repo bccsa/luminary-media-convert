@@ -51,6 +51,7 @@ import { useAppLayout } from '../composables/useAppLayout';
 import { useEncodeEta } from '../composables/useEncodeEta';
 import { useSessionFileOps } from '../composables/useSessionFileOps';
 import { useChapterTrimSync } from '../composables/useChapterTrimSync';
+import { useTrimDeletions } from '../composables/useTrimDeletions';
 import { slicePeaksToTrims, trimmedDuration } from '../utils/trimTimeline';
 import type { AccelMode, SegmentFormat } from '../types';
 import { formatBytes, formatDateTime, formatRelative } from '../utils/format';
@@ -88,6 +89,12 @@ const trimSegments = computed<TrimSegment[]>(() =>
         outSec: s.outSec,
     }))
 );
+/**
+ * Ranges removed from the trim timeline. They stay listed beside the player so a
+ * deletion can be undone, right up until the encode consumes the markers.
+ */
+const trimDeletions = useTrimDeletions(editorSegments);
+
 const outputPanelRef = ref<InstanceType<typeof SessionOutputPanel> | null>(
     null
 );
@@ -1087,6 +1094,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
         // positions drawn over a timeline that no longer matches them.
         if (submittedTrims.length > 0) {
             editorSegments.value = [];
+            trimDeletions.clear();
         }
 
         // Save config for future reuse (strip trimSegments — session-specific)
@@ -2099,6 +2107,10 @@ onUnmounted(() => {
                         :show-trim-segment-editor="showTrimSegmentEditor"
                         :thumbnail-vtt-url="thumbnailVttUrl"
                         :waveform-peaks="timelineWaveformPeaks"
+                        :removed-trim-segments="trimDeletions.removed.value"
+                        @segment-removed="trimDeletions.record"
+                        @restore-trim-segment="trimDeletions.restore"
+                        @restore-all-trim-segments="trimDeletions.restoreAll"
                         :is-completed="isCompleted"
                         :probe-duration="trimEditorProbeDuration"
                         :add-gap-above-timeline="false"
@@ -2203,6 +2215,10 @@ onUnmounted(() => {
                             :show-trim-segment-editor="showTrimSegmentEditor"
                             :thumbnail-vtt-url="thumbnailVttUrl"
                             :waveform-peaks="timelineWaveformPeaks"
+                            :removed-trim-segments="trimDeletions.removed.value"
+                            @segment-removed="trimDeletions.record"
+                            @restore-trim-segment="trimDeletions.restore"
+                            @restore-all-trim-segments="trimDeletions.restoreAll"
                             :is-completed="isCompleted"
                             :can-edit-trim-timeline="canEditTrimTimeline"
                             :can-edit-chapters-playback="

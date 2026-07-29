@@ -111,6 +111,8 @@ const emit = defineEmits<{
     select: [ids: string[]];
     seek: [seconds: number];
     'segment-commit': [segments: Segment[]];
+    /** A segment was removed. Carries it whole so consumers can offer an undo. */
+    'segment-removed': [segment: Segment];
 }>();
 
 // -------------- derived mode config --------------
@@ -679,8 +681,10 @@ function rippleInsert(list: Segment[], incoming: Segment): Segment[] {
 }
 
 function removeSegment(id: string) {
+    const removed = segments.value.find((s) => s.id === id);
     commitSegments(segments.value.filter((s) => s.id !== id));
     selectedIds.value.delete(id);
+    if (removed) emit('segment-removed', { ...removed });
 }
 
 function clearAll() {
@@ -1263,6 +1267,7 @@ defineExpose({
     markIn,
     markOut,
     addSegment: addSegmentAtPlayhead,
+    removeSegment,
     clearAll,
     undo,
     redo,
@@ -1492,6 +1497,27 @@ defineExpose({
                         v-if="labelsVisible && ((seg.outSec - seg.inSec) / visibleSpan) * 100 > 4"
                         class="se-segment-label"
                     >{{ seg.label || `#${segments.indexOf(seg) + 1}` }}</span>
+                    <button
+                        v-if="isSelected(seg.id) && ((seg.outSec - seg.inSec) / visibleSpan) * 100 > 6"
+                        type="button"
+                        class="se-segment-delete"
+                        title="Remove segment"
+                        aria-label="Remove segment"
+                        @mousedown.stop
+                        @click.stop="removeSegment(seg.id)"
+                    >
+                        <svg
+                            class="se-icon"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            aria-hidden="true"
+                        >
+                            <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+                        </svg>
+                    </button>
                 </div>
 
                 <div
