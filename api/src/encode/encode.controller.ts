@@ -725,6 +725,10 @@ export class EncodeController {
         res.set({
             'Content-Type': 'text/vtt',
             'Cache-Control': 'private, max-age=300',
+            // The web client is served under COEP credentialless, which refuses
+            // cross-origin subresources unless they say they may be embedded.
+            // Helmet's default of same-origin would have the browser drop this.
+            'Cross-Origin-Resource-Policy': 'cross-origin',
         });
         res.send(vtt);
     }
@@ -754,9 +758,14 @@ export class EncodeController {
         );
         if (!existsSync(path)) throw new NotFoundException('Sprite not found');
 
+        // `jpg` is not a media type — and the API sends X-Content-Type-Options:
+        // nosniff, so the browser will not correct it for us.
+        const mediaType = match[1] === 'jpg' ? 'jpeg' : match[1];
+
         res.set({
-            'Content-Type': match[1] === 'webp' ? 'image/webp' : `image/${match[1]}`,
+            'Content-Type': `image/${mediaType}`,
             'Cache-Control': 'private, max-age=3600',
+            'Cross-Origin-Resource-Policy': 'cross-origin',
         });
         createReadStream(path).pipe(res);
     }

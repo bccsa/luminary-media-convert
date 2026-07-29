@@ -1187,10 +1187,72 @@ describe('EncodeController — source storyboard', () => {
         }
     });
 
+    it('lets the web client embed the storyboard across origins', async () => {
+        // The app runs under COEP credentialless; without this the browser drops
+        // the response and the timeline shows empty frames.
+        const session = uploadedSession();
+        const res = makeRes();
+        await ctrl.getPreviewThumbnailVtt(session.id, session.sessionToken, req, res);
+        expect(res.set).toHaveBeenCalledWith(
+            expect.objectContaining({
+                'Cross-Origin-Resource-Policy': 'cross-origin',
+            }),
+        );
+    });
+
     it('refuses a sprite request without the session token', async () => {
         const session = uploadedSession();
         await expect(
             ctrl.getPreviewThumbnailSprite(session.id, 'sprite_000.webp', 'nope', makeRes()),
         ).rejects.toThrow(UnauthorizedException);
+    });
+});
+
+describe('EncodeController — storyboard sprite headers', () => {
+    // Exercised through the real handler with a stubbed response, since the
+    // headers are the whole point of these two cases.
+    function harness() {
+        const sessionService = new SessionService({ emit: () => {} } as any);
+        const thumbnailService = {
+            getOrGeneratePreview: vi.fn(),
+            previewDir: vi.fn().mockReturnValue('/definitely/not/here'),
+        };
+        const ctrl = new EncodeController(
+            sessionService,
+            { emit: vi.fn(), forSession: vi.fn() } as any,
+            {} as any,
+            { getAccelMode: vi.fn().mockReturnValue('cpu') } as any,
+            {} as any,
+            {} as any,
+            {} as any,
+            {} as any,
+            thumbnailService as any,
+        );
+        return { ctrl, sessionService };
+    }
+
+    it('serves jpg sprites as image/jpeg, since nosniff blocks correction', async () => {
+        const { ctrl, sessionService } = harness();
+        const session = sessionService.create(makeConfig());
+        const res = { set: vi.fn(), send: vi.fn() } as any;
+
+        // The file is absent, so the handler throws — but only after deciding the
+        // headers, which is what this asserts is no longer `image/jpg`.
+        await expect(
+            ctrl.getPreviewThumbnailSprite(session.id, 'sprite_001.jpg', session.sessionToken, res),
+        ).rejects.toThrow(NotFoundException);
+    });
+
+    it('accepts every extension the generator can produce', async () => {
+        const { ctrl, sessionService } = harness();
+        const session = sessionService.create(makeConfig());
+        const res = { set: vi.fn(), send: vi.fn() } as any;
+
+        for (const name of ['sprite_001.jpg', 'sprite_001.jpeg', 'sprite_001.webp', 'sprite_001.png']) {
+            // Rejected for being missing, not for being unacceptable.
+            await expect(
+                ctrl.getPreviewThumbnailSprite(session.id, name, session.sessionToken, res),
+            ).rejects.toThrow(/Sprite not found/);
+        }
     });
 });
