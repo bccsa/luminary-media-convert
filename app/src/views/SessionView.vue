@@ -1257,25 +1257,25 @@ async function onDiscardChapters() {
     chaptersSaveError.value = null;
     try {
         await chapters.discardLocal();
-        syncChaptersFromTrim();
+        syncChaptersFromTimeline();
     } catch (err) {
         chaptersSaveError.value =
             errorMessage(err);
     }
 }
 
-// While trim editing is enabled, the trim timeline and chapter list stay
-// mirrored: trim boundary changes propagate into the chapter list (labels
-// preserved by row index) and chapter edits propagate back.
-const { syncChaptersFromTrim } = useChapterTrimSync({
+// Once the encode is submitted the bottom timeline becomes the chapter editor,
+// and it stays in step with the chapter list beside the player in both
+// directions. Trim markers never take part — see #51.
+const { syncChaptersFromTimeline } = useChapterTrimSync({
     editorSegments,
     chapterSegments,
-    canEditTrimTimeline,
-    // Trim markers seed chapters only while they are still live. After submit they
-    // are dropped, and without this the sync would read the emptied trim list as a
-    // chapter deletion and wipe any chapters already authored for the session.
-    trimSeedsChapters: computed(
-        () => canEditTrimTimeline.value && showProbeConfig.value
+    // Before the encode is submitted the timeline holds trim markers, which have
+    // nothing to say about chapters: mirroring stays off so they cannot seed the
+    // chapter list, and a chapter sidecar cannot overwrite them. Afterwards the
+    // timeline *is* the chapter editor and the two are kept in step.
+    mirrorActive: computed(
+        () => canEditTrimTimeline.value && !showProbeConfig.value
     ),
     chaptersLoaded: chapters.isLoaded,
 });
