@@ -1,8 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { existsSync } from 'fs';
-import { copyFile, rm, writeFile } from 'fs/promises';
+import { copyFile, readdir, rm, writeFile } from 'fs/promises';
 import { join, posix } from 'path';
-import { SessionService, type Session } from './session.service.js';
+import {
+    SESSION_STATE_FILENAME,
+    SessionService,
+    type Session,
+} from './session.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import { EncryptionService } from './encryption.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
@@ -366,10 +370,7 @@ export class EncodeService {
                 message: 'Encoding failed',
             });
         } finally {
-            // Don't destroy preview here — the client may still be
-            // transitioning from the preview URL to S3 playback.
-            // Preview state is cleaned up on session deletion.
-            await this.cleanupSessionFiles(sessionId, session);
+            await this.cleanupSessionFiles(sessionId);
         }
     }
 
@@ -389,17 +390,45 @@ export class EncodeService {
         }
     }
 
-    private async cleanupSessionFiles(
-        sessionId: string,
-        session: Session
-    ): Promise<void> {
+    /**
+     * Reclaim what a finished encode leaves behind, without losing the session.
+     *
+     * On success the source upload, the preview cache, the waveform sidecar and
+     * the encoded output have no remaining reader: the output is in the client's
+     * bucket, and a re-encode is a new session with a new upload. They go
+     * immediately — the source is the largest thing the encoder ever holds, and
+     * staging shares a host with production (#59), so one filling the disk takes
+     * the other down with it.
+     *
+     * `session.json` is spared. Clearing the whole directory used to take it too,
+     * which quietly undid session persistence (#67) for exactly the sessions a
+     * user comes back to: a completed session vanished on the next restart and the
+     * client was told it had expired.
+     *
+     * A failed session keeps everything until the sweep ages it out (#73). A
+     * failure is when someone wants to retry or inspect the input.
+     */
+    private async cleanupSessionFiles(sessionId: string): Promise<void> {
+        if (this.sessionService.get(sessionId)?.status !== 'completed') return;
+
+        const sessionDir = join(this.workDir, sessionId);
         try {
-            const sessionDir = join(this.workDir, sessionId);
-            await rm(sessionDir, { recursive: true, force: true });
+            const entries = await readdir(sessionDir);
+            await Promise.all(
+                entries
+                    .filter((entry) => entry !== SESSION_STATE_FILENAME)
+                    .map((entry) =>
+                        rm(join(sessionDir, entry), {
+                            recursive: true,
+                            force: true,
+                        })
+                    )
+            );
             this.logger.debug(
                 `Cleaned up work directory for session ${sessionId}`
             );
         } catch (err) {
+            if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
             this.logger.warn(
                 `Failed to clean up session ${sessionId}: ${(err as Error).message}`
             );
