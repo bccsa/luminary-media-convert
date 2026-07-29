@@ -1767,3 +1767,71 @@ describe('SegmentEditor — removing segments', () => {
         expect(onSeek).not.toHaveBeenCalled();
     });
 });
+
+describe('SegmentEditor — marking between existing segments', () => {
+    const two = () => [seg(1, 10, 20), seg(2, 40, 50)];
+
+    it('starts a new segment in the gap rather than extending the later one', async () => {
+        const t = { value: 25 };
+        const w = mountEditor({ segments: two(), currentTime: t });
+        await flush();
+        // Select the later segment: this is the case that used to swallow the gap.
+        const segEls = w.findAll('.se-segment');
+        mouseAt(segEls[1].element as HTMLElement, 'mousedown', 45);
+        mouseAt(document.body, 'mouseup', 45);
+        await flush();
+
+        w.vm.markIn();
+        await flush();
+        expect(w.find('.se-pending-marker').exists()).toBe(true);
+
+        t.value = 35;
+        w.vm.markOut();
+        await flush();
+        const segs = latestSegments(w);
+        expect(segs).toHaveLength(3);
+        expect(segs.map((s) => [s.inSec, s.outSec])).toContainEqual([25, 35]);
+        // The later segment kept its start.
+        expect(segs.find((s) => s.id === 'seg-2')!.inSec).toBe(40);
+    });
+
+    it('does not let the earlier segment swallow the gap either', async () => {
+        const t = { value: 30 };
+        const w = mountEditor({ segments: two(), currentTime: t });
+        await flush();
+        const segEls = w.findAll('.se-segment');
+        mouseAt(segEls[0].element as HTMLElement, 'mousedown', 15);
+        mouseAt(document.body, 'mouseup', 15);
+        await flush();
+
+        w.vm.markOut();
+        await flush();
+        expect(latestSegments(w).find((s) => s.id === 'seg-1')!.outSec).toBe(20);
+    });
+
+    it('still extends the selection before the first segment', async () => {
+        const t = { value: 2 };
+        const w = mountEditor({ segments: [seg(1, 10, 20)], currentTime: t });
+        await flush();
+        const segEl = w.get('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 15);
+        mouseAt(document.body, 'mouseup', 15);
+        await flush();
+        w.vm.markIn();
+        await flush();
+        expect(latestSegments(w)[0].inSec).toBe(2);
+    });
+
+    it('still extends the selection after the last segment', async () => {
+        const t = { value: 60 };
+        const w = mountEditor({ segments: [seg(1, 10, 20)], currentTime: t });
+        await flush();
+        const segEl = w.get('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 15);
+        mouseAt(document.body, 'mouseup', 15);
+        await flush();
+        w.vm.markOut();
+        await flush();
+        expect(latestSegments(w)[0].outSec).toBe(60);
+    });
+});
