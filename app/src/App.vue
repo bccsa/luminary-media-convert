@@ -39,19 +39,6 @@ const encodingApiUrl = ref('');
 
 provide('encodingApiUrl', encodingApiUrl);
 
-/**
- * Session views that fill the viewport rather than scrolling the page — the trim
- * workspace and the session detail layout it shares.
- *
- * They size themselves against the space left below the header, so the shell
- * becomes a fixed-height flex column and `main` simply takes what remains. The
- * remainder must not be computed from an assumed header height: the header grows
- * whenever its teleported workflow controls wrap or gain a scrollbar, and the
- * surplus pushes the bottom of `main` past the viewport. The trim view hides
- * overflow on the document while it is open, so there is then nothing to scroll
- * it back and whatever sits lowest — the timeline's playback controls — is simply
- * gone until the page happens to reload into a shorter header.
- */
 const fillsViewport = computed(
     () =>
         identityChecked.value &&
