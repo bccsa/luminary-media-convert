@@ -198,3 +198,24 @@ export function mapSegmentsFromTimeline<T extends Segment>(
         }))
         .sort((a, b) => a.inSec - b.inSec);
 }
+
+/**
+ * Like {@link sourceToOutput}, but never without an answer: a position inside
+ * material the timeline no longer shows maps to the seam where that material was
+ * cut out. Reporting nothing there would strand the playhead at zero while
+ * playback carried on.
+ */
+export function sourceToOutputClamped(
+    t: number,
+    ranges: readonly TrimSegment[],
+): number {
+    const direct = sourceToOutput(t, ranges);
+    if (direct != null) return direct;
+
+    let elapsed = 0;
+    for (const r of ordered(ranges)) {
+        if (t < r.inSec) return elapsed;
+        elapsed += r.outSec - r.inSec;
+    }
+    return elapsed;
+}

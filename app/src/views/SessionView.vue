@@ -60,6 +60,7 @@ import {
     outputToSource,
     slicePeaksToTrims,
     sourceToOutput,
+    sourceToOutputClamped,
     trimmedDuration,
 } from '../utils/trimTimeline';
 import type { AccelMode, SegmentFormat } from '../types';
@@ -742,6 +743,18 @@ function seekPlayerTime(t: number) {
  * Material that was merely never marked stays put — it is still there to mark, and
  * collapsing it would make marking one clip look like discarding everything else.
  */
+/**
+ * The ranges the encode will keep. Normally the clips; when every clip has been
+ * deleted, the source minus what was deleted — otherwise deleting them all would
+ * send no trim at all and the encoder would take the whole source back, deletions
+ * included.
+ */
+const effectiveKeepRanges = computed<TrimSegment[]>(() => {
+    if (trimSegments.value.length > 0) return trimSegments.value;
+    if (deletedRanges.value.length === 0) return [];
+    return invertRanges(deletedRanges.value, sourceProbeDuration.value);
+});
+
 const deletedRanges = computed<TrimSegment[]>(() =>
     trimDeletions.removed.value.map((s) => ({ inSec: s.inSec, outSec: s.outSec }))
 );
@@ -773,7 +786,9 @@ const timelineSegments = computed<Segment[]>({
 function timelineCurrentTime(): number {
     const t = playerRef.value?.getCurrentTime() ?? 0;
     if (!timelineIsShortened.value) return t;
-    return sourceToOutput(t, timelineRanges.value) ?? 0;
+    // Playback can be inside material the timeline no longer shows; the playhead
+    // belongs at the seam, not back at zero.
+    return sourceToOutputClamped(t, timelineRanges.value);
 }
 
 function timelineSeek(t: number) {
@@ -783,8 +798,10 @@ function timelineSeek(t: number) {
 }
 
 useTrimPlayback({
-    ranges: trimSegments,
-    active: computed(() => showProbeConfig.value && trimSegments.value.length > 0),
+    ranges: effectiveKeepRanges,
+    active: computed(
+        () => showProbeConfig.value && effectiveKeepRanges.value.length > 0
+    ),
     getCurrentTime: () => playerRef.value?.getCurrentTime() ?? 0,
     seek: (t: number) => playerRef.value?.seek(t),
 });
@@ -1181,7 +1198,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
 
         // Strip audioTrackMetadata before sending to API, add trim segments
         const { audioTrackMetadata: _, ...apiConfig } = config;
-        const submittedTrims = trimSegments.value;
+        const submittedTrims = effectiveKeepRanges.value;
         const submitConfig =
             submittedTrims.length > 0
                 ? { ...apiConfig, trimSegments: submittedTrims }

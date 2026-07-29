@@ -7,6 +7,7 @@ import {
     outputToSource,
     slicePeaksToTrims,
     sourceToOutput,
+    sourceToOutputClamped,
     toOutputSegments,
     trimmedDuration,
 } from './trimTimeline';
@@ -264,5 +265,30 @@ describe('mapSegmentsToTimeline / mapSegmentsFromTimeline', () => {
         const mapped = mapSegmentsToTimeline([seg('a', 80, 90, 'Outro')], remaining);
         expect(mapped[0].id).toBe('a');
         expect(mapped[0].label).toBe('Outro');
+    });
+});
+
+describe('sourceToOutputClamped', () => {
+    const ranges = [trim(0, 60), trim(70, 120)];
+
+    it('agrees with sourceToOutput inside kept material', () => {
+        expect(sourceToOutputClamped(30, ranges)).toBe(30);
+        expect(sourceToOutputClamped(80, ranges)).toBe(70);
+    });
+
+    it('reports the seam for a position inside a cut', () => {
+        // 60–70 was removed: anywhere in it belongs at the join, 60.
+        expect(sourceToOutputClamped(60, ranges)).toBe(60);
+        expect(sourceToOutputClamped(65, ranges)).toBe(60);
+        expect(sourceToOutputClamped(69.9, ranges)).toBe(60);
+    });
+
+    it('reports the end for a position past everything kept', () => {
+        expect(sourceToOutputClamped(999, ranges)).toBe(110);
+    });
+
+    it('never strands the playhead at zero mid-playback', () => {
+        // The bug this exists for: 65s played back as 0 and stuck there.
+        expect(sourceToOutputClamped(65, ranges)).not.toBe(0);
     });
 });
