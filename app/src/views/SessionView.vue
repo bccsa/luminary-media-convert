@@ -110,17 +110,6 @@ const removedTrimSegments = computed(() =>
     showProbeConfig.value ? trimDeletions.removed.value : []
 );
 
-/**
- * Preview playback follows the trim: discarded stretches are skipped, so what you
- * hear and see while previewing is the programme that will be encoded. Only while
- * the markers are live — afterwards the preview is already trim-aware server-side.
- */
-useTrimPlayback({
-    ranges: trimSegments,
-    active: computed(() => showProbeConfig.value && trimSegments.value.length > 0),
-    getCurrentTime: () => playerRef.value?.getCurrentTime() ?? 0,
-    seek: (t: number) => playerRef.value?.seek(t),
-});
 
 const outputPanelRef = ref<InstanceType<typeof SessionOutputPanel> | null>(
     null
@@ -725,6 +714,18 @@ const playerRef = computed(() => {
 function seekPlayerTime(t: number) {
     playerRef.value?.seek(t);
 }
+
+/**
+ * Preview playback follows the trim: discarded stretches are skipped, so what you
+ * hear and see while previewing is the programme that will be encoded. Only while
+ * the markers are live — afterwards the preview is already trim-aware server-side.
+ */
+useTrimPlayback({
+    ranges: trimSegments,
+    active: computed(() => showProbeConfig.value && trimSegments.value.length > 0),
+    getCurrentTime: () => playerRef.value?.getCurrentTime() ?? 0,
+    seek: (t: number) => playerRef.value?.seek(t),
+});
 
 const currentAngleIndex = ref(0);
 const copied = ref(false);
