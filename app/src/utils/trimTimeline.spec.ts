@@ -266,6 +266,22 @@ describe('mapSegmentsToTimeline / mapSegmentsFromTimeline', () => {
         expect(mapped[0].id).toBe('a');
         expect(mapped[0].label).toBe('Outro');
     });
+
+    it('resolves a second deletion against the shortened timeline, not the source', () => {
+        // The invariant behind a two-minute video collapsing to a few seconds:
+        // once the first deletion shortens the timeline, what the user marks at
+        // 10–20 on screen is 20–30 in the source. Recording the on-screen numbers
+        // as source numbers cuts the wrong material, and each further deletion
+        // compounds the error.
+        const afterFirstDeletion = invertRanges([trim(10, 20)], 120);
+
+        const [recorded] = mapSegmentsFromTimeline(
+            [seg('second', 10, 20)],
+            afterFirstDeletion
+        );
+
+        expect([recorded.inSec, recorded.outSec]).toEqual([20, 30]);
+    });
 });
 
 describe('sourceToOutputClamped', () => {

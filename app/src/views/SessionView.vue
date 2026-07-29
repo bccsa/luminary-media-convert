@@ -112,7 +112,15 @@ const trimDeletions = useTrimDeletions(editorSegments);
  */
 function onTimelineSegmentRemoved(segment: Segment) {
     if (!showProbeConfig.value) return;
-    trimDeletions.record(segment);
+    // The editor works in timeline time, which stops matching source time as soon
+    // as the first deletion shortens the timeline. Deletions are held in source
+    // time, so map before recording — otherwise the second deletion onwards cuts
+    // whatever happens to sit at those numbers in the source, and a couple of
+    // deletions can collapse a two-minute video to a few seconds.
+    const [inSourceTime] = timelineIsShortened.value
+        ? mapSegmentsFromTimeline([segment], timelineRanges.value)
+        : [segment];
+    trimDeletions.record(inSourceTime);
 }
 
 const removedTrimSegments = computed(() =>
@@ -2011,12 +2019,19 @@ onUnmounted(() => {
                                     </div>
                                 </div>
 
-                                <!-- Encode config panel -->
+                                <!--
+                                    Encode config panel — hidden rather than
+                                    unmounted when the aside shows another tab.
+                                    Start Encoding reads the config straight off
+                                    this form, so unmounting it made a perfectly
+                                    valid config look invalid to anyone who
+                                    started their encode from the Clips tab.
+                                -->
                                 <div
-                                    v-if="
-                                        showProbeConfig &&
-                                        (!showChaptersBesidePlayer ||
-                                            encodeSidePanelTab === 'encode')
+                                    v-if="showProbeConfig"
+                                    v-show="
+                                        !showChaptersBesidePlayer ||
+                                        encodeSidePanelTab === 'encode'
                                     "
                                     class="min-h-0 flex-1 overflow-y-auto"
                                 >
