@@ -1167,8 +1167,20 @@ function drawWaveform(): void {
     const maxBarHeight = canvasHeight * WAVEFORM_MAX_HEIGHT_RATIO;
 
     const rootEl = rootElRef.value || document.documentElement;
-    const color = props.waveformColor || getComputedStyle(rootEl).getPropertyValue('--se-waveform').trim() || 'rgba(255,255,255,0.35)';
+    const styles = getComputedStyle(rootEl);
+    const color = props.waveformColor || styles.getPropertyValue('--se-waveform').trim() || 'rgba(255,255,255,0.35)';
+    // While trimming, material outside every range is not going to be encoded.
+    // Drawing it faintly says so at a glance: deleting a range dims that stretch
+    // immediately, without hiding it or moving anything else.
+    const excludedColor =
+        styles.getPropertyValue('--se-waveform-excluded').trim() ||
+        'rgba(148, 163, 184, 0.35)';
+    const keptRanges =
+        props.mode === 'trim' && segments.value.length > 0
+            ? segments.value.map((seg) => ({ inSec: seg.inSec, outSec: seg.outSec }))
+            : null;
     ctx.fillStyle = color;
+    let usingExcluded = false;
 
     const startIdx = Math.floor((viewStart.value / props.duration) * peaks.length);
     const endIdx = Math.ceil(((viewStart.value + visibleSpan.value) / props.duration) * peaks.length);
@@ -1183,6 +1195,15 @@ function drawWaveform(): void {
         const peak1 = peaks[Math.min(idx1, peaks.length - 1)] || 0;
         const peak2 = peaks[Math.min(idx2, peaks.length - 1)] || 0;
         const peak = peak1 * (1 - t) + peak2 * t;
+
+        if (keptRanges) {
+            const t = viewStart.value + (x / canvasWidth) * visibleSpan.value;
+            const excluded = !keptRanges.some((r) => t >= r.inSec && t < r.outSec);
+            if (excluded !== usingExcluded) {
+                ctx.fillStyle = excluded ? excludedColor : color;
+                usingExcluded = excluded;
+            }
+        }
 
         const barHeight = Math.max(1, peak * maxBarHeight);
         ctx.fillRect(x, canvasHeight - barHeight, 1, barHeight);
@@ -1217,6 +1238,10 @@ watch(
         drawWaveform();
     },
 );
+
+// Segment edits change which stretches are excluded, so the waveform has to be
+// repainted for a deletion to be visible.
+watch(segments, () => drawWaveform(), { deep: true });
 
 
 onMounted(() => {
