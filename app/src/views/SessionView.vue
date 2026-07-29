@@ -19,7 +19,7 @@ import type {
     EncodeConfig,
     TrimSegment,
 } from '@luminary-media-converter/encode-config';
-import { SegmentEditor } from '@luminary-media-converter/segment-editor';
+import { SegmentEditor, formatTime } from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
 import {
     useChapters,
@@ -2019,6 +2019,41 @@ onUnmounted(() => {
                                         keyboard-scope="focus"
                                         :fps="segmentEditorProbeFps"
                                     />
+                                    <!-- Clips removed from the encode: dropped from
+                                         the timeline, restorable until Start Encoding -->
+                                    <div
+                                        v-if="removedTrimSegments.length > 0"
+                                        class="shrink-0 mt-3 rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-800/50"
+                                    >
+                                        <div class="mb-2 flex items-center justify-between gap-2">
+                                            <span class="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                Removed ({{ removedTrimSegments.length }})
+                                            </span>
+                                            <button
+                                                v-if="removedTrimSegments.length > 1"
+                                                type="button"
+                                                class="chapter-toolbar-muted"
+                                                @click="trimDeletions.restoreAll"
+                                            >Restore all</button>
+                                        </div>
+                                        <ul class="max-h-40 space-y-1 overflow-y-auto">
+                                            <li
+                                                v-for="seg in removedTrimSegments"
+                                                :key="seg.id"
+                                                class="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1 dark:bg-slate-900/40"
+                                            >
+                                                <span class="font-mono text-xs text-slate-600 dark:text-slate-300">
+                                                    {{ formatTime(seg.inSec) }} – {{ formatTime(seg.outSec) }}
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    class="chapter-toolbar-muted"
+                                                    @click="trimDeletions.restore(seg.id)"
+                                                >Undo</button>
+                                            </li>
+                                        </ul>
+                                    </div>
+
                                     <p
                                         v-if="chaptersSaveError"
                                         class="shrink-0 text-xs text-red-600 dark:text-red-400"
@@ -2136,10 +2171,7 @@ onUnmounted(() => {
                         :show-trim-segment-editor="showTrimSegmentEditor"
                         :thumbnail-vtt-url="thumbnailVttUrl"
                         :waveform-peaks="timelineWaveformPeaks"
-                        :removed-trim-segments="removedTrimSegments"
                         @segment-removed="onTimelineSegmentRemoved"
-                        @restore-trim-segment="trimDeletions.restore"
-                        @restore-all-trim-segments="trimDeletions.restoreAll"
                         :is-completed="isCompleted"
                         :probe-duration="trimEditorProbeDuration"
                         :add-gap-above-timeline="false"
@@ -2244,11 +2276,8 @@ onUnmounted(() => {
                             :show-trim-segment-editor="showTrimSegmentEditor"
                             :thumbnail-vtt-url="thumbnailVttUrl"
                             :waveform-peaks="timelineWaveformPeaks"
-                            :removed-trim-segments="removedTrimSegments"
-                            @segment-removed="onTimelineSegmentRemoved"
-                            @restore-trim-segment="trimDeletions.restore"
-                            @restore-all-trim-segments="trimDeletions.restoreAll"
-                            :is-completed="isCompleted"
+                                @segment-removed="onTimelineSegmentRemoved"
+                                    :is-completed="isCompleted"
                             :can-edit-trim-timeline="canEditTrimTimeline"
                             :can-edit-chapters-playback="
                                 canEditChaptersPlayback
