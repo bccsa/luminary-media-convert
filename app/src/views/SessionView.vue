@@ -95,6 +95,20 @@ const trimSegments = computed<TrimSegment[]>(() =>
  */
 const trimDeletions = useTrimDeletions(editorSegments);
 
+/**
+ * Only pre-encode removals are trim deletions. Once the encode is submitted the
+ * timeline holds chapters, and removing one of those is not "removed from the
+ * encode" — it is a chapter edit, with its own undo and its own save path.
+ */
+function onTimelineSegmentRemoved(segment: Segment) {
+    if (!showProbeConfig.value) return;
+    trimDeletions.record(segment);
+}
+
+const removedTrimSegments = computed(() =>
+    showProbeConfig.value ? trimDeletions.removed.value : []
+);
+
 const outputPanelRef = ref<InstanceType<typeof SessionOutputPanel> | null>(
     null
 );
@@ -2107,8 +2121,8 @@ onUnmounted(() => {
                         :show-trim-segment-editor="showTrimSegmentEditor"
                         :thumbnail-vtt-url="thumbnailVttUrl"
                         :waveform-peaks="timelineWaveformPeaks"
-                        :removed-trim-segments="trimDeletions.removed.value"
-                        @segment-removed="trimDeletions.record"
+                        :removed-trim-segments="removedTrimSegments"
+                        @segment-removed="onTimelineSegmentRemoved"
                         @restore-trim-segment="trimDeletions.restore"
                         @restore-all-trim-segments="trimDeletions.restoreAll"
                         :is-completed="isCompleted"
@@ -2215,8 +2229,8 @@ onUnmounted(() => {
                             :show-trim-segment-editor="showTrimSegmentEditor"
                             :thumbnail-vtt-url="thumbnailVttUrl"
                             :waveform-peaks="timelineWaveformPeaks"
-                            :removed-trim-segments="trimDeletions.removed.value"
-                            @segment-removed="trimDeletions.record"
+                            :removed-trim-segments="removedTrimSegments"
+                            @segment-removed="onTimelineSegmentRemoved"
                             @restore-trim-segment="trimDeletions.restore"
                             @restore-all-trim-segments="trimDeletions.restoreAll"
                             :is-completed="isCompleted"
