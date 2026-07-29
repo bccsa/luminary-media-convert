@@ -702,6 +702,11 @@ const displayEncoderLabel = computed(() => {
     return d && encoderConfig[d] ? encoderConfig[d].label : undefined;
 });
 
+const displayEncoderIcon = computed(() => {
+    const d = displayEncoder.value;
+    return d && encoderConfig[d] ? encoderConfig[d].icon : undefined;
+});
+
 const displaySegmentFormat = computed<SegmentFormat | string | undefined>(
     () => poller.segmentFormat.value ?? session.value?.segmentFormat
 );
@@ -1947,6 +1952,32 @@ onUnmounted(() => {
                                     "
                                     class="min-h-0 flex-1 overflow-y-auto space-y-3"
                                 >
+                                    <!--
+                                        Which encoder is doing the work. Only
+                                        meaningful while it is running, and the
+                                        panel that used to carry it is hidden
+                                        for exactly that state.
+                                    -->
+                                    <div
+                                        v-if="displayEncoderLabel"
+                                        class="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300"
+                                        :title="`Encoding is running on ${displayEncoderLabel}`"
+                                    >
+                                        <svg
+                                            v-if="displayEncoderIcon"
+                                            class="h-3.5 w-3.5 text-slate-500 dark:text-slate-400"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            aria-hidden="true"
+                                        >
+                                            <path :d="displayEncoderIcon" />
+                                        </svg>
+                                        {{ displayEncoderLabel }}
+                                    </div>
                                     <div
                                         v-if="
                                             poller.status.value === 'queued' &&
