@@ -34,10 +34,14 @@ export interface PreviewThumbnails {
 export class ThumbnailService {
     private readonly logger = new Logger(ThumbnailService.name);
     private spriteFormat: SpriteFormat | null | undefined = undefined;
+    private decodeAccel: string[] | undefined = undefined;
     private readonly workDir =
         process.env.WORK_DIR || join(process.cwd(), 'work');
     /** In-flight generations keyed by sessionId, so two tabs share one ffmpeg pass. */
-    private readonly inFlight = new Map<string, Promise<PreviewThumbnails | null>>();
+    private readonly inFlight = new Map<
+        string,
+        Promise<PreviewThumbnails | null>
+    >();
 
     /** Where a session's pre-encode storyboard lives. */
     previewDir(sessionId: string): string {
@@ -51,10 +55,13 @@ export class ThumbnailService {
      */
     async removePreview(sessionId: string): Promise<void> {
         try {
-            await rm(this.previewDir(sessionId), { recursive: true, force: true });
+            await rm(this.previewDir(sessionId), {
+                recursive: true,
+                force: true,
+            });
         } catch (err) {
             this.logger.warn(
-                `Could not remove source storyboard for ${sessionId}: ${(err as Error).message}`,
+                `Could not remove source storyboard for ${sessionId}: ${(err as Error).message}`
             );
         }
     }
@@ -75,7 +82,7 @@ export class ThumbnailService {
             duration: number;
             sourceWidth: number;
             sourceHeight: number;
-        },
+        }
     ): Promise<PreviewThumbnails | null> {
         const dir = this.previewDir(sessionId);
         const vttPath = join(dir, 'thumbnails.vtt');
@@ -85,7 +92,7 @@ export class ThumbnailService {
                 return { vtt: await readFile(vttPath, 'utf-8'), dir };
             } catch (err) {
                 this.logger.warn(
-                    `Failed to read cached storyboard for ${sessionId}: ${(err as Error).message}. Regenerating.`,
+                    `Failed to read cached storyboard for ${sessionId}: ${(err as Error).message}. Regenerating.`
                 );
             }
         }
@@ -105,7 +112,10 @@ export class ThumbnailService {
             // generateThumbnails writes into <outputDir>/thumbnails.
             const producedDir = join(dir, 'thumbnails');
             return {
-                vtt: await readFile(join(producedDir, 'thumbnails.vtt'), 'utf-8'),
+                vtt: await readFile(
+                    join(producedDir, 'thumbnails.vtt'),
+                    'utf-8'
+                ),
                 dir: producedDir,
             };
         })().finally(() => {
@@ -142,14 +152,66 @@ export class ThumbnailService {
         }
         if (!this.spriteFormat) {
             this.logger.warn(
-                'No suitable image encoder (libwebp/mjpeg) available — thumbnail generation disabled',
+                'No suitable image encoder (libwebp/mjpeg) available — thumbnail generation disabled'
             );
         } else {
             this.logger.log(
-                `Thumbnail sprite format: ${this.spriteFormat.ext} (${this.spriteFormat.encoder})`,
+                `Thumbnail sprite format: ${this.spriteFormat.ext} (${this.spriteFormat.encoder})`
             );
         }
         return this.spriteFormat;
+    }
+
+    /**
+     * Decoder acceleration for the storyboard pass, detected once.
+     *
+     * Deliberately no `-hwaccel_output_format`: the filter chain below scales and
+     * tiles in software, so the frames have to come back to system memory. That is
+     * the opposite of the preview encoder, where `scale_cuda` needs them to stay
+     * on the device — passing the wrong one of those two breaks the filter graph.
+     *
+     * Only the decode is accelerated, which is the expensive half here: an hour of
+     * 1080p50 HEVC is a long software decode, and the pass has to walk the whole
+     * file to sample it.
+     */
+    private async detectDecodeAccel(): Promise<string[]> {
+        if (this.decodeAccel !== undefined) return this.decodeAccel;
+        try {
+            const { stdout } = await execFileAsync('ffmpeg', ['-hwaccels'], {
+                timeout: 10_000,
+            });
+            if (stdout.includes('cuda'))
+                this.decodeAccel = ['-hwaccel', 'cuda'];
+            else if (
+                process.platform === 'darwin' &&
+                stdout.includes('videotoolbox')
+            )
+                this.decodeAccel = ['-hwaccel', 'videotoolbox'];
+            else this.decodeAccel = [];
+        } catch {
+            this.decodeAccel = [];
+        }
+        if (this.decodeAccel.length > 0) {
+            this.logger.log(
+                `Thumbnail decode acceleration: ${this.decodeAccel[1]}`
+            );
+        }
+        return this.decodeAccel;
+    }
+
+    /**
+     * How long the storyboard pass is allowed to take.
+     *
+     * A fixed cap cannot work: the pass walks the entire source, so the work grows
+     * with runtime while the budget did not. Five minutes was enough for the short
+     * clips this was built against and cut an hour-long file off after a third of
+     * it, leaving a timeline whose thumbnails simply stopped. Allow a second of
+     * wall clock per four seconds of source, with the old five minutes as the
+     * floor and half an hour as a backstop against a pathological file.
+     */
+    private timeoutFor(durationSeconds: number): number {
+        const scaled = (durationSeconds / 4) * 1000;
+        return Math.min(Math.max(scaled, 300_000), 1_800_000);
     }
 
     async generateThumbnails(opts: {
@@ -165,7 +227,9 @@ export class ThumbnailService {
         if (opts.duration <= 0) return null;
 
         const thumbHeight =
-            Math.ceil(((THUMB_WIDTH / opts.sourceWidth) * opts.sourceHeight) / 2) * 2;
+            Math.ceil(
+                ((THUMB_WIDTH / opts.sourceWidth) * opts.sourceHeight) / 2
+            ) * 2;
 
         const thumbnailDir = join(opts.outputDir, 'thumbnails');
         await mkdir(thumbnailDir, { recursive: true });
@@ -176,28 +240,54 @@ export class ThumbnailService {
             ? ['-f', 'concat', '-safe', '0', '-i', opts.concatFilePath]
             : ['-i', opts.inputPath];
 
-        try {
-            await execFileAsync(
+        const filterArgs = [
+            '-vf',
+            `fps=1/${INTERVAL_SECONDS},scale=${THUMB_WIDTH}:${thumbHeight},tile=${COLUMNS}x${ROWS}`,
+            '-c:v',
+            format.encoder,
+            ...format.args,
+            '-an',
+            spritePattern,
+        ];
+        const timeout = this.timeoutFor(opts.duration);
+        const accel = await this.detectDecodeAccel();
+
+        const run = (decodeArgs: string[]) =>
+            execFileAsync(
                 'ffmpeg',
-                [
-                    ...inputArgs,
-                    '-vf', `fps=1/${INTERVAL_SECONDS},scale=${THUMB_WIDTH}:${thumbHeight},tile=${COLUMNS}x${ROWS}`,
-                    '-c:v', format.encoder,
-                    ...format.args,
-                    '-an',
-                    spritePattern,
-                ],
-                { timeout: 300_000 },
+                [...decodeArgs, ...inputArgs, ...filterArgs],
+                { timeout }
             );
+
+        try {
+            await run(accel);
         } catch (err) {
+            // The GPU may simply not decode this codec — retry in software rather
+            // than lose the storyboard over it. Nothing is retried when there was
+            // no acceleration to begin with: the failure is then real.
+            if (accel.length === 0) {
+                this.logger.warn(
+                    `FFmpeg thumbnail generation failed: ${(err as Error).message}`
+                );
+                return null;
+            }
             this.logger.warn(
-                `FFmpeg thumbnail generation failed: ${(err as Error).message}`,
+                `Accelerated thumbnail decode failed, retrying in software: ${(err as Error).message}`
             );
-            return null;
+            try {
+                await run([]);
+            } catch (softwareErr) {
+                this.logger.warn(
+                    `FFmpeg thumbnail generation failed: ${(softwareErr as Error).message}`
+                );
+                return null;
+            }
         }
 
         const spriteFiles = (await readdir(thumbnailDir))
-            .filter((f) => f.startsWith('sprite_') && f.endsWith(`.${format.ext}`))
+            .filter(
+                (f) => f.startsWith('sprite_') && f.endsWith(`.${format.ext}`)
+            )
             .sort();
 
         if (spriteFiles.length === 0) {
@@ -209,13 +299,13 @@ export class ThumbnailService {
             opts.duration,
             spriteFiles,
             THUMB_WIDTH,
-            thumbHeight,
+            thumbHeight
         );
         const vttPath = join(thumbnailDir, 'thumbnails.vtt');
         await writeFile(vttPath, vttContent, 'utf-8');
 
         this.logger.log(
-            `Generated ${spriteFiles.length} thumbnail sprite sheet(s) for ${Math.floor(opts.duration)}s video`,
+            `Generated ${spriteFiles.length} thumbnail sprite sheet(s) for ${Math.floor(opts.duration)}s video`
         );
 
         return { vttRelativePath: 'thumbnails/thumbnails.vtt' };
@@ -225,7 +315,7 @@ export class ThumbnailService {
         duration: number,
         spriteFiles: string[],
         thumbWidth: number,
-        thumbHeight: number,
+        thumbHeight: number
     ): string {
         const totalThumbs = Math.ceil(duration / INTERVAL_SECONDS);
         const lines: string[] = ['WEBVTT', ''];
@@ -245,8 +335,12 @@ export class ThumbnailService {
             const x = col * thumbWidth;
             const y = row * thumbHeight;
 
-            lines.push(`${formatVttTime(startTime)} --> ${formatVttTime(endTime)}`);
-            lines.push(`${spriteFile}#xywh=${x},${y},${thumbWidth},${thumbHeight}`);
+            lines.push(
+                `${formatVttTime(startTime)} --> ${formatVttTime(endTime)}`
+            );
+            lines.push(
+                `${spriteFile}#xywh=${x},${y},${thumbWidth},${thumbHeight}`
+            );
             lines.push('');
         }
 
