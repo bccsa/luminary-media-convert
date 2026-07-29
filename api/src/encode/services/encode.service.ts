@@ -321,6 +321,21 @@ export class EncodeService {
                 encodeResult.segmentFormat,
                 encryptionKey ? encryptionKey.toString('hex') : undefined
             );
+            // The client reads the storyboard from S3 from here on, so the one
+            // built from the source is no longer looked at. Nothing else prunes
+            // the session directory until the session is deleted.
+            //
+            // Never fatal: the output is already in S3 and the session already
+            // marked completed, so failing here would report a successful encode
+            // as failed over an unlinked file.
+            await this.thumbnailService
+                .removePreview(sessionId)
+                .catch((err: Error) => {
+                    this.logger.warn(
+                        `Could not drop source storyboard for ${sessionId}: ${err.message}`,
+                    );
+                });
+
             await this.sendWebhook(session, {
                 sessionId,
                 status: 'completed',
