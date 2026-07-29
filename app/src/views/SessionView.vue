@@ -568,6 +568,21 @@ const showChaptersSidePanel = computed(
         canEditChaptersPlayback.value
 );
 
+/**
+ * The panel beside the player is a clip list before the encode and a chapter list
+ * after it, so it has to read whichever list is live for the phase. It used to be
+ * bound to the chapter list alone, which only showed trim ranges because the two
+ * were mirrored — once that mirroring went (#51), the clip list came up empty.
+ */
+const asidePanelSegments = computed<Segment[]>({
+    get: () =>
+        showProbeConfig.value ? editorSegments.value : chapterSegments.value,
+    set: (next) => {
+        if (showProbeConfig.value) editorSegments.value = next;
+        else chapterSegments.value = next;
+    },
+});
+
 const showTrimSegmentEditor = computed(
     () =>
         !!(
@@ -1942,7 +1957,7 @@ onUnmounted(() => {
                                 >
                                     <SegmentEditor
                                         ref="chapterSegmentEditorRef"
-                                        v-model="chapterSegments"
+                                        v-model="asidePanelSegments"
                                         class="min-h-0 flex-1 overflow-hidden"
                                         mode="chapters"
                                         split-list-panel
