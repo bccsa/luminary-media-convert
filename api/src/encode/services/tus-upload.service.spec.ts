@@ -90,7 +90,8 @@ describe('TusUploadService', () => {
 
         const previewService = { init: vi.fn().mockResolvedValue(undefined), destroy: vi.fn().mockResolvedValue(undefined) } as any;
         const waveformService = { getOrComputeCached: vi.fn().mockResolvedValue({ version: 1, sampleRate: 8000, numPeaks: 0, peaks: [] }) } as any;
-        service = new TusUploadService(sessionService, probeService, previewService, webhookService, waveformService);
+        const thumbnailService = { getOrGeneratePreview: vi.fn().mockResolvedValue(null) } as any;
+        service = new TusUploadService(sessionService, probeService, previewService, webhookService, waveformService, thumbnailService);
         await service.onModuleInit();
     });
 

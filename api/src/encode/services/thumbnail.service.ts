@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { execFile } from 'child_process';
-import { mkdir, readdir, writeFile } from 'fs/promises';
+import { existsSync } from 'fs';
+import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { promisify } from 'util';
 
@@ -22,10 +23,83 @@ export interface ThumbnailResult {
     vttRelativePath: string;
 }
 
+export interface PreviewThumbnails {
+    /** WebVTT cue text, sprite files referenced by bare filename. */
+    vtt: string;
+    /** Directory holding the sprite sheets the VTT refers to. */
+    dir: string;
+}
+
 @Injectable()
 export class ThumbnailService {
     private readonly logger = new Logger(ThumbnailService.name);
     private spriteFormat: SpriteFormat | null | undefined = undefined;
+    private readonly workDir =
+        process.env.WORK_DIR || join(process.cwd(), 'work');
+    /** In-flight generations keyed by sessionId, so two tabs share one ffmpeg pass. */
+    private readonly inFlight = new Map<string, Promise<PreviewThumbnails | null>>();
+
+    /** Where a session's pre-encode storyboard lives. */
+    previewDir(sessionId: string): string {
+        return join(this.workDir, sessionId, 'preview-thumbnails');
+    }
+
+    /**
+     * Storyboard for the uploaded source, generated before any encode so the trim
+     * timeline has frames to show. The encode writes its own storyboard for the
+     * finished output; this one describes the source and is thrown away with the
+     * session directory.
+     *
+     * Returns null when the source has no usable video, or ffmpeg cannot produce
+     * sprites — the timeline simply goes without.
+     */
+    async getOrGeneratePreview(
+        sessionId: string,
+        opts: {
+            inputPath: string;
+            duration: number;
+            sourceWidth: number;
+            sourceHeight: number;
+        },
+    ): Promise<PreviewThumbnails | null> {
+        const dir = this.previewDir(sessionId);
+        const vttPath = join(dir, 'thumbnails.vtt');
+
+        if (existsSync(vttPath)) {
+            try {
+                return { vtt: await readFile(vttPath, 'utf-8'), dir };
+            } catch (err) {
+                this.logger.warn(
+                    `Failed to read cached storyboard for ${sessionId}: ${(err as Error).message}. Regenerating.`,
+                );
+            }
+        }
+
+        const existing = this.inFlight.get(sessionId);
+        if (existing) return existing;
+
+        const promise = (async () => {
+            const result = await this.generateThumbnails({
+                inputPath: opts.inputPath,
+                outputDir: dir,
+                duration: opts.duration,
+                sourceWidth: opts.sourceWidth,
+                sourceHeight: opts.sourceHeight,
+            });
+            if (!result) return null;
+            // generateThumbnails writes into <outputDir>/thumbnails.
+            const producedDir = join(dir, 'thumbnails');
+            return {
+                vtt: await readFile(join(producedDir, 'thumbnails.vtt'), 'utf-8'),
+                dir: producedDir,
+            };
+        })().finally(() => {
+            this.inFlight.delete(sessionId);
+        });
+
+        this.inFlight.set(sessionId, promise);
+        return promise;
+    }
 
     private async detectSpriteFormat(): Promise<SpriteFormat | null> {
         if (this.spriteFormat !== undefined) return this.spriteFormat;
