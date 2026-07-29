@@ -139,3 +139,62 @@ export function applyOutputEdit<T extends Segment>(
     }
     return next.sort((a, b) => a.inSec - b.inSec);
 }
+
+/**
+ * Everything outside `ranges`, within a source of `duration` seconds.
+ *
+ * Used to turn "what was deleted" into "what is still on the timeline": deleting
+ * a clip takes that material out of the video, while material that was simply
+ * never marked stays put and can still be marked later.
+ */
+export function invertRanges(
+    ranges: readonly TrimSegment[],
+    duration: number,
+): TrimSegment[] {
+    if (!Number.isFinite(duration) || duration <= 0) return [];
+    const list = ordered(ranges);
+    const gaps: TrimSegment[] = [];
+    let cursor = 0;
+    for (const r of list) {
+        const from = Math.max(0, Math.min(duration, r.inSec));
+        const to = Math.max(0, Math.min(duration, r.outSec));
+        if (from > cursor) gaps.push({ inSec: cursor, outSec: from });
+        cursor = Math.max(cursor, to);
+    }
+    if (cursor < duration) gaps.push({ inSec: cursor, outSec: duration });
+    return gaps;
+}
+
+/** Segment endpoints moved onto a timeline built from `ranges`. */
+export function mapSegmentsToTimeline<T extends Segment>(
+    segments: readonly T[],
+    ranges: readonly TrimSegment[],
+): T[] {
+    return segments
+        .map((s) => {
+            const inSec = sourceToOutput(s.inSec, ranges);
+            const outSec = sourceToOutput(s.outSec, ranges);
+            if (inSec == null) return null;
+            return {
+                ...s,
+                inSec,
+                // An end landing exactly on a boundary has no mapping of its own.
+                outSec: outSec ?? inSec + Math.max(0, s.outSec - s.inSec),
+            };
+        })
+        .filter((s): s is T => s !== null);
+}
+
+/** The reverse: endpoints read off that timeline, put back in source time. */
+export function mapSegmentsFromTimeline<T extends Segment>(
+    segments: readonly T[],
+    ranges: readonly TrimSegment[],
+): T[] {
+    return segments
+        .map((s) => ({
+            ...s,
+            inSec: outputToSource(s.inSec, ranges),
+            outSec: outputToSource(s.outSec, ranges),
+        }))
+        .sort((a, b) => a.inSec - b.inSec);
+}

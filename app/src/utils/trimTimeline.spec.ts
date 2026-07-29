@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
     applyOutputEdit,
+    invertRanges,
+    mapSegmentsFromTimeline,
+    mapSegmentsToTimeline,
     outputToSource,
     slicePeaksToTrims,
     sourceToOutput,
@@ -196,5 +199,70 @@ describe('applyOutputEdit', () => {
         edited[0] = { ...edited[0], outSec: edited[0].inSec - 5 };
         const out = applyOutputEdit(source, edited);
         expect(out[0].outSec).toBeGreaterThanOrEqual(out[0].inSec);
+    });
+});
+
+describe('invertRanges', () => {
+    it('returns the gaps around the ranges', () => {
+        expect(invertRanges([trim(10, 20), trim(40, 50)], 100)).toEqual([
+            { inSec: 0, outSec: 10 },
+            { inSec: 20, outSec: 40 },
+            { inSec: 50, outSec: 100 },
+        ]);
+    });
+
+    it('is the whole source when nothing is removed', () => {
+        expect(invertRanges([], 100)).toEqual([{ inSec: 0, outSec: 100 }]);
+    });
+
+    it('is empty when everything is removed', () => {
+        expect(invertRanges([trim(0, 100)], 100)).toEqual([]);
+    });
+
+    it('merges overlapping ranges rather than double-counting them', () => {
+        expect(invertRanges([trim(10, 30), trim(20, 40)], 100)).toEqual([
+            { inSec: 0, outSec: 10 },
+            { inSec: 40, outSec: 100 },
+        ]);
+    });
+
+    it('clamps ranges reaching past the source', () => {
+        expect(invertRanges([trim(90, 200)], 100)).toEqual([
+            { inSec: 0, outSec: 90 },
+        ]);
+    });
+
+    it('has nothing to say about a nonsensical duration', () => {
+        expect(invertRanges([trim(10, 20)], 0)).toEqual([]);
+        expect(invertRanges([trim(10, 20)], Number.NaN)).toEqual([]);
+    });
+});
+
+describe('mapSegmentsToTimeline / mapSegmentsFromTimeline', () => {
+    // 10.7s removed from the middle: the timeline is the rest, closed up.
+    const remaining = invertRanges([trim(60, 70)], 120);
+
+    it('shifts segments after the removal earlier', () => {
+        const mapped = mapSegmentsToTimeline([seg('a', 10, 20), seg('b', 80, 90)], remaining);
+        expect(mapped[0].inSec).toBe(10);
+        expect(mapped[1].inSec).toBe(70);
+        expect(mapped[1].outSec).toBe(80);
+    });
+
+    it('leaves segments before the removal alone', () => {
+        const mapped = mapSegmentsToTimeline([seg('a', 10, 20)], remaining);
+        expect([mapped[0].inSec, mapped[0].outSec]).toEqual([10, 20]);
+    });
+
+    it('round-trips back to source positions', () => {
+        const source = [seg('a', 10, 20), seg('b', 80, 90)];
+        const back = mapSegmentsFromTimeline(mapSegmentsToTimeline(source, remaining), remaining);
+        expect(back.map((s) => [s.inSec, s.outSec])).toEqual([[10, 20], [80, 90]]);
+    });
+
+    it('keeps ids and labels through both directions', () => {
+        const mapped = mapSegmentsToTimeline([seg('a', 80, 90, 'Outro')], remaining);
+        expect(mapped[0].id).toBe('a');
+        expect(mapped[0].label).toBe('Outro');
     });
 });

@@ -53,7 +53,15 @@ import { useSessionFileOps } from '../composables/useSessionFileOps';
 import { useChapterTrimSync } from '../composables/useChapterTrimSync';
 import { useTrimDeletions } from '../composables/useTrimDeletions';
 import { useTrimPlayback } from '../composables/useTrimPlayback';
-import { slicePeaksToTrims, trimmedDuration } from '../utils/trimTimeline';
+import {
+    invertRanges,
+    mapSegmentsFromTimeline,
+    mapSegmentsToTimeline,
+    outputToSource,
+    slicePeaksToTrims,
+    sourceToOutput,
+    trimmedDuration,
+} from '../utils/trimTimeline';
 import type { AccelMode, SegmentFormat } from '../types';
 import { formatBytes, formatDateTime, formatRelative } from '../utils/format';
 import { errorMessage } from '../utils/errors';
@@ -641,6 +649,7 @@ const sourceProbeDuration = computed(() => {
 });
 
 const trimEditorProbeDuration = computed(() => {
+    if (timelineIsShortened.value) return trimmedDuration(timelineRanges.value);
     // Prefer player-reported duration (reflects encoded trim cuts); fall back through
     // in-memory probe then session-doc probe so completed sessions always get a value.
     if (showsOutputTimeline.value) {
@@ -660,6 +669,13 @@ const trimEditorProbeDuration = computed(() => {
  * the concat list and is already trimmed — slicing again would cut it twice.
  */
 const timelineWaveformPeaks = computed(() => {
+    if (timelineIsShortened.value) {
+        return slicePeaksToTrims(
+            waveformPeaks.value,
+            sourceProbeDuration.value,
+            timelineRanges.value
+        );
+    }
     if (!showsOutputTimeline.value || isCompleted.value) {
         return waveformPeaks.value;
     }
@@ -720,6 +736,52 @@ function seekPlayerTime(t: number) {
  * hear and see while previewing is the programme that will be encoded. Only while
  * the markers are live — afterwards the preview is already trim-aware server-side.
  */
+/**
+ * Deleting a clip takes that material out of the video, so the timeline loses it:
+ * the waveform closes up, the total shortens, and the clips after it move earlier.
+ * Material that was merely never marked stays put — it is still there to mark, and
+ * collapsing it would make marking one clip look like discarding everything else.
+ */
+const deletedRanges = computed<TrimSegment[]>(() =>
+    trimDeletions.removed.value.map((s) => ({ inSec: s.inSec, outSec: s.outSec }))
+);
+
+const timelineRanges = computed<TrimSegment[]>(() =>
+    invertRanges(deletedRanges.value, sourceProbeDuration.value)
+);
+
+const timelineIsShortened = computed(
+    () =>
+        showProbeConfig.value &&
+        deletedRanges.value.length > 0 &&
+        sourceProbeDuration.value > 0
+);
+
+const timelineSegments = computed<Segment[]>({
+    get: () =>
+        timelineIsShortened.value
+            ? mapSegmentsToTimeline(editorSegments.value, timelineRanges.value)
+            : editorSegments.value,
+    set: (next) => {
+        editorSegments.value = timelineIsShortened.value
+            ? mapSegmentsFromTimeline(next, timelineRanges.value)
+            : next;
+    },
+});
+
+/** The player runs on source time; the timeline may be shorter than that. */
+function timelineCurrentTime(): number {
+    const t = playerRef.value?.getCurrentTime() ?? 0;
+    if (!timelineIsShortened.value) return t;
+    return sourceToOutput(t, timelineRanges.value) ?? 0;
+}
+
+function timelineSeek(t: number) {
+    playerRef.value?.seek(
+        timelineIsShortened.value ? outputToSource(t, timelineRanges.value) : t
+    );
+}
+
 useTrimPlayback({
     ranges: trimSegments,
     active: computed(() => showProbeConfig.value && trimSegments.value.length > 0),
@@ -2176,7 +2238,7 @@ onUnmounted(() => {
                         v-if="activeTab === 'trim' && showTrimSegmentEditor"
                         class="order-3 shrink-0"
                         section="timeline"
-                        v-model:editor-segments="editorSegments"
+                        v-model:editor-segments="timelineSegments"
                         :show-chapters-side-panel="showChaptersBesidePlayer"
                         :can-save-chapters="canSaveChapters"
                         :chapters-is-dirty="chapters.isDirty.value"
@@ -2189,10 +2251,8 @@ onUnmounted(() => {
                         :is-completed="isCompleted"
                         :probe-duration="trimEditorProbeDuration"
                         :add-gap-above-timeline="false"
-                        :get-current-time="
-                            () => playerRef?.getCurrentTime() ?? 0
-                        "
-                        :on-seek="(t: number) => playerRef?.seek(t)"
+                        :get-current-time="timelineCurrentTime"
+                        :on-seek="timelineSeek"
                         :on-play-pause="() => playerRef?.togglePlay()"
                         :is-preview-playing="isPreviewPlaying"
                         :segment-editor-probe-fps="segmentEditorProbeFps"
