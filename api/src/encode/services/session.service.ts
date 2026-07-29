@@ -1,5 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { CreateSessionDto } from '../dto/create-session.dto.js';
 import type { SessionStatus } from '../dto/webhook-payload.dto.js';
 import type { ProbeResult } from './probe.service.js';
@@ -35,13 +37,112 @@ export interface Session {
     createdAt: number;
 }
 
+/** Statuses that cannot survive the process that was driving them. */
+const IN_FLIGHT: SessionStatus[] = [
+    'uploading',
+    'queued',
+    'encoding',
+    'encrypting',
+    'uploading_to_s3',
+];
+
 @Injectable()
-export class SessionService {
+export class SessionService implements OnModuleInit {
     private readonly logger = new Logger(SessionService.name);
     private readonly sessions = new Map<string, Session>();
     private readonly tokenIndex = new Map<string, string>();
+    private readonly workDir =
+        process.env.WORK_DIR || join(process.cwd(), 'work');
 
     constructor(private readonly sessionEvents: SessionEventsService) {}
+
+    /**
+     * Sessions outlive the process. Without this, restarting the API — which every
+     * deploy does — orphans every session: the SaaS still has its record, the API
+     * has never heard of it, and the client is met with 401 on every route.
+     */
+    onModuleInit(): void {
+        this.restore();
+    }
+
+    private sessionFile(id: string): string {
+        return join(this.workDir, id, 'session.json');
+    }
+
+    /**
+     * Written after anything worth keeping changes. Progress is deliberately not
+     * one of those things: it ticks several times a second and is worthless after
+     * a restart, since whatever was producing it is gone.
+     */
+    private persist(session: Session): void {
+        const path = this.sessionFile(session.id);
+        try {
+            mkdirSync(join(this.workDir, session.id), { recursive: true });
+            const tmp = `${path}.tmp`;
+            // Session config carries S3 credentials, so keep it to the owner and
+            // swap it into place rather than leaving a half-written file.
+            writeFileSync(tmp, JSON.stringify(session), { mode: 0o600 });
+            renameSync(tmp, path);
+        } catch (err) {
+            this.logger.warn(
+                `Could not persist session ${session.id}: ${(err as Error).message}`,
+            );
+        }
+    }
+
+    /** Drop the on-disk record, so a removed session cannot come back on restart. */
+    private forget(id: string): void {
+        try {
+            rmSync(this.sessionFile(id), { force: true });
+        } catch (err) {
+            this.logger.warn(
+                `Could not remove persisted session ${id}: ${(err as Error).message}`,
+            );
+        }
+    }
+
+    private restore(): void {
+        if (!existsSync(this.workDir)) return;
+
+        let restored = 0;
+        let abandoned = 0;
+        for (const entry of readdirSync(this.workDir, { withFileTypes: true })) {
+            if (!entry.isDirectory()) continue;
+            const path = join(this.workDir, entry.name, 'session.json');
+            if (!existsSync(path)) continue;
+
+            try {
+                const session = JSON.parse(readFileSync(path, 'utf-8')) as Session;
+                if (!session?.id || !session?.sessionToken) continue;
+
+                if (IN_FLIGHT.includes(session.status)) {
+                    // The queue and the FFmpeg process died with the old process;
+                    // reporting these as still running would be a lie the client
+                    // would wait on forever.
+                    session.status = 'failed';
+                    session.error =
+                        'The encoder restarted while this session was in progress.';
+                    abandoned++;
+                }
+
+                this.sessions.set(session.id, session);
+                this.tokenIndex.set(session.sessionToken, session.id);
+                this.persist(session);
+                restored++;
+            } catch (err) {
+                this.logger.warn(
+                    `Could not restore session from ${path}: ${(err as Error).message}`,
+                );
+            }
+        }
+
+        if (restored > 0) {
+            this.logger.log(
+                `Restored ${restored} session(s) from disk` +
+                    (abandoned > 0 ? `, ${abandoned} marked failed after restart` : ''),
+            );
+        }
+    }
 
     private emitEvent(session: Session, extra?: Partial<SessionEvent>): void {
         this.sessionEvents.emit({
@@ -76,6 +177,7 @@ export class SessionService {
 
         this.sessions.set(id, session);
         this.tokenIndex.set(sessionToken, id);
+        this.persist(session);
         this.logger.log(`Session created: ${id}`);
 
         return session;
@@ -95,6 +197,7 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.status = status;
+            this.persist(session);
             this.emitEvent(session);
         }
     }
@@ -120,6 +223,7 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.filePath = filePath;
+            this.persist(session);
         }
     }
 
@@ -127,6 +231,7 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.ingestTotalBytes = bytes;
+            this.persist(session);
             this.emitEvent(session);
         }
     }
@@ -135,6 +240,7 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.probeResult = probeResult;
+            this.persist(session);
             this.emitEvent(session, { probeResult });
         }
     }
@@ -143,6 +249,7 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.encodeConfig = encodeConfig;
+            this.persist(session);
         }
     }
 
@@ -150,6 +257,7 @@ export class SessionService {
         const session = this.sessions.get(id);
         if (session) {
             session.outputDir = outputDir;
+            this.persist(session);
         }
     }
 
@@ -172,6 +280,7 @@ export class SessionService {
             session.thumbnailsVtt = thumbnailsVtt;
             session.segmentFormat = segmentFormat;
             session.encryptionKeyHex = encryptionKeyHex;
+            this.persist(session);
             this.emitEvent(session);
         }
     }
@@ -181,6 +290,7 @@ export class SessionService {
         if (session) {
             session.status = 'failed';
             session.error = error;
+            this.persist(session);
             this.emitEvent(session);
         }
     }
@@ -191,6 +301,7 @@ export class SessionService {
 
         this.tokenIndex.delete(session.sessionToken);
         this.sessions.delete(id);
+        this.forget(id);
         this.logger.log(`Session removed: ${id}`);
         return session;
     }
@@ -210,6 +321,7 @@ export class SessionService {
             ) {
                 this.tokenIndex.delete(session.sessionToken);
                 this.sessions.delete(id);
+                this.forget(id);
                 removed++;
             }
         }
