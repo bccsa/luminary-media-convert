@@ -52,6 +52,7 @@ import { useEncodeEta } from '../composables/useEncodeEta';
 import { useSessionFileOps } from '../composables/useSessionFileOps';
 import { useChapterTrimSync } from '../composables/useChapterTrimSync';
 import { useTrimDeletions } from '../composables/useTrimDeletions';
+import { useTrimPlayback } from '../composables/useTrimPlayback';
 import { slicePeaksToTrims, trimmedDuration } from '../utils/trimTimeline';
 import type { AccelMode, SegmentFormat } from '../types';
 import { formatBytes, formatDateTime, formatRelative } from '../utils/format';
@@ -108,6 +109,18 @@ function onTimelineSegmentRemoved(segment: Segment) {
 const removedTrimSegments = computed(() =>
     showProbeConfig.value ? trimDeletions.removed.value : []
 );
+
+/**
+ * Preview playback follows the trim: discarded stretches are skipped, so what you
+ * hear and see while previewing is the programme that will be encoded. Only while
+ * the markers are live — afterwards the preview is already trim-aware server-side.
+ */
+useTrimPlayback({
+    ranges: trimSegments,
+    active: computed(() => showProbeConfig.value && trimSegments.value.length > 0),
+    getCurrentTime: () => playerRef.value?.getCurrentTime() ?? 0,
+    seek: (t: number) => playerRef.value?.seek(t),
+});
 
 const outputPanelRef = ref<InstanceType<typeof SessionOutputPanel> | null>(
     null
