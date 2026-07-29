@@ -208,10 +208,15 @@ export class ThumbnailService {
      * it, leaving a timeline whose thumbnails simply stopped. Allow a second of
      * wall clock per four seconds of source, with the old five minutes as the
      * floor and half an hour as a backstop against a pathological file.
+     *
+     * Rounded because durations are fractional — 3597.4s of video worked out to
+     * a timeout of 899340.25ms, and `execFile` rejects anything but an unsigned
+     * integer, so both the accelerated attempt and its software retry died before
+     * ffmpeg was even started.
      */
     private timeoutFor(durationSeconds: number): number {
         const scaled = (durationSeconds / 4) * 1000;
-        return Math.min(Math.max(scaled, 300_000), 1_800_000);
+        return Math.round(Math.min(Math.max(scaled, 300_000), 1_800_000));
     }
 
     async generateThumbnails(opts: {

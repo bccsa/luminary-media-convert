@@ -248,6 +248,21 @@ describe('ThumbnailService', () => {
             expect(call[2].timeout).toBe(900_000);
         });
 
+        it('gives execFile an integer, whatever the duration', async () => {
+            // Durations are fractional. This exact source scaled to 899340.25ms,
+            // which execFile rejects outright — killing the accelerated attempt
+            // and its software retry before ffmpeg ran at all.
+            await run({ hwaccels: 'cuda\n', duration: 3597.361 });
+
+            const call = mockExecFile.mock.calls.find((c: any[]) =>
+                (c[1] as string[])?.some(
+                    (a) => typeof a === 'string' && a.includes('sprite_%03d')
+                )
+            );
+            expect(Number.isInteger(call[2].timeout)).toBe(true);
+            expect(call[2].timeout).toBe(899_340);
+        });
+
         it('keeps the old five minutes as the floor for short clips', async () => {
             await run({ hwaccels: '', duration: 30 });
 
