@@ -377,6 +377,54 @@ describe('SessionService — surviving a restart', () => {
         expect(restart().get(session.id)).toBeUndefined();
     });
 
+    it('reclaims the working directory when a session ages out', () => {
+        // The record alone is not the point: the source upload lives here, and
+        // nothing else ever prunes it.
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        service.setCompleted(session.id, [], '');
+        writeFileSync(join(workDir, session.id, 'source.mp4'), 'pretend media');
+        (service.get(session.id) as Session).createdAt = Date.now() - 48 * 60 * 60 * 1000;
+
+        service.cleanup();
+
+        expect(existsSync(join(workDir, session.id))).toBe(false);
+    });
+
+    it('reclaims the working directory when a session is deleted', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        writeFileSync(join(workDir, session.id, 'source.mp4'), 'pretend media');
+
+        service.remove(session.id);
+
+        expect(existsSync(join(workDir, session.id))).toBe(false);
+    });
+
+    it('leaves a session that is still young alone', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        service.setCompleted(session.id, [], '');
+
+        service.cleanup();
+
+        expect(service.get(session.id)).toBeDefined();
+        expect(existsSync(join(workDir, session.id))).toBe(true);
+    });
+
+    it('leaves an unfinished session alone however old it is', () => {
+        // Sweeping something mid-encode would delete the input from under FFmpeg.
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        service.updateStatus(session.id, 'encoding');
+        (service.get(session.id) as Session).createdAt = Date.now() - 48 * 60 * 60 * 1000;
+
+        service.cleanup();
+
+        expect(service.get(session.id)).toBeDefined();
+        expect(existsSync(join(workDir, session.id))).toBe(true);
+    });
+
     it('ignores unreadable records instead of failing to start', () => {
         mkdirSync(join(workDir, 'broken'), { recursive: true });
         writeFileSync(join(workDir, 'broken', 'session.json'), '{ not json');

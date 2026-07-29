@@ -90,13 +90,17 @@ export class SessionService implements OnModuleInit {
         }
     }
 
-    /** Drop the on-disk record, so a removed session cannot come back on restart. */
-    private forget(id: string): void {
+    /**
+     * Drop everything the session left on disk: the record, so it cannot come back
+     * on the next restart, and the working directory holding its source upload,
+     * preview cache and sidecars. Nothing else prunes these.
+     */
+    private purge(id: string): void {
         try {
-            rmSync(this.sessionFile(id), { force: true });
+            rmSync(join(this.workDir, id), { recursive: true, force: true });
         } catch (err) {
             this.logger.warn(
-                `Could not remove persisted session ${id}: ${(err as Error).message}`,
+                `Could not remove working directory for session ${id}: ${(err as Error).message}`,
             );
         }
     }
@@ -301,7 +305,7 @@ export class SessionService implements OnModuleInit {
 
         this.tokenIndex.delete(session.sessionToken);
         this.sessions.delete(id);
-        this.forget(id);
+        this.purge(id);
         this.logger.log(`Session removed: ${id}`);
         return session;
     }
@@ -321,7 +325,13 @@ export class SessionService implements OnModuleInit {
             ) {
                 this.tokenIndex.delete(session.sessionToken);
                 this.sessions.delete(id);
-                this.forget(id);
+                this.purge(id);
+                // Named individually: this deletes a customer's uploaded media,
+                // which should never be something you discover by its absence.
+                this.logger.log(
+                    `Cleaned up session ${id} (${session.status}, ` +
+                        `${Math.round((Date.now() - session.createdAt) / 3_600_000)}h old)`,
+                );
                 removed++;
             }
         }

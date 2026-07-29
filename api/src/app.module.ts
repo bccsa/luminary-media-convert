@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { EncodeModule } from './encode/encode.module.js';
 import { AuthModule } from './auth/auth.module.js';
@@ -7,6 +8,7 @@ import { HlsEditModule } from './hls-edit/hls-edit.module.js';
 
 @Module({
     imports: [
+        ScheduleModule.forRoot(),
         AuthModule,
         EncodeModule,
         HlsEditModule,
