@@ -1739,33 +1739,30 @@ describe('SegmentEditor — removing segments', () => {
         expect(payload.inSec).toBe(10);
     });
 
-    it('offers a delete control on the selected segment', async () => {
+    it('offers a delete control on the segment', async () => {
+        // Present in the DOM for every wide-enough block; revealed on hover or
+        // selection by CSS, which jsdom does not evaluate.
         const w = mountEditor({ segments: [seg(1, 10, 40)] });
         await flush();
-        expect(w.find('.se-segment-delete').exists()).toBe(false);
-
-        const segEl = w.get('.se-segment').element as HTMLElement;
-        mouseAt(segEl, 'mousedown', 20);
-        mouseAt(document.body, 'mouseup', 20);
-        await flush();
-
         expect(w.find('.se-segment-delete').exists()).toBe(true);
+
         await w.find('.se-segment-delete').trigger('click');
         await flush();
         expect(latestSegments(w)).toHaveLength(0);
         expect(w.emitted('segment-removed')).toBeTruthy();
     });
 
+    it('leaves the control off blocks too narrow to hold it', async () => {
+        // 1s of a 100s span is ~1% wide — a button there would cover the block.
+        const w = mountEditor({ segments: [seg(1, 10, 11)] });
+        await flush();
+        expect(w.find('.se-segment-delete').exists()).toBe(false);
+    });
+
     it('does not seek or start a drag when the delete control is pressed', async () => {
         const onSeek = vi.fn();
         const w = mountEditor({ segments: [seg(1, 10, 40)], props: { onSeek } });
         await flush();
-        const segEl = w.get('.se-segment').element as HTMLElement;
-        mouseAt(segEl, 'mousedown', 20);
-        mouseAt(document.body, 'mouseup', 20);
-        await flush();
-        onSeek.mockClear();
-
         await w.find('.se-segment-delete').trigger('mousedown');
         expect(onSeek).not.toHaveBeenCalled();
     });

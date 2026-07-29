@@ -1464,7 +1464,16 @@ html.dark .se-confirm {
 .se-segment-delete {
     position: absolute;
     top: 2px;
-    right: 2px;
+    /* Clear of the out handle, which is 6px wide at right: -2px and would otherwise
+       take the press. */
+    right: 8px;
+    /* Above the handles, so the hit area is the button all the way to its edge. */
+    z-index: 4;
+    /* Revealed on hover or while selected — a control on every block at all times
+       would clutter a timeline that can hold dozens. */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1477,6 +1486,19 @@ html.dark .se-confirm {
     color: rgb(255 255 255 / 0.92);
     cursor: pointer;
     line-height: 0;
+}
+
+.se-segment:hover .se-segment-delete,
+.se-segment--selected .se-segment-delete {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.se-segment-delete:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+    outline: 2px solid var(--se-accent);
+    outline-offset: 1px;
 }
 
 .se-segment-delete:hover {

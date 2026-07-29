@@ -1498,7 +1498,7 @@ defineExpose({
                         class="se-segment-label"
                     >{{ seg.label || `#${segments.indexOf(seg) + 1}` }}</span>
                     <button
-                        v-if="isSelected(seg.id) && ((seg.outSec - seg.inSec) / visibleSpan) * 100 > 6"
+                        v-if="((seg.outSec - seg.inSec) / visibleSpan) * 100 > 6"
                         type="button"
                         class="se-segment-delete"
                         title="Remove segment"
