@@ -75,6 +75,14 @@ interface Props {
     waveformPeaks?: number[] | null;
     /** Color for waveform visualization. Defaults to CSS variable --se-waveform or rgba(255,255,255,0.35). */
     waveformColor?: string | null;
+    /**
+     * Cap on how many segments can exist. Unlimited when unset.
+     *
+     * At the cap, marking a new segment replaces the oldest rather than being
+     * refused — a trim that allows exactly one range should let the user re-mark
+     * it freely, not make them delete the old one first.
+     */
+    maxSegments?: number;
     /** Override the empty-state heading shown when there are no segments yet (split-list panel only). */
     emptyTitle?: string;
     /** Override the empty-state hint shown under the heading (split-list panel only). */
@@ -223,6 +231,33 @@ function clearSelection() {
     emit('select', []);
 }
 
+const hasSelection = computed(() => selectedIds.value.size > 0);
+
+/**
+ * Trimming is a single-selection activity: one clip is picked, adjusted, and
+ * kept or dropped. Multi-select existed for chapters and subtitles, where
+ * relabelling or clearing a run of cues at once is useful, and it only made
+ * trimming easier to get wrong — a stray modifier-click could add a second clip
+ * to the selection and the next delete would take both.
+ */
+const multiSelectAllowed = computed(() => props.mode !== 'trim');
+
+/**
+ * Removes whatever is selected, as one undoable step.
+ *
+ * Shared by the delete button and the Delete/Backspace keys so both behave
+ * identically. Each removal is announced, which the keyboard path previously
+ * did not do — consumers tracking what was cut (the removed-clips list beside
+ * the timeline) silently missed anything deleted with the keyboard.
+ */
+function deleteSelected() {
+    if (selectedIds.value.size === 0) return;
+    const removed = segments.value.filter((s) => selectedIds.value.has(s.id));
+    commitSegments(segments.value.filter((s) => !selectedIds.value.has(s.id)));
+    clearSelection();
+    for (const seg of removed) emit('segment-removed', { ...seg });
+}
+
 const primarySelectedId = computed(() => {
     if (selectedIds.value.size === 0) return null;
     const ids = Array.from(selectedIds.value);
@@ -326,7 +361,7 @@ function emitSeek(sec: number, final: boolean, minIntervalMs?: number) {
 
 // -------------- timeline interaction: click-to-seek + drag-scrub + marquee --------------
 
-type DragMode = 'scrub' | 'handle' | 'segment' | 'marquee' | null;
+type DragMode = 'scrub' | 'handle' | 'segment' | 'marquee' | 'mark' | null;
 const dragMode = ref<DragMode>(null);
 const dragContext = ref<{
     id?: string;
@@ -362,8 +397,13 @@ function onTimelineMouseDown(e: MouseEvent) {
     if (target.closest('.se-segment-handle') || target.closest('.se-segment')) return;
     (timelineRef.value as HTMLDivElement | null)?.focus();
 
-    // Shift-drag on empty area = marquee select; plain drag = scrub playhead.
-    if (e.shiftKey && props.mode !== 'trim') {
+    // Shift-drag marks a range in trim and marquee-selects elsewhere; plain drag
+    // scrubs the playhead in both.
+    if (e.shiftKey && e.button === 0) {
+        if (props.mode === 'trim') {
+            beginMarkDrag(e);
+            return;
+        }
         beginMarquee(e);
         return;
     }
@@ -384,6 +424,56 @@ function beginScrub(e: MouseEvent) {
         dragMode.value = null;
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+}
+
+/** Live range being dragged out, in seconds. Null when no mark drag is running. */
+const draftRange = ref<{ from: number; to: number } | null>(null);
+
+const draftRangeStyle = computed(() => {
+    const d = draftRange.value;
+    if (!d) return null;
+    const lo = timeToPercent(Math.min(d.from, d.to));
+    const hi = timeToPercent(Math.max(d.from, d.to));
+    return { left: `${lo}%`, width: `${Math.max(0, hi - lo)}%` };
+});
+
+/**
+ * Shift-drag across the timeline to mark a range, rather than pressing In and Out
+ * at two playhead positions.
+ *
+ * Plain drag stays as scrubbing — it is how the playhead is positioned, which
+ * matters more now that trimming keeps a single range. Shift is free here because
+ * marquee select never applied to trim.
+ */
+function beginMarkDrag(e: MouseEvent) {
+    const start = clampTime(pxToTime(e.clientX));
+    dragMode.value = 'mark';
+    draftRange.value = { from: start, to: start };
+
+    const onMove = (ev: MouseEvent) => {
+        const raw = clampTime(pxToTime(ev.clientX));
+        draftRange.value = { from: start, to: snapTime(raw) };
+    };
+    const onUp = (ev: MouseEvent) => {
+        const end = clampTime(pxToTime(ev.clientX));
+        const lo = Math.min(start, end);
+        const hi = Math.max(start, end);
+        draftRange.value = null;
+        snapGuide.value = null;
+        dragMode.value = null;
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+
+        // A shift-click that never travelled would otherwise leave a sliver of a
+        // clip behind, which is harder to notice than nothing happening.
+        if (hi - lo < props.minSegmentSec) return;
+        addSegmentInternal(lo, hi);
+        // Park the playhead on the in-point so the player shows where the kept
+        // material starts, rather than wherever the drag happened to end.
+        emitSeek(lo, true);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -474,7 +564,16 @@ function onSegmentMouseDown(seg: Segment, e: MouseEvent) {
     if ((e.target as HTMLElement).closest('.se-segment-handle')) return;
     e.stopPropagation();
     (timelineRef.value as HTMLDivElement | null)?.focus();
-    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+
+    // Shift-drag marks a range wherever it starts. Without this the existing clip
+    // would swallow the gesture, and with a single trim range that clip covers
+    // exactly the stretch most likely to be re-marked.
+    if (e.shiftKey && e.button === 0 && props.mode === 'trim') {
+        beginMarkDrag(e);
+        return;
+    }
+    const additive =
+        multiSelectAllowed.value && (e.shiftKey || e.metaKey || e.ctrlKey);
     if (additive) toggleSelection(seg.id);
     else setSelection([seg.id]);
 
@@ -673,13 +772,26 @@ function addSegmentAtPlayhead() {
     addSegmentInternal(inSec, outSec);
 }
 
+/**
+ * The segments that survive making room for one more, given `maxSegments`.
+ * Oldest give way first; everything stays when there is no cap or no pressure.
+ */
+function roomForOneMore(): Segment[] {
+    const cap = props.maxSegments;
+    if (cap == null || segments.value.length < cap) return segments.value;
+    return segments.value.slice(segments.value.length - Math.max(0, cap - 1));
+}
+
 function addSegmentInternal(inSec: number, outSec: number) {
     const newSeg: Segment = { id: createSegmentId(), inSec, outSec };
     if (props.mode === 'chapters' && props.rippleEdit) {
         const next = rippleInsert(segments.value, newSeg);
         commitSegments(next);
     } else {
-        commitSegments([...segments.value, newSeg]);
+        // At the cap the oldest segments give way, so re-marking is one gesture
+        // rather than delete-then-mark. Deliberately silent about it: nothing was
+        // cut from the output, so this is not a removal consumers should record.
+        commitSegments([...roomForOneMore(), newSeg]);
     }
     setSelection([newSeg.id]);
     emit('segment-commit', segments.value);
@@ -839,9 +951,7 @@ function onKeyDown(e: KeyboardEvent) {
         case 'Delete': case 'Backspace': {
             if (selectedIds.value.size > 0) {
                 e.preventDefault();
-                const keep = segments.value.filter((s) => !selectedIds.value.has(s.id));
-                commitSegments(keep);
-                clearSelection();
+                deleteSelected();
             }
             return;
         }
@@ -1371,7 +1481,18 @@ defineExpose({
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
                 <slot name="toolbar-before-clear" />
                 <button
-                    v-if="segments.length > 0"
+                    v-if="mode === 'trim'"
+                    type="button"
+                    class="se-btn se-btn--danger"
+                    :disabled="!hasSelection"
+                    :title="hasSelection ? 'Delete the selected clip · Delete — undo with ⌘/Ctrl + Z' : 'Select a clip on the timeline to delete it'"
+                    @click="deleteSelected"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
+                    Delete
+                </button>
+                <button
+                    v-else-if="segments.length > 0"
                     type="button"
                     class="se-btn se-btn--danger"
                     @click="confirmClearOpen = true"
@@ -1515,8 +1636,14 @@ defineExpose({
                         v-if="labelsVisible && ((seg.outSec - seg.inSec) / visibleSpan) * 100 > 4"
                         class="se-segment-label"
                     >{{ seg.label || `#${segments.indexOf(seg) + 1}` }}</span>
+                    <!--
+                        Not in trim: the controls bar carries a delete button that
+                        acts on the selection, and a second way to remove a clip —
+                        one that fires on hover, right where the clip is dragged
+                        and resized — was too easy to hit by accident.
+                    -->
                     <button
-                        v-if="((seg.outSec - seg.inSec) / visibleSpan) * 100 > 6"
+                        v-if="mode !== 'trim' && ((seg.outSec - seg.inSec) / visibleSpan) * 100 > 6"
                         type="button"
                         class="se-segment-delete"
                         title="Remove segment"
@@ -1538,6 +1665,13 @@ defineExpose({
                     </button>
                 </div>
 
+                <!-- The range being dragged out, before it becomes a clip. -->
+                <div
+                    v-if="draftRangeStyle"
+                    class="se-draft-range"
+                    :style="draftRangeStyle"
+                    aria-hidden="true"
+                />
                 <div
                     v-if="playheadPercent >= 0 && playheadPercent <= 100"
                     class="se-playhead"
@@ -1754,7 +1888,18 @@ defineExpose({
                     title="Redo"
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
                 <button
-                    v-if="segments.length > 0"
+                    v-if="mode === 'trim'"
+                    type="button"
+                    class="se-btn se-btn--danger"
+                    :disabled="!hasSelection"
+                    :title="hasSelection ? 'Delete the selected clip · Delete — undo with ⌘/Ctrl + Z' : 'Select a clip on the timeline to delete it'"
+                    @click="deleteSelected"
+                >
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
+                    Delete
+                </button>
+                <button
+                    v-else-if="segments.length > 0"
                     type="button"
                     class="se-btn se-btn--danger"
                     @click="confirmClearOpen = true"
@@ -2008,7 +2153,9 @@ defineExpose({
                         <dt>⌘ / Ctrl + Shift + Z</dt><dd>Redo</dd>
                         <dt>+ / −</dt><dd>Zoom in / out (0 resets)</dd>
                         <dt>Ctrl / ⌘ + wheel</dt><dd>Zoom at cursor</dd>
-                        <dt>Shift + drag</dt><dd>Marquee-select segments</dd>
+                        <dt>Shift + drag</dt>
+                        <dd v-if="mode === 'trim'">Drag out a clip on the timeline</dd>
+                        <dd v-else>Marquee-select segments</dd>
                         <dt>Esc</dt><dd>Clear selection / close</dd>
                         <dt>?</dt><dd>Toggle this help</dd>
                     </dl>
