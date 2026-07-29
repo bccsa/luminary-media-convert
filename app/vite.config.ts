@@ -68,6 +68,7 @@ export default defineConfig({
         dedupe: ['video.js'],
     },
     test: {
-        environment: 'node',
+        environment: 'jsdom',
+        setupFiles: ['./vitest.setup.ts'],
     },
 });
