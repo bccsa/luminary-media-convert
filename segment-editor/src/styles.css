@@ -1511,3 +1511,30 @@ html.dark .se-confirm {
     width: 12px;
     height: 12px;
 }
+
+/* Material the trim discards. Hatched rather than merely dimmed, so it reads as
+   "not part of the programme" even where the waveform is quiet. */
+.se-excluded-span {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+    background:
+        repeating-linear-gradient(
+            135deg,
+            var(--se-excluded-hatch, rgba(100, 116, 139, 0.16)) 0 6px,
+            transparent 6px 12px
+        ),
+        var(--se-excluded-wash, rgba(100, 116, 139, 0.22));
+}
+
+html.dark .se-root .se-excluded-span {
+    background:
+        repeating-linear-gradient(
+            135deg,
+            rgba(15, 23, 42, 0.4) 0 6px,
+            transparent 6px 12px
+        ),
+        rgba(2, 6, 23, 0.42);
+}

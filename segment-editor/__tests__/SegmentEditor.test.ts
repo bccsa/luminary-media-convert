@@ -1767,3 +1767,60 @@ describe('SegmentEditor — removing segments', () => {
         expect(onSeek).not.toHaveBeenCalled();
     });
 });
+
+describe('SegmentEditor — discarded material', () => {
+    it('shades every stretch the trim will not keep', async () => {
+        // duration 100, keeping 10–20 and 40–50: gaps are 0–10, 20–40, 50–100.
+        const w = mountEditor({
+            segments: [seg(1, 10, 20), seg(2, 40, 50)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        const spans = w.findAll('.se-excluded-span');
+        expect(spans).toHaveLength(3);
+        expect(spans[0].attributes('style')).toContain('left: 0%');
+        expect(spans[0].attributes('style')).toContain('width: 10%');
+    });
+
+    it('shades nothing when no range has been marked', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+        expect(w.findAll('.se-excluded-span')).toHaveLength(0);
+    });
+
+    it('grows the shaded region when a range is deleted', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20), seg(2, 40, 50)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        expect(w.findAll('.se-excluded-span')).toHaveLength(3);
+
+        w.vm.removeSegment('seg-2');
+        await flush();
+        // Only 10–20 survives, so everything after it is now one discarded run.
+        const spans = w.findAll('.se-excluded-span');
+        expect(spans).toHaveLength(2);
+        expect(spans[1].attributes('style')).toContain('width: 80%');
+    });
+
+    it('treats overlapping ranges as one covered run', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 30), seg(2, 20, 40)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        const spans = w.findAll('.se-excluded-span');
+        expect(spans).toHaveLength(2);
+        expect(spans[1].attributes('style')).toContain('left: 40%');
+    });
+
+    it('leaves chapter mode alone', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20)],
+            props: { mode: 'chapters' },
+        });
+        await flush();
+        expect(w.findAll('.se-excluded-span')).toHaveLength(0);
+    });
+});

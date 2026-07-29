@@ -1054,6 +1054,34 @@ function onTimelineHoverLeave() {
     hideThumbPreview();
 }
 
+/**
+ * Stretches the trim will discard: everything the ranges do not cover. Shaded on
+ * the track so the difference between material that will be encoded and material
+ * that will not is obvious at a glance, and so deleting a range shows immediately.
+ */
+const excludedSpans = computed(() => {
+    if (props.mode !== 'trim' || segments.value.length === 0) return [];
+    const ranges = segments.value
+        .slice()
+        .sort((a, b) => a.inSec - b.inSec);
+
+    const gaps: { from: number; to: number }[] = [];
+    let cursor = 0;
+    for (const r of ranges) {
+        if (r.inSec > cursor) gaps.push({ from: cursor, to: r.inSec });
+        cursor = Math.max(cursor, r.outSec);
+    }
+    if (cursor < props.duration) gaps.push({ from: cursor, to: props.duration });
+
+    return gaps
+        .map((g, i) => ({
+            key: `gap-${i}`,
+            left: timeToPercent(g.from),
+            width: ((g.to - g.from) / visibleSpan.value) * 100,
+        }))
+        .filter((g) => g.width > 0 && g.left < 100 && g.left + g.width > 0);
+});
+
 // -------------- thumbnail filmstrip (background of the track) --------------
 
 /**
@@ -1480,6 +1508,14 @@ defineExpose({
                     v-if="waveformPeaks?.length"
                     ref="waveformCanvas"
                     class="se-waveform-canvas"
+                />
+
+                <div
+                    v-for="span in excludedSpans"
+                    :key="span.key"
+                    class="se-excluded-span"
+                    :style="{ left: `${span.left}%`, width: `${span.width}%` }"
+                    aria-hidden="true"
                 />
 
                 <div class="se-ruler">
