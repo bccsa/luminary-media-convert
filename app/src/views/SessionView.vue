@@ -802,6 +802,7 @@ useTrimPlayback({
     active: computed(
         () => showProbeConfig.value && effectiveKeepRanges.value.length > 0
     ),
+    isPlaying: isPreviewPlaying,
     getCurrentTime: () => playerRef.value?.getCurrentTime() ?? 0,
     seek: (t: number) => playerRef.value?.seek(t),
 });

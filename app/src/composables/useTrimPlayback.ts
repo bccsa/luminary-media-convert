@@ -7,6 +7,12 @@ interface TrimPlaybackDeps {
     ranges: Ref<TrimSegment[]> | Readonly<Ref<TrimSegment[]>>;
     /** Only steer playback while this is true — e.g. before the encode is submitted. */
     active: Readonly<Ref<boolean>>;
+    /**
+     * Whether the video is actually playing. Steering a paused player would drag
+     * the playhead out of any stretch that is not being kept — including a gap the
+     * user has parked in deliberately to mark a new clip there.
+     */
+    isPlaying: Readonly<Ref<boolean>>;
     getCurrentTime: () => number;
     seek: (t: number) => void;
     /** Called when playback runs past the last surviving range. */
@@ -25,7 +31,7 @@ interface TrimPlaybackDeps {
  * times a second — a quarter of a second of deleted material is very noticeable.
  */
 export function useTrimPlayback(deps: TrimPlaybackDeps) {
-    const { ranges, active, getCurrentTime, seek, onPastEnd } = deps;
+    const { ranges, active, isPlaying, getCurrentTime, seek, onPastEnd } = deps;
 
     let rafId: number | null = null;
     /** Seek already asked for and not yet observed to have landed. */
@@ -35,7 +41,11 @@ export function useTrimPlayback(deps: TrimPlaybackDeps) {
     function tick() {
         rafId = requestAnimationFrame(tick);
 
-        if (!active.value || ranges.value.length === 0) return;
+        if (!active.value || !isPlaying.value || ranges.value.length === 0) {
+            // Paused: leave the playhead wherever it has been put.
+            pendingTarget = null;
+            return;
+        }
 
         const t = getCurrentTime();
         if (!Number.isFinite(t)) return;
