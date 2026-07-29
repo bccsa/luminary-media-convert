@@ -52,3 +52,59 @@ export function shouldSeek(
 ): boolean {
     return Math.abs(target - t) > toleranceSec;
 }
+
+export interface JumpPlan {
+    /** Position to seek to, or null to leave playback alone this frame. */
+    seekTo: number | null;
+    /** Seek already in flight, carried to the next frame. */
+    pendingTarget: number | null;
+}
+
+/**
+ * Decide what to do about the play position on a single frame.
+ *
+ * A seek is not instant: `currentTime` keeps reporting the old position for a
+ * while afterwards. Checked naively at animation-frame rate, that reads as "still
+ * in discarded material" and fires another seek, then another — dozens of seeks
+ * for one cut, which the player answers with a stall. So a seek is remembered
+ * until it lands, and only re-issued if it appears to have been dropped.
+ */
+export function planPlaybackJump(opts: {
+    t: number;
+    ranges: readonly TrimSegment[];
+    pendingTarget: number | null;
+    /** Milliseconds since the pending seek was issued. */
+    pendingAgeMs?: number;
+    toleranceSec?: number;
+    /** Give up on a seek that never took effect, and try once more. */
+    retryAfterMs?: number;
+}): JumpPlan {
+    const {
+        t,
+        ranges,
+        pendingTarget,
+        pendingAgeMs = 0,
+        toleranceSec = 0.25,
+        retryAfterMs = 1000,
+    } = opts;
+
+    if (pendingTarget != null) {
+        const arrived = t >= pendingTarget - toleranceSec;
+        if (arrived || isKept(t, ranges)) {
+            return { seekTo: null, pendingTarget: null };
+        }
+        if (pendingAgeMs < retryAfterMs) {
+            return { seekTo: null, pendingTarget };
+        }
+        // Long overdue: the seek probably never took. Ask once more.
+        return { seekTo: pendingTarget, pendingTarget };
+    }
+
+    if (isKept(t, ranges)) return { seekTo: null, pendingTarget: null };
+
+    const target = nextKeptStart(t, ranges);
+    if (target == null || !shouldSeek(t, target, toleranceSec)) {
+        return { seekTo: null, pendingTarget: null };
+    }
+    return { seekTo: target, pendingTarget: target };
+}

@@ -1,6 +1,6 @@
 import { onUnmounted, watch, type Ref } from 'vue';
 import type { TrimSegment } from '../types';
-import { nextKeptStart, shouldSeek } from '../utils/trimPlayback';
+import { planPlaybackJump } from '../utils/trimPlayback';
 
 interface TrimPlaybackDeps {
     /** Ranges that will survive into the encode. */
@@ -28,6 +28,9 @@ export function useTrimPlayback(deps: TrimPlaybackDeps) {
     const { ranges, active, getCurrentTime, seek, onPastEnd } = deps;
 
     let rafId: number | null = null;
+    /** Seek already asked for and not yet observed to have landed. */
+    let pendingTarget: number | null = null;
+    let pendingSince = 0;
 
     function tick() {
         rafId = requestAnimationFrame(tick);
@@ -37,16 +40,27 @@ export function useTrimPlayback(deps: TrimPlaybackDeps) {
         const t = getCurrentTime();
         if (!Number.isFinite(t)) return;
 
-        const target = nextKeptStart(t, ranges.value);
-        if (target == null) {
-            // Either inside kept material, or past the last range with nothing
-            // left to play. nextKeptStart cannot tell those apart on its own.
-            const beyond = ranges.value.every((r) => t >= r.outSec);
-            if (beyond) onPastEnd?.();
+        const plan = planPlaybackJump({
+            t,
+            ranges: ranges.value,
+            pendingTarget,
+            pendingAgeMs: pendingTarget == null ? 0 : performance.now() - pendingSince,
+        });
+
+        if (plan.pendingTarget !== pendingTarget) {
+            pendingTarget = plan.pendingTarget;
+            pendingSince = performance.now();
+        }
+
+        if (plan.seekTo != null) {
+            pendingSince = performance.now();
+            seek(plan.seekTo);
             return;
         }
 
-        if (shouldSeek(t, target)) seek(target);
+        if (plan.pendingTarget == null && ranges.value.every((r) => t >= r.outSec)) {
+            onPastEnd?.();
+        }
     }
 
     function start() {
@@ -56,6 +70,7 @@ export function useTrimPlayback(deps: TrimPlaybackDeps) {
     function stop() {
         if (rafId != null) cancelAnimationFrame(rafId);
         rafId = null;
+        pendingTarget = null;
     }
 
     watch(

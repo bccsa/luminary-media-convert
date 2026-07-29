@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isKept, nextKeptStart, shouldSeek } from './trimPlayback';
+import { isKept, nextKeptStart, planPlaybackJump, shouldSeek } from './trimPlayback';
 import type { TrimSegment } from '../types';
 
 const r = (inSec: number, outSec: number): TrimSegment => ({ inSec, outSec });
@@ -73,5 +73,63 @@ describe('shouldSeek', () => {
     it('respects a custom tolerance', () => {
         expect(shouldSeek(39, 40, 2)).toBe(false);
         expect(shouldSeek(39, 40, 0.5)).toBe(true);
+    });
+});
+
+describe('planPlaybackJump', () => {
+    const ranges = [r(10, 20), r(40, 50)];
+
+    it('does nothing while playback is inside kept material', () => {
+        const plan = planPlaybackJump({ t: 15, ranges, pendingTarget: null });
+        expect(plan).toEqual({ seekTo: null, pendingTarget: null });
+    });
+
+    it('jumps to the next range and remembers it', () => {
+        const plan = planPlaybackJump({ t: 25, ranges, pendingTarget: null });
+        expect(plan).toEqual({ seekTo: 40, pendingTarget: 40 });
+    });
+
+    it('does not fire a second seek while the first is still in flight', () => {
+        // The player has not caught up yet — this is the frame that used to
+        // re-seek, and the one after that, and the one after that.
+        const plan = planPlaybackJump({
+            t: 25,
+            ranges,
+            pendingTarget: 40,
+            pendingAgeMs: 16,
+        });
+        expect(plan.seekTo).toBeNull();
+        expect(plan.pendingTarget).toBe(40);
+    });
+
+    it('forgets the pending seek once playback arrives', () => {
+        const plan = planPlaybackJump({ t: 40, ranges, pendingTarget: 40, pendingAgeMs: 50 });
+        expect(plan).toEqual({ seekTo: null, pendingTarget: null });
+    });
+
+    it('forgets it if playback ended up in kept material some other way', () => {
+        const plan = planPlaybackJump({ t: 15, ranges, pendingTarget: 40, pendingAgeMs: 50 });
+        expect(plan).toEqual({ seekTo: null, pendingTarget: null });
+    });
+
+    it('retries a seek that never took effect', () => {
+        const plan = planPlaybackJump({
+            t: 25,
+            ranges,
+            pendingTarget: 40,
+            pendingAgeMs: 1500,
+        });
+        expect(plan.seekTo).toBe(40);
+    });
+
+    it('leaves a jump smaller than the tolerance alone', () => {
+        // Seeking 0.1s is not worth the stall it costs.
+        const plan = planPlaybackJump({ t: 39.9, ranges, pendingTarget: null });
+        expect(plan.seekTo).toBeNull();
+    });
+
+    it('does nothing past the last range', () => {
+        const plan = planPlaybackJump({ t: 55, ranges, pendingTarget: null });
+        expect(plan).toEqual({ seekTo: null, pendingTarget: null });
     });
 });
