@@ -52,6 +52,7 @@ const editorSegments = defineModel<Segment[]>('editorSegments', { required: true
 const emit = defineEmits<{
     discardChapters: [];
     saveChapters: [];
+    segmentRemoved: [segment: Segment];
 }>();
 
 const showToolbarSection = () => props.section !== 'timeline';
@@ -112,6 +113,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             >{{ chaptersIsSaving ? 'Saving…' : 'Save chapters' }}</button>
         </div>
 
+
         <p
             v-if="showToolbarSection() && !(showTrimSegmentEditor || showChaptersSidePanel)"
             class="text-sm leading-relaxed text-slate-500 dark:text-slate-400"
@@ -148,6 +150,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             :thumbnail-vtt-url="thumbnailVttUrl"
             :waveform-peaks="waveformPeaks"
             combined-controls
+            @segment-removed="emit('segmentRemoved', $event)"
         >
             <template v-if="canSaveChapters" #toolbar-before-clear>
                 <span

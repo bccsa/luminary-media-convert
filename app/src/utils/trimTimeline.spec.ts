@@ -1,8 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { slicePeaksToTrims, trimmedDuration } from './trimTimeline';
+import {
+    applyOutputEdit,
+    invertRanges,
+    mapSegmentsFromTimeline,
+    mapSegmentsToTimeline,
+    outputToSource,
+    slicePeaksToTrims,
+    sourceToOutput,
+    sourceToOutputClamped,
+    toOutputSegments,
+    trimmedDuration,
+} from './trimTimeline';
+import type { Segment } from '@luminary-media-converter/segment-editor';
 import type { TrimSegment } from '../types';
 
 const trim = (inSec: number, outSec: number): TrimSegment => ({ inSec, outSec });
+const seg = (id: string, inSec: number, outSec: number, label = ''): Segment => ({
+    id,
+    inSec,
+    outSec,
+    label,
+});
 
 describe('trimmedDuration', () => {
     it('sums the retained ranges', () => {
@@ -66,5 +84,211 @@ describe('slicePeaksToTrims', () => {
         const original = [...peaks];
         slicePeaksToTrims(peaks, 100, [trim(10, 20)]);
         expect(peaks).toEqual(original);
+    });
+});
+
+describe('sourceToOutput', () => {
+    const ranges = [trim(10, 20), trim(40, 50)];
+
+    it('maps the first kept range onto the start of the output', () => {
+        expect(sourceToOutput(10, ranges)).toBe(0);
+        expect(sourceToOutput(15, ranges)).toBe(5);
+    });
+
+    it('closes the gap for later ranges', () => {
+        expect(sourceToOutput(40, ranges)).toBe(10);
+        expect(sourceToOutput(45, ranges)).toBe(15);
+    });
+
+    it('has no answer for discarded material', () => {
+        expect(sourceToOutput(5, ranges)).toBeNull();
+        expect(sourceToOutput(30, ranges)).toBeNull();
+        expect(sourceToOutput(60, ranges)).toBeNull();
+    });
+});
+
+describe('outputToSource', () => {
+    const ranges = [trim(10, 20), trim(40, 50)];
+
+    it('walks the ranges in order', () => {
+        expect(outputToSource(0, ranges)).toBe(10);
+        expect(outputToSource(5, ranges)).toBe(15);
+        expect(outputToSource(10, ranges)).toBe(40);
+        expect(outputToSource(15, ranges)).toBe(45);
+    });
+
+    it('clamps past the end to the last frame kept', () => {
+        expect(outputToSource(999, ranges)).toBe(50);
+    });
+
+    it('is the identity when nothing is marked', () => {
+        expect(outputToSource(42, [])).toBe(42);
+    });
+
+    it('round-trips with sourceToOutput', () => {
+        for (const t of [10, 12.5, 19.9, 40, 47]) {
+            expect(outputToSource(sourceToOutput(t, ranges)!, ranges)).toBeCloseTo(t, 6);
+        }
+    });
+});
+
+describe('toOutputSegments', () => {
+    it('lays the ranges end to end from zero', () => {
+        const out = toOutputSegments([seg('a', 10, 20), seg('b', 40, 50)]);
+        expect(out.map((s) => [s.inSec, s.outSec])).toEqual([[0, 10], [10, 20]]);
+    });
+
+    it('keeps ids and labels', () => {
+        const out = toOutputSegments([seg('a', 10, 20, 'Intro')]);
+        expect(out[0].id).toBe('a');
+        expect(out[0].label).toBe('Intro');
+    });
+
+    it('orders by source position before laying out', () => {
+        const out = toOutputSegments([seg('b', 40, 50), seg('a', 10, 20)]);
+        expect(out.map((s) => s.id)).toEqual(['a', 'b']);
+    });
+});
+
+describe('applyOutputEdit', () => {
+    const source = [seg('a', 10, 20), seg('b', 40, 50)];
+
+    it('is a no-op when nothing moved', () => {
+        const out = applyOutputEdit(source, toOutputSegments(source));
+        expect(out.map((s) => [s.inSec, s.outSec])).toEqual([[10, 20], [40, 50]]);
+    });
+
+    it('folds a lengthened block back onto its source out-point', () => {
+        const edited = toOutputSegments(source);
+        edited[0] = { ...edited[0], outSec: edited[0].outSec + 3 };
+        const out = applyOutputEdit(source, edited);
+        expect(out[0].outSec).toBe(23);
+        expect(out[1]).toEqual(source[1]);
+    });
+
+    it('folds a moved start back onto its source in-point', () => {
+        const edited = toOutputSegments(source);
+        edited[0] = { ...edited[0], inSec: edited[0].inSec + 2 };
+        const out = applyOutputEdit(source, edited);
+        expect(out[0].inSec).toBe(12);
+        expect(out[0].outSec).toBe(20);
+    });
+
+    it('edits a later block without disturbing the ones before it', () => {
+        const edited = toOutputSegments(source);
+        edited[1] = { ...edited[1], outSec: edited[1].outSec + 5 };
+        const out = applyOutputEdit(source, edited);
+        expect(out[0]).toEqual(source[0]);
+        expect(out[1].outSec).toBe(55);
+    });
+
+    it('drops a block that was deleted', () => {
+        const edited = toOutputSegments(source).filter((s) => s.id !== 'a');
+        const out = applyOutputEdit(source, edited);
+        expect(out.map((s) => s.id)).toEqual(['b']);
+        expect(out[0]).toEqual(source[1]);
+    });
+
+    it('ignores a block with no source counterpart', () => {
+        const edited = [...toOutputSegments(source), seg('new', 20, 30)];
+        const out = applyOutputEdit(source, edited);
+        expect(out.map((s) => s.id)).toEqual(['a', 'b']);
+    });
+
+    it('never lets an edit invert a range', () => {
+        const edited = toOutputSegments(source);
+        edited[0] = { ...edited[0], outSec: edited[0].inSec - 5 };
+        const out = applyOutputEdit(source, edited);
+        expect(out[0].outSec).toBeGreaterThanOrEqual(out[0].inSec);
+    });
+});
+
+describe('invertRanges', () => {
+    it('returns the gaps around the ranges', () => {
+        expect(invertRanges([trim(10, 20), trim(40, 50)], 100)).toEqual([
+            { inSec: 0, outSec: 10 },
+            { inSec: 20, outSec: 40 },
+            { inSec: 50, outSec: 100 },
+        ]);
+    });
+
+    it('is the whole source when nothing is removed', () => {
+        expect(invertRanges([], 100)).toEqual([{ inSec: 0, outSec: 100 }]);
+    });
+
+    it('is empty when everything is removed', () => {
+        expect(invertRanges([trim(0, 100)], 100)).toEqual([]);
+    });
+
+    it('merges overlapping ranges rather than double-counting them', () => {
+        expect(invertRanges([trim(10, 30), trim(20, 40)], 100)).toEqual([
+            { inSec: 0, outSec: 10 },
+            { inSec: 40, outSec: 100 },
+        ]);
+    });
+
+    it('clamps ranges reaching past the source', () => {
+        expect(invertRanges([trim(90, 200)], 100)).toEqual([
+            { inSec: 0, outSec: 90 },
+        ]);
+    });
+
+    it('has nothing to say about a nonsensical duration', () => {
+        expect(invertRanges([trim(10, 20)], 0)).toEqual([]);
+        expect(invertRanges([trim(10, 20)], Number.NaN)).toEqual([]);
+    });
+});
+
+describe('mapSegmentsToTimeline / mapSegmentsFromTimeline', () => {
+    // 10.7s removed from the middle: the timeline is the rest, closed up.
+    const remaining = invertRanges([trim(60, 70)], 120);
+
+    it('shifts segments after the removal earlier', () => {
+        const mapped = mapSegmentsToTimeline([seg('a', 10, 20), seg('b', 80, 90)], remaining);
+        expect(mapped[0].inSec).toBe(10);
+        expect(mapped[1].inSec).toBe(70);
+        expect(mapped[1].outSec).toBe(80);
+    });
+
+    it('leaves segments before the removal alone', () => {
+        const mapped = mapSegmentsToTimeline([seg('a', 10, 20)], remaining);
+        expect([mapped[0].inSec, mapped[0].outSec]).toEqual([10, 20]);
+    });
+
+    it('round-trips back to source positions', () => {
+        const source = [seg('a', 10, 20), seg('b', 80, 90)];
+        const back = mapSegmentsFromTimeline(mapSegmentsToTimeline(source, remaining), remaining);
+        expect(back.map((s) => [s.inSec, s.outSec])).toEqual([[10, 20], [80, 90]]);
+    });
+
+    it('keeps ids and labels through both directions', () => {
+        const mapped = mapSegmentsToTimeline([seg('a', 80, 90, 'Outro')], remaining);
+        expect(mapped[0].id).toBe('a');
+        expect(mapped[0].label).toBe('Outro');
+    });
+});
+
+describe('sourceToOutputClamped', () => {
+    const ranges = [trim(0, 60), trim(70, 120)];
+
+    it('agrees with sourceToOutput inside kept material', () => {
+        expect(sourceToOutputClamped(30, ranges)).toBe(30);
+        expect(sourceToOutputClamped(80, ranges)).toBe(70);
+    });
+
+    it('reports the seam for a position inside a cut', () => {
+        // 60–70 was removed: anywhere in it belongs at the join, 60.
+        expect(sourceToOutputClamped(60, ranges)).toBe(60);
+        expect(sourceToOutputClamped(65, ranges)).toBe(60);
+        expect(sourceToOutputClamped(69.9, ranges)).toBe(60);
+    });
+
+    it('reports the end for a position past everything kept', () => {
+        expect(sourceToOutputClamped(999, ranges)).toBe(110);
+    });
+
+    it('never strands the playhead at zero mid-playback', () => {
+        // The bug this exists for: 65s played back as 0 and stuck there.
+        expect(sourceToOutputClamped(65, ranges)).not.toBe(0);
     });
 });

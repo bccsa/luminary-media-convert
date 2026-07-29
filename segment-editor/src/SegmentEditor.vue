@@ -111,6 +111,8 @@ const emit = defineEmits<{
     select: [ids: string[]];
     seek: [seconds: number];
     'segment-commit': [segments: Segment[]];
+    /** A segment was removed. Carries it whole so consumers can offer an undo. */
+    'segment-removed': [segment: Segment];
 }>();
 
 // -------------- derived mode config --------------
@@ -601,6 +603,19 @@ function selectedSegment(): Segment | undefined {
     return id ? segments.value.find((s) => s.id === id) : undefined;
 }
 
+/**
+ * True when the playhead sits in a gap with a segment on either side. Extending a
+ * neighbour over such a gap would make it impossible to mark the gap itself, so
+ * marking wins there; before the first segment or after the last, where there is
+ * nothing to be ambiguous about, extending still applies.
+ */
+function inGapBetweenSegments(t: number): boolean {
+    const list = segments.value;
+    return (
+        list.some((s) => s.outSec <= t) && list.some((s) => s.inSec >= t)
+    );
+}
+
 function markIn() {
     const t = clampTime(props.getCurrentTime());
     const atPH = segmentAt(t);
@@ -611,8 +626,9 @@ function markIn() {
         return;
     }
     const sel = selectedSegment();
-    // Only extend backward if playhead is genuinely before the selected segment.
-    if (sel && t < sel.inSec) {
+    // Only extend backward if playhead is genuinely before the selected segment,
+    // and is not in a gap the user is trying to mark.
+    if (sel && t < sel.inSec && !inGapBetweenSegments(t)) {
         commitSegmentChange(sel.id, { inSec: t });
         pendingInSec.value = null;
         return;
@@ -640,9 +656,13 @@ function markOut() {
         return;
     }
     const sel = selectedSegment();
-    if (sel && t > sel.outSec) {
+    if (sel && t > sel.outSec && !inGapBetweenSegments(t)) {
         commitSegmentChange(sel.id, { outSec: t });
+        return;
     }
+    // In a gap between segments a lone `]` starts the mark instead, so the pair
+    // can be pressed in either order.
+    if (inGapBetweenSegments(t)) pendingInSec.value = t;
 }
 
 function addSegmentAtPlayhead() {
@@ -679,8 +699,10 @@ function rippleInsert(list: Segment[], incoming: Segment): Segment[] {
 }
 
 function removeSegment(id: string) {
+    const removed = segments.value.find((s) => s.id === id);
     commitSegments(segments.value.filter((s) => s.id !== id));
     selectedIds.value.delete(id);
+    if (removed) emit('segment-removed', { ...removed });
 }
 
 function clearAll() {
@@ -1263,6 +1285,7 @@ defineExpose({
     markIn,
     markOut,
     addSegment: addSegmentAtPlayhead,
+    removeSegment,
     clearAll,
     undo,
     redo,
@@ -1492,6 +1515,27 @@ defineExpose({
                         v-if="labelsVisible && ((seg.outSec - seg.inSec) / visibleSpan) * 100 > 4"
                         class="se-segment-label"
                     >{{ seg.label || `#${segments.indexOf(seg) + 1}` }}</span>
+                    <button
+                        v-if="((seg.outSec - seg.inSec) / visibleSpan) * 100 > 6"
+                        type="button"
+                        class="se-segment-delete"
+                        title="Remove segment"
+                        aria-label="Remove segment"
+                        @mousedown.stop
+                        @click.stop="removeSegment(seg.id)"
+                    >
+                        <svg
+                            class="se-icon"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            aria-hidden="true"
+                        >
+                            <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
+                        </svg>
+                    </button>
                 </div>
 
                 <div

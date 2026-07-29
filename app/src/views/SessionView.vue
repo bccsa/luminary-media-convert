@@ -19,7 +19,7 @@ import type {
     EncodeConfig,
     TrimSegment,
 } from '@luminary-media-converter/encode-config';
-import { SegmentEditor } from '@luminary-media-converter/segment-editor';
+import { SegmentEditor, formatTime } from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
 import {
     useChapters,
@@ -51,7 +51,18 @@ import { useAppLayout } from '../composables/useAppLayout';
 import { useEncodeEta } from '../composables/useEncodeEta';
 import { useSessionFileOps } from '../composables/useSessionFileOps';
 import { useChapterTrimSync } from '../composables/useChapterTrimSync';
-import { slicePeaksToTrims, trimmedDuration } from '../utils/trimTimeline';
+import { useTrimDeletions } from '../composables/useTrimDeletions';
+import { useTrimPlayback } from '../composables/useTrimPlayback';
+import {
+    invertRanges,
+    mapSegmentsFromTimeline,
+    mapSegmentsToTimeline,
+    outputToSource,
+    slicePeaksToTrims,
+    sourceToOutput,
+    sourceToOutputClamped,
+    trimmedDuration,
+} from '../utils/trimTimeline';
 import type { AccelMode, SegmentFormat } from '../types';
 import { formatBytes, formatDateTime, formatRelative } from '../utils/format';
 import { errorMessage } from '../utils/errors';
@@ -88,6 +99,27 @@ const trimSegments = computed<TrimSegment[]>(() =>
         outSec: s.outSec,
     }))
 );
+/**
+ * Ranges removed from the trim timeline. They stay listed beside the player so a
+ * deletion can be undone, right up until the encode consumes the markers.
+ */
+const trimDeletions = useTrimDeletions(editorSegments);
+
+/**
+ * Only pre-encode removals are trim deletions. Once the encode is submitted the
+ * timeline holds chapters, and removing one of those is not "removed from the
+ * encode" — it is a chapter edit, with its own undo and its own save path.
+ */
+function onTimelineSegmentRemoved(segment: Segment) {
+    if (!showProbeConfig.value) return;
+    trimDeletions.record(segment);
+}
+
+const removedTrimSegments = computed(() =>
+    showProbeConfig.value ? trimDeletions.removed.value : []
+);
+
+
 const outputPanelRef = ref<InstanceType<typeof SessionOutputPanel> | null>(
     null
 );
@@ -618,6 +650,7 @@ const sourceProbeDuration = computed(() => {
 });
 
 const trimEditorProbeDuration = computed(() => {
+    if (timelineIsShortened.value) return trimmedDuration(timelineRanges.value);
     // Prefer player-reported duration (reflects encoded trim cuts); fall back through
     // in-memory probe then session-doc probe so completed sessions always get a value.
     if (showsOutputTimeline.value) {
@@ -637,6 +670,13 @@ const trimEditorProbeDuration = computed(() => {
  * the concat list and is already trimmed — slicing again would cut it twice.
  */
 const timelineWaveformPeaks = computed(() => {
+    if (timelineIsShortened.value) {
+        return slicePeaksToTrims(
+            waveformPeaks.value,
+            sourceProbeDuration.value,
+            timelineRanges.value
+        );
+    }
     if (!showsOutputTimeline.value || isCompleted.value) {
         return waveformPeaks.value;
     }
@@ -691,6 +731,81 @@ const playerRef = computed(() => {
 function seekPlayerTime(t: number) {
     playerRef.value?.seek(t);
 }
+
+/**
+ * Preview playback follows the trim: discarded stretches are skipped, so what you
+ * hear and see while previewing is the programme that will be encoded. Only while
+ * the markers are live — afterwards the preview is already trim-aware server-side.
+ */
+/**
+ * Deleting a clip takes that material out of the video, so the timeline loses it:
+ * the waveform closes up, the total shortens, and the clips after it move earlier.
+ * Material that was merely never marked stays put — it is still there to mark, and
+ * collapsing it would make marking one clip look like discarding everything else.
+ */
+/**
+ * The ranges the encode will keep. Normally the clips; when every clip has been
+ * deleted, the source minus what was deleted — otherwise deleting them all would
+ * send no trim at all and the encoder would take the whole source back, deletions
+ * included.
+ */
+const effectiveKeepRanges = computed<TrimSegment[]>(() => {
+    if (trimSegments.value.length > 0) return trimSegments.value;
+    if (deletedRanges.value.length === 0) return [];
+    return invertRanges(deletedRanges.value, sourceProbeDuration.value);
+});
+
+const deletedRanges = computed<TrimSegment[]>(() =>
+    trimDeletions.removed.value.map((s) => ({ inSec: s.inSec, outSec: s.outSec }))
+);
+
+const timelineRanges = computed<TrimSegment[]>(() =>
+    invertRanges(deletedRanges.value, sourceProbeDuration.value)
+);
+
+const timelineIsShortened = computed(
+    () =>
+        showProbeConfig.value &&
+        deletedRanges.value.length > 0 &&
+        sourceProbeDuration.value > 0
+);
+
+const timelineSegments = computed<Segment[]>({
+    get: () =>
+        timelineIsShortened.value
+            ? mapSegmentsToTimeline(editorSegments.value, timelineRanges.value)
+            : editorSegments.value,
+    set: (next) => {
+        editorSegments.value = timelineIsShortened.value
+            ? mapSegmentsFromTimeline(next, timelineRanges.value)
+            : next;
+    },
+});
+
+/** The player runs on source time; the timeline may be shorter than that. */
+function timelineCurrentTime(): number {
+    const t = playerRef.value?.getCurrentTime() ?? 0;
+    if (!timelineIsShortened.value) return t;
+    // Playback can be inside material the timeline no longer shows; the playhead
+    // belongs at the seam, not back at zero.
+    return sourceToOutputClamped(t, timelineRanges.value);
+}
+
+function timelineSeek(t: number) {
+    playerRef.value?.seek(
+        timelineIsShortened.value ? outputToSource(t, timelineRanges.value) : t
+    );
+}
+
+useTrimPlayback({
+    ranges: effectiveKeepRanges,
+    active: computed(
+        () => showProbeConfig.value && effectiveKeepRanges.value.length > 0
+    ),
+    isPlaying: isPreviewPlaying,
+    getCurrentTime: () => playerRef.value?.getCurrentTime() ?? 0,
+    seek: (t: number) => playerRef.value?.seek(t),
+});
 
 const currentAngleIndex = ref(0);
 const copied = ref(false);
@@ -1084,7 +1199,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
 
         // Strip audioTrackMetadata before sending to API, add trim segments
         const { audioTrackMetadata: _, ...apiConfig } = config;
-        const submittedTrims = trimSegments.value;
+        const submittedTrims = effectiveKeepRanges.value;
         const submitConfig =
             submittedTrims.length > 0
                 ? { ...apiConfig, trimSegments: submittedTrims }
@@ -1102,6 +1217,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
         // positions drawn over a timeline that no longer matches them.
         if (submittedTrims.length > 0) {
             editorSegments.value = [];
+            trimDeletions.clear();
         }
 
         // Save config for future reuse (strip trimSegments — session-specific)
@@ -1997,6 +2113,41 @@ onUnmounted(() => {
                                         keyboard-scope="focus"
                                         :fps="segmentEditorProbeFps"
                                     />
+                                    <!-- Clips removed from the encode: dropped from
+                                         the timeline, restorable until Start Encoding -->
+                                    <div
+                                        v-if="removedTrimSegments.length > 0"
+                                        class="shrink-0 mt-3 rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-800/50"
+                                    >
+                                        <div class="mb-2 flex items-center justify-between gap-2">
+                                            <span class="text-xs font-medium text-slate-600 dark:text-slate-300">
+                                                Removed ({{ removedTrimSegments.length }})
+                                            </span>
+                                            <button
+                                                v-if="removedTrimSegments.length > 1"
+                                                type="button"
+                                                class="chapter-toolbar-muted"
+                                                @click="trimDeletions.restoreAll"
+                                            >Restore all</button>
+                                        </div>
+                                        <ul class="max-h-40 space-y-1 overflow-y-auto">
+                                            <li
+                                                v-for="seg in removedTrimSegments"
+                                                :key="seg.id"
+                                                class="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1 dark:bg-slate-900/40"
+                                            >
+                                                <span class="font-mono text-xs text-slate-600 dark:text-slate-300">
+                                                    {{ formatTime(seg.inSec) }} – {{ formatTime(seg.outSec) }}
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    class="chapter-toolbar-muted"
+                                                    @click="trimDeletions.restore(seg.id)"
+                                                >Undo</button>
+                                            </li>
+                                        </ul>
+                                    </div>
+
                                     <p
                                         v-if="chaptersSaveError"
                                         class="shrink-0 text-xs text-red-600 dark:text-red-400"
@@ -2105,7 +2256,7 @@ onUnmounted(() => {
                         v-if="activeTab === 'trim' && showTrimSegmentEditor"
                         class="order-3 shrink-0"
                         section="timeline"
-                        v-model:editor-segments="editorSegments"
+                        v-model:editor-segments="timelineSegments"
                         :show-chapters-side-panel="showChaptersBesidePlayer"
                         :can-save-chapters="canSaveChapters"
                         :chapters-is-dirty="chapters.isDirty.value"
@@ -2114,13 +2265,12 @@ onUnmounted(() => {
                         :show-trim-segment-editor="showTrimSegmentEditor"
                         :thumbnail-vtt-url="thumbnailVttUrl"
                         :waveform-peaks="timelineWaveformPeaks"
+                        @segment-removed="onTimelineSegmentRemoved"
                         :is-completed="isCompleted"
                         :probe-duration="trimEditorProbeDuration"
                         :add-gap-above-timeline="false"
-                        :get-current-time="
-                            () => playerRef?.getCurrentTime() ?? 0
-                        "
-                        :on-seek="(t: number) => playerRef?.seek(t)"
+                        :get-current-time="timelineCurrentTime"
+                        :on-seek="timelineSeek"
                         :on-play-pause="() => playerRef?.togglePlay()"
                         :is-preview-playing="isPreviewPlaying"
                         :segment-editor-probe-fps="segmentEditorProbeFps"
@@ -2218,7 +2368,8 @@ onUnmounted(() => {
                             :show-trim-segment-editor="showTrimSegmentEditor"
                             :thumbnail-vtt-url="thumbnailVttUrl"
                             :waveform-peaks="timelineWaveformPeaks"
-                            :is-completed="isCompleted"
+                                @segment-removed="onTimelineSegmentRemoved"
+                                    :is-completed="isCompleted"
                             :can-edit-trim-timeline="canEditTrimTimeline"
                             :can-edit-chapters-playback="
                                 canEditChaptersPlayback
