@@ -351,7 +351,8 @@ describe('SegmentEditor — selection', () => {
     it('keeps the selection to one clip in trim, whatever modifier is held', async () => {
         // Trimming picks one clip, adjusts it, keeps or drops it. A stray
         // modifier-click adding a second would put it in the firing line of the
-        // next delete.
+        // next delete. Meta rather than shift: in trim, shift-drag marks a new
+        // range, which has its own tests.
         const w = mountEditor({
             segments: [seg(1, 0, 5), seg(2, 10, 15)],
             props: { mode: 'trim' },
@@ -361,7 +362,7 @@ describe('SegmentEditor — selection', () => {
         mouseAt(segEls[0].element as HTMLElement, 'mousedown', 2);
         mouseAt(document.body, 'mouseup', 2);
         await flush();
-        mouseAt(segEls[1].element as HTMLElement, 'mousedown', 12, { shiftKey: true });
+        mouseAt(segEls[1].element as HTMLElement, 'mousedown', 12, { metaKey: true });
         mouseAt(document.body, 'mouseup', 12);
         await flush();
 
@@ -1823,6 +1824,115 @@ describe('SegmentEditor — removing segments', () => {
         });
         await flush();
         expect(w.find('.se-segment-delete').exists()).toBe(false);
+    });
+});
+
+describe('SegmentEditor — shift-drag to mark a range', () => {
+    /** Drag across the timeline track from one second to another. */
+    async function shiftDrag(
+        w: ReturnType<typeof mountEditor>,
+        fromSec: number,
+        toSec: number
+    ) {
+        const track = w.find('.se-timeline').element as HTMLElement;
+        mouseAt(track, 'mousedown', fromSec, { shiftKey: true });
+        await flush();
+        mouseAt(document.body, 'mousemove', toSec);
+        await flush();
+        mouseAt(document.body, 'mouseup', toSec);
+        await flush();
+    }
+
+    it('marks the dragged range in trim mode', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+
+        await shiftDrag(w, 20, 50);
+
+        const segs = latestSegments(w);
+        expect(segs).toHaveLength(1);
+        expect(segs[0].inSec).toBeCloseTo(20, 1);
+        expect(segs[0].outSec).toBeCloseTo(50, 1);
+    });
+
+    it('marks the same range when dragged right to left', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+
+        await shiftDrag(w, 50, 20);
+
+        const segs = latestSegments(w);
+        expect(segs[0].inSec).toBeCloseTo(20, 1);
+        expect(segs[0].outSec).toBeCloseTo(50, 1);
+    });
+
+    it('shows the range while it is being dragged, then commits it', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+        const track = w.find('.se-timeline').element as HTMLElement;
+
+        mouseAt(track, 'mousedown', 20, { shiftKey: true });
+        await flush();
+        mouseAt(document.body, 'mousemove', 50);
+        await flush();
+        expect(w.find('.se-draft-range').exists()).toBe(true);
+
+        mouseAt(document.body, 'mouseup', 50);
+        await flush();
+        expect(w.find('.se-draft-range').exists()).toBe(false);
+    });
+
+    it('ignores a shift-click that never travelled', async () => {
+        // Otherwise a stray click leaves a sliver of a clip, which is harder to
+        // notice than nothing happening.
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+
+        await shiftDrag(w, 30, 30);
+
+        expect(w.emitted('update:modelValue')).toBeUndefined();
+    });
+
+    it('replaces the existing range rather than adding a second', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20)],
+            props: { mode: 'trim', maxSegments: 1 },
+        });
+        await flush();
+
+        await shiftDrag(w, 60, 90);
+
+        const segs = latestSegments(w);
+        expect(segs).toHaveLength(1);
+        expect(segs[0].inSec).toBeCloseTo(60, 1);
+    });
+
+    it('leaves plain drag scrubbing the playhead', async () => {
+        const onSeek = vi.fn();
+        const w = mountEditor({ props: { mode: 'trim', onSeek } });
+        await flush();
+        const track = w.find('.se-timeline').element as HTMLElement;
+
+        mouseAt(track, 'mousedown', 40);
+        mouseAt(document.body, 'mouseup', 40);
+        await flush();
+
+        expect(onSeek).toHaveBeenCalled();
+        expect(w.emitted('update:modelValue')).toBeUndefined();
+    });
+
+    it('still marquee-selects in chapters rather than marking', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 10, 20), seg(2, 30, 40)],
+            props: { mode: 'chapters' },
+        });
+        await flush();
+
+        await shiftDrag(w, 5, 45);
+
+        // Both cues fall inside the marquee; nothing new is created.
+        const selectEvents = w.emitted('select')!;
+        expect(selectEvents[selectEvents.length - 1][0]).toHaveLength(2);
     });
 });
 

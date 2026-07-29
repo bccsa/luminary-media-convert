@@ -361,7 +361,7 @@ function emitSeek(sec: number, final: boolean, minIntervalMs?: number) {
 
 // -------------- timeline interaction: click-to-seek + drag-scrub + marquee --------------
 
-type DragMode = 'scrub' | 'handle' | 'segment' | 'marquee' | null;
+type DragMode = 'scrub' | 'handle' | 'segment' | 'marquee' | 'mark' | null;
 const dragMode = ref<DragMode>(null);
 const dragContext = ref<{
     id?: string;
@@ -397,8 +397,13 @@ function onTimelineMouseDown(e: MouseEvent) {
     if (target.closest('.se-segment-handle') || target.closest('.se-segment')) return;
     (timelineRef.value as HTMLDivElement | null)?.focus();
 
-    // Shift-drag on empty area = marquee select; plain drag = scrub playhead.
-    if (e.shiftKey && props.mode !== 'trim') {
+    // Shift-drag marks a range in trim and marquee-selects elsewhere; plain drag
+    // scrubs the playhead in both.
+    if (e.shiftKey && e.button === 0) {
+        if (props.mode === 'trim') {
+            beginMarkDrag(e);
+            return;
+        }
         beginMarquee(e);
         return;
     }
@@ -419,6 +424,56 @@ function beginScrub(e: MouseEvent) {
         dragMode.value = null;
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+}
+
+/** Live range being dragged out, in seconds. Null when no mark drag is running. */
+const draftRange = ref<{ from: number; to: number } | null>(null);
+
+const draftRangeStyle = computed(() => {
+    const d = draftRange.value;
+    if (!d) return null;
+    const lo = timeToPercent(Math.min(d.from, d.to));
+    const hi = timeToPercent(Math.max(d.from, d.to));
+    return { left: `${lo}%`, width: `${Math.max(0, hi - lo)}%` };
+});
+
+/**
+ * Shift-drag across the timeline to mark a range, rather than pressing In and Out
+ * at two playhead positions.
+ *
+ * Plain drag stays as scrubbing — it is how the playhead is positioned, which
+ * matters more now that trimming keeps a single range. Shift is free here because
+ * marquee select never applied to trim.
+ */
+function beginMarkDrag(e: MouseEvent) {
+    const start = clampTime(pxToTime(e.clientX));
+    dragMode.value = 'mark';
+    draftRange.value = { from: start, to: start };
+
+    const onMove = (ev: MouseEvent) => {
+        const raw = clampTime(pxToTime(ev.clientX));
+        draftRange.value = { from: start, to: snapTime(raw) };
+    };
+    const onUp = (ev: MouseEvent) => {
+        const end = clampTime(pxToTime(ev.clientX));
+        const lo = Math.min(start, end);
+        const hi = Math.max(start, end);
+        draftRange.value = null;
+        snapGuide.value = null;
+        dragMode.value = null;
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+
+        // A shift-click that never travelled would otherwise leave a sliver of a
+        // clip behind, which is harder to notice than nothing happening.
+        if (hi - lo < props.minSegmentSec) return;
+        addSegmentInternal(lo, hi);
+        // Park the playhead on the in-point so the player shows where the kept
+        // material starts, rather than wherever the drag happened to end.
+        emitSeek(lo, true);
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -509,6 +564,14 @@ function onSegmentMouseDown(seg: Segment, e: MouseEvent) {
     if ((e.target as HTMLElement).closest('.se-segment-handle')) return;
     e.stopPropagation();
     (timelineRef.value as HTMLDivElement | null)?.focus();
+
+    // Shift-drag marks a range wherever it starts. Without this the existing clip
+    // would swallow the gesture, and with a single trim range that clip covers
+    // exactly the stretch most likely to be re-marked.
+    if (e.shiftKey && e.button === 0 && props.mode === 'trim') {
+        beginMarkDrag(e);
+        return;
+    }
     const additive =
         multiSelectAllowed.value && (e.shiftKey || e.metaKey || e.ctrlKey);
     if (additive) toggleSelection(seg.id);
@@ -1602,6 +1665,13 @@ defineExpose({
                     </button>
                 </div>
 
+                <!-- The range being dragged out, before it becomes a clip. -->
+                <div
+                    v-if="draftRangeStyle"
+                    class="se-draft-range"
+                    :style="draftRangeStyle"
+                    aria-hidden="true"
+                />
                 <div
                     v-if="playheadPercent >= 0 && playheadPercent <= 100"
                     class="se-playhead"
@@ -2083,7 +2153,9 @@ defineExpose({
                         <dt>⌘ / Ctrl + Shift + Z</dt><dd>Redo</dd>
                         <dt>+ / −</dt><dd>Zoom in / out (0 resets)</dd>
                         <dt>Ctrl / ⌘ + wheel</dt><dd>Zoom at cursor</dd>
-                        <dt>Shift + drag</dt><dd>Marquee-select segments</dd>
+                        <dt>Shift + drag</dt>
+                        <dd v-if="mode === 'trim'">Drag out a clip on the timeline</dd>
+                        <dd v-else>Marquee-select segments</dd>
                         <dt>Esc</dt><dd>Clear selection / close</dd>
                         <dt>?</dt><dd>Toggle this help</dd>
                     </dl>

@@ -468,6 +468,22 @@ html.dark .se-root {
     z-index: 3;
 }
 
+/*
+ * The range being shift-dragged, before it is committed as a clip. Deliberately
+ * lighter than a real segment and dashed at the edges, so it reads as a
+ * preview of where the clip will land rather than as one already there.
+ */
+.se-draft-range {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: rgba(56, 189, 248, 0.28);
+    border-left: 1px dashed rgba(56, 189, 248, 0.9);
+    border-right: 1px dashed rgba(56, 189, 248, 0.9);
+    pointer-events: none;
+    z-index: 3;
+}
+
 .se-pending-marker {
     position: absolute;
     top: 0;
