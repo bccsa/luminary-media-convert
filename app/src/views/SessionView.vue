@@ -53,7 +53,14 @@ import { useSessionFileOps } from '../composables/useSessionFileOps';
 import { useChapterTrimSync } from '../composables/useChapterTrimSync';
 import { useTrimDeletions } from '../composables/useTrimDeletions';
 import { useTrimPlayback } from '../composables/useTrimPlayback';
-import { slicePeaksToTrims, trimmedDuration } from '../utils/trimTimeline';
+import {
+    applyOutputEdit,
+    outputToSource,
+    slicePeaksToTrims,
+    sourceToOutput,
+    toOutputSegments,
+    trimmedDuration,
+} from '../utils/trimTimeline';
 import type { AccelMode, SegmentFormat } from '../types';
 import { formatBytes, formatDateTime, formatRelative } from '../utils/format';
 import { errorMessage } from '../utils/errors';
@@ -641,6 +648,11 @@ const sourceProbeDuration = computed(() => {
 });
 
 const trimEditorProbeDuration = computed(() => {
+    // Pre-encode with clips marked, the timeline is the programme: its length is
+    // the kept ranges, not the source.
+    if (showOutputTrimTimeline.value) {
+        return trimmedDuration(trimSegments.value);
+    }
     // Prefer player-reported duration (reflects encoded trim cuts); fall back through
     // in-memory probe then session-doc probe so completed sessions always get a value.
     if (showsOutputTimeline.value) {
@@ -660,6 +672,14 @@ const trimEditorProbeDuration = computed(() => {
  * the concat list and is already trimmed — slicing again would cut it twice.
  */
 const timelineWaveformPeaks = computed(() => {
+    // Same collapse while trimming, so the waveform matches the blocks above it.
+    if (showOutputTrimTimeline.value) {
+        return slicePeaksToTrims(
+            waveformPeaks.value,
+            sourceProbeDuration.value,
+            trimSegments.value
+        );
+    }
     if (!showsOutputTimeline.value || isCompleted.value) {
         return waveformPeaks.value;
     }
@@ -720,6 +740,47 @@ function seekPlayerTime(t: number) {
  * hear and see while previewing is the programme that will be encoded. Only while
  * the markers are live — afterwards the preview is already trim-aware server-side.
  */
+/**
+ * While trimming, the timeline shows the programme rather than the source: the
+ * kept ranges laid end to end, so deleting a clip visibly closes the gap and the
+ * waveform, ruler and playhead all describe what will be encoded.
+ *
+ * The mapping lives here rather than in SegmentEditor, which stays a plain
+ * renderer of whatever segments, duration, peaks and times it is handed. Edits
+ * come back in output coordinates and are folded onto the source ranges.
+ */
+const showOutputTrimTimeline = computed(
+    () => showProbeConfig.value && trimSegments.value.length > 0
+);
+
+const timelineSegments = computed<Segment[]>({
+    get: () =>
+        showOutputTrimTimeline.value
+            ? toOutputSegments(editorSegments.value)
+            : editorSegments.value,
+    set: (next) => {
+        editorSegments.value = showOutputTrimTimeline.value
+            ? applyOutputEdit(editorSegments.value, next)
+            : next;
+    },
+});
+
+/** Playhead position expressed on whichever timeline is being shown. */
+function timelineCurrentTime(): number {
+    const t = playerRef.value?.getCurrentTime() ?? 0;
+    if (!showOutputTrimTimeline.value) return t;
+    return sourceToOutput(t, trimSegments.value) ?? 0;
+}
+
+/** Seeks arrive in timeline coordinates; the player only understands the source. */
+function timelineSeek(t: number) {
+    playerRef.value?.seek(
+        showOutputTrimTimeline.value
+            ? outputToSource(t, trimSegments.value)
+            : t
+    );
+}
+
 useTrimPlayback({
     ranges: trimSegments,
     active: computed(() => showProbeConfig.value && trimSegments.value.length > 0),
@@ -2176,7 +2237,7 @@ onUnmounted(() => {
                         v-if="activeTab === 'trim' && showTrimSegmentEditor"
                         class="order-3 shrink-0"
                         section="timeline"
-                        v-model:editor-segments="editorSegments"
+                        v-model:editor-segments="timelineSegments"
                         :show-chapters-side-panel="showChaptersBesidePlayer"
                         :can-save-chapters="canSaveChapters"
                         :chapters-is-dirty="chapters.isDirty.value"
@@ -2189,10 +2250,8 @@ onUnmounted(() => {
                         :is-completed="isCompleted"
                         :probe-duration="trimEditorProbeDuration"
                         :add-gap-above-timeline="false"
-                        :get-current-time="
-                            () => playerRef?.getCurrentTime() ?? 0
-                        "
-                        :on-seek="(t: number) => playerRef?.seek(t)"
+                        :get-current-time="timelineCurrentTime"
+                        :on-seek="timelineSeek"
                         :on-play-pause="() => playerRef?.togglePlay()"
                         :is-preview-playing="isPreviewPlaying"
                         :segment-editor-probe-fps="segmentEditorProbeFps"
