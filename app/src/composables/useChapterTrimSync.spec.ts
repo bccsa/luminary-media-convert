@@ -10,52 +10,83 @@ const seg = (id: string, inSec: number, outSec: number, label = ''): Segment => 
     label,
 });
 
-function setup(opts: { seeds?: boolean } = {}) {
+function setup(opts: { mirror?: boolean } = {}) {
     const editorSegments = ref<Segment[]>([]);
     const chapterSegments = ref<Segment[]>([]);
-    const canEditTrimTimeline = ref(true);
-    const trimSeeds = ref(opts.seeds ?? true);
+    const mirror = ref(opts.mirror ?? true);
     const chaptersLoaded = ref(true);
 
     const sync = useChapterTrimSync({
         editorSegments,
         chapterSegments,
-        canEditTrimTimeline: computed(() => canEditTrimTimeline.value),
-        trimSeedsChapters: computed(() => trimSeeds.value),
+        mirrorActive: computed(() => mirror.value),
         chaptersLoaded: computed(() => chaptersLoaded.value),
     });
 
-    return { editorSegments, chapterSegments, canEditTrimTimeline, trimSeeds, sync };
+    return { editorSegments, chapterSegments, mirror, chaptersLoaded, sync };
 }
 
-describe('useChapterTrimSync', () => {
-    it('seeds the chapter list from trim ranges while they are live', async () => {
-        const { editorSegments, chapterSegments } = setup();
+describe('useChapterTrimSync — before the encode is submitted', () => {
+    it('does not let trim markers seed the chapter list', async () => {
+        const { editorSegments, chapterSegments } = setup({ mirror: false });
         editorSegments.value = [seg('a', 10, 20), seg('b', 40, 50)];
         await nextTick();
+        expect(chapterSegments.value).toHaveLength(0);
+    });
+
+    it('does not let a loaded chapter sidecar overwrite trim markers', async () => {
+        const { editorSegments, chapterSegments } = setup({ mirror: false });
+        editorSegments.value = [seg('a', 10, 20)];
+        await nextTick();
+        chapterSegments.value = [seg('c', 0, 5, 'Existing chapter')];
+        await nextTick();
+        expect(editorSegments.value.map((s) => [s.inSec, s.outSec])).toEqual([[10, 20]]);
+    });
+
+    it('does not clear chapters when trim markers are dropped at submit', async () => {
+        const { editorSegments, chapterSegments } = setup({ mirror: false });
+        chapterSegments.value = [seg('c', 0, 5, 'Keep me')];
+        editorSegments.value = [seg('a', 10, 20)];
+        await nextTick();
+        editorSegments.value = [];
+        await nextTick();
+        expect(chapterSegments.value).toHaveLength(1);
+        expect(chapterSegments.value[0].label).toBe('Keep me');
+    });
+});
+
+describe('useChapterTrimSync — once the timeline is the chapter editor', () => {
+    it('propagates timeline edits into the chapter list', async () => {
+        const { editorSegments, chapterSegments } = setup();
+        editorSegments.value = [seg('a', 0, 10), seg('b', 10, 20)];
+        await nextTick();
         expect(chapterSegments.value.map((s) => [s.inSec, s.outSec])).toEqual([
+            [0, 10],
             [10, 20],
-            [40, 50],
         ]);
     });
 
-    it('preserves chapter labels by row when trim boundaries move', async () => {
+    it('preserves chapter labels by row when boundaries move', async () => {
         const { editorSegments, chapterSegments } = setup();
-        editorSegments.value = [seg('a', 10, 20), seg('b', 40, 50)];
+        editorSegments.value = [seg('a', 0, 10), seg('b', 10, 20)];
         await nextTick();
-        chapterSegments.value = [
-            seg('a', 10, 20, 'Intro'),
-            seg('b', 40, 50, 'Outro'),
-        ];
+        chapterSegments.value = [seg('a', 0, 10, 'Intro'), seg('b', 10, 20, 'Outro')];
         await nextTick();
-        editorSegments.value = [seg('a', 12, 20), seg('b', 40, 50)];
+        editorSegments.value = [seg('a', 0, 12), seg('b', 12, 20)];
         await nextTick();
         expect(chapterSegments.value.map((s) => s.label)).toEqual(['Intro', 'Outro']);
     });
 
-    it('clears chapters when the trim list empties and trim still seeds them', async () => {
+    it('renders chapters onto the timeline', async () => {
         const { editorSegments, chapterSegments } = setup();
-        editorSegments.value = [seg('a', 10, 20)];
+        chapterSegments.value = [seg('c', 5, 15, 'Chapter 1')];
+        await nextTick();
+        expect(editorSegments.value.map((s) => [s.inSec, s.outSec])).toEqual([[5, 15]]);
+    });
+
+    it('clears chapters when every segment is deleted from the timeline', async () => {
+        const { editorSegments, chapterSegments } = setup();
+        editorSegments.value = [seg('a', 0, 10)];
         await nextTick();
         expect(chapterSegments.value).toHaveLength(1);
         editorSegments.value = [];
@@ -63,42 +94,30 @@ describe('useChapterTrimSync', () => {
         expect(chapterSegments.value).toHaveLength(0);
     });
 
-    it('keeps chapters when trim markers are dropped after submit', async () => {
-        // Regression: the encode submit empties the trim list, and the sync used to
-        // read that as "chapters deleted", taking authored chapters down with it.
-        const { editorSegments, chapterSegments, trimSeeds } = setup();
-        editorSegments.value = [seg('a', 10, 20)];
-        await nextTick();
-        chapterSegments.value = [seg('a', 10, 20, 'Keep me')];
+    it('adopts the chapter list when mirroring turns on', async () => {
+        const { editorSegments, chapterSegments, mirror } = setup({ mirror: false });
+        chapterSegments.value = [seg('c', 3, 9, 'From S3')];
+        editorSegments.value = [seg('trim', 40, 60)];
         await nextTick();
 
-        trimSeeds.value = false;
-        editorSegments.value = [];
+        mirror.value = true;
         await nextTick();
 
-        expect(chapterSegments.value).toHaveLength(1);
-        expect(chapterSegments.value[0].label).toBe('Keep me');
+        expect(editorSegments.value.map((s) => [s.inSec, s.outSec])).toEqual([[3, 9]]);
     });
+});
 
-    it('still renders chapters onto the timeline once trim stops seeding', async () => {
-        // Post-encode the timeline shows chapters, so this direction must keep working.
-        const { editorSegments, chapterSegments, trimSeeds } = setup({ seeds: false });
-        chapterSegments.value = [seg('c', 5, 15, 'Chapter 1')];
-        await nextTick();
-        expect(trimSeeds.value).toBe(false);
-        expect(editorSegments.value.map((s) => [s.inSec, s.outSec])).toEqual([[5, 15]]);
-    });
-
+describe('useChapterTrimSync — guards', () => {
     it('does nothing while the chapter sidecar has not loaded', async () => {
         const editorSegments = ref<Segment[]>([]);
         const chapterSegments = ref<Segment[]>([]);
         useChapterTrimSync({
             editorSegments,
             chapterSegments,
-            canEditTrimTimeline: computed(() => true),
+            mirrorActive: computed(() => true),
             chaptersLoaded: computed(() => false),
         });
-        editorSegments.value = [seg('a', 10, 20)];
+        editorSegments.value = [seg('a', 0, 10)];
         await nextTick();
         expect(chapterSegments.value).toHaveLength(0);
     });

@@ -2,19 +2,18 @@ import { ref, watch, type Ref } from 'vue';
 import type { Segment } from '@luminary-media-converter/segment-editor';
 
 interface ChapterTrimSyncDeps {
-    /** Trim timeline ranges authored by the user. */
+    /** Segments shown on the bottom timeline. */
     editorSegments: Ref<Segment[]>;
-    /** Chapter list (from useChapters), mirrored from the trim timeline while editing. */
+    /** Chapter list (from useChapters), edited beside the player. */
     chapterSegments: Ref<Segment[]>;
-    /** True when the trim timeline is currently editable. */
-    canEditTrimTimeline: Readonly<Ref<boolean>>;
     /**
-     * True while trim markers are still live and may seed the chapter list. Goes
-     * false once the encode is submitted: the markers are dropped at that point,
-     * and an emptied trim list must not be read as "the chapters were deleted".
-     * Defaults to `canEditTrimTimeline` when omitted.
+     * True once the timeline represents chapters rather than trim markers — that
+     * is, after the encode has been submitted. Mirroring is off before then:
+     * trimming picks which parts of the source to keep and says nothing about how
+     * the result should be divided into chapters, so the two lists must not touch
+     * each other while trim markers are live.
      */
-    trimSeedsChapters?: Readonly<Ref<boolean>>;
+    mirrorActive: Readonly<Ref<boolean>>;
     /** True when the chapter sidecar has been loaded for the current session. */
     chaptersLoaded: Readonly<Ref<boolean>>;
 }
@@ -26,12 +25,12 @@ function segmentTimesAlmostEqual(a: Segment, b: Segment): boolean {
     );
 }
 
-function sameTrimAsChapterBoundaries(trim: Segment[], ch: Segment[]): boolean {
-    if (trim.length !== ch.length) return false;
-    return trim.every((t, i) => segmentTimesAlmostEqual(t, ch[i]!));
+function sameBoundaries(a: Segment[], b: Segment[]): boolean {
+    if (a.length !== b.length) return false;
+    return a.every((s, i) => segmentTimesAlmostEqual(s, b[i]!));
 }
 
-/** True when trim timeline and chapter list already match (times + labels, same order). */
+/** True when timeline and chapter list already match (times + labels, same order). */
 function editorMatchesChapters(ed: Segment[], ch: Segment[]): boolean {
     if (ed.length !== ch.length) return false;
     return ed.every((s, i) => {
@@ -44,47 +43,54 @@ function editorMatchesChapters(ed: Segment[], ch: Segment[]): boolean {
 }
 
 /**
- * Keeps the trim timeline and the chapter list mirrored while the trim
- * timeline is editable. Trim boundary changes propagate into the chapter list
- * (labels preserved by row index); chapter edits propagate back into the trim
- * timeline. Returns `syncChaptersFromTrim` so callers can re-trigger the sync
- * after discarding a chapter draft.
+ * Keeps the bottom timeline and the chapter list mirrored once the timeline is a
+ * chapter editor — after the encode has been submitted. Timeline edits propagate
+ * into the chapter list (labels preserved by row index) and chapter edits
+ * propagate back onto the timeline.
+ *
+ * Nothing is mirrored while `mirrorActive` is false. Before the encode the
+ * timeline holds trim markers: ephemeral ranges describing what to encode. They
+ * must never seed chapters, and loading a chapter sidecar must never overwrite
+ * them.
+ *
+ * Returns `syncChaptersFromTimeline` so callers can re-trigger the sync after
+ * discarding a chapter draft.
  */
 export function useChapterTrimSync(deps: ChapterTrimSyncDeps) {
-    const { editorSegments, chapterSegments, canEditTrimTimeline, chaptersLoaded } =
+    const { editorSegments, chapterSegments, mirrorActive, chaptersLoaded } =
         deps;
-    const trimSeedsChapters = deps.trimSeedsChapters ?? canEditTrimTimeline;
 
-    const hadTrimForChapterSync = ref(false);
+    /** Guards against reading a timeline emptied for other reasons as a deletion. */
+    const timelineHadSegments = ref(false);
 
-    function syncEditorFromChaptersIfNeeded() {
-        if (!canEditTrimTimeline.value || !chaptersLoaded.value) return;
+    function syncEditorFromChapters() {
+        if (!mirrorActive.value || !chaptersLoaded.value) return;
         if (editorMatchesChapters(editorSegments.value, chapterSegments.value))
             return;
         editorSegments.value = chapterSegments.value.map((s) => ({ ...s }));
     }
 
-    function syncChaptersFromTrim() {
-        if (!trimSeedsChapters.value || !chaptersLoaded.value) return;
+    function syncChaptersFromTimeline() {
+        if (!mirrorActive.value || !chaptersLoaded.value) return;
 
-        const trim = editorSegments.value;
-        if (trim.length === 0) {
-            if (hadTrimForChapterSync.value) {
+        const timeline = editorSegments.value;
+        if (timeline.length === 0) {
+            if (timelineHadSegments.value) {
                 chapterSegments.value = [];
-                hadTrimForChapterSync.value = false;
+                timelineHadSegments.value = false;
             }
             return;
         }
 
-        hadTrimForChapterSync.value = true;
+        timelineHadSegments.value = true;
         const prev = chapterSegments.value;
-        const next: Segment[] = trim.map((t, i) => ({
+        const next: Segment[] = timeline.map((t, i) => ({
             ...t,
             label: i < prev.length ? (prev[i]!.label ?? '') : '',
         }));
 
         if (
-            sameTrimAsChapterBoundaries(trim, prev) &&
+            sameBoundaries(timeline, prev) &&
             next.every((s, i) => (s.label ?? '') === (prev[i]?.label ?? ''))
         ) {
             return;
@@ -93,21 +99,23 @@ export function useChapterTrimSync(deps: ChapterTrimSyncDeps) {
         chapterSegments.value = next;
     }
 
-    watch(editorSegments, () => syncChaptersFromTrim(), { deep: true });
+    watch(editorSegments, () => syncChaptersFromTimeline(), { deep: true });
 
     watch(chaptersLoaded, (loaded) => {
         if (loaded) {
-            syncChaptersFromTrim();
-            syncEditorFromChaptersIfNeeded();
+            syncChaptersFromTimeline();
+            syncEditorFromChapters();
         }
     });
 
-    watch(chapterSegments, () => syncEditorFromChaptersIfNeeded(), { deep: true });
+    watch(chapterSegments, () => syncEditorFromChapters(), { deep: true });
 
-    watch(canEditTrimTimeline, (can) => {
-        if (!can) hadTrimForChapterSync.value = false;
-        else syncEditorFromChaptersIfNeeded();
+    watch(mirrorActive, (active) => {
+        // Entering chapter editing: the chapter list is the source of truth, so
+        // adopt it rather than pushing whatever the timeline happens to hold.
+        if (!active) timelineHadSegments.value = false;
+        else syncEditorFromChapters();
     });
 
-    return { syncChaptersFromTrim };
+    return { syncChaptersFromTimeline };
 }
