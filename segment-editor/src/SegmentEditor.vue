@@ -75,6 +75,14 @@ interface Props {
     waveformPeaks?: number[] | null;
     /** Color for waveform visualization. Defaults to CSS variable --se-waveform or rgba(255,255,255,0.35). */
     waveformColor?: string | null;
+    /**
+     * Cap on how many segments can exist. Unlimited when unset.
+     *
+     * At the cap, marking a new segment replaces the oldest rather than being
+     * refused — a trim that allows exactly one range should let the user re-mark
+     * it freely, not make them delete the old one first.
+     */
+    maxSegments?: number;
     /** Override the empty-state heading shown when there are no segments yet (split-list panel only). */
     emptyTitle?: string;
     /** Override the empty-state hint shown under the heading (split-list panel only). */
@@ -701,13 +709,26 @@ function addSegmentAtPlayhead() {
     addSegmentInternal(inSec, outSec);
 }
 
+/**
+ * The segments that survive making room for one more, given `maxSegments`.
+ * Oldest give way first; everything stays when there is no cap or no pressure.
+ */
+function roomForOneMore(): Segment[] {
+    const cap = props.maxSegments;
+    if (cap == null || segments.value.length < cap) return segments.value;
+    return segments.value.slice(segments.value.length - Math.max(0, cap - 1));
+}
+
 function addSegmentInternal(inSec: number, outSec: number) {
     const newSeg: Segment = { id: createSegmentId(), inSec, outSec };
     if (props.mode === 'chapters' && props.rippleEdit) {
         const next = rippleInsert(segments.value, newSeg);
         commitSegments(next);
     } else {
-        commitSegments([...segments.value, newSeg]);
+        // At the cap the oldest segments give way, so re-marking is one gesture
+        // rather than delete-then-mark. Deliberately silent about it: nothing was
+        // cut from the output, so this is not a removal consumers should record.
+        commitSegments([...roomForOneMore(), newSeg]);
     }
     setSelection([newSeg.id]);
     emit('segment-commit', segments.value);

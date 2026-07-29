@@ -1826,6 +1826,66 @@ describe('SegmentEditor — removing segments', () => {
     });
 });
 
+describe('SegmentEditor — maxSegments', () => {
+    /** Mark a range by driving the playhead and the two mark keys. */
+    async function mark(
+        w: ReturnType<typeof mountEditor>,
+        t: { value: number },
+        inSec: number,
+        outSec: number
+    ) {
+        const vm = w.vm as unknown as { markIn: () => void; markOut: () => void };
+        t.value = inSec;
+        vm.markIn();
+        await flush();
+        t.value = outSec;
+        vm.markOut();
+        await flush();
+    }
+
+    it('replaces the existing range when only one is allowed', async () => {
+        const t = { value: 0 };
+        const w = mountEditor({
+            currentTime: t,
+            props: { mode: 'trim', maxSegments: 1 },
+        });
+        await flush();
+
+        await mark(w, t, 10, 20);
+        expect(latestSegments(w)).toHaveLength(1);
+
+        await mark(w, t, 60, 70);
+        const after = latestSegments(w);
+        expect(after).toHaveLength(1);
+        expect(after[0]).toMatchObject({ inSec: 60, outSec: 70 });
+    });
+
+    it('does not report the replaced range as removed', async () => {
+        const t = { value: 0 };
+        const w = mountEditor({
+            currentTime: t,
+            props: { mode: 'trim', maxSegments: 1 },
+        });
+        await flush();
+        await mark(w, t, 10, 20);
+        await mark(w, t, 60, 70);
+
+        // Nothing was cut from the output — the range was re-marked. Recording it
+        // as a removal would put a phantom entry in the removed-clips list.
+        expect(w.emitted('segment-removed')).toBeUndefined();
+    });
+
+    it('keeps every range when no cap is set', async () => {
+        const t = { value: 0 };
+        const w = mountEditor({ currentTime: t, props: { mode: 'trim' } });
+        await flush();
+
+        await mark(w, t, 10, 20);
+        await mark(w, t, 60, 70);
+        expect(latestSegments(w)).toHaveLength(2);
+    });
+});
+
 describe('SegmentEditor — the trim delete button', () => {
     /** The single danger button in the trim toolbar. */
     const deleteBtn = (w: ReturnType<typeof mountEditor>) =>
