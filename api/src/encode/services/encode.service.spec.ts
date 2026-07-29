@@ -96,6 +96,7 @@ describe('EncodeService', () => {
             generateThumbnails: vi.fn().mockResolvedValue({
                 vttRelativePath: 'thumbnails/thumbnails.vtt',
             }),
+            removePreview: vi.fn().mockResolvedValue(undefined),
         } as any;
 
         waveformService = {
@@ -156,6 +157,30 @@ describe('EncodeService', () => {
         const updated = sessionService.get(session.id)!;
         expect(updated.status).toBe('failed');
         expect(updated.error).toBe('No encoding configuration provided');
+    });
+
+    it('drops the source storyboard once the encode has produced its own', async () => {
+        // Built at upload for the trim timeline. After completion the client reads
+        // the storyboard from S3, and nothing prunes the session directory until
+        // the session is deleted.
+        const session = sessionService.create(makeConfig());
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        await service.processSession(session.id);
+
+        expect(thumbnailService.removePreview).toHaveBeenCalledWith(session.id);
+    });
+
+    it('still completes when the source storyboard cannot be removed', async () => {
+        thumbnailService.removePreview.mockRejectedValue(new Error('EBUSY'));
+        const session = sessionService.create(makeConfig());
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        await service.processSession(session.id);
+
+        expect(sessionService.get(session.id)?.status).toBe('completed');
     });
 
     it('should run full pipeline: encode -> s3 -> completed', async () => {

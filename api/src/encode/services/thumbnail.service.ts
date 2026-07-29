@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { execFile } from 'child_process';
 import { existsSync } from 'fs';
-import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { promisify } from 'util';
 
@@ -42,6 +42,21 @@ export class ThumbnailService {
     /** Where a session's pre-encode storyboard lives. */
     previewDir(sessionId: string): string {
         return join(this.workDir, sessionId, 'preview-thumbnails');
+    }
+
+    /**
+     * Drop the source storyboard. Once the encode has produced its own, this one
+     * describes material the client no longer looks at, and the session directory
+     * is not otherwise pruned until the session is deleted.
+     */
+    async removePreview(sessionId: string): Promise<void> {
+        try {
+            await rm(this.previewDir(sessionId), { recursive: true, force: true });
+        } catch (err) {
+            this.logger.warn(
+                `Could not remove source storyboard for ${sessionId}: ${(err as Error).message}`,
+            );
+        }
     }
 
     /**
