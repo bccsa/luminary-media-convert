@@ -39,6 +39,27 @@ const encodingApiUrl = ref('');
 
 provide('encodingApiUrl', encodingApiUrl);
 
+/**
+ * Session views that fill the viewport rather than scrolling the page — the trim
+ * workspace and the session detail layout it shares.
+ *
+ * They size themselves against the space left below the header, so the shell
+ * becomes a fixed-height flex column and `main` simply takes what remains. The
+ * remainder must not be computed from an assumed header height: the header grows
+ * whenever its teleported workflow controls wrap or gain a scrollbar, and the
+ * surplus pushes the bottom of `main` past the viewport. The trim view hides
+ * overflow on the document while it is open, so there is then nothing to scroll
+ * it back and whatever sits lowest — the timeline's playback controls — is simply
+ * gone until the page happens to reload into a shorter header.
+ */
+const fillsViewport = computed(
+    () =>
+        identityChecked.value &&
+        !identityError.value &&
+        (headerLayout.value === 'session-trim' ||
+            (isSessionDetail.value && headerLayout.value !== 'session'))
+);
+
 watch(
     isAuthenticated,
     async (authenticated) => {
@@ -62,7 +83,14 @@ watch(
 </script>
 
 <template>
-    <div class="relative min-h-screen">
+    <div
+        :class="[
+            'relative',
+            fillsViewport
+                ? 'flex h-dvh flex-col overflow-hidden'
+                : 'min-h-screen',
+        ]"
+    >
         <div
             class="pointer-events-none fixed inset-0 bg-gradient-to-b from-slate-50/90 via-sky-50/35 to-slate-100 dark:from-slate-950 dark:via-sky-950/35 dark:to-slate-950"
             aria-hidden="true"
@@ -322,7 +350,7 @@ watch(
         <!-- Authenticated shell -->
         <template v-else>
             <header
-                class="sticky top-0 z-40 border-b border-sky-200/50 bg-white/90 font-sans shadow-sm backdrop-blur-md dark:border-sky-500/15 dark:bg-slate-900/85"
+                class="sticky top-0 z-40 shrink-0 border-b border-sky-200/50 bg-white/90 font-sans shadow-sm backdrop-blur-md dark:border-sky-500/15 dark:bg-slate-900/85"
             >
                 <div
                     class="mx-auto flex min-h-14 w-full items-center gap-1.5 py-2 sm:gap-2 transition-[padding,max-width] duration-200"
@@ -371,9 +399,8 @@ watch(
             <main
                 class="relative mx-auto w-full transition-[padding,max-width] duration-200"
                 :class="[
-                    headerLayout === 'session-trim' ||
-                    (isSessionDetail && headerLayout !== 'session')
-                        ? 'py-0 max-w-none px-0 h-[calc(100dvh-3.5rem)] overflow-hidden'
+                    fillsViewport
+                        ? 'py-0 max-w-none px-0 min-h-0 flex-1 overflow-hidden'
                         : isSessionDetail
                           ? 'py-0 max-w-7xl px-4 sm:px-6'
                           : 'py-8 sm:py-10 max-w-6xl px-4 sm:px-6',
