@@ -1,5 +1,10 @@
-import { SessionService } from './session.service.js';
+import { mkdirSync, mkdtempSync, existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { SessionService, type Session } from './session.service.js';
 import type { CreateSessionDto } from '../dto/create-session.dto.js';
+
+const events = { emit: () => {} } as any;
 
 function makeConfig(overrides: Partial<CreateSessionDto> = {}): CreateSessionDto {
     return {
@@ -267,5 +272,128 @@ describe('SessionService', () => {
             service.cleanup(1000);
             expect(service.getBySessionToken(session.sessionToken)).toBeUndefined();
         });
+    });
+});
+describe('SessionService — surviving a restart', () => {
+    let workDir: string;
+
+    beforeEach(() => {
+        workDir = mkdtempSync(join(tmpdir(), 'luminary-sessions-'));
+        process.env.WORK_DIR = workDir;
+    });
+
+    afterEach(() => {
+        rmSync(workDir, { recursive: true, force: true });
+        delete process.env.WORK_DIR;
+    });
+
+    /** A second service over the same work dir stands in for a restarted process. */
+    function restart(): SessionService {
+        const next = new SessionService(events);
+        next.onModuleInit();
+        return next;
+    }
+
+    it('writes a session to disk when it is created', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        const path = join(workDir, session.id, 'session.json');
+        expect(existsSync(path)).toBe(true);
+        expect(JSON.parse(readFileSync(path, 'utf-8')).id).toBe(session.id);
+    });
+
+    it('finds the session again after a restart, token and all', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        service.updateStatus(session.id, 'uploaded');
+        service.setFilePath(session.id, '/tmp/source.mp4');
+
+        const after = restart();
+        expect(after.get(session.id)?.filePath).toBe('/tmp/source.mp4');
+        expect(after.getBySessionToken(session.sessionToken)?.id).toBe(session.id);
+    });
+
+    it('keeps the encode config, so a trimmed session still knows its ranges', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        service.setEncodeConfig(session.id, {
+            type: 'video',
+            trimSegments: [{ inSec: 10, outSec: 20 }],
+        } as any);
+
+        expect(restart().get(session.id)?.encodeConfig?.trimSegments).toEqual([
+            { inSec: 10, outSec: 20 },
+        ]);
+    });
+
+    it('marks a session that was mid-encode as failed rather than still running', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        service.updateStatus(session.id, 'encoding');
+
+        const restored = restart().get(session.id);
+        // The FFmpeg process died with the old process; claiming otherwise would
+        // leave the client waiting forever.
+        expect(restored?.status).toBe('failed');
+        expect(restored?.error).toMatch(/restarted/i);
+    });
+
+    it.each(['uploading', 'queued', 'encrypting', 'uploading_to_s3'] as const)(
+        'does the same for a session left in %s',
+        (status) => {
+            const service = new SessionService(events);
+            const session = service.create(makeConfig());
+            service.updateStatus(session.id, status);
+            expect(restart().get(session.id)?.status).toBe('failed');
+        },
+    );
+
+    it('leaves a completed session completed', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        service.setCompleted(session.id, ['master.m3u8'], 'master.m3u8');
+
+        const restored = restart().get(session.id);
+        expect(restored?.status).toBe('completed');
+        expect(restored?.files).toEqual(['master.m3u8']);
+    });
+
+    it('does not bring back a session that was deleted', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        service.remove(session.id);
+
+        expect(existsSync(join(workDir, session.id, 'session.json'))).toBe(false);
+        expect(restart().get(session.id)).toBeUndefined();
+    });
+
+    it('does not bring back a session that was cleaned up', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        service.setCompleted(session.id, [], '');
+        (service.get(session.id) as Session).createdAt = Date.now() - 48 * 60 * 60 * 1000;
+        service.cleanup();
+
+        expect(restart().get(session.id)).toBeUndefined();
+    });
+
+    it('ignores unreadable records instead of failing to start', () => {
+        mkdirSync(join(workDir, 'broken'), { recursive: true });
+        writeFileSync(join(workDir, 'broken', 'session.json'), '{ not json');
+        const service = new SessionService(events);
+        expect(() => service.onModuleInit()).not.toThrow();
+    });
+
+    it('ignores directories that hold no session record', () => {
+        mkdirSync(join(workDir, 'stray-output'), { recursive: true });
+        const service = new SessionService(events);
+        expect(() => service.onModuleInit()).not.toThrow();
+    });
+
+    it('keeps the record readable only by the owner — it carries S3 credentials', () => {
+        const service = new SessionService(events);
+        const session = service.create(makeConfig());
+        const mode = statSync(join(workDir, session.id, 'session.json')).mode & 0o777;
+        expect(mode).toBe(0o600);
     });
 });
