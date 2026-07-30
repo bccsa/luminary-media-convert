@@ -49,6 +49,7 @@ import {
     getSessionWaveform,
 } from '../api';
 import { useSessionPoller } from '../composables/useSessionPoller';
+import { useStoryboard } from '../composables/useStoryboard';
 import { useActiveUploads } from '../composables/useActiveUploads';
 import { useAppLayout } from '../composables/useAppLayout';
 import { useEncodeEta } from '../composables/useEncodeEta';
@@ -887,20 +888,37 @@ const playbackUrl = computed(() => {
     return s3Url.value;
 });
 
+/**
+ * Before the encode there is no storyboard in S3 — the encode is what writes one.
+ * The API samples the source instead, so the trim timeline has frames while the
+ * user is still choosing what to keep.
+ */
+const sourceStoryboardUrl = computed(() => {
+    if (!showProbeConfig.value) return null;
+    if (!encodingApiUrl.value || !sessionToken.value) return null;
+    return (
+        `${encodingApiUrl.value}/api/sessions/${sessionId.value}` +
+        `/thumbnails/thumbnails.vtt?token=${encodeURIComponent(sessionToken.value)}`
+    );
+});
+
+// Sampling an hour of video takes minutes and the API serves whatever sprites
+// exist so far, so the storyboard grows after the first request. Follow it.
+const storyboard = useStoryboard({
+    url: sourceStoryboardUrl,
+    active: showProbeConfig,
+});
+
 const thumbnailVttUrl = computed(() => {
-    // Before the encode there is no storyboard in S3 — the encode is what writes
-    // one. The API generates a storyboard for the source instead, so the trim
-    // timeline has frames while the user is still choosing what to keep.
-    if (showProbeConfig.value) {
-        if (!encodingApiUrl.value || !sessionToken.value) return null;
-        return (
-            `${encodingApiUrl.value}/api/sessions/${sessionId.value}` +
-            `/thumbnails/thumbnails.vtt?token=${encodeURIComponent(sessionToken.value)}`
-        );
-    }
+    if (showProbeConfig.value) return storyboard.versionedUrl.value;
     if (!displayThumbnailsVtt.value || !s3PublicBaseUrl.value) return null;
     return `${s3PublicBaseUrl.value}/${displayThumbnailsVtt.value}`;
 });
+
+/** Frames are still being made — the timeline is incomplete rather than broken. */
+const storyboardPending = computed(
+    () => storyboard.pending.value && !storyboard.complete.value
+);
 
 const shouldCollapseFiles = computed(
     () => (displayFiles.value?.length ?? 0) > 10
@@ -2393,6 +2411,7 @@ onUnmounted(() => {
                         :chapters-save-error="chaptersSaveError"
                         :show-trim-segment-editor="showTrimSegmentEditor"
                         :thumbnail-vtt-url="thumbnailVttUrl"
+                        :storyboard-pending="storyboardPending"
                         :waveform-peaks="timelineWaveformPeaks"
                         @segment-removed="onTimelineSegmentRemoved"
                         :is-completed="isCompleted"
