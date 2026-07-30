@@ -31,6 +31,11 @@ const props = withDefaults(
         thumbnailVttUrl?: string | null;
         /** Audio waveform peaks (normalized 0–1 amplitude). */
         waveformPeaks?: number[] | null;
+        /**
+         * The source storyboard is still being sampled, so the filmstrip covers
+         * only part of the timeline and more frames are on the way.
+         */
+        storyboardPending?: boolean;
         /** After encode completes — timeline title is for chapter editing, not pre-encode trim. */
         isCompleted?: boolean;
         /**
@@ -153,20 +158,31 @@ const trimToolbarHasVisibleContent = computed(() => {
             combined-controls
             @segment-removed="emit('segmentRemoved', $event)"
         >
-            <template v-if="canSaveChapters" #toolbar-before-clear>
+            <template #toolbar-before-clear>
+                <!--
+                    Without this a half-drawn filmstrip looks like a failure. It
+                    takes minutes to sample a long source, and the frames arrive
+                    left to right as they are made.
+                -->
                 <span
-                    v-if="chaptersIsDirty"
+                    v-if="storyboardPending"
+                    class="storyboard-pending-pill"
+                    title="Frames are sampled from the source after upload; the timeline fills in as they arrive."
+                >Generating thumbnails…</span>
+                <span
+                    v-if="canSaveChapters && chaptersIsDirty"
                     class="chapter-unsaved-pill"
                     title="Unsaved changes are stored locally; click Save to commit to S3."
                 >Unsaved</span>
                 <button
-                    v-if="chaptersIsDirty"
+                    v-if="canSaveChapters && chaptersIsDirty"
                     type="button"
                     class="chapter-toolbar-muted"
                     :disabled="chaptersIsSaving"
                     @click="emit('discardChapters')"
                 >Discard</button>
                 <button
+                    v-if="canSaveChapters"
                     type="button"
                     class="chapter-save-btn"
                     :disabled="!chaptersIsDirty || chaptersIsSaving"
@@ -179,6 +195,24 @@ const trimToolbarHasVisibleContent = computed(() => {
 </template>
 
 <style scoped>
+.storyboard-pending-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 9999px;
+    border: 1px solid rgb(226 232 240);
+    background: rgb(248 250 252);
+    padding: 0.125rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: rgb(100 116 139);
+}
+
+:global(html.dark) .storyboard-pending-pill {
+    border-color: rgb(51 65 85);
+    background: rgb(30 41 59 / 0.6);
+    color: rgb(148 163 184);
+}
+
 .se-timeline-wrap {
     /* Override the general .se-timeline-wrap rule that adds margin-bottom — we want
        the editor card to bleed flush to the column's bottom edge. */
