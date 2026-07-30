@@ -133,6 +133,21 @@ describe('SessionView', () => {
         expect(called).toBe(true);
     });
 
+    it('keeps the encoder storyboard while the encode is running', async () => {
+        // The encode's own storyboard reaches S3 only at completion. Gated on
+        // the pre-encode state, the timeline dropped all its frames the moment
+        // Start Encoding was pressed and stayed bare for the whole encode.
+        detail.mockResolvedValue(uploadedSession({ status: 'encoding' }));
+        status.mockResolvedValue({ status: 'encoding' });
+
+        await mountView();
+
+        const asked = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls
+            .map((c) => String(c[0]))
+            .some((u) => u.includes('thumbnails.vtt'));
+        expect(asked).toBe(true);
+    });
+
     it('reads the storyboard from the encoder before an encode exists', async () => {
         // After encoding it comes from S3; before, only the API has the source to
         // sample, and the token has to ride on the URL.
