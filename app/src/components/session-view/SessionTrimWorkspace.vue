@@ -68,6 +68,22 @@ const segmentEditorTimelineTitle = computed(() =>
     props.isCompleted ? 'Edit chapters' : 'Trim segments',
 );
 
+/**
+ * The same strip is trim before the encode and chapters after it, so the mode has
+ * to follow the phase. Left hardcoded to `trim`, chapter editing inherited every
+ * trim rule: one selection at a time, no hover delete, and shift-drag marking a
+ * range instead of selecting across one.
+ */
+const timelineMode = computed(() => (props.isCompleted ? 'chapters' : 'trim'));
+
+/**
+ * Trimming keeps a single range; chapters are a list and must not be capped —
+ * with the trim cap applied, marking a second chapter silently replaced the first.
+ */
+const timelineMaxSegments = computed(() =>
+    props.isCompleted ? undefined : 1,
+);
+
 defineExpose({
     focusSegmentEditor: () => {
         trimSegmentEditorRef.value?.focus?.();
@@ -140,8 +156,8 @@ const trimToolbarHasVisibleContent = computed(() => {
         <SegmentEditor
             ref="trimSegmentEditorRef"
             v-model="editorSegments"
-            mode="trim"
-            :max-segments="1"
+            :mode="timelineMode"
+            :max-segments="timelineMaxSegments"
             :show-labels="true"
             :title="segmentEditorTimelineTitle"
             :show-header="false"
