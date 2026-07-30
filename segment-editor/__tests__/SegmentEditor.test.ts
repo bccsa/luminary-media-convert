@@ -1827,6 +1827,126 @@ describe('SegmentEditor — removing segments', () => {
     });
 });
 
+describe('SegmentEditor — double-press and drag to mark a range', () => {
+    // The gesture is timed with performance.now(), which fake timers do not move.
+    let now = 0;
+    beforeEach(() => {
+        now = 1000;
+        vi.spyOn(performance, 'now').mockImplementation(() => now);
+    });
+    afterEach(() => vi.restoreAllMocks());
+
+    /** Two presses close together in time and place, then a drag. */
+    async function doublePressDrag(
+        w: ReturnType<typeof mountEditor>,
+        fromSec: number,
+        toSec: number,
+        opts: { gapMs?: number; secondAtSec?: number } = {}
+    ) {
+        const track = w.find('.se-timeline').element as HTMLElement;
+        mouseAt(track, 'mousedown', fromSec);
+        mouseAt(document.body, 'mouseup', fromSec);
+        await flush();
+        now += opts.gapMs ?? 10;
+        mouseAt(track, 'mousedown', opts.secondAtSec ?? fromSec);
+        await flush();
+        mouseAt(document.body, 'mousemove', toSec);
+        await flush();
+        mouseAt(document.body, 'mouseup', toSec);
+        await flush();
+    }
+
+    it('marks the dragged range in trim', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+
+        await doublePressDrag(w, 20, 50);
+
+        const segs = latestSegments(w);
+        expect(segs).toHaveLength(1);
+        expect(segs[0].inSec).toBeCloseTo(20, 0);
+        expect(segs[0].outSec).toBeCloseTo(50, 0);
+    });
+
+    it('marks a chapter the same way', async () => {
+        // Chapters had no drag-to-create at all; shift-drag is marquee select there.
+        const w = mountEditor({ props: { mode: 'chapters' } });
+        await flush();
+
+        await doublePressDrag(w, 20, 50);
+
+        expect(latestSegments(w)).toHaveLength(1);
+    });
+
+    it('leaves an existing segment to be moved, not re-marked', async () => {
+        // Pressing a clip means "move it"; hijacking that would cost the two most
+        // used gestures on a marked range.
+        const w = mountEditor({
+            segments: [seg(1, 10, 40)],
+            props: { mode: 'trim' },
+        });
+        await flush();
+        const segEl = w.findAll('.se-segment')[0].element as HTMLElement;
+
+        mouseAt(segEl, 'mousedown', 20);
+        mouseAt(document.body, 'mouseup', 20);
+        await flush();
+        mouseAt(segEl, 'mousedown', 20);
+        await flush();
+        mouseAt(document.body, 'mousemove', 60);
+        await flush();
+        mouseAt(document.body, 'mouseup', 60);
+        await flush();
+
+        // Still one segment — moved or unchanged, but never a second one.
+        expect(latestSegments(w)).toHaveLength(1);
+    });
+
+    it('treats a slow second press as an ordinary click', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+
+        await doublePressDrag(w, 20, 50, { gapMs: 600 });
+
+        expect(w.emitted('update:modelValue')).toBeUndefined();
+    });
+
+    it('treats a second press somewhere else as an ordinary click', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+
+        await doublePressDrag(w, 20, 50, { secondAtSec: 35 });
+
+        expect(w.emitted('update:modelValue')).toBeUndefined();
+    });
+
+    it('creates nothing when the drag never travels', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+
+        await doublePressDrag(w, 30, 30);
+
+        expect(w.emitted('update:modelValue')).toBeUndefined();
+    });
+
+    it('does not chain a third press into another range', async () => {
+        const w = mountEditor({ props: { mode: 'trim' } });
+        await flush();
+        const track = w.find('.se-timeline').element as HTMLElement;
+
+        // press, press (marks), press again — the third starts over.
+        await doublePressDrag(w, 20, 50);
+        mouseAt(track, 'mousedown', 20);
+        await flush();
+        mouseAt(document.body, 'mousemove', 80);
+        await flush();
+        mouseAt(document.body, 'mouseup', 80);
+        await flush();
+
+        expect(latestSegments(w)).toHaveLength(1);
+    });
+});
+
 describe('SegmentEditor — shift-drag to mark a range', () => {
     /** Drag across the timeline track from one second to another. */
     async function shiftDrag(
