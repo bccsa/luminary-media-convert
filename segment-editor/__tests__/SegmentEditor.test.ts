@@ -1843,6 +1843,38 @@ describe('SegmentEditor — shift-drag to mark a range', () => {
         await flush();
     }
 
+    it('shows the frame under the moving edge as the range is dragged out', async () => {
+        // Otherwise in and out points are chosen blind and checked afterwards.
+        const onSeek = vi.fn();
+        const w = mountEditor({ props: { mode: 'trim', onSeek } });
+        await flush();
+        const track = w.find('.se-timeline').element as HTMLElement;
+
+        mouseAt(track, 'mousedown', 20, { shiftKey: true });
+        await flush();
+        mouseAt(document.body, 'mousemove', 50);
+        await flush();
+
+        expect(onSeek).toHaveBeenCalled();
+        const followed = onSeek.mock.calls.at(-1)![0] as number;
+        expect(followed).toBeCloseTo(50, 0);
+
+        mouseAt(document.body, 'mouseup', 50);
+        await flush();
+    });
+
+    it('leaves the playhead on the in-point once the range is marked', async () => {
+        // The drag ends wherever the mouse stopped; the useful frame afterwards is
+        // where the kept material starts, so the clip can be played straight back.
+        const onSeek = vi.fn();
+        const w = mountEditor({ props: { mode: 'trim', onSeek } });
+        await flush();
+
+        await shiftDrag(w, 20, 50);
+
+        expect(onSeek.mock.calls.at(-1)![0]).toBeCloseTo(20, 0);
+    });
+
     it('marks the dragged range in trim mode', async () => {
         const w = mountEditor({ props: { mode: 'trim' } });
         await flush();

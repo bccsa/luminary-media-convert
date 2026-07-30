@@ -455,7 +455,13 @@ function beginMarkDrag(e: MouseEvent) {
 
     const onMove = (ev: MouseEvent) => {
         const raw = clampTime(pxToTime(ev.clientX));
-        draftRange.value = { from: start, to: snapTime(raw) };
+        const edge = snapTime(raw);
+        draftRange.value = { from: start, to: edge };
+        // Show the frame under the moving edge, so in and out points are chosen
+        // against the picture instead of guessed and checked afterwards. Throttled
+        // like the resize drag: a seek per mouse-move is far more than a player
+        // can service, and that backlog is what makes playback stutter.
+        emitSeek(edge, false, HANDLE_DRAG_SEEK_MS);
     };
     const onUp = (ev: MouseEvent) => {
         const end = clampTime(pxToTime(ev.clientX));
