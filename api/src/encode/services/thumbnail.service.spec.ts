@@ -1,4 +1,10 @@
-import { mkdtempSync, rmSync, readdirSync, writeFileSync } from 'fs';
+import {
+    mkdirSync,
+    mkdtempSync,
+    readdirSync,
+    rmSync,
+    writeFileSync,
+} from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -142,6 +148,142 @@ describe('ThumbnailService', () => {
                 .split('\n')
                 .filter((l) => l.includes(' --> '));
             expect(timeLines).toHaveLength(25);
+        });
+    });
+
+    describe('getOrGeneratePreview', () => {
+        let workDir: string;
+        let svc: ThumbnailService;
+        const SID = 'sess-1';
+
+        /** Where generateThumbnails actually writes. */
+        function producedDir(): string {
+            return join(workDir, SID, 'preview-thumbnails', 'thumbnails');
+        }
+
+        function seedSprites(count: number) {
+            mkdirSync(producedDir(), { recursive: true });
+            for (let i = 1; i <= count; i++) {
+                writeFileSync(
+                    join(
+                        producedDir(),
+                        `sprite_${String(i).padStart(3, '0')}.webp`
+                    ),
+                    'sprite'
+                );
+            }
+        }
+
+        /** Answers the capability probes; leaves sprite generation hanging. */
+        function mockGenerationInFlight() {
+            mockExecFile.mockImplementation((...args: any[]) => {
+                const cb = args[args.length - 1];
+                const ffargs = args[1] as string[];
+                if (ffargs[0] === '-encoders') {
+                    cb(null, {
+                        stdout: ' V..... libwebp libwebp WebP',
+                        stderr: '',
+                    });
+                    return;
+                }
+                if (ffargs[0] === '-hwaccels') {
+                    cb(null, { stdout: '', stderr: '' });
+                    return;
+                }
+                // Sprite generation: never completes during the test.
+            });
+        }
+
+        const opts = () => ({
+            inputPath: '/tmp/source.mkv',
+            duration: 600,
+            sourceWidth: 1920,
+            sourceHeight: 1080,
+        });
+
+        beforeEach(() => {
+            workDir = mkdtempSync(join(tmpdir(), 'thumb-preview-'));
+            process.env.WORK_DIR = workDir;
+            svc = new ThumbnailService();
+            mockExecFile.mockReset();
+        });
+
+        afterEach(() => {
+            rmSync(workDir, { recursive: true, force: true });
+            delete process.env.WORK_DIR;
+        });
+
+        it('reads the finished storyboard from where it was written', async () => {
+            // The cache used to be looked for one directory above the file, so it
+            // never hit and every request kicked off another full ffmpeg pass.
+            mkdirSync(producedDir(), { recursive: true });
+            writeFileSync(
+                join(producedDir(), 'thumbnails.vtt'),
+                'WEBVTT\n\ncached'
+            );
+            mockGenerationInFlight();
+
+            const result = await svc.getOrGeneratePreview(SID, opts());
+
+            expect(result?.vtt).toContain('cached');
+            expect(result?.complete).toBe(true);
+            // Nothing was regenerated: no ffmpeg call at all.
+            expect(mockExecFile).not.toHaveBeenCalled();
+        });
+
+        it('serves the sprites written so far instead of waiting for the rest', async () => {
+            seedSprites(3);
+            mockGenerationInFlight();
+
+            const result = await svc.getOrGeneratePreview(SID, opts());
+
+            expect(result).not.toBeNull();
+            expect(result!.complete).toBe(false);
+            expect(result!.vtt).toContain('WEBVTT');
+            expect(result!.vtt).toContain('sprite_001.webp');
+            expect(result!.vtt).toContain('sprite_003.webp');
+        });
+
+        it('covers only the sampled span, not the whole duration', async () => {
+            // One sprite holds 25 thumbnails at 5s each — 125s of a 600s source.
+            seedSprites(1);
+            mockGenerationInFlight();
+
+            const result = await svc.getOrGeneratePreview(SID, opts());
+
+            const cues = result!.vtt
+                .split('\n')
+                .filter((l) => l.includes(' --> '));
+            expect(cues).toHaveLength(25);
+        });
+
+        it('has nothing to offer before the first sprite lands', async () => {
+            mockGenerationInFlight();
+
+            expect(await svc.getOrGeneratePreview(SID, opts())).toBeNull();
+        });
+
+        it('does not start a second pass while one is running', async () => {
+            mockGenerationInFlight();
+
+            await svc.getOrGeneratePreview(SID, opts());
+            await svc.getOrGeneratePreview(SID, opts());
+            // The pass is started but not awaited, so give its own setup — probe,
+            // mkdir — time to reach ffmpeg before counting.
+            await new Promise((resolve) => setTimeout(resolve, 50));
+
+            // Scoped to this test's own work directory: other tests leave a
+            // deliberately hanging pass behind, and its ffmpeg call can land here
+            // after the mock is reset.
+            const passes = mockExecFile.mock.calls.filter((c: any[]) =>
+                (c[1] as string[])?.some(
+                    (a) =>
+                        typeof a === 'string' &&
+                        a.includes('sprite_%03d') &&
+                        a.includes(workDir)
+                )
+            );
+            expect(passes).toHaveLength(1);
         });
     });
 

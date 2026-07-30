@@ -724,7 +724,13 @@ export class EncodeController {
 
         res.set({
             'Content-Type': 'text/vtt',
-            'Cache-Control': 'private, max-age=300',
+            // A partial storyboard must not be cached as though it were final —
+            // the client is expected to ask again as more of the source is
+            // sampled, and a cached copy would freeze the timeline half-drawn.
+            'Cache-Control': result.complete
+                ? 'private, max-age=300'
+                : 'no-store',
+            'X-Storyboard-Complete': String(result.complete),
             // The web client is served under COEP credentialless, which refuses
             // cross-origin subresources unless they say they may be embedded.
             // Helmet's default of same-origin would have the browser drop this.

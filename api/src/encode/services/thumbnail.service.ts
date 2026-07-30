@@ -28,6 +28,11 @@ export interface PreviewThumbnails {
     vtt: string;
     /** Directory holding the sprite sheets the VTT refers to. */
     dir: string;
+    /**
+     * False while the sampling pass is still running: the cues cover only the
+     * part of the source sampled so far, and asking again later gets more.
+     */
+    complete: boolean;
 }
 
 @Injectable()
@@ -40,7 +45,7 @@ export class ThumbnailService {
     /** In-flight generations keyed by sessionId, so two tabs share one ffmpeg pass. */
     private readonly inFlight = new Map<
         string,
-        Promise<PreviewThumbnails | null>
+        Promise<ThumbnailResult | null>
     >();
 
     /** Where a session's pre-encode storyboard lives. */
@@ -85,11 +90,19 @@ export class ThumbnailService {
         }
     ): Promise<PreviewThumbnails | null> {
         const dir = this.previewDir(sessionId);
-        const vttPath = join(dir, 'thumbnails.vtt');
+        // generateThumbnails writes into <outputDir>/thumbnails. The finished VTT
+        // lands there too — looking for it one level up meant the cache never hit,
+        // and every request after the first started another full pass.
+        const producedDir = join(dir, 'thumbnails');
+        const vttPath = join(producedDir, 'thumbnails.vtt');
 
         if (existsSync(vttPath)) {
             try {
-                return { vtt: await readFile(vttPath, 'utf-8'), dir };
+                return {
+                    vtt: await readFile(vttPath, 'utf-8'),
+                    dir: producedDir,
+                    complete: true,
+                };
             } catch (err) {
                 this.logger.warn(
                     `Failed to read cached storyboard for ${sessionId}: ${(err as Error).message}. Regenerating.`
@@ -97,33 +110,70 @@ export class ThumbnailService {
             }
         }
 
-        const existing = this.inFlight.get(sessionId);
-        if (existing) return existing;
-
-        const promise = (async () => {
-            const result = await this.generateThumbnails({
+        if (!this.inFlight.has(sessionId)) {
+            const run = this.generateThumbnails({
                 inputPath: opts.inputPath,
                 outputDir: dir,
                 duration: opts.duration,
                 sourceWidth: opts.sourceWidth,
                 sourceHeight: opts.sourceHeight,
-            });
-            if (!result) return null;
-            // generateThumbnails writes into <outputDir>/thumbnails.
-            const producedDir = join(dir, 'thumbnails');
-            return {
-                vtt: await readFile(
-                    join(producedDir, 'thumbnails.vtt'),
-                    'utf-8'
-                ),
-                dir: producedDir,
-            };
-        })().finally(() => {
-            this.inFlight.delete(sessionId);
-        });
+            })
+                .catch((err: Error) => {
+                    this.logger.warn(
+                        `Storyboard generation failed for ${sessionId}: ${err.message}`
+                    );
+                    return null;
+                })
+                .finally(() => {
+                    this.inFlight.delete(sessionId);
+                });
+            this.inFlight.set(sessionId, run);
+        }
 
-        this.inFlight.set(sessionId, promise);
-        return promise;
+        // Deliberately not awaited. Sampling an hour of video takes minutes, and
+        // waiting for the last sprite held the request open for all of it — the
+        // timeline stayed empty with nothing to say why. Sprites are numbered and
+        // each covers a fixed span, so the ones already written make a perfectly
+        // valid storyboard for the part of the timeline they cover.
+        return this.partialPreview(producedDir, opts);
+    }
+
+    /** A storyboard for however much of the source has been sampled so far. */
+    private async partialPreview(
+        producedDir: string,
+        opts: { duration: number; sourceWidth: number; sourceHeight: number }
+    ): Promise<PreviewThumbnails | null> {
+        const format = await this.detectSpriteFormat();
+        if (!format) return null;
+
+        let sprites: string[];
+        try {
+            sprites = (await readdir(producedDir))
+                .filter(
+                    (f) =>
+                        f.startsWith('sprite_') && f.endsWith(`.${format.ext}`)
+                )
+                .sort();
+        } catch {
+            return null; // Nothing written yet.
+        }
+        if (sprites.length === 0) return null;
+
+        return {
+            vtt: this.buildVtt(
+                opts.duration,
+                sprites,
+                THUMB_WIDTH,
+                this.thumbHeightFor(opts.sourceWidth, opts.sourceHeight)
+            ),
+            dir: producedDir,
+            complete: false,
+        };
+    }
+
+    /** Sprite height for the source's aspect ratio, kept even for the encoders. */
+    private thumbHeightFor(sourceWidth: number, sourceHeight: number): number {
+        return Math.ceil(((THUMB_WIDTH / sourceWidth) * sourceHeight) / 2) * 2;
     }
 
     private async detectSpriteFormat(): Promise<SpriteFormat | null> {
