@@ -11,6 +11,44 @@ export interface WaveformSidecar {
     peaks: number[];
 }
 
+/**
+ * Samples folded into one envelope entry — 0.1s at the 8kHz the audio is
+ * resampled to. Fine enough that resampling down to the requested peak count
+ * loses nothing visible, and small enough that an hour of audio is 36,000
+ * numbers rather than 58MB of decoded PCM.
+ */
+const SAMPLES_PER_ENVELOPE_BUCKET = 800;
+
+/**
+ * Reduces the coarse envelope to the requested number of peaks, keeping the
+ * loudest value in each span. Peaks are an outline, so a mean here would flatten
+ * exactly the transients the outline exists to show.
+ */
+export function resampleEnvelope(
+    envelope: readonly number[],
+    numPeaks: number
+): number[] {
+    if (envelope.length === 0 || numPeaks <= 0) return [];
+    // Already at or below the target: nothing to merge, and stretching it would
+    // invent detail that was never sampled.
+    if (envelope.length <= numPeaks) return [...envelope];
+
+    const peaks = new Array<number>(numPeaks);
+    for (let i = 0; i < numPeaks; i++) {
+        const start = Math.floor((i * envelope.length) / numPeaks);
+        const end = Math.max(
+            start + 1,
+            Math.floor(((i + 1) * envelope.length) / numPeaks)
+        );
+        let max = 0;
+        for (let j = start; j < end && j < envelope.length; j++) {
+            if (envelope[j] > max) max = envelope[j];
+        }
+        peaks[i] = max;
+    }
+    return peaks;
+}
+
 @Injectable()
 export class WaveformService {
     private readonly logger = new Logger(WaveformService.name);
@@ -30,7 +68,7 @@ export class WaveformService {
      */
     async getOrComputeCached(
         sessionId: string,
-        opts: { inputPath: string; concatFilePath?: string; numPeaks?: number },
+        opts: { inputPath: string; concatFilePath?: string; numPeaks?: number }
     ): Promise<WaveformSidecar> {
         const cachePath = this.cachePath(sessionId);
 
@@ -40,7 +78,7 @@ export class WaveformService {
                 return JSON.parse(body) as WaveformSidecar;
             } catch (err) {
                 this.logger.warn(
-                    `Failed to read cached waveform for ${sessionId}: ${(err as Error).message}. Recomputing.`,
+                    `Failed to read cached waveform for ${sessionId}: ${(err as Error).message}. Recomputing.`
                 );
             }
         }
@@ -61,7 +99,7 @@ export class WaveformService {
                 await writeFile(cachePath, JSON.stringify(sidecar));
             } catch (err) {
                 this.logger.warn(
-                    `Failed to write waveform cache for ${sessionId}: ${(err as Error).message}`,
+                    `Failed to write waveform cache for ${sessionId}: ${(err as Error).message}`
                 );
             }
             return sidecar;
@@ -127,11 +165,13 @@ export class WaveformService {
             : ['-i', resolvedInput];
 
         return new Promise((resolve, reject) => {
-            const chunks: Buffer[] = [];
             let errOutput = '';
 
             const ffmpeg = spawn('ffmpeg', [
                 ...inputArgs,
+                // Nothing here looks at the picture; without this ffmpeg still
+                // demuxes and decodes it alongside the audio.
+                '-vn',
                 '-af',
                 'aresample=8000,aformat=sample_fmts=s16:channel_layouts=mono',
                 '-f',
@@ -139,8 +179,43 @@ export class WaveformService {
                 'pipe:1',
             ]);
 
+            // Reduce to a coarse envelope as the samples arrive rather than
+            // holding the decoded audio. An hour of 8kHz mono s16 is ~58MB to
+            // buffer and then walk again; the envelope for the same hour is
+            // 36,000 floats, and the peaks are resampled from it at the end.
+            const envelope: number[] = [];
+            let bucketMax = 0;
+            let bucketFill = 0;
+            /** Trailing byte when a chunk splits a 16-bit sample. */
+            let carry: number | null = null;
+
+            const takeSample = (value: number) => {
+                const amplitude = Math.abs(value) / 32768;
+                if (amplitude > bucketMax) bucketMax = amplitude;
+                if (++bucketFill >= SAMPLES_PER_ENVELOPE_BUCKET) {
+                    envelope.push(Math.min(bucketMax, 1));
+                    bucketMax = 0;
+                    bucketFill = 0;
+                }
+            };
+
             ffmpeg.stdout.on('data', (chunk: Buffer) => {
-                chunks.push(chunk);
+                let offset = 0;
+                if (carry !== null && chunk.length > 0) {
+                    // Rejoin the sample the chunk boundary split. Little-endian,
+                    // and it has to be sign-extended by hand: read as unsigned, a
+                    // quiet negative sample looks like a full-scale positive one
+                    // and would spike the waveform once every chunk.
+                    const raw = ((chunk[0] << 8) | carry) & 0xffff;
+                    takeSample(raw >= 0x8000 ? raw - 0x10000 : raw);
+                    carry = null;
+                    offset = 1;
+                }
+                const end = chunk.length - ((chunk.length - offset) % 2);
+                for (let i = offset; i < end; i += 2) {
+                    takeSample(chunk.readInt16LE(i));
+                }
+                if (end < chunk.length) carry = chunk[end];
             });
 
             ffmpeg.stderr.on('data', (data: Buffer) => {
@@ -162,51 +237,15 @@ export class WaveformService {
                 }
 
                 try {
-                    const buffer = Buffer.concat(chunks);
-                    const samples = new Int16Array(
-                        buffer.buffer,
-                        buffer.byteOffset,
-                        buffer.length / 2
-                    );
-                    const peaks = this.computePeaks(samples, numPeaks);
-                    resolve(peaks);
+                    // Whatever is left in the part-filled bucket still describes
+                    // real audio — dropping it would shorten the waveform.
+                    if (bucketFill > 0) envelope.push(Math.min(bucketMax, 1));
+                    resolve(resampleEnvelope(envelope, numPeaks));
                 } catch (err) {
                     this.logger.error(`Error computing peaks: ${err}`);
                     reject(err);
                 }
             });
         });
-    }
-
-    private computePeaks(samples: Int16Array, numPeaks: number): number[] {
-        const peaks: number[] = [];
-        const samplesPerPeak = Math.floor(samples.length / numPeaks);
-
-        if (samplesPerPeak === 0) {
-            // File is very short, return one sample per peak
-            for (
-                let i = 0;
-                i < samples.length && peaks.length < numPeaks;
-                i++
-            ) {
-                peaks.push(Math.abs(samples[i]) / 32768);
-            }
-            return peaks;
-        }
-
-        for (let i = 0; i < numPeaks; i++) {
-            let max = 0;
-            const startIdx = i * samplesPerPeak;
-            const endIdx = Math.min(startIdx + samplesPerPeak, samples.length);
-
-            for (let j = startIdx; j < endIdx; j++) {
-                const normalized = Math.abs(samples[j]) / 32768;
-                max = Math.max(max, normalized);
-            }
-
-            peaks.push(Math.min(max, 1));
-        }
-
-        return peaks;
     }
 }

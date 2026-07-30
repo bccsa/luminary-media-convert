@@ -1273,6 +1273,39 @@ function canObserveResize(): boolean {
     return typeof ResizeObserver !== 'undefined';
 }
 
+/** Resolved once per colour change: reading a CSS variable forces style recalc. */
+let waveformColorCache: { key: string; value: string } | null = null;
+
+function resolveWaveformColor(): string {
+    if (props.waveformColor) return props.waveformColor;
+    const rootEl = rootElRef.value || document.documentElement;
+    const key = rootEl.className;
+    if (waveformColorCache?.key === key) return waveformColorCache.value;
+    const value =
+        getComputedStyle(rootEl).getPropertyValue('--se-waveform').trim() ||
+        'rgba(255,255,255,0.35)';
+    waveformColorCache = { key, value };
+    return value;
+}
+
+let waveformFrame: number | null = null;
+
+/**
+ * Coalesces redraws onto the next animation frame.
+ *
+ * Zoom and pan move `viewStart` and `visibleSpan` many times per frame — a wheel
+ * gesture or a drag fires on every event — and each one used to repaint the
+ * whole canvas synchronously. Only the last state before the browser paints can
+ * be seen, so the rest were work nobody ever saw.
+ */
+function scheduleWaveformDraw(): void {
+    if (waveformFrame != null) return;
+    waveformFrame = requestAnimationFrame(() => {
+        waveformFrame = null;
+        drawWaveform();
+    });
+}
+
 function drawWaveform(): void {
     const canvas = waveformCanvas.value;
     if (!canvas || !props.waveformPeaks?.length) return;
@@ -1280,42 +1313,59 @@ function drawWaveform(): void {
     const container = timelineMetricsEl();
     if (!container) return;
 
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
+    // Assigning width or height resets the drawing surface even when the value
+    // is unchanged, so only do it when the size has actually moved. Everything
+    // below repaints the full canvas anyway.
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+    } else {
+        canvas.getContext('2d')?.clearRect(0, 0, width, height);
+    }
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const peaks = props.waveformPeaks;
-    const canvasHeight = canvas.height;
-    const canvasWidth = canvas.width;
     // Every bar stands on the bottom edge of the track and grows upward, so the
     // waveform reads as one shape sitting under the thumbnails. Amplitude scaling
     // and colour are unchanged from how the waveform has always drawn.
-    const maxBarHeight = canvasHeight * WAVEFORM_MAX_HEIGHT_RATIO;
+    const maxBarHeight = height * WAVEFORM_MAX_HEIGHT_RATIO;
 
-    const rootEl = rootElRef.value || document.documentElement;
-    const color = props.waveformColor || getComputedStyle(rootEl).getPropertyValue('--se-waveform').trim() || 'rgba(255,255,255,0.35)';
-    ctx.fillStyle = color;
+    ctx.fillStyle = resolveWaveformColor();
 
     const startIdx = Math.floor((viewStart.value / props.duration) * peaks.length);
     const endIdx = Math.ceil(((viewStart.value + visibleSpan.value) / props.duration) * peaks.length);
     const rangeLen = Math.max(1, endIdx - startIdx);
+    const lastPeak = peaks.length - 1;
 
-    for (let x = 0; x < canvasWidth; x++) {
-        const peakIdx = startIdx + (x / canvasWidth) * rangeLen;
+    // One path for the whole waveform rather than a fill per column: same
+    // pixels, a fraction of the canvas calls at 1000+ columns.
+    ctx.beginPath();
+    for (let x = 0; x < width; x++) {
+        const peakIdx = startIdx + (x / width) * rangeLen;
         const idx1 = Math.floor(peakIdx);
-        const idx2 = Math.ceil(peakIdx);
         const t = peakIdx - idx1;
 
-        const peak1 = peaks[Math.min(idx1, peaks.length - 1)] || 0;
-        const peak2 = peaks[Math.min(idx2, peaks.length - 1)] || 0;
+        const peak1 = peaks[Math.min(idx1, lastPeak)] || 0;
+        const peak2 = peaks[Math.min(idx1 + 1, lastPeak)] || 0;
         const peak = peak1 * (1 - t) + peak2 * t;
 
         const barHeight = Math.max(1, peak * maxBarHeight);
-        ctx.fillRect(x, canvasHeight - barHeight, 1, barHeight);
+        ctx.rect(x, height - barHeight, 1, barHeight);
     }
+    ctx.fill();
 }
+
+watch(
+    () => props.waveformColor,
+    () => {
+        waveformColorCache = null;
+        scheduleWaveformDraw();
+    },
+);
 
 watch(
     () => props.waveformPeaks,
@@ -1328,7 +1378,7 @@ watch(
             if (container) {
                 waveformResizeObserver = new ResizeObserver(() => {
                     measureTrackWidth();
-                    drawWaveform();
+                    scheduleWaveformDraw();
                 });
                 waveformResizeObserver.observe(container);
             }
@@ -1338,13 +1388,10 @@ watch(
     { flush: 'post' },
 );
 
-watch(
-    [viewStart, visibleSpan],
-    () => {
-        measureTrackWidth();
-        drawWaveform();
-    },
-);
+watch([viewStart, visibleSpan], () => {
+    measureTrackWidth();
+    scheduleWaveformDraw();
+});
 
 
 onMounted(() => {
@@ -1357,7 +1404,7 @@ onMounted(() => {
     if (container && !waveformResizeObserver && canObserveResize()) {
         waveformResizeObserver = new ResizeObserver(() => {
             measureTrackWidth();
-            drawWaveform();
+            scheduleWaveformDraw();
         });
         waveformResizeObserver.observe(container);
     }
@@ -1367,6 +1414,7 @@ onBeforeUnmount(() => {
     thumbnailFetchAbort?.abort();
     thumbnailFetchAbort = null;
     cancelAnimationFrame(rafId);
+    if (waveformFrame != null) cancelAnimationFrame(waveformFrame);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
 

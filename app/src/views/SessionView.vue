@@ -1154,13 +1154,43 @@ async function fetchWaveform() {
         );
         if (!response.ok) {
             // Waveform generation may not be available or may fail - don't treat as critical error
+            scheduleWaveformRetry();
             return;
         }
         const data = await response.json();
         waveformPeaks.value = data.peaks ?? null;
+        if (!waveformPeaks.value?.length) scheduleWaveformRetry();
     } catch {
         // Non-critical: waveform is a UX enhancement, don't error the whole view
+        scheduleWaveformRetry();
     }
+}
+
+/** Backs off from ~2s to ~30s while the source is still being analysed. */
+const WAVEFORM_RETRY_MS = [2_000, 4_000, 8_000, 15_000, 30_000];
+let waveformRetries = 0;
+let waveformRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * The waveform is computed from the source on first request, which for a long
+ * file takes a while. A single attempt on page load usually lands before it is
+ * ready, and nothing asked again — so the timeline stayed flat until someone
+ * happened to reload. Keep asking, slower each time.
+ */
+function scheduleWaveformRetry() {
+    if (waveformRetryTimer || isCompleted.value) return;
+    const delay =
+        WAVEFORM_RETRY_MS[
+            Math.min(waveformRetries, WAVEFORM_RETRY_MS.length - 1)
+        ];
+    waveformRetries++;
+    waveformRetryTimer = setTimeout(() => {
+        waveformRetryTimer = null;
+        // Only while the trim UI can still use it.
+        if (!waveformPeaks.value?.length && showProbeConfig.value) {
+            void fetchWaveform();
+        }
+    }, delay);
 }
 
 // Re-fetch the waveform when a session transitions to completed: the encode
@@ -1555,6 +1585,7 @@ async function copyOutputObjectKey(key: string) {
 onMounted(fetchSession);
 
 onUnmounted(() => {
+    if (waveformRetryTimer) clearTimeout(waveformRetryTimer);
     poller.stop();
     chapters.unload();
     document.documentElement.style.overflowY = '';
