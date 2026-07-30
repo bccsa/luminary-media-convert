@@ -319,8 +319,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return q.toFixed(1);
     }
 
-    private bitrateToVideoCrf(bitrateKbps: number, width: number, height: number): number {
-        const bpp = (bitrateKbps * 1000) / (width * height * 30);
+    private bitrateToVideoCrf(bitrateKbps: number, width: number, height: number, fps: number): number {
+        // Bits per pixel must use the real frame rate: this assumed 30 fps, so a
+        // 50 fps source was treated as having 66% more bits per pixel than it
+        // does, and the quality target it derived demanded more than the rate cap
+        // could pay for — the encoder rode the cap and motion fell apart.
+        const bpp = (bitrateKbps * 1000) / (width * height * (fps > 0 ? fps : 30));
         const crf = 23 - Math.log2(bpp / 0.1) * 3;
         return Math.max(16, Math.min(34, Math.round(crf)));
     }
@@ -411,12 +415,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             if (this.accelMode === 'nvidia') {
                 args.push(
                     `-c:v:${videoOutputIndex}`, 'h264_nvenc',
+                    `-profile:v:${videoOutputIndex}`, 'high',
                     `-preset:v:${videoOutputIndex}`, this.getNvencPreset(r.height),
                     `-tune:v:${videoOutputIndex}`, 'hq',
                     `-rc:v:${videoOutputIndex}`, 'vbr',
                 );
                 if (r.vbr) {
-                    const cq = this.bitrateToVideoCrf(r.videoBitrateKbps, r.width, r.height);
+                    const cq = this.bitrateToVideoCrf(r.videoBitrateKbps, r.width, r.height, sourceFrameRate);
                     args.push(
                         `-cq:v:${videoOutputIndex}`, `${cq}`,
                         `-b:v:${videoOutputIndex}`, '0',
@@ -448,7 +453,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     `-preset:v:${videoOutputIndex}`, this.getX264Preset(r.height),
                 );
                 if (r.vbr) {
-                    const crf = this.bitrateToVideoCrf(r.videoBitrateKbps, r.width, r.height);
+                    const crf = this.bitrateToVideoCrf(r.videoBitrateKbps, r.width, r.height, sourceFrameRate);
                     args.push(
                         `-crf:v:${videoOutputIndex}`, `${crf}`,
                         `-maxrate:v:${videoOutputIndex}`, `${r.videoBitrateKbps}k`,

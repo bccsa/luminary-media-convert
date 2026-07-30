@@ -9,6 +9,7 @@ import type {
     VideoTrackInfo,
 } from './types';
 import { computeLayoutKey, getStoredConfig } from './layoutStorage';
+import { fpsAdjustedBitrateKbps } from './ladder';
 
 const props = withDefaults(
     defineProps<{
@@ -281,7 +282,7 @@ function reanalyzeVideo() {
                     track.height
                 ),
                 height: rung.height,
-                videoBitrateKbps: rung.bitrateKbps,
+                videoBitrateKbps: fpsAdjustedBitrateKbps(rung.bitrateKbps, track.frameRate ?? 30),
                 copyStream: false,
                 audioGroupId,
                 vbr: true,
