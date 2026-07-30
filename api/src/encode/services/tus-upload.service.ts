@@ -7,7 +7,7 @@ import {
 import { TusdServer } from 'node-tusd';
 import { join, basename } from 'path';
 import { mkdirSync } from 'fs';
-import { rename, copyFile, unlink, mkdir, access } from 'fs/promises';
+import { rename, copyFile, unlink, mkdir, access, stat } from 'fs/promises';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { SessionService } from './session.service.js';
 import { ProbeService } from './probe.service.js';
@@ -27,6 +27,21 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
     private readonly tusDir: string;
     private readonly workDir: string;
     private cleanupInterval: ReturnType<typeof setInterval> | null = null;
+    /**
+     * Final uploads whose completion we are watching from the filesystem side.
+     *
+     * The post-finish hook is delivered over an HTTP request whose context tusd
+     * ties to the client's connection. The browser closes that connection the
+     * instant it has its 201 — it has no reason to linger — so the hook loses a
+     * race it should never have been in, and the session sticks at "uploading"
+     * with the file stranded. Observed twice in four uploads. The file itself
+     * reaching its declared size is the ground truth, so watch for that and run
+     * the same finalisation if the hook never arrives.
+     */
+    private readonly pendingFinals = new Map<
+        string,
+        { timer: ReturnType<typeof setInterval>; deadline: number }
+    >();
 
     constructor(
         private readonly sessionService: SessionService,
@@ -112,6 +127,15 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
 
                 this.sessionService.updateStatus(sessionId, 'uploading');
                 this.sendStatusWebhook(sessionId, 'uploading');
+
+                if (upload.isFinal || (!upload.isPartial && upload.size)) {
+                    this.watchFinalUpload(
+                        upload.id,
+                        sessionId,
+                        upload.size ?? 0,
+                        basename(upload.metadata?.filename || 'input') || 'input',
+                    );
+                }
             },
 
             onUploadFinish: async (_req, upload) => {
@@ -169,6 +193,7 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                 await unlink(`${tusFilePath}.info`).catch(() => {});
 
                 await this.finalizeUpload(sessionId, destPath);
+                this.clearFinalWatch(upload.id);
             },
         });
 
@@ -191,6 +216,7 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
     }
 
     async onModuleDestroy(): Promise<void> {
+        for (const id of [...this.pendingFinals.keys()]) this.clearFinalWatch(id);
         if (this.cleanupInterval) {
             clearInterval(this.cleanupInterval);
             this.cleanupInterval = null;
@@ -226,6 +252,95 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
      * Shared between tus uploads and URL ingestion so both paths converge on
      * identical post-ingest behaviour.
      */
+    private watchFinalUpload(
+        uploadId: string,
+        sessionId: string,
+        expectedSize: number,
+        filename: string,
+    ): void {
+        this.clearFinalWatch(uploadId);
+        const deadline = Date.now() + 10 * 60_000;
+        const timer = setInterval(() => {
+            void this.reconcileFinalUpload(
+                uploadId,
+                sessionId,
+                expectedSize,
+                filename,
+                deadline,
+            );
+        }, 2_000);
+        timer.unref?.();
+        this.pendingFinals.set(uploadId, { timer, deadline });
+    }
+
+    private clearFinalWatch(uploadId: string): void {
+        const pending = this.pendingFinals.get(uploadId);
+        if (pending) {
+            clearInterval(pending.timer);
+            this.pendingFinals.delete(uploadId);
+        }
+    }
+
+    /** Runs the hook's work from filesystem evidence when the hook was killed. */
+    private async reconcileFinalUpload(
+        uploadId: string,
+        sessionId: string,
+        expectedSize: number,
+        filename: string,
+        deadline: number,
+    ): Promise<void> {
+        const session = this.sessionService.get(sessionId);
+        // Hook won the race, or the session is gone: nothing left to rescue.
+        if (!session || session.filePath) {
+            this.clearFinalWatch(uploadId);
+            return;
+        }
+        if (Date.now() > deadline) {
+            this.logger.warn(
+                `Gave up waiting for final upload ${uploadId} of session ${sessionId}`,
+            );
+            this.clearFinalWatch(uploadId);
+            return;
+        }
+
+        const tusFilePath = join(this.tusDir, uploadId);
+        let size: number;
+        try {
+            size = (await stat(tusFilePath)).size;
+        } catch {
+            return; // Not concatenated yet.
+        }
+        if (expectedSize > 0 && size !== expectedSize) return;
+
+        this.clearFinalWatch(uploadId);
+        this.logger.warn(
+            `post-finish hook never arrived for upload ${uploadId}; finalising session ${sessionId} from disk`,
+        );
+        try {
+            const sessionDir = join(this.workDir, sessionId);
+            await mkdir(sessionDir, { recursive: true });
+            const destPath = join(sessionDir, filename);
+            const alreadyMoved = await access(destPath)
+                .then(() => true)
+                .catch(() => false);
+            if (!alreadyMoved) {
+                try {
+                    await rename(tusFilePath, destPath);
+                } catch (err: unknown) {
+                    if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
+                    await copyFile(tusFilePath, destPath);
+                    await unlink(tusFilePath);
+                }
+            }
+            await unlink(`${tusFilePath}.info`).catch(() => {});
+            await this.finalizeUpload(sessionId, destPath);
+        } catch (err) {
+            this.logger.error(
+                `Reconciling upload ${uploadId} failed: ${(err as Error).message}`,
+            );
+        }
+    }
+
     async finalizeUpload(sessionId: string, destPath: string): Promise<void> {
         this.sessionService.setFilePath(sessionId, destPath);
 
