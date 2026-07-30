@@ -411,7 +411,36 @@ function onTimelineMouseDown(e: MouseEvent) {
         beginPan(e);
         return;
     }
+
+    // Double-press and drag marks a range too. Shift-drag does the same thing and
+    // is documented, but nobody discovers a modifier on their own — this is the
+    // gesture people try. Detected from the press rather than a `dblclick` event,
+    // which only arrives after the second click has finished and so cannot take
+    // over the drag it is meant to start.
+    if (e.button === 0 && isSecondPressOf(e)) {
+        lastPress = null; // A third press starts over rather than chaining.
+        e.preventDefault(); // Otherwise the browser selects the labels.
+        beginMarkDrag(e);
+        return;
+    }
+    lastPress = { at: performance.now(), x: e.clientX, y: e.clientY };
+
     beginScrub(e);
+}
+
+/** How close together, in time and space, two presses count as one gesture. */
+const DOUBLE_PRESS_MS = 350;
+const DOUBLE_PRESS_SLOP_PX = 5;
+
+let lastPress: { at: number; x: number; y: number } | null = null;
+
+function isSecondPressOf(e: MouseEvent): boolean {
+    if (!lastPress) return false;
+    return (
+        performance.now() - lastPress.at <= DOUBLE_PRESS_MS &&
+        Math.abs(e.clientX - lastPress.x) <= DOUBLE_PRESS_SLOP_PX &&
+        Math.abs(e.clientY - lastPress.y) <= DOUBLE_PRESS_SLOP_PX
+    );
 }
 
 function beginScrub(e: MouseEvent) {
@@ -2207,6 +2236,10 @@ defineExpose({
                         <dt>⌘ / Ctrl + Shift + Z</dt><dd>Redo</dd>
                         <dt>+ / −</dt><dd>Zoom in / out (0 resets)</dd>
                         <dt>Ctrl / ⌘ + wheel</dt><dd>Zoom at cursor</dd>
+                        <dt>Double-click + drag</dt>
+                        <dd v-if="mode === 'trim'">Drag out a clip on the timeline</dd>
+                        <dd v-else-if="mode === 'chapters'">Drag out a chapter on the timeline</dd>
+                        <dd v-else>Drag out a cue on the timeline</dd>
                         <dt>Shift + drag</dt>
                         <dd v-if="mode === 'trim'">Drag out a clip on the timeline</dd>
                         <dd v-else>Marquee-select segments</dd>
