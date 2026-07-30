@@ -893,8 +893,19 @@ const playbackUrl = computed(() => {
  * The API samples the source instead, so the trim timeline has frames while the
  * user is still choosing what to keep.
  */
+/**
+ * The encoder's sampled storyboard is the only one that exists until the encode
+ * writes its own to S3 — which happens at completion, not before. Gating this on
+ * the pre-encode state alone meant the timeline lost all its frames the moment
+ * Start Encoding was pressed, for the whole run, despite 29 finished sprites
+ * sitting on the encoder's disk.
+ */
+const sourceStoryboardActive = computed(
+    () => showProbeConfig.value || showEncoding.value
+);
+
 const sourceStoryboardUrl = computed(() => {
-    if (!showProbeConfig.value) return null;
+    if (!sourceStoryboardActive.value) return null;
     if (!encodingApiUrl.value || !sessionToken.value) return null;
     return (
         `${encodingApiUrl.value}/api/sessions/${sessionId.value}` +
@@ -906,11 +917,11 @@ const sourceStoryboardUrl = computed(() => {
 // exist so far, so the storyboard grows after the first request. Follow it.
 const storyboard = useStoryboard({
     url: sourceStoryboardUrl,
-    active: showProbeConfig,
+    active: sourceStoryboardActive,
 });
 
 const thumbnailVttUrl = computed(() => {
-    if (showProbeConfig.value) return storyboard.versionedUrl.value;
+    if (sourceStoryboardActive.value) return storyboard.versionedUrl.value;
     if (!displayThumbnailsVtt.value || !s3PublicBaseUrl.value) return null;
     return `${s3PublicBaseUrl.value}/${displayThumbnailsVtt.value}`;
 });
