@@ -3029,6 +3029,66 @@ describe('FfmpegService', () => {
             expect(args).toContain('-bufsize:v:0');
         });
 
+        it('asks NVENC for high profile, matching the other encoders', async () => {
+            // Unset, NVENC emits Main — no CABAC, no 8x8 transforms — while the
+            // VideoToolbox branch has always requested high. Roughly 10% of
+            // quality at the same bitrate, given away silently (#93).
+            (service as any).accelMode = 'nvidia';
+
+            const args = await buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig: {
+                    type: 'video',
+                    segmentDuration: 6,
+                    videoRenditions: [
+                        { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, audioGroupId: 'hd', vbr: true },
+                    ],
+                    audioGroups: [
+                        { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    ],
+                } as EncodeConfigDto,
+            });
+
+            const pIdx = args.indexOf('-profile:v:0');
+            expect(pIdx).toBeGreaterThan(-1);
+            expect(args[pIdx + 1]).toBe('high');
+        });
+
+        it('demands less per frame from a 60 fps source than a 30 fps one', async () => {
+            // The cq target divided by a hardcoded 30 fps, so high-frame-rate
+            // sources were asked for more quality than their rate cap could pay
+            // for — the encoder rode the cap and motion fell apart (#93).
+            (service as any).accelMode = 'nvidia';
+            const cfg = () => ({
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, audioGroupId: 'hd', vbr: true },
+                ],
+                audioGroups: [
+                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                ],
+            }) as EncodeConfigDto;
+
+            const cqAt = async (fps: number) => {
+                const spy = vi
+                    .spyOn(service as any, 'probeFrameRate')
+                    .mockResolvedValue(fps);
+                const args = await buildVideoArgs({
+                    inputPath: '/tmp/input.mp4',
+                    outputDir: '/tmp/output',
+                    encodeConfig: cfg(),
+                });
+                spy.mockRestore();
+                return parseInt(args[args.indexOf('-cq:v:0') + 1], 10);
+            };
+
+            const at30 = await cqAt(30);
+            const at60 = await cqAt(60);
+            expect(at60).toBeGreaterThan(at30);
+        });
+
         it('should use CRF-based VBR args for CPU with vbr=true', async () => {
             (service as any).accelMode = 'cpu';
 
