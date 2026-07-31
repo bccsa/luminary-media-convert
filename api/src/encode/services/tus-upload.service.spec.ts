@@ -14,6 +14,8 @@ const {
     mockMkdir,
     mockAccess,
     mockStat,
+    mockReaddir,
+    mockReadFile,
 } = vi.hoisted(() => ({
     mockStart: vi.fn().mockResolvedValue(undefined),
     mockStop: vi.fn().mockResolvedValue(undefined),
@@ -27,6 +29,8 @@ const {
     // Rejects by default → file does not exist yet → move proceeds normally.
     mockAccess: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
     mockStat: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
+    mockReaddir: vi.fn().mockResolvedValue([]),
+    mockReadFile: vi.fn().mockResolvedValue('{}'),
 }));
 
 vi.mock('node-tusd', () => ({
@@ -46,6 +50,8 @@ vi.mock('fs/promises', () => ({
     mkdir: (...args: any[]) => mockMkdir(...args),
     access: (...args: any[]) => mockAccess(...args),
     stat: (...args: any[]) => mockStat(...args),
+    readdir: (...args: any[]) => mockReaddir(...args),
+    readFile: (...args: any[]) => mockReadFile(...args),
 }));
 
 vi.mock('fs', async (importOriginal) => {
@@ -158,73 +164,104 @@ describe('TusUploadService', () => {
         });
     });
 
-    describe('reconciling a final upload whose post-finish hook was killed', () => {
-        // tusd ties the hook to the client's connection, and the browser closes
-        // it the moment it has its 201 — 2 of 4 real uploads lost the handoff
-        // and stuck at "uploading" with the file stranded in .tus-uploads.
-        const SIZE = 4_703_782_365;
+    describe('finalising a staged upload whose post-finish hook never ran', () => {
+        // tusd ties that hook to the client's connection and the browser drops it
+        // at the 201 — 4 of 6 real uploads lost the race. An earlier attempt read
+        // the expected id from the post-create payload, which carries none for a
+        // concatenated final, so it watched a path that never existed.
+        const SIZE = 7_224_420_490;
 
-        async function createFinalUpload() {
-            const session = sessionService.create(makeConfig());
-            const hook = capturedServerConfig.value.onUploadCreate;
-            await hook(makeRequestInfo(), {
-                id: 'final-1',
-                isFinal: true,
-                size: SIZE,
-                metadata: { sessionId: session.id, filename: 'input.mkv' },
-            });
-            return session;
+        function stageFinal(sessionId: string, over: Record<string, unknown> = {}) {
+            mockReaddir.mockResolvedValue(['final-1.info']);
+            mockReadFile.mockResolvedValue(
+                JSON.stringify({
+                    ID: 'final-1',
+                    Size: SIZE,
+                    IsPartial: false,
+                    IsFinal: true,
+                    MetaData: { sessionId, filename: 'archive.mkv' },
+                    ...over,
+                }),
+            );
         }
 
-        it('finalises from disk when the file reaches its declared size', async () => {
-            vi.useFakeTimers();
-            const session = await createFinalUpload();
+        it('moves the staged file and finalises the session', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            stageFinal(session.id);
+            mockStat.mockResolvedValue({ size: SIZE });
             const finalize = vi
                 .spyOn(service, 'finalizeUpload')
                 .mockResolvedValue(undefined);
-            mockStat.mockResolvedValue({ size: SIZE });
 
-            await vi.advanceTimersByTimeAsync(2_000);
+            await (service as any).sweepStagedFinals();
 
             expect(mockRename).toHaveBeenCalledTimes(1);
             expect(finalize).toHaveBeenCalledWith(
                 session.id,
-                expect.stringContaining('input.mkv'),
+                expect.stringContaining('archive.mkv'),
             );
-            // Reported once: the watcher must not fire again.
-            await vi.advanceTimersByTimeAsync(10_000);
-            expect(finalize).toHaveBeenCalledTimes(1);
-            vi.useRealTimers();
         });
 
-        it('waits while the concatenation is still growing', async () => {
-            vi.useFakeTimers();
-            await createFinalUpload();
+        it('waits while the concatenation is still being written', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            stageFinal(session.id);
+            mockStat.mockResolvedValue({ size: SIZE - 1 });
             const finalize = vi
                 .spyOn(service, 'finalizeUpload')
                 .mockResolvedValue(undefined);
-            mockStat.mockResolvedValue({ size: SIZE - 1 });
 
-            await vi.advanceTimersByTimeAsync(8_000);
+            await (service as any).sweepStagedFinals();
 
             expect(finalize).not.toHaveBeenCalled();
-            vi.useRealTimers();
         });
 
-        it('stands down when the hook won the race', async () => {
-            vi.useFakeTimers();
-            const session = await createFinalUpload();
+        it('leaves the partial chunks alone', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            stageFinal(session.id, { IsPartial: true, IsFinal: false });
+            mockStat.mockResolvedValue({ size: SIZE });
             const finalize = vi
                 .spyOn(service, 'finalizeUpload')
                 .mockResolvedValue(undefined);
-            sessionService.setFilePath(session.id, '/work/x/input.mkv');
-            mockStat.mockResolvedValue({ size: SIZE });
 
-            await vi.advanceTimersByTimeAsync(6_000);
+            await (service as any).sweepStagedFinals();
+
+            expect(finalize).not.toHaveBeenCalled();
+        });
+
+        it('stands down when the hook already did the work', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            sessionService.setFilePath(session.id, '/work/x/archive.mkv');
+            stageFinal(session.id);
+            mockStat.mockResolvedValue({ size: SIZE });
+            const finalize = vi
+                .spyOn(service, 'finalizeUpload')
+                .mockResolvedValue(undefined);
+
+            await (service as any).sweepStagedFinals();
 
             expect(finalize).not.toHaveBeenCalled();
             expect(mockRename).not.toHaveBeenCalled();
-            vi.useRealTimers();
+        });
+
+        it('gives up on an upload it has failed three times', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            stageFinal(session.id);
+            mockStat.mockResolvedValue({ size: SIZE });
+            vi.spyOn(service, 'finalizeUpload').mockRejectedValue(
+                new Error('probe exploded'),
+            );
+
+            for (let i = 0; i < 5; i++) {
+                await (service as any).sweepStagedFinals();
+            }
+
+            // Three attempts, then it stops rather than looping forever.
+            expect(mockRename).toHaveBeenCalledTimes(3);
         });
     });
 
