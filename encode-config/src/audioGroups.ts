@@ -126,11 +126,13 @@ export function buildSuggestedAudioGroups(
               })
             : audioTracks;
 
-        for (const track of perTier) {
+        const labels = labelsForTier(perTier, tier.label);
+
+        perTier.forEach((track, n) => {
             const lang = track.language || 'und';
             groups.push({
                 id: tier.groupId,
-                label: labelFor(track, lang, tier.label, perTier.length > 1),
+                label: labels[n],
                 audioBitrateKbps: isAlreadyABR
                     ? track.bitrateKbps || tier.bitrateKbps
                     : tier.bitrateKbps,
@@ -141,25 +143,40 @@ export function buildSuggestedAudioGroups(
                 copyStream: isAlreadyABR ? true : undefined,
                 vbr: !isAlreadyABR,
             });
-        }
+        });
     }
 
     return groups;
 }
 
 /**
- * A name a listener can pick between. Untagged tracks would otherwise all read
- * the same within a tier, leaving no way to tell three languages apart, so they
- * fall back to their source track number.
+ * Names a listener can actually pick between, one per track in the tier.
+ *
+ * A source-provided name wins when it is unique. What it cannot do is stand in
+ * for several tracks at once, and sources name tracks unhelpfully often — one
+ * broadcast carried four separate languages, none language-tagged, three of them
+ * reaching the encode config named "NA". Anything that would appear twice in a
+ * group is qualified by the source track it came from.
  */
-function labelFor(
-    track: AudioTrackInfo,
-    lang: string,
-    tierLabel: string,
-    needsDistinguishing: boolean
-): string {
-    if (track.name) return track.name;
-    if (lang !== 'und') return `${lang.toUpperCase()} ${tierLabel}`;
-    if (needsDistinguishing) return `Track ${track.index} ${tierLabel}`;
-    return tierLabel;
+function labelsForTier(
+    tracks: readonly AudioTrackInfo[],
+    tierLabel: string
+): string[] {
+    const base = tracks.map((track) => {
+        if (track.name) return track.name;
+        const lang = track.language || 'und';
+        if (lang !== 'und') return `${lang.toUpperCase()} ${tierLabel}`;
+        return tierLabel;
+    });
+
+    const seen = new Map<string, number>();
+    for (const label of base) seen.set(label, (seen.get(label) ?? 0) + 1);
+
+    // Only qualify what would otherwise collide. Sources name their tracks
+    // unhelpfully more often than not — a broadcast arrived with four separate
+    // languages all called "NA" — and identical entries in one group give a
+    // listener no way to choose between them.
+    return base.map((label, i) =>
+        (seen.get(label) ?? 0) > 1 ? `${label} (track ${tracks[i].index})` : label
+    );
 }

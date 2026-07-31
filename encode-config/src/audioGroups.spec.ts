@@ -89,6 +89,61 @@ describe('buildSuggestedAudioGroups', () => {
             );
         });
 
+        /**
+         * Sources name their tracks unhelpfully more often than not. A real
+         * broadcast arrived with four separate languages — MUL, ENG, FRA, NYA —
+         * carrying no language tags at all, and by the time they reached the
+         * encode config three of them were named "NA". Identical entries in one
+         * group leave a listener no way to choose between them.
+         */
+        describe('labels that would collide', () => {
+            const sameName = [
+                track(0, { name: 'English', language: 'eng' }),
+                track(1, { name: 'NA' }),
+                track(2, { name: 'NA' }),
+                track(3, { name: 'NA' }),
+            ];
+
+            it('qualifies duplicates with their source track', () => {
+                const groups = buildSuggestedAudioGroups(sameName, 1);
+                const lowTier = groups.filter((g) => g.id === 'low');
+
+                expect(new Set(lowTier.map((g) => g.label)).size).toBe(
+                    lowTier.length
+                );
+            });
+
+            it('names the track that distinguishes them', () => {
+                const labels = buildSuggestedAudioGroups(sameName, 1)
+                    .filter((g) => g.id === 'low')
+                    .map((g) => g.label);
+
+                expect(labels).toContain('NA (track 1)');
+                expect(labels).toContain('NA (track 2)');
+                expect(labels).toContain('NA (track 3)');
+            });
+
+            it('leaves a name that does not collide alone', () => {
+                // Only what would be ambiguous gets qualified.
+                const labels = buildSuggestedAudioGroups(sameName, 1)
+                    .filter((g) => g.id === 'low')
+                    .map((g) => g.label);
+
+                expect(labels).toContain('English');
+            });
+
+            it('distinguishes unnamed untagged tracks too', () => {
+                const unnamed = [track(1), track(2), track(3)];
+                const lowTier = buildSuggestedAudioGroups(unnamed, 1).filter(
+                    (g) => g.id === 'low'
+                );
+
+                expect(new Set(lowTier.map((g) => g.label)).size).toBe(
+                    lowTier.length
+                );
+            });
+        });
+
         it('prefers the track name when the source provides one', () => {
             const named = [
                 track(1, { name: 'Director commentary' }),
