@@ -27,7 +27,10 @@ const props = withDefaults(
         segmentEditorProbeFps: number;
         /** `toolbar` = hints + chapter actions in the workflow card. `timeline` = full trim editor (below the player row). */
         section?: 'toolbar' | 'timeline';
-        /** Post-encode `thumbnails.vtt` URL for timeline hover previews (trim mode). */
+        /**
+         * `thumbnails.vtt` URL for the timeline filmstrip and hover previews —
+         * sampled from the source before the encode, read from S3 after it.
+         */
         thumbnailVttUrl?: string | null;
         /** Audio waveform peaks (normalized 0–1 amplitude). */
         waveformPeaks?: number[] | null;

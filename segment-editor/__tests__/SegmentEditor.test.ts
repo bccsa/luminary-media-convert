@@ -1719,6 +1719,39 @@ describe('SegmentEditor — thumbnail filmstrip', () => {
         expect(tiles[0].find('img').attributes('src')).toContain('sprite.jpg');
     });
 
+    it('tiles thumbnails in chapters mode too', async () => {
+        // The filmstrip used to be gated on trim mode. The session timeline
+        // switches to chapters once the encode finishes — which is exactly when
+        // the encode's own storyboard lands in S3 — so the frames were suppressed
+        // at the moment they became available, and the track went bare.
+        mockVttFetch();
+        const w = await mountWithStrip({ mode: 'chapters' });
+        expect(w.findAll('.se-thumb-tile').length).toBeGreaterThan(0);
+    });
+
+    it('fetches the storyboard regardless of mode', async () => {
+        const fetchMock = mockVttFetch();
+        await mountWithStrip({ mode: 'chapters' });
+        expect(fetchMock).toHaveBeenCalledWith(
+            'https://example.test/thumbs/thumbnails.vtt',
+            expect.anything()
+        );
+    });
+
+    it('shows the hover preview in chapters mode', async () => {
+        mockVttFetch();
+        const w = await mountWithStrip({ mode: 'chapters' });
+        expect(w.find('.se-thumb-preview').exists()).toBe(true);
+    });
+
+    it('leaves the track bare when no storyboard is supplied', async () => {
+        // The consumer decides by passing a URL or not — the mode no longer does.
+        mockVttFetch();
+        const w = await mountWithStrip({ mode: 'chapters', thumbnailVttUrl: null });
+        expect(w.findAll('.se-thumb-tile')).toHaveLength(0);
+        expect(w.find('.se-thumb-preview').exists()).toBe(false);
+    });
+
     it('crops each tile out of the sprite by translating then scaling', async () => {
         mockVttFetch();
         const w = await mountWithStrip();
@@ -1738,12 +1771,6 @@ describe('SegmentEditor — thumbnail filmstrip', () => {
         });
         // Later tiles sit further along the source, so their sprite offsets grow.
         expect(offsets[offsets.length - 1]).toBeLessThan(offsets[0]);
-    });
-
-    it('renders no filmstrip outside trim mode', async () => {
-        mockVttFetch();
-        const w = await mountWithStrip({ mode: 'chapters' });
-        expect(w.findAll('.se-thumb-tile')).toHaveLength(0);
     });
 
     it('renders no filmstrip when the VTT cannot be fetched', async () => {

@@ -68,7 +68,10 @@ interface Props {
      */
     combinedControls?: boolean;
     /**
-     * URL of `thumbnails.vtt` (HLS sprite storyboard). In trim mode, hovering the timeline shows the matching thumbnail.
+     * URL of `thumbnails.vtt` (HLS sprite storyboard). Renders as a filmstrip
+     * behind the track, and hovering the timeline shows the matching thumbnail.
+     * Applies in every mode — marking a chapter boundary needs to see the frame
+     * as much as marking a trim point does. Pass null to leave the track bare.
      */
     thumbnailVttUrl?: string | null;
     /** Audio waveform peaks (normalized 0–1 amplitude). When provided, rendered as a canvas background in the timeline. */
@@ -1155,13 +1158,13 @@ function preloadThumbnailSprites(cues: ThumbnailSpriteCue[]) {
 }
 
 watch(
-    () => [props.thumbnailVttUrl, props.mode] as const,
-    async ([url, mode]) => {
+    () => props.thumbnailVttUrl,
+    async (url) => {
         thumbnailFetchAbort?.abort();
         thumbnailFetchAbort = null;
         thumbnailCues.value = [];
         thumbPreviewStyle.value = { display: 'none' };
-        if (!url || mode !== 'trim') return;
+        if (!url) return;
         const ac = new AbortController();
         thumbnailFetchAbort = ac;
         try {
@@ -1185,7 +1188,7 @@ function hideThumbPreview() {
 }
 
 function onTimelineHoverMove(e: MouseEvent) {
-    if (props.mode !== 'trim' || !props.thumbnailVttUrl) return;
+    if (!props.thumbnailVttUrl) return;
     if (dragMode.value !== null) {
         hideThumbPreview();
         return;
@@ -1239,7 +1242,6 @@ function measureTrackWidth() {
 }
 
 const thumbnailStripTiles = computed(() => {
-    if (props.mode !== 'trim') return [];
     const cues = thumbnailCues.value;
     const width = trackWidthPx.value;
     if (!cues.length || width <= 0 || visibleSpan.value <= 0) return [];
@@ -1637,7 +1639,7 @@ defineExpose({
             @keyup="keyboardScope === 'focus' ? onKeyUp($event) : undefined"
         >
             <div
-                v-if="thumbnailVttUrl && mode === 'trim'"
+                v-if="thumbnailVttUrl"
                 class="se-thumb-preview"
                 :style="thumbPreviewStyle"
             />
