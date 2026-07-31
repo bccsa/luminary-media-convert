@@ -1755,6 +1755,32 @@ describe('SessionsService', () => {
             expect(mockS3ClientService.listObjects).toHaveBeenCalledWith('user:1', 'cfg-1', 'output/');
         });
 
+        /**
+         * This call is what raises the "prefix already contains files" warning
+         * before an encode overwrites a previous run. Keys are stored without a
+         * leading separator, so looking under the prefix exactly as typed would
+         * search a location nothing was written to, report a reused prefix as
+         * empty, and disarm the warning without any sign it had stopped working.
+         */
+        it('looks under the canonical prefix, not the one as typed', async () => {
+            mockS3ConfigsService.getById.mockResolvedValue({
+                _id: 's3config:cfg-1',
+                userId: 'user:1',
+            });
+            mockS3ClientService.listObjects.mockResolvedValue([
+                'output/master.m3u8',
+            ]);
+
+            const result = await service.checkPrefix('user:1', 'cfg-1', '/output');
+
+            expect(mockS3ClientService.listObjects).toHaveBeenCalledWith(
+                'user:1',
+                'cfg-1',
+                'output/',
+            );
+            expect(result).toEqual({ exists: true, count: 1 });
+        });
+
         it('should return exists=false with count 0 when no objects found', async () => {
             mockS3ConfigsService.getById.mockResolvedValue({
                 _id: 's3config:cfg-1',

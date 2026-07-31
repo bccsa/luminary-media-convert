@@ -888,7 +888,12 @@ export class SessionsService implements OnModuleInit {
         // Verify config belongs to user
         await this.s3ConfigsService.getById(userId, s3ConfigId);
 
-        const normalizedPrefix = prefix && !prefix.endsWith('/') ? prefix + '/' : prefix;
+        // Must canonicalize the same way the encoder does, or this looks in a
+        // place nothing was ever written to. Keys are stored without a leading
+        // separator, so a prefix typed as "/out" would list "/out/", find
+        // nothing, and report a reused prefix as empty — silently disarming the
+        // overwrite warning this call exists to raise.
+        const normalizedPrefix = SessionsService.normalizePrefix(prefix);
         const keys = await this.s3ClientService.listObjects(userId, s3ConfigId, normalizedPrefix);
         return { exists: keys.length > 0, count: keys.length };
     }
