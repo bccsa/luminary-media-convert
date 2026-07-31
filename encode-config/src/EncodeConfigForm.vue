@@ -10,6 +10,10 @@ import type {
 } from './types';
 import { computeLayoutKey, getStoredConfig } from './layoutStorage';
 import { fpsAdjustedBitrateKbps } from './ladder';
+import {
+    buildSuggestedAudioGroups,
+    getAudioTierForHeight,
+} from './audioGroups';
 
 const props = withDefaults(
     defineProps<{
@@ -66,37 +70,6 @@ const ABR_LADDER = [
     { height: 144, width: 256, bitrateKbps: 150, label: '144p' },
 ];
 
-const AUDIO_GROUP_TIERS = [
-    {
-        minHeight: 720,
-        groupId: 'hd',
-        label: 'HD',
-        bitrateKbps: 256,
-        channels: 2,
-    },
-    {
-        minHeight: 360,
-        groupId: 'mid',
-        label: 'Standard',
-        bitrateKbps: 128,
-        channels: 2,
-    },
-    {
-        minHeight: 0,
-        groupId: 'low',
-        label: 'Bandwidth Saving',
-        bitrateKbps: 64,
-        channels: 2,
-    },
-];
-
-function getAudioTierForHeight(height: number) {
-    for (const tier of AUDIO_GROUP_TIERS) {
-        if (height >= tier.minHeight) return tier;
-    }
-    return AUDIO_GROUP_TIERS[AUDIO_GROUP_TIERS.length - 1];
-}
-
 // Derive a rendition width from a target height that preserves the source's
 // aspect ratio, rounded to an even number (H.264/yuv420p requires even
 // dimensions). For a 16:9 source this reproduces the ABR_LADDER widths exactly;
@@ -124,111 +97,6 @@ function mapTierToGroupId(standardGroupId: string, tierIds: string[]): string {
         tierIds[0] ??
         'tier_0'
     );
-}
-
-function buildSuggestedAudioGroups(
-    audioTracks: AudioTrackInfo[],
-    videoTrackCount: number
-): AudioGroup[] {
-    if (audioTracks.length === 0) return [];
-
-    const langMap = new Map<string, AudioTrackInfo[]>();
-    for (const track of audioTracks) {
-        const lang = track.language || 'und';
-        if (!langMap.has(lang)) langMap.set(lang, []);
-        langMap.get(lang)!.push(track);
-    }
-    for (const tracks of langMap.values()) {
-        tracks.sort((a, b) => (b.bitrateKbps || 0) - (a.bitrateKbps || 0));
-    }
-
-    const languages = Array.from(langMap.keys());
-    const isMultiSource =
-        languages.length > 1 ||
-        (languages.length === 1 &&
-            (langMap.get(languages[0])?.length ?? 0) > 1);
-    const hasMultiAudioPerLang = Array.from(langMap.values()).some(
-        (tracks) => tracks.length > 1
-    );
-    const isAlreadyABR = videoTrackCount > 1 && hasMultiAudioPerLang;
-
-    const maxSourceBitrate = Math.max(
-        ...audioTracks.map((t) => t.bitrateKbps || 0)
-    );
-    const maxSourceChannels = Math.max(
-        ...audioTracks.map((t) => t.channels || 2)
-    );
-    const isMono = maxSourceChannels === 1;
-
-    const applicableTiers = (
-        maxSourceBitrate > 0
-            ? AUDIO_GROUP_TIERS.filter((t) => {
-                  const effective = isMono
-                      ? Math.round(t.bitrateKbps / 2)
-                      : t.bitrateKbps;
-                  return effective <= maxSourceBitrate + 32;
-              })
-            : [...AUDIO_GROUP_TIERS]
-    ).map((t, i) => ({
-        ...t,
-        bitrateKbps: isMono ? Math.round(t.bitrateKbps / 2) : t.bitrateKbps,
-        channels: i === 0 ? maxSourceChannels : Math.min(2, maxSourceChannels),
-    }));
-    if (applicableTiers.length === 0) {
-        const fallback = AUDIO_GROUP_TIERS[AUDIO_GROUP_TIERS.length - 1];
-        applicableTiers.push({
-            ...fallback,
-            bitrateKbps: isMono
-                ? Math.round(fallback.bitrateKbps / 2)
-                : fallback.bitrateKbps,
-            channels: Math.min(2, maxSourceChannels),
-        });
-    }
-
-    const groups: AudioGroup[] = [];
-
-    if (isMultiSource) {
-        for (let i = 0; i < applicableTiers.length; i++) {
-            const tier = applicableTiers[i];
-            for (const lang of languages) {
-                const tracks = langMap.get(lang)!;
-                const track = tracks[Math.min(i, tracks.length - 1)];
-                groups.push({
-                    id: tier.groupId,
-                    label:
-                        languages.length > 1
-                            ? (track.name ??
-                              `${lang.toUpperCase()} ${tier.label}`)
-                            : (track.name ?? tier.label),
-                    audioBitrateKbps: isAlreadyABR
-                        ? track.bitrateKbps || tier.bitrateKbps
-                        : tier.bitrateKbps,
-                    channels: isAlreadyABR ? track.channels : tier.channels,
-                    audioCodec: 'aac',
-                    sourceTrackIndex: track.index,
-                    language: lang === 'und' ? undefined : lang,
-                    copyStream: isAlreadyABR ? true : undefined,
-                    vbr: !isAlreadyABR,
-                });
-            }
-        }
-    } else {
-        const sourceAudio = audioTracks[0];
-        for (const tier of applicableTiers) {
-            groups.push({
-                id: tier.groupId,
-                label: tier.label,
-                audioBitrateKbps: tier.bitrateKbps,
-                channels: tier.channels,
-                audioCodec: 'aac',
-                sourceTrackIndex: sourceAudio.index,
-                language: sourceAudio.language,
-                vbr: true,
-            });
-        }
-    }
-
-    return groups;
 }
 
 function reanalyzeVideo() {
