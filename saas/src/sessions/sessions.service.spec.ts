@@ -374,6 +374,82 @@ describe('SessionsService', () => {
                 service.getSession('user:1', 'sess-1'),
             ).rejects.toThrow('connection lost');
         });
+
+        /**
+         * `publicUrl` is how a browser reaches the output, not a record of where
+         * it was written. Served from the creation-time snapshot, correcting a
+         * storage config left every existing session unplayable with no remedy
+         * short of encoding again.
+         */
+        describe('publicUrl', () => {
+            const storedSession = () => ({
+                _id: 'session:sess-1',
+                userId: 'user:1',
+                sessionId: 'sess-1',
+                status: 'completed',
+                s3ConfigId: 'cfg-1',
+                s3Config: {
+                    endPoint: 'https://acct.r2.cloudflarestorage.com',
+                    bucket: 'medias',
+                    pathPrefix: 'test/',
+                    publicUrl: undefined as string | undefined,
+                },
+            });
+
+            it('takes the current value from the storage config', async () => {
+                mockDatabaseService.get.mockReset().mockResolvedValue(storedSession());
+                mockS3ConfigsService.getById.mockResolvedValue({
+                    publicUrl: 'https://pub-new.r2.dev',
+                });
+
+                const result = await service.getSession('user:1', 'sess-1');
+
+                expect(result.s3Config?.publicUrl).toBe('https://pub-new.r2.dev');
+            });
+
+            it('leaves the location fields as they were written', async () => {
+                // Refreshing these would point the session at objects that were
+                // never there — only the delivery URL may follow the config.
+                mockDatabaseService.get.mockReset().mockResolvedValue(storedSession());
+                mockS3ConfigsService.getById.mockResolvedValue({
+                    endPoint: 'https://moved.r2.cloudflarestorage.com',
+                    bucket: 'somewhere-else',
+                    pathPrefix: 'moved/',
+                    publicUrl: 'https://pub-new.r2.dev',
+                });
+
+                const result = await service.getSession('user:1', 'sess-1');
+
+                expect(result.s3Config?.endPoint).toBe(
+                    'https://acct.r2.cloudflarestorage.com',
+                );
+                expect(result.s3Config?.bucket).toBe('medias');
+                expect(result.s3Config?.pathPrefix).toBe('test/');
+            });
+
+            it('keeps the snapshot when the config is gone', async () => {
+                const doc = storedSession();
+                doc.s3Config.publicUrl = 'https://pub-old.r2.dev';
+                mockDatabaseService.get.mockReset().mockResolvedValue(doc);
+                mockS3ConfigsService.getById.mockRejectedValue(
+                    new NotFoundException('S3 config not found'),
+                );
+
+                const result = await service.getSession('user:1', 'sess-1');
+
+                expect(result.s3Config?.publicUrl).toBe('https://pub-old.r2.dev');
+            });
+
+            it('does not look up a config the session was not created with', async () => {
+                const doc = storedSession();
+                delete (doc as { s3ConfigId?: string }).s3ConfigId;
+                mockDatabaseService.get.mockReset().mockResolvedValue(doc);
+
+                await service.getSession('user:1', 'sess-1');
+
+                expect(mockS3ConfigsService.getById).not.toHaveBeenCalled();
+            });
+        });
     });
 
     describe('listAllSessions', () => {
