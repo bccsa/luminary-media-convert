@@ -3029,6 +3029,57 @@ describe('FfmpegService', () => {
             expect(args).toContain('-bufsize:v:0');
         });
 
+        it('reserves NVDEC surfaces before the input, scaled to the ladder', async () => {
+            // A six-rendition ladder drained the decoder pool: "No decoder
+            // surfaces left" → "Invalid data found when processing input" →
+            // either a dead encode or valid H.264 full of undecoded frames (#93).
+            // Reproduced on the box: fails without this, clean with it.
+            (service as any).accelMode = 'nvidia';
+
+            const args = await buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig: {
+                    type: 'video',
+                    segmentDuration: 6,
+                    videoRenditions: [
+                        { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, audioGroupId: 'hd', vbr: true },
+                        { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', vbr: true },
+                        { width: 640, height: 360, videoBitrateKbps: 600, copyStream: false, audioGroupId: 'hd', vbr: true },
+                    ],
+                    audioGroups: [
+                        { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    ],
+                } as EncodeConfigDto,
+            });
+
+            const idx = args.indexOf('-extra_hw_frames');
+            expect(idx).toBeGreaterThan(-1);
+            // 8 + 2 per rendition.
+            expect(args[idx + 1]).toBe('14');
+            // A decoder option: after -i it configures nothing.
+            expect(idx).toBeLessThan(args.indexOf('-i'));
+        });
+
+        it('caps the reservation so a long ladder cannot exhaust VRAM', async () => {
+            (service as any).accelMode = 'nvidia';
+            const many = Array.from({ length: 20 }, (_, i) => ({
+                width: 640, height: 360 + i, videoBitrateKbps: 600,
+                copyStream: false, audioGroupId: 'hd', vbr: true,
+            }));
+
+            const args = await buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig: {
+                    type: 'video', segmentDuration: 6, videoRenditions: many,
+                    audioGroups: [{ id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 }],
+                } as EncodeConfigDto,
+            });
+
+            expect(args[args.indexOf('-extra_hw_frames') + 1]).toBe('32');
+        });
+
         it('asks NVENC for high profile, matching the other encoders', async () => {
             // Unset, NVENC emits Main — no CABAC, no 8x8 transforms — while the
             // VideoToolbox branch has always requested high. Roughly 10% of

@@ -306,6 +306,17 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return 'slow';
     }
 
+    /**
+     * Spare NVDEC surfaces for a ladder of this size.
+     *
+     * Two per branch plus headroom, capped: each surface is a full frame buffer
+     * and the card this runs on has 2GB, so asking without limit trades one
+     * failure for an allocation failure.
+     */
+    private extraHwFramesFor(renditionCount: number): number {
+        return Math.min(8 + renditionCount * 2, 32);
+    }
+
     private getNvencPreset(height: number): string {
         if (height >= 1080) return 'p4';
         if (height >= 720) return 'p5';
@@ -360,7 +371,22 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const hasReencode = renditions.some(r => !r.copyStream);
 
         if (hasReencode && this.accelMode === 'nvidia') {
-            args.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda');
+            // Every rendition branch holds references to decoded surfaces, so a
+            // ladder drains NVDEC's pool: it then stops handing back frames and
+            // reports "No decoder surfaces left". The decoder does not fail
+            // cleanly — downstream this arrives as "Invalid data found when
+            // processing input", which either kills the encode or, when the pool
+            // recovers between frames, yields structurally valid H.264 built from
+            // frames that were never decoded properly. That is the corruption in
+            // #93. Ask for surfaces to spare, scaled to the ladder.
+            args.push(
+                '-extra_hw_frames',
+                String(this.extraHwFramesFor(renditions.length)),
+                '-hwaccel',
+                'cuda',
+                '-hwaccel_output_format',
+                'cuda',
+            );
         } else if (hasReencode && this.accelMode === 'apple') {
             args.push('-hwaccel', 'videotoolbox', '-hwaccel_output_format', 'videotoolbox_vld');
         }
