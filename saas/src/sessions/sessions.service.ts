@@ -449,6 +449,8 @@ export class SessionsService implements OnModuleInit {
             throw new ForbiddenException('Not authorized to view this session');
         }
 
+        await this.applyLivePublicUrl(userId, doc);
+
         // Augment with active session data if available in memory
         const record = this.sessions.get(sessionId);
         if (record) {
@@ -460,6 +462,35 @@ export class SessionsService implements OnModuleInit {
         }
 
         return doc;
+    }
+
+    /**
+     * Replace the stored `publicUrl` with the storage config's current one.
+     *
+     * The rest of `s3Config` is deliberately historical — `endPoint`, `bucket`
+     * and `pathPrefix` record where the output was actually written, and
+     * refreshing them would point old sessions at objects that were never there.
+     * `publicUrl` is not a location though, it is how a browser reaches one; when
+     * it is corrected, finished sessions have to follow or they stay unplayable
+     * with no way to fix them short of encoding again.
+     *
+     * Falls back to the snapshot if the config has since been deleted or belongs
+     * to someone else — a stale URL beats failing the whole session read.
+     */
+    private async applyLivePublicUrl(
+        userId: string,
+        doc: SessionDocument,
+    ): Promise<void> {
+        if (!doc.s3ConfigId || !doc.s3Config) return;
+        try {
+            const config = await this.s3ConfigsService.getById(
+                userId,
+                doc.s3ConfigId,
+            );
+            doc.s3Config.publicUrl = config.publicUrl;
+        } catch {
+            // Keep the snapshot.
+        }
     }
 
     async updateSessionName(
