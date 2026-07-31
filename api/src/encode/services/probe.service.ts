@@ -168,17 +168,24 @@ export class ProbeService {
         this.logger.log('Stream-level bitrates missing, computing from packet data...');
 
         try {
-            // Sample only the first 10 seconds of packets instead of the
-            // entire file — sufficient for bitrate estimation and avoids
-            // scanning multi-GB files.
+            // Scanning a multi-GB file to price it is not worth the wait, so
+            // this samples. But sampling only the opening prices the programme
+            // by its introduction: a broadcast that starts quietly reported
+            // four of five audio tracks at 2 kbps, and every suggestion built
+            // on those numbers inherited the mistake. Sample at several points
+            // instead and keep the loudest, which is the one that describes
+            // what the stream actually needs.
             const sampleDuration = Math.min(10, duration);
+            const starts = this.packetSampleStarts(duration, sampleDuration);
             const { stdout: csv } = await execFileAsync('ffprobe', [
                 '-v', 'quiet', '-print_format', 'csv=p=0',
-                '-read_intervals', `%+${sampleDuration}`,
-                '-show_entries', 'packet=stream_index,size', filePath,
+                '-read_intervals', this.readIntervalsArg(starts, sampleDuration),
+                '-show_entries', 'packet=stream_index,size,pts_time', filePath,
             ], { timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
 
-            const bytesPerStream = new Map<number, number>();
+            // Kept per sample so a quiet stretch cannot drag down a loud one.
+            // Each packet carries the timestamp that places it in its sample.
+            const bytesPerSample = new Map<number, number[]>();
             for (const line of csv.split('\n')) {
                 if (!line) continue;
                 const parts = line.split(',');
@@ -186,7 +193,16 @@ export class ProbeService {
                 const streamIndex = parseInt(parts[0], 10);
                 const size = parseInt(parts[1], 10);
                 if (isNaN(streamIndex) || isNaN(size)) continue;
-                bytesPerStream.set(streamIndex, (bytesPerStream.get(streamIndex) ?? 0) + size);
+                if (!bytesPerSample.has(streamIndex)) {
+                    bytesPerSample.set(streamIndex, new Array(starts.length).fill(0));
+                }
+                const sample = this.sampleIndexFor(parseFloat(parts[2]), starts);
+                bytesPerSample.get(streamIndex)![sample] += size;
+            }
+
+            const bytesPerStream = new Map<number, number>();
+            for (const [streamIndex, samples] of bytesPerSample) {
+                bytesPerStream.set(streamIndex, Math.max(...samples));
             }
 
             const avStreamToType = new Map<number, { type: 'video' | 'audio'; localIndex: number }>();
@@ -218,12 +234,54 @@ export class ProbeService {
                 }
             }
 
-            this.logger.log(`Packet-based bitrate computation complete (sample: ${sampleDuration.toFixed(1)}s)`);
+            this.logger.log(
+                `Packet-based bitrate computation complete ` +
+                    `(${starts.length} sample(s) of ${sampleDuration.toFixed(1)}s)`
+            );
         } catch (err) {
             this.logger.warn(
                 `Packet-based bitrate computation failed: ${(err as Error).message}`,
             );
         }
+    }
+
+    /**
+     * Offsets to sample from, in seconds — spread through the file so a quiet
+     * opening cannot speak for the whole of it. A file barely longer than one
+     * sample has nowhere else to look and keeps the original head-only read.
+     */
+    private packetSampleStarts(duration: number, sampleDuration: number): number[] {
+        if (duration <= sampleDuration * 2) return [0];
+        const latestStart = duration - sampleDuration;
+        const starts = [0.1, 0.5, 0.9].map(
+            (fraction) =>
+                Math.round(Math.max(0, Math.min(latestStart, duration * fraction)) * 1000) / 1000,
+        );
+        // Clamping to the last usable start can collide on shorter files.
+        // Overlapping samples are harmless; duplicate reads are just waste.
+        return [...new Set(starts)];
+    }
+
+    /** ffprobe `-read_intervals`: `START%+DURATION`, comma separated. */
+    private readIntervalsArg(starts: number[], sampleDuration: number): string {
+        // A lone sample from the top keeps the original spelling, so short
+        // files issue exactly the request they always did.
+        if (starts.length === 1 && starts[0] === 0) return `%+${sampleDuration}`;
+        return starts.map((s) => `${s}%+${sampleDuration}`).join(',');
+    }
+
+    /**
+     * Which sample a packet belongs to: the last one starting at or before its
+     * timestamp. Packets without a usable timestamp fall to the first sample
+     * rather than being discarded.
+     */
+    private sampleIndexFor(pts: number, starts: number[]): number {
+        if (!Number.isFinite(pts)) return 0;
+        let index = 0;
+        for (let i = 0; i < starts.length; i++) {
+            if (pts >= starts[i]) index = i;
+        }
+        return index;
     }
 
     private parseDurationTag(duration: string): number {
