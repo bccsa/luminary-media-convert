@@ -14,6 +14,7 @@ import {
     buildSuggestedAudioGroups,
     getAudioTierForHeight,
 } from './audioGroups';
+import { applySavedTrackLabels } from './trackLabels';
 
 const props = withDefaults(
     defineProps<{
@@ -183,31 +184,13 @@ reanalyze();
         computeLayoutKey(props.probeResult, encodingType.value)
     );
     if (savedConfig) {
-        if (savedConfig.videoTrackNames) {
-            const nameMap = new Map(
-                savedConfig.videoTrackNames.map((t) => [t.index, t.name])
-            );
-            for (const t of editableVideoTracks) {
-                const saved = nameMap.get(t.index);
-                if (saved != null) t.name = saved;
-            }
-        }
-        if (savedConfig.audioTrackMetadata) {
-            const audioMetaMap = new Map(
-                savedConfig.audioTrackMetadata.map((m) => [
-                    m.index,
-                    { name: m.name, language: m.language },
-                ])
-            );
-            for (const t of editableAudioTracks) {
-                const saved = audioMetaMap.get(t.index);
-                if (saved) {
-                    if (saved.name !== undefined) t.name = saved.name;
-                    if (saved.language !== undefined)
-                        t.language = saved.language;
-                }
-            }
-        }
+        // Fill blanks only — never overwrite what the source itself provided.
+        applySavedTrackLabels(
+            savedConfig,
+            editableVideoTracks,
+            editableAudioTracks,
+            false
+        );
         reanalyze();
     }
 }
@@ -240,31 +223,13 @@ function loadPreviousTrackLabels() {
     const config = getStoredConfig(layoutKey.value);
     if (!config) return;
 
-    if (config.videoTrackNames) {
-        const nameMap = new Map(
-            config.videoTrackNames.map((t) => [t.index, t.name])
-        );
-        for (const t of editableVideoTracks) {
-            const saved = nameMap.get(t.index);
-            if (saved != null) t.name = saved;
-        }
-    }
-
-    if (config.audioTrackMetadata) {
-        const audioMetaMap = new Map(
-            config.audioTrackMetadata.map((m) => [
-                m.index,
-                { name: m.name, language: m.language },
-            ])
-        );
-        for (const t of editableAudioTracks) {
-            const saved = audioMetaMap.get(t.index);
-            if (saved) {
-                if (saved.name !== undefined) t.name = saved.name;
-                if (saved.language !== undefined) t.language = saved.language;
-            }
-        }
-    }
+    // Asked for explicitly, so the saved set replaces what is on screen.
+    applySavedTrackLabels(
+        config,
+        editableVideoTracks,
+        editableAudioTracks,
+        true
+    );
 }
 
 function addVideoRendition() {
