@@ -50,6 +50,7 @@ import {
 } from '../api';
 import { useSessionPoller } from '../composables/useSessionPoller';
 import { useStoryboard } from '../composables/useStoryboard';
+import { useTrimmedStoryboard } from '../composables/useTrimmedStoryboard';
 import { useActiveUploads } from '../composables/useActiveUploads';
 import { useAppLayout } from '../composables/useAppLayout';
 import { useEncodeEta } from '../composables/useEncodeEta';
@@ -945,11 +946,33 @@ const storyboard = useStoryboard({
     active: sourceStoryboardActive,
 });
 
-const thumbnailVttUrl = computed(() => {
+const rawThumbnailVttUrl = computed(() => {
     if (sourceStoryboardActive.value) return storyboard.versionedUrl.value;
     if (!displayThumbnailsVtt.value || !s3PublicBaseUrl.value) return null;
     return `${s3PublicBaseUrl.value}/${displayThumbnailsVtt.value}`;
 });
+
+/**
+ * Ranges the filmstrip has to be re-timed through, and only where it needs it.
+ *
+ * The encoder's storyboard is sampled from the source, so its cues are in source
+ * time while a trimmed timeline runs on the programme. The storyboard written at
+ * completion is sampled from the encoded output instead, so it already matches
+ * and must be left alone — re-timing it would shift frames that are correct.
+ */
+const storyboardTrimRanges = computed<TrimSegment[]>(() => {
+    if (!sourceStoryboardActive.value) return [];
+    if (timelineIsShortened.value) return timelineRanges.value;
+    if (showsOutputTimeline.value) return submittedTrimSegments.value;
+    return [];
+});
+
+const trimmedStoryboard = useTrimmedStoryboard({
+    url: rawThumbnailVttUrl,
+    ranges: storyboardTrimRanges,
+});
+
+const thumbnailVttUrl = computed(() => trimmedStoryboard.url.value);
 
 /** Frames are still being made — the timeline is incomplete rather than broken. */
 const storyboardPending = computed(

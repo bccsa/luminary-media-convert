@@ -226,6 +226,85 @@ describe('SessionView', () => {
         });
     });
 
+    /**
+     * The encoder samples its storyboard from the source, so cues are in source
+     * time; a trimmed timeline runs on the programme. Left unmapped, frames sit
+     * under the wrong part of the ruler and cut material stays on the strip,
+     * which reads as the encode ignoring the trim — it was queried twice on
+     * exactly that basis.
+     */
+    describe('storyboard on a trimmed timeline', () => {
+        const TRIMS = [{ inSec: 10, outSec: 20 }];
+
+        function createObjectUrlSpy() {
+            const spy = vi.fn(() => 'blob:retimed');
+            // jsdom implements neither of these.
+            vi.stubGlobal('URL', {
+                ...URL,
+                createObjectURL: spy,
+                revokeObjectURL: vi.fn(),
+            });
+            return spy;
+        }
+
+        afterEach(() => {
+            vi.unstubAllGlobals();
+        });
+
+        it('re-times the encoder storyboard while trims are applied', async () => {
+            const spy = createObjectUrlSpy();
+            detail.mockResolvedValue(uploadedSession({ status: 'encoding' }));
+            status.mockResolvedValue({
+                status: 'encoding',
+                trimSegments: TRIMS,
+            });
+
+            await mountView();
+            await flushPromises();
+
+            expect(spy).toHaveBeenCalled();
+        });
+
+        it('passes the storyboard through when nothing is trimmed', async () => {
+            // No ranges means the timeline is already in source time — nothing
+            // to correct, and no reason to spend a fetch and a blob on it.
+            const spy = createObjectUrlSpy();
+            detail.mockResolvedValue(uploadedSession({ status: 'encoding' }));
+            status.mockResolvedValue({ status: 'encoding' });
+
+            await mountView();
+            await flushPromises();
+
+            expect(spy).not.toHaveBeenCalled();
+        });
+
+        it('leaves the completed storyboard alone', async () => {
+            // That one is sampled from the encoded output, so it already matches
+            // the trimmed timeline; re-timing would shift correct frames.
+            const spy = createObjectUrlSpy();
+            detail.mockResolvedValue(
+                uploadedSession({
+                    status: 'completed',
+                    thumbnailsVtt: 'out/thumbnails/thumbnails.vtt',
+                    s3Config: {
+                        endPoint: 'https://acct.r2.cloudflarestorage.com',
+                        bucket: 'medias',
+                        publicUrl: 'https://pub-abc.r2.dev',
+                    },
+                })
+            );
+            status.mockResolvedValue({
+                status: 'completed',
+                trimSegments: TRIMS,
+            });
+
+            await mountView();
+            await flushPromises();
+
+            expect(spy).not.toHaveBeenCalled();
+        });
+    });
+
     it('reads the storyboard from the encoder before an encode exists', async () => {
         // After encoding it comes from S3; before, only the API has the source to
         // sample, and the token has to ride on the URL.
