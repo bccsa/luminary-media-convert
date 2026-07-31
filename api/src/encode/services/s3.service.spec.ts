@@ -229,6 +229,53 @@ describe('S3Service', () => {
             expect(result.masterPlaylistKey).toBe('prefix/master.m3u8');
         });
 
+        /**
+         * A key may begin with '/', but it is an empty first path segment rather
+         * than a root: clients drop it when signing, public URLs render it as
+         * '//', and the two spellings then disagree about naming one object. A
+         * prefix typed as '/videos' put every key in that state, and renaming the
+         * prefix to escape it failed as a copy onto itself.
+         */
+        it('should strip a leading slash from pathPrefix', async () => {
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U');
+            mkdirSync(join(tmpDir, 'stream_0'), { recursive: true });
+            writeFileSync(join(tmpDir, 'stream_0', 'playlist.m3u8'), '#EXTM3U');
+
+            const result = await service.uploadDirectory(
+                makeS3Config({ pathPrefix: '/videos' }),
+                tmpDir,
+                'master.m3u8',
+            );
+
+            expect(result.masterPlaylistKey).toBe('videos/master.m3u8');
+            expect(result.keys).toContain('videos/stream_0/playlist.m3u8');
+            expect(result.keys.every((k) => !k.startsWith('/'))).toBe(true);
+        });
+
+        it('should collapse doubled separators in pathPrefix', async () => {
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U');
+
+            const result = await service.uploadDirectory(
+                makeS3Config({ pathPrefix: '//videos//project-1//' }),
+                tmpDir,
+                'master.m3u8',
+            );
+
+            expect(result.masterPlaylistKey).toBe('videos/project-1/master.m3u8');
+        });
+
+        it('should treat a prefix of only slashes as no prefix', async () => {
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U');
+
+            const result = await service.uploadDirectory(
+                makeS3Config({ pathPrefix: '/' }),
+                tmpDir,
+                'master.m3u8',
+            );
+
+            expect(result.masterPlaylistKey).toBe('master.m3u8');
+        });
+
         it('should report progress via onProgress callback', async () => {
             writeFileSync(join(tmpDir, 'a.m3u8'), 'a');
             writeFileSync(join(tmpDir, 'b.mp4'), 'b');

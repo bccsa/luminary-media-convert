@@ -76,11 +76,18 @@ export class SessionsService implements OnModuleInit {
         const saasUrl = process.env.SAAS_SERVICE_URL || `http://localhost:${process.env.PORT || 3001}`;
         const webhookSecret = process.env.WEBHOOK_SECRET || '';
 
+        // Canonical from the outset: the prefix recorded here is what the rename
+        // and move paths later match keys against, so if it disagrees with the
+        // keys the encoder actually wrote, those rewrites mis-target. Normalizing
+        // before forwarding keeps the two definitions of "where this went" equal.
+        const pathPrefix =
+            SessionsService.normalizePrefix(dto.s3?.pathPrefix) || undefined;
+
         const { s3ConfigId: _, ...encodingApiDto } = dto as any;
         // Strip publicUrl from S3 config — not relevant to the Encoding API
         if (encodingApiDto.s3) {
             const { publicUrl: __, ...s3Rest } = encodingApiDto.s3;
-            encodingApiDto.s3 = s3Rest;
+            encodingApiDto.s3 = { ...s3Rest, pathPrefix };
         }
         const payload: Record<string, unknown> = {
             ...encodingApiDto,
@@ -115,7 +122,7 @@ export class SessionsService implements OnModuleInit {
         const s3Config: SessionDocument['s3Config'] = {
             endPoint: dto.s3.endPoint,
             bucket: dto.s3.bucket,
-            pathPrefix: dto.s3.pathPrefix,
+            pathPrefix,
             port: dto.s3.port,
             useSSL: dto.s3.useSSL,
             publicUrl: dto.s3.publicUrl,
