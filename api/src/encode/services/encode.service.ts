@@ -85,10 +85,13 @@ export class EncodeService {
                 encryptionIV = this.encryptionService.generateIV();
             }
 
-            // Set up S3 path prefix
-            const s3PathPrefix = session.config.s3.pathPrefix
-                ? session.config.s3.pathPrefix.replace(/\/+$/, '')
-                : '';
+            // Set up S3 path prefix. This is the prefix every uploaded key is
+            // built from — segments, playlists and sidecars all route through
+            // the segment pipeline — so it has to be canonical here or keys
+            // inherit whatever the caller typed, a leading '/' included.
+            const s3PathPrefix = S3Service.canonicalPrefix(
+                session.config.s3.pathPrefix
+            );
 
             // Current pipeline progress state (updated by both FFmpeg and pipeline callbacks)
             // Initialize all bars so the UI shows them from the start

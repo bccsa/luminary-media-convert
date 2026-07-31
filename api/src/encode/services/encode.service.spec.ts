@@ -183,6 +183,52 @@ describe('EncodeService', () => {
         expect(sessionService.get(session.id)?.status).toBe('completed');
     });
 
+    /**
+     * Every uploaded key — segments, playlists and sidecars — is built from the
+     * prefix handed to the pipeline, so this is the only place normalizing it
+     * has any effect. `S3Service.uploadDirectory` normalizes too, but nothing
+     * calls it, which is how a prefix typed with a leading slash still reached
+     * storage after that was fixed.
+     */
+    describe('s3 path prefix given to the pipeline', () => {
+        const prefixPassedToPipeline = () =>
+            (segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>)
+                .mock.calls[0][0].s3PathPrefix;
+
+        async function runWithPrefix(pathPrefix: string) {
+            const config = makeConfig();
+            config.s3.pathPrefix = pathPrefix;
+            const session = sessionService.create(config);
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+            await service.processSession(session.id);
+        }
+
+        it('drops a leading slash so keys do not begin with one', async () => {
+            await runWithPrefix('/videos');
+
+            expect(prefixPassedToPipeline()).toBe('videos');
+        });
+
+        it('collapses doubled separators', async () => {
+            await runWithPrefix('//videos//project-1//');
+
+            expect(prefixPassedToPipeline()).toBe('videos/project-1');
+        });
+
+        it('treats a prefix of only slashes as none', async () => {
+            await runWithPrefix('/');
+
+            expect(prefixPassedToPipeline()).toBe('');
+        });
+
+        it('leaves an already-canonical prefix alone', async () => {
+            await runWithPrefix('videos/project-1');
+
+            expect(prefixPassedToPipeline()).toBe('videos/project-1');
+        });
+    });
+
     it('should run full pipeline: encode -> s3 -> completed', async () => {
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
