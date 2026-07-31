@@ -85,34 +85,6 @@ describe('S3Service', () => {
         });
     });
 
-    describe('walkDir (private)', () => {
-        let tmpDir: string;
-
-        beforeEach(() => {
-            tmpDir = mkdtempSync(join(tmpdir(), 's3-walk-'));
-        });
-
-        afterEach(() => {
-            rmSync(tmpDir, { recursive: true, force: true });
-        });
-
-        it('should return all files recursively', async () => {
-            mkdirSync(join(tmpDir, 'sub'), { recursive: true });
-            writeFileSync(join(tmpDir, 'a.txt'), 'a');
-            writeFileSync(join(tmpDir, 'sub', 'b.txt'), 'b');
-
-            const files = await (service as any).walkDir(tmpDir);
-            expect(files).toHaveLength(2);
-            expect(files).toContain(join(tmpDir, 'a.txt'));
-            expect(files).toContain(join(tmpDir, 'sub', 'b.txt'));
-        });
-
-        it('should return empty array for empty directory', async () => {
-            const files = await (service as any).walkDir(tmpDir);
-            expect(files).toEqual([]);
-        });
-    });
-
     describe('createClient (private)', () => {
         it('should create a MinIO client with given config', () => {
             (service as any).createClient(makeS3Config({
@@ -148,188 +120,42 @@ describe('S3Service', () => {
         });
     });
 
-    describe('uploadDirectory', () => {
-        let tmpDir: string;
-
-        beforeEach(() => {
-            tmpDir = mkdtempSync(join(tmpdir(), 's3-upload-'));
+    /**
+     * These cases previously ran through `uploadDirectory`, which turned out to
+     * have no callers — so they were asserting a fix that never reached storage.
+     * Kept as direct tests of the helper, which the live upload path in
+     * `encode.service` uses to build every key.
+     */
+    describe('canonicalPrefix', () => {
+        it('drops a leading slash', () => {
+            // A key may begin with '/', but it is an empty first path segment
+            // rather than a root: clients drop it when signing, public URLs
+            // render it as '//', and the two spellings then disagree about
+            // naming one object.
+            expect(S3Service.canonicalPrefix('/videos')).toBe('videos');
         });
 
-        afterEach(() => {
-            rmSync(tmpDir, { recursive: true, force: true });
+        it('drops a trailing slash', () => {
+            expect(S3Service.canonicalPrefix('videos/')).toBe('videos');
         });
 
-        it('should upload all files and return keys + master playlist key', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U');
-            mkdirSync(join(tmpDir, 'stream_0'), { recursive: true });
-            writeFileSync(join(tmpDir, 'stream_0', 'playlist.m3u8'), '#EXTM3U');
-            writeFileSync(join(tmpDir, 'stream_0', 'init.mp4'), 'init');
-            writeFileSync(join(tmpDir, 'stream_0', 'segment_000.m4s'), 'seg');
-
-            const result = await service.uploadDirectory(
-                makeS3Config(),
-                tmpDir,
-                'master.m3u8',
+        it('collapses doubled separators', () => {
+            expect(S3Service.canonicalPrefix('//videos//project-1//')).toBe(
+                'videos/project-1',
             );
-
-            expect(result.keys).toHaveLength(4);
-            expect(result.keys).toContain('master.m3u8');
-            expect(result.keys).toContain('stream_0/playlist.m3u8');
-            expect(result.keys).toContain('stream_0/init.mp4');
-            expect(result.keys).toContain('stream_0/segment_000.m4s');
-            expect(result.masterPlaylistKey).toBe('master.m3u8');
-
-            expect(mockFPutObject).toHaveBeenCalledTimes(4);
         });
 
-        it('should use correct content types for uploaded files', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U');
-            mkdirSync(join(tmpDir, 'stream_0'), { recursive: true });
-            writeFileSync(join(tmpDir, 'stream_0', 'init.mp4'), 'init');
-            writeFileSync(join(tmpDir, 'stream_0', 'segment_000.m4s'), 'seg');
-
-            await service.uploadDirectory(makeS3Config(), tmpDir, 'master.m3u8');
-
-            const calls = mockFPutObject.mock.calls;
-            const m3u8Call = calls.find((c: any[]) => c[1] === 'master.m3u8');
-            expect(m3u8Call?.[3]).toEqual({ 'Content-Type': 'application/vnd.apple.mpegurl' });
-
-            const mp4Call = calls.find((c: any[]) => c[1] === 'stream_0/init.mp4');
-            expect(mp4Call?.[3]).toEqual({ 'Content-Type': 'video/mp4' });
-
-            const m4sCall = calls.find((c: any[]) => c[1] === 'stream_0/segment_000.m4s');
-            expect(m4sCall?.[3]).toEqual({ 'Content-Type': 'video/iso.segment' });
+        it('treats a prefix of only slashes as none', () => {
+            expect(S3Service.canonicalPrefix('/')).toBe('');
         });
 
-        it('should apply pathPrefix to object keys', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U');
-            mkdirSync(join(tmpDir, 'stream_0'), { recursive: true });
-            writeFileSync(join(tmpDir, 'stream_0', 'playlist.m3u8'), '#EXTM3U');
-
-            const result = await service.uploadDirectory(
-                makeS3Config({ pathPrefix: 'videos/project-1' }),
-                tmpDir,
-                'master.m3u8',
-            );
-
-            expect(result.masterPlaylistKey).toBe('videos/project-1/master.m3u8');
-            expect(result.keys).toContain('videos/project-1/master.m3u8');
-            expect(result.keys).toContain('videos/project-1/stream_0/playlist.m3u8');
+        it('treats a missing prefix as none', () => {
+            expect(S3Service.canonicalPrefix(undefined)).toBe('');
         });
 
-        it('should strip trailing slashes from pathPrefix', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U');
-
-            const result = await service.uploadDirectory(
-                makeS3Config({ pathPrefix: 'prefix/' }),
-                tmpDir,
-                'master.m3u8',
-            );
-
-            expect(result.masterPlaylistKey).toBe('prefix/master.m3u8');
-        });
-
-        /**
-         * A key may begin with '/', but it is an empty first path segment rather
-         * than a root: clients drop it when signing, public URLs render it as
-         * '//', and the two spellings then disagree about naming one object. A
-         * prefix typed as '/videos' put every key in that state, and renaming the
-         * prefix to escape it failed as a copy onto itself.
-         */
-        it('should strip a leading slash from pathPrefix', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U');
-            mkdirSync(join(tmpDir, 'stream_0'), { recursive: true });
-            writeFileSync(join(tmpDir, 'stream_0', 'playlist.m3u8'), '#EXTM3U');
-
-            const result = await service.uploadDirectory(
-                makeS3Config({ pathPrefix: '/videos' }),
-                tmpDir,
-                'master.m3u8',
-            );
-
-            expect(result.masterPlaylistKey).toBe('videos/master.m3u8');
-            expect(result.keys).toContain('videos/stream_0/playlist.m3u8');
-            expect(result.keys.every((k) => !k.startsWith('/'))).toBe(true);
-        });
-
-        it('should collapse doubled separators in pathPrefix', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U');
-
-            const result = await service.uploadDirectory(
-                makeS3Config({ pathPrefix: '//videos//project-1//' }),
-                tmpDir,
-                'master.m3u8',
-            );
-
-            expect(result.masterPlaylistKey).toBe('videos/project-1/master.m3u8');
-        });
-
-        it('should treat a prefix of only slashes as no prefix', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U');
-
-            const result = await service.uploadDirectory(
-                makeS3Config({ pathPrefix: '/' }),
-                tmpDir,
-                'master.m3u8',
-            );
-
-            expect(result.masterPlaylistKey).toBe('master.m3u8');
-        });
-
-        it('should report progress via onProgress callback', async () => {
-            writeFileSync(join(tmpDir, 'a.m3u8'), 'a');
-            writeFileSync(join(tmpDir, 'b.mp4'), 'b');
-            writeFileSync(join(tmpDir, 'c.m4s'), 'c');
-
-            const progressValues: number[] = [];
-            await service.uploadDirectory(
-                makeS3Config(),
-                tmpDir,
-                'a.m3u8',
-                { onProgress: (p) => progressValues.push(p) },
-            );
-
-            expect(progressValues).toHaveLength(3);
-            expect(progressValues[0]).toBe(33);
-            expect(progressValues[1]).toBe(67);
-            expect(progressValues[2]).toBe(100);
-        });
-
-        it('should handle empty output directory', async () => {
-            const result = await service.uploadDirectory(
-                makeS3Config(),
-                tmpDir,
-                'master.m3u8',
-            );
-
-            expect(result.keys).toEqual([]);
-            expect(result.masterPlaylistKey).toBe('');
-            expect(mockFPutObject).not.toHaveBeenCalled();
-        });
-
-        it('should throw when fPutObject fails', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U');
-            mockFPutObject.mockRejectedValue(new Error('Access denied'));
-
-            await expect(
-                service.uploadDirectory(makeS3Config(), tmpDir, 'master.m3u8'),
-            ).rejects.toThrow('S3 upload failed for master.m3u8: Access denied');
-        });
-
-        it('should upload to the correct bucket', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U');
-
-            await service.uploadDirectory(
-                makeS3Config({ bucket: 'my-bucket' }),
-                tmpDir,
-                'master.m3u8',
-            );
-
-            expect(mockFPutObject).toHaveBeenCalledWith(
-                'my-bucket',
-                'master.m3u8',
-                expect.any(String),
-                expect.any(Object),
+        it('leaves an already-canonical prefix alone', () => {
+            expect(S3Service.canonicalPrefix('videos/project-1')).toBe(
+                'videos/project-1',
             );
         });
     });

@@ -103,12 +103,9 @@ describe('EncodeService', () => {
             generateWaveform: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
         } as any;
 
-        s3Service = {
-            uploadDirectory: vi.fn().mockResolvedValue({
-                keys: ['master.m3u8', 'v0/playlist.m3u8', 'v0/segment_000.ts'],
-                masterPlaylistKey: 'master.m3u8',
-            }),
-        } as any;
+        // Uploads run through SegmentPipelineService, mocked below; this stands
+        // in only for the prefix helper the encode path reads off the class.
+        s3Service = {} as any;
 
         webhookService = {
             send: vi.fn().mockResolvedValue(undefined),
@@ -186,9 +183,9 @@ describe('EncodeService', () => {
     /**
      * Every uploaded key — segments, playlists and sidecars — is built from the
      * prefix handed to the pipeline, so this is the only place normalizing it
-     * has any effect. `S3Service.uploadDirectory` normalizes too, but nothing
-     * calls it, which is how a prefix typed with a leading slash still reached
-     * storage after that was fixed.
+     * has any effect. An earlier fix normalized a different upload method that
+     * turned out to have no callers, and a prefix typed with a leading slash
+     * still reached storage; that method has since been removed.
      */
     describe('s3 path prefix given to the pipeline', () => {
         const prefixPassedToPipeline = () =>
