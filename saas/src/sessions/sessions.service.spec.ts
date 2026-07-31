@@ -1528,6 +1528,91 @@ describe('SessionsService', () => {
             expect(result.files).toEqual(['old/master.m3u8', 'old/v0/seg0.m4s']);
         });
 
+        /**
+         * A leading slash is not part of the key as S3 addresses it, so "/old/"
+         * and "old/" name the same objects. Compared as plain strings the no-op
+         * guard missed, the copy went ahead, and the backend rejected it as
+         * copying an object onto itself — reaching the user as a bare 500.
+         */
+        describe('prefixes that name the same objects', () => {
+            function makeSlashedDoc() {
+                return {
+                    ...makeRenameDoc(),
+                    files: ['/old/master.m3u8', '/old/v0/seg0.m4s'],
+                    masterPlaylist: '/old/master.m3u8',
+                    thumbnailsVtt: '/old/thumbs.vtt',
+                    s3Config: {
+                        endPoint: 'minio',
+                        bucket: 'bucket',
+                        pathPrefix: '/old/',
+                    },
+                };
+            }
+
+            it('touches no storage when only the leading slash differs', async () => {
+                mockDatabaseService.get.mockResolvedValue(makeSlashedDoc());
+
+                await service.renameSessionPrefix('user:1', 'sess-rename', {
+                    newPathPrefix: 'old/',
+                });
+
+                expect(mockS3ClientService.copyObjectSameBucket).not.toHaveBeenCalled();
+                expect(mockS3ClientService.deleteObjects).not.toHaveBeenCalled();
+            });
+
+            it('rewrites the recorded keys to the canonical form', async () => {
+                // What the user was asking for: the same objects, addressed
+                // without the empty leading segment that produced `//` in URLs.
+                mockDatabaseService.get.mockResolvedValue(makeSlashedDoc());
+
+                const result = await service.renameSessionPrefix('user:1', 'sess-rename', {
+                    newPathPrefix: 'old/',
+                });
+
+                expect(result.files).toEqual(['old/master.m3u8', 'old/v0/seg0.m4s']);
+                expect(result.masterPlaylist).toBe('old/master.m3u8');
+                expect(result.thumbnailsVtt).toBe('old/thumbs.vtt');
+                expect(result.s3Config?.pathPrefix).toBe('old/');
+            });
+
+            it('still moves objects for a genuine rename off a slashed prefix', async () => {
+                mockDatabaseService.get.mockResolvedValue(makeSlashedDoc());
+
+                await service.renameSessionPrefix('user:1', 'sess-rename', {
+                    newPathPrefix: 'new/',
+                });
+
+                expect(mockS3ClientService.copyObjectSameBucket).toHaveBeenCalledWith(
+                    'user:1', 'cfg-1', '/old/master.m3u8', 'new/master.m3u8',
+                );
+                expect(mockS3ClientService.deleteObjects).toHaveBeenCalledWith(
+                    'user:1', 'cfg-1', ['/old/master.m3u8', '/old/v0/seg0.m4s'],
+                );
+            });
+
+            it('normalizes a slashed target rather than copying onto itself', async () => {
+                mockDatabaseService.get.mockResolvedValue(makeRenameDoc());
+
+                const result = await service.renameSessionPrefix('user:1', 'sess-rename', {
+                    newPathPrefix: '/old',
+                });
+
+                expect(mockS3ClientService.copyObjectSameBucket).not.toHaveBeenCalled();
+                expect(result.s3Config?.pathPrefix).toBe('old/');
+            });
+
+            it('accepts a target given without a trailing slash', async () => {
+                mockDatabaseService.get.mockResolvedValue(makeRenameDoc());
+
+                const result = await service.renameSessionPrefix('user:1', 'sess-rename', {
+                    newPathPrefix: 'new',
+                });
+
+                expect(result.s3Config?.pathPrefix).toBe('new/');
+                expect(result.files).toEqual(['new/master.m3u8', 'new/v0/seg0.m4s']);
+            });
+        });
+
         it('should reject if user does not own session', async () => {
             mockDatabaseService.get.mockResolvedValue(makeRenameDoc());
 

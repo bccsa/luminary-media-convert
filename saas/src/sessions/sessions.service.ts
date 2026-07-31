@@ -788,17 +788,24 @@ export class SessionsService implements OnModuleInit {
         }
 
         const oldPrefix = doc.s3Config?.pathPrefix ?? '';
-        // Ensure non-empty prefix always ends with '/'
-        const rawPrefix = dto.newPathPrefix;
-        const newPrefix = rawPrefix && !rawPrefix.endsWith('/') ? rawPrefix + '/' : rawPrefix;
+        const newPrefix = SessionsService.normalizePrefix(dto.newPathPrefix);
 
-        if (oldPrefix === newPrefix) {
-            return doc;
+        // A leading slash is not part of the key as S3 addresses it, so "/out/"
+        // and "out/" name the same objects. Comparing the two as plain strings
+        // let such a rename through to a copy, which the backend then rejected as
+        // copying an object onto itself — surfacing as a bare 500. Recognise it
+        // here and rewrite the recorded keys to the canonical form instead, which
+        // is what a user spelling the prefix without the slash is asking for.
+        if (SessionsService.normalizePrefix(oldPrefix) === newPrefix) {
+            return this.commitPrefixChange(doc, oldPrefix, newPrefix);
         }
 
         // Copy all files to new prefix (parallel with concurrency limit)
         await this.runParallel(doc.files, (key) => {
             const newKey = this.rewriteKey(key, oldPrefix, newPrefix);
+            if (SessionsService.addressesSameObject(key, newKey)) {
+                return Promise.resolve();
+            }
             return this.s3ClientService.copyObjectSameBucket(
                 userId,
                 doc.s3ConfigId!,
@@ -807,10 +814,46 @@ export class SessionsService implements OnModuleInit {
             );
         });
 
-        // Delete originals
-        await this.s3ClientService.deleteObjects(userId, doc.s3ConfigId, doc.files);
+        // Delete originals — but never one that is also the destination, or the
+        // rename would delete the file it just kept.
+        const supersededKeys = doc.files.filter(
+            (key) =>
+                !SessionsService.addressesSameObject(
+                    key,
+                    this.rewriteKey(key, oldPrefix, newPrefix),
+                ),
+        );
+        if (supersededKeys.length) {
+            await this.s3ClientService.deleteObjects(
+                userId,
+                doc.s3ConfigId,
+                supersededKeys,
+            );
+        }
 
-        // Update session document
+        return this.commitPrefixChange(doc, oldPrefix, newPrefix);
+    }
+
+    /** Trailing slash, no leading slash, no doubled separators. */
+    private static normalizePrefix(prefix: string | undefined): string {
+        const collapsed = (prefix ?? '')
+            .replace(/\/{2,}/g, '/')
+            .replace(/^\/+/, '');
+        if (!collapsed) return '';
+        return collapsed.endsWith('/') ? collapsed : `${collapsed}/`;
+    }
+
+    /** Two keys naming one stored object — they differ only in leading slashes. */
+    private static addressesSameObject(a: string, b: string): boolean {
+        return a.replace(/^\/+/, '') === b.replace(/^\/+/, '');
+    }
+
+    /** Point the session document at the new prefix and persist it. */
+    private async commitPrefixChange(
+        doc: SessionDocument,
+        oldPrefix: string,
+        newPrefix: string,
+    ): Promise<SessionDocument> {
         const rewritten = this.rewriteSessionKeys(doc, oldPrefix, newPrefix);
         doc.files = rewritten.files;
         doc.masterPlaylist = rewritten.masterPlaylist;
@@ -824,7 +867,7 @@ export class SessionsService implements OnModuleInit {
         await this.databaseService.upsert(doc);
 
         this.logger.log(
-            `Renamed prefix for session ${sessionId}: "${oldPrefix}" → "${newPrefix}"`,
+            `Renamed prefix for session ${doc.sessionId}: "${oldPrefix}" → "${newPrefix}"`,
         );
 
         return doc;
