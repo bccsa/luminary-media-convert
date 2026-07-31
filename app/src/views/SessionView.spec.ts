@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { shallowMount, flushPromises } from '@vue/test-utils';
 
 /**
@@ -146,6 +146,84 @@ describe('SessionView', () => {
             .map((c) => String(c[0]))
             .some((u) => u.includes('thumbnails.vtt'));
         expect(asked).toBe(true);
+    });
+
+    /**
+     * A storage config with no usable delivery URL still encodes perfectly — the
+     * objects land in the bucket and only the address handed to the browser
+     * cannot work. Unsaid, that presents as a player spinning forever with the
+     * reason visible only in the console.
+     */
+    describe('undeliverable storage', () => {
+        function completedWith(s3Config: Record<string, unknown>) {
+            detail.mockResolvedValue(
+                uploadedSession({
+                    status: 'completed',
+                    masterPlaylist: 'out/master.m3u8',
+                    s3Config,
+                })
+            );
+            status.mockResolvedValue({ status: 'completed' });
+        }
+
+        const banner = (w: Awaited<ReturnType<typeof mountView>>) =>
+            w.find('[data-testid="delivery-problem"]');
+
+        afterEach(() => {
+            // The protocol stub would otherwise leak into later tests; fetch is
+            // re-stubbed by beforeEach.
+            vi.unstubAllGlobals();
+        });
+
+        it('warns when the storage config has no Public URL', async () => {
+            completedWith({
+                endPoint: 'https://acct.r2.cloudflarestorage.com',
+                bucket: 'medias',
+            });
+
+            const wrapper = await mountView();
+
+            expect(banner(wrapper).exists()).toBe(true);
+            expect(banner(wrapper).text()).toContain('no Public URL');
+        });
+
+        it('names mixed content as the cause when the page is secure', async () => {
+            // jsdom serves the test page over http, where the browser permits an
+            // http subresource — the block only exists on a secure page.
+            vi.stubGlobal('location', {
+                ...window.location,
+                protocol: 'https:',
+            });
+            // Certain to fail: the browser refuses before the request is sent.
+            completedWith({
+                endPoint: 'https://acct.r2.cloudflarestorage.com',
+                bucket: 'medias',
+                publicUrl: 'http://10.0.0.1:9000/medias',
+            });
+
+            const wrapper = await mountView();
+
+            expect(banner(wrapper).text()).toContain('secure page');
+        });
+
+        it('stays quiet when a usable Public URL is set', async () => {
+            completedWith({
+                endPoint: 'https://acct.r2.cloudflarestorage.com',
+                bucket: 'medias',
+                publicUrl: 'https://pub-abc.r2.dev',
+            });
+
+            const wrapper = await mountView();
+
+            expect(banner(wrapper).exists()).toBe(false);
+        });
+
+        it('says nothing before there is any output to deliver', async () => {
+            // Pre-encode playback comes from the encoder, not from storage.
+            const wrapper = await mountView();
+
+            expect(banner(wrapper).exists()).toBe(false);
+        });
     });
 
     it('reads the storyboard from the encoder before an encode exists', async () => {

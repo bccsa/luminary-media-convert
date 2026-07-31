@@ -889,6 +889,31 @@ const playbackUrl = computed(() => {
 });
 
 /**
+ * Why the finished output cannot be delivered to this page, if it cannot.
+ *
+ * Without a Public URL the base falls back to the S3 API endpoint, which is not
+ * a delivery host: R2 answers unsigned browser requests with 400, and a MinIO
+ * endpoint is typically an internal hostname. The encode succeeds, the objects
+ * are written correctly, and playback then spins with the reason visible only
+ * in the console — which cost a full morning to diagnose on staging.
+ *
+ * `blocked` is a certainty (the browser refuses before the request leaves the
+ * page); `unreachable` is a strong likelihood, so it warns without hiding a
+ * player that may yet work against a genuinely public endpoint.
+ */
+const deliveryProblem = computed<'blocked' | 'unreachable' | null>(() => {
+    if (!isCompleted.value) return null;
+    const base = s3PublicBaseUrl.value;
+    if (!base) return null;
+    const pageIsSecure =
+        typeof window !== 'undefined' &&
+        window.location.protocol === 'https:';
+    if (pageIsSecure && base.startsWith('http://')) return 'blocked';
+    if (!session.value?.s3Config?.publicUrl) return 'unreachable';
+    return null;
+});
+
+/**
  * Before the encode there is no storyboard in S3 — the encode is what writes one.
  * The API samples the source instead, so the trim timeline has frames while the
  * user is still choosing what to keep.
@@ -1820,6 +1845,49 @@ onUnmounted(() => {
                                 : '',
                         ]"
                     >
+                        <!--
+                            The encode succeeded and the objects are in the
+                            bucket; only the address the browser was given
+                            cannot work. Say so here, or this presents as a
+                            player that loads forever for no stated reason.
+                        -->
+                        <div
+                            v-if="deliveryProblem"
+                            role="alert"
+                            data-testid="delivery-problem"
+                            class="mb-3 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/60 dark:text-amber-100"
+                        >
+                            <svg
+                                class="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"
+                                />
+                            </svg>
+                            <div>
+                                <p class="font-medium">
+                                    {{
+                                        deliveryProblem === 'blocked'
+                                            ? 'This storage cannot be played from a secure page'
+                                            : 'This storage has no Public URL'
+                                    }}
+                                </p>
+                                <p class="mt-1">
+                                    {{
+                                        deliveryProblem === 'blocked'
+                                            ? 'The output is served over http:// while this page is https://, so the browser blocks it. The encode is fine — the storage needs to be reachable over https://.'
+                                            : 'The encode finished and the files are in the bucket, but without a Public URL the player is pointed at the S3 API endpoint, which does not serve browsers. Set one on the storage config.'
+                                    }}
+                                </p>
+                            </div>
+                        </div>
+
                         <SessionPlayerStrip
                             ref="sessionPlayerStripRef"
                             class="flex-1 min-h-0"
