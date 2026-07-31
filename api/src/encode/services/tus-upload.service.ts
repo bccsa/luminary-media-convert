@@ -189,12 +189,16 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
         this.sweepInterval.unref?.();
 
         this.cleanupInterval = setInterval(() => {
+            // Rescue before expiring: a finished upload waiting on a dead hook is
+            // not abandoned, and deleting it destroys the user's file.
+            void this.sweepStagedFinals().finally(() => {
             this.tusdServer.cleanUpExpiredUploads().then((count) => {
                 if (count > 0) {
                     this.logger.log(`Periodic cleanup: removed ${count} expired upload(s)`);
                 }
             }).catch((err) => {
                 this.logger.warn(`Periodic cleanup failed: ${(err as Error).message}`);
+            });
             });
         }, 30 * 60 * 1000);
 
@@ -211,6 +215,17 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
         if (this.cleanupInterval) {
             clearInterval(this.cleanupInterval);
             this.cleanupInterval = null;
+        }
+
+        try {
+            // Before expiring anything: a deploy restart ran this while a
+            // finished upload sat in staging waiting on a hook that had been
+            // killed, and expiry deleted the file outright.
+            await this.sweepStagedFinals();
+        } catch (err) {
+            this.logger.warn(
+                `Final sweep before shutdown failed: ${(err as Error).message}`,
+            );
         }
 
         try {
@@ -294,7 +309,18 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
             const session = this.sessionService.get(sessionId);
             // No session, or the hook already did the work: nothing to rescue.
             if (!session || session.filePath) continue;
-            if (session.status !== 'uploading' && session.status !== 'created') {
+            // A restart marks anything in flight as failed, which would hide a
+            // perfectly complete upload from this sweep for good. That marker is
+            // ours and specific, so treat it as rescuable; any other failure is
+            // a real one and stays failed.
+            const failedByRestart =
+                session.status === 'failed' &&
+                /encoder restarted/i.test(session.error ?? '');
+            if (
+                session.status !== 'uploading' &&
+                session.status !== 'created' &&
+                !failedByRestart
+            ) {
                 continue;
             }
 

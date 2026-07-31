@@ -247,6 +247,64 @@ describe('TusUploadService', () => {
             expect(mockRename).not.toHaveBeenCalled();
         });
 
+        it('rescues a session a restart marked failed', async () => {
+            // Restore marks anything in flight failed, which hid a finished
+            // upload from the sweep permanently — and the expiry then deleted
+            // the file. Cost a real 7.2GB upload.
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            sessionService.setFailed(
+                session.id,
+                'The encoder restarted while this session was in progress.',
+            );
+            stageFinal(session.id);
+            mockStat.mockResolvedValue({ size: SIZE });
+            const finalize = vi
+                .spyOn(service, 'finalizeUpload')
+                .mockResolvedValue(undefined);
+
+            await (service as any).sweepStagedFinals();
+
+            expect(finalize).toHaveBeenCalledWith(
+                session.id,
+                expect.stringContaining('archive.mkv'),
+            );
+        });
+
+        it('leaves a genuinely failed session alone', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            sessionService.setFailed(session.id, 'ffmpeg exited with code 1');
+            stageFinal(session.id);
+            mockStat.mockResolvedValue({ size: SIZE });
+            const finalize = vi
+                .spyOn(service, 'finalizeUpload')
+                .mockResolvedValue(undefined);
+
+            await (service as any).sweepStagedFinals();
+
+            expect(finalize).not.toHaveBeenCalled();
+        });
+
+        it('sweeps before expiring uploads on shutdown', async () => {
+            // The deploy path: expiry ran first and deleted a finished upload
+            // that was only waiting on a killed hook.
+            const order: string[] = [];
+            vi.spyOn(service as any, 'sweepStagedFinals').mockImplementation(
+                async () => {
+                    order.push('sweep');
+                },
+            );
+            mockCleanUpExpiredUploads.mockImplementation(async () => {
+                order.push('expire');
+                return 0;
+            });
+
+            await service.onModuleDestroy();
+
+            expect(order).toEqual(['sweep', 'expire']);
+        });
+
         it('gives up on an upload it has failed three times', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.updateStatus(session.id, 'uploading');
