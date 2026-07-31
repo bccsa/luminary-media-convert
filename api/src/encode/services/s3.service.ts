@@ -37,6 +37,26 @@ export class S3Service {
     }
 
     /**
+     * The prefix as it should appear in an object key: no leading separator, no
+     * trailing one, no doubled ones.
+     *
+     * S3 permits a key to begin with '/', but it is an empty first path segment
+     * rather than a root, so nothing addresses it consistently: clients drop it
+     * when signing, public URLs render it as '//', and two spellings of one key
+     * then disagree about whether they name the same object. A prefix typed as
+     * '/videos' produced exactly that — every key led with a slash, delivery URLs
+     * carried '//', and renaming the prefix to repair it failed as a copy onto
+     * itself. Take the leading separator off here, where keys are built, so it
+     * cannot enter storage regardless of how the caller spelled it.
+     */
+    static canonicalPrefix(pathPrefix?: string): string {
+        return (pathPrefix ?? '')
+            .replace(/\/{2,}/g, '/')
+            .replace(/^\/+/, '')
+            .replace(/\/+$/, '');
+    }
+
+    /**
      * Recursively collect all file paths under a directory.
      */
     private async walkDir(dir: string): Promise<string[]> {
@@ -74,9 +94,7 @@ export class S3Service {
         let completedCount = 0;
         const concurrency = options?.concurrency ?? this.defaultConcurrency;
 
-        const prefix = config.pathPrefix
-            ? config.pathPrefix.replace(/\/+$/, '')
-            : '';
+        const prefix = S3Service.canonicalPrefix(config.pathPrefix);
 
         let nextIndex = 0;
 

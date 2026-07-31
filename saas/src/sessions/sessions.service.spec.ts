@@ -108,7 +108,9 @@ describe('SessionsService', () => {
             expect(record?.s3Config).toEqual({
                 endPoint: 'minio',
                 bucket: 'b',
-                pathPrefix: 'out',
+                // Recorded canonically — with the trailing separator the rename
+                // and move paths already assume when matching keys.
+                pathPrefix: 'out/',
                 port: undefined,
                 useSSL: undefined,
                 publicUrl: undefined,
@@ -116,6 +118,49 @@ describe('SessionsService', () => {
             // Ensure secrets are NOT stored
             expect((record?.s3Config as any)?.accessKey).toBeUndefined();
             expect((record?.s3Config as any)?.secretKey).toBeUndefined();
+        });
+
+        /**
+         * The recorded prefix is what the rename and move paths match keys
+         * against later, so it has to mean the same thing as the keys the
+         * encoder wrote. A prefix typed with a leading slash produced keys that
+         * led with one, delivery URLs containing '//', and a rename that failed
+         * as a copy onto itself.
+         */
+        it('records and forwards a leading-slash prefix canonically', async () => {
+            await service.createSession('user:1', {
+                s3: {
+                    endPoint: 'minio',
+                    bucket: 'b',
+                    accessKey: 'a',
+                    secretKey: 's',
+                    pathPrefix: '/out',
+                },
+            } as any);
+
+            expect(service.getSessionRecord('sess-123')?.s3Config?.pathPrefix).toBe(
+                'out/',
+            );
+            const body = JSON.parse(
+                vi.mocked(fetch).mock.calls[0][1]!.body as string,
+            );
+            expect(body.s3.pathPrefix).toBe('out/');
+        });
+
+        it('treats a prefix of only slashes as none at all', async () => {
+            await service.createSession('user:1', {
+                s3: {
+                    endPoint: 'minio',
+                    bucket: 'b',
+                    accessKey: 'a',
+                    secretKey: 's',
+                    pathPrefix: '//',
+                },
+            } as any);
+
+            expect(
+                service.getSessionRecord('sess-123')?.s3Config?.pathPrefix,
+            ).toBeUndefined();
         });
 
         it('should throw BadGatewayException when Encoding API fails', async () => {
@@ -728,7 +773,8 @@ describe('SessionsService', () => {
                     s3Config: {
                         endPoint: 'minio',
                         bucket: 'b',
-                        pathPrefix: 'out',
+                        // Canonical, matching the keys the encoder writes.
+                        pathPrefix: 'out/',
                         port: undefined,
                         useSSL: undefined,
                     },
