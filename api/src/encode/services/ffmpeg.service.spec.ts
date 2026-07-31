@@ -3055,13 +3055,16 @@ describe('FfmpegService', () => {
 
             const idx = args.indexOf('-extra_hw_frames');
             expect(idx).toBeGreaterThan(-1);
-            // 8 + 2 per rendition.
-            expect(args[idx + 1]).toBe('14');
+            // Inside the measured window: below it the pool exhausts mid-decode,
+            // above it cuvidCreateDecoder refuses to initialise.
+            expect(args[idx + 1]).toBe('8');
             // A decoder option: after -i it configures nothing.
             expect(idx).toBeLessThan(args.indexOf('-i'));
         });
 
-        it('caps the reservation so a long ladder cannot exhaust VRAM', async () => {
+        it('keeps the same budget however long the ladder is', async () => {
+            // The ceiling is the decoder's, not the ladder's: scaling this per
+            // rendition reached 20 on six rungs and broke every encode.
             (service as any).accelMode = 'nvidia';
             const many = Array.from({ length: 20 }, (_, i) => ({
                 width: 640, height: 360 + i, videoBitrateKbps: 600,
@@ -3077,7 +3080,7 @@ describe('FfmpegService', () => {
                 } as EncodeConfigDto,
             });
 
-            expect(args[args.indexOf('-extra_hw_frames') + 1]).toBe('32');
+            expect(args[args.indexOf('-extra_hw_frames') + 1]).toBe('8');
         });
 
         it('asks NVENC for high profile, matching the other encoders', async () => {

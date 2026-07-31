@@ -307,15 +307,18 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     /**
-     * Spare NVDEC surfaces for a ladder of this size.
+     * Spare NVDEC decode surfaces.
      *
-     * Two per branch plus headroom, capped: each surface is a full frame buffer
-     * and the card this runs on has 2GB, so asking without limit trades one
-     * failure for an allocation failure.
+     * Measured on the GTX 1050 with a six-rendition ladder, identical for direct
+     * and concat inputs: 0-4 extra exhausts the pool mid-decode, 6-12 works, and
+     * 16 or more makes cuvidCreateDecoder refuse to initialise at all
+     * (CUDA_ERROR_INVALID_VALUE) because NVDEC caps total surfaces.
+     *
+     * So this is a fixed budget, not a per-rendition one: the ceiling belongs to
+     * the decoder, not the ladder. Scaling it by rendition count reached 20 on a
+     * six-rung ladder and broke every encode outright.
      */
-    private extraHwFramesFor(renditionCount: number): number {
-        return Math.min(8 + renditionCount * 2, 32);
-    }
+    private static readonly EXTRA_HW_FRAMES = 8;
 
     private getNvencPreset(height: number): string {
         if (height >= 1080) return 'p4';
@@ -381,7 +384,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             // #93. Ask for surfaces to spare, scaled to the ladder.
             args.push(
                 '-extra_hw_frames',
-                String(this.extraHwFramesFor(renditions.length)),
+                String(FfmpegService.EXTRA_HW_FRAMES),
                 '-hwaccel',
                 'cuda',
                 '-hwaccel_output_format',
