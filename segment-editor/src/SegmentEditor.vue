@@ -1917,6 +1917,13 @@ defineExpose({
             v-if="combinedControlsBar"
             class="se-controls-bar"
         >
+            <div class="se-controls-bar__lead">
+                <div v-if="showPlaybackControls" class="se-controls-bar__time">
+                    {{ formatTime(playheadSec) }} / {{ formatTime(duration) }}
+                </div>
+            </div>
+
+            <div class="se-controls-bar__main">
             <div
                 v-if="showPlaybackControls && (onPlayPause || onSeek)"
                 class="se-controls-bar__playback"
@@ -1989,10 +1996,6 @@ defineExpose({
                 >
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>
                 </button>
-            </div>
-
-            <div v-if="showPlaybackControls" class="se-controls-bar__time">
-                {{ formatTime(playheadSec) }} / {{ formatTime(duration) }}
             </div>
 
             <div v-if="showToolbar" class="se-controls-bar__marks">
@@ -2083,13 +2086,14 @@ defineExpose({
                 </div>
             </div>
 
+            </div>
+
             <!-- When the header is suppressed, the keyboard-shortcuts button moves to the
                  far right of the controls bar (so users still have a way to open help). -->
             <button
                 v-if="showHelp && !showHeader"
                 type="button"
                 class="se-btn se-btn--icon se-controls-bar__help"
-                :class="{ 'se-controls-bar__help--alone': !$slots['playback-start'] && !$slots['playback-end'] }"
                 title="Keyboard shortcuts (?)"
                 @click="helpOpen = !helpOpen"
             ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
