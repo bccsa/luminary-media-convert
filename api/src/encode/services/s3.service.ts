@@ -1,5 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as Minio from 'minio';
+import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
+import { Transform } from 'stream';
 import type { S3ConfigDto } from '../dto/s3-config.dto.js';
 
 @Injectable()
@@ -45,16 +48,46 @@ export class S3Service {
             .replace(/\/+$/, '');
     }
 
+    /**
+     * `onBytes` reports bytes as they leave for S3, not on completion.
+     *
+     * Callers watching for a stuck upload need to distinguish slow from stalled,
+     * and per-file completion cannot: byte-range packing produces files of a few
+     * hundred MB, so on a slow link a perfectly healthy transfer reports nothing
+     * for minutes. A 500 MB file at 2 MB/s took over four minutes and was killed
+     * by a five-minute stall detector that had no way to see it moving.
+     */
     async uploadFile(
         client: Minio.Client,
         bucket: string,
         filePath: string,
         objectKey: string,
+        onBytes?: (bytes: number) => void,
     ): Promise<void> {
         const contentType = this.getContentType(filePath);
-        await client.fPutObject(bucket, objectKey, filePath, {
-            'Content-Type': contentType,
+
+        if (!onBytes) {
+            await client.fPutObject(bucket, objectKey, filePath, {
+                'Content-Type': contentType,
+            });
+            this.logger.debug(`Uploaded: ${objectKey}`);
+            return;
+        }
+
+        const { size } = await stat(filePath);
+        const counter = new Transform({
+            transform(chunk, _enc, cb) {
+                onBytes(chunk.length);
+                cb(null, chunk);
+            },
         });
+        await client.putObject(
+            bucket,
+            objectKey,
+            createReadStream(filePath).pipe(counter),
+            size,
+            { 'Content-Type': contentType },
+        );
         this.logger.debug(`Uploaded: ${objectKey}`);
     }
 
