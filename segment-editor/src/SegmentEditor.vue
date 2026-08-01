@@ -143,7 +143,7 @@ const clearNoun = computed(() => {
     switch (props.mode) {
         case 'chapters': return 'chapters';
         case 'subtitles': return 'subtitle cues';
-        default: return 'clips';
+        default: return 'cuts';
     }
 });
 
@@ -1546,10 +1546,6 @@ defineExpose({
                 <button type="button" class="se-btn se-btn--squish" @click="markOut" title="Mark Out at playhead ( O or ] )">
                     <span aria-hidden="true">]</span>
                 </button>
-                <button type="button" class="se-btn" @click="addSegmentAtPlayhead" title="Add a 10-second segment at playhead">
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-                    Add
-                </button>
                 <button
                     type="button"
                     class="se-btn se-btn--squish"
@@ -1570,11 +1566,11 @@ defineExpose({
                     type="button"
                     class="se-btn se-btn--danger"
                     :disabled="!hasSelection"
-                    :title="hasSelection ? 'Delete the selected clip · Delete — undo with ⌘/Ctrl + Z' : 'Select a clip on the timeline to delete it'"
+                    :title="hasSelection ? 'Cut the selected range · Delete — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
                     @click="deleteSelected"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
-                    Delete
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+                    Cut
                 </button>
                 <button
                     v-else-if="segments.length > 0"
@@ -1722,9 +1718,9 @@ defineExpose({
                         class="se-segment-label"
                     >{{ seg.label || `#${segments.indexOf(seg) + 1}` }}</span>
                     <!--
-                        Not in trim: the controls bar carries a delete button that
-                        acts on the selection, and a second way to remove a clip —
-                        one that fires on hover, right where the clip is dragged
+                        Not in trim: the controls bar carries a Cut button that
+                        acts on the selection, and a second way to remove a cut —
+                        one that fires on hover, right where the range is dragged
                         and resized — was too easy to hit by accident.
                     -->
                     <button
@@ -1776,12 +1772,16 @@ defineExpose({
             </div>
 
             <div
-                v-if="zoom > 1"
                 ref="scrollbarRef"
                 class="se-scrollbar"
+                :class="{ 'se-scrollbar--idle': zoom <= 1 }"
                 @mousedown="onScrollbarMouseDown"
             >
-                <div class="se-scrollbar-thumb" :style="scrollbarThumbStyle" />
+                <div
+                    v-if="zoom > 1"
+                    class="se-scrollbar-thumb"
+                    :style="scrollbarThumbStyle"
+                />
             </div>
         </div>
 
@@ -1954,10 +1954,6 @@ defineExpose({
                 <button type="button" class="se-btn se-btn--squish" @click="markOut" title="Mark Out at playhead ( O or ] )">
                     <span aria-hidden="true">]</span>
                 </button>
-                <button type="button" class="se-btn" @click="addSegmentAtPlayhead" title="Add a 10-second segment at playhead">
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-                    Add
-                </button>
                 <button
                     type="button"
                     class="se-btn se-btn--squish"
@@ -1977,11 +1973,11 @@ defineExpose({
                     type="button"
                     class="se-btn se-btn--danger"
                     :disabled="!hasSelection"
-                    :title="hasSelection ? 'Delete the selected clip · Delete — undo with ⌘/Ctrl + Z' : 'Select a clip on the timeline to delete it'"
+                    :title="hasSelection ? 'Cut the selected range · Delete — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
                     @click="deleteSelected"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
-                    Delete
+                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+                    Cut
                 </button>
                 <button
                     v-else-if="segments.length > 0"
@@ -2239,11 +2235,11 @@ defineExpose({
                         <dt>+ / −</dt><dd>Zoom in / out (0 resets)</dd>
                         <dt>Ctrl / ⌘ + wheel</dt><dd>Zoom at cursor</dd>
                         <dt>Double-click + drag</dt>
-                        <dd v-if="mode === 'trim'">Drag out a clip on the timeline</dd>
+                        <dd v-if="mode === 'trim'">Drag out a cut on the timeline</dd>
                         <dd v-else-if="mode === 'chapters'">Drag out a chapter on the timeline</dd>
                         <dd v-else>Drag out a cue on the timeline</dd>
                         <dt>Shift + drag</dt>
-                        <dd v-if="mode === 'trim'">Drag out a clip on the timeline</dd>
+                        <dd v-if="mode === 'trim'">Drag out a cut on the timeline</dd>
                         <dd v-else>Marquee-select segments</dd>
                         <dt>Esc</dt><dd>Clear selection / close</dd>
                         <dt>?</dt><dd>Toggle this help</dd>

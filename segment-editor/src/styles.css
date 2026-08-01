@@ -22,7 +22,7 @@
     --se-segment-label: rgb(30 41 55);
     --se-segment-label-shadow: none;
     --se-ruler-tick: rgba(100, 116, 139, 0.28);
-    --se-waveform: rgba(3, 105, 161, 0.55);
+    --se-waveform: rgba(255, 255, 255, 0.85);
     --se-list-hover: rgba(14, 165, 233, 0.08);
     --se-list-selected: rgba(14, 165, 233, 0.12);
     --se-kbd-bg: rgb(250 250 250);
@@ -71,7 +71,7 @@ html.dark .se-root {
     --se-segment-label: rgba(255, 255, 255, 0.92);
     --se-segment-label-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
     --se-ruler-tick: rgba(148, 163, 184, 0.22);
-    --se-waveform: rgba(226, 232, 240, 0.55);
+    --se-waveform: rgba(255, 255, 255, 0.85);
     --se-list-hover: rgba(56, 189, 248, 0.08);
     --se-list-selected: rgba(56, 189, 248, 0.14);
     --se-kbd-bg: rgb(15 23 42 / 0.45);
@@ -297,10 +297,10 @@ html.dark .se-root {
     box-sizing: content-box;
 }
 
+/* No focus ring on the track. It is a canvas you point at rather than a
+   control you tab to, and the ring reads as a border drawn around the video. */
 .se-timeline-wrap:focus-visible {
-    outline: 2px solid var(--se-accent);
-    outline-offset: 2px;
-    border-radius: var(--se-radius-sm);
+    outline: none;
 }
 
 .se-timeline {
@@ -319,17 +319,29 @@ html.dark .se-root {
     height: 3.25rem;
 }
 
-/* Thumbnail filmstrip: sits behind everything in the track. Desaturated and dimmed
-   so the frames read as texture you can navigate by, leaving the waveform and the
-   segment blocks as the only saturated things in the track. Contrast is pulled back
-   as well, since burned-in text and hard cuts otherwise fight the waveform. */
+/* Thumbnail filmstrip: sits behind everything in the track, shown as the frames
+   actually look. Legibility for the waveform comes from the gradient below rather
+   than from dimming the picture, which washed the frames out to a flat grey. */
 .se-thumb-strip {
     position: absolute;
     inset: 0;
     overflow: hidden;
     pointer-events: none;
-    opacity: var(--se-thumb-strip-opacity, 0.25);
-    filter: grayscale(1) contrast(0.8);
+}
+
+/* Black fade along the bottom, where the waveform sits. Gives the peaks something
+   to read against without touching the frames above them. */
+.se-thumb-strip::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        to bottom,
+        transparent 40%,
+        rgba(0, 0, 0, 0.45) 70%,
+        rgba(0, 0, 0, 0.8) 100%
+    );
+    pointer-events: none;
 }
 
 .se-thumb-tile {
@@ -507,6 +519,12 @@ html.dark .se-root {
     text-shadow: var(--se-pending-bracket-shadow);
 }
 
+/* Always laid out, even at zoom 1. Rendering it only when zoomed made the whole
+   timeline jump the moment you zoomed, because the row appeared underneath it. */
+.se-scrollbar--idle {
+    visibility: hidden;
+}
+
 .se-scrollbar {
     position: relative;
     height: 10px;
@@ -675,6 +693,7 @@ html.dark .se-root {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: center;
     gap: 0.4rem 0.875rem;
     margin: 0;
     padding-top: 0.25rem;

@@ -567,11 +567,11 @@ describe('SegmentEditor — keyboard navigation', () => {
         const el = getTimeline(w);
         keyDown(el, '+');
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(true);
         keyDown(el, '-');
         keyDown(el, '0');
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(false);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(false);
     });
 
     it('underscore and equals serve as zoom aliases', async () => {
@@ -580,7 +580,7 @@ describe('SegmentEditor — keyboard navigation', () => {
         const el = getTimeline(w);
         keyDown(el, '=');
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(true);
         keyDown(el, '_');
         await flush();
     });
@@ -982,7 +982,7 @@ describe('SegmentEditor — zoom, pan, wheel', () => {
             }),
         );
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(true);
     });
 
     it('Cmd+wheel zooms out when deltaY is positive', async () => {
@@ -1043,7 +1043,7 @@ describe('SegmentEditor — zoom, pan, wheel', () => {
         await flush();
         w.vm.zoomTo(20, 40);
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(true);
     });
 
     it('zoomTo is a no-op when duration is zero or range is empty', async () => {
@@ -1052,7 +1052,7 @@ describe('SegmentEditor — zoom, pan, wheel', () => {
         w.vm.zoomTo(0, 10);
         w.vm.zoomTo(30, 20);
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(false);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(false);
     });
 
     it('the zoom slider adjusts the viewport', async () => {
@@ -1062,7 +1062,7 @@ describe('SegmentEditor — zoom, pan, wheel', () => {
         slider.value = '5';
         slider.dispatchEvent(new Event('input', { bubbles: true }));
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(true);
     });
 });
 
@@ -1110,7 +1110,7 @@ describe('SegmentEditor — scrollbar', () => {
         // Can't render scrollbar without zoom > 1, so this test verifies the branch executes
         // without error and that no scrollbar is shown.
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(false);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(false);
     });
 });
 
@@ -1146,7 +1146,7 @@ describe('SegmentEditor — touch', () => {
         tl.dispatchEvent(touchEvent('touchmove', [{ x: 300 }, { x: 700 }]));
         tl.dispatchEvent(touchEvent('touchend', [{ x: 300 }]));
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(true);
     });
 });
 
@@ -1203,7 +1203,7 @@ describe('SegmentEditor — exposed methods', () => {
         expect(latestSegments(w)).toHaveLength(1);
     });
 
-    it('clicking Mark In / Mark Out / Add via the toolbar works', async () => {
+    it('clicking Mark In / Mark Out via the toolbar works', async () => {
         const t = { value: 10 };
         const w = mountEditor({ currentTime: t });
         await flush();
@@ -1215,10 +1215,18 @@ describe('SegmentEditor — exposed methods', () => {
         await buttons[1].trigger('click'); // Mark Out
         await flush();
         expect(latestSegments(w)).toHaveLength(1);
-        t.value = 40;
-        await buttons[2].trigger('click'); // Add
+    });
+
+    it('keeps the scrollbar row laid out at every zoom level', async () => {
+        // Rendering the row only when zoomed made the whole timeline jump the
+        // moment you zoomed, because a row appeared underneath it.
+        const w = mountEditor();
         await flush();
-        expect(latestSegments(w)).toHaveLength(2);
+
+        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar').classes()).toContain(
+            'se-scrollbar--idle'
+        );
     });
 
     it('clears everything from the toolbar, behind a confirm', async () => {

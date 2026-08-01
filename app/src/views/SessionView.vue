@@ -2072,7 +2072,7 @@ onUnmounted(() => {
                                         "
                                         @click="encodeSidePanelTab = 'chapters'"
                                     >
-                                        Clips
+                                        Cuts
                                     </button>
                                 </div>
 
@@ -2237,7 +2237,7 @@ onUnmounted(() => {
                                     Start Encoding reads the config straight off
                                     this form, so unmounting it made a perfectly
                                     valid config look invalid to anyone who
-                                    started their encode from the Clips tab.
+                                    started their encode from the Cuts tab.
                                 -->
                                 <div
                                     v-if="showProbeConfig"
@@ -2308,64 +2308,25 @@ onUnmounted(() => {
                                     "
                                     class="min-h-0 flex-1 flex flex-col overflow-hidden"
                                 >
-                                    <SegmentEditor
-                                        ref="chapterSegmentEditorRef"
-                                        v-model="asidePanelSegments"
-                                        class="min-h-0 flex-1 overflow-hidden"
-                                        mode="chapters"
-                                        split-list-panel
-                                        :duration="chaptersSidePanelDuration"
-                                        :get-current-time="
-                                            () =>
-                                                playerRef?.getCurrentTime() ?? 0
-                                        "
-                                        :on-seek="
-                                            (t: number) => playerRef?.seek(t)
-                                        "
-                                        :on-play-pause="
-                                            () => playerRef?.togglePlay()
-                                        "
-                                        :is-playing="isPreviewPlaying"
-                                        :ripple-edit="false"
-                                        :show-timeline="false"
-                                        :show-toolbar="false"
-                                        :show-playback-controls="false"
-                                        :show-help="false"
-                                        :read-only="showProbeConfig"
-                                        :title="
-                                            showProbeConfig
-                                                ? 'Clips'
-                                                : 'Chapters'
-                                        "
-                                        :empty-title="
-                                            showProbeConfig
-                                                ? 'No clips yet'
-                                                : 'No chapters yet'
-                                        "
-                                        :empty-hint="
-                                            showProbeConfig
-                                                ? 'Use the timeline below to add in/out marks for the ranges you want to keep. If nothing is selected, it will take the whole timline '
-                                                : 'Use the trim timeline below to add in/out marks, or load chapters from a VTT sidecar.'
-                                        "
-                                        keyboard-scope="focus"
-                                        :fps="segmentEditorProbeFps"
-                                    />
-                                    <!-- Clips removed from the encode: dropped from
-                                         the timeline, restorable until Start Encoding -->
+                                    <!--
+                                        Before the encode this panel is about what
+                                        has been cut. Listing the kept ranges as
+                                        well said the same thing twice — what
+                                        remains is whatever was not cut — and the
+                                        only action worth having here is undo.
+                                    -->
                                     <div
-                                        v-if="removedTrimSegments.length > 0"
-                                        class="shrink-0 mt-3 rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-800/50"
+                                        v-if="showProbeConfig"
+                                        class="min-h-0 flex flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-700 dark:bg-slate-800/50"
                                     >
                                         <div
-                                            class="mb-2 flex items-center justify-between gap-2"
+                                            class="mb-2 flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 pb-2 dark:border-slate-700"
                                         >
-                                            <span
-                                                class="text-xs font-medium text-slate-600 dark:text-slate-300"
+                                            <h3
+                                                class="text-sm font-semibold text-slate-800 dark:text-slate-100"
                                             >
-                                                Removed ({{
-                                                    removedTrimSegments.length
-                                                }})
-                                            </span>
+                                                Cuts
+                                            </h3>
                                             <button
                                                 v-if="
                                                     removedTrimSegments.length >
@@ -2379,9 +2340,26 @@ onUnmounted(() => {
                                             >
                                                 Restore all
                                             </button>
+                                            <span
+                                                v-else
+                                                class="text-xs text-slate-400 dark:text-slate-500"
+                                            >
+                                                {{
+                                                    removedTrimSegments.length ||
+                                                    'No'
+                                                }}
+                                                cut{{
+                                                    removedTrimSegments.length ===
+                                                    1
+                                                        ? ''
+                                                        : 's'
+                                                }}
+                                            </span>
                                         </div>
+
                                         <ul
-                                            class="max-h-40 space-y-1 overflow-y-auto"
+                                            v-if="removedTrimSegments.length > 0"
+                                            class="min-h-0 flex-1 space-y-1 overflow-y-auto"
                                         >
                                             <li
                                                 v-for="seg in removedTrimSegments"
@@ -2408,8 +2386,95 @@ onUnmounted(() => {
                                                 </button>
                                             </li>
                                         </ul>
+
+                                        <div
+                                            v-else
+                                            class="flex min-h-0 flex-1 flex-col items-center justify-center px-4 text-center"
+                                        >
+                                            <div
+                                                class="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-700/50"
+                                            >
+                                                <svg
+                                                    class="h-5 w-5 text-slate-400 dark:text-slate-500"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    stroke-width="2"
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    aria-hidden="true"
+                                                >
+                                                    <circle cx="6" cy="6" r="3" />
+                                                    <circle
+                                                        cx="6"
+                                                        cy="18"
+                                                        r="3"
+                                                    />
+                                                    <line
+                                                        x1="20"
+                                                        y1="4"
+                                                        x2="8.12"
+                                                        y2="15.88"
+                                                    />
+                                                    <line
+                                                        x1="14.47"
+                                                        y1="14.48"
+                                                        x2="20"
+                                                        y2="20"
+                                                    />
+                                                    <line
+                                                        x1="8.12"
+                                                        y1="8.12"
+                                                        x2="12"
+                                                        y2="12"
+                                                    />
+                                                </svg>
+                                            </div>
+                                            <p
+                                                class="text-sm font-medium text-slate-700 dark:text-slate-200"
+                                            >
+                                                No cuts yet
+                                            </p>
+                                            <p
+                                                class="mt-1 text-xs text-slate-500 dark:text-slate-400"
+                                            >
+                                                Mark in/out on the timeline below
+                                                and press Cut. The whole timeline
+                                                is encoded if you cut nothing.
+                                            </p>
+                                        </div>
                                     </div>
 
+                                    <SegmentEditor
+                                        v-else
+                                        ref="chapterSegmentEditorRef"
+                                        v-model="asidePanelSegments"
+                                        class="min-h-0 flex-1 overflow-hidden"
+                                        mode="chapters"
+                                        split-list-panel
+                                        :duration="chaptersSidePanelDuration"
+                                        :get-current-time="
+                                            () =>
+                                                playerRef?.getCurrentTime() ?? 0
+                                        "
+                                        :on-seek="
+                                            (t: number) => playerRef?.seek(t)
+                                        "
+                                        :on-play-pause="
+                                            () => playerRef?.togglePlay()
+                                        "
+                                        :is-playing="isPreviewPlaying"
+                                        :ripple-edit="false"
+                                        :show-timeline="false"
+                                        :show-toolbar="false"
+                                        :show-playback-controls="false"
+                                        :show-help="false"
+                                        title="Chapters"
+                                        empty-title="No chapters yet"
+                                        empty-hint="Use the trim timeline below to add in/out marks, or load chapters from a VTT sidecar."
+                                        keyboard-scope="focus"
+                                        :fps="segmentEditorProbeFps"
+                                    />
                                     <p
                                         v-if="chaptersSaveError"
                                         class="shrink-0 text-xs text-red-600 dark:text-red-400"
