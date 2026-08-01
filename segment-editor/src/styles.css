@@ -366,8 +366,8 @@ html.dark .se-root {
     width: 100%;
     height: 100%;
     pointer-events: none;
-    /* Sitting behind greyed thumbnails, the waveform needs more weight than the
-       0.4 it carried when the track was otherwise empty. */
+    /* Drawn over the frames, in white, against the gradient at the bottom of
+       the strip. Near-opaque because it has full-colour picture behind it. */
     opacity: 0.9;
 }
 
@@ -393,6 +393,18 @@ html.dark .se-root {
     transform: translateX(3px);
     font-family: var(--se-font-mono);
     pointer-events: none;
+}
+
+/* The stretches that will not survive the encode. Darkening them says which
+   parts are kept using the picture itself, which survives thumbnails of any
+   colour — a translucent tint over the kept range did not. */
+.se-discarded {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.62);
+    pointer-events: none;
+    z-index: 1;
 }
 
 .se-segment {

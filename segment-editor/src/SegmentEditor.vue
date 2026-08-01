@@ -462,6 +462,42 @@ function beginScrub(e: MouseEvent) {
 }
 
 /** Live range being dragged out, in seconds. Null when no mark drag is running. */
+/**
+ * The stretches that will not survive the encode, as `{left, width}` percentages.
+ *
+ * Trim ranges are what gets kept, so everything between them is dropped. A
+ * translucent tint over the kept range used to be enough to show which was
+ * which, but that was against frames dimmed to a quarter strength; over
+ * full-colour thumbnails a 14% wash disappears. Darkening what will be cut says
+ * it with the picture itself, so it reads whatever the video happens to look
+ * like — and matches how an editor expects a timeline to behave.
+ *
+ * Empty when nothing is marked: no marks means the whole timeline is encoded,
+ * and dimming all of it would say the opposite.
+ */
+const discardedRanges = computed(() => {
+    if (props.mode !== 'trim') return [];
+    const kept = segments.value
+        .filter((s) => s.outSec > s.inSec)
+        .slice()
+        .sort((a, b) => a.inSec - b.inSec);
+    if (kept.length === 0) return [];
+
+    const spans: { from: number; to: number }[] = [];
+    let cursor = 0;
+    for (const seg of kept) {
+        if (seg.inSec > cursor) spans.push({ from: cursor, to: seg.inSec });
+        cursor = Math.max(cursor, seg.outSec);
+    }
+    if (cursor < props.duration) spans.push({ from: cursor, to: props.duration });
+
+    return spans.map((s) => {
+        const lo = timeToPercent(s.from);
+        const hi = timeToPercent(s.to);
+        return { left: `${lo}%`, width: `${Math.max(0, hi - lo)}%` };
+    });
+});
+
 const draftRange = ref<{ from: number; to: number } | null>(null);
 
 const draftRangeStyle = computed(() => {
@@ -1690,6 +1726,18 @@ defineExpose({
                         >{{ tick.label }}</div>
                     </template>
                 </div>
+
+                <!--
+                    What will not survive the encode, darkened. Sits over the
+                    frames and the waveform but under the marks, so the bright
+                    stretches are exactly what gets kept.
+                -->
+                <div
+                    v-for="(gap, i) in discardedRanges"
+                    :key="`discarded-${i}`"
+                    class="se-discarded"
+                    :style="gap"
+                />
 
                 <div
                     v-for="seg in segments"

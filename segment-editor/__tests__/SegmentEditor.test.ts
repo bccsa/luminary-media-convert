@@ -1679,6 +1679,68 @@ describe('SegmentEditor — split list panel (beside player)', () => {
     });
 });
 
+/**
+ * Trim ranges are what gets kept, so everything between them is dropped.
+ * Darkening the dropped stretches says which is which using the picture itself.
+ * A translucent tint over the kept range only worked while the frames were
+ * dimmed to a quarter strength; over full-colour thumbnails it disappeared.
+ */
+describe('SegmentEditor — discarded ranges', () => {
+    const dimmed = (w: ReturnType<typeof mountEditor>) =>
+        w.findAll('.se-discarded');
+
+    it('darkens the gap between two kept ranges', async () => {
+        const w = mountEditor({
+            props: { mode: 'trim', duration: 100 },
+            segments: [seg(1, 10, 20), seg(2, 60, 70)],
+        });
+        await flush();
+
+        // before 10, between 20 and 60, after 70
+        expect(dimmed(w)).toHaveLength(3);
+    });
+
+    it('darkens nothing when no range is marked', async () => {
+        // No marks means the whole timeline is encoded, so dimming any of it
+        // would say the opposite.
+        const w = mountEditor({ props: { mode: 'trim', duration: 100 } });
+        await flush();
+
+        expect(dimmed(w)).toHaveLength(0);
+    });
+
+    it('leaves no gap when a range covers the whole timeline', async () => {
+        const w = mountEditor({
+            props: { mode: 'trim', duration: 100 },
+            segments: [seg(1, 0, 100)],
+        });
+        await flush();
+
+        expect(dimmed(w)).toHaveLength(0);
+    });
+
+    it('darkens only the tail when a range starts at zero', async () => {
+        const w = mountEditor({
+            props: { mode: 'trim', duration: 100 },
+            segments: [seg(1, 0, 40)],
+        });
+        await flush();
+
+        expect(dimmed(w)).toHaveLength(1);
+    });
+
+    it('does not dim outside trim mode', async () => {
+        // Chapters mark points of interest; the material between them is kept.
+        const w = mountEditor({
+            props: { mode: 'chapters', duration: 100 },
+            segments: [seg(1, 10, 20)],
+        });
+        await flush();
+
+        expect(dimmed(w)).toHaveLength(0);
+    });
+});
+
 describe('SegmentEditor — thumbnail filmstrip', () => {
     // Ten cues of 10s each, 160x90 frames laid out along one sprite sheet.
     const VTT = [
