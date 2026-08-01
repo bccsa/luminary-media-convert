@@ -1,6 +1,6 @@
 import { type Mocked } from 'vitest';
 import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { rmSync, mkdtempSync } from 'fs';
+import { rmSync, mkdtempSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { EncodeController } from './encode.controller.js';
@@ -298,6 +298,83 @@ describe('EncodeController', () => {
             expect(result.status).toBe('queued');
             expect(result.queuePosition).toBe(1);
             expect(queueService.enqueue).toHaveBeenCalledWith(session.id);
+        });
+
+        /**
+         * Every failure seen in practice — a full disk, a stalled upload, a
+         * restart — left the uploaded source untouched. Accepting only
+         * "uploaded" meant a valid multi-GB file could be used again only by
+         * deleting the session and uploading it a second time.
+         */
+        describe('retrying a failed encode', () => {
+            const tmpSource = join(tmpdir(), `retry-src-${Date.now()}.mkv`);
+
+            beforeEach(() => {
+                writeFileSync(tmpSource, 'source bytes');
+            });
+
+            afterEach(() => {
+                rmSync(tmpSource, { force: true });
+            });
+
+            it('accepts a failed session whose source is still on disk', async () => {
+                const session = sessionService.create(makeConfig());
+                sessionService.setFilePath(session.id, tmpSource);
+                sessionService.setFailed(session.id, 'Pipeline drain stalled');
+
+                const result = await controller.startEncode(
+                    session.id,
+                    makeEncodeConfig(),
+                    makeRequest(),
+                );
+
+                expect(result.status).toBe('queued');
+                expect(queueService.enqueue).toHaveBeenCalledWith(session.id);
+            });
+
+            it('refuses when the source is gone, and says so', async () => {
+                // Nothing to retry from — this one genuinely needs re-uploading,
+                // and the message should say that rather than name a status.
+                const session = sessionService.create(makeConfig());
+                sessionService.setFilePath(session.id, '/nonexistent/gone.mkv');
+                sessionService.setFailed(session.id, 'Encoding failed');
+
+                await expect(
+                    controller.startEncode(
+                        session.id,
+                        makeEncodeConfig(),
+                        makeRequest(),
+                    ),
+                ).rejects.toThrow(/no longer on disk/);
+            });
+
+            it('refuses a failed session that never had a source', async () => {
+                const session = sessionService.create(makeConfig());
+                sessionService.setFailed(session.id, 'Upload failed');
+
+                await expect(
+                    controller.startEncode(
+                        session.id,
+                        makeEncodeConfig(),
+                        makeRequest(),
+                    ),
+                ).rejects.toThrow(BadRequestException);
+            });
+
+            it('still refuses a session that is mid-encode', async () => {
+                // Retry applies to terminal failure, not to work in progress.
+                const session = sessionService.create(makeConfig());
+                sessionService.setFilePath(session.id, tmpSource);
+                sessionService.updateStatus(session.id, 'encoding');
+
+                await expect(
+                    controller.startEncode(
+                        session.id,
+                        makeEncodeConfig(),
+                        makeRequest(),
+                    ),
+                ).rejects.toThrow(/must be in "uploaded" status/);
+            });
         });
 
         it('should call setTrimSegments when trimSegments are present', async () => {

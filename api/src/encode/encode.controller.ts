@@ -242,10 +242,22 @@ export class EncodeController {
             throw new NotFoundException(`Session ${sessionId} not found`);
         }
 
-        if (session.status !== 'uploaded') {
-            throw new BadRequestException(
-                `Session must be in "uploaded" status to start encoding (current: "${session.status}")`
-            );
+        // A failed encode is worth retrying when its source survived. Every
+        // failure seen in practice — a full disk, a stalled upload, a restart —
+        // left the uploaded file untouched, and refusing anything but "uploaded"
+        // meant a valid multi-GB source could only be used by deleting the
+        // session and uploading it again.
+        const canRetry =
+            session.status === 'failed' &&
+            !!session.filePath &&
+            existsSync(session.filePath);
+
+        if (session.status !== 'uploaded' && !canRetry) {
+            const reason =
+                session.status === 'failed'
+                    ? `the source file for session ${sessionId} is no longer on disk, so it must be uploaded again`
+                    : `Session must be in "uploaded" status to start encoding (current: "${session.status}")`;
+            throw new BadRequestException(reason);
         }
 
         if (dto.type === 'video') {

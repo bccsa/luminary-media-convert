@@ -226,6 +226,24 @@ describe('EncodeService', () => {
         });
     });
 
+    it('clears output left by a previous attempt before re-encoding', async () => {
+        // A retry inherits whatever the failed run left behind. Segments from
+        // the abandoned attempt would be picked up by the pipeline and packed
+        // into playlists alongside the new ones — and the stale output was
+        // holding 4.9 GB on a volume that had run out of space.
+        const session = sessionService.create(makeConfig());
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        const outputDir = join(testWorkDir, session.id, 'output');
+        mkdirSync(outputDir, { recursive: true });
+        writeFileSync(join(outputDir, 'stale_segment.m4s'), 'from the failed run');
+
+        await service.processSession(session.id);
+
+        expect(existsSync(join(outputDir, 'stale_segment.m4s'))).toBe(false);
+    });
+
     it('should run full pipeline: encode -> s3 -> completed', async () => {
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
