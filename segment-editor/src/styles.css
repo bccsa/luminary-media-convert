@@ -734,6 +734,7 @@ html.dark .se-root {
 }
 
 .se-controls-bar__playback {
+    order: 2;
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
@@ -741,13 +742,16 @@ html.dark .se-root {
     flex-shrink: 0;
 }
 
-.se-controls-bar__playback .se-btn {
+.se-controls-bar .se-btn {
     min-height: 2.25rem;
     min-width: 2.25rem;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     box-sizing: border-box;
+}
+
+.se-controls-bar__playback .se-btn {
     line-height: 0;
 }
 
@@ -778,14 +782,18 @@ html.dark .se-root {
 
 .se-controls-bar__time {
     font-family: var(--se-font-mono);
-    font-size: 0.8125rem;
+    font-size: 1rem;
     font-weight: 600;
     letter-spacing: 0.02em;
     color: var(--se-text);
     flex-shrink: 0;
 }
 
+/* Transport in the middle of the centred group, edit tools to its left, zoom to
+   its right — so the control reached for most often is the one under the
+   middle of the timeline. */
 .se-controls-bar__marks {
+    order: 1;
     display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
@@ -795,6 +803,7 @@ html.dark .se-root {
 }
 
 .se-controls-bar__zoom {
+    order: 3;
     display: inline-flex;
     align-items: center;
     gap: 0.4rem 0.6rem;
@@ -802,6 +811,7 @@ html.dark .se-root {
 }
 
 .se-controls-bar__actions {
+    order: 4;
     display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
