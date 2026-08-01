@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { existsSync } from 'fs';
-import { copyFile, readdir, rm, writeFile } from 'fs/promises';
+import { copyFile, readdir, rm, statfs, writeFile } from 'fs/promises';
 import { join, posix } from 'path';
+import { estimateOutputBytes, formatBytes } from './output-estimate.js';
 import {
     SESSION_STATE_FILENAME,
     SessionService,
@@ -56,6 +57,19 @@ export class EncodeService {
         }
 
         const outputDir = join(this.workDir, sessionId, 'output');
+
+        const shortfall = await this.diskShortfall(session);
+        if (shortfall) {
+            this.logger.error(`Session ${sessionId} refused: ${shortfall}`);
+            this.sessionService.setFailed(sessionId, shortfall);
+            await this.sendWebhook(session, {
+                sessionId,
+                status: 'failed',
+                error: shortfall,
+                message: 'Encoding failed',
+            });
+            return;
+        }
 
         // A retry inherits whatever the failed run left here. Segments from the
         // previous attempt would be picked up by the pipeline and packed into
@@ -424,8 +438,63 @@ export class EncodeService {
      * A failed session keeps everything until the sweep ages it out (#73). A
      * failure is when someone wants to retry or inspect the input.
      */
+    /**
+     * Why this encode cannot fit on disk, or null when it can (or cannot be
+     * judged).
+     *
+     * Checked before any work starts. Without it an encode runs out of space at
+     * whatever line touches the disk first and reports a raw ENOSPC — after the
+     * source has been uploaded, the job queued, and in one case forty minutes of
+     * encoding already spent.
+     *
+     * Silent when the estimate or the free-space reading is unavailable: a
+     * missing figure is a reason to proceed as before, not to refuse work.
+     */
+    private async diskShortfall(session: Session): Promise<string | null> {
+        const duration = session.probeResult?.format?.duration ?? 0;
+        const needed = estimateOutputBytes(session.encodeConfig ?? {}, duration);
+        if (needed <= 0) return null;
+
+        const free = await this.freeBytes();
+        if (free === null || free >= needed) return null;
+
+        return (
+            `Not enough disk space on the encoder: this encode needs about ` +
+            `${formatBytes(needed)} and only ${formatBytes(free)} is free. ` +
+            `Free space and retry — the uploaded source is kept.`
+        );
+    }
+
+    /** Free bytes on the work volume, or null when it cannot be read. */
+    private async freeBytes(): Promise<number | null> {
+        try {
+            const fs = await statfs(this.workDir);
+            return fs.bavail * fs.bsize;
+        } catch {
+            return null;
+        }
+    }
+
     private async cleanupSessionFiles(sessionId: string): Promise<void> {
-        if (this.sessionService.get(sessionId)?.status !== 'completed') return;
+        const status = this.sessionService.get(sessionId)?.status;
+
+        // A failed encode keeps its source — that is what makes a retry possible
+        // without uploading gigabytes again. Its output is regenerable, so there
+        // is no reason to hold it: an abandoned attempt left 4.9 GB on a volume
+        // that had already run out of space, and the next run discards it anyway.
+        if (status === 'failed') {
+            await rm(join(this.workDir, sessionId, 'output'), {
+                recursive: true,
+                force: true,
+            }).catch((err) => {
+                this.logger.warn(
+                    `Failed to clear output for failed session ${sessionId}: ${(err as Error).message}`
+                );
+            });
+            return;
+        }
+
+        if (status !== 'completed') return;
 
         const sessionDir = join(this.workDir, sessionId);
         try {
