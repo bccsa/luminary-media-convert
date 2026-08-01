@@ -226,6 +226,117 @@ describe('EncodeService', () => {
         });
     });
 
+    /**
+     * Running out of space used to surface as a raw ENOSPC from whatever line
+     * touched the disk first — after the source had been uploaded, the job
+     * queued, and in one case forty minutes of encoding spent.
+     */
+    describe('refusing an encode that cannot fit', () => {
+        function withFreeBytes(bytes: number) {
+            vi.spyOn(service as any, 'freeBytes').mockResolvedValue(bytes);
+        }
+
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
+        it('fails before encoding when the output cannot fit', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+            (sessionService.get(session.id) as any).probeResult = {
+                format: { duration: 3600 },
+            };
+            withFreeBytes(10 * 1024 ** 2); // 10 MB
+
+            await service.processSession(session.id);
+
+            expect(sessionService.get(session.id)?.status).toBe('failed');
+            expect(ffmpegService.encode).not.toHaveBeenCalled();
+        });
+
+        it('says how much is needed and how much is free', async () => {
+            // The old message was an errno and a path; this one has to be
+            // actionable by whoever reads it.
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+            (sessionService.get(session.id) as any).probeResult = {
+                format: { duration: 3600 },
+            };
+            withFreeBytes(10 * 1024 ** 2);
+
+            await service.processSession(session.id);
+
+            const error = sessionService.get(session.id)?.error ?? '';
+            expect(error).toMatch(/needs about .* and only .* is free/);
+            expect(error).toMatch(/source is kept/);
+        });
+
+        it('proceeds when there is room', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+            (sessionService.get(session.id) as any).probeResult = {
+                format: { duration: 3600 },
+            };
+            withFreeBytes(500 * 1024 ** 3); // 500 GB
+
+            await service.processSession(session.id);
+
+            expect(ffmpegService.encode).toHaveBeenCalled();
+        });
+
+        it('proceeds when free space cannot be read', async () => {
+            // A missing figure is a reason to carry on as before, not to refuse.
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+            (sessionService.get(session.id) as any).probeResult = {
+                format: { duration: 3600 },
+            };
+            vi.spyOn(service as any, 'freeBytes').mockResolvedValue(null);
+
+            await service.processSession(session.id);
+
+            expect(ffmpegService.encode).toHaveBeenCalled();
+        });
+
+        it('proceeds when the duration is unknown', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+            withFreeBytes(1024); // 1 KB — would refuse if it could estimate
+
+            await service.processSession(session.id);
+
+            expect(ffmpegService.encode).toHaveBeenCalled();
+        });
+    });
+
+    it('keeps the source but drops the output when an encode fails', async () => {
+        // The source is what makes a retry possible without re-uploading; the
+        // output is regenerable, and an abandoned 4.9 GB of it was sitting on a
+        // volume that had run out of space.
+        const session = sessionService.create(makeConfig());
+        const sourcePath = join(testWorkDir, session.id, 'input.mkv');
+        mkdirSync(join(testWorkDir, session.id), { recursive: true });
+        writeFileSync(sourcePath, 'source bytes');
+        sessionService.setFilePath(session.id, sourcePath);
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+        const outputDir = join(testWorkDir, session.id, 'output');
+        mkdirSync(outputDir, { recursive: true });
+        writeFileSync(join(outputDir, 'partial.m4s'), 'half an encode');
+
+        ffmpegService.encode.mockRejectedValueOnce(new Error('boom'));
+        await service.processSession(session.id);
+
+        expect(sessionService.get(session.id)?.status).toBe('failed');
+        expect(existsSync(sourcePath)).toBe(true);
+        expect(existsSync(outputDir)).toBe(false);
+    });
+
     it('clears output left by a previous attempt before re-encoding', async () => {
         // A retry inherits whatever the failed run left behind. Segments from
         // the abandoned attempt would be picked up by the pipeline and packed
