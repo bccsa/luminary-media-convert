@@ -57,6 +57,19 @@ export class EncodeService {
 
         const outputDir = join(this.workDir, sessionId, 'output');
 
+        // A retry inherits whatever the failed run left here. Segments from the
+        // previous attempt would be picked up by the pipeline and packed into
+        // playlists alongside the new ones, so start from an empty directory —
+        // which also releases the disk the abandoned output was holding.
+        //
+        // Not fatal if it fails: an unusable work directory surfaces with a
+        // better error a moment later, when the encode tries to write to it.
+        await rm(outputDir, { recursive: true, force: true }).catch((err) => {
+            this.logger.warn(
+                `Could not clear previous output for ${sessionId}: ${(err as Error).message}`
+            );
+        });
+
         try {
             this.sessionService.updateStatus(sessionId, 'encoding');
             this.sessionService.setOutputDir(sessionId, outputDir);
