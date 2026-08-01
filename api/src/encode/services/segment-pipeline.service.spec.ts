@@ -78,4 +78,96 @@ describe('SegmentPipeline', () => {
             expect(keys).toContain('prefix/other.m3u8');
         });
     });
+
+    /**
+     * The watchdog exists to catch an upload that has genuinely stopped. It has
+     * to tell that apart from one that is merely slow, and completed-file counts
+     * cannot: byte-range packing writes files of a few hundred MB, and one of
+     * those on a slow link takes longer than the timeout while transferring
+     * perfectly well. A 500 MB pack at 2 MB/s takes over four minutes; a
+     * five-minute completion-based detector discarded a finished hour-long
+     * encode twice, with every upload succeeding.
+     */
+    describe('drain stall detection', () => {
+        let tmpDir: string;
+
+        beforeEach(() => {
+            tmpDir = mkdtempSync(join(tmpdir(), 'pipeline-stall-'));
+            process.env.S3_UPLOAD_STALL_TIMEOUT_MS = '250';
+        });
+
+        afterEach(() => {
+            rmSync(tmpDir, { recursive: true, force: true });
+            delete process.env.S3_UPLOAD_STALL_TIMEOUT_MS;
+        });
+
+        /** A single upload that trickles bytes for longer than the timeout. */
+        function pipelineWithSlowUpload(totalMs: number, onBytes = true) {
+            const pipeline = makePipeline(tmpDir);
+            const s3 = (pipeline as any).s3Service;
+            s3.uploadFile = vi.fn(
+                async (
+                    _c: unknown,
+                    _b: string,
+                    _f: string,
+                    _k: string,
+                    report?: (n: number) => void
+                ) => {
+                    const step = 50;
+                    for (let t = 0; t < totalMs; t += step) {
+                        await new Promise((r) => setTimeout(r, step));
+                        if (onBytes && report) report(1024);
+                    }
+                }
+            );
+            return pipeline;
+        }
+
+        it('does not trip while bytes are still moving', async () => {
+            // Four times the stall window, but never silent for one.
+            const pipeline = pipelineWithSlowUpload(1000);
+            writeFileSync(join(tmpDir, 'big.m4s'), 'x');
+
+            (pipeline as any).enqueueUpload({
+                filePath: join(tmpDir, 'big.m4s'),
+                objectKey: 'prefix/big.m4s',
+            });
+
+            await expect(
+                (pipeline as any).waitForUploads()
+            ).resolves.toBeUndefined();
+        });
+
+        it('still trips when nothing moves at all', async () => {
+            // The case it exists for: bytes stop, and stay stopped.
+            const pipeline = pipelineWithSlowUpload(1000, false);
+            writeFileSync(join(tmpDir, 'stuck.m4s'), 'x');
+
+            (pipeline as any).enqueueUpload({
+                filePath: join(tmpDir, 'stuck.m4s'),
+                objectKey: 'prefix/stuck.m4s',
+            });
+
+            await expect((pipeline as any).waitForUploads()).rejects.toThrow(
+                /no bytes sent to S3/
+            );
+        });
+
+        it('reports how much it did send', async () => {
+            // "uploaded=1401" counted segments while the transfers were a few
+            // large files, which read as though uploads had succeeded and
+            // vanished. The message should say what actually left.
+            const pipeline = pipelineWithSlowUpload(1000, false);
+            writeFileSync(join(tmpDir, 'stuck.m4s'), 'x');
+
+            (pipeline as any).enqueueUpload({
+                filePath: join(tmpDir, 'stuck.m4s'),
+                objectKey: 'prefix/stuck.m4s',
+            });
+
+            await expect((pipeline as any).waitForUploads()).rejects.toThrow(
+                /sent=\d+MB/
+            );
+        });
+    });
 });

@@ -95,6 +95,8 @@ export class SegmentPipeline {
     private totalSegmentsProduced = 0;
     private segmentsEncrypted = 0;
     private segmentsUploaded = 0;
+    /** Bytes handed to S3, counted as they are sent rather than on completion. */
+    private bytesUploaded = 0;
 
     // Upload queue
     private readonly uploadQueue: UploadTask[] = [];
@@ -595,6 +597,9 @@ export class SegmentPipeline {
                     this.config.s3Config.bucket,
                     task.filePath,
                     task.objectKey,
+                    (bytes) => {
+                        this.bytesUploaded += bytes;
+                    },
                 );
                 this.uploadedKeys.push(task.objectKey);
                 this.segmentsUploaded += task.segmentCount ?? 1;
@@ -623,14 +628,21 @@ export class SegmentPipeline {
     }
 
     private async waitForUploads(): Promise<void> {
-        // Stall watchdog: trip only when no upload has completed for stallMs.
-        // A wall-clock deadline punishes slow-but-progressing links on large
-        // outputs; a stall detector still catches genuinely stuck uploads.
+        // Stall watchdog: trip only when nothing at all has moved for stallMs.
+        //
+        // "Moved" has to mean bytes. Watching completed uploads instead cannot
+        // tell slow from stuck: byte-range packing writes files of a few hundred
+        // MB, and on a slow link one of those takes longer than any sensible
+        // timeout while transferring perfectly well. A 500 MB pack at 2 MB/s
+        // takes over four minutes, so a five-minute completion-based detector
+        // discarded a finished hour-long encode twice over — with every upload
+        // succeeding and nothing logged as an error.
         const stallMs = Number(
             process.env.S3_UPLOAD_STALL_TIMEOUT_MS ?? 5 * 60 * 1000,
         );
 
         let lastProgressAt = Date.now();
+        let lastBytes = this.bytesUploaded;
         let lastUploaded = this.segmentsUploaded;
         let lastQueueDepth = this.activeUploads + this.uploadQueue.length;
 
@@ -640,16 +652,21 @@ export class SegmentPipeline {
         ) {
             const queueDepth = this.activeUploads + this.uploadQueue.length;
             if (
+                this.bytesUploaded !== lastBytes ||
                 this.segmentsUploaded !== lastUploaded ||
                 queueDepth !== lastQueueDepth
             ) {
+                lastBytes = this.bytesUploaded;
                 lastUploaded = this.segmentsUploaded;
                 lastQueueDepth = queueDepth;
                 lastProgressAt = Date.now();
             } else if (Date.now() - lastProgressAt > stallMs) {
+                const stalledSec = Math.round(stallMs / 1000);
                 throw new Error(
-                    `Pipeline drain stalled: no upload progress for ${Math.round(stallMs / 1000)}s ` +
-                        `(active=${this.activeUploads}, queued=${this.uploadQueue.length}, uploaded=${this.segmentsUploaded})`,
+                    `Pipeline drain stalled: no bytes sent to S3 for ${stalledSec}s ` +
+                        `(active=${this.activeUploads}, queued=${this.uploadQueue.length}, ` +
+                        `segments=${this.segmentsUploaded}, ` +
+                        `sent=${(this.bytesUploaded / 1048576).toFixed(0)}MB)`
                 );
             }
             await new Promise((r) => setTimeout(r, 200));
