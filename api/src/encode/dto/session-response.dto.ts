@@ -110,6 +110,17 @@ export class SessionStatusDto {
     queuePosition?: number;
 
     @ApiPropertyOptional({
+        description:
+            'The encode can be run again without re-uploading. Present when status is ' +
+            '"failed" and the uploaded source is still on the encoder. A failure is ' +
+            'usually transient — a full disk, a stalled upload, a restart — and leaves ' +
+            'the source untouched.',
+        example: true,
+    })
+    @Expose()
+    canRetry?: boolean;
+
+    @ApiPropertyOptional({
         description: 'Probe results from the uploaded file. Present when status is "uploaded".',
         type: ProbeResultDto,
     })

@@ -24,6 +24,7 @@ export function useSessionPoller() {
     const progress = ref<number | undefined>();
     const pipelineProgress = ref<PipelineProgress | undefined>();
     const queuePosition = ref<number | undefined>();
+    const canRetry = ref<boolean | undefined>();
     const files = ref<string[] | undefined>();
     const masterPlaylist = ref<string | undefined>();
     const anglePlaylists = ref<{ name: string; key: string }[] | undefined>();
@@ -52,6 +53,7 @@ export function useSessionPoller() {
         progress.value = data.progress;
         pipelineProgress.value = data.pipelineProgress;
         queuePosition.value = data.queuePosition;
+        canRetry.value = data.canRetry;
         files.value = data.files;
         masterPlaylist.value = data.masterPlaylist;
         anglePlaylists.value = data.anglePlaylists;
@@ -94,6 +96,7 @@ export function useSessionPoller() {
         progress.value = undefined;
         pipelineProgress.value = undefined;
         queuePosition.value = undefined;
+        canRetry.value = undefined;
         files.value = undefined;
         masterPlaylist.value = undefined;
         anglePlaylists.value = undefined;
@@ -165,6 +168,7 @@ export function useSessionPoller() {
         progress: readonly(progress),
         pipelineProgress: readonly(pipelineProgress),
         queuePosition: readonly(queuePosition),
+        canRetry: readonly(canRetry),
         files: readonly(files),
         masterPlaylist: readonly(masterPlaylist),
         anglePlaylists: readonly(anglePlaylists),

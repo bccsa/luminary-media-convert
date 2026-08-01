@@ -9,8 +9,14 @@ export type {
 } from '@luminary-media-converter/encode-config';
 
 // Import + re-export ProbeResult and TrimSegment (both used by SessionStatusResponse below)
-import type { ProbeResult, TrimSegment } from '@luminary-media-converter/encode-config';
-export type { ProbeResult, TrimSegment } from '@luminary-media-converter/encode-config';
+import type {
+    ProbeResult,
+    TrimSegment,
+} from '@luminary-media-converter/encode-config';
+export type {
+    ProbeResult,
+    TrimSegment,
+} from '@luminary-media-converter/encode-config';
 
 // --- S3 & Webhook Config ---
 
@@ -88,6 +94,7 @@ export interface SessionStatusResponse {
     progress?: number;
     pipelineProgress?: PipelineProgress;
     queuePosition?: number;
+    canRetry?: boolean;
     probeResult?: ProbeResult;
     files?: string[];
     masterPlaylist?: string;
