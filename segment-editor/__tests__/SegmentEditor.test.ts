@@ -81,6 +81,29 @@ describe('SegmentEditor — mode defaults', () => {
         expect(w.find('.se-label-field').exists()).toBe(true);
     });
 
+    it('draws no label over a trim range', async () => {
+        // The bright stretch already says which part is kept and the times live
+        // in the Cuts panel, so a "#1" floating over the frames competed with
+        // the picture for nothing.
+        const w = mountEditor({
+            props: { mode: 'trim', duration: 100 },
+            segments: [seg(1, 10, 60)],
+        });
+        await flush();
+
+        expect(w.find('.se-segment-label').exists()).toBe(false);
+    });
+
+    it('draws the label over a chapter, which has a name worth showing', async () => {
+        const w = mountEditor({
+            props: { mode: 'chapters', duration: 100 },
+            segments: [seg(1, 10, 60, 'Intro')],
+        });
+        await flush();
+
+        expect(w.find('.se-segment-label').text()).toBe('Intro');
+    });
+
     it('derives the panel title from mode and custom title prop', async () => {
         const chapters = mountEditor({ props: { mode: 'chapters' } });
         expect(chapters.find('.se-title').text()).toBe('Chapters');
