@@ -380,10 +380,14 @@ const remoteIngestLabel = computed<string>(() => {
         : 'Uploading from URL...';
 });
 
+const canRetryEncode = computed(
+    () => currentStatus.value === 'failed' && poller.canRetry.value === true
+);
+
 const showProbeConfig = computed(() => {
     const s = currentStatus.value;
     return (
-        s === 'uploaded' &&
+        (s === 'uploaded' || canRetryEncode.value) &&
         isActiveSession.value &&
         !!probeResult.value &&
         !submitting.value
@@ -907,8 +911,7 @@ const deliveryProblem = computed<'blocked' | 'unreachable' | null>(() => {
     const base = s3PublicBaseUrl.value;
     if (!base) return null;
     const pageIsSecure =
-        typeof window !== 'undefined' &&
-        window.location.protocol === 'https:';
+        typeof window !== 'undefined' && window.location.protocol === 'https:';
     if (pageIsSecure && base.startsWith('http://')) return 'blocked';
     if (!session.value?.s3Config?.publicUrl) return 'unreachable';
     return null;
@@ -1159,8 +1162,19 @@ async function handleStatusAfterLoad(status: string) {
             encodingApiUrl.value!,
             sessionToken.value!
         );
+    } else if (status === 'failed' && isActiveSession.value) {
+        // Only the encoder knows whether the source survived the failure, and
+        // that decides whether this session can simply be run again. `failed` is
+        // terminal, so the poller reads it once and stops — a single request,
+        // not a loop.
+        await fetchProbeResults();
+        poller.start(
+            sessionId.value,
+            encodingApiUrl.value!,
+            sessionToken.value!
+        );
     }
-    // completed / failed / imported / expired => no additional setup needed
+    // completed / imported / expired => no additional setup needed
 }
 
 // ---------------------------------------------------------------------------
@@ -1672,6 +1686,7 @@ onUnmounted(() => {
 
 <template>
     <div
+        :data-retry-available="canRetryEncode || undefined"
         :class="
             headerLayout === 'session-trim'
                 ? 'flex h-full w-full flex-col'
@@ -2376,9 +2391,7 @@ onUnmounted(() => {
                                                 <span
                                                     class="font-mono text-xs text-slate-600 dark:text-slate-300"
                                                 >
-                                                    {{
-                                                        formatTime(seg.inSec)
-                                                    }}
+                                                    {{ formatTime(seg.inSec) }}
                                                     –
                                                     {{ formatTime(seg.outSec) }}
                                                 </span>

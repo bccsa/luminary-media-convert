@@ -399,6 +399,17 @@ export class EncodeController {
             }));
         }
 
+        // A failed encode can be run again while its source is still on disk.
+        // The client cannot see the encoder's filesystem, so it is told here
+        // rather than left to guess from the status alone.
+        if (
+            session.status === 'failed' &&
+            !!session.filePath &&
+            existsSync(session.filePath)
+        ) {
+            result.canRetry = true;
+        }
+
         if (session.status === 'queued') {
             result.queuePosition =
                 this.queueService.getPosition(sessionId) ?? undefined;

@@ -305,6 +305,74 @@ describe('SessionView', () => {
         });
     });
 
+    /**
+     * Failures are usually transient — a full disk, a stalled upload, a restart
+     * — and none of them touch the uploaded source. Without a way back, the only
+     * remedy was deleting the session and uploading the file again, which on a
+     * 7 GB broadcast is ten minutes and the very upload that tends to cause the
+     * problem in the first place.
+     */
+    describe('retrying a failed encode', () => {
+        function failedSession(canRetry: boolean | undefined) {
+            detail.mockResolvedValue(uploadedSession({ status: 'failed' }));
+            status.mockResolvedValue({
+                status: 'failed',
+                error: 'Not enough disk space on the encoder',
+                canRetry,
+                probeResult: uploadedSession().probeResult,
+            });
+        }
+
+        /**
+         * Whether the view is offering the encode again. Asserted on the root
+         * rather than the panel itself: the panel lives inside a tab that is not
+         * the default one, and the change under test is the gate, not the layout.
+         */
+        const canStart = (w: Awaited<ReturnType<typeof mountView>>) =>
+            w.attributes('data-retry-available') === 'true';
+
+        it('offers the encode form again when the source survived', async () => {
+            failedSession(true);
+
+            const wrapper = await mountView();
+            await flushPromises();
+
+            expect(canStart(wrapper)).toBe(true);
+        });
+
+        it('does not offer it when the source is gone', async () => {
+            // Nothing to retry from — this one genuinely needs re-uploading.
+            failedSession(false);
+
+            const wrapper = await mountView();
+            await flushPromises();
+
+            expect(canStart(wrapper)).toBe(false);
+        });
+
+        it('does not offer it when the encoder said nothing either way', async () => {
+            // An older encoder, or a session it no longer holds. Absence of the
+            // flag is not permission.
+            failedSession(undefined);
+
+            const wrapper = await mountView();
+            await flushPromises();
+
+            expect(canStart(wrapper)).toBe(false);
+        });
+
+        it('asks the encoder about a failed session at all', async () => {
+            // The status only reaches the client if something requests it, and
+            // a failed session previously triggered no request.
+            failedSession(true);
+
+            await mountView();
+            await flushPromises();
+
+            expect(status).toHaveBeenCalled();
+        });
+    });
+
     it('reads the storyboard from the encoder before an encode exists', async () => {
         // After encoding it comes from S3; before, only the API has the source to
         // sample, and the token has to ride on the URL.
