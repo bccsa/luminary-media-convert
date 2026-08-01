@@ -81,6 +81,29 @@ describe('SegmentEditor — mode defaults', () => {
         expect(w.find('.se-label-field').exists()).toBe(true);
     });
 
+    it('draws no label over a trim range', async () => {
+        // The bright stretch already says which part is kept and the times live
+        // in the Cuts panel, so a "#1" floating over the frames competed with
+        // the picture for nothing.
+        const w = mountEditor({
+            props: { mode: 'trim', duration: 100 },
+            segments: [seg(1, 10, 60)],
+        });
+        await flush();
+
+        expect(w.find('.se-segment-label').exists()).toBe(false);
+    });
+
+    it('draws the label over a chapter, which has a name worth showing', async () => {
+        const w = mountEditor({
+            props: { mode: 'chapters', duration: 100 },
+            segments: [seg(1, 10, 60, 'Intro')],
+        });
+        await flush();
+
+        expect(w.find('.se-segment-label').text()).toBe('Intro');
+    });
+
     it('derives the panel title from mode and custom title prop', async () => {
         const chapters = mountEditor({ props: { mode: 'chapters' } });
         expect(chapters.find('.se-title').text()).toBe('Chapters');
@@ -567,11 +590,11 @@ describe('SegmentEditor — keyboard navigation', () => {
         const el = getTimeline(w);
         keyDown(el, '+');
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(true);
         keyDown(el, '-');
         keyDown(el, '0');
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(false);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(false);
     });
 
     it('underscore and equals serve as zoom aliases', async () => {
@@ -580,7 +603,7 @@ describe('SegmentEditor — keyboard navigation', () => {
         const el = getTimeline(w);
         keyDown(el, '=');
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(true);
         keyDown(el, '_');
         await flush();
     });
@@ -982,7 +1005,7 @@ describe('SegmentEditor — zoom, pan, wheel', () => {
             }),
         );
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(true);
     });
 
     it('Cmd+wheel zooms out when deltaY is positive', async () => {
@@ -1043,7 +1066,7 @@ describe('SegmentEditor — zoom, pan, wheel', () => {
         await flush();
         w.vm.zoomTo(20, 40);
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(true);
     });
 
     it('zoomTo is a no-op when duration is zero or range is empty', async () => {
@@ -1052,7 +1075,7 @@ describe('SegmentEditor — zoom, pan, wheel', () => {
         w.vm.zoomTo(0, 10);
         w.vm.zoomTo(30, 20);
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(false);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(false);
     });
 
     it('the zoom slider adjusts the viewport', async () => {
@@ -1062,7 +1085,7 @@ describe('SegmentEditor — zoom, pan, wheel', () => {
         slider.value = '5';
         slider.dispatchEvent(new Event('input', { bubbles: true }));
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(true);
     });
 });
 
@@ -1110,7 +1133,7 @@ describe('SegmentEditor — scrollbar', () => {
         // Can't render scrollbar without zoom > 1, so this test verifies the branch executes
         // without error and that no scrollbar is shown.
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(false);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(false);
     });
 });
 
@@ -1146,7 +1169,7 @@ describe('SegmentEditor — touch', () => {
         tl.dispatchEvent(touchEvent('touchmove', [{ x: 300 }, { x: 700 }]));
         tl.dispatchEvent(touchEvent('touchend', [{ x: 300 }]));
         await flush();
-        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar-thumb').exists()).toBe(true);
     });
 });
 
@@ -1203,7 +1226,7 @@ describe('SegmentEditor — exposed methods', () => {
         expect(latestSegments(w)).toHaveLength(1);
     });
 
-    it('clicking Mark In / Mark Out / Add via the toolbar works', async () => {
+    it('clicking Mark In / Mark Out via the toolbar works', async () => {
         const t = { value: 10 };
         const w = mountEditor({ currentTime: t });
         await flush();
@@ -1215,10 +1238,18 @@ describe('SegmentEditor — exposed methods', () => {
         await buttons[1].trigger('click'); // Mark Out
         await flush();
         expect(latestSegments(w)).toHaveLength(1);
-        t.value = 40;
-        await buttons[2].trigger('click'); // Add
+    });
+
+    it('keeps the scrollbar row laid out at every zoom level', async () => {
+        // Rendering the row only when zoomed made the whole timeline jump the
+        // moment you zoomed, because a row appeared underneath it.
+        const w = mountEditor();
         await flush();
-        expect(latestSegments(w)).toHaveLength(2);
+
+        expect(w.find('.se-scrollbar').exists()).toBe(true);
+        expect(w.find('.se-scrollbar').classes()).toContain(
+            'se-scrollbar--idle'
+        );
     });
 
     it('clears everything from the toolbar, behind a confirm', async () => {
@@ -1668,6 +1699,68 @@ describe('SegmentEditor — split list panel (beside player)', () => {
         await w.find('.se-list-row').trigger('click');
         await flush();
         expect(onSeek).not.toHaveBeenCalled();
+    });
+});
+
+/**
+ * Trim ranges are what gets kept, so everything between them is dropped.
+ * Darkening the dropped stretches says which is which using the picture itself.
+ * A translucent tint over the kept range only worked while the frames were
+ * dimmed to a quarter strength; over full-colour thumbnails it disappeared.
+ */
+describe('SegmentEditor — discarded ranges', () => {
+    const dimmed = (w: ReturnType<typeof mountEditor>) =>
+        w.findAll('.se-discarded');
+
+    it('darkens the gap between two kept ranges', async () => {
+        const w = mountEditor({
+            props: { mode: 'trim', duration: 100 },
+            segments: [seg(1, 10, 20), seg(2, 60, 70)],
+        });
+        await flush();
+
+        // before 10, between 20 and 60, after 70
+        expect(dimmed(w)).toHaveLength(3);
+    });
+
+    it('darkens nothing when no range is marked', async () => {
+        // No marks means the whole timeline is encoded, so dimming any of it
+        // would say the opposite.
+        const w = mountEditor({ props: { mode: 'trim', duration: 100 } });
+        await flush();
+
+        expect(dimmed(w)).toHaveLength(0);
+    });
+
+    it('leaves no gap when a range covers the whole timeline', async () => {
+        const w = mountEditor({
+            props: { mode: 'trim', duration: 100 },
+            segments: [seg(1, 0, 100)],
+        });
+        await flush();
+
+        expect(dimmed(w)).toHaveLength(0);
+    });
+
+    it('darkens only the tail when a range starts at zero', async () => {
+        const w = mountEditor({
+            props: { mode: 'trim', duration: 100 },
+            segments: [seg(1, 0, 40)],
+        });
+        await flush();
+
+        expect(dimmed(w)).toHaveLength(1);
+    });
+
+    it('does not dim outside trim mode', async () => {
+        // Chapters mark points of interest; the material between them is kept.
+        const w = mountEditor({
+            props: { mode: 'chapters', duration: 100 },
+            segments: [seg(1, 10, 20)],
+        });
+        await flush();
+
+        expect(dimmed(w)).toHaveLength(0);
     });
 });
 

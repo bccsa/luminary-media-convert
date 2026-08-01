@@ -161,7 +161,6 @@ const trimToolbarHasVisibleContent = computed(() => {
             v-model="editorSegments"
             :mode="timelineMode"
             :max-segments="timelineMaxSegments"
-            :show-labels="true"
             :title="segmentEditorTimelineTitle"
             :show-header="false"
             :duration="probeDuration"

@@ -55,9 +55,12 @@ describe('SessionTrimWorkspace timeline', () => {
         expect(editorProps(true).maxSegments).toBeUndefined();
     });
 
-    it('labels segments in both phases', () => {
-        // Trim normally hides labels; this timeline asks for them either way.
-        expect(editorProps(false).showLabels).toBe(true);
-        expect(editorProps(true).showLabels).toBe(true);
+    it('leaves labelling to the editor rather than forcing it on', () => {
+        // Trim ranges carry no name worth showing over the frames: the bright
+        // stretch already says which part is kept, and the times live in the
+        // Cuts panel. Chapters do have names, and the editor shows them by
+        // default — so not passing the prop gives the right answer in both.
+        expect(editorProps(false).showLabels).toBeUndefined();
+        expect(editorProps(true).showLabels).toBeUndefined();
     });
 });
