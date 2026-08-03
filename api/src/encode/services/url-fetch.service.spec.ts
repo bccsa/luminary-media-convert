@@ -3,12 +3,24 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { ReadableStream } from 'stream/web';
 
-const { mockLookup } = vi.hoisted(() => ({
+const { mockLookup, mockInFlightShortfall } = vi.hoisted(() => ({
     mockLookup: vi.fn(),
+    // Null by default — the guard stays out of the way of every test that is
+    // not about it.
+    mockInFlightShortfall: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock('dns/promises', () => ({
     lookup: (...args: any[]) => mockLookup(...args),
+}));
+
+// Only the in-flight guard is stubbed; `ingestShortfall` stays real so the
+// check before the download is still exercised by the tests above it. Free
+// space cannot be made to fall mid-download from a test, and the wiring — that
+// a refusal actually aborts the transfer — is what these cover.
+vi.mock('./disk-space.js', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('./disk-space.js')>()),
+    inFlightShortfall: (...args: any[]) => mockInFlightShortfall(...args),
 }));
 
 import { UrlFetchService } from './url-fetch.service.js';
@@ -74,6 +86,7 @@ describe('UrlFetchService', () => {
         delete process.env.URL_FETCH_STREAMS;
         delete process.env.MAX_UPLOAD_SIZE;
         delete process.env.DISK_RESERVE_BYTES;
+        mockInFlightShortfall.mockResolvedValue(null);
 
         sessionService = new SessionService({ emit: () => {} } as any);
         tusUploadService = { finalizeUpload: vi.fn().mockResolvedValue(undefined) };
@@ -596,6 +609,90 @@ describe('UrlFetchService', () => {
             );
             // The probe told us it would not fit, so the body was never fetched.
             expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(tusUploadService.finalizeUpload).not.toHaveBeenCalled();
+        });
+
+        it('stops a single-stream download when the volume runs out under it', async () => {
+            // The check before the download only knew what was free then; an
+            // encode writing its output beside it can take the rest.
+            mockInFlightShortfall.mockResolvedValue(
+                'Upload stopped: the encoder is running out of disk space',
+            );
+            const svc = makeService();
+            const session = sessionService.create(makeConfig());
+
+            fetchMock
+                .mockResolvedValueOnce(
+                    makeResponse({
+                        status: 200,
+                        headers: { 'content-length': '11', 'content-type': 'video/mp4' },
+                        url: 'https://example.com/small.mp4',
+                    }),
+                )
+                .mockResolvedValueOnce(
+                    makeResponse({
+                        status: 200,
+                        headers: {},
+                        body: Buffer.from('small video'),
+                        url: 'https://example.com/small.mp4',
+                    }),
+                );
+
+            await svc.fetchToSession(session.id, 'https://example.com/small.mp4');
+
+            expect(sessionService.get(session.id)!.status).toBe('failed');
+            expect(sessionService.get(session.id)!.error).toMatch(
+                /Upload stopped/,
+            );
+            expect(tusUploadService.finalizeUpload).not.toHaveBeenCalled();
+        });
+
+        it('stops a parallel download when the volume runs out under it', async () => {
+            // The path large sources actually take, which is when disk matters.
+            mockInFlightShortfall.mockResolvedValue(
+                'Upload stopped: the encoder is running out of disk space',
+            );
+            process.env.URL_FETCH_STREAMS = '4';
+            const svc = makeService();
+            const session = sessionService.create(makeConfig());
+
+            const total = 20 * 1024 * 1024; // over the 16 MB parallel threshold
+            const fullBuf = Buffer.alloc(total);
+
+            fetchMock.mockResolvedValueOnce(
+                makeResponse({
+                    status: 200,
+                    headers: {
+                        'content-length': String(total),
+                        'content-type': 'video/mp4',
+                        'accept-ranges': 'bytes',
+                    },
+                    url: 'https://cdn.example.com/big.mp4',
+                }),
+            );
+            for (let i = 0; i < 4; i++) {
+                fetchMock.mockImplementationOnce(async (_url: string, init: any) => {
+                    const m = /^bytes=(\d+)-(\d+)$/.exec(init.headers.Range)!;
+                    const start = parseInt(m[1]!, 10);
+                    const end = parseInt(m[2]!, 10);
+                    return makeResponse({
+                        status: 206,
+                        headers: {
+                            'content-range': `bytes ${start}-${end}/${total}`,
+                            'content-length': String(end - start + 1),
+                        },
+                        body: fullBuf.subarray(start, end + 1),
+                        url: 'https://cdn.example.com/big.mp4',
+                    });
+                });
+            }
+
+            await svc.fetchToSession(session.id, 'https://cdn.example.com/big.mp4');
+
+            expect(sessionService.get(session.id)!.status).toBe('failed');
+            expect(sessionService.get(session.id)!.error).toMatch(
+                /Upload stopped/,
+            );
             expect(tusUploadService.finalizeUpload).not.toHaveBeenCalled();
         });
 

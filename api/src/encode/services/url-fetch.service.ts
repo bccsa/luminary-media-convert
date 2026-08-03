@@ -13,12 +13,14 @@ import {
     hasAllowedExtension,
     extensionFromContentType,
 } from './media-extensions.js';
-import { ingestShortfall } from './disk-space.js';
+import { ingestShortfall, inFlightShortfall } from './disk-space.js';
 
 const DEFAULT_MAX_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 const DEFAULT_STREAMS = 4;
 const MAX_STREAMS = 16;
 const MIN_PARALLEL_BYTES = 16 * 1024 * 1024; // 16 MB
+/** How often the volume is measured while a download runs. */
+const DISK_CHECK_INTERVAL_MS = 2000;
 const PROGRESS_INTERVAL_MS = 500;
 const HEARTBEAT_INTERVAL_MS = 2000;
 const PROBE_TIMEOUT_MS = 15_000;
@@ -46,6 +48,8 @@ export class UrlFetchService {
     private readonly logger = new Logger(UrlFetchService.name);
     private readonly workDir: string;
     private readonly maxSize: number;
+    /** When the volume was last measured, shared across concurrent streams. */
+    private lastDiskCheck = 0;
     private readonly streams: number;
     private readonly inFlight = new Map<string, AbortController>();
 
@@ -334,6 +338,42 @@ export class UrlFetchService {
         return `input${ext}`;
     }
 
+    /**
+     * Why the download in progress can no longer continue, or null.
+     *
+     * The check before the download only knew what was free at the time. A
+     * source accepted then can still be overtaken by an encode writing its
+     * output beside it, and unlike the tus path there is no external hook to
+     * notice — so the streams check as they go.
+     *
+     * Throttled and shared across streams: the parallel path runs four at once
+     * and it is one volume being measured, not four.
+     */
+    private async downloadDiskGuard(
+        remaining: number,
+    ): Promise<string | null> {
+        const now = Date.now();
+        if (now - this.lastDiskCheck < DISK_CHECK_INTERVAL_MS) return null;
+        this.lastDiskCheck = now;
+        return inFlightShortfall(this.workDir, remaining);
+    }
+
+    /**
+     * Pass a chunk on, unless the volume has run out underneath the download.
+     * Never calls back twice, and treats its own failure as "carry on".
+     */
+    private guardedPassthrough(
+        chunk: unknown,
+        remaining: number,
+        cb: (err?: Error | null, chunk?: unknown) => void,
+    ): void {
+        this.downloadDiskGuard(remaining)
+            .then((shortfall) =>
+                shortfall ? cb(new Error(shortfall)) : cb(null, chunk),
+            )
+            .catch(() => cb(null, chunk));
+    }
+
     private async downloadParallel(
         sessionId: string,
         url: string,
@@ -400,7 +440,11 @@ export class UrlFetchService {
                         transform: (chunk, _enc, cb) => {
                             downloaded += chunk.length;
                             emitProgress();
-                            cb(null, chunk);
+                            this.guardedPassthrough(
+                                chunk,
+                                Math.max(0, total - downloaded),
+                                cb,
+                            );
                         },
                     });
 
@@ -492,7 +536,12 @@ export class UrlFetchService {
                     this.sessionService.updateProgress(sessionId, 0);
                     lastHeartbeat = now;
                 }
-                cb(null, chunk);
+
+                this.guardedPassthrough(
+                    chunk,
+                    total !== null ? Math.max(0, total - downloaded) : 0,
+                    cb,
+                );
             },
         });
 
