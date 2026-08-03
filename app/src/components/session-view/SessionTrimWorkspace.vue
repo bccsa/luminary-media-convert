@@ -129,7 +129,7 @@ const trimToolbarHasVisibleContent = computed(() => {
     <!-- Timeline: full-width bottom strip for precise trim editing -->
     <div
         v-if="section === 'timeline' && showTrimSegmentEditor"
-        class="se-timeline-wrap w-full pl-3 pr-4"
+        class="se-timeline-wrap w-full"
     >
         <SegmentEditor
             ref="trimSegmentEditorRef"
@@ -194,9 +194,13 @@ const trimToolbarHasVisibleContent = computed(() => {
 }
 
 .se-timeline-wrap :deep(.se-root) {
-    /* Square while this bled edge to edge. Now that it is inset to line up with
-       the player and the side card, it reads as one of them — so it is rounded
-       like them (matching their `rounded-xl`). */
-    border-radius: 0.75rem;
+    /* The card itself runs the full width — it is the floor of the layout, not
+       another panel sitting on it, so it has no corners to round. Alignment is
+       done inside instead: the padding here puts the filmstrip and waveform on
+       the same left edge as the player, and the same right edge as the card
+       beside it. Top padding is trimmed back because the strip carries its own
+       breathing room above the track. */
+    border-radius: 0;
+    padding: 0.5rem 0.75rem 1.125rem;
 }
 </style>

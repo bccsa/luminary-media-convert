@@ -19,8 +19,8 @@
     --se-danger-hover: rgba(239, 68, 68, 0.1);
     --se-playhead: rgb(3 105 161);
     --se-playhead-shadow: rgba(14, 116, 144, 0.28);
-    --se-segment-label: rgb(30 41 55);
-    --se-segment-label-shadow: none;
+    --se-segment-label: #ffffff;
+    --se-segment-label-bg: rgb(15 23 42 / 0.78);
     --se-ruler-tick: rgba(100, 116, 139, 0.28);
     --se-waveform: rgba(255, 255, 255, 0.85);
     --se-list-hover: rgba(14, 165, 233, 0.08);
@@ -68,8 +68,8 @@ html.dark .se-root {
     --se-danger-hover: rgba(239, 68, 68, 0.15);
     --se-playhead: rgba(255, 255, 255, 0.95);
     --se-playhead-shadow: rgba(0, 0, 0, 0.65);
-    --se-segment-label: rgba(255, 255, 255, 0.92);
-    --se-segment-label-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
+    --se-segment-label: rgba(255, 255, 255, 0.95);
+    --se-segment-label-bg: rgb(2 6 23 / 0.82);
     --se-ruler-tick: rgba(148, 163, 184, 0.22);
     --se-waveform: rgba(255, 255, 255, 0.85);
     --se-list-hover: rgba(56, 189, 248, 0.08);
@@ -459,8 +459,21 @@ html.dark .se-root {
     right: -2px;
 }
 
+/*
+ * The label sits on the filmstrip, and chapters are no longer dimmed, so it
+ * competes with full-colour frames. As plain text it disappeared — in the light
+ * theme it was dark with no shadow at all, so any busy frame swallowed it. A
+ * chip of its own gives it a constant background whatever is underneath, which
+ * a shadow cannot: a shadow only helps where the frame is lighter than the text.
+ *
+ * Capped at the segment width so a long chapter name on a short chapter
+ * ellipsises rather than pushing against the edges.
+ */
 .se-segment-label {
-    padding: 0 6px;
+    max-width: calc(100% - 8px);
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--se-segment-label-bg);
     font-size: 10px;
     font-weight: 600;
     color: var(--se-segment-label);
@@ -468,7 +481,6 @@ html.dark .se-root {
     overflow: hidden;
     text-overflow: ellipsis;
     pointer-events: none;
-    text-shadow: var(--se-segment-label-shadow);
 }
 
 .se-playhead {
