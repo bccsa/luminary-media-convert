@@ -171,6 +171,11 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                 const session = this.sessionService.get(sessionId);
                 if (!session || session.status !== 'uploading') return;
 
+                // Bytes are arriving, so this session is alive. Stamped before
+                // the throttle below, and regardless of it — the abandoned-session
+                // sweep judges on this and a slow upload must not look idle.
+                this.sessionService.touch(sessionId);
+
                 const now = Date.now();
                 if (now - this.lastDiskCheck < DISK_CHECK_INTERVAL_MS) return;
                 this.lastDiskCheck = now;
