@@ -366,11 +366,14 @@ export class UrlFetchService {
         chunk: unknown,
         remaining: number,
         cb: (err?: Error | null, chunk?: unknown) => void,
+        onStop?: (reason: string) => void,
     ): void {
         this.downloadDiskGuard(remaining)
-            .then((shortfall) =>
-                shortfall ? cb(new Error(shortfall)) : cb(null, chunk),
-            )
+            .then((shortfall) => {
+                if (!shortfall) return cb(null, chunk);
+                onStop?.(shortfall);
+                cb(new Error(shortfall));
+            })
             .catch(() => cb(null, chunk));
     }
 
@@ -392,6 +395,15 @@ export class UrlFetchService {
         const fd = fh.fd;
         const ranges = this.computeRanges(total, this.streams);
         let downloaded = 0;
+        // Why this download was stopped, when it was us who stopped it.
+        //
+        // The ranges share one file descriptor. When the guard fails one of
+        // them the descriptor is closed underneath the others, and they fail in
+        // turn with EBADF — which then wins the race to reject `Promise.all`.
+        // Observed reporting `EBADF: bad file descriptor, write` to the user
+        // for what was really a full disk: precisely the raw errno this whole
+        // issue is about. Remember the real reason and re-throw that instead.
+        let stopReason: string | null = null;
         let lastEmittedAt = 0;
         let lastEmittedBytes = 0;
 
@@ -444,6 +456,9 @@ export class UrlFetchService {
                                 chunk,
                                 Math.max(0, total - downloaded),
                                 cb,
+                                (reason) => {
+                                    stopReason ??= reason;
+                                },
                             );
                         },
                     });
@@ -464,6 +479,9 @@ export class UrlFetchService {
 
             emitProgress(true);
             await fh.sync().catch(() => {});
+        } catch (err) {
+            if (stopReason) throw new Error(stopReason);
+            throw err;
         } finally {
             await fh.close().catch(() => {});
         }
