@@ -41,6 +41,15 @@ export interface Session {
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
     createdAt: number;
+    /**
+     * When this session last did anything.
+     *
+     * Abandonment cannot be judged on `createdAt`: a 10 GB upload over a poor
+     * link is hours old and perfectly alive, while a tab closed on the config
+     * screen is hours old and never coming back. Only the gap since the last
+     * sign of life tells those apart.
+     */
+    lastActivityAt: number;
 }
 
 /** Statuses that cannot survive the process that was driving them. */
@@ -144,6 +153,11 @@ export class SessionService implements OnModuleInit {
                 const session = JSON.parse(readFileSync(path, 'utf-8')) as Session;
                 if (!session?.id || !session?.sessionToken) continue;
 
+                // Written before sessions carried an activity stamp. Falling
+                // back to createdAt keeps the sweep from treating every
+                // pre-existing session as freshly active.
+                session.lastActivityAt ??= session.createdAt;
+
                 if (IN_FLIGHT.includes(session.status)) {
                     // The queue and the FFmpeg process died with the old process;
                     // reporting these as still running would be a lie the client
@@ -206,6 +220,7 @@ export class SessionService implements OnModuleInit {
             progress: 0,
             config,
             createdAt: Date.now(),
+            lastActivityAt: Date.now(),
         };
 
         this.sessions.set(id, session);
@@ -230,6 +245,7 @@ export class SessionService implements OnModuleInit {
         const session = this.sessions.get(id);
         if (session) {
             session.status = status;
+            session.lastActivityAt = Date.now();
             this.persist(session);
             this.emitEvent(session);
         }
@@ -239,8 +255,22 @@ export class SessionService implements OnModuleInit {
         const session = this.sessions.get(id);
         if (session) {
             session.progress = progress;
+            session.lastActivityAt = Date.now();
             this.emitEvent(session);
         }
+    }
+
+    /**
+     * Record a sign of life without changing anything else.
+     *
+     * A tus upload reports its progress to tusd, not to us, so nothing here
+     * moves while gigabytes are arriving. Without this a slow upload looks
+     * identical to an abandoned one and `cleanupAbandoned` would delete it
+     * mid-transfer.
+     */
+    touch(id: string): void {
+        const session = this.sessions.get(id);
+        if (session) session.lastActivityAt = Date.now();
     }
 
     updatePipelineProgress(id: string, pipelineProgress: PipelineProgress): void {
@@ -343,6 +373,43 @@ export class SessionService implements OnModuleInit {
      * Remove sessions older than the given max age (in ms).
      * Useful for periodic cleanup of completed/failed sessions.
      */
+    /**
+     * Remove sessions that were started and then walked away from.
+     *
+     * `cleanup` only ever considered `completed` and `failed`, so a session that
+     * uploaded and was never encoded was bounded by nothing at all — not by size
+     * and not by age. Someone who uploads 7 GB, looks at the config form and
+     * closes the tab leaves that 7 GB on the volume permanently; the disk
+     * exhaustion in #130 found 6.9 GB of `/work` being exactly that.
+     *
+     * Only genuinely idle states are swept. Anything mid-encode is left alone —
+     * it is doing work someone is waiting on — and so is `queued`, where the
+     * source is needed and a long backlog is a legitimate reason to sit still.
+     */
+    cleanupAbandoned(maxAgeMs: number): number {
+        const cutoff = Date.now() - maxAgeMs;
+        const idle: SessionStatus[] = ['created', 'uploading', 'uploaded'];
+        let removed = 0;
+
+        for (const [id, session] of this.sessions.entries()) {
+            if (!idle.includes(session.status)) continue;
+            if (session.lastActivityAt >= cutoff) continue;
+
+            this.tokenIndex.delete(session.sessionToken);
+            this.sessions.delete(id);
+            this.purge(id);
+            // Named individually: this deletes a customer's uploaded media,
+            // which should never be something you discover by its absence.
+            this.logger.log(
+                `Removed abandoned session ${id} (${session.status}, ` +
+                    `idle ${Math.round((Date.now() - session.lastActivityAt) / 3_600_000)}h)`,
+            );
+            removed++;
+        }
+
+        return removed;
+    }
+
     cleanup(maxAgeMs: number = 24 * 60 * 60 * 1000): number {
         const cutoff = Date.now() - maxAgeMs;
         let removed = 0;

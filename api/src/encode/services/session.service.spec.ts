@@ -234,6 +234,103 @@ describe('SessionService', () => {
         });
     });
 
+    describe('cleanupAbandoned', () => {
+        const idle = (id: string, hours: number) => {
+            (service.get(id) as any).lastActivityAt =
+                Date.now() - hours * 3_600_000;
+        };
+
+        it('removes an upload that was never encoded', () => {
+            // The 7 GB-and-a-closed-tab case: nothing else has ever bounded
+            // these, not size and not age.
+            const session = service.create(makeConfig());
+            service.updateStatus(session.id, 'uploaded');
+            idle(session.id, 8);
+
+            expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(1);
+            expect(service.get(session.id)).toBeUndefined();
+        });
+
+        it('leaves a session that is still doing something', () => {
+            const session = service.create(makeConfig());
+            service.updateStatus(session.id, 'uploaded');
+            idle(session.id, 1);
+
+            expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(0);
+            expect(service.get(session.id)).toBeDefined();
+        });
+
+        it('spares a slow upload that is still delivering bytes', () => {
+            // A tus upload reports progress to tusd, not to us, so nothing here
+            // moves while gigabytes arrive — `touch` is the only sign of life a
+            // long transfer gives. Without it this session is swept mid-upload.
+            const session = service.create(makeConfig());
+            service.updateStatus(session.id, 'uploading');
+            idle(session.id, 20);
+
+            service.touch(session.id);
+
+            expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(0);
+            expect(service.get(session.id)).toBeDefined();
+        });
+
+        it('sweeps an upload that stopped delivering', () => {
+            const session = service.create(makeConfig());
+            service.updateStatus(session.id, 'uploading');
+            idle(session.id, 20);
+
+            expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(1);
+        });
+
+        it('never touches a session mid-encode', () => {
+            // Deleting the source out from under a running encode would be far
+            // worse than the disk it reclaims.
+            for (const status of ['encoding', 'encrypting', 'uploading_to_s3'] as const) {
+                const session = service.create(makeConfig());
+                service.updateStatus(session.id, status);
+                idle(session.id, 100);
+
+                expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(0);
+                expect(service.get(session.id)).toBeDefined();
+            }
+        });
+
+        it('leaves queued sessions alone', () => {
+            // The source is needed, and a long backlog is a legitimate reason
+            // for a session to sit still.
+            const session = service.create(makeConfig());
+            service.updateStatus(session.id, 'queued');
+            idle(session.id, 100);
+
+            expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(0);
+            expect(service.get(session.id)).toBeDefined();
+        });
+
+        it('leaves finished sessions to the other sweep', () => {
+            const done = service.create(makeConfig());
+            service.setCompleted(done.id, [], '');
+            idle(done.id, 100);
+            const failed = service.create(makeConfig());
+            service.setFailed(failed.id, 'err');
+            idle(failed.id, 100);
+
+            expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(0);
+            expect(service.get(done.id)).toBeDefined();
+            expect(service.get(failed.id)).toBeDefined();
+        });
+
+        it('releases the session token too', () => {
+            const session = service.create(makeConfig());
+            service.updateStatus(session.id, 'uploaded');
+            idle(session.id, 8);
+
+            service.cleanupAbandoned(6 * 3_600_000);
+            expect(
+                service.getBySessionToken(session.sessionToken),
+            ).toBeUndefined();
+        });
+    });
+
     describe('cleanup', () => {
         it('should remove old completed/failed sessions', () => {
             const s1 = service.create(makeConfig());
