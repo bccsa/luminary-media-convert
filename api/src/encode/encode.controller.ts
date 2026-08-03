@@ -483,12 +483,22 @@ export class EncodeController {
             throw new NotFoundException(`Session ${sessionId} not found`);
         }
 
+        // Finished sessions are deletable too — that is the only way their disk
+        // is ever reclaimed. Excluding them meant the work directory of a failed
+        // session, source file and all, could not be removed through the product
+        // at any point in its life; on staging that was several GB per attempt,
+        // on a volume that filled and took the next encode down with it.
+        //
+        // uploading_to_s3 stays excluded: the pipeline is mid-write, and pulling
+        // its files out from under it leaves half an output in the bucket.
         const deletableStatuses = [
             'created',
             'uploading',
             'uploaded',
             'queued',
             'encoding',
+            'failed',
+            'completed',
         ];
         if (!deletableStatuses.includes(session.status)) {
             throw new BadRequestException(

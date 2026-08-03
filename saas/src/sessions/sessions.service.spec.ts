@@ -603,6 +603,49 @@ describe('SessionsService', () => {
     });
 
     describe('deleteSession — error handling', () => {
+        /**
+         * Deleting is how a user reclaims disk. Reporting success while the
+         * encoder still holds the files tells them they have freed space they
+         * have not — on staging that meant deleting session after session and
+         * watching the free space never move.
+         */
+        it('refuses when the encoder refuses, rather than claiming success', async () => {
+            await service.createSession('user:1', {
+                s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' },
+            } as any);
+
+            vi.mocked(fetch).mockResolvedValue(
+                new Response(
+                    JSON.stringify({ message: 'Cannot delete session in "failed" status' }),
+                    { status: 400 },
+                ),
+            );
+            mockDatabaseService.get.mockResolvedValueOnce({
+                _id: 'session:sess-123', _rev: '1-abc', userId: 'user:1',
+            });
+
+            await expect(
+                service.deleteSession('user:1', 'sess-123'),
+            ).rejects.toThrow(/still on the encoder/);
+            expect(mockDatabaseService.destroy).not.toHaveBeenCalled();
+        });
+
+        it('asks the encoder even with no session held in memory', async () => {
+            // Gating this on the in-memory record meant that after a restart the
+            // encoder was never asked, and its copy of the source stayed for good.
+            mockDatabaseService.get.mockResolvedValueOnce({
+                _id: 'session:sess-orphan', _rev: '1-abc', userId: 'user:1',
+            });
+            vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 204 }));
+
+            await service.deleteSession('user:1', 'sess-orphan');
+
+            expect(fetch).toHaveBeenCalledWith(
+                'http://localhost:3000/api/sessions/sess-orphan',
+                expect.objectContaining({ method: 'DELETE' }),
+            );
+        });
+
         it('should succeed even when Encoding API delete fails (best-effort)', async () => {
             await service.createSession('user:1', {
                 s3: { endPoint: 'e', bucket: 'b', accessKey: 'a', secretKey: 's' },
