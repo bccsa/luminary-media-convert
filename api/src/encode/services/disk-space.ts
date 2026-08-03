@@ -59,3 +59,36 @@ export async function ingestShortfall(
         `running). Free space on the encoder and upload again.`
     );
 }
+
+/**
+ * Why an upload already in flight can no longer be allowed to continue, or null
+ * when it can (or when the question cannot be answered).
+ *
+ * Checking once at creation is not enough. Two uploads accepted in the same
+ * moment each measure the same free space independently and both pass, and an
+ * encode writing its output alongside them takes the rest — staging reached 0
+ * bytes free with an encode running and a 13 GB upload still being accepted
+ * onto the same volume.
+ *
+ * Unlike the check at creation, an unknown remaining size is not a reason to
+ * stay quiet: the reserve alone still decides, because the point here is to
+ * stop the volume being driven to empty whatever the upload claims about
+ * itself.
+ */
+export async function inFlightShortfall(
+    dir: string,
+    remainingBytes: number
+): Promise<string | null> {
+    const free = await freeBytes(dir);
+    if (free === null) return null;
+
+    const reserve = reserveBytes();
+    const needed = Math.max(0, remainingBytes) + reserve;
+    if (free >= needed) return null;
+
+    return (
+        `Upload stopped: the encoder is running out of disk space ` +
+        `(${formatBytes(free)} free). Free space on the encoder and ` +
+        `upload again.`
+    );
+}

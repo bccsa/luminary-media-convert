@@ -134,7 +134,30 @@ export class HookServer {
 
             case 'post-receive': {
                 if (this.config.onProgress) {
-                    await this.config.onProgress(upload);
+                    try {
+                        await this.config.onProgress(upload);
+                    } catch (err: unknown) {
+                        // An upload can become unacceptable after it was let in
+                        // — most obviously when the disk it is filling runs out
+                        // from under it. Throwing here asks tusd to terminate it
+                        // rather than letting it run to completion.
+                        const hookErr = err as {
+                            status_code?: number;
+                            body?: string;
+                        };
+                        const response: TusdHookResponse = {
+                            StopUpload: true,
+                            HttpResponse: {
+                                StatusCode: hookErr.status_code || 400,
+                                Body: hookErr.body || 'Upload stopped',
+                            },
+                        };
+                        res.writeHead(200, {
+                            'Content-Type': 'application/json',
+                        });
+                        res.end(JSON.stringify(response));
+                        return;
+                    }
                 }
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end('{}');

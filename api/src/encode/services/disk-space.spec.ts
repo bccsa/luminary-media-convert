@@ -11,6 +11,7 @@ vi.mock('fs/promises', () => ({
 import {
     freeBytes,
     ingestShortfall,
+    inFlightShortfall,
     reserveBytes,
     DEFAULT_RESERVE_BYTES,
 } from './disk-space.js';
@@ -121,6 +122,47 @@ describe('disk-space', () => {
             mockStatfs.mockRejectedValueOnce(new Error('ENOSYS'));
 
             await expect(ingestShortfall('/work', 500 * GB)).resolves.toBeNull();
+        });
+    });
+
+    describe('inFlightShortfall', () => {
+        it('stops an upload when the volume has fallen into the reserve', async () => {
+            // Nothing left of this upload to write, but the disk is nearly gone
+            // — something else took it, which is exactly the case to stop for.
+            mockStatfs.mockResolvedValueOnce(withFree(1));
+
+            await expect(inFlightShortfall('/work', 0)).resolves.toMatch(
+                /Upload stopped/
+            );
+        });
+
+        it('stops when what is left of the upload no longer fits', async () => {
+            mockStatfs.mockResolvedValueOnce(withFree(5));
+
+            await expect(inFlightShortfall('/work', 10 * GB)).resolves.toMatch(
+                /Upload stopped/
+            );
+        });
+
+        it('lets an upload continue when there is room for the rest of it', async () => {
+            mockStatfs.mockResolvedValueOnce(withFree(100));
+
+            await expect(inFlightShortfall('/work', 10 * GB)).resolves.toBeNull();
+        });
+
+        it('judges on the reserve even when the remaining size is unknown', async () => {
+            // Unlike the check at creation, an unknown size is not a reason to
+            // stay quiet here — the point is to stop the volume reaching empty.
+            mockStatfs.mockResolvedValueOnce(withFree(100));
+
+            await expect(inFlightShortfall('/work', 0)).resolves.toBeNull();
+            expect(mockStatfs).toHaveBeenCalled();
+        });
+
+        it('stays silent when free space cannot be read', async () => {
+            mockStatfs.mockRejectedValueOnce(new Error('ENOSYS'));
+
+            await expect(inFlightShortfall('/work', 500 * GB)).resolves.toBeNull();
         });
     });
 });
