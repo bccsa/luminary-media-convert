@@ -528,18 +528,36 @@ describe('EncodeController', () => {
             ).rejects.toThrow(BadRequestException);
         });
 
-        it('should reject deletion of a completed session', async () => {
+        /**
+         * Deleting a finished session is the only way its disk is ever
+         * reclaimed. While these were refused, the work directory of a failed
+         * session — source file and all — could not be removed through the
+         * product at any point in its life. On staging that was several GB per
+         * attempt, on a volume that filled and took the next encode with it.
+         */
+        it('deletes a completed session', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.setCompleted(session.id, ['master.m3u8'], 'master.m3u8');
 
             await expect(
                 controller.deleteSession(session.id),
-            ).rejects.toThrow(BadRequestException);
+            ).resolves.toBeUndefined();
         });
 
-        it('should reject deletion of a failed session', async () => {
+        it('deletes a failed session, whose source is the disk worth reclaiming', async () => {
             const session = sessionService.create(makeConfig());
             sessionService.setFailed(session.id, 'some error');
+
+            await expect(
+                controller.deleteSession(session.id),
+            ).resolves.toBeUndefined();
+        });
+
+        it('still refuses while the output is being written to S3', async () => {
+            // Pulling files out from under the pipeline mid-write leaves half an
+            // output in the bucket.
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading_to_s3');
 
             await expect(
                 controller.deleteSession(session.id),

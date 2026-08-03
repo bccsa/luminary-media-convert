@@ -277,28 +277,52 @@ export class SessionsService implements OnModuleInit {
             }
         }
 
-        // Delete from Encoding API if active
-        if (record) {
-            try {
-                const res = await fetch(
-                    `${this.encodingApiUrl}/api/sessions/${sessionId}`,
-                    {
-                        method: 'DELETE',
-                        headers: { 'X-API-Key': this.encodingApiMasterKey },
-                    },
-                );
+        // Always ask the encoder, whether or not this process still holds the
+        // session in memory. Gating on the in-memory record meant that after a
+        // restart the encoder was never asked at all, and its copy of the source
+        // — gigabytes of it — stayed on disk for good.
+        //
+        // A 404 is fine: the encoder has already forgotten it, which is the
+        // state we want. An outright refusal is not — the files are still
+        // there, and reporting success would tell the user they had reclaimed
+        // space they had not.
+        try {
+            const res = await fetch(
+                `${this.encodingApiUrl}/api/sessions/${sessionId}`,
+                {
+                    method: 'DELETE',
+                    headers: { 'X-API-Key': this.encodingApiMasterKey },
+                },
+            );
 
-                if (!res.ok && res.status !== 404) {
-                    const body = await res.json().catch(() => ({}));
-                    this.logger.warn(
-                        `Encoding API session delete failed (${res.status}): ${body.message ?? ''}`,
-                    );
-                }
-            } catch {
-                // Best-effort — encoding API may be unavailable
+            // A 4xx is the encoder refusing, so the files are certainly still
+            // there and the user must hear about it. A 5xx is the encoder
+            // broken — transient, and not worth holding the record hostage to.
+            if (!res.ok && res.status !== 404 && res.status < 500) {
+                const body = await res.json().catch(() => ({}));
+                const reason = body.message ?? `status ${res.status}`;
+                this.logger.error(
+                    `Encoding API refused to delete session ${sessionId}: ${reason}`,
+                );
+                throw new BadGatewayException(
+                    `The encoder could not delete this session (${reason}). ` +
+                        'Its files are still on the encoder, so the session has been kept.',
+                );
             }
-            this.sessions.delete(sessionId);
+            if (!res.ok && res.status >= 500) {
+                this.logger.warn(
+                    `Encoding API errored deleting ${sessionId} (${res.status}); its files may remain`,
+                );
+            }
+        } catch (err) {
+            if (err instanceof BadGatewayException) throw err;
+            // Unreachable rather than refusing. Keeping the record hostage to a
+            // service being down helps nobody, so the delete goes ahead.
+            this.logger.warn(
+                `Encoding API unreachable while deleting ${sessionId}: ${(err as Error).message}`,
+            );
         }
+        this.sessions.delete(sessionId);
 
         // Remove CouchDB document
         if (doc?._rev) {
