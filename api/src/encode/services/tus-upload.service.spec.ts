@@ -130,6 +130,33 @@ describe('TusUploadService', () => {
             });
         });
 
+        it('should refuse further requests once the session has been stopped', async () => {
+            // tusd's StopUpload only cuts a request already in flight. A client
+            // sending small chunks with gaps between them gets stopped between
+            // requests, and would otherwise carry on filling the disk one
+            // accepted chunk at a time — observed doing exactly that.
+            const session = sessionService.create(makeConfig());
+            sessionService.setFailed(session.id, 'Upload stopped: out of space');
+            const hook = capturedServerConfig.value.onIncomingRequest;
+
+            await expect(
+                hook(makeRequestInfo(`Bearer ${session.sessionToken}`)),
+            ).rejects.toEqual({
+                status_code: 507,
+                body: 'Upload stopped: out of space',
+            });
+        });
+
+        it('should allow requests for a session still uploading', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            const hook = capturedServerConfig.value.onIncomingRequest;
+
+            await expect(
+                hook(makeRequestInfo(`Bearer ${session.sessionToken}`)),
+            ).resolves.toBeUndefined();
+        });
+
         it('should reject non-Bearer scheme', async () => {
             const hook = capturedServerConfig.value.onIncomingRequest;
             const req = makeRequestInfo('Basic abc123');

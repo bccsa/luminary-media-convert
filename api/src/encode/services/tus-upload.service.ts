@@ -95,6 +95,17 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                         body: 'Invalid or expired session token',
                     };
                 }
+
+                // A session stopped mid-upload must stay stopped. tusd's
+                // StopUpload only cuts a request already in flight, so a client
+                // sending small chunks with gaps between them would otherwise
+                // carry on filling the disk one accepted chunk at a time.
+                if (session.status === 'failed') {
+                    throw {
+                        status_code: 507,
+                        body: session.error || 'This upload has been stopped.',
+                    };
+                }
             },
 
             onUploadCreate: async (_req, upload) => {
