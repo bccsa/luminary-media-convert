@@ -180,6 +180,70 @@ describe('HookServer', () => {
         );
     });
 
+    it('should ask tusd to stop the upload when onProgress throws', async () => {
+        // An upload can become unacceptable after it was let in — the disk it is
+        // filling running out is the case this exists for.
+        const onProgress = vi.fn().mockRejectedValue({
+            status_code: 507,
+            body: 'Upload stopped: out of disk space',
+        });
+        hookServer = new HookServer({
+            path: '/api/tus',
+            directory: '/tmp/test-uploads',
+            onProgress,
+        });
+        port = await hookServer.start();
+
+        const payload = makePayload('post-receive', { Offset: 512 });
+        const res = await postToHookServer(port, payload);
+
+        expect(res.status).toBe(200);
+        expect(JSON.parse(res.body)).toEqual({
+            StopUpload: true,
+            HttpResponse: {
+                StatusCode: 507,
+                Body: 'Upload stopped: out of disk space',
+            },
+        });
+    });
+
+    it('should not stop the upload when onProgress resolves', async () => {
+        const onProgress = vi.fn().mockResolvedValue(undefined);
+        hookServer = new HookServer({
+            path: '/api/tus',
+            directory: '/tmp/test-uploads',
+            onProgress,
+        });
+        port = await hookServer.start();
+
+        const res = await postToHookServer(
+            port,
+            makePayload('post-receive', { Offset: 512 }),
+        );
+
+        expect(JSON.parse(res.body)).toEqual({});
+    });
+
+    it('should default the stop response when the thrown value carries nothing', async () => {
+        const onProgress = vi.fn().mockRejectedValue(new Error('boom'));
+        hookServer = new HookServer({
+            path: '/api/tus',
+            directory: '/tmp/test-uploads',
+            onProgress,
+        });
+        port = await hookServer.start();
+
+        const res = await postToHookServer(
+            port,
+            makePayload('post-receive', { Offset: 512 }),
+        );
+
+        expect(JSON.parse(res.body)).toEqual({
+            StopUpload: true,
+            HttpResponse: { StatusCode: 400, Body: 'Upload stopped' },
+        });
+    });
+
     it('should handle partial uploads (no metadata)', async () => {
         const onUploadCreate = vi.fn().mockResolvedValue(undefined);
         hookServer = new HookServer({

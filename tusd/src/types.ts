@@ -28,7 +28,11 @@ export interface TusdServerConfig {
     /** Hook: fires when an upload is fully completed, including concatenation (maps to tusd post-finish). */
     onUploadFinish?: (req: RequestInfo, upload: UploadInfo) => Promise<void>;
 
-    /** Hook: fires periodically during upload with progress (maps to tusd post-receive). */
+    /**
+     * Hook: fires periodically during upload with progress (maps to tusd
+     * post-receive). Throw to stop an upload already in flight — tusd
+     * terminates it and the client's next request fails.
+     */
     onProgress?: (upload: UploadInfo) => Promise<void>;
 
     /** Hook: fires when an upload is terminated/deleted (maps to tusd post-terminate). */
@@ -88,6 +92,7 @@ export interface TusdHookResponse {
         Header?: Record<string, string>;
     };
     RejectUpload?: boolean;
+    StopUpload?: boolean;
     ChangeFileInfo?: {
         ID?: string;
         MetaData?: Record<string, string>;

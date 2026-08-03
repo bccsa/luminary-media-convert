@@ -130,6 +130,33 @@ describe('TusUploadService', () => {
             });
         });
 
+        it('should refuse further requests once the session has been stopped', async () => {
+            // tusd's StopUpload only cuts a request already in flight. A client
+            // sending small chunks with gaps between them gets stopped between
+            // requests, and would otherwise carry on filling the disk one
+            // accepted chunk at a time — observed doing exactly that.
+            const session = sessionService.create(makeConfig());
+            sessionService.setFailed(session.id, 'Upload stopped: out of space');
+            const hook = capturedServerConfig.value.onIncomingRequest;
+
+            await expect(
+                hook(makeRequestInfo(`Bearer ${session.sessionToken}`)),
+            ).rejects.toEqual({
+                status_code: 507,
+                body: 'Upload stopped: out of space',
+            });
+        });
+
+        it('should allow requests for a session still uploading', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            const hook = capturedServerConfig.value.onIncomingRequest;
+
+            await expect(
+                hook(makeRequestInfo(`Bearer ${session.sessionToken}`)),
+            ).resolves.toBeUndefined();
+        });
+
         it('should reject non-Bearer scheme', async () => {
             const hook = capturedServerConfig.value.onIncomingRequest;
             const req = makeRequestInfo('Basic abc123');
@@ -508,6 +535,101 @@ describe('TusUploadService', () => {
                     }),
                 ).resolves.toBeUndefined();
             });
+        });
+    });
+
+    describe('onProgress', () => {
+        const GB = 1024 ** 3;
+        const withFree = (gb: number) => ({
+            bavail: (gb * GB) / 4096,
+            bsize: 4096,
+        });
+
+        function uploadingSession() {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploading');
+            return session;
+        }
+
+        it('stops an upload once the volume has run out under it', async () => {
+            const session = uploadingSession();
+            mockStatfs.mockResolvedValueOnce(withFree(1));
+            const hook = capturedServerConfig.value.onProgress;
+
+            await expect(
+                hook({
+                    size: 40 * GB,
+                    offset: 5 * GB,
+                    metadata: { sessionId: session.id },
+                }),
+            ).rejects.toMatchObject({
+                status_code: 507,
+                body: expect.stringContaining('Upload stopped'),
+            });
+
+            const failed = sessionService.get(session.id)!;
+            expect(failed.status).toBe('failed');
+            expect(failed.error).toMatch(/Upload stopped/);
+        });
+
+        it('lets an upload continue while there is room', async () => {
+            const session = uploadingSession();
+            mockStatfs.mockResolvedValueOnce(withFree(200));
+            const hook = capturedServerConfig.value.onProgress;
+
+            await expect(
+                hook({
+                    size: 40 * GB,
+                    offset: 5 * GB,
+                    metadata: { sessionId: session.id },
+                }),
+            ).resolves.toBeUndefined();
+
+            expect(sessionService.get(session.id)!.status).toBe('uploading');
+        });
+
+        it('does not measure the volume on every progress event', async () => {
+            // tusd reports roughly every second per upload and the client runs
+            // five in parallel; the answer does not change that fast.
+            const session = uploadingSession();
+            mockStatfs.mockResolvedValue(withFree(200));
+            const hook = capturedServerConfig.value.onProgress;
+
+            const event = {
+                size: 40 * GB,
+                offset: 5 * GB,
+                metadata: { sessionId: session.id },
+            };
+            await hook(event);
+            await hook(event);
+            await hook(event);
+
+            expect(mockStatfs).toHaveBeenCalledTimes(1);
+        });
+
+        it('ignores a session that is no longer uploading', async () => {
+            // Re-failing a session would overwrite whatever actually went wrong.
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'encoding');
+            const hook = capturedServerConfig.value.onProgress;
+
+            await expect(
+                hook({
+                    size: 40 * GB,
+                    offset: 5 * GB,
+                    metadata: { sessionId: session.id },
+                }),
+            ).resolves.toBeUndefined();
+
+            expect(mockStatfs).not.toHaveBeenCalled();
+            expect(sessionService.get(session.id)!.status).toBe('encoding');
+        });
+
+        it('ignores an event carrying no sessionId', async () => {
+            const hook = capturedServerConfig.value.onProgress;
+
+            await expect(hook({ metadata: {} })).resolves.toBeUndefined();
+            expect(mockStatfs).not.toHaveBeenCalled();
         });
     });
 

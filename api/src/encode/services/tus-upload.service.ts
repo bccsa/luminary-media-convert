@@ -16,10 +16,18 @@ import { WebhookService } from './webhook.service.js';
 import { WaveformService } from './waveform.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
 import { hasAllowedExtension } from './media-extensions.js';
-import { ingestShortfall } from './disk-space.js';
+import { ingestShortfall, inFlightShortfall } from './disk-space.js';
 
 const DEFAULT_MAX_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 const EXPIRATION_MS = 10 * 60 * 1000; // 10 minutes
+/**
+ * How often the volume is measured while uploads are running.
+ *
+ * tusd reports progress roughly every second per upload, and the client runs
+ * five in parallel — checking on every event would be several statfs calls a
+ * second for no better answer.
+ */
+const DISK_CHECK_INTERVAL_MS = 2000;
 
 @Injectable()
 export class TusUploadService implements OnModuleInit, OnModuleDestroy {
@@ -36,6 +44,8 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
      */
     private readonly reconcileFailures = new Map<string, number>();
     private sweepInterval: ReturnType<typeof setInterval> | null = null;
+    /** When the volume was last measured, for the progress-hook throttle. */
+    private lastDiskCheck = 0;
 
     constructor(
         private readonly sessionService: SessionService,
@@ -83,6 +93,17 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                     throw {
                         status_code: 401,
                         body: 'Invalid or expired session token',
+                    };
+                }
+
+                // A session stopped mid-upload must stay stopped. tusd's
+                // StopUpload only cuts a request already in flight, so a client
+                // sending small chunks with gaps between them would otherwise
+                // carry on filling the disk one accepted chunk at a time.
+                if (session.status === 'failed') {
+                    throw {
+                        status_code: 507,
+                        body: session.error || 'This upload has been stopped.',
                     };
                 }
             },
@@ -138,6 +159,41 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
 
                 this.sessionService.updateStatus(sessionId, 'uploading');
                 this.sendStatusWebhook(sessionId, 'uploading');
+            },
+
+            onProgress: async (upload) => {
+                const sessionId = upload.metadata?.sessionId;
+                if (!sessionId) return;
+
+                // Only judge uploads still running: a session already failed or
+                // finished has nothing to stop, and re-failing it would overwrite
+                // whatever actually went wrong.
+                const session = this.sessionService.get(sessionId);
+                if (!session || session.status !== 'uploading') return;
+
+                const now = Date.now();
+                if (now - this.lastDiskCheck < DISK_CHECK_INTERVAL_MS) return;
+                this.lastDiskCheck = now;
+
+                const remaining = Math.max(
+                    0,
+                    (upload.size ?? 0) - (upload.offset ?? 0),
+                );
+                const shortfall = await inFlightShortfall(
+                    this.workDir,
+                    remaining,
+                );
+                if (!shortfall) return;
+
+                this.logger.error(
+                    `Upload for session ${sessionId} stopped: ${shortfall}`,
+                );
+                this.sessionService.setFailed(sessionId, shortfall);
+                this.sendStatusWebhook(sessionId, 'failed');
+
+                // Throwing asks tusd to terminate the upload rather than letting
+                // it carry on filling a volume that has no room left.
+                throw { status_code: 507, body: shortfall };
             },
 
             onUploadFinish: async (_req, upload) => {
