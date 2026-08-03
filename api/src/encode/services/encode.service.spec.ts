@@ -1,4 +1,14 @@
 import { type Mocked } from 'vitest';
+
+const { mockFreeBytes } = vi.hoisted(() => ({
+    mockFreeBytes: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock('./disk-space.js', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('./disk-space.js')>()),
+    freeBytes: (...args: any[]) => mockFreeBytes(...args),
+}));
+
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -232,12 +242,15 @@ describe('EncodeService', () => {
      * queued, and in one case forty minutes of encoding spent.
      */
     describe('refusing an encode that cannot fit', () => {
-        function withFreeBytes(bytes: number) {
-            vi.spyOn(service as any, 'freeBytes').mockResolvedValue(bytes);
+        function withFreeBytes(bytes: number | null) {
+            mockFreeBytes.mockResolvedValue(bytes);
         }
 
         afterEach(() => {
             vi.restoreAllMocks();
+            // Unread by default, so the guard stays silent for every test that
+            // is not about it.
+            mockFreeBytes.mockResolvedValue(null);
         });
 
         it('fails before encoding when the output cannot fit', async () => {
@@ -295,7 +308,7 @@ describe('EncodeService', () => {
             (sessionService.get(session.id) as any).probeResult = {
                 format: { duration: 3600 },
             };
-            vi.spyOn(service as any, 'freeBytes').mockResolvedValue(null);
+            withFreeBytes(null);
 
             await service.processSession(session.id);
 

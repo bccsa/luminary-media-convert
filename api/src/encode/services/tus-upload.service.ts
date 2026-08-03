@@ -16,6 +16,7 @@ import { WebhookService } from './webhook.service.js';
 import { WaveformService } from './waveform.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
 import { hasAllowedExtension } from './media-extensions.js';
+import { ingestShortfall } from './disk-space.js';
 
 const DEFAULT_MAX_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 const EXPIRATION_MS = 10 * 60 * 1000; // 10 minutes
@@ -116,6 +117,23 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
                         status_code: 415,
                         body: `Unsupported file type. Allowed: media files (video/audio).`,
                     };
+                }
+
+                // Refuse now rather than after the transfer. `filesize` carries
+                // the whole file: with parallelUploads > 1 this hook fires once
+                // per partial, each declaring only its own slice, so
+                // `upload.size` alone would wave through a file five times too
+                // big for the volume. Older clients omit it — then the partial
+                // size is all there is, which still catches the worst cases.
+                const shortfall = await ingestShortfall(
+                    this.workDir,
+                    Number(upload.metadata?.filesize) || upload.size || 0,
+                );
+                if (shortfall) {
+                    this.logger.error(
+                        `Upload refused for session ${sessionId}: ${shortfall}`,
+                    );
+                    throw { status_code: 507, body: shortfall };
                 }
 
                 this.sessionService.updateStatus(sessionId, 'uploading');

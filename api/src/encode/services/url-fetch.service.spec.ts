@@ -73,6 +73,7 @@ describe('UrlFetchService', () => {
         process.env.WORK_DIR = workDir;
         delete process.env.URL_FETCH_STREAMS;
         delete process.env.MAX_UPLOAD_SIZE;
+        delete process.env.DISK_RESERVE_BYTES;
 
         sessionService = new SessionService({ emit: () => {} } as any);
         tusUploadService = { finalizeUpload: vi.fn().mockResolvedValue(undefined) };
@@ -95,6 +96,7 @@ describe('UrlFetchService', () => {
         delete process.env.WORK_DIR;
         delete process.env.URL_FETCH_STREAMS;
         delete process.env.MAX_UPLOAD_SIZE;
+        delete process.env.DISK_RESERVE_BYTES;
     });
 
     function makeService(): UrlFetchService {
@@ -567,6 +569,61 @@ describe('UrlFetchService', () => {
             expect(sessionService.get(session.id)!.status).toBe('failed');
             expect(sessionService.get(session.id)!.error).toMatch(/maximum allowed size/);
             expect(tusUploadService.finalizeUpload).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('free space', () => {
+        it('refuses a source the disk cannot hold, before downloading it', async () => {
+            // A reserve larger than any real volume, so the guard fires whatever
+            // the machine running the tests happens to have free.
+            process.env.DISK_RESERVE_BYTES = String(1024 ** 5);
+            const svc = makeService();
+            const session = sessionService.create(makeConfig());
+
+            fetchMock.mockResolvedValueOnce(
+                makeResponse({
+                    status: 200,
+                    headers: { 'content-length': '999', 'content-type': 'video/mp4' },
+                    url: 'https://example.com/big.mp4',
+                }),
+            );
+
+            await svc.fetchToSession(session.id, 'https://example.com/big.mp4');
+
+            expect(sessionService.get(session.id)!.status).toBe('failed');
+            expect(sessionService.get(session.id)!.error).toMatch(
+                /Not enough disk space/,
+            );
+            // The probe told us it would not fit, so the body was never fetched.
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+            expect(tusUploadService.finalizeUpload).not.toHaveBeenCalled();
+        });
+
+        it('downloads normally when the source fits', async () => {
+            const svc = makeService();
+            const session = sessionService.create(makeConfig());
+
+            fetchMock
+                .mockResolvedValueOnce(
+                    makeResponse({
+                        status: 200,
+                        headers: { 'content-length': '11', 'content-type': 'video/mp4' },
+                        url: 'https://example.com/small.mp4',
+                    }),
+                )
+                .mockResolvedValueOnce(
+                    makeResponse({
+                        status: 200,
+                        headers: {},
+                        body: Buffer.from('small video'),
+                        url: 'https://example.com/small.mp4',
+                    }),
+                );
+
+            await svc.fetchToSession(session.id, 'https://example.com/small.mp4');
+
+            expect(sessionService.get(session.id)!.error).toBeUndefined();
+            expect(tusUploadService.finalizeUpload).toHaveBeenCalled();
         });
     });
 

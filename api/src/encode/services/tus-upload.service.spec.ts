@@ -16,6 +16,7 @@ const {
     mockStat,
     mockReaddir,
     mockReadFile,
+    mockStatfs,
 } = vi.hoisted(() => ({
     mockStart: vi.fn().mockResolvedValue(undefined),
     mockStop: vi.fn().mockResolvedValue(undefined),
@@ -31,6 +32,9 @@ const {
     mockStat: vi.fn().mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })),
     mockReaddir: vi.fn().mockResolvedValue([]),
     mockReadFile: vi.fn().mockResolvedValue('{}'),
+    // Plenty of room by default, so the disk guard stays out of the way of
+    // every test that is not about it.
+    mockStatfs: vi.fn().mockResolvedValue({ bavail: 1_000_000, bsize: 4096 }),
 }));
 
 vi.mock('node-tusd', () => ({
@@ -52,6 +56,7 @@ vi.mock('fs/promises', () => ({
     stat: (...args: any[]) => mockStat(...args),
     readdir: (...args: any[]) => mockReaddir(...args),
     readFile: (...args: any[]) => mockReadFile(...args),
+    statfs: (...args: any[]) => mockStatfs(...args),
 }));
 
 vi.mock('fs', async (importOriginal) => {
@@ -403,6 +408,106 @@ describe('TusUploadService', () => {
             await hook(makeRequestInfo(), { metadata: { sessionId: session.id } });
 
             expect(sessionService.get(session.id)!.status).toBe('uploading');
+        });
+
+        describe('free space', () => {
+            const GB = 1024 ** 3;
+            /** A statfs reading reporting `gb` gigabytes available. */
+            const withFree = (gb: number) => ({
+                bavail: (gb * GB) / 4096,
+                bsize: 4096,
+            });
+
+            it('should refuse a file the disk cannot hold', async () => {
+                const session = sessionService.create(makeConfig());
+                mockStatfs.mockResolvedValueOnce(withFree(1));
+                const hook = capturedServerConfig.value.onUploadCreate;
+
+                await expect(
+                    hook(makeRequestInfo(), {
+                        metadata: {
+                            sessionId: session.id,
+                            filename: 'big.mp4',
+                            filesize: String(5 * GB),
+                        },
+                    }),
+                ).rejects.toMatchObject({
+                    status_code: 507,
+                    body: expect.stringContaining('Not enough disk space'),
+                });
+
+                // Refused, so the session never enters uploading.
+                expect(sessionService.get(session.id)!.status).toBe('created');
+            });
+
+            it('should accept a file that fits with the reserve to spare', async () => {
+                const session = sessionService.create(makeConfig());
+                mockStatfs.mockResolvedValueOnce(withFree(100));
+                const hook = capturedServerConfig.value.onUploadCreate;
+
+                await expect(
+                    hook(makeRequestInfo(), {
+                        metadata: {
+                            sessionId: session.id,
+                            filename: 'big.mp4',
+                            filesize: String(5 * GB),
+                        },
+                    }),
+                ).resolves.toBeUndefined();
+            });
+
+            it('should refuse on the whole file, not the partial slice it was handed', async () => {
+                // tus-js-client splits the upload and copies metadata to every
+                // partial, so this hook sees a 1 GB slice of a 40 GB file. Judging
+                // by `upload.size` alone would wave all five slices through onto a
+                // volume with room for none of them.
+                const session = sessionService.create(makeConfig());
+                mockStatfs.mockResolvedValueOnce(withFree(10));
+                const hook = capturedServerConfig.value.onUploadCreate;
+
+                await expect(
+                    hook(makeRequestInfo(), {
+                        size: 1 * GB,
+                        isPartial: true,
+                        metadata: {
+                            sessionId: session.id,
+                            filename: 'big.mp4',
+                            filesize: String(40 * GB),
+                        },
+                    }),
+                ).rejects.toMatchObject({ status_code: 507 });
+            });
+
+            it('should fall back to the declared upload size when the client sends no filesize', async () => {
+                const session = sessionService.create(makeConfig());
+                mockStatfs.mockResolvedValueOnce(withFree(1));
+                const hook = capturedServerConfig.value.onUploadCreate;
+
+                await expect(
+                    hook(makeRequestInfo(), {
+                        size: 9 * GB,
+                        metadata: { sessionId: session.id, filename: 'big.mp4' },
+                    }),
+                ).rejects.toMatchObject({ status_code: 507 });
+            });
+
+            it('should accept the upload when free space cannot be read', async () => {
+                // An unreadable volume is a reason to behave as before, not to
+                // refuse someone's upload.
+                const session = sessionService.create(makeConfig());
+                mockStatfs.mockRejectedValueOnce(new Error('ENOSYS'));
+                const hook = capturedServerConfig.value.onUploadCreate;
+
+                await expect(
+                    hook(makeRequestInfo(), {
+                        metadata: {
+                            sessionId: session.id,
+                            filename: 'big.mp4',
+                            filesize: String(500 * GB),
+                        },
+                    }),
+                ).resolves.toBeUndefined();
+            });
         });
     });
 

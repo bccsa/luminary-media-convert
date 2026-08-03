@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { existsSync } from 'fs';
-import { copyFile, readdir, rm, statfs, writeFile } from 'fs/promises';
+import { copyFile, readdir, rm, writeFile } from 'fs/promises';
 import { join, posix } from 'path';
 import { estimateOutputBytes, formatBytes } from './output-estimate.js';
+import { freeBytes } from './disk-space.js';
 import {
     SESSION_STATE_FILENAME,
     SessionService,
@@ -455,7 +456,7 @@ export class EncodeService {
         const needed = estimateOutputBytes(session.encodeConfig ?? {}, duration);
         if (needed <= 0) return null;
 
-        const free = await this.freeBytes();
+        const free = await freeBytes(this.workDir);
         if (free === null || free >= needed) return null;
 
         return (
@@ -463,16 +464,6 @@ export class EncodeService {
             `${formatBytes(needed)} and only ${formatBytes(free)} is free. ` +
             `Free space and retry — the uploaded source is kept.`
         );
-    }
-
-    /** Free bytes on the work volume, or null when it cannot be read. */
-    private async freeBytes(): Promise<number | null> {
-        try {
-            const fs = await statfs(this.workDir);
-            return fs.bavail * fs.bsize;
-        } catch {
-            return null;
-        }
     }
 
     private async cleanupSessionFiles(sessionId: string): Promise<void> {
