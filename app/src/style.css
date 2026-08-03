@@ -372,9 +372,15 @@
             dark:border-slate-600 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-700;
     }
 
+    /*
+     * Sits inline with Discard and Save, so it has to be built like them: same
+     * padding, same text size, and a real border rather than a ring — a ring is
+     * a box-shadow and adds no height, which left the pill a few pixels short of
+     * the buttons beside it.
+     */
     .chapter-unsaved-pill {
-        @apply rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900 ring-1 ring-amber-200/90
-            dark:bg-amber-950/55 dark:text-amber-200/95 dark:ring-amber-800/45;
+        @apply inline-flex items-center rounded-md border border-amber-200/90 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-900
+            dark:border-amber-800/45 dark:bg-amber-950/55 dark:text-amber-200/95;
     }
 
     .chapter-save-btn {

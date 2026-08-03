@@ -305,7 +305,7 @@ defineExpose({
                 v-if="showAside"
                 class="flex min-h-0 flex-col overflow-hidden"
                 :class="activeTab === 'trim'
-                    ? 'gap-2 px-4 pt-3 pb-2 trim-aside'
+                    ? 'gap-2 pl-4 pr-5 pt-3 pb-2 trim-aside'
                     : 'gap-3'"
                 :style="asideColStyle"
             >

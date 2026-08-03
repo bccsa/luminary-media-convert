@@ -475,9 +475,26 @@ function beginScrub(e: MouseEvent) {
  * Empty when nothing is marked: no marks means the whole timeline is encoded,
  * and dimming all of it would say the opposite.
  */
+/**
+ * The parts of the timeline to scrim over — everything the marked ranges do not
+ * cover, so every one of them stays lit.
+ *
+ * Trim: the gaps are the cuts, and dimming them is what makes the surviving
+ * footage read at a glance.
+ *
+ * Chapters: the same treatment answers a different question — where does each
+ * chapter sit in the video. Every chapter stays lit whether or not it is
+ * selected; scrimming the unselected ones hid the very thing the marks are for.
+ * Which chapter is selected is said by its border, not by dimming its
+ * neighbours.
+ */
 const discardedRanges = computed(() => {
-    if (props.mode !== 'trim') return [];
-    const kept = segments.value
+    const basis =
+        props.mode === 'trim' || props.mode === 'chapters'
+            ? segments.value
+            : [];
+
+    const kept = basis
         .filter((s) => s.outSec > s.inSec)
         .slice()
         .sort((a, b) => a.inSec - b.inSec);

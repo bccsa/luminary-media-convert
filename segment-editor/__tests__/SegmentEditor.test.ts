@@ -1752,15 +1752,51 @@ describe('SegmentEditor — discarded ranges', () => {
         expect(dimmed(w)).toHaveLength(1);
     });
 
-    it('does not dim outside trim mode', async () => {
-        // Chapters mark points of interest; the material between them is kept.
+    it('dims the gaps around chapters, leaving every chapter lit', async () => {
         const w = mountEditor({
             props: { mode: 'chapters', duration: 100 },
+            segments: [seg(1, 10, 20), seg(2, 60, 70)],
+        });
+        await flush();
+
+        // before 10, between 20 and 60, after 70 — both chapters stay lit.
+        expect(dimmed(w)).toHaveLength(3);
+    });
+
+    it('keeps every chapter lit when one of them is selected', async () => {
+        // Scrimming the unselected chapters hid the very thing the marks are
+        // for. Selection is said by the border, not by dimming its neighbours.
+        const w = mountEditor({
+            props: { mode: 'chapters', duration: 100 },
+            segments: [seg(1, 10, 20), seg(2, 60, 70)],
+        });
+        await flush();
+
+        const segEls = w.findAll('.se-segment');
+        mouseAt(segEls[0].element as HTMLElement, 'mousedown', 12);
+        mouseAt(document.body, 'mouseup', 12);
+        await flush();
+
+        expect(w.findAll('.se-segment--selected')).toHaveLength(1);
+        expect(dimmed(w)).toHaveLength(3);
+    });
+
+    it('dims nothing when there are no chapters yet', async () => {
+        const w = mountEditor({ props: { mode: 'chapters', duration: 100 } });
+        await flush();
+
+        expect(dimmed(w)).toHaveLength(0);
+    });
+
+    it('still dims every cut in trim mode, selected or not', async () => {
+        // Trim is about what survives the encode, not about what is selected.
+        const w = mountEditor({
+            props: { mode: 'trim', duration: 100 },
             segments: [seg(1, 10, 20)],
         });
         await flush();
 
-        expect(dimmed(w)).toHaveLength(0);
+        expect(dimmed(w)).toHaveLength(2);
     });
 });
 
