@@ -173,6 +173,7 @@ describe('api', () => {
                         sessionId: 'sess-1',
                         filename: 'test.mp4',
                         filetype: 'video/mp4',
+                        filesize: String(file.size),
                     },
                     headers: {
                         Authorization: 'Bearer sess_abc',
@@ -180,6 +181,23 @@ describe('api', () => {
                 }),
             );
             expect(mockStart).toHaveBeenCalled();
+        });
+
+        it('declares the whole file size, not a chunk of it', () => {
+            // The encoder checks this against its free space before accepting
+            // the transfer. With parallelUploads > 1 each partial declares only
+            // its own slice, so the whole-file figure has to come from here.
+            const file = new File(['x'.repeat(9000)], 'big.mp4', {
+                type: 'video/mp4',
+            });
+            uploadFile('https://api.example.com/api/tus', 'sess-1', 'sess_abc', file);
+
+            expect(tus.Upload).toHaveBeenCalledWith(
+                file,
+                expect.objectContaining({
+                    metadata: expect.objectContaining({ filesize: '9000' }),
+                }),
+            );
         });
     });
 

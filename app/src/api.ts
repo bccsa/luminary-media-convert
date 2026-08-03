@@ -156,6 +156,11 @@ export function uploadFile(
                 sessionId,
                 filename: file.name,
                 filetype: file.type,
+                // The whole file's size. tus-js-client copies metadata to every
+                // partial upload, so this is what lets the encoder check the
+                // file against its free space before accepting the transfer —
+                // each partial only declares its own slice.
+                filesize: String(file.size),
             },
             headers: {
                 Authorization: `Bearer ${sessionToken}`,

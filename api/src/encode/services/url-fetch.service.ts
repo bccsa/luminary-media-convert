@@ -13,6 +13,7 @@ import {
     hasAllowedExtension,
     extensionFromContentType,
 } from './media-extensions.js';
+import { ingestShortfall } from './disk-space.js';
 
 const DEFAULT_MAX_SIZE = 10 * 1024 * 1024 * 1024; // 10 GB
 const DEFAULT_STREAMS = 4;
@@ -121,6 +122,14 @@ export class UrlFetchService {
             }
 
             if (probe.contentLength !== null) {
+                // The HEAD probe already told us how big this is, so there is
+                // no reason to spend the download discovering it will not fit.
+                const shortfall = await ingestShortfall(
+                    this.workDir,
+                    probe.contentLength,
+                );
+                if (shortfall) throw new Error(shortfall);
+
                 this.sessionService.setIngestTotal(sessionId, probe.contentLength);
             }
 
