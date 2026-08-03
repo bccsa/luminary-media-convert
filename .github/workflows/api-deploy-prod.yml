@@ -134,6 +134,44 @@ jobs:
           done
           rollback
 
+      - name: Retain only the newest image tags
+        # Every deploy tags the build with its commit sha and nothing removed the
+        # old ones — 25 `lmc-api-staging` tags accumulated in a few days of active
+        # work, ~9.5 GB reclaimable. The prune below cannot help: `docker image
+        # prune` without `-a` only touches *dangling* images, and every one of
+        # these is tagged. That is why the host filled while pruning every deploy.
+        #
+        # Keeps `latest`, the newest few sha tags as rollback targets, and whatever
+        # the running container actually uses — which is not necessarily the newest,
+        # if a deploy rolled back. Untagging here leaves the layers dangling, so the
+        # prune below reclaims them in the same run.
+        if: success()
+        run: |
+          set -uo pipefail
+          IMG='${{ vars.DOCKER_IMAGE }}'
+          C='${{ vars.DOCKER_CONTAINER }}'
+          KEEP='${{ vars.DOCKER_IMAGE_KEEP || 3 }}'
+
+          IN_USE="$(docker inspect -f '{{.Image}}' "$C" 2>/dev/null || true)"
+
+          # `docker images` lists newest first, so everything past $KEEP is older
+          # than the rollback targets worth holding on to.
+          docker images --no-trunc --filter=reference="${IMG}:*" \
+              --format '{{.ID}} {{.Repository}}:{{.Tag}}' \
+            | grep -v ':latest$' \
+            | tail -n +$((KEEP + 1)) \
+            | while read -r id tag; do
+                if [ -n "$IN_USE" ] && [ "$id" = "$IN_USE" ]; then
+                  echo "keeping $tag (in use by $C)"
+                  continue
+                fi
+                if docker rmi "$tag" >/dev/null 2>&1; then
+                  echo "removed $tag"
+                else
+                  echo "::warning::could not remove $tag"
+                fi
+              done
+
       - name: Reclaim old Docker build cache & dangling images
         # Every deploy runs `docker build`, and Docker never auto-removes the old
         # cache/images — left unchecked they fill the host disk (this is what
