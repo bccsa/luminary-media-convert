@@ -2474,7 +2474,51 @@ onUnmounted(() => {
                                         empty-hint="Use the trim timeline below to add in/out marks, or load chapters from a VTT sidecar."
                                         keyboard-scope="focus"
                                         :fps="segmentEditorProbeFps"
-                                    />
+                                    >
+                                        <!--
+                                            Saving belongs with the list it
+                                            saves, not in a toolbar further
+                                            down the page.
+                                        -->
+                                        <template
+                                            v-if="canSaveChapters"
+                                            #list-actions
+                                        >
+                                            <span
+                                                v-if="chapters.isDirty.value"
+                                                class="chapter-unsaved-pill"
+                                                title="Unsaved changes are stored locally; click Save to commit to S3."
+                                            >
+                                                Unsaved
+                                            </span>
+                                            <button
+                                                v-if="chapters.isDirty.value"
+                                                type="button"
+                                                class="chapter-toolbar-muted"
+                                                :disabled="
+                                                    chapters.isSaving.value
+                                                "
+                                                @click="onDiscardChapters"
+                                            >
+                                                Discard
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="chapter-save-btn"
+                                                :disabled="
+                                                    !chapters.isDirty.value ||
+                                                    chapters.isSaving.value
+                                                "
+                                                @click="onSaveChapters"
+                                            >
+                                                {{
+                                                    chapters.isSaving.value
+                                                        ? 'Saving…'
+                                                        : 'Save chapters'
+                                                }}
+                                            </button>
+                                        </template>
+                                    </SegmentEditor>
                                     <p
                                         v-if="chaptersSaveError"
                                         class="shrink-0 text-xs text-red-600 dark:text-red-400"
@@ -2586,8 +2630,6 @@ onUnmounted(() => {
                         v-model:editor-segments="timelineSegments"
                         :show-chapters-side-panel="showChaptersBesidePlayer"
                         :can-save-chapters="canSaveChapters"
-                        :chapters-is-dirty="chapters.isDirty.value"
-                        :chapters-is-saving="chapters.isSaving.value"
                         :chapters-save-error="chaptersSaveError"
                         :show-trim-segment-editor="showTrimSegmentEditor"
                         :thumbnail-vtt-url="thumbnailVttUrl"
@@ -2602,8 +2644,6 @@ onUnmounted(() => {
                         :on-play-pause="() => playerRef?.togglePlay()"
                         :is-preview-playing="isPreviewPlaying"
                         :segment-editor-probe-fps="segmentEditorProbeFps"
-                        @discard-chapters="onDiscardChapters"
-                        @save-chapters="onSaveChapters"
                     />
 
                     <div
@@ -2690,9 +2730,7 @@ onUnmounted(() => {
                             v-model:editor-segments="editorSegments"
                             :show-chapters-side-panel="showChaptersBesidePlayer"
                             :can-save-chapters="canSaveChapters"
-                            :chapters-is-dirty="chapters.isDirty.value"
-                            :chapters-is-saving="chapters.isSaving.value"
-                            :chapters-save-error="chaptersSaveError"
+                                    :chapters-save-error="chaptersSaveError"
                             :show-trim-segment-editor="showTrimSegmentEditor"
                             :thumbnail-vtt-url="thumbnailVttUrl"
                             :waveform-peaks="timelineWaveformPeaks"
@@ -2710,9 +2748,7 @@ onUnmounted(() => {
                             :on-play-pause="() => playerRef?.togglePlay()"
                             :is-preview-playing="isPreviewPlaying"
                             :segment-editor-probe-fps="segmentEditorProbeFps"
-                            @discard-chapters="onDiscardChapters"
-                            @save-chapters="onSaveChapters"
-                        />
+                                />
                     </div>
                 </div>
             </template>
