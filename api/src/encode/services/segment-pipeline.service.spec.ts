@@ -80,6 +80,60 @@ describe('SegmentPipeline', () => {
     });
 
     /**
+     * The segment total is partly estimated — streams × ceil(duration /
+     * segmentDuration) — and FFmpeg routinely produces a few more than that, so
+     * keyframe alignment and trim concatenation both push the real count past
+     * it. Divided by the estimate regardless, the upload bar read 102%.
+     */
+    describe('progress percentages', () => {
+        let tmpDir: string;
+
+        beforeEach(() => {
+            tmpDir = mkdtempSync(join(tmpdir(), 'pipeline-progress-'));
+        });
+
+        afterEach(() => {
+            rmSync(tmpDir, { recursive: true, force: true });
+        });
+
+        function progressAfter(uploaded: number, produced: number, estimate: number) {
+            const seen: number[] = [];
+            const pipeline = makePipeline(tmpDir, {
+                estimatedTotalSegments: estimate,
+                onProgress: (p) => {
+                    if (p.uploading != null) seen.push(p.uploading);
+                },
+            });
+            (pipeline as any).segmentsUploaded = uploaded;
+            (pipeline as any).totalSegmentsProduced = produced;
+            (pipeline as any).emitProgress();
+            return seen.at(-1);
+        }
+
+        it('never reports more than 100%', () => {
+            // 102 uploaded against an estimate of 100 is exactly the reported bug.
+            expect(progressAfter(102, 102, 100)).toBe(100);
+        });
+
+        it('measures against the real count once it exceeds the estimate', () => {
+            // 60 of the 120 actually produced is halfway, whatever the estimate
+            // guessed — measured against the estimate it would read 60% and
+            // overstate the work done.
+            expect(progressAfter(60, 120, 100)).toBe(50);
+        });
+
+        it('uses the estimate while it still holds', () => {
+            // The estimate is preferred precisely because it does not grow
+            // mid-encode, which would make the bar jump about.
+            expect(progressAfter(25, 10, 100)).toBe(25);
+        });
+
+        it('reports nothing rather than dividing by zero', () => {
+            expect(progressAfter(0, 0, 0)).toBeUndefined();
+        });
+    });
+
+    /**
      * The watchdog exists to catch an upload that has genuinely stopped. It has
      * to tell that apart from one that is merely slow, and completed-file counts
      * cannot: byte-range packing writes files of a few hundred MB, and one of

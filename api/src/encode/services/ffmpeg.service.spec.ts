@@ -1674,7 +1674,7 @@ describe('FfmpegService', () => {
             expect(calls).toContain(75);
         });
 
-        it('should not report progress when duration is unknown', async () => {
+        it('reports only the finish when duration is unknown', async () => {
             const mockProc = createMockProcess();
             mockSpawn.mockReturnValue(mockProc);
             probeDurationSpy.mockResolvedValue(0);
@@ -1687,10 +1687,12 @@ describe('FfmpegService', () => {
             mockProc.emitClose(0);
             await promise;
 
-            expect(onProgress).not.toHaveBeenCalled();
+            // Nothing can be said about how far along it is, but finishing is
+            // still worth reporting — the bar otherwise sits empty at the end.
+            expect(onProgress.mock.calls.map((c: any[]) => c[0])).toEqual([100]);
         });
 
-        it('should cap progress at 99.9%', async () => {
+        it('caps running progress at 99.9% and reports 100 once finished', async () => {
             const mockProc = createMockProcess();
             mockSpawn.mockReturnValue(mockProc);
             probeDurationSpy.mockResolvedValue(100);
@@ -1705,7 +1707,11 @@ describe('FfmpegService', () => {
             await promise;
 
             const calls = onProgress.mock.calls.map((c: any[]) => c[0]);
-            expect(calls.every((v: number) => v <= 99.9)).toBe(true);
+            // Capped while running, so a rounded 100 never claims a finish that
+            // has not happened. Nothing used to lift it afterwards, so a
+            // finished encode sat at 99.9% through the whole upload phase.
+            expect(calls.slice(0, -1).every((v: number) => v <= 99.9)).toBe(true);
+            expect(calls.at(-1)).toBe(100);
         });
 
         it('should call fixMasterPlaylist and generateAnglePlaylists for video type', async () => {

@@ -62,7 +62,7 @@ export class SegmentPipelineService {
 
     constructor(
         private readonly encryptionService: EncryptionService,
-        private readonly s3Service: S3Service,
+        private readonly s3Service: S3Service
     ) {}
 
     /**
@@ -73,7 +73,7 @@ export class SegmentPipelineService {
             config,
             this.encryptionService,
             this.s3Service,
-            this.logger,
+            this.logger
         );
     }
 }
@@ -106,7 +106,7 @@ export class SegmentPipeline {
         private readonly config: SegmentPipelineConfig,
         private readonly encryptionService: EncryptionService,
         private readonly s3Service: S3Service,
-        private readonly logger: Logger,
+        private readonly logger: Logger
     ) {
         this.pollIntervalMs = config.pollIntervalMs ?? 2000;
         this.uploadConcurrency = config.uploadConcurrency ?? 5;
@@ -131,7 +131,7 @@ export class SegmentPipeline {
                 .catch((err) => {
                     this.pipelineError = err;
                     this.logger.error(
-                        `Pipeline poll error: ${(err as Error).message}`,
+                        `Pipeline poll error: ${(err as Error).message}`
                     );
                 })
                 .finally(() => {
@@ -296,7 +296,7 @@ export class SegmentPipeline {
 
         if (segmentFiles.length > 0) {
             this.logger.debug(
-                `[pipeline] ${streamDirName}: found ${segmentFiles.length} new segment(s) (processed: ${state.processedSegments.size})`,
+                `[pipeline] ${streamDirName}: found ${segmentFiles.length} new segment(s) (processed: ${state.processedSegments.size})`
             );
         }
 
@@ -327,7 +327,7 @@ export class SegmentPipeline {
                     await this.encryptionService.encryptSegment(
                         segPath,
                         this.config.encryptionKey,
-                        this.config.encryptionIV,
+                        this.config.encryptionIV
                     );
                     this.segmentsEncrypted++;
                 } catch (err) {
@@ -344,7 +344,7 @@ export class SegmentPipeline {
                     streamDirName,
                     state,
                     { extinfLine: '', filename },
-                    segPath,
+                    segPath
                 );
             } else {
                 // Upload individual segment
@@ -365,7 +365,7 @@ export class SegmentPipeline {
         streamDirName: string,
         state: StreamState,
         seg: { extinfLine: string; filename: string },
-        segPath: string,
+        segPath: string
     ): Promise<void> {
         // Get segment size
         const segStat = await stat(segPath);
@@ -383,10 +383,7 @@ export class SegmentPipeline {
 
             // Enqueue the completed chunk for upload
             const completedChunkFile = state.currentChunkMediaFile;
-            const objectKey = this.objectKey(
-                streamDirName,
-                completedChunkFile,
-            );
+            const objectKey = this.objectKey(streamDirName, completedChunkFile);
             this.enqueueUpload({
                 filePath: join(streamDir, completedChunkFile),
                 objectKey,
@@ -404,7 +401,7 @@ export class SegmentPipeline {
         if (!state.currentChunkStream) {
             state.currentChunkMediaFile = `media_${state.currentChunkIndex}.${state.segExt}`;
             state.currentChunkStream = createWriteStream(
-                join(streamDir, state.currentChunkMediaFile),
+                join(streamDir, state.currentChunkMediaFile)
             );
             state.currentChunkStream.setMaxListeners(0);
         }
@@ -429,13 +426,13 @@ export class SegmentPipeline {
 
     private async finalizeCurrentChunk(
         streamDir: string,
-        state: StreamState,
+        state: StreamState
     ): Promise<void> {
         if (!state.currentChunkStream) return;
 
         state.currentChunkStream.end();
         await new Promise<void>((resolve) =>
-            state.currentChunkStream!.on('finish', resolve),
+            state.currentChunkStream!.on('finish', resolve)
         );
         state.currentChunkStream = null;
     }
@@ -491,7 +488,7 @@ export class SegmentPipeline {
 
     private async rewritePlaylistWithByteRanges(
         streamDir: string,
-        state: StreamState,
+        state: StreamState
     ): Promise<void> {
         if (state.byteRangeEntries.length === 0) return;
 
@@ -538,7 +535,7 @@ export class SegmentPipeline {
     }
 
     private parseSegments(
-        content: string,
+        content: string
     ): { extinfLine: string; filename: string }[] {
         const segments: { extinfLine: string; filename: string }[] = [];
         const lines = content.split('\n');
@@ -599,7 +596,7 @@ export class SegmentPipeline {
                     task.objectKey,
                     (bytes) => {
                         this.bytesUploaded += bytes;
-                    },
+                    }
                 );
                 this.uploadedKeys.push(task.objectKey);
                 this.segmentsUploaded += task.segmentCount ?? 1;
@@ -616,14 +613,14 @@ export class SegmentPipeline {
                 if (attempt < 2) {
                     // Exponential backoff: 1s, 2s
                     await new Promise((r) =>
-                        setTimeout(r, 1000 * (attempt + 1)),
+                        setTimeout(r, 1000 * (attempt + 1))
                     );
                 }
             }
         }
 
         throw new Error(
-            `S3 upload failed for ${task.objectKey} after 3 attempts: ${lastErr?.message}`,
+            `S3 upload failed for ${task.objectKey} after 3 attempts: ${lastErr?.message}`
         );
     }
 
@@ -638,7 +635,7 @@ export class SegmentPipeline {
         // discarded a finished hour-long encode twice over — with every upload
         // succeeding and nothing logged as an error.
         const stallMs = Number(
-            process.env.S3_UPLOAD_STALL_TIMEOUT_MS ?? 5 * 60 * 1000,
+            process.env.S3_UPLOAD_STALL_TIMEOUT_MS ?? 5 * 60 * 1000
         );
 
         let lastProgressAt = Date.now();
@@ -679,7 +676,7 @@ export class SegmentPipeline {
      */
     async uploadRemainingFiles(
         outputDir: string,
-        exclude?: Set<string>,
+        exclude?: Set<string>
     ): Promise<string[]> {
         const additionalKeys: string[] = [];
         const files = await this.walkDir(outputDir);
@@ -700,12 +697,12 @@ export class SegmentPipeline {
                     this.s3Client,
                     this.config.s3Config.bucket,
                     filePath,
-                    objectKey,
+                    objectKey
                 );
                 additionalKeys.push(objectKey);
             } catch (err) {
                 throw new Error(
-                    `S3 upload failed for ${objectKey}: ${(err as Error).message}`,
+                    `S3 upload failed for ${objectKey}: ${(err as Error).message}`
                 );
             }
         }
@@ -731,10 +728,18 @@ export class SegmentPipeline {
     private emitProgress(): void {
         if (!this.config.onProgress) return;
 
-        // Use the estimated total when available (doesn't grow mid-encode),
-        // fall back to discovered count (which causes progress to jump).
-        const expectedSegments =
-            this.config.estimatedTotalSegments ?? this.totalSegmentsProduced;
+        // The estimate is preferred because it does not grow mid-encode, which
+        // would make the bar jump about. But it is only `streams × ceil(duration
+        // / segmentDuration)`, and FFmpeg routinely produces a few more than
+        // that — keyframe alignment and trim concatenation both add segments.
+        // Taken as gospel it produced an upload bar reading 102%.
+        //
+        // Whichever is larger is the honest denominator: the estimate while it
+        // holds, the real count once it has been exceeded.
+        const expectedSegments = Math.max(
+            this.config.estimatedTotalSegments ?? 0,
+            this.totalSegmentsProduced
+        );
 
         const progress: PipelineProgress = {
             encoding: 0, // Set externally by EncodeService via FFmpeg callback
@@ -743,18 +748,22 @@ export class SegmentPipeline {
         if (this.config.encryptionKey) {
             progress.encrypting =
                 expectedSegments > 0
-                    ? Math.round(
-                          (this.segmentsEncrypted / expectedSegments) * 100
-                      )
+                    ? percentOf(this.segmentsEncrypted, expectedSegments)
                     : undefined;
         }
 
         if (expectedSegments > 0) {
-            progress.uploading = Math.round(
-                (this.segmentsUploaded / expectedSegments) * 100
+            progress.uploading = percentOf(
+                this.segmentsUploaded,
+                expectedSegments
             );
         }
 
         this.config.onProgress(progress);
     }
+}
+
+function percentOf(done: number, total: number): number {
+    if (!(total > 0)) return 0;
+    return Math.min(100, Math.max(0, Math.round((done / total) * 100)));
 }
