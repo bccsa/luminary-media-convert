@@ -1,7 +1,3 @@
-// Deploy trigger: the frontend build only runs on changes under app/, but the
-// app bundles encode-config, segment-editor and hls — so fixes landing in those
-// never ship on their own (#135). Touching a file here forces the build until
-// the trigger covers the workspaces it depends on. Safe to remove once it does.
 import { createApp } from 'vue';
 import { createAuth0 } from '@auth0/auth0-vue';
 import App from './App.vue';
