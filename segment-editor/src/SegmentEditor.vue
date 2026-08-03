@@ -2153,13 +2153,23 @@ defineExpose({
                 "
                 class="se-list-split-header"
             >
-                <h3 class="se-title">{{ modeTitle }}</h3>
-                <div class="se-meta">
-                    <span v-if="segments.length > 0">
-                        {{ segments.length }} segment{{ segments.length !== 1 ? 's' : '' }}
-                        · {{ formatDuration(totalSelectedDuration) }}
-                    </span>
-                    <span v-else>No segments</span>
+                <!--
+                    Count and duration read as part of the heading, so they sit
+                    with it. The right edge is left for whatever the host puts
+                    there — saving, for the app.
+                -->
+                <div class="se-list-split-header__lead">
+                    <h3 class="se-title">{{ modeTitle }}</h3>
+                    <div class="se-meta">
+                        <span v-if="segments.length > 0">
+                            {{ segments.length }} segment{{ segments.length !== 1 ? 's' : '' }}
+                            · {{ formatDuration(totalSelectedDuration) }}
+                        </span>
+                        <span v-else>No segments</span>
+                    </div>
+                </div>
+                <div v-if="$slots['list-actions']" class="se-list-split-header__actions">
+                    <slot name="list-actions" />
                 </div>
             </div>
             <p

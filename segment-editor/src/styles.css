@@ -1230,6 +1230,22 @@ html.dark .se-confirm {
     border-bottom: 1px solid var(--se-border);
 }
 
+/* Title and its count/duration read as one unit, against the left edge. */
+.se-list-split-header__lead {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.se-list-split-header__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin-left: auto;
+}
+
 /* Chapters & subtitles: more breathing room, clearer hierarchy */
 .se-root[data-mode='chapters']:not(.se-root--split-list),
 .se-root[data-mode='subtitles']:not(.se-root--split-list) {

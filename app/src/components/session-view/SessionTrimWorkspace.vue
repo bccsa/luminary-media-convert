@@ -11,8 +11,6 @@ const props = withDefaults(
          * pre-encode trim markers — those are ephemeral and must not be savable.
          */
         canSaveChapters?: boolean;
-        chaptersIsDirty: boolean;
-        chaptersIsSaving: boolean;
         chaptersSaveError: string | null;
         showTrimSegmentEditor: boolean;
         /** Trim timeline is available (pre-encode configure phase). */
@@ -58,8 +56,6 @@ const props = withDefaults(
 const editorSegments = defineModel<Segment[]>('editorSegments', { required: true });
 
 const emit = defineEmits<{
-    discardChapters: [];
-    saveChapters: [];
     segmentRemoved: [segment: Segment];
 }>();
 
@@ -97,7 +93,6 @@ defineExpose({
 const trimToolbarHasVisibleContent = computed(() => {
     if (props.section === 'timeline') return false;
     if (props.canSaveChapters && props.chaptersSaveError) return true;
-    if (props.canSaveChapters && !props.showTrimSegmentEditor) return true;
     if (props.canEditTrimTimeline && !props.showTrimSegmentEditor) return true;
     if (props.canEditChaptersPlayback && !props.showTrimSegmentEditor && !props.showChaptersSidePanel) return true;
     return false;
@@ -113,30 +108,10 @@ const trimToolbarHasVisibleContent = computed(() => {
             class="text-xs text-red-600 dark:text-red-400"
         >{{ chaptersSaveError }}</p>
 
-        <div
-            v-if="canSaveChapters && !showTrimSegmentEditor"
-            class="flex flex-wrap items-center gap-2"
-        >
-            <span
-                v-if="chaptersIsDirty"
-                class="chapter-unsaved-pill"
-                title="Unsaved changes are stored locally; click Save to commit to S3."
-            >Unsaved</span>
-            <button
-                v-if="chaptersIsDirty"
-                type="button"
-                class="chapter-toolbar-muted"
-                :disabled="chaptersIsSaving"
-                @click="emit('discardChapters')"
-            >Discard</button>
-            <button
-                type="button"
-                class="chapter-save-btn"
-                :disabled="!chaptersIsDirty || chaptersIsSaving"
-                @click="emit('saveChapters')"
-            >{{ chaptersIsSaving ? 'Saving…' : 'Save chapters' }}</button>
-        </div>
-
+        <!--
+            Saving moved into the chapter list's own header — it belongs with
+            the list it saves rather than in a toolbar further down the page.
+        -->
 
         <p
             v-if="showToolbarSection() && !(showTrimSegmentEditor || showChaptersSidePanel)"
@@ -154,7 +129,7 @@ const trimToolbarHasVisibleContent = computed(() => {
     <!-- Timeline: full-width bottom strip for precise trim editing -->
     <div
         v-if="section === 'timeline' && showTrimSegmentEditor"
-        class="se-timeline-wrap w-full"
+        class="se-timeline-wrap w-full pl-3 pr-4"
     >
         <SegmentEditor
             ref="trimSegmentEditorRef"
@@ -187,25 +162,6 @@ const trimToolbarHasVisibleContent = computed(() => {
                     class="storyboard-pending-pill"
                     title="Frames are sampled from the source after upload; the timeline fills in as they arrive."
                 >Generating thumbnails…</span>
-                <span
-                    v-if="canSaveChapters && chaptersIsDirty"
-                    class="chapter-unsaved-pill"
-                    title="Unsaved changes are stored locally; click Save to commit to S3."
-                >Unsaved</span>
-                <button
-                    v-if="canSaveChapters && chaptersIsDirty"
-                    type="button"
-                    class="chapter-toolbar-muted"
-                    :disabled="chaptersIsSaving"
-                    @click="emit('discardChapters')"
-                >Discard</button>
-                <button
-                    v-if="canSaveChapters"
-                    type="button"
-                    class="chapter-save-btn"
-                    :disabled="!chaptersIsDirty || chaptersIsSaving"
-                    @click="emit('saveChapters')"
-                >{{ chaptersIsSaving ? 'Saving…' : 'Save chapters' }}</button>
             </template>
         </SegmentEditor>
     </div>
@@ -238,6 +194,9 @@ const trimToolbarHasVisibleContent = computed(() => {
 }
 
 .se-timeline-wrap :deep(.se-root) {
-    border-radius: 0;
+    /* Square while this bled edge to edge. Now that it is inset to line up with
+       the player and the side card, it reads as one of them — so it is rounded
+       like them (matching their `rounded-xl`). */
+    border-radius: 0.75rem;
 }
 </style>

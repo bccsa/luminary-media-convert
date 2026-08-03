@@ -177,6 +177,13 @@ defineExpose({
                     !showAside && activeTab === 'trim' ? 'max-w-[min(100%,60vw)]' : '',
                     activeTab === 'trim' ? 'pt-3 pl-3' : '',
                     activeTab === 'trim' && !showAside ? 'pr-3' : '',
+                    /*
+                     * The aside pads itself by 4 on the side facing the handle.
+                     * Without the same here the player's card sat flush against
+                     * the divider while the aside's card stood well clear of it,
+                     * which read as the divider being off-centre.
+                     */
+                    activeTab === 'trim' && showAside ? 'pr-4' : '',
                 ]"
                 :style="playerColStyle"
             >
