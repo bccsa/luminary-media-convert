@@ -1,20 +1,25 @@
 /**
- * Electron main process — Phase 1 spike.
+ * Electron main process.
  *
- * Deliberately minimal: no renderer app, no SaaS, no local database. It exists
- * to prove the things that are expensive to discover late — that the staged
- * service tree runs from inside a packaged app, that worker threads resolve
- * from unpacked resources, that ffmpeg is reachable when the app is launched
- * from Finder rather than a shell, and that quitting does not orphan ffmpeg.
+ * Starts the encoder as a child process and serves one loopback origin that
+ * carries both the renderer and the `/saas/*` API it expects. There is no
+ * database and no second service: the encoder persists its own sessions to
+ * WORK_DIR, and the only state the shell owns is the user's S3 profiles.
+ *
+ * The window still shows a status page until the renderer is built and staged.
  */
 
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, safeStorage, shell } from 'electron';
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { detectFfmpeg, installHint } from './ffmpeg-detect.js';
 import { EncoderService } from './services.js';
+import { S3ConfigStore } from './s3-configs.js';
+import { SessionIndex } from './session-index.js';
+import { AppServer } from './static-server.js';
+import { stableRendererPort } from './ports.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -30,6 +35,7 @@ function resourcesRoot() {
 }
 
 let encoder = null;
+let appServer = null;
 let window = null;
 let status = { ok: false, error: 'starting' };
 
@@ -61,11 +67,65 @@ async function main() {
     try {
         status = await startEncoder();
         console.error(`[main] encoder ready at ${status.encoderUrl}`);
+
+        status.appUrl = await startAppServer();
+        console.error(`[main] app server ready at ${status.appUrl}`);
+        writeHandle({
+            appUrl: status.appUrl,
+            encoderUrl: encoder.baseUrl,
+            masterKey: encoder.masterKey,
+            workDir: status.workDir,
+            logDir: status.logDir,
+            ffmpeg: status.ffmpeg,
+            ffprobe: status.ffprobe,
+        });
+
+        // The renderer lands here once it is built (Phase 6). Until then the
+        // window keeps showing status rather than a 503 page.
+        if (rendererDir()) window?.loadURL(status.appUrl);
     } catch (err) {
         status = { ok: false, error: err.message };
         console.error(err);
     }
     publishStatus();
+}
+
+/**
+ * Serve the renderer and the /saas/* adapter on one loopback origin.
+ *
+ * Same origin as the app means no CORS to configure and no mixed-content
+ * problem; a pinned port means the origin — and therefore localStorage — is
+ * stable across launches.
+ */
+async function startAppServer() {
+    const userData = app.getPath('userData');
+
+    const s3Configs = new S3ConfigStore(
+        join(userData, 's3-configs.json'),
+        safeStorage,
+    );
+    const sessionIndex = new SessionIndex(join(userData, 'session-index.json'));
+
+    appServer = new AppServer({
+        s3Configs,
+        sessionIndex,
+        rendererDir: rendererDir(),
+        encoder: () => ({
+            baseUrl: encoder.baseUrl,
+            masterKey: encoder.masterKey,
+        }),
+    });
+
+    const port = await appServer.listen(
+        await stableRendererPort(join(userData, 'ports.json')),
+    );
+    return `http://127.0.0.1:${port}`;
+}
+
+/** The built Vue app, when there is one. */
+function rendererDir() {
+    const dir = join(resourcesRoot(), 'renderer');
+    return existsSync(dir) ? dir : undefined;
 }
 
 async function startEncoder() {
@@ -102,18 +162,6 @@ async function startEncoder() {
 
     await encoder.start();
 
-    // Spike affordance: lets a shell script drive the packaged app. A real
-    // build keeps the master key out of a world-readable file — Phase 5 puts
-    // secrets in a 0600 file, with the S3 key in the OS keychain.
-    writeHandle({
-        encoderUrl: encoder.baseUrl,
-        masterKey: encoder.masterKey,
-        workDir,
-        logDir,
-        ffmpeg: ffmpeg.ffmpeg.path,
-        ffprobe: ffmpeg.ffprobe.path,
-    });
-
     return {
         ok: true,
         encoderUrl: encoder.baseUrl,
@@ -125,6 +173,11 @@ async function startEncoder() {
     };
 }
 
+/**
+ * A 0600 file naming the local URLs and the master key, so a script can drive a
+ * running app. It exists for development; the renderer never reads it, and it
+ * should go once there is nothing left to drive by hand.
+ */
 function writeHandle(handle) {
     const dir = app.getPath('userData');
     mkdirSync(dir, { recursive: true });
@@ -146,9 +199,12 @@ function createWindow() {
         },
     });
 
-    // Nothing in this window should navigate anywhere; anything trying to is
-    // either a bug or hostile, and external links belong in the real browser.
-    window.webContents.on('will-navigate', (event) => event.preventDefault());
+    // The app may navigate within its own origin; anything else is either a bug
+    // or hostile, and genuine external links belong in the real browser.
+    window.webContents.on('will-navigate', (event, url) => {
+        if (status.appUrl && url.startsWith(status.appUrl)) return;
+        event.preventDefault();
+    });
     window.webContents.setWindowOpenHandler(({ url }) => {
         void shell.openExternal(url);
         return { action: 'deny' };
@@ -179,7 +235,10 @@ app.on('before-quit', (event) => {
     if (quitting || !encoder) return;
     event.preventDefault();
     quitting = true;
-    void encoder.stop().finally(() => app.quit());
+    void encoder
+        .stop()
+        .then(() => appServer?.close())
+        .finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => app.quit());
