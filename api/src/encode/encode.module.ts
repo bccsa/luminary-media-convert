@@ -16,6 +16,7 @@ import { RestartNotifierService } from './services/restart-notifier.service.js';
 import { ProbeService } from './services/probe.service.js';
 import { TusUploadService } from './services/tus-upload.service.js';
 import { UrlFetchService } from './services/url-fetch.service.js';
+import { LocalSourceService } from './services/local-source.service.js';
 import { SegmentPipelineService } from './services/segment-pipeline.service.js';
 import { PreviewService } from './services/preview.service.js';
 import { WaveformService } from './services/waveform.service.js';
@@ -39,6 +40,7 @@ import { AuthorizationWebhookService } from '../auth/authorization-webhook.servi
         ProbeService,
         TusUploadService,
         UrlFetchService,
+        LocalSourceService,
         SegmentPipelineService,
         PreviewService,
         WaveformService,
@@ -53,6 +55,8 @@ export class EncodeModule implements OnModuleInit {
     ) {}
 
     onModuleInit(): void {
+        if (!this.tusService.tusEnabled) return;
+
         const app = this.httpAdapterHost.httpAdapter.getInstance();
         const handler = (req: any, res: any) =>
             this.tusService.handle(req, res);

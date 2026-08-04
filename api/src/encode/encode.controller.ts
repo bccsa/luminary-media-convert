@@ -7,6 +7,7 @@ import {
     HttpCode,
     HttpStatus,
     NotFoundException,
+    NotImplementedException,
     Param,
     Post,
     Query,
@@ -49,6 +50,8 @@ import { CreateSessionDto } from './dto/create-session.dto.js';
 import { EncodeConfigDto } from './dto/encode-config.dto.js';
 import { UrlUploadDto } from './dto/url-upload.dto.js';
 import { UrlFetchService } from './services/url-fetch.service.js';
+import { LocalSourceDto } from './dto/local-source.dto.js';
+import { LocalSourceService } from './services/local-source.service.js';
 import { WaveformService } from './services/waveform.service.js';
 import { ThumbnailService } from './services/thumbnail.service.js';
 import {
@@ -80,6 +83,7 @@ export class EncodeController {
         private readonly authorizationWebhookService: AuthorizationWebhookService,
         private readonly previewService: PreviewService,
         private readonly urlFetchService: UrlFetchService,
+        private readonly localSourceService: LocalSourceService,
         private readonly waveformService: WaveformService,
         private readonly thumbnailService: ThumbnailService
     ) {}
@@ -193,6 +197,67 @@ export class EncodeController {
             dto.url,
             dto.filename
         );
+
+        return { sessionId, status: 'uploading' };
+    }
+
+    @Post(':sessionId/local-source')
+    @HttpCode(HttpStatus.ACCEPTED)
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('master')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'Adopt a source file already present on the encoder host',
+        description:
+            'Alternative to tus upload and URL ingestion: the encoder reads a file straight off ' +
+            'its own filesystem, with no copy. The file is never modified or deleted, including ' +
+            'when the session fails. Intended for the desktop build, where the encoder runs on ' +
+            "the user's machine. Requires ALLOW_LOCAL_SOURCE=true and master authentication; " +
+            'LOCAL_SOURCE_ROOTS can restrict which directories are readable. ' +
+            'Returns 202 immediately; clients track progress via SSE or polling.',
+    })
+    @ApiParam({
+        name: 'sessionId',
+        description: 'Session ID returned from POST /api/sessions',
+    })
+    @ApiResponse({
+        status: 202,
+        description: 'Local source ingestion started in the background.',
+    })
+    @ApiResponse({ status: 400, description: 'Invalid path or session state.' })
+    @ApiResponse({
+        status: 401,
+        description: 'Unauthorized — invalid or missing credentials.',
+    })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    @ApiResponse({
+        status: 501,
+        description: 'Local source ingestion is not enabled on this encoder.',
+    })
+    async startLocalSource(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: LocalSourceDto
+    ): Promise<{ sessionId: string; status: 'uploading' }> {
+        if (!this.localSourceService.enabled) {
+            throw new NotImplementedException(
+                'Local source ingestion is disabled (set ALLOW_LOCAL_SOURCE=true to enable)'
+            );
+        }
+
+        const session = this.sessionService.get(sessionId);
+        if (!session) {
+            throw new NotFoundException(`Session ${sessionId} not found`);
+        }
+
+        if (session.status !== 'created' && session.status !== 'uploading') {
+            throw new BadRequestException(
+                `Session is not accepting uploads (current status: ${session.status})`
+            );
+        }
+
+        // Background, like url-upload: validation is cheap but the probe that
+        // follows is not. LocalSourceService owns status and webhook delivery.
+        void this.localSourceService.ingest(sessionId, dto.path);
 
         return { sessionId, status: 'uploading' };
     }

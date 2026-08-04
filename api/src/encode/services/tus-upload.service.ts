@@ -4,7 +4,11 @@ import {
     type OnModuleDestroy,
     type OnModuleInit,
 } from '@nestjs/common';
-import { TusdServer } from 'node-tusd';
+// Type-only: node-tusd is ESM and this service compiles to CommonJS, so the
+// implementation is pulled in via a dynamic import() below — and only when tus
+// is actually enabled. That keeps the tusd Go binary out of builds that never
+// serve uploads (the desktop app reads its source straight off local disk).
+import type { TusdServer } from 'node-tusd';
 import { join, basename } from 'path';
 import { mkdirSync } from 'fs';
 import { rename, copyFile, unlink, mkdir, access, stat, readdir, readFile } from 'fs/promises';
@@ -35,6 +39,13 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
     private tusdServer!: TusdServer;
     private readonly tusDir: string;
     private readonly workDir: string;
+    /**
+     * Whether this instance serves tus uploads. Off means no tusd process, no
+     * /api/tus routes, and no staging directory; ingestion then comes from URL
+     * fetch or a local source path instead. finalizeUpload() stays available
+     * either way — every ingestion path converges on it.
+     */
+    readonly tusEnabled: boolean;
     private cleanupInterval: ReturnType<typeof setInterval> | null = null;
     /**
      * Staged finals we have already failed to rescue, by upload id.
@@ -57,10 +68,22 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
     ) {
         this.workDir = process.env.WORK_DIR || join(process.cwd(), 'work');
         this.tusDir = join(this.workDir, '.tus-uploads');
-        mkdirSync(this.tusDir, { recursive: true });
+        this.tusEnabled = process.env.TUS_ENABLED !== 'false';
+        if (this.tusEnabled) {
+            mkdirSync(this.tusDir, { recursive: true });
+        }
     }
 
     async onModuleInit(): Promise<void> {
+        if (!this.tusEnabled) {
+            this.logger.log('TUS uploads disabled (TUS_ENABLED=false)');
+            return;
+        }
+
+        // Deferred so the ESM-only node-tusd package — and the platform-specific
+        // tusd binary it resolves — are never loaded when uploads are disabled.
+        const { TusdServer } = await import('node-tusd');
+
         const maxSize =
             parseInt(process.env.MAX_UPLOAD_SIZE || '0', 10) ||
             DEFAULT_MAX_SIZE;
@@ -287,6 +310,8 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
     }
 
     async onModuleDestroy(): Promise<void> {
+        if (!this.tusEnabled) return;
+
         if (this.sweepInterval) {
             clearInterval(this.sweepInterval);
             this.sweepInterval = null;
@@ -326,6 +351,14 @@ export class TusUploadService implements OnModuleInit, OnModuleDestroy {
     }
 
     handle(req: IncomingMessage, res: ServerResponse): void {
+        if (!this.tusEnabled) {
+            // The routes are not mounted when tus is disabled, so this is only
+            // reachable if something calls in directly. Fail loudly rather than
+            // dereferencing a server that was never started.
+            res.statusCode = 404;
+            res.end();
+            return;
+        }
         this.tusdServer.handle(req, res);
     }
 

@@ -119,6 +119,65 @@ describe('TusUploadService', () => {
         });
     });
 
+    describe('TUS_ENABLED=false', () => {
+        // The desktop build reads its source straight off local disk, so it has
+        // no use for tusd — and skipping it keeps the platform-specific Go
+        // binary out of the bundle entirely.
+        function makeDisabledService(): TusUploadService {
+            vi.clearAllMocks();
+            process.env.TUS_ENABLED = 'false';
+            return new TusUploadService(
+                sessionService,
+                probeService,
+                { init: vi.fn(), destroy: vi.fn() } as any,
+                { send: vi.fn().mockResolvedValue(undefined) } as any,
+                { getOrComputeCached: vi.fn() } as any,
+                { getOrGeneratePreview: vi.fn() } as any,
+            );
+        }
+
+        afterEach(() => {
+            delete process.env.TUS_ENABLED;
+        });
+
+        it('does not start tusd', async () => {
+            const disabled = makeDisabledService();
+            await disabled.onModuleInit();
+
+            expect(disabled.tusEnabled).toBe(false);
+            expect(mockStart).not.toHaveBeenCalled();
+        });
+
+        it('does not create the staging directory', () => {
+            makeDisabledService();
+            expect(mockMkdir).not.toHaveBeenCalled();
+        });
+
+        it('answers 404 rather than touching a server that never started', () => {
+            const disabled = makeDisabledService();
+            const res = { statusCode: 200, end: vi.fn() } as any;
+
+            disabled.handle({} as any, res);
+
+            expect(res.statusCode).toBe(404);
+            expect(res.end).toHaveBeenCalled();
+            expect(mockHandle).not.toHaveBeenCalled();
+        });
+
+        it('shuts down without stopping a server that never started', async () => {
+            const disabled = makeDisabledService();
+            await disabled.onModuleInit();
+            await expect(disabled.onModuleDestroy()).resolves.toBeUndefined();
+
+            expect(mockStop).not.toHaveBeenCalled();
+            expect(mockCleanUpExpiredUploads).not.toHaveBeenCalled();
+        });
+
+        it('still exposes finalizeUpload — every ingestion path needs it', () => {
+            expect(typeof makeDisabledService().finalizeUpload).toBe('function');
+        });
+    });
+
     describe('onIncomingRequest', () => {
         it('should reject missing Authorization header', async () => {
             const hook = capturedServerConfig.value.onIncomingRequest;

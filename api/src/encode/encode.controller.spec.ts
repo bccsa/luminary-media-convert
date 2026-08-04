@@ -1217,6 +1217,7 @@ describe('EncodeController — source storyboard', () => {
             {} as any,
             {} as any,
             {} as any,
+            {} as any,
             thumbnailService,
         );
     });
@@ -1317,6 +1318,7 @@ describe('EncodeController — storyboard sprite headers', () => {
             { emit: vi.fn(), forSession: vi.fn() } as any,
             {} as any,
             { getAccelMode: vi.fn().mockReturnValue('cpu') } as any,
+            {} as any,
             {} as any,
             {} as any,
             {} as any,
