@@ -219,9 +219,18 @@ defineExpose({
                     v-if="showPlaybackControlsRow || $slots['below-player']"
                     class="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 pt-3"
                 >
+                    <!--
+                        A real flex-basis, not `flex-1`. With `flex-basis: 0%`
+                        this side never asks for any width, so the line never
+                        overflows, `flex-wrap` never fires, and the dropdowns
+                        stayed pinned alongside while the title and status were
+                        squeezed underneath them until they collided. Given a
+                        basis to fall below, the row wraps as it was meant to
+                        and the dropdowns take a second line.
+                    -->
                     <div
                         v-if="$slots['below-player']"
-                        class="min-w-0 flex-1"
+                        class="min-w-0 flex-[1_1_16rem]"
                     >
                         <slot name="below-player" />
                     </div>
@@ -238,7 +247,7 @@ defineExpose({
                                 variant="playback"
                                 presentation="custom"
                                 numeric
-                                wrapper-class="min-w-[10rem] max-w-[min(100%,20rem)]"
+                                wrapper-class="min-w-[7rem] max-w-[min(100%,14rem)]"
                                 :model-value="currentAngleIndex"
                                 :options="angleSelectOptions"
                                 aria-label="Camera angle"
