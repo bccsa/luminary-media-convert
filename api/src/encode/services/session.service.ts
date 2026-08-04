@@ -24,6 +24,11 @@ export interface AnglePlaylistInfo {
 export interface Session {
     id: string;
     sessionToken: string;
+    /**
+     * User-facing label. Optional: a session is perfectly usable without one,
+     * and the source filename is a reasonable fallback for display.
+     */
+    name?: string;
     status: SessionStatus;
     progress: number;
     pipelineProgress?: PipelineProgress;
@@ -41,6 +46,8 @@ export interface Session {
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
     createdAt: number;
+    /** When the encode finished. Absent until it does. */
+    completedAt?: number;
     /**
      * When this session last did anything.
      *
@@ -51,6 +58,22 @@ export interface Session {
      */
     lastActivityAt: number;
 }
+
+export interface SessionListQuery {
+    limit?: number;
+    skip?: number;
+    status?: SessionStatus;
+    /** Matches session name or id, case-insensitive. */
+    search?: string;
+}
+
+export interface SessionListResult {
+    sessions: Session[];
+    /** Matches before paging, so a client can render "x of n". */
+    total: number;
+}
+
+const DEFAULT_LIST_LIMIT = 25;
 
 /** Statuses that cannot survive the process that was driving them. */
 const IN_FLIGHT: SessionStatus[] = [
@@ -216,6 +239,7 @@ export class SessionService implements OnModuleInit {
         const session: Session = {
             id,
             sessionToken,
+            name: config.name?.trim() || undefined,
             status: 'created',
             progress: 0,
             config,
@@ -343,9 +367,56 @@ export class SessionService implements OnModuleInit {
             session.thumbnailsVtt = thumbnailsVtt;
             session.segmentFormat = segmentFormat;
             session.encryptionKeyHex = encryptionKeyHex;
+            session.completedAt = Date.now();
             this.persist(session);
             this.emitEvent(session);
         }
+    }
+
+    /** Rename a session. An empty name clears it rather than storing "". */
+    setName(id: string, name: string): Session | undefined {
+        const session = this.sessions.get(id);
+        if (!session) return undefined;
+        session.name = name.trim() || undefined;
+        this.persist(session);
+        return session;
+    }
+
+    /**
+     * Sessions newest-first, filtered and paged.
+     *
+     * Without a database this is the whole history, so it reads the in-memory
+     * map that `restore()` rebuilds from WORK_DIR at boot. Fine at desktop
+     * scale — one user's sessions — and it avoids a second store that could
+     * disagree with the encoder about what exists.
+     */
+    list(query: SessionListQuery = {}): SessionListResult {
+        const { status, search } = query;
+        const needle = search?.trim().toLowerCase();
+
+        let matched = [...this.sessions.values()];
+
+        if (status) {
+            matched = matched.filter((s) => s.status === status);
+        }
+
+        if (needle) {
+            // Name or id: the history view offers one box for both, and an id
+            // is what someone pasting from a log or a webhook payload has.
+            matched = matched.filter(
+                (s) =>
+                    s.name?.toLowerCase().includes(needle) ||
+                    s.id.toLowerCase().includes(needle),
+            );
+        }
+
+        matched.sort((a, b) => b.createdAt - a.createdAt);
+
+        const total = matched.length;
+        const skip = Math.max(0, query.skip ?? 0);
+        const limit = query.limit ?? DEFAULT_LIST_LIMIT;
+
+        return { sessions: matched.slice(skip, skip + limit), total };
     }
 
     setFailed(id: string, error: string): void {

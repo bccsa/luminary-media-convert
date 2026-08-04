@@ -9,6 +9,7 @@ import {
     NotFoundException,
     NotImplementedException,
     Param,
+    Patch,
     Post,
     Query,
     Req,
@@ -52,6 +53,12 @@ import { UrlUploadDto } from './dto/url-upload.dto.js';
 import { UrlFetchService } from './services/url-fetch.service.js';
 import { LocalSourceDto } from './dto/local-source.dto.js';
 import { LocalSourceService } from './services/local-source.service.js';
+import { ListSessionsQueryDto } from './dto/list-sessions.dto.js';
+import {
+    SessionSummaryDto,
+    toSessionSummary,
+} from './dto/session-summary.dto.js';
+import { UpdateSessionNameDto } from './dto/update-session-name.dto.js';
 import { WaveformService } from './services/waveform.service.js';
 import { ThumbnailService } from './services/thumbnail.service.js';
 import {
@@ -199,6 +206,55 @@ export class EncodeController {
         );
 
         return { sessionId, status: 'uploading' };
+    }
+
+    @Get()
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('master', 'apikey')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'List sessions, newest first',
+        description:
+            'Paginated session listing with optional status and name/id search. ' +
+            'The encoder restores its sessions from the work directory at startup, ' +
+            'so this covers everything it still holds — subject to the retention ' +
+            'settings, which can be disabled entirely with SESSION_MAX_AGE_HOURS=never.',
+    })
+    @ApiResponse({
+        status: 200,
+        description: 'Matching sessions plus the total before paging.',
+    })
+    listSessions(@Query() query: ListSessionsQueryDto): {
+        sessions: SessionSummaryDto[];
+        total: number;
+    } {
+        const { sessions, total } = this.sessionService.list({
+            limit: query.limit,
+            skip: query.skip,
+            status: query.status,
+            search: query.search,
+        });
+
+        return { sessions: sessions.map(toSessionSummary), total };
+    }
+
+    @Patch(':sessionId/name')
+    @UseGuards(AuthResolverGuard)
+    @AuthTypes('master', 'apikey', 'session')
+    @ApiSecurity('apikey')
+    @ApiOperation({ summary: 'Rename a session' })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({ status: 200, description: 'The updated session summary.' })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
+    updateSessionName(
+        @Param('sessionId') sessionId: string,
+        @Body() dto: UpdateSessionNameDto
+    ): SessionSummaryDto {
+        const session = this.sessionService.setName(sessionId, dto.name);
+        if (!session) {
+            throw new NotFoundException(`Session ${sessionId} not found`);
+        }
+        return toSessionSummary(session);
     }
 
     @Post(':sessionId/local-source')

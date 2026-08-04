@@ -50,6 +50,110 @@ describe('SessionService', () => {
         });
     });
 
+    describe('name', () => {
+        it('takes a name from the create config', () => {
+            const s = service.create(makeConfig({ name: 'Interview' }));
+            expect(s.name).toBe('Interview');
+        });
+
+        it('leaves the name unset when none is given', () => {
+            expect(service.create(makeConfig()).name).toBeUndefined();
+        });
+
+        it.each(['', '   '])('treats %p as unnamed rather than storing it', (given) => {
+            const s = service.create(makeConfig({ name: given }));
+            expect(s.name).toBeUndefined();
+        });
+
+        it('renames an existing session', () => {
+            const s = service.create(makeConfig());
+            expect(service.setName(s.id, 'Renamed')?.name).toBe('Renamed');
+            expect(service.get(s.id)?.name).toBe('Renamed');
+        });
+
+        it('clears the name when renamed to nothing', () => {
+            const s = service.create(makeConfig({ name: 'Old' }));
+            service.setName(s.id, '  ');
+            expect(service.get(s.id)?.name).toBeUndefined();
+        });
+
+        it('returns undefined for an unknown session', () => {
+            expect(service.setName('nope', 'x')).toBeUndefined();
+        });
+    });
+
+    describe('list', () => {
+        /** Distinct createdAt values, so ordering assertions are not ties. */
+        function seed(names: string[]): Session[] {
+            return names.map((name, i) => {
+                const s = service.create(makeConfig({ name }));
+                s.createdAt = 1000 + i;
+                return s;
+            });
+        }
+
+        it('returns newest first', () => {
+            seed(['oldest', 'middle', 'newest']);
+            expect(service.list().sessions.map((s) => s.name)).toEqual([
+                'newest',
+                'middle',
+                'oldest',
+            ]);
+        });
+
+        it('reports the total before paging, so a client can show "x of n"', () => {
+            seed(['a', 'b', 'c', 'd', 'e']);
+            const page = service.list({ limit: 2, skip: 1 });
+            expect(page.sessions).toHaveLength(2);
+            expect(page.total).toBe(5);
+        });
+
+        it('pages without gaps or repeats', () => {
+            seed(['a', 'b', 'c', 'd', 'e']);
+            const first = service.list({ limit: 2, skip: 0 }).sessions;
+            const second = service.list({ limit: 2, skip: 2 }).sessions;
+            const ids = [...first, ...second].map((s) => s.id);
+            expect(new Set(ids).size).toBe(4);
+        });
+
+        it('filters by status', () => {
+            const [a] = seed(['a', 'b']);
+            service.updateStatus(a.id, 'completed');
+            const result = service.list({ status: 'completed' });
+            expect(result.total).toBe(1);
+            expect(result.sessions[0].id).toBe(a.id);
+        });
+
+        it('searches the name case-insensitively', () => {
+            seed(['Interview final', 'Podcast']);
+            expect(service.list({ search: 'INTERVIEW' }).total).toBe(1);
+        });
+
+        it('searches by id too — that is what a log line gives you', () => {
+            const [a] = seed(['a', 'b']);
+            const result = service.list({ search: a.id.slice(0, 8) });
+            expect(result.sessions.map((s) => s.id)).toEqual([a.id]);
+        });
+
+        it('does not match unnamed sessions on an empty-ish search', () => {
+            seed(['named']);
+            service.create(makeConfig());
+            expect(service.list({ search: 'zzz' }).total).toBe(0);
+        });
+
+        it('combines status and search', () => {
+            const [a, b] = seed(['report one', 'report two']);
+            service.updateStatus(a.id, 'completed');
+            service.updateStatus(b.id, 'failed');
+            const result = service.list({ search: 'report', status: 'failed' });
+            expect(result.sessions.map((s) => s.id)).toEqual([b.id]);
+        });
+
+        it('is empty rather than throwing when nothing exists', () => {
+            expect(service.list()).toEqual({ sessions: [], total: 0 });
+        });
+    });
+
     describe('get', () => {
         it('should return a session by id', () => {
             const created = service.create(makeConfig());

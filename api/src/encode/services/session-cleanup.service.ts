@@ -30,31 +30,59 @@ export class SessionCleanupService {
     /** Hourly by default: disk is reclaimed soon after a session ages out. */
     @Cron(process.env.SESSION_CLEANUP_CRON?.trim() || '0 * * * *')
     sweep(): number {
+        let total = 0;
+
         const hours = this.maxAgeHours();
-        const removed = this.sessionService.cleanup(hours * 60 * 60 * 1000);
-        if (removed > 0) {
-            this.logger.log(
-                `Swept ${removed} session(s) older than ${hours}h`,
-            );
+        if (hours !== null) {
+            const removed = this.sessionService.cleanup(hours * 60 * 60 * 1000);
+            if (removed > 0) {
+                this.logger.log(
+                    `Swept ${removed} session(s) older than ${hours}h`,
+                );
+            }
+            total += removed;
         }
 
         const idleHours = this.abandonedMaxAgeHours();
-        const abandoned = this.sessionService.cleanupAbandoned(
-            idleHours * 60 * 60 * 1000,
-        );
-        if (abandoned > 0) {
-            this.logger.log(
-                `Swept ${abandoned} session(s) abandoned for over ${idleHours}h`,
+        if (idleHours !== null) {
+            const abandoned = this.sessionService.cleanupAbandoned(
+                idleHours * 60 * 60 * 1000,
             );
+            if (abandoned > 0) {
+                this.logger.log(
+                    `Swept ${abandoned} session(s) abandoned for over ${idleHours}h`,
+                );
+            }
+            total += abandoned;
         }
 
-        return removed + abandoned;
+        return total;
     }
 
-    /** How long a finished session is kept. Misconfiguration falls back rather than deleting early. */
-    private maxAgeHours(): number {
+    /**
+     * Whether a retention setting means "keep forever".
+     *
+     * The desktop build has no database behind the encoder, so this session
+     * list is the user's entire history — sweeping it would delete their work,
+     * not reclaim scratch space. A server deployment leaves these unset and
+     * keeps the existing windows.
+     *
+     * Only spelled-out values count. "0" stays a misconfiguration that falls
+     * back to the default, because it reads equally well as "keep nothing" and
+     * guessing wrong in that direction deletes the user's sessions.
+     */
+    private isDisabled(raw: string): boolean {
+        return ['never', 'off', 'none'].includes(raw.toLowerCase());
+    }
+
+    /**
+     * How long a finished session is kept, or null to keep it indefinitely.
+     * Misconfiguration falls back rather than deleting early.
+     */
+    private maxAgeHours(): number | null {
         const raw = process.env.SESSION_MAX_AGE_HOURS?.trim();
         if (!raw) return DEFAULT_MAX_AGE_HOURS;
+        if (this.isDisabled(raw)) return null;
         const parsed = Number(raw);
         if (!Number.isFinite(parsed) || parsed <= 0) {
             this.logger.warn(
@@ -72,9 +100,10 @@ export class SessionCleanupService {
      * holding space nobody is going to use, while a finished one may still be
      * wanted. Misconfiguration falls back rather than deleting early.
      */
-    private abandonedMaxAgeHours(): number {
+    private abandonedMaxAgeHours(): number | null {
         const raw = process.env.SESSION_ABANDONED_MAX_AGE_HOURS?.trim();
         if (!raw) return DEFAULT_ABANDONED_MAX_AGE_HOURS;
+        if (this.isDisabled(raw)) return null;
         const parsed = Number(raw);
         if (!Number.isFinite(parsed) || parsed <= 0) {
             this.logger.warn(

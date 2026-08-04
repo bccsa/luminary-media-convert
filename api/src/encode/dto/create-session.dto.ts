@@ -2,7 +2,9 @@ import {
     IsBoolean,
     IsNumber,
     IsOptional,
+    IsString,
     Max,
+    MaxLength,
     Min,
     ValidateNested,
 } from 'class-validator';
@@ -13,6 +15,17 @@ import { WebhookConfigDto } from './webhook-config.dto.js';
 import { EncryptionConfigDto } from './encryption-config.dto.js';
 
 export class CreateSessionDto {
+    @ApiPropertyOptional({
+        description:
+            'User-facing label for the session, shown in listings. Can also be set later via PATCH /api/sessions/{id}/name.',
+        example: 'Interview — final cut',
+    })
+    @IsString()
+    @IsOptional()
+    @MaxLength(200)
+    @Expose()
+    name?: string;
+
     @ApiPropertyOptional({
         description: 'HLS segment duration in seconds. Defaults to 6.',
         default: 6,
