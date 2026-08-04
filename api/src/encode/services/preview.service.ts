@@ -8,6 +8,7 @@ import type { ReadStream } from 'fs';
 import { SessionService } from './session.service.js';
 import type { ProbeResult, AudioTrackInfo } from './probe.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
+import { FFMPEG } from './ffmpeg-bin.js';
 
 const MAX_AUDIO_BITRATE_KBPS = 150;
 
@@ -420,7 +421,7 @@ export class PreviewService {
         const csvPath = join(tmpDir, 'segments.csv');
 
         try {
-            await execFileAsync('ffmpeg', [
+            await execFileAsync(FFMPEG, [
                 '-i', filePath,
                 '-map', `0:v:${videoStreamIndex}`,
                 '-c:v', 'copy', '-an',
@@ -683,7 +684,7 @@ export class PreviewService {
 
             let result: { stdout: any };
             try {
-                result = await execFileAsync('ffmpeg', args, opts);
+                result = await execFileAsync(FFMPEG, args, opts);
             } catch (gpuErr: any) {
                 if (!useGpu) throw gpuErr;
                 // GPU failed (e.g. NVENC session limit) — retry with CPU
@@ -692,7 +693,7 @@ export class PreviewService {
                     state.filePath, start, segDur, videoMap, audioMap,
                     rendition, 'cpu', false,
                 );
-                result = await execFileAsync('ffmpeg', cpuArgs, opts);
+                result = await execFileAsync(FFMPEG, cpuArgs, opts);
             }
 
             // Write segment data ourselves — guaranteed flushed via writeFile

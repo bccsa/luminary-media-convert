@@ -22,6 +22,7 @@ import type {
     TrimSegmentDto,
 } from '../dto/encode-config.dto.js';
 import dotenv from 'dotenv';
+import { FFMPEG, FFPROBE } from './ffmpeg-bin.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -123,7 +124,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      */
     private ffmpegQuery(args: string[]): string | null {
         try {
-            return execFileSync('ffmpeg', args, {
+            return execFileSync(FFMPEG, args, {
                 encoding: 'utf-8',
                 timeout: 5000,
                 stdio: ['ignore', 'pipe', 'ignore'],
@@ -165,7 +166,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     ): Promise<{ video: number[]; audio: number[] }> {
         try {
             const { stdout } = await execFileAsync(
-                'ffprobe',
+                FFPROBE,
                 [
                     '-v',
                     'error',
@@ -242,7 +243,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private async probeDuration(inputPath: string): Promise<number> {
         try {
             const { stdout } = await execFileAsync(
-                'ffprobe',
+                FFPROBE,
                 [
                     '-v',
                     'error',
@@ -267,7 +268,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private async probeFrameRate(inputPath: string): Promise<number> {
         try {
             const { stdout } = await execFileAsync(
-                'ffprobe',
+                FFPROBE,
                 [
                     '-v',
                     'error',
@@ -304,7 +305,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     ): Promise<number | null> {
         try {
             const { stdout } = await execFileAsync(
-                'ffprobe',
+                FFPROBE,
                 [
                     '-v',
                     'error',
@@ -908,7 +909,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         this.logger.debug(`FFmpeg args: ffmpeg ${args.join(' ')}`);
 
         return new Promise<EncodeResult>((resolve, reject) => {
-            const proc = spawn('ffmpeg', args, {
+            const proc = spawn(FFMPEG, args, {
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
             this.activeProcess = proc;

@@ -1,12 +1,23 @@
 {
     "name": "@luminary-media-converter/desktop",
+    "productName": "Luminary Media Convert",
     "version": "0.0.1",
     "private": true,
-    "description": "Electron desktop shell — runs the encoder locally against files on disk",
+    "description": "Electron desktop shell \u2014 runs the encoder locally against files on disk",
     "type": "module",
     "scripts": {
         "stage": "node scripts/stage-services.mjs",
         "stage:api": "node scripts/stage-services.mjs api",
-        "stage:saas": "node scripts/stage-services.mjs saas"
-    }
+        "stage:saas": "node scripts/stage-services.mjs saas",
+        "start": "npm run stage:api && electron .",
+        "start:nostage": "electron .",
+        "pack": "npm run stage:api && electron-builder --dir",
+        "dist": "npm run stage && electron-builder"
+    },
+    "devDependencies": {
+        "electron": "43.2.0",
+        "electron-builder": "^26.15.3"
+    },
+    "main": "src/main.js",
+    "author": "Bells Solutions"
 }

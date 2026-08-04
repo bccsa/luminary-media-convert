@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+        />
+        <title>Luminary Media Convert — encoder status</title>
+        <style>
+            :root {
+                color-scheme: light dark;
+                font-family:
+                    ui-sans-serif, system-ui, -apple-system, sans-serif;
+            }
+            body {
+                margin: 0;
+                padding: 2rem;
+                line-height: 1.5;
+            }
+            h1 {
+                font-size: 1.05rem;
+                margin: 0 0 1.25rem;
+                font-weight: 600;
+            }
+            dl {
+                display: grid;
+                grid-template-columns: auto 1fr;
+                gap: 0.4rem 1.25rem;
+                margin: 0;
+                font-size: 0.85rem;
+            }
+            dt {
+                opacity: 0.6;
+            }
+            dd {
+                margin: 0;
+                font-family: ui-monospace, SFMono-Regular, monospace;
+                overflow-wrap: anywhere;
+            }
+            .state {
+                display: inline-block;
+                padding: 0.15rem 0.5rem;
+                border-radius: 999px;
+                font-size: 0.75rem;
+                font-family: ui-sans-serif, system-ui, sans-serif;
+            }
+            .ok {
+                background: #dcfce7;
+                color: #166534;
+            }
+            .bad {
+                background: #fee2e2;
+                color: #991b1b;
+            }
+            @media (prefers-color-scheme: dark) {
+                .ok {
+                    background: #14532d;
+                    color: #bbf7d0;
+                }
+                .bad {
+                    background: #7f1d1d;
+                    color: #fecaca;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Luminary Media Convert — local encoder</h1>
+        <dl id="out">
+            <dt>state</dt>
+            <dd>starting…</dd>
+        </dl>
+        <script>
+            window.luminary.onStatus((s) => {
+                const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+                const badge = (ok, text) =>
+                    `<span class="state ${ok ? 'ok' : 'bad'}">${text}</span>`;
+
+                document.getElementById('out').innerHTML = [
+                    row('state', badge(s.ok, s.ok ? 'running' : 'failed')),
+                    s.error ? row('error', s.error) : '',
+                    s.encoderUrl ? row('encoder', s.encoderUrl) : '',
+                    s.ffmpeg ? row('ffmpeg', s.ffmpeg) : '',
+                    s.ffprobe ? row('ffprobe', s.ffprobe) : '',
+                    s.ffmpegSource ? row('found via', s.ffmpegSource) : '',
+                    s.workDir ? row('work dir', s.workDir) : '',
+                    s.logDir ? row('logs', s.logDir) : '',
+                ].join('');
+            });
+        </script>
+    </body>
+</html>

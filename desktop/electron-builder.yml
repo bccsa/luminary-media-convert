@@ -1,0 +1,45 @@
+appId: com.luminary.mediaconvert
+productName: Luminary Media Convert
+
+directories:
+  output: release
+  # Scoped to desktop/ so the packager never walks the monorepo.
+  buildResources: build
+
+files:
+  - src/**/*
+  - package.json
+
+# The staged services go in Resources/, outside the asar, on purpose. The
+# encoder resolves its worker threads with join(__dirname, '*.worker.js'), which
+# only works against real files — inside an asar those paths do not exist.
+extraResources:
+  - from: build/resources/services
+    to: services
+    filter:
+      - '**/*'
+
+asar: true
+
+mac:
+  # Two per-arch builds rather than a universal binary: nothing here is native,
+  # so a universal build would only duplicate identical JavaScript.
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.video
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: AudioVideo
