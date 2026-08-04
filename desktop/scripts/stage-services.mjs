@@ -21,7 +21,13 @@
  *       platform-specific Go binary out of every installer. This is only safe
  *       because the import is dynamic — see TusUploadService.onModuleInit.
  *
- * Usage: node scripts/stage-services.mjs [api|saas ...]   (default: both)
+ * Usage: node scripts/stage-services.mjs [api|saas ...]   (default: api)
+ *
+ * Only the encoder ships. The desktop build has no authentication and therefore
+ * no multi-tenancy, which leaves the SaaS session document a second copy of
+ * state the encoder already persists to WORK_DIR — so the encoder is the source
+ * of truth and saas/ is not part of the app. It stays stageable here because
+ * the config costs nothing and the hosted product still uses it.
  */
 
 import { execFileSync, spawn } from 'node:child_process';
@@ -382,7 +388,7 @@ function directorySize(dir) {
 }
 
 const requested = process.argv.slice(2);
-const targets = requested.length > 0 ? requested : Object.keys(SERVICES);
+const targets = requested.length > 0 ? requested : ['api'];
 
 for (const name of targets) {
     const stageDir = stage(name);
