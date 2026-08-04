@@ -10,7 +10,8 @@
         "segment-editor",
         "tusd",
         "saas",
-        "admin"
+        "admin",
+        "desktop"
     ],
     "scripts": {
         "predev": "npm -w encode-config run build && npm -w segment-editor run build",

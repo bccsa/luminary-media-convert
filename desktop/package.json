@@ -1,0 +1,12 @@
+{
+    "name": "@luminary-media-converter/desktop",
+    "version": "0.0.1",
+    "private": true,
+    "description": "Electron desktop shell — runs the encoder locally against files on disk",
+    "type": "module",
+    "scripts": {
+        "stage": "node scripts/stage-services.mjs",
+        "stage:api": "node scripts/stage-services.mjs api",
+        "stage:saas": "node scripts/stage-services.mjs saas"
+    }
+}

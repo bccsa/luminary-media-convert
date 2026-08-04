@@ -1,0 +1,4 @@
+# Staged service trees and packaged output — all reproducible from source.
+build/
+dist/
+release/
