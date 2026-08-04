@@ -153,6 +153,76 @@ describe('PreviewService', () => {
     });
 
     /* ============================================================== */
+    /*  Source-file containment                                        */
+    /* ============================================================== */
+
+    describe('scratch directories stay inside WORK_DIR', () => {
+        // A source file can live anywhere on disk — in the desktop app the user
+        // picks it straight out of their own folders and it is read in place.
+        // Preview scratch dirs are rm -rf'd, so deriving them from the source's
+        // location would create and then delete directories next to the user's
+        // media. Everything must hang off WORK_DIR instead.
+        const OUTSIDE_DIR = '/Users/someone/Movies';
+        const OUTSIDE_FILE = `${OUTSIDE_DIR}/holiday.mp4`;
+        const WORK_DIR = '/var/luminary-work';
+
+        let origWorkDir: string | undefined;
+
+        beforeEach(() => {
+            origWorkDir = process.env.WORK_DIR;
+            process.env.WORK_DIR = WORK_DIR;
+        });
+
+        afterEach(() => {
+            if (origWorkDir === undefined) delete process.env.WORK_DIR;
+            else process.env.WORK_DIR = origWorkDir;
+        });
+
+        function pathArgs(mock: typeof mockMkdir): string[] {
+            return mock.mock.calls.map((call) => String(call[0]));
+        }
+
+        it('never creates or removes anything next to the source file', async () => {
+            // A <=480p H.264 source takes the copy-mode path, which also runs
+            // the keyframe scan — so this covers both scratch dirs.
+            const probe = makeProbe({
+                videoTracks: [
+                    { index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 },
+                ],
+            });
+            sessionService = makeSessionService({ filePath: OUTSIDE_FILE, probeResult: probe });
+            service = new PreviewService(sessionService, makeFfmpegService());
+
+            await service.init('s1');
+            await service.destroy('s1');
+
+            const touched = [...pathArgs(mockMkdir), ...pathArgs(mockRm)];
+            expect(touched.length).toBeGreaterThan(0);
+
+            for (const path of touched) {
+                expect(path.startsWith(WORK_DIR)).toBe(true);
+                expect(path).not.toContain(OUTSIDE_DIR);
+            }
+        });
+
+        it('puts the preview and keyframe-scan dirs under WORK_DIR/<sessionId>', async () => {
+            const probe = makeProbe({
+                videoTracks: [
+                    { index: 0, codec: 'h264', width: 854, height: 480, bitrateKbps: 2000, frameRate: 30 },
+                ],
+            });
+            sessionService = makeSessionService({ filePath: OUTSIDE_FILE, probeResult: probe });
+            service = new PreviewService(sessionService, makeFfmpegService());
+
+            await service.init('s1');
+
+            const made = pathArgs(mockMkdir);
+            expect(made).toContain(`${WORK_DIR}/s1/preview`);
+            expect(made).toContain(`${WORK_DIR}/s1/kfscan`);
+        });
+    });
+
+    /* ============================================================== */
     /*  init()                                                         */
     /* ============================================================== */
 

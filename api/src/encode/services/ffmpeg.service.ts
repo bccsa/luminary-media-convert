@@ -4,7 +4,12 @@ import {
     OnModuleInit,
     OnModuleDestroy,
 } from '@nestjs/common';
-import { spawn, execFile, execSync, type ChildProcess } from 'child_process';
+import {
+    spawn,
+    execFile,
+    execFileSync,
+    type ChildProcess,
+} from 'child_process';
 import { mkdirSync, existsSync } from 'fs';
 import { readFile, writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
@@ -109,49 +114,47 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return 'cpu';
     }
 
+    /**
+     * Run `ffmpeg <args>` and return stdout, or null if it fails.
+     *
+     * execFileSync rather than execSync: no shell means no `2>/dev/null`
+     * (which is POSIX-only and silently fails the whole probe on Windows),
+     * and Windows still gets .exe resolution off PATH.
+     */
+    private ffmpegQuery(args: string[]): string | null {
+        try {
+            return execFileSync('ffmpeg', args, {
+                encoding: 'utf-8',
+                timeout: 5000,
+                stdio: ['ignore', 'pipe', 'ignore'],
+            });
+        } catch {
+            return null;
+        }
+    }
+
     private detectNvidiaGpu(): boolean {
         try {
-            execSync('nvidia-smi', { stdio: 'ignore', timeout: 5000 });
+            execFileSync('nvidia-smi', [], { stdio: 'ignore', timeout: 5000 });
         } catch {
             return false;
         }
 
-        try {
-            const hwaccels = execSync('ffmpeg -hwaccels 2>/dev/null', {
-                encoding: 'utf-8',
-                timeout: 5000,
-            });
-            return hwaccels.includes('cuda');
-        } catch {
-            return false;
-        }
+        return this.ffmpegQuery(['-hwaccels'])?.includes('cuda') ?? false;
     }
 
     private detectAppleGpu(): boolean {
         if (process.platform !== 'darwin' || process.arch !== 'arm64') {
             return false;
         }
-        try {
-            const hwaccels = execSync('ffmpeg -hwaccels 2>/dev/null', {
-                encoding: 'utf-8',
-                timeout: 5000,
-            });
-            if (!hwaccels.includes('videotoolbox')) return false;
 
-            const encoders = execSync('ffmpeg -encoders 2>/dev/null', {
-                encoding: 'utf-8',
-                timeout: 5000,
-            });
-            if (!encoders.includes('h264_videotoolbox')) return false;
+        const hwaccels = this.ffmpegQuery(['-hwaccels']);
+        if (!hwaccels?.includes('videotoolbox')) return false;
 
-            const filters = execSync('ffmpeg -filters 2>/dev/null', {
-                encoding: 'utf-8',
-                timeout: 5000,
-            });
-            return filters.includes('scale_vt');
-        } catch {
-            return false;
-        }
+        const encoders = this.ffmpegQuery(['-encoders']);
+        if (!encoders?.includes('h264_videotoolbox')) return false;
+
+        return this.ffmpegQuery(['-filters'])?.includes('scale_vt') ?? false;
     }
 
     /**

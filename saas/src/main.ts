@@ -71,8 +71,11 @@ async function bootstrap() {
     app.enableCors({ origin });
 
     const port = process.env.PORT ?? 3001;
-    await app.listen(port);
-    console.log(`Luminary SaaS running on port ${port}`);
+    // Defaults to all interfaces, as the containerised deployment needs.
+    // Set BIND_HOST=127.0.0.1 to keep the service loopback-only (desktop).
+    const host = process.env.BIND_HOST ?? '0.0.0.0';
+    await app.listen(port, host);
+    console.log(`Luminary SaaS running on ${host}:${port}`);
     if (process.env.ENABLE_SWAGGER === 'true') {
         console.log(`API docs available at http://localhost:${port}/saas/docs`);
     }

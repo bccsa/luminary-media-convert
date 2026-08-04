@@ -6,9 +6,9 @@ import { tmpdir } from 'os';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 
-const { mockSpawn, mockExecSync, mockExecFile, MockWorker, useRealWorker } = vi.hoisted(() => ({
+const { mockSpawn, mockExecFileSync, mockExecFile, MockWorker, useRealWorker } = vi.hoisted(() => ({
     mockSpawn: vi.fn(),
-    mockExecSync: vi.fn(),
+    mockExecFileSync: vi.fn(),
     mockExecFile: vi.fn(),
     MockWorker: vi.fn(),
     useRealWorker: { value: true },
@@ -19,7 +19,7 @@ vi.mock('child_process', async (importOriginal) => {
     return {
         ...actual,
         spawn: mockSpawn,
-        execSync: mockExecSync,
+        execFileSync: mockExecFileSync,
         execFile: mockExecFile,
     };
 });
@@ -70,11 +70,11 @@ describe('FfmpegService', () => {
     let service: FfmpegService;
 
     beforeEach(() => {
-        mockExecSync.mockReset();
+        mockExecFileSync.mockReset();
         mockExecFile.mockReset();
 
         // Default: GPU detection falls through to CPU
-        mockExecSync.mockImplementation(() => {
+        mockExecFileSync.mockImplementation(() => {
             throw new Error('not available');
         });
 
@@ -2594,9 +2594,10 @@ describe('FfmpegService', () => {
 
     describe('GPU detection via onModuleInit', () => {
         it('should detect NVIDIA GPU when nvidia-smi succeeds and hwaccels includes cuda', async () => {
-            mockExecSync.mockImplementation((cmd: string) => {
+            mockExecFileSync.mockImplementation((file: string, args: string[] = []) => {
+                const cmd = [file, ...args].join(' ');
                 if (cmd === 'nvidia-smi') return '';
-                if (cmd === 'ffmpeg -hwaccels 2>/dev/null') return 'Hardware acceleration methods:\ncuda\n';
+                if (cmd === 'ffmpeg -hwaccels') return 'Hardware acceleration methods:\ncuda\n';
                 throw new Error('not available');
             });
 
@@ -2606,7 +2607,7 @@ describe('FfmpegService', () => {
         });
 
         it('should fall through when nvidia-smi fails', async () => {
-            mockExecSync.mockImplementation(() => {
+            mockExecFileSync.mockImplementation(() => {
                 throw new Error('not available');
             });
 
@@ -2621,11 +2622,12 @@ describe('FfmpegService', () => {
             Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
 
             try {
-                mockExecSync.mockImplementation((cmd: string) => {
+                mockExecFileSync.mockImplementation((file: string, args: string[] = []) => {
+                const cmd = [file, ...args].join(' ');
                     if (cmd === 'nvidia-smi') throw new Error('not available');
-                    if (cmd === 'ffmpeg -hwaccels 2>/dev/null') return 'Hardware acceleration methods:\nvideotoolbox\n';
-                    if (cmd === 'ffmpeg -encoders 2>/dev/null') return 'h264_videotoolbox';
-                    if (cmd === 'ffmpeg -filters 2>/dev/null') return 'scale_vt';
+                    if (cmd === 'ffmpeg -hwaccels') return 'Hardware acceleration methods:\nvideotoolbox\n';
+                    if (cmd === 'ffmpeg -encoders') return 'h264_videotoolbox';
+                    if (cmd === 'ffmpeg -filters') return 'scale_vt';
                     throw new Error('not available');
                 });
 
@@ -2639,7 +2641,7 @@ describe('FfmpegService', () => {
         });
 
         it('should fall back to CPU when neither GPU is detected', async () => {
-            mockExecSync.mockImplementation(() => {
+            mockExecFileSync.mockImplementation(() => {
                 throw new Error('not available');
             });
 
@@ -2655,10 +2657,11 @@ describe('FfmpegService', () => {
             Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
 
             try {
-                mockExecSync.mockImplementation((cmd: string) => {
+                mockExecFileSync.mockImplementation((file: string, args: string[] = []) => {
+                const cmd = [file, ...args].join(' ');
                     if (cmd === 'nvidia-smi') throw new Error('not available');
-                    if (cmd === 'ffmpeg -hwaccels 2>/dev/null') return 'Hardware acceleration methods:\nvideotoolbox\n';
-                    if (cmd === 'ffmpeg -encoders 2>/dev/null') return 'some_other_encoder';
+                    if (cmd === 'ffmpeg -hwaccels') return 'Hardware acceleration methods:\nvideotoolbox\n';
+                    if (cmd === 'ffmpeg -encoders') return 'some_other_encoder';
                     throw new Error('not available');
                 });
 

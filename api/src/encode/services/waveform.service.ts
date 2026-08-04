@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { spawn } from 'child_process';
 import { existsSync, readdirSync } from 'fs';
 import { mkdir, readFile, writeFile } from 'fs/promises';
-import { dirname, join } from 'path';
+import { dirname, join, relative, isAbsolute, resolve } from 'path';
 
 export interface WaveformSidecar {
     version: number;
@@ -115,6 +115,12 @@ export class WaveformService {
         return join(this.workDir, sessionId, 'waveform.json');
     }
 
+    /** True when `target` sits inside WORK_DIR — i.e. it is a file we manage. */
+    private isInsideWorkDir(target: string): boolean {
+        const rel = relative(resolve(this.workDir), resolve(target));
+        return rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel);
+    }
+
     async generateWaveform(opts: {
         inputPath: string;
         concatFilePath?: string;
@@ -126,7 +132,14 @@ export class WaveformService {
 
         // For a direct input (no concat file), tolerate the upload-side rename
         // by falling back to whatever non-hidden file sits in the same dir.
-        if (!opts.concatFilePath && !existsSync(resolvedInput)) {
+        // Only ever do this inside WORK_DIR: a source can live anywhere on disk
+        // (e.g. a local file picked in the desktop app), and we must not list —
+        // let alone transcode — an arbitrary directory of the user's.
+        if (
+            !opts.concatFilePath &&
+            !existsSync(resolvedInput) &&
+            this.isInsideWorkDir(resolvedInput)
+        ) {
             const dir = dirname(resolvedInput);
             this.logger.log(
                 `File not found at ${resolvedInput}, checking directory: ${dir}`

@@ -76,8 +76,11 @@ async function bootstrap() {
     app.enableCors(CORS_OPTIONS);
 
     const port = process.env.PORT ?? 3000;
-    await app.listen(port);
-    console.log(`Luminary Media Convert running on port ${port}`);
+    // Defaults to all interfaces, as the containerised deployment needs.
+    // Set BIND_HOST=127.0.0.1 to keep the service loopback-only (desktop).
+    const host = process.env.BIND_HOST ?? '0.0.0.0';
+    await app.listen(port, host);
+    console.log(`Luminary Media Convert running on ${host}:${port}`);
     console.log(`API docs available at http://localhost:${port}/api/docs`);
 }
 
