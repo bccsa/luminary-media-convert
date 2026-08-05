@@ -22,3 +22,6 @@ declare module '*.vue' {
     const component: DefineComponent<object, object, unknown>;
     export default component;
 }
+
+/** True in the Electron build. Set by `define` in vite.config.ts. */
+declare const __DESKTOP__: boolean;

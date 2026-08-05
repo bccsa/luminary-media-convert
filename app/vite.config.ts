@@ -3,72 +3,126 @@ import vue from '@vitejs/plugin-vue';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { cloudflare } from '@cloudflare/vite-plugin';
+import { fileURLToPath, URL } from 'node:url';
 
-export default defineConfig({
-    plugins: [
-        vue(),
-        tailwindcss(),
-        VitePWA({
-            registerType: 'prompt',
-            includeAssets: ['favicon.svg', 'favicon.ico'],
-            manifest: {
-                name: 'Luminary Media Convert',
-                short_name: 'Luminary',
-                description: 'Upload, encode, and review media sessions.',
-                theme_color: '#0284c7',
-                background_color: '#f8fafc',
-                display: 'standalone',
-                scope: '/',
-                start_url: '/sessions',
-                icons: [
-                    {
-                        src: 'pwa-64x64.png',
-                        sizes: '64x64',
-                        type: 'image/png',
-                    },
-                    {
-                        src: 'pwa-192x192.png',
-                        sizes: '192x192',
-                        type: 'image/png',
-                    },
-                    {
-                        src: 'pwa-512x512.png',
-                        sizes: '512x512',
-                        type: 'image/png',
-                        purpose: 'any',
-                    },
-                    {
-                        src: 'maskable-icon-512x512.png',
-                        sizes: '512x512',
-                        type: 'image/png',
-                        purpose: 'maskable',
-                    },
-                ],
-            },
-            workbox: {
-                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-                navigateFallback: 'index.html',
-                navigateFallbackDenylist: [/^\/api\//],
-            },
-            devOptions: {
-                enabled: true,
-            },
-        }),
-        cloudflare(),
-    ],
-    server: {
-        port: 5173,
-        strictPort: true,
-        headers: {
-            'Cross-Origin-Opener-Policy': 'same-origin',
-            'Cross-Origin-Embedder-Policy': 'credentialless',
+/**
+ * Two targets from one source tree.
+ *
+ * The web build is unchanged: Cloudflare Workers, a service worker, Auth0.
+ *
+ * `--mode desktop` builds the renderer that the Electron shell serves. It drops
+ * the two plugins that make no sense there and swaps Auth0 for a local stub —
+ * see src/shims/auth0.ts. Everything else, including the video.js dedupe, is
+ * shared, because the differences are about where the app runs rather than what
+ * it does.
+ */
+export default defineConfig(({ mode }) => {
+    const desktop = mode === 'desktop';
+
+    return {
+        plugins: [
+            vue(),
+            tailwindcss(),
+            // A service worker would fight the shell's own SPA fallback, and an
+            // install prompt is meaningless in something already installed.
+            ...(desktop
+                ? []
+                : [
+                      VitePWA({
+                          registerType: 'prompt',
+                          includeAssets: ['favicon.svg', 'favicon.ico'],
+                          manifest: {
+                              name: 'Luminary Media Convert',
+                              short_name: 'Luminary',
+                              description:
+                                  'Upload, encode, and review media sessions.',
+                              theme_color: '#0284c7',
+                              background_color: '#f8fafc',
+                              display: 'standalone',
+                              scope: '/',
+                              start_url: '/sessions',
+                              icons: [
+                                  {
+                                      src: 'pwa-64x64.png',
+                                      sizes: '64x64',
+                                      type: 'image/png',
+                                  },
+                                  {
+                                      src: 'pwa-192x192.png',
+                                      sizes: '192x192',
+                                      type: 'image/png',
+                                  },
+                                  {
+                                      src: 'pwa-512x512.png',
+                                      sizes: '512x512',
+                                      type: 'image/png',
+                                      purpose: 'any',
+                                  },
+                                  {
+                                      src: 'maskable-icon-512x512.png',
+                                      sizes: '512x512',
+                                      type: 'image/png',
+                                      purpose: 'maskable',
+                                  },
+                              ],
+                          },
+                          workbox: {
+                              globPatterns: [
+                                  '**/*.{js,css,html,ico,png,svg,woff2}',
+                              ],
+                              navigateFallback: 'index.html',
+                              navigateFallbackDenylist: [/^\/api\//],
+                          },
+                          devOptions: {
+                              enabled: true,
+                          },
+                      }),
+                      // Reads wrangler.jsonc; there is no Worker in the desktop build.
+                      cloudflare(),
+                  ]),
+        ],
+        define: {
+            // Lets the router and nav drop what only exists for the hosted
+            // product, and the bundler remove it rather than ship it dead.
+            __DESKTOP__: JSON.stringify(desktop),
+            // The shell serves the app and its API from one origin, so every
+            // /saas/* call is relative. Forced here rather than left to an env
+            // file: .env sets this to localhost:3001 for web development, and
+            // inheriting that would point the packaged app at a service that
+            // does not exist — failing at runtime, not at build time.
+            ...(desktop
+                ? { 'import.meta.env.VITE_SAAS_SERVICE_URL': '""' }
+                : {}),
         },
-    },
-    resolve: {
-        dedupe: ['video.js'],
-    },
-    test: {
-        environment: 'jsdom',
-        setupFiles: ['./vitest.setup.ts'],
-    },
+        resolve: {
+            dedupe: ['video.js'],
+            alias: desktop
+                ? {
+                      '@auth0/auth0-vue': fileURLToPath(
+                          new URL('./src/shims/auth0.ts', import.meta.url)
+                      ),
+                      // Generated by vite-plugin-pwa, which is not loaded here.
+                      'virtual:pwa-register/vue': fileURLToPath(
+                          new URL('./src/shims/pwa-register.ts', import.meta.url)
+                      ),
+                  }
+                : {},
+        },
+        build: {
+            // Separate output so the two targets never overwrite each other.
+            outDir: desktop ? 'dist-desktop' : 'dist',
+        },
+        server: {
+            port: 5173,
+            strictPort: true,
+            headers: {
+                'Cross-Origin-Opener-Policy': 'same-origin',
+                'Cross-Origin-Embedder-Policy': 'credentialless',
+            },
+        },
+        test: {
+            environment: 'jsdom',
+            setupFiles: ['./vitest.setup.ts'],
+        },
+    };
 });

@@ -6,6 +6,12 @@ import { useTheme, type ThemePreference } from '../composables/useTheme';
 const { user, logout } = useAuth0();
 const { preference, setPreference } = useTheme();
 
+/**
+ * The desktop build has no account: nothing to show and nowhere to sign out
+ * to. The menu keeps its appearance controls and drops the rest.
+ */
+const isDesktop = __DESKTOP__;
+
 const returnTo = window.location.origin;
 
 const open = ref(false);
@@ -105,7 +111,7 @@ function signOut() {
                 aria-label="Account"
                 @click.stop
             >
-                <div class="border-b border-slate-100 px-3 py-3 dark:border-slate-700">
+                <div v-if="!isDesktop" class="border-b border-slate-100 px-3 py-3 dark:border-slate-700">
                     <p class="text-xs font-medium text-slate-500 dark:text-slate-400">Signed in as</p>
                     <p class="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-slate-100" :title="email">
                         {{ email || '—' }}
@@ -154,7 +160,7 @@ function signOut() {
                     </div>
                 </div>
 
-                <div class="border-t border-slate-100 px-2 py-2 dark:border-slate-700">
+                <div v-if="!isDesktop" class="border-t border-slate-100 px-2 py-2 dark:border-slate-700">
                     <button
                         type="button"
                         role="menuitem"

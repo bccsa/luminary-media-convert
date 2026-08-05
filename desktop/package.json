@@ -9,10 +9,11 @@
         "stage": "node scripts/stage-services.mjs",
         "stage:api": "node scripts/stage-services.mjs api",
         "stage:saas": "node scripts/stage-services.mjs saas",
-        "start": "npm run stage:api && electron .",
+        "start": "npm run stage && electron .",
         "start:nostage": "electron .",
-        "pack": "npm run stage:api && electron-builder --dir",
-        "dist": "npm run stage && electron-builder"
+        "pack": "npm run stage && electron-builder --dir",
+        "dist": "npm run stage && electron-builder",
+        "stage:renderer": "node scripts/stage-services.mjs renderer"
     },
     "devDependencies": {
         "electron": "43.2.0",

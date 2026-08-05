@@ -9,9 +9,9 @@
  * The window still shows a status page until the renderer is built and staged.
  */
 
-import { app, BrowserWindow, ipcMain, safeStorage, shell } from 'electron';
-import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { detectFfmpeg, installHint } from './ffmpeg-detect.js';
@@ -222,6 +222,44 @@ function publishStatus() {
 }
 
 ipcMain.handle('status', () => status);
+
+/**
+ * Extensions the encoder will actually accept, mirroring its own allow-list
+ * (api/src/encode/services/media-extensions.ts). Filtering here means the user
+ * is not offered files that would be rejected a moment later.
+ */
+const VIDEO_EXTENSIONS = ['mp4', 'mkv', 'mov', 'avi', 'webm', 'flv', 'wmv', 'm4v',
+    'ts', 'mts', 'm2ts', 'mpg', 'mpeg', '3gp', '3g2', 'mxf', 'ogv'];
+const AUDIO_EXTENSIONS = ['mp3', 'aac', 'flac', 'wav', 'ogg', 'm4a', 'wma', 'opus', 'aiff'];
+
+ipcMain.handle('pick-file', async () => {
+    const result = await dialog.showOpenDialog(window ?? undefined, {
+        title: 'Choose a media file',
+        properties: ['openFile'],
+        filters: [
+            { name: 'Media', extensions: [...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS] },
+            { name: 'Video', extensions: VIDEO_EXTENSIONS },
+            { name: 'Audio', extensions: AUDIO_EXTENSIONS },
+            { name: 'All files', extensions: ['*'] },
+        ],
+    });
+
+    const path = result.filePaths?.[0];
+    if (result.canceled || !path) return null;
+    return describeFile(path);
+});
+
+ipcMain.handle('stat-file', (_event, path) => describeFile(path));
+
+function describeFile(path) {
+    try {
+        const info = statSync(path);
+        if (!info.isFile()) return null;
+        return { path, name: basename(path), size: info.size };
+    } catch {
+        return null;
+    }
+}
 
 /**
  * Stop the encoder before the process goes away.

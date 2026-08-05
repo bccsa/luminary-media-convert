@@ -5,7 +5,7 @@ import { useRouter } from 'vue-router';
 import EncodePipelineAside from '../components/EncodePipelineAside.vue';
 import SessionConfigForm from '../components/SessionConfigForm.vue';
 import type { SavedS3Config, SubmitPayload } from '../components/SessionConfigForm.vue';
-import { createSession, uploadFile, startUrlUpload, listS3Configs, getS3Config, createS3Config, updateSessionName, checkPrefix } from '../api';
+import { createSession, uploadFile, startUrlUpload, startLocalSource, listS3Configs, getS3Config, createS3Config, updateSessionName, checkPrefix } from '../api';
 import { useActiveUploads } from '../composables/useActiveUploads';
 import type { CreateSessionRequest, S3Config } from '../types';
 import { formatBytes } from '../utils/format';
@@ -163,6 +163,15 @@ async function startUpload(payload: SubmitPayload) {
             );
 
             registerUpload(session.sessionId, abort, promise);
+        } else if (payload.source === 'local') {
+            // No upload and no progress to track: the encoder already has the
+            // file. It behaves like the URL path from here — status arrives
+            // over SSE, so nothing is registered with useActiveUploads.
+            await startLocalSource(
+                session.sessionId,
+                payload.localFile.path,
+                accessToken,
+            );
         } else {
             await startUrlUpload(session.sessionId, payload.url, accessToken, payload.filename);
         }

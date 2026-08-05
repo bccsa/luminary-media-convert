@@ -387,14 +387,55 @@ function directorySize(dir) {
     return bytes;
 }
 
+/**
+ * Build the Vue app for desktop and copy it next to the services.
+ *
+ * `--mode desktop` swaps Auth0 and the service worker for local stubs and emits
+ * to its own directory, so the web build is never overwritten.
+ */
+function stageRenderer() {
+    console.log('\n[renderer] staging');
+
+    run('npm', ['-w', 'app', 'run', 'build:desktop'], {
+        cwd: REPO_ROOT,
+        quiet: true,
+    });
+
+    const built = join(REPO_ROOT, 'app', 'dist-desktop');
+    if (!existsSync(join(built, 'index.html'))) {
+        throw new Error(`renderer build produced no index.html at ${built}`);
+    }
+
+    const stageDir = join(DESKTOP_DIR, 'build', 'resources', 'renderer');
+    rmSync(stageDir, { recursive: true, force: true });
+    mkdirSync(stageDir, { recursive: true });
+    cpSync(built, stageDir, { recursive: true });
+
+    // A service worker would fight the shell's SPA fallback, and the manifest
+    // describes an installable web app. Neither belongs in a packaged build.
+    for (const stray of ['sw.js', 'registerSW.js', 'manifest.webmanifest']) {
+        rmSync(join(stageDir, stray), { force: true });
+    }
+
+    log('built and copied');
+    return stageDir;
+}
+
 const requested = process.argv.slice(2);
-const targets = requested.length > 0 ? requested : ['api'];
+const targets = requested.length > 0 ? requested : ['api', 'renderer'];
 
 for (const name of targets) {
+    if (name === 'renderer') {
+        const dir = stageRenderer();
+        const mb = (directorySize(dir) / 1024 / 1024).toFixed(1);
+        console.log(`[renderer] staged at ${relative(REPO_ROOT, dir)} (${mb} MB)`);
+        continue;
+    }
+
     const stageDir = stage(name);
     await verify(name, stageDir);
     const mb = (directorySize(stageDir) / 1024 / 1024).toFixed(1);
     console.log(`[${name}] staged at ${relative(REPO_ROOT, stageDir)} (${mb} MB)`);
 }
 
-console.log('\nAll services staged.');
+console.log('\nStaging complete.');

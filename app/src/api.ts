@@ -121,6 +121,27 @@ export async function startUrlUpload(
     });
 }
 
+/**
+ * Hand the encoder a file that is already on this machine.
+ *
+ * Desktop only. Nothing is uploaded: the encoder opens the path directly and
+ * leaves the file untouched, so a multi-gigabyte source costs no copy and no
+ * transfer. Returns as soon as ingestion starts; progress arrives over SSE
+ * exactly as it does for a URL fetch.
+ */
+export async function startLocalSource(
+    sessionId: string,
+    path: string,
+    accessToken: string
+): Promise<void> {
+    return requestVoid(`${SAAS_URL}/saas/sessions/${sessionId}/local-source`, {
+        method: 'POST',
+        token: accessToken,
+        body: { path },
+        errorPrefix: 'Could not read the selected file',
+    });
+}
+
 export async function deleteSession(
     sessionId: string,
     accessToken: string,

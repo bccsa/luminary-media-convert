@@ -2,6 +2,7 @@
 import { useRoute } from 'vue-router';
 
 const route = useRoute();
+const isDesktop = __DESKTOP__;
 
 function linkActive(pathCheck: 'sessions' | 'keys' | 's3') {
     if (pathCheck === 'sessions') return route.path.startsWith('/sessions');
@@ -36,7 +37,10 @@ function navLinkClass(active: boolean) {
             <span class="hidden sm:inline">Sessions</span>
         </router-link>
 
+        <!-- API keys authenticate third parties against a hosted encoder.
+             The desktop build has neither, so the whole view goes. -->
         <router-link
+            v-if="!isDesktop"
             to="/keys"
             :class="navLinkClass(linkActive('keys'))"
             :aria-current="linkActive('keys') ? 'page' : undefined"

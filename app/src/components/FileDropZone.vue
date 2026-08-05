@@ -1,10 +1,29 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import {
+    isDesktop,
+    localFileFromDrop,
+    pickLocalFile,
+    type LocalFile,
+} from '../desktop';
 
-const emit = defineEmits<{ 'update:file': [file: File | null] }>();
+/**
+ * Two ways of naming the same file.
+ *
+ * On the web the app only ever gets a File, and uploads its bytes. In the
+ * desktop build the encoder is on this machine and can read the file where it
+ * lies, so what matters is the absolute path — which a browser will not hand
+ * out, and which the Electron preload provides instead.
+ */
+const emit = defineEmits<{
+    'update:file': [file: File | null];
+    'update:localFile': [file: LocalFile | null];
+}>();
 
+const desktop = isDesktop();
 const dragging = ref(false);
-const selectedFile = ref<File | null>(null);
+/** Name and size only: enough to render, from either source. */
+const selectedFile = ref<{ name: string; size: number } | null>(null);
 const fileInput = ref<HTMLInputElement | null>(null);
 
 function formatSize(bytes: number): string {
@@ -15,17 +34,36 @@ function formatSize(bytes: number): string {
 }
 
 function selectFile(file: File | null) {
-    selectedFile.value = file;
+    selectedFile.value = file ? { name: file.name, size: file.size } : null;
     emit('update:file', file);
 }
 
-function onDrop(e: DragEvent) {
+function selectLocalFile(file: LocalFile | null) {
+    selectedFile.value = file ? { name: file.name, size: file.size } : null;
+    emit('update:localFile', file);
+}
+
+async function onDrop(e: DragEvent) {
     dragging.value = false;
     const file = e.dataTransfer?.files[0] ?? null;
+
+    if (desktop && file) {
+        const local = await localFileFromDrop(file);
+        // Falls back to the upload path if the path cannot be recovered —
+        // better a slower route than a dead drop target.
+        if (local) return selectLocalFile(local);
+    }
     selectFile(file);
 }
 
-function onBrowse() {
+async function onBrowse() {
+    if (desktop) {
+        // The native dialog gives an unambiguous path and filters to the
+        // extensions the encoder accepts; a file input gives neither.
+        const local = await pickLocalFile();
+        if (local) selectLocalFile(local);
+        return;
+    }
     fileInput.value?.click();
 }
 
@@ -35,7 +73,9 @@ function onInputChange(e: Event) {
 }
 
 function clear() {
-    selectFile(null);
+    selectedFile.value = null;
+    emit('update:file', null);
+    emit('update:localFile', null);
     if (fileInput.value) fileInput.value.value = '';
 }
 </script>

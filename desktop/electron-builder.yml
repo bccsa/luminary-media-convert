@@ -18,6 +18,12 @@ extraResources:
     to: services
     filter:
       - '**/*'
+  # Served over loopback HTTP by the shell, not loaded from disk by the
+  # renderer — so it stays outside the asar alongside the services.
+  - from: build/resources/renderer
+    to: renderer
+    filter:
+      - '**/*'
 
 asar: true
 

@@ -2,6 +2,7 @@
 import { reactive, computed, ref, watch } from 'vue';
 import type { S3Config, CreateSessionRequest } from '../types';
 import FileDropZone from './FileDropZone.vue';
+import type { LocalFile } from '../desktop';
 import FormSelect from './FormSelect.vue';
 
 export interface SavedS3Config {
@@ -28,7 +29,10 @@ const props = withDefaults(defineProps<{
 
 export type SubmitPayload =
     | { source: 'file'; config: CreateSessionRequest; file: File; s3ConfigId: string; sessionName: string }
-    | { source: 'url'; config: CreateSessionRequest; url: string; filename?: string; s3ConfigId: string; sessionName: string };
+    | { source: 'url'; config: CreateSessionRequest; url: string; filename?: string; s3ConfigId: string; sessionName: string }
+    // Desktop only: the encoder shares a filesystem with the app, so the source
+    // is named rather than uploaded. No File object exists for this path.
+    | { source: 'local'; config: CreateSessionRequest; localFile: LocalFile; s3ConfigId: string; sessionName: string };
 
 const emit = defineEmits<{
     submit: [payload: SubmitPayload];
@@ -37,6 +41,8 @@ const emit = defineEmits<{
 }>();
 
 const file = defineModel<File | null>('file', { default: null });
+/** Set instead of `file` when the drop zone resolved a path on disk. */
+const localFile = ref<LocalFile | null>(null);
 const pathPrefix = defineModel<string>('pathPrefix', { default: '' });
 
 const sessionName = ref('');
@@ -189,7 +195,7 @@ const canSubmit = computed(() => {
     if (!hasS3Config.value) return false;
     if (encryptionEnabled.value && !encryptionKeyUrl.value.trim()) return false;
     if (sourceMode.value === 'file') {
-        if (!file.value) return false;
+        if (!file.value && !localFile.value) return false;
     } else {
         if (!isValidUrl.value) return false;
     }
@@ -217,7 +223,15 @@ function onSubmit() {
         },
     };
 
-    if (sourceMode.value === 'file' && file.value) {
+    if (sourceMode.value === 'file' && localFile.value) {
+        emit('submit', {
+            source: 'local',
+            config,
+            localFile: localFile.value,
+            s3ConfigId: selectedConfigId.value,
+            sessionName: sessionName.value.trim(),
+        });
+    } else if (sourceMode.value === 'file' && file.value) {
         emit('submit', {
             source: 'file',
             config,
@@ -503,7 +517,11 @@ const canCreateConfig = computed(() =>
                 </button>
             </div>
 
-            <FileDropZone v-if="sourceMode === 'file'" @update:file="f => (file = f)" />
+            <FileDropZone
+                v-if="sourceMode === 'file'"
+                @update:file="f => (file = f)"
+                @update:local-file="f => (localFile = f)"
+            />
 
             <div v-else class="space-y-3">
                 <div>

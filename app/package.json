@@ -10,7 +10,8 @@
         "preview": "npm run build && wrangler dev",
         "test": "vitest run",
         "generate:pwa-icons": "pwa-assets-generator -p minimal-2023 public/favicon.svg",
-        "deploy": "npm run build && wrangler deploy"
+        "deploy": "npm run build && wrangler deploy",
+        "build:desktop": "npm run build:libs && vue-tsc -b && vite build --mode desktop"
     },
     "dependencies": {
         "@auth0/auth0-vue": "^2.5.0",
