@@ -164,6 +164,30 @@ export class S3ConfigStore {
         return true;
     }
 
+    /**
+     * Everything about a profile except the credentials — not even masked
+     * placeholders.
+     *
+     * This is what the renderer needs to build public object URLs for playback
+     * and the storyboard, so it is the one view that reaches the page on every
+     * session load. Omitting the key fields entirely, rather than masking them,
+     * means there is nothing to leak if it is ever logged or serialised.
+     */
+    publicView(id, pathPrefix) {
+        const config = this.#configs.find((c) => c.id === id);
+        if (!config) return undefined;
+
+        return {
+            endPoint: config.endPoint,
+            port: config.port,
+            useSSL: config.useSSL,
+            bucket: config.bucket,
+            region: config.region,
+            publicUrl: config.publicUrl,
+            ...(pathPrefix ? { pathPrefix } : {}),
+        };
+    }
+
     /** Credentials in the shape the encoder's S3 config expects. */
     toEncoderS3(id, pathPrefix) {
         const config = this.get(id);

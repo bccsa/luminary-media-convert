@@ -223,6 +223,15 @@ export class AppServer {
                 return send(res, 200, {
                     ...result.json,
                     ...extra,
+                    // Where the finished output can be read from. The encoder
+                    // holds the S3 settings but never returns them, so without
+                    // this the page cannot build a single object URL — playback
+                    // and the storyboard both come back empty once an encode
+                    // finishes. Credentials are not part of this view.
+                    s3Config: this.s3Configs.publicView(
+                        extra.s3ConfigId,
+                        extra.pathPrefix
+                    ),
                     encodingApiUrl: this.encoder().baseUrl,
                 });
             }
