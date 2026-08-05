@@ -52,17 +52,17 @@ export class EncoderService {
         return `http://127.0.0.1:${this.port}`;
     }
 
-    async start() {
-        this.port = await freePort();
-
-        mkdirSync(this.workDir, { recursive: true });
-        mkdirSync(this.logDir, { recursive: true });
-        this.#logStream = createWriteStream(join(this.logDir, 'encoder.log'), {
-            flags: 'a',
-        });
-
-        const env = {
-            ...process.env,
+    /**
+     * The environment the encoder runs under.
+     *
+     * Separate from start() so it can be asserted on directly: these values are
+     * the difference between a server deployment and a desktop app, and getting
+     * one wrong is silent — the encoder starts happily either way and behaves
+     * incorrectly hours later.
+     */
+    buildEnv(inherited = process.env) {
+        return {
+            ...inherited,
             ELECTRON_RUN_AS_NODE: '1',
 
             PORT: String(this.port),
@@ -77,14 +77,37 @@ export class EncoderService {
             TUS_ENABLED: 'false',
             ALLOW_LOCAL_SOURCE: 'true',
 
+            // Nothing sits behind this encoder, so its session list is the
+            // user's entire history rather than a server's scratch space. The
+            // defaults sweep finished sessions after a day and idle ones after
+            // six hours, which here means deleting someone's work while they
+            // are still using the app. Both windows are turned off; disk is
+            // reclaimed when the user deletes a session, which is the only
+            // moment they have said they are finished with it.
+            SESSION_MAX_AGE_HOURS: inherited.SESSION_MAX_AGE_HOURS ?? 'never',
+            SESSION_ABANDONED_MAX_AGE_HOURS:
+                inherited.SESSION_ABANDONED_MAX_AGE_HOURS ?? 'never',
+
             // Absolute paths, because a GUI-launched app cannot rely on PATH.
             FFMPEG_PATH: this.ffmpeg,
             FFPROBE_PATH: this.ffprobe,
             // Belt and braces for any call site still resolving by name.
-            PATH: [dirOf(this.ffmpeg), process.env.PATH]
+            PATH: [dirOf(this.ffmpeg), inherited.PATH]
                 .filter(Boolean)
                 .join(pathSeparator()),
         };
+    }
+
+    async start() {
+        this.port = await freePort();
+
+        mkdirSync(this.workDir, { recursive: true });
+        mkdirSync(this.logDir, { recursive: true });
+        this.#logStream = createWriteStream(join(this.logDir, 'encoder.log'), {
+            flags: 'a',
+        });
+
+        const env = this.buildEnv();
 
         this.#proc = spawn(process.execPath, [this.entry], {
             cwd: this.cwd,
