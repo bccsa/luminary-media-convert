@@ -9,7 +9,15 @@
  * The window still shows a status page until the renderer is built and staged.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
+import {
+    app,
+    BrowserWindow,
+    dialog,
+    ipcMain,
+    safeStorage,
+    screen,
+    shell,
+} from 'electron';
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +28,7 @@ import { S3ConfigStore } from './s3-configs.js';
 import { SessionIndex } from './session-index.js';
 import { AppServer } from './static-server.js';
 import { stableRendererPort } from './ports.js';
+import { WindowState } from './window-state.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -37,6 +46,7 @@ function resourcesRoot() {
 let encoder = null;
 let appServer = null;
 let window = null;
+let windowState = null;
 let status = { ok: false, error: 'starting' };
 
 // A packaged app has nowhere to print, so anything that goes wrong before the
@@ -187,10 +197,18 @@ function writeHandle(handle) {
 }
 
 function createWindow() {
+    windowState = new WindowState(
+        join(app.getPath('userData'), 'window-state.json'),
+        screen,
+    );
+
     window = new BrowserWindow({
-        width: 720,
-        height: 420,
+        ...windowState.bounds(),
         title: 'Luminary Media Convert',
+        // Created hidden and shown once the first paint is ready, so startup is
+        // a window appearing rather than an empty frame filling in.
+        show: false,
+        backgroundColor: '#0f172a',
         webPreferences: {
             preload: join(HERE, 'preload.cjs'),
             contextIsolation: true,
@@ -208,6 +226,12 @@ function createWindow() {
     window.webContents.setWindowOpenHandler(({ url }) => {
         void shell.openExternal(url);
         return { action: 'deny' };
+    });
+
+    windowState.track(window);
+    window.once('ready-to-show', () => {
+        if (windowState.startMaximized) window.maximize();
+        window.show();
     });
 
     window.loadFile(join(HERE, 'status.html'));
