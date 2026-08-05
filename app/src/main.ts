@@ -1,3 +1,7 @@
+// Deploy trigger: the frontend build only runs on changes under app/, so the
+// trim fixes in #156 and #159 needed a touch here to ship. Delete this comment
+// freely — it carries no behaviour, and the next real change to this file
+// replaces its purpose.
 import { createApp } from 'vue';
 import { createAuth0 } from '@auth0/auth0-vue';
 import App from './App.vue';
