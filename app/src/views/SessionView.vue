@@ -66,6 +66,7 @@ import {
     slicePeaksToTrims,
     sourceToOutput,
     sourceToOutputClamped,
+    toOutputSegments,
     trimmedDuration,
 } from '../utils/trimTimeline';
 import type { AccelMode, SegmentFormat } from '../types';
@@ -1355,12 +1356,20 @@ async function onEncodeSubmit(config: EncodeConfig) {
             sessionToken.value
         );
 
-        // The trim ranges have now been consumed by the encode. They are markers,
-        // not content: they described which parts of the source to keep, and say
-        // nothing about the encoded result. Drop them rather than leaving source
-        // positions drawn over a timeline that no longer matches them.
+        // The timeline switches to the encoded programme here, so the ranges
+        // have to move with it: they are in source time, and the ruler is not
+        // any more. Laying them end to end from zero puts each one where the
+        // material it selected now lives.
+        //
+        // They are deliberately not dropped. Marking a range is a selection,
+        // not a deletion — clearing it on submit read as the app throwing the
+        // work away, and left nothing on screen describing what had just been
+        // sent to encode.
         if (submittedTrims.length > 0) {
-            editorSegments.value = [];
+            editorSegments.value = toOutputSegments(editorSegments.value);
+            // Deletions are the one thing that genuinely does not survive: they
+            // described material the encode has already removed, so there is
+            // nothing left for them to refer to.
             trimDeletions.clear();
         }
 

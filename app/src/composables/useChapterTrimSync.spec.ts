@@ -210,3 +210,58 @@ describe('useChapterTrimSync — when the sidecar loads after the encode', () =>
         expect(chapterSegments.value).toHaveLength(2);
     });
 });
+
+describe('useChapterTrimSync — selecting a range is not deleting it', () => {
+    /**
+     * Pressing Start Encode is the moment mirroring goes live, and at that
+     * moment the timeline holds the ranges the user just selected. Adopting an
+     * empty chapter list there erased that selection in front of them.
+     */
+    it('keeps the timeline when mirroring turns on with no chapters', async () => {
+        const { editorSegments, mirror } = setup({ mirror: false });
+        editorSegments.value = [seg('t1', 0, 30), seg('t2', 40, 60)];
+        await nextTick();
+
+        mirror.value = true;
+        await nextTick();
+
+        expect(editorSegments.value).toHaveLength(2);
+    });
+
+    it('seeds the chapter list from those ranges instead', async () => {
+        const { editorSegments, chapterSegments, mirror } = setup({ mirror: false });
+        editorSegments.value = [seg('t1', 0, 30), seg('t2', 40, 60)];
+        await nextTick();
+
+        mirror.value = true;
+        await nextTick();
+
+        // A reasonable first draft of the chapters, rather than nothing.
+        expect(chapterSegments.value).toHaveLength(2);
+    });
+
+    it('still lets existing chapters win over the timeline', async () => {
+        const { editorSegments, chapterSegments, mirror } = setup({ mirror: false });
+        editorSegments.value = [seg('t1', 0, 30), seg('t2', 40, 60)];
+        chapterSegments.value = [seg('c1', 0, 10, 'Intro')];
+        await nextTick();
+
+        mirror.value = true;
+        await nextTick();
+
+        expect(editorSegments.value.map((s) => s.label)).toEqual(['Intro']);
+    });
+
+    it('still clears chapters when the user empties the timeline', async () => {
+        // The guard is only about entering chapter mode; deleting every segment
+        // while editing must still propagate.
+        const { editorSegments, chapterSegments } = setup({ mirror: true });
+        editorSegments.value = [seg('a', 0, 10), seg('b', 10, 20)];
+        await nextTick();
+
+        editorSegments.value = [];
+        await nextTick();
+
+        expect(chapterSegments.value).toHaveLength(0);
+    });
+});
