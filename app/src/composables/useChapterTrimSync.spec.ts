@@ -122,3 +122,91 @@ describe('useChapterTrimSync — guards', () => {
         expect(chapterSegments.value).toHaveLength(0);
     });
 });
+
+describe('useChapterTrimSync — when the sidecar loads after the encode', () => {
+    /**
+     * The sidecar is fetched over the network, so it can easily arrive after
+     * the encode has been submitted and mirroring has gone live. At that moment
+     * the timeline still holds the trim ranges the encode was started with.
+     */
+    function setupLateLoad() {
+        const editorSegments = ref<Segment[]>([]);
+        const chapterSegments = ref<Segment[]>([]);
+        const chaptersLoaded = ref(false);
+
+        useChapterTrimSync({
+            editorSegments,
+            chapterSegments,
+            mirrorActive: computed(() => true),
+            chaptersLoaded: computed(() => chaptersLoaded.value),
+        });
+
+        return { editorSegments, chapterSegments, chaptersLoaded };
+    }
+
+    it('keeps chapters that came from the sidecar', async () => {
+        const { editorSegments, chapterSegments, chaptersLoaded } = setupLateLoad();
+
+        // Trim ranges the encode was started with.
+        editorSegments.value = [seg('t1', 0, 30), seg('t2', 60, 90)];
+        await nextTick();
+
+        // The sidecar arrives: three real chapters the user wrote earlier.
+        chapterSegments.value = [
+            seg('c1', 0, 10, 'Intro'),
+            seg('c2', 10, 20, 'Middle'),
+            seg('c3', 20, 30, 'Outro'),
+        ];
+        chaptersLoaded.value = true;
+        await nextTick();
+
+        expect(chapterSegments.value.map((s) => s.label)).toEqual([
+            'Intro',
+            'Middle',
+            'Outro',
+        ]);
+    });
+
+    it('does not truncate chapters to the number of trim ranges', async () => {
+        const { editorSegments, chapterSegments, chaptersLoaded } = setupLateLoad();
+
+        editorSegments.value = [seg('t1', 0, 30)];
+        await nextTick();
+
+        chapterSegments.value = [
+            seg('c1', 0, 10, 'Intro'),
+            seg('c2', 10, 20, 'Middle'),
+        ];
+        chaptersLoaded.value = true;
+        await nextTick();
+
+        expect(chapterSegments.value).toHaveLength(2);
+    });
+
+    it('shows the loaded chapters on the timeline', async () => {
+        const { editorSegments, chapterSegments, chaptersLoaded } = setupLateLoad();
+
+        editorSegments.value = [seg('t1', 0, 30), seg('t2', 60, 90)];
+        await nextTick();
+
+        chapterSegments.value = [seg('c1', 0, 10, 'Intro')];
+        chaptersLoaded.value = true;
+        await nextTick();
+
+        expect(editorSegments.value.map((s) => s.label)).toEqual(['Intro']);
+    });
+
+    it('still seeds chapters from the timeline when the sidecar was empty', async () => {
+        // Nothing to lose here, and the trim ranges are a sensible starting
+        // point for chapters over the trimmed programme.
+        const { editorSegments, chapterSegments, chaptersLoaded } = setupLateLoad();
+
+        editorSegments.value = [seg('t1', 0, 30), seg('t2', 60, 90)];
+        await nextTick();
+
+        chaptersLoaded.value = true;
+        await nextTick();
+
+        expect(chapterSegments.value).toHaveLength(2);
+    });
+});

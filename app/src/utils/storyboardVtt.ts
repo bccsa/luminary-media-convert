@@ -29,42 +29,50 @@ export function retimeStoryboardVtt(
 
     const lines: string[] = ['WEBVTT', ''];
     for (const cue of cues) {
-        const mapped = mapCue(cue.startTime, cue.endTime, ranges);
-        if (!mapped) continue;
-        lines.push(
-            `${formatVttTimestamp(mapped.start)} --> ${formatVttTimestamp(mapped.end)}`,
-            `${cue.spriteUrl}#xywh=${cue.x},${cue.y},${cue.w},${cue.h}`,
-            '',
-        );
+        for (const mapped of mapCue(cue.startTime, cue.endTime, ranges)) {
+            lines.push(
+                `${formatVttTimestamp(mapped.start)} --> ${formatVttTimestamp(mapped.end)}`,
+                `${cue.spriteUrl}#xywh=${cue.x},${cue.y},${cue.w},${cue.h}`,
+                '',
+            );
+        }
     }
 
     return lines.join('\n');
 }
 
 /**
- * Where a cue belongs on the output timeline, or null when the frame it shows
- * was cut and so has no place there.
+ * Where a cue belongs on the output timeline — one entry per retained range it
+ * overlaps, and none at all when the frame it shows was cut entirely.
  *
- * A cue that starts inside a retained range but runs past its end is truncated
- * at the cut rather than allowed to spill across it — beyond that point the
- * frame no longer describes what is playing.
+ * Overlap is the test, not where the cue starts. Cues are sampled from the
+ * source at a fixed interval, so a trim almost never begins exactly on one: the
+ * cue covering the first seconds of a retained range usually starts before that
+ * range does. Keying on the start dropped that cue, which left the opening of
+ * every such range with no thumbnail at all — and the coarser the sampling, or
+ * the more ranges a trim creates, the more of the strip went blank.
+ *
+ * Each entry is clipped to the range it falls in, so a cue is never drawn
+ * spilling across a cut into material it does not describe.
  */
 function mapCue(
     startTime: number,
     endTime: number,
     ranges: readonly TrimSegment[],
-): { start: number; end: number } | null {
-    const start = sourceToOutput(startTime, ranges);
-    if (start === null) return null;
+): { start: number; end: number }[] {
+    const mapped: { start: number; end: number }[] = [];
 
-    const containing = ranges.find(
-        (r) => startTime >= r.inSec && startTime < r.outSec,
-    );
-    if (!containing) return null;
+    for (const range of ranges) {
+        const from = Math.max(startTime, range.inSec);
+        const to = Math.min(endTime, range.outSec);
+        if (to <= from) continue;
 
-    const available = containing.outSec - startTime;
-    const duration = Math.min(endTime - startTime, available);
-    if (duration <= 0) return null;
+        // `from` sits inside this range by construction, so it always maps.
+        const start = sourceToOutput(from, ranges);
+        if (start === null) continue;
 
-    return { start, end: start + duration };
+        mapped.push({ start, end: start + (to - from) });
+    }
+
+    return mapped.sort((a, b) => a.start - b.start);
 }
