@@ -7,9 +7,7 @@ import { EncodeController } from './encode.controller.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
-import { AuthorizationWebhookService } from '../auth/authorization-webhook.service';
 import { PreviewService } from './services/preview.service.js';
-import { UrlFetchService } from './services/url-fetch.service.js';
 import type { CreateSessionDto } from './dto/create-session.dto.js';
 import type { EncodeConfigDto } from './dto/encode-config.dto.js';
 import type { Response } from 'express';
@@ -58,9 +56,11 @@ describe('EncodeController', () => {
     let sessionService: SessionService;
     let queueService: Mocked<QueueService>;
     let ffmpegService: Mocked<FfmpegService>;
-    let authorizationWebhookService: Mocked<AuthorizationWebhookService>;
     let previewService: Mocked<PreviewService>;
-    let urlFetchService: Mocked<UrlFetchService>;
+    let ingestService: any;
+    let hlsEditService: any;
+    let waveformService: any;
+    let thumbnailService: any;
     let testWorkDir: string;
 
     beforeEach(() => {
@@ -83,10 +83,6 @@ describe('EncodeController', () => {
             killActiveProcess: vi.fn(),
         } as any;
 
-        authorizationWebhookService = {
-            checkAuthorization: vi.fn().mockResolvedValue(undefined),
-        } as any;
-
         previewService = {
             init: vi.fn(),
             isReady: vi.fn().mockReturnValue(false),
@@ -97,13 +93,32 @@ describe('EncodeController', () => {
             setTrimSegments: vi.fn(),
         } as any;
 
-        urlFetchService = {
-            fetchToSession: vi.fn().mockResolvedValue(undefined),
-            abort: vi.fn().mockReturnValue(false),
-        } as any;
-
+        // Ingest, chapter and sidecar collaborators. The controller only
+        // orchestrates them; each has its own suite.
+        ingestService = { finalizeUpload: vi.fn().mockResolvedValue(undefined) };
+        hlsEditService = {
+            readChapters: vi.fn().mockResolvedValue(null),
+            writeChapters: vi.fn().mockResolvedValue(undefined),
+        };
+        waveformService = {
+            getOrComputeCached: vi.fn().mockResolvedValue({ peaks: [], numPeaks: 0 }),
+        };
+        thumbnailService = {
+            getOrGeneratePreview: vi.fn().mockResolvedValue(null),
+            readPreviewVtt: vi.fn().mockResolvedValue(null),
+        };
         const sessionEventsService = { emit: vi.fn(), forSession: vi.fn().mockReturnValue({ pipe: vi.fn().mockReturnValue({ subscribe: vi.fn() }) }) } as any;
-        controller = new EncodeController(sessionService, sessionEventsService, queueService, ffmpegService, authorizationWebhookService, previewService, urlFetchService);
+        controller = new EncodeController(
+            sessionService,
+            sessionEventsService,
+            queueService,
+            ffmpegService,
+            previewService,
+            ingestService,
+            hlsEditService,
+            waveformService,
+            thumbnailService,
+        );
     });
 
     afterEach(() => {
@@ -117,44 +132,38 @@ describe('EncodeController', () => {
     });
 
     describe('createSession', () => {
-        it('should create a session and return tus endpoint', async () => {
-            const dto = makeConfig();
-            const req = makeRequest();
+        it('returns the session and the token that drives it', async () => {
+            // No tus endpoint and no upload size: the browser never uploads.
+            // A session is handed the absolute path of a file already on this
+            // machine, so there is no transfer to size or address to hand back.
+            const result = await controller.createSession(makeConfig());
 
-            const result = await controller.createSession(dto, req);
-
-            expect(result.sessionId).toBeDefined();
-            expect(result.tusEndpoint).toBe('http://localhost:3000/api/tus');
+            expect(result.sessionId).toBeTruthy();
             expect(result.sessionToken).toMatch(/^sess_/);
-            expect(result.maxUploadSize).toBeGreaterThan(0);
         });
 
-        it('should build tusEndpoint from request protocol and host', async () => {
-            const dto = makeConfig();
-            const req = makeRequest({
-                protocol: 'https',
-                get: (h: string) =>
-                    h === 'host' ? 'api.example.com' : undefined,
-            });
+        it('gives each session its own token', async () => {
+            const first = await controller.createSession(makeConfig());
+            const second = await controller.createSession(makeConfig());
 
-            const result = await controller.createSession(dto, req);
-
-            expect(result.tusEndpoint).toBe('https://api.example.com/api/tus');
+            expect(first.sessionToken).not.toBe(second.sessionToken);
         });
 
-        it('should use MAX_UPLOAD_SIZE from env when set', async () => {
-            process.env.MAX_UPLOAD_SIZE = '5368709120';
-            const result = await controller.createSession(makeConfig(), makeRequest());
+        it('does not echo the S3 credentials back', async () => {
+            // The caller supplied them; repeating them widens where they can be
+            // read for nothing in return.
+            const result = await controller.createSession(makeConfig());
 
-            expect(result.maxUploadSize).toBe(5368709120);
+            expect(JSON.stringify(result)).not.toContain('secret');
         });
 
-        it('should default maxUploadSize to 10 GB', async () => {
-            const result = await controller.createSession(makeConfig(), makeRequest());
+        it('registers the session so it can be looked up by its token', async () => {
+            const result = await controller.createSession(makeConfig());
 
-            expect(result.maxUploadSize).toBe(10 * 1024 * 1024 * 1024);
+            expect(sessionService.getBySessionToken(result.sessionToken)?.id).toBe(
+                result.sessionId,
+            );
         });
-
     });
 
     describe('getStatus', () => {
@@ -602,54 +611,6 @@ describe('EncodeController', () => {
         });
     });
 
-    describe('createSession with apiKey', () => {
-        it('should pass apiKey to authorization webhook', async () => {
-            const req = makeRequest();
-            (req as any).apiKey = { userId: 'user:1', webhookUrl: 'http://example.com/hook' };
-
-            const result = await controller.createSession(makeConfig(), req);
-
-            expect(authorizationWebhookService.checkAuthorization).toHaveBeenCalledWith(
-                'create_session',
-                expect.objectContaining({
-                    apiKey: { userId: 'user:1', webhookUrl: 'http://example.com/hook' },
-                }),
-            );
-            expect(result.sessionId).toBeDefined();
-        });
-
-        it('should bind webhook from API key when no per-session webhook is configured', async () => {
-            const dto: CreateSessionDto = {
-                s3: {
-                    endPoint: 's3.example.com',
-                    bucket: 'test',
-                    accessKey: 'key',
-                    secretKey: 'secret',
-                },
-            };
-            const req = makeRequest();
-            (req as any).apiKey = { userId: 'user:1', webhookUrl: 'http://example.com/hook' };
-
-            const result = await controller.createSession(dto, req);
-
-            const session = sessionService.get(result.sessionId)!;
-            expect(session.config.webhook).toEqual({
-                url: 'http://example.com/hook',
-                sessionToken: '',
-            });
-        });
-
-        it('should not override per-session webhook with API key webhook', async () => {
-            const dto = makeConfig(); // has webhook configured
-            const req = makeRequest();
-            (req as any).apiKey = { userId: 'user:1', webhookUrl: 'http://example.com/other-hook' };
-
-            const result = await controller.createSession(dto, req);
-
-            const session = sessionService.get(result.sessionId)!;
-            expect(session.config.webhook!.url).toBe('https://example.com/webhook');
-        });
-    });
 
     describe('startEncode - copyStream validation', () => {
         it('should reject copyStream rendition without sourceTrackIndex', async () => {
@@ -715,9 +676,11 @@ describe('EncodeController', () => {
                 sessionEventsService,
                 queueService,
                 ffmpegService,
-                authorizationWebhookService,
                 previewService,
-                urlFetchService,
+                ingestService,
+                hlsEditService,
+                waveformService,
+                thumbnailService,
             );
 
             const result = ctrl.streamEvents(session.id, session.sessionToken);
@@ -742,9 +705,11 @@ describe('EncodeController', () => {
                 sessionEventsService,
                 queueService,
                 ffmpegService,
-                authorizationWebhookService,
                 previewService,
-                urlFetchService,
+                ingestService,
+                hlsEditService,
+                waveformService,
+                thumbnailService,
             );
 
             const session = sessionService.create(makeConfig());
@@ -992,11 +957,13 @@ describe('EncodeController', () => {
 
         it('should include encryptionKeyHex when completed with encryption', () => {
             const session = sessionService.create(makeConfig());
+            // (id, files, masterPlaylist, thumbnailsVtt, segmentFormat,
+            // encryptionKeyHex) — the angle-playlist argument that used to sit
+            // in the middle is gone with the per-angle files themselves.
             sessionService.setCompleted(
                 session.id,
                 ['master.m3u8'],
                 'master.m3u8',
-                undefined,
                 undefined,
                 undefined,
                 'abcd1234abcd1234abcd1234abcd1234',
@@ -1014,95 +981,7 @@ describe('EncodeController', () => {
         });
     });
 
-    describe('startUrlUpload', () => {
-        it('should kick off the URL fetch and return 202-style response', async () => {
-            const session = sessionService.create(makeConfig());
 
-            const result = await controller.startUrlUpload(session.id, {
-                url: 'https://example.com/file.mp4',
-            });
-
-            expect(result).toEqual({ sessionId: session.id, status: 'uploading' });
-            expect(urlFetchService.fetchToSession).toHaveBeenCalledWith(
-                session.id,
-                'https://example.com/file.mp4',
-                undefined,
-            );
-        });
-
-        it('should pass filename override through to UrlFetchService', async () => {
-            const session = sessionService.create(makeConfig());
-
-            await controller.startUrlUpload(session.id, {
-                url: 'https://example.com/opaque',
-                filename: 'meeting.mp4',
-            });
-
-            expect(urlFetchService.fetchToSession).toHaveBeenCalledWith(
-                session.id,
-                'https://example.com/opaque',
-                'meeting.mp4',
-            );
-        });
-
-        it('should accept session in uploading status (idempotent retry)', async () => {
-            const session = sessionService.create(makeConfig());
-            sessionService.updateStatus(session.id, 'uploading');
-
-            await expect(
-                controller.startUrlUpload(session.id, { url: 'https://example.com/file.mp4' }),
-            ).resolves.toEqual({ sessionId: session.id, status: 'uploading' });
-        });
-
-        it('should reject when session does not exist', async () => {
-            await expect(
-                controller.startUrlUpload('nonexistent', { url: 'https://example.com/file.mp4' }),
-            ).rejects.toThrow(NotFoundException);
-            expect(urlFetchService.fetchToSession).not.toHaveBeenCalled();
-        });
-
-        it('should reject when session is past the upload phase', async () => {
-            const session = sessionService.create(makeConfig());
-            sessionService.updateStatus(session.id, 'encoding');
-
-            await expect(
-                controller.startUrlUpload(session.id, { url: 'https://example.com/file.mp4' }),
-            ).rejects.toThrow(BadRequestException);
-            expect(urlFetchService.fetchToSession).not.toHaveBeenCalled();
-        });
-
-        it('should not await the background fetch (fire-and-forget)', async () => {
-            const session = sessionService.create(makeConfig());
-            // Make fetchToSession hang — controller must still resolve quickly.
-            urlFetchService.fetchToSession.mockImplementation(
-                () => new Promise(() => {}),
-            );
-
-            await expect(
-                controller.startUrlUpload(session.id, { url: 'https://example.com/file.mp4' }),
-            ).resolves.toBeDefined();
-        });
-    });
-
-    describe('deleteSession - URL ingest abort', () => {
-        it('should abort an in-flight URL download', async () => {
-            const session = sessionService.create(makeConfig());
-            sessionService.updateStatus(session.id, 'uploading');
-
-            await controller.deleteSession(session.id);
-
-            expect(urlFetchService.abort).toHaveBeenCalledWith(session.id);
-        });
-
-        it('should not call abort for non-uploading statuses', async () => {
-            const session = sessionService.create(makeConfig());
-            sessionService.updateStatus(session.id, 'queued');
-
-            await controller.deleteSession(session.id);
-
-            expect(urlFetchService.abort).not.toHaveBeenCalled();
-        });
-    });
 
     describe('getStatus - uploading phase fields', () => {
         it('should expose progress during URL ingestion', () => {
