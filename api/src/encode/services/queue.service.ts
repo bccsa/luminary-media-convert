@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { SessionService } from './session.service.js';
 import { EncodeService } from './encode.service.js';
-import { WebhookService } from './webhook.service.js';
+import { SessionEventsService } from './session-events.service.js';
 
 @Injectable()
 export class QueueService implements OnModuleDestroy {
@@ -14,7 +14,7 @@ export class QueueService implements OnModuleDestroy {
     constructor(
         private readonly sessionService: SessionService,
         private readonly encodeService: EncodeService,
-        private readonly webhookService: WebhookService
+        private readonly sessionEvents: SessionEventsService
     ) {}
 
     async onModuleDestroy(): Promise<void> {
@@ -27,7 +27,7 @@ export class QueueService implements OnModuleDestroy {
 
     /**
      * Add a session to the encoding queue.
-     * Sends a "queued" webhook and triggers drain if idle.
+     * Emits the new queue positions over SSE and triggers drain if idle.
      */
     enqueue(sessionId: string): number {
         if (this.shuttingDown) {
@@ -45,22 +45,7 @@ export class QueueService implements OnModuleDestroy {
             `Session ${sessionId} enqueued at position ${position}`
         );
 
-        // Send webhook asynchronously
-        const session = this.sessionService.get(sessionId);
-        if (session?.config.webhook) {
-            this.webhookService
-                .send(
-                    session.config.webhook.url,
-                    session.config.webhook.sessionToken,
-                    {
-                        sessionId,
-                        status: 'queued',
-                        queuePosition: position,
-                        message: `Queued at position ${position}`,
-                    }
-                )
-                .catch(() => {});
-        }
+        this.notifyQueuePositions();
 
         // Trigger drain if not already processing
         if (!this.processing) {
@@ -134,25 +119,19 @@ export class QueueService implements OnModuleDestroy {
     }
 
     /**
-     * Send updated queue position webhooks to all sessions still waiting in the queue.
+     * Emit the current queue position to every session still waiting.
+     *
+     * SSE is the only push channel left, so a client watching a queued session
+     * learns it has moved up from here — polling `getPosition()` is the
+     * fallback for clients that are not subscribed.
      */
     private notifyQueuePositions(): void {
         this.queue.forEach((sessionId, idx) => {
-            const session = this.sessionService.get(sessionId);
-            if (session?.config.webhook) {
-                this.webhookService
-                    .send(
-                        session.config.webhook.url,
-                        session.config.webhook.sessionToken,
-                        {
-                            sessionId,
-                            status: 'queued',
-                            queuePosition: idx + 1,
-                            message: `Queue position updated to ${idx + 1}`,
-                        }
-                    )
-                    .catch(() => {});
-            }
+            this.sessionEvents.emit({
+                sessionId,
+                status: 'queued',
+                queuePosition: idx + 1,
+            });
         });
     }
 

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { spawn, execFile, execSync, type ChildProcess } from 'child_process';
 import { mkdirSync, existsSync } from 'fs';
-import { readFile, writeFile, unlink } from 'fs/promises';
+import { readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { promisify } from 'util';
 import { Worker } from 'worker_threads';
@@ -17,6 +17,7 @@ import type {
     TrimSegmentDto,
 } from '../dto/encode-config.dto.js';
 import dotenv from 'dotenv';
+import { ffmpegBin, ffmpegShellBin, ffprobeBin } from './ffbin.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -33,17 +34,11 @@ export interface EncodeOptions {
     preByteRangeHook?: (outputDir: string) => void | Promise<void>;
 }
 
-export interface AnglePlaylist {
-    name: string;
-    filename: string;
-}
-
 export type SegmentFormat = 'fmp4' | 'mpegts';
 
 export interface EncodeResult {
     outputDir: string;
     masterPlaylist: string;
-    anglePlaylists: AnglePlaylist[];
     segmentFormat: SegmentFormat;
 }
 
@@ -117,7 +112,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
 
         try {
-            const hwaccels = execSync('ffmpeg -hwaccels 2>/dev/null', {
+            const hwaccels = execSync(`${ffmpegShellBin()} -hwaccels 2>/dev/null`, {
                 encoding: 'utf-8',
                 timeout: 5000,
             });
@@ -132,19 +127,19 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             return false;
         }
         try {
-            const hwaccels = execSync('ffmpeg -hwaccels 2>/dev/null', {
+            const hwaccels = execSync(`${ffmpegShellBin()} -hwaccels 2>/dev/null`, {
                 encoding: 'utf-8',
                 timeout: 5000,
             });
             if (!hwaccels.includes('videotoolbox')) return false;
 
-            const encoders = execSync('ffmpeg -encoders 2>/dev/null', {
+            const encoders = execSync(`${ffmpegShellBin()} -encoders 2>/dev/null`, {
                 encoding: 'utf-8',
                 timeout: 5000,
             });
             if (!encoders.includes('h264_videotoolbox')) return false;
 
-            const filters = execSync('ffmpeg -filters 2>/dev/null', {
+            const filters = execSync(`${ffmpegShellBin()} -filters 2>/dev/null`, {
                 encoding: 'utf-8',
                 timeout: 5000,
             });
@@ -162,7 +157,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     ): Promise<{ video: number[]; audio: number[] }> {
         try {
             const { stdout } = await execFileAsync(
-                'ffprobe',
+                ffprobeBin(),
                 [
                     '-v',
                     'error',
@@ -239,7 +234,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private async probeDuration(inputPath: string): Promise<number> {
         try {
             const { stdout } = await execFileAsync(
-                'ffprobe',
+                ffprobeBin(),
                 [
                     '-v',
                     'error',
@@ -264,7 +259,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private async probeFrameRate(inputPath: string): Promise<number> {
         try {
             const { stdout } = await execFileAsync(
-                'ffprobe',
+                ffprobeBin(),
                 [
                     '-v',
                     'error',
@@ -301,7 +296,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     ): Promise<number | null> {
         try {
             const { stdout } = await execFileAsync(
-                'ffprobe',
+                ffprobeBin(),
                 [
                     '-v',
                     'error',
@@ -905,7 +900,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         this.logger.debug(`FFmpeg args: ffmpeg ${args.join(' ')}`);
 
         return new Promise<EncodeResult>((resolve, reject) => {
-            const proc = spawn('ffmpeg', args, {
+            const proc = spawn(ffmpegBin(), args, {
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
             this.activeProcess = proc;
@@ -964,38 +959,11 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                         await this.convertToByteRange(outputDir, maxBytes);
                     }
 
-                    let anglePlaylists: AnglePlaylist[] = [];
-                    let masterPlaylistFilename = 'master.m3u8';
+                    // One spec-correct master, angles and all. Splitting it per
+                    // angle is the player's job now (see the hls package's
+                    // extractAnglePlaylist / extractAudioOnlyPlaylist).
                     if (type === 'video') {
                         await this.fixMasterPlaylist(outputDir, encodeConfig);
-                        anglePlaylists = await this.generateAnglePlaylists(
-                            outputDir,
-                            encodeConfig
-                        );
-                        if (anglePlaylists.length > 1) {
-                            const masterPath = join(outputDir, 'master.m3u8');
-                            await unlink(masterPath).catch(() => {});
-                            masterPlaylistFilename =
-                                anglePlaylists[0]?.filename ?? 'master.m3u8';
-                        }
-
-                        const audioOnlyPlaylist =
-                            await this.generateAudioOnlyPlaylist(
-                                outputDir,
-                                encodeConfig
-                            );
-                        if (audioOnlyPlaylist) {
-                            if (
-                                anglePlaylists.length === 1 &&
-                                anglePlaylists[0].name === 'Default'
-                            ) {
-                                anglePlaylists[0] = {
-                                    ...anglePlaylists[0],
-                                    name: 'Video',
-                                };
-                            }
-                            anglePlaylists.push(audioOnlyPlaylist);
-                        }
                     } else {
                         await this.fixAudioOnlyMasterPlaylist(
                             outputDir,
@@ -1004,8 +972,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     }
                     resolve({
                         outputDir,
-                        masterPlaylist: masterPlaylistFilename,
-                        anglePlaylists,
+                        masterPlaylist: 'master.m3u8',
                         segmentFormat: useFmp4 ? 'fmp4' : 'mpegts',
                     });
                 })().catch(reject);
@@ -1182,146 +1149,6 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 return line.replace(/NAME="[^"]*"/, `NAME="${name}"`);
             })
             .join('\n');
-    }
-
-    /**
-     * Parse the already-fixed master.m3u8 (which has VIDEO="angle" attributes)
-     * and split it into one playlist per angle. Does NOT upload the original
-     * multi-angle master because most HLS web players don't support it.
-     */
-    private async generateAnglePlaylists(
-        outputDir: string,
-        config: EncodeConfigDto
-    ): Promise<AnglePlaylist[]> {
-        const renditions = config.videoRenditions ?? [];
-        if (renditions.length === 0) return [];
-
-        const masterPath = join(outputDir, 'master.m3u8');
-        const uniqueTracks = new Set(
-            renditions.map((r) => r.sourceTrackIndex ?? 0)
-        );
-        if (uniqueTracks.size <= 1) {
-            return [{ name: 'Default', filename: 'master.m3u8' }];
-        }
-
-        let content: string;
-        try {
-            content = await readFile(masterPath, 'utf-8');
-        } catch {
-            return [];
-        }
-        const lines = content.split('\n');
-
-        let extVersion = '#EXT-X-VERSION:3';
-        const audioMediaLines: string[] = [];
-        const streamsByAngle = new Map<
-            string,
-            { infLine: string; uri: string }[]
-        >();
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (line.startsWith('#EXT-X-VERSION:')) {
-                extVersion = line;
-            } else if (
-                line.startsWith('#EXT-X-MEDIA:') &&
-                line.includes('TYPE=AUDIO')
-            ) {
-                audioMediaLines.push(line);
-            } else if (line.startsWith('#EXT-X-STREAM-INF:')) {
-                const uriLine = lines[i + 1]?.trim();
-                if (!uriLine || uriLine.startsWith('#')) continue;
-
-                const videoMatch = line.match(/VIDEO="([^"]+)"/);
-                const angleId = videoMatch?.[1] ?? 'default';
-
-                if (!streamsByAngle.has(angleId)) {
-                    streamsByAngle.set(angleId, []);
-                }
-
-                const cleanedLine = line.replace(/,?VIDEO="[^"]*"/g, '');
-                streamsByAngle
-                    .get(angleId)!
-                    .push({ infLine: cleanedLine, uri: uriLine });
-            }
-        }
-
-        this.logger.debug(
-            `generateAnglePlaylists: found ${streamsByAngle.size} angle(s) in master.m3u8: ` +
-                `${[...streamsByAngle.entries()].map(([k, v]) => `"${k}" (${v.length} streams)`).join(', ')}`
-        );
-
-        const nameByTrackIndex = new Map<number, string>();
-        for (const tn of config.videoTrackNames ?? []) {
-            nameByTrackIndex.set(tn.index, tn.name ?? `Angle ${tn.index}`);
-        }
-
-        const sanitize = (s: string): string =>
-            s
-                .replace(/[^a-zA-Z0-9_-]/g, '_')
-                .replace(/_+/g, '_')
-                .replace(/^_|_$/g, '') || 'angle';
-
-        const anglePlaylists: AnglePlaylist[] = [];
-
-        for (const [angleId, streams] of streamsByAngle) {
-            const angleName =
-                [...nameByTrackIndex.values()].find(
-                    (name) => sanitize(name) === angleId
-                ) ?? angleId;
-
-            const filename = `${angleId}.m3u8`;
-            const parts: string[] = ['#EXTM3U', extVersion, ...audioMediaLines];
-
-            for (const { infLine, uri } of streams) {
-                parts.push(infLine, uri);
-            }
-
-            const anglePath = join(outputDir, filename);
-            await writeFile(anglePath, parts.join('\n') + '\n', 'utf-8');
-            anglePlaylists.push({ name: angleName, filename });
-
-            this.logger.debug(
-                `generateAnglePlaylists: wrote "${filename}" for angle "${angleName}" with ${streams.length} stream(s)`
-            );
-        }
-
-        return anglePlaylists;
-    }
-
-    /**
-     * Generate a standalone audio-only master playlist from a video encode's
-     * audio streams. Follows the same structure as audio-file-upload playlists.
-     */
-    private async generateAudioOnlyPlaylist(
-        outputDir: string,
-        config: EncodeConfigDto
-    ): Promise<AnglePlaylist | null> {
-        const audioGroups = config.audioGroups ?? [];
-        if (audioGroups.length === 0) return null;
-
-        const masterPath = join(outputDir, 'master.m3u8');
-        let extVersion = '#EXT-X-VERSION:7';
-        try {
-            const raw = await readFile(masterPath, 'utf-8');
-            const versionMatch = raw.match(/#EXT-X-VERSION:\d+/);
-            if (versionMatch) extVersion = versionMatch[0];
-        } catch {
-            // master.m3u8 may not exist yet
-        }
-
-        const content = this.buildAudioOnlyMasterContent(
-            extVersion,
-            audioGroups
-        );
-        const filename = 'audio_only.m3u8';
-        await writeFile(join(outputDir, filename), content, 'utf-8');
-
-        this.logger.debug(
-            `generateAudioOnlyPlaylist: wrote "${filename}" with ${audioGroups.length} audio group(s)`
-        );
-
-        return { name: 'Audio only', filename };
     }
 
     /**

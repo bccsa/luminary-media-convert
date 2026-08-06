@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { ffprobeBin } from './ffbin.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -128,7 +129,7 @@ export class ProbeService {
     }
 
     private async runFfprobe(filePath: string): Promise<FfprobeOutput> {
-        const { stdout } = await execFileAsync('ffprobe', [
+        const { stdout } = await execFileAsync(ffprobeBin(), [
             '-v', 'quiet', '-print_format', 'json',
             '-show_format', '-show_streams', filePath,
         ], { timeout: 60000 });
@@ -177,7 +178,7 @@ export class ProbeService {
             // what the stream actually needs.
             const sampleDuration = Math.min(10, duration);
             const starts = this.packetSampleStarts(duration, sampleDuration);
-            const { stdout: csv } = await execFileAsync('ffprobe', [
+            const { stdout: csv } = await execFileAsync(ffprobeBin(), [
                 '-v', 'quiet', '-print_format', 'csv=p=0',
                 '-read_intervals', this.readIntervalsArg(starts, sampleDuration),
                 '-show_entries', 'packet=stream_index,size,pts_time', filePath,

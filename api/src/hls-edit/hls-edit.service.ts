@@ -268,7 +268,13 @@ function folderOf(key: string): string {
 }
 
 function chaptersKey(folderPrefix: string, lang: string): string {
-    const prefix = folderPrefix.endsWith('/') ? folderPrefix : folderPrefix + '/';
+    // An empty prefix means the bucket root, not a folder called "". Appending
+    // the separator regardless produced "/chapters/en.vtt" — a key with a
+    // leading slash, which S3 stores happily and nothing ever finds again.
+    const prefix =
+        !folderPrefix || folderPrefix.endsWith('/')
+            ? folderPrefix
+            : folderPrefix + '/';
     return `${prefix}chapters/${lang}.vtt`;
 }
 

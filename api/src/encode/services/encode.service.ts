@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls';
 import { existsSync } from 'fs';
 import { copyFile, readdir, rm, writeFile } from 'fs/promises';
 import { join, posix } from 'path';
@@ -14,13 +15,10 @@ import { EncryptionService } from './encryption.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
 import { WaveformService } from './waveform.service.js';
 import { S3Service } from './s3.service.js';
-import { WebhookService } from './webhook.service.js';
 import {
     SegmentPipelineService,
     type PipelineProgress,
 } from './segment-pipeline.service.js';
-
-import type { WebhookPayloadDto } from '../dto/webhook-payload.dto.js';
 
 @Injectable()
 export class EncodeService {
@@ -35,7 +33,6 @@ export class EncodeService {
         private readonly thumbnailService: ThumbnailService,
         private readonly waveformService: WaveformService,
         private readonly s3Service: S3Service,
-        private readonly webhookService: WebhookService,
         private readonly segmentPipelineService: SegmentPipelineService
     ) {}
 
@@ -63,12 +60,6 @@ export class EncodeService {
         if (shortfall) {
             this.logger.error(`Session ${sessionId} refused: ${shortfall}`);
             this.sessionService.setFailed(sessionId, shortfall);
-            await this.sendWebhook(session, {
-                sessionId,
-                status: 'failed',
-                error: shortfall,
-                message: 'Encoding failed',
-            });
             return;
         }
 
@@ -86,32 +77,32 @@ export class EncodeService {
         });
 
         try {
-            this.sessionService.updateStatus(sessionId, 'encoding');
-            this.sessionService.setOutputDir(sessionId, outputDir);
-            await this.sendWebhook(session, {
-                sessionId,
-                status: 'encoding',
-                progress: 0,
-                message: 'Encoding started',
-            });
-
             const encryptionEnabled =
-                session.config.encryption?.enabled !== false &&
-                !!session.config.encryption?.keyUrl;
+                session.config.encryption != null &&
+                session.config.encryption.enabled !== false;
 
-            // Pre-compute encryption materials
+            // Pre-compute encryption materials. This happens before the status
+            // flips to 'encoding' so anything watching that transition can be
+            // handed the key it will need to play the output back.
             let encryptionKey: Buffer | undefined;
             let encryptionIV: Buffer | undefined;
-            let encryptionSalt: Buffer | undefined;
 
             if (encryptionEnabled) {
-                encryptionSalt = this.encryptionService.generateSalt();
-                encryptionKey = this.encryptionService.deriveKey(
-                    sessionId,
-                    encryptionSalt
-                );
+                encryptionKey = this.encryptionService.generateKey();
                 encryptionIV = this.encryptionService.generateIV();
+                // On the session before the status flips, so the 'encoding'
+                // event and every status read after it carry the key. A CMS
+                // that only learned it at completion would have a playable URL
+                // in hand, and nothing able to decrypt it, for the length of
+                // the encode.
+                this.sessionService.setEncryptionKey(
+                    sessionId,
+                    encryptionKey.toString('hex')
+                );
             }
+
+            this.sessionService.updateStatus(sessionId, 'encoding');
+            this.sessionService.setOutputDir(sessionId, outputDir);
 
             // Set up S3 path prefix. This is the prefix every uploaded key is
             // built from — segments, playlists and sidecars all route through
@@ -120,6 +111,17 @@ export class EncodeService {
             const s3PathPrefix = S3Service.canonicalPrefix(
                 session.config.s3.pathPrefix
             );
+
+            // The playback URL is fully determined once the prefix is — the
+            // encode writes exactly one master playlist, at a known name — so
+            // it is published now rather than on completion. The caller can
+            // save it against its own record while the encode runs, instead of
+            // holding a half-finished record open for however long that takes.
+            if (session.publicBaseUrl) {
+                const masterKey = posix.join(s3PathPrefix, 'master.m3u8');
+                const base = session.publicBaseUrl.replace(/\/+$/, '');
+                this.sessionService.setHlsUrl(sessionId, `${base}/${masterKey}`);
+            }
 
             // Current pipeline progress state (updated by both FFmpeg and pipeline callbacks)
             // Initialize all bars so the UI shows them from the start
@@ -181,14 +183,6 @@ export class EncodeService {
                     this.sessionService.updatePipelineProgress(sessionId, {
                         ...currentProgress,
                     });
-                    if (percent % 5 < 1 || percent >= 99) {
-                        this.sendWebhook(session, {
-                            sessionId,
-                            status: 'encoding',
-                            progress: percent,
-                            message: `Encoding: ${percent}% complete`,
-                        }).catch(() => {});
-                    }
                 },
             });
 
@@ -204,7 +198,8 @@ export class EncodeService {
             if (encryptionEnabled) {
                 await this.encryptionService.injectKeyTagsIntoPlaylists(
                     outputDir,
-                    session.config.encryption!.keyUrl!,
+                    session.config.encryption?.keyUrl ??
+                        LUMINARY_KEY_PLACEHOLDER_URI,
                     encryptionIV!
                 );
             }
@@ -308,38 +303,17 @@ export class EncodeService {
             // Upload remaining files (playlists, thumbnails, master.m3u8)
             this.sessionService.updateStatus(sessionId, 'uploading_to_s3');
             this.sessionService.updateProgress(sessionId, 0);
-            await this.sendWebhook(session, {
-                sessionId,
-                status: 'uploading_to_s3',
-                progress: 0,
-                message: 'Uploading playlists and thumbnails to S3',
-            });
 
             await pipeline.uploadRemainingFiles(outputDir);
 
             // Collect all uploaded keys
             const allKeys = pipeline.keys;
 
-            // Resolve master playlist and angle playlists
-            const anglePlaylistsWithKeys = encodeResult.anglePlaylists.map(
-                (ap) => {
-                    const key =
-                        allKeys.find(
-                            (k) => k.split('/').pop() === ap.filename
-                        ) ?? '';
-                    return { name: ap.name, key };
-                }
-            );
-
-            const masterPlaylistKey =
+            // The encode writes a single master playlist — angles included.
+            const effectiveMasterPlaylist =
                 allKeys.find(
                     (k) => k.split('/').pop() === encodeResult.masterPlaylist
                 ) ?? '';
-
-            const effectiveMasterPlaylist =
-                anglePlaylistsWithKeys.length > 0
-                    ? anglePlaylistsWithKeys[0].key
-                    : masterPlaylistKey;
 
             const thumbnailsVttKey = thumbnailsVttRelPath
                 ? allKeys.find((k) => k.endsWith(thumbnailsVttRelPath!))
@@ -349,9 +323,6 @@ export class EncodeService {
                 sessionId,
                 allKeys,
                 effectiveMasterPlaylist,
-                anglePlaylistsWithKeys.length > 0
-                    ? anglePlaylistsWithKeys
-                    : undefined,
                 thumbnailsVttKey,
                 encodeResult.segmentFormat,
                 encryptionKey ? encryptionKey.toString('hex') : undefined
@@ -371,53 +342,13 @@ export class EncodeService {
                     );
                 });
 
-            await this.sendWebhook(session, {
-                sessionId,
-                status: 'completed',
-                progress: 100,
-                message: 'Encoding and upload complete',
-                files: allKeys,
-                masterPlaylist: effectiveMasterPlaylist,
-                anglePlaylists:
-                    anglePlaylistsWithKeys.length > 0
-                        ? anglePlaylistsWithKeys
-                        : undefined,
-                thumbnailsVtt: thumbnailsVttKey,
-                encryptionKeyHex: encryptionKey
-                    ? encryptionKey.toString('hex')
-                    : undefined,
-                probeResult: session.probeResult ?? undefined,
-            });
-
             this.logger.log(`Session ${sessionId} completed successfully`);
         } catch (err) {
             const errorMsg = (err as Error).message || 'Unknown error';
             this.logger.error(`Session ${sessionId} failed: ${errorMsg}`);
             this.sessionService.setFailed(sessionId, errorMsg);
-            await this.sendWebhook(session, {
-                sessionId,
-                status: 'failed',
-                error: errorMsg,
-                message: 'Encoding failed',
-            });
         } finally {
             await this.cleanupSessionFiles(sessionId);
-        }
-    }
-
-    private async sendWebhook(
-        session: Session,
-        payload: WebhookPayloadDto
-    ): Promise<void> {
-        if (!session.config.webhook) return;
-        try {
-            await this.webhookService.send(
-                session.config.webhook.url,
-                session.config.webhook.sessionToken,
-                payload
-            );
-        } catch {
-            // Webhook errors are already logged inside WebhookService
         }
     }
 

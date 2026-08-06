@@ -12,9 +12,15 @@ export interface SessionEvent {
     error?: string;
     files?: string[];
     masterPlaylist?: string;
-    anglePlaylists?: { name: string; key: string }[];
     thumbnailsVtt?: string;
     encryptionKeyHex?: string;
+    /**
+     * Where the output will be playable from. Present from the moment encoding
+     * starts — the destination key is settled long before the first segment
+     * exists, and the CMS wants to store the URL alongside the key it is handed
+     * in the same event.
+     */
+    hlsUrl?: string;
     segmentFormat?: string;
     encoder?: string;
     probeResult?: unknown;

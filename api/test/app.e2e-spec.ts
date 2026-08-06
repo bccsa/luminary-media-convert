@@ -12,7 +12,7 @@ describe('Encode API (e2e)', () => {
 
         const moduleFixture: TestingModule =
             await Test.createTestingModule({
-                imports: [AppModule],
+                imports: [AppModule.forRoot()],
             }).compile();
 
         app = moduleFixture.createNestApplication();

@@ -4,6 +4,7 @@ import { existsSync } from 'fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { promisify } from 'util';
+import { ffmpegBin } from './ffbin.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -179,7 +180,7 @@ export class ThumbnailService {
     private async detectSpriteFormat(): Promise<SpriteFormat | null> {
         if (this.spriteFormat !== undefined) return this.spriteFormat;
         try {
-            const { stdout } = await execFileAsync('ffmpeg', ['-encoders'], {
+            const { stdout } = await execFileAsync(ffmpegBin(), ['-encoders'], {
                 timeout: 10_000,
             });
             if (stdout.includes('libwebp')) {
@@ -227,7 +228,7 @@ export class ThumbnailService {
     private async detectDecodeAccel(): Promise<string[]> {
         if (this.decodeAccel !== undefined) return this.decodeAccel;
         try {
-            const { stdout } = await execFileAsync('ffmpeg', ['-hwaccels'], {
+            const { stdout } = await execFileAsync(ffmpegBin(), ['-hwaccels'], {
                 timeout: 10_000,
             });
             if (stdout.includes('cuda'))
@@ -309,7 +310,7 @@ export class ThumbnailService {
 
         const run = (decodeArgs: string[]) =>
             execFileAsync(
-                'ffmpeg',
+                ffmpegBin(),
                 [...decodeArgs, ...inputArgs, ...filterArgs],
                 { timeout }
             );

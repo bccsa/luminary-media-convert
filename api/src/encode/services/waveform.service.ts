@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import { existsSync, readdirSync } from 'fs';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
+import { ffmpegBin } from './ffbin.js';
 
 export interface WaveformSidecar {
     version: number;
@@ -167,7 +168,7 @@ export class WaveformService {
         return new Promise((resolve, reject) => {
             let errOutput = '';
 
-            const ffmpeg = spawn('ffmpeg', [
+            const ffmpeg = spawn(ffmpegBin(), [
                 ...inputArgs,
                 // Nothing here looks at the picture; without this ffmpeg still
                 // demuxes and decodes it alongside the audio.

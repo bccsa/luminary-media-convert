@@ -1,32 +1,33 @@
 import {
     CanActivate,
     ExecutionContext,
+    Inject,
     Injectable,
     UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { timingSafeEqual } from 'crypto';
 import type { Request } from 'express';
-import { KeyValidationWebhookService } from './key-validation-webhook.service.js';
 import { SessionService } from '../encode/services/session.service.js';
 import { AUTH_TYPES_KEY, type AuthType } from './auth-types.decorator.js';
+import { LOCAL_API_TOKEN, type LocalApiToken } from './local-auth.config.js';
 
 /**
- * Composite guard that resolves authentication via a priority chain:
- * Master Key -> API Key -> Session Token
+ * Guard that resolves authentication via a priority chain:
+ * Master Key -> Session Token -> Read Token
  *
  * Uses the @AuthTypes() decorator to determine which methods are allowed.
  * Defaults to ['master'] if no decorator is present.
  *
- * The master key (MASTER_API_KEY env var) is a superkey that is always
- * accepted regardless of the @AuthTypes() decorator on the endpoint.
+ * The master key is a superkey that is always accepted regardless of the
+ * @AuthTypes() decorator on the endpoint.
  */
 @Injectable()
 export class AuthResolverGuard implements CanActivate {
     constructor(
         private readonly reflector: Reflector,
-        private readonly keyValidationService: KeyValidationWebhookService,
         private readonly sessionService: SessionService,
+        @Inject(LOCAL_API_TOKEN) private readonly masterKey: LocalApiToken
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -38,11 +39,10 @@ export class AuthResolverGuard implements CanActivate {
 
         const request = context.switchToHttp().getRequest<Request>();
 
-        // 1. Try X-API-Key header (master key or regular API key)
+        // 1. Try X-API-Key header (master key)
         const apiKeyHeader = request.headers['x-api-key'] as string | undefined;
         if (apiKeyHeader) {
-            // Check master key first — always accepted (superkey)
-            const masterKey = process.env.MASTER_API_KEY;
+            const masterKey = this.masterKey;
             if (
                 masterKey &&
                 apiKeyHeader.length === masterKey.length &&
@@ -50,16 +50,6 @@ export class AuthResolverGuard implements CanActivate {
             ) {
                 (request as any).authType = 'master';
                 return true;
-            }
-
-            // Check regular API key via webhook
-            if (allowedTypes.includes('apikey')) {
-                const metadata = await this.keyValidationService.validateKey(apiKeyHeader);
-                if (metadata) {
-                    (request as any).authType = 'apikey';
-                    (request as any).apiKey = metadata;
-                    return true;
-                }
             }
 
             // Key was provided but invalid
@@ -86,6 +76,30 @@ export class AuthResolverGuard implements CanActivate {
                 (request as any).authType = 'session';
                 (request as any).session = session;
                 return true;
+            }
+        }
+
+        // 3. Try a read-only token on the query string.
+        //
+        // Only on endpoints that opt in with @AuthTypes('read'), which is the
+        // status endpoint alone. The CMS watches a session from a browser, and
+        // the two ways a browser can carry a credential to a URL it does not
+        // control the headers of — EventSource and a plain <a> — both mean the
+        // query string. It reads status; it cannot start, cancel, or reach the
+        // source file, so widening the door this far costs nothing.
+        if (allowedTypes.includes('read')) {
+            const token = request.query.token;
+            if (typeof token === 'string' && token) {
+                const session =
+                    this.sessionService.getBySessionToken(token) ??
+                    this.sessionService.getByReadToken(token);
+                const sessionId = request.params.sessionId;
+                if (session && (!sessionId || session.id === sessionId)) {
+                    (request as any).authType = 'read';
+                    (request as any).session = session;
+                    return true;
+                }
+                throw new UnauthorizedException('Invalid or expired token');
             }
         }
 

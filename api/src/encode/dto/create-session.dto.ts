@@ -9,7 +9,6 @@ import {
 import { Expose, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { S3ConfigDto } from './s3-config.dto.js';
-import { WebhookConfigDto } from './webhook-config.dto.js';
 import { EncryptionConfigDto } from './encryption-config.dto.js';
 
 export class CreateSessionDto {
@@ -65,17 +64,6 @@ export class CreateSessionDto {
     @Type(() => S3ConfigDto)
     @Expose()
     s3: S3ConfigDto;
-
-    @ApiPropertyOptional({
-        description:
-            'Webhook configuration for status callbacks. If omitted, no webhooks are sent — use the polling endpoint instead.',
-        type: WebhookConfigDto,
-    })
-    @IsOptional()
-    @ValidateNested()
-    @Type(() => WebhookConfigDto)
-    @Expose()
-    webhook?: WebhookConfigDto;
 
     @ApiPropertyOptional({
         description:

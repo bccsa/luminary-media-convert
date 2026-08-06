@@ -5,6 +5,15 @@
     "author": "",
     "private": true,
     "license": "Apache-2.0",
+    "main": "dist/bootstrap.js",
+    "types": "dist/bootstrap.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/bootstrap.d.ts",
+            "default": "./dist/bootstrap.js"
+        },
+        "./package.json": "./package.json"
+    },
     "scripts": {
         "build": "nest build",
         "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -33,7 +42,6 @@
         "dotenv": "^17.2.3",
         "helmet": "^8.1.0",
         "minio": "^8.0.5",
-        "node-tusd": "file:../tusd",
         "reflect-metadata": "^0.2.2",
         "rxjs": "^7.8.1",
         "uuid": "^11.1.0"
