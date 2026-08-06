@@ -8,7 +8,6 @@ on:
     paths:
       - api/**
       - hls/**
-      - tusd/**
       - package.json
       - package-lock.json
       - .github/workflows/api-deploy-prod.yml
@@ -41,7 +40,6 @@ jobs:
           MAX_UPLOAD_SIZE=${{ vars.MAX_UPLOAD_SIZE }}
           S3_UPLOAD_CONCURRENCY=${{ vars.S3_UPLOAD_CONCURRENCY }}
           MASTER_API_KEY=${{ secrets.MASTER_API_KEY }}
-          HLS_ENCRYPTION_SEED=${{ secrets.HLS_ENCRYPTION_SEED }}
           KEY_VALIDATION_WEBHOOK_URL=${{ vars.KEY_VALIDATION_WEBHOOK_URL }}
           KEY_VALIDATION_WEBHOOK_TIMEOUT_MS=${{ vars.KEY_VALIDATION_WEBHOOK_TIMEOUT_MS }}
           KEY_VALIDATION_CACHE_TTL_MS=${{ vars.KEY_VALIDATION_CACHE_TTL_MS }}
