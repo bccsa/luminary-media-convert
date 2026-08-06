@@ -1,259 +1,273 @@
-import { type Mocked } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueueService } from './queue.service.js';
-import { SessionService } from './session.service.js';
-import { EncodeService } from './encode.service.js';
-import { WebhookService } from './webhook.service.js';
-import type { CreateSessionDto } from '../dto/create-session.dto.js';
+import type { SessionService } from './session.service.js';
+import type { EncodeService } from './encode.service.js';
+import type { SessionEventsService } from './session-events.service.js';
 
-function makeConfig(): CreateSessionDto {
-    return {
-        s3: {
-            endPoint: 's3.example.com',
-            bucket: 'test',
-            accessKey: 'key',
-            secretKey: 'secret',
-        },
-        webhook: {
-            url: 'https://example.com/webhook',
-            sessionToken: 'tok',
-        },
-    };
+const updateStatus = vi.fn();
+const setFailed = vi.fn();
+const processSession = vi.fn<(id: string) => Promise<void>>();
+const emit = vi.fn();
+
+const sessions = { updateStatus, setFailed } as unknown as SessionService;
+const encoder = { processSession } as unknown as EncodeService;
+const events = { emit } as unknown as SessionEventsService;
+
+function build(): QueueService {
+    return new QueueService(sessions, encoder, events);
 }
 
-describe('QueueService', () => {
-    let queueService: QueueService;
-    let sessionService: SessionService;
-    let encodeService: Mocked<EncodeService>;
-    let webhookService: Mocked<WebhookService>;
+/** A job that only resolves when told to, so the queue can be observed mid-run. */
+function deferred() {
+    let release!: () => void;
+    const promise = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    return { promise, release };
+}
 
-    beforeEach(() => {
-        sessionService = new SessionService({ emit: () => {} } as any);
+/** Let the drain loop advance past its pending awaits. */
+const settle = () => new Promise((r) => setImmediate(r));
 
-        encodeService = {
-            processSession: vi.fn().mockResolvedValue(undefined),
-        } as any;
+beforeEach(() => {
+    updateStatus.mockReset();
+    setFailed.mockReset();
+    emit.mockReset();
+    processSession.mockReset().mockResolvedValue(undefined);
+});
 
-        webhookService = {
-            send: vi.fn().mockResolvedValue(undefined),
-        } as any;
+describe('QueueService — enqueueing', () => {
+    it('marks the session queued and returns its position', async () => {
+        const job = deferred();
+        processSession.mockReturnValue(job.promise);
+        const queue = build();
 
-        queueService = new QueueService(
-            sessionService,
-            encodeService,
-            webhookService,
+        expect(queue.enqueue('a')).toBe(1);
+        expect(updateStatus).toHaveBeenCalledWith('a', 'queued');
+
+        job.release();
+        await settle();
+    });
+
+    it('numbers the queue by who is still waiting, not by arrival', async () => {
+        // Draining starts synchronously and shifts the running session off the
+        // queue before enqueue() returns for the next one — so the first caller
+        // gets 1 meaning "running", and the one after it gets 1 meaning "next".
+        // Position is a place in the line ahead, which is what a client waiting
+        // on it wants to know.
+        const job = deferred();
+        processSession.mockReturnValue(job.promise);
+        const queue = build();
+
+        expect(queue.enqueue('a')).toBe(1);
+        expect(queue.enqueue('b')).toBe(1);
+        expect(queue.enqueue('c')).toBe(2);
+
+        job.release();
+        await settle();
+    });
+
+    it('runs one encode at a time', async () => {
+        const first = deferred();
+        processSession.mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+        const queue = build();
+
+        queue.enqueue('a');
+        queue.enqueue('b');
+        await settle();
+
+        // 'b' waits: the queue is not a fan-out, and two ffmpeg runs would
+        // contend for the same CPU and disk.
+        expect(processSession).toHaveBeenCalledTimes(1);
+        expect(processSession).toHaveBeenCalledWith('a');
+
+        first.release();
+        await settle();
+        expect(processSession).toHaveBeenCalledWith('b');
+    });
+
+    it('processes in FIFO order', async () => {
+        const order: string[] = [];
+        processSession.mockImplementation(async (id) => {
+            order.push(id);
+        });
+        const queue = build();
+
+        queue.enqueue('a');
+        queue.enqueue('b');
+        queue.enqueue('c');
+        await settle();
+        await settle();
+
+        expect(order).toEqual(['a', 'b', 'c']);
+    });
+});
+
+describe('QueueService — positions', () => {
+    it('reports the position of a waiting session', async () => {
+        const job = deferred();
+        processSession.mockReturnValue(job.promise);
+        const queue = build();
+
+        queue.enqueue('a');
+        queue.enqueue('b');
+        await settle();
+
+        // 'a' has been shifted off to be processed; 'b' is now first in line.
+        expect(queue.getPosition('b')).toBe(1);
+
+        job.release();
+        await settle();
+    });
+
+    it('reports null for a session it is not holding', () => {
+        expect(build().getPosition('nope')).toBeNull();
+    });
+
+    it('tells every waiting session where it now stands', async () => {
+        // SSE is the only push channel, so a client watching a queued session
+        // learns it has moved up from here.
+        const job = deferred();
+        processSession.mockReturnValue(job.promise);
+        const queue = build();
+
+        queue.enqueue('a');
+        queue.enqueue('b');
+        emit.mockClear();
+        queue.enqueue('c');
+
+        expect(emit).toHaveBeenCalledWith({
+            sessionId: 'b',
+            status: 'queued',
+            queuePosition: 1,
+        });
+        expect(emit).toHaveBeenCalledWith({
+            sessionId: 'c',
+            status: 'queued',
+            queuePosition: 2,
+        });
+
+        job.release();
+        await settle();
+    });
+});
+
+describe('QueueService — dequeueing', () => {
+    it('removes a session that has not started yet', async () => {
+        const job = deferred();
+        processSession.mockReturnValue(job.promise);
+        const queue = build();
+
+        queue.enqueue('a');
+        queue.enqueue('b');
+
+        expect(queue.dequeue('b')).toBe(true);
+        expect(queue.getPosition('b')).toBeNull();
+
+        job.release();
+        await settle();
+    });
+
+    it('reports false for a session it does not hold', () => {
+        expect(build().dequeue('nope')).toBe(false);
+    });
+
+    it('closes the gap for everyone behind it', async () => {
+        const job = deferred();
+        processSession.mockReturnValue(job.promise);
+        const queue = build();
+
+        queue.enqueue('a');
+        queue.enqueue('b');
+        queue.enqueue('c');
+        emit.mockClear();
+
+        queue.dequeue('b');
+
+        expect(emit).toHaveBeenCalledWith(
+            expect.objectContaining({ sessionId: 'c', queuePosition: 1 }),
         );
+
+        job.release();
+        await settle();
+    });
+});
+
+describe('QueueService — failures', () => {
+    it('carries on after a job throws', async () => {
+        // processSession is supposed to swallow its own errors; if one escapes,
+        // it must not take the rest of the queue down with it.
+        processSession
+            .mockRejectedValueOnce(new Error('ffmpeg exploded'))
+            .mockResolvedValue(undefined);
+        const queue = build();
+
+        queue.enqueue('a');
+        queue.enqueue('b');
+        await settle();
+        await settle();
+
+        expect(setFailed).toHaveBeenCalledWith('a', 'ffmpeg exploded');
+        expect(processSession).toHaveBeenCalledWith('b');
     });
 
-    describe('enqueue', () => {
-        it('should add session to queue and return position', () => {
-            const session = sessionService.create(makeConfig());
-            const position = queueService.enqueue(session.id);
+    it('names a reason even when the error carries none', async () => {
+        processSession.mockRejectedValueOnce(new Error(''));
+        const queue = build();
 
-            expect(position).toBe(1);
+        queue.enqueue('a');
+        await settle();
+        await settle();
+
+        expect(setFailed).toHaveBeenCalledWith('a', 'Unexpected queue error');
+    });
+});
+
+describe('QueueService — shutdown', () => {
+    it('waits for the running encode before letting the process quit', async () => {
+        // Quitting out from under ffmpeg leaves an orphan process and half an
+        // output in the bucket.
+        const job = deferred();
+        processSession.mockReturnValue(job.promise);
+        const queue = build();
+        queue.enqueue('a');
+        await settle();
+
+        let done = false;
+        const shutdown = queue.onModuleDestroy().then(() => {
+            done = true;
         });
 
-        it('should return incrementing positions for items behind the first', () => {
-            encodeService.processSession.mockReturnValue(
-                new Promise(() => {}),
-            );
+        await settle();
+        expect(done).toBe(false);
 
-            const s1 = sessionService.create(makeConfig());
-            const s2 = sessionService.create(makeConfig());
-            const s3 = sessionService.create(makeConfig());
-
-            const p1 = queueService.enqueue(s1.id);
-            expect(p1).toBe(1);
-
-            const p2 = queueService.enqueue(s2.id);
-            expect(p2).toBe(1);
-
-            const p3 = queueService.enqueue(s3.id);
-            expect(p3).toBe(2);
-        });
-
-        it('should update session status to queued', () => {
-            const session = sessionService.create(makeConfig());
-            queueService.enqueue(session.id);
-
-            expect(sessionService.get(session.id)!.status).toBe('queued');
-        });
-
-        it('should send a queued webhook', () => {
-            const session = sessionService.create(makeConfig());
-            queueService.enqueue(session.id);
-
-            expect(webhookService.send).toHaveBeenCalledWith(
-                'https://example.com/webhook',
-                'tok',
-                expect.objectContaining({
-                    sessionId: session.id,
-                    status: 'queued',
-                    queuePosition: 1,
-                }),
-            );
-        });
-
-        it('should return -1 when shutting down', async () => {
-            await queueService.onModuleDestroy();
-            const session = sessionService.create(makeConfig());
-            const pos = queueService.enqueue(session.id);
-
-            expect(pos).toBe(-1);
-        });
+        job.release();
+        await shutdown;
+        expect(done).toBe(true);
     });
 
-    describe('getPosition', () => {
-        it('should return 1-based position', () => {
-            encodeService.processSession.mockReturnValue(
-                new Promise(() => {}),
-            );
+    it('refuses new work once shutting down', async () => {
+        const queue = build();
+        await queue.onModuleDestroy();
 
-            const s1 = sessionService.create(makeConfig());
-            const s2 = sessionService.create(makeConfig());
-
-            queueService.enqueue(s1.id);
-            queueService.enqueue(s2.id);
-
-            expect(queueService.getPosition(s2.id)).toBe(1);
-        });
-
-        it('should return null for unknown session', () => {
-            expect(queueService.getPosition('nonexistent')).toBeNull();
-        });
+        expect(queue.enqueue('a')).toBe(-1);
+        expect(updateStatus).not.toHaveBeenCalled();
     });
 
-    describe('dequeue', () => {
-        it('should remove a queued session and return true', () => {
-            encodeService.processSession.mockReturnValue(
-                new Promise(() => {}),
-            );
+    it('stops draining rather than starting the next job', async () => {
+        const first = deferred();
+        processSession.mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+        const queue = build();
+        queue.enqueue('a');
+        queue.enqueue('b');
+        await settle();
 
-            const s1 = sessionService.create(makeConfig());
-            const s2 = sessionService.create(makeConfig());
+        const shutdown = queue.onModuleDestroy();
+        first.release();
+        await shutdown;
 
-            queueService.enqueue(s1.id);
-            queueService.enqueue(s2.id);
-
-            const removed = queueService.dequeue(s2.id);
-
-            expect(removed).toBe(true);
-            expect(queueService.getPosition(s2.id)).toBeNull();
-        });
-
-        it('should return false for a session not in the queue', () => {
-            expect(queueService.dequeue('nonexistent')).toBe(false);
-        });
-
-        it('should update positions of remaining sessions after removal', () => {
-            encodeService.processSession.mockReturnValue(
-                new Promise(() => {}),
-            );
-
-            const s1 = sessionService.create(makeConfig());
-            const s2 = sessionService.create(makeConfig());
-            const s3 = sessionService.create(makeConfig());
-
-            queueService.enqueue(s1.id);
-            queueService.enqueue(s2.id);
-            queueService.enqueue(s3.id);
-
-            queueService.dequeue(s2.id);
-
-            expect(queueService.getPosition(s3.id)).toBe(1);
-        });
-
-        it('should send updated position webhooks after removal', () => {
-            encodeService.processSession.mockReturnValue(
-                new Promise(() => {}),
-            );
-
-            const s1 = sessionService.create(makeConfig());
-            const s2 = sessionService.create(makeConfig());
-            const s3 = sessionService.create(makeConfig());
-
-            queueService.enqueue(s1.id);
-            queueService.enqueue(s2.id);
-            queueService.enqueue(s3.id);
-
-            webhookService.send.mockClear();
-            queueService.dequeue(s2.id);
-
-            expect(webhookService.send).toHaveBeenCalledWith(
-                'https://example.com/webhook',
-                'tok',
-                expect.objectContaining({
-                    sessionId: s3.id,
-                    status: 'queued',
-                    queuePosition: 1,
-                }),
-            );
-        });
-    });
-
-    describe('drain', () => {
-        it('should process sessions in FIFO order', async () => {
-            const order: string[] = [];
-            encodeService.processSession.mockImplementation(
-                async (id: string) => {
-                    order.push(id);
-                },
-            );
-
-            const s1 = sessionService.create(makeConfig());
-            const s2 = sessionService.create(makeConfig());
-            const s3 = sessionService.create(makeConfig());
-
-            queueService.enqueue(s1.id);
-            queueService.enqueue(s2.id);
-            queueService.enqueue(s3.id);
-
-            await new Promise((r) => setTimeout(r, 50));
-
-            expect(order).toEqual([s1.id, s2.id, s3.id]);
-        });
-
-        it('should continue processing after a job failure', async () => {
-            const processed: string[] = [];
-
-            encodeService.processSession.mockImplementation(
-                async (id: string) => {
-                    if (processed.length === 0) {
-                        processed.push(id);
-                        throw new Error('Simulated failure');
-                    }
-                    processed.push(id);
-                },
-            );
-
-            const s1 = sessionService.create(makeConfig());
-            const s2 = sessionService.create(makeConfig());
-
-            queueService.enqueue(s1.id);
-            queueService.enqueue(s2.id);
-
-            await new Promise((r) => setTimeout(r, 50));
-
-            expect(processed).toEqual([s1.id, s2.id]);
-            expect(sessionService.get(s1.id)!.status).toBe('failed');
-        });
-
-        it('should set processing to false when queue is empty', async () => {
-            const session = sessionService.create(makeConfig());
-            queueService.enqueue(session.id);
-
-            await new Promise((r) => setTimeout(r, 50));
-
-            expect(queueService.isProcessing).toBe(false);
-            expect(queueService.length).toBe(0);
-        });
-    });
-
-    describe('onModuleDestroy', () => {
-        it('should prevent new enqueues after shutdown', async () => {
-            await queueService.onModuleDestroy();
-
-            const session = sessionService.create(makeConfig());
-            expect(queueService.enqueue(session.id)).toBe(-1);
-        });
+        // 'b' is left queued for the next boot rather than started during
+        // shutdown, where it could not finish.
+        expect(processSession).toHaveBeenCalledTimes(1);
     });
 });

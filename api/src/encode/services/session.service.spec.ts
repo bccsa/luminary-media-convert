@@ -1,574 +1,594 @@
-import { mkdirSync, mkdtempSync, existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    statSync,
+    writeFileSync,
+} from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { SessionService, type Session } from './session.service.js';
+import {
+    CREDENTIALS_FILENAME,
+    REDACTED_CREDENTIAL,
+    SessionService,
+    type Session,
+} from './session.service.js';
 import type { CreateSessionDto } from '../dto/create-session.dto.js';
+import type { CredentialCipher } from './credential-cipher.js';
 
-const events = { emit: () => {} } as any;
+/**
+ * SessionService reads WORK_DIR once, as a field initialiser, so every test gets
+ * its own directory *before* the service is constructed. Sharing one would let a
+ * restore test pick up records another test wrote.
+ */
+let workDir: string;
+
+const emit = vi.fn();
+const events = { emit } as unknown as ConstructorParameters<
+    typeof SessionService
+>[0];
+
+/**
+ * Reversible stand-in for Electron's safeStorage. Deliberately not a no-op: the
+ * point of most of these tests is that what lands on disk is *not* the
+ * plaintext, and an identity cipher would pass them while proving nothing.
+ */
+const cipher: CredentialCipher = {
+    encrypt: (plain) => `enc:${Buffer.from(plain).toString('base64')}`,
+    decrypt: (blob) => {
+        if (!blob.startsWith('enc:')) throw new Error('not our ciphertext');
+        return Buffer.from(blob.slice(4), 'base64').toString('utf-8');
+    },
+};
 
 function makeConfig(overrides: Partial<CreateSessionDto> = {}): CreateSessionDto {
     return {
         s3: {
             endPoint: 's3.example.com',
             bucket: 'test-bucket',
-            accessKey: 'key',
-            secretKey: 'secret',
-        },
-        webhook: {
-            url: 'https://example.com/webhook',
-            sessionToken: 'tok123',
+            accessKey: 'AKIAEXAMPLE',
+            secretKey: 'sUp3rS3cret',
         },
         ...overrides,
-    };
+    } as CreateSessionDto;
 }
 
-describe('SessionService', () => {
-    let service: SessionService;
+function build(withCipher = true): SessionService {
+    return new SessionService(events, withCipher ? cipher : undefined);
+}
 
-    beforeEach(() => {
-        service = new SessionService({ emit: () => {} } as any);
-    });
+/**
+ * Write a session record straight to disk, as a previous process would have.
+ *
+ * The record carries redacted keys and the real ones live in the sidecar,
+ * because that is the only shape the service ever writes — seeding real keys
+ * into session.json would let a session restore its credentials by a route that
+ * does not exist, and quietly hide whether recovery works at all.
+ */
+function seedOnDisk(
+    session: Partial<Session> & { id: string },
+    { withCredentials = true } = {},
+): void {
+    const dir = join(workDir, session.id);
+    mkdirSync(dir, { recursive: true });
 
-    describe('create', () => {
-        it('should create a session with a unique id and upload token', () => {
-            const session = service.create(makeConfig());
+    const config = makeConfig();
+    writeFileSync(
+        join(dir, 'session.json'),
+        JSON.stringify({
+            sessionToken: `sess_${session.id}`,
+            status: 'uploaded',
+            progress: 0,
+            createdAt: Date.now(),
+            lastActivityAt: Date.now(),
+            ...session,
+            config: {
+                ...config,
+                s3: {
+                    ...config.s3,
+                    accessKey: REDACTED_CREDENTIAL,
+                    secretKey: REDACTED_CREDENTIAL,
+                },
+            },
+        }),
+    );
 
-            expect(session.id).toBeDefined();
-            expect(session.sessionToken).toMatch(/^sess_/);
-            expect(session.status).toBe('created');
-            expect(session.progress).toBe(0);
-            expect(session.config.s3.endPoint).toBe('s3.example.com');
-            expect(session.createdAt).toBeLessThanOrEqual(Date.now());
-        });
-
-        it('should create sessions with unique ids', () => {
-            const s1 = service.create(makeConfig());
-            const s2 = service.create(makeConfig());
-
-            expect(s1.id).not.toBe(s2.id);
-            expect(s1.sessionToken).not.toBe(s2.sessionToken);
-        });
-    });
-
-    describe('get', () => {
-        it('should return a session by id', () => {
-            const created = service.create(makeConfig());
-            const found = service.get(created.id);
-
-            expect(found).toBeDefined();
-            expect(found!.id).toBe(created.id);
-        });
-
-        it('should return undefined for unknown id', () => {
-            expect(service.get('nonexistent')).toBeUndefined();
-        });
-    });
-
-    describe('getBySessionToken', () => {
-        it('should return a session by upload token', () => {
-            const created = service.create(makeConfig());
-            const found = service.getBySessionToken(created.sessionToken);
-
-            expect(found).toBeDefined();
-            expect(found!.id).toBe(created.id);
-        });
-
-        it('should return undefined for unknown token', () => {
-            expect(service.getBySessionToken('bad_token')).toBeUndefined();
-        });
-    });
-
-    describe('updateStatus', () => {
-        it('should update session status', () => {
-            const session = service.create(makeConfig());
-            service.updateStatus(session.id, 'encoding');
-
-            expect(service.get(session.id)!.status).toBe('encoding');
-        });
-
-        it('should be a no-op for unknown id', () => {
-            expect(() => service.updateStatus('nonexistent', 'encoding')).not.toThrow();
-        });
-    });
-
-    describe('updateProgress', () => {
-        it('should update session progress', () => {
-            const session = service.create(makeConfig());
-            service.updateProgress(session.id, 42.5);
-
-            expect(service.get(session.id)!.progress).toBe(42.5);
-        });
-    });
-
-    describe('updatePipelineProgress', () => {
-        it('should set pipelineProgress and update progress from encoding field', () => {
-            const emitSpy = vi.fn();
-            const svc = new SessionService({ emit: emitSpy } as any);
-            const session = svc.create(makeConfig());
-
-            const pipelineProgress = { encoding: 55, encrypting: 30, uploading: 10 };
-            svc.updatePipelineProgress(session.id, pipelineProgress);
-
-            const updated = svc.get(session.id)!;
-            expect(updated.pipelineProgress).toEqual(pipelineProgress);
-            expect(updated.progress).toBe(55);
-            expect(emitSpy).toHaveBeenCalled();
-        });
-
-        it('should be a no-op for unknown session id', () => {
-            const emitSpy = vi.fn();
-            const svc = new SessionService({ emit: emitSpy } as any);
-
-            expect(() => svc.updatePipelineProgress('nonexistent', { encoding: 50 })).not.toThrow();
-            // emit should not have been called (no session created)
-            expect(emitSpy).not.toHaveBeenCalled();
-        });
-    });
-
-    describe('setFilePath', () => {
-        it('should set the file path on the session', () => {
-            const session = service.create(makeConfig());
-            service.setFilePath(session.id, '/tmp/test.mp4');
-
-            expect(service.get(session.id)!.filePath).toBe('/tmp/test.mp4');
-        });
-    });
-
-    describe('setOutputDir', () => {
-        it('should set the output directory on the session', () => {
-            const session = service.create(makeConfig());
-            service.setOutputDir(session.id, '/tmp/output');
-
-            expect(service.get(session.id)!.outputDir).toBe('/tmp/output');
-        });
-    });
-
-    describe('setProbeResult', () => {
-        it('should store probe result', () => {
-            const session = service.create(makeConfig());
-            const probeResult = {
-                format: { duration: 60, bitrateKbps: 3000, formatName: 'mp4' },
-                videoTracks: [],
-                audioTracks: [],
-            };
-            service.setProbeResult(session.id, probeResult);
-
-            const updated = service.get(session.id)!;
-            expect(updated.probeResult).toEqual(probeResult);
-        });
-    });
-
-    describe('setIngestTotal', () => {
-        it('stores the total bytes and emits an event', () => {
-            const emitSpy = vi.fn();
-            const svc = new SessionService({ emit: emitSpy } as any);
-            const session = svc.create(makeConfig());
-            emitSpy.mockClear();
-
-            svc.setIngestTotal(session.id, 524_288_000);
-
-            expect(svc.get(session.id)!.ingestTotalBytes).toBe(524_288_000);
-            expect(emitSpy).toHaveBeenCalledWith(
-                expect.objectContaining({
-                    sessionId: session.id,
-                    ingestTotalBytes: 524_288_000,
+    if (withCredentials) {
+        writeFileSync(
+            join(dir, CREDENTIALS_FILENAME),
+            cipher.encrypt(
+                JSON.stringify({
+                    accessKey: config.s3.accessKey,
+                    secretKey: config.s3.secretKey,
                 }),
-            );
-        });
+            ),
+        );
+    }
+}
 
-        it('is a no-op for unknown session ids', () => {
-            expect(() => service.setIngestTotal('does-not-exist', 100)).not.toThrow();
-        });
+beforeEach(() => {
+    workDir = mkdtempSync(join(tmpdir(), 'lmc-session-'));
+    process.env.WORK_DIR = workDir;
+    emit.mockClear();
+});
 
-        it('subsequent events include the total once set', () => {
-            const emitSpy = vi.fn();
-            const svc = new SessionService({ emit: emitSpy } as any);
-            const session = svc.create(makeConfig());
-            svc.setIngestTotal(session.id, 1000);
-            emitSpy.mockClear();
+afterEach(() => {
+    rmSync(workDir, { recursive: true, force: true });
+    delete process.env.WORK_DIR;
+});
 
-            svc.updateProgress(session.id, 50);
+describe('SessionService — creating', () => {
+    it('mints a session token and starts in "created"', () => {
+        const session = build().create(makeConfig());
 
-            expect(emitSpy).toHaveBeenCalledWith(
-                expect.objectContaining({ ingestTotalBytes: 1000, progress: 50 }),
-            );
-        });
+        expect(session.id).toBeTruthy();
+        expect(session.sessionToken).toMatch(/^sess_[0-9a-f]{32}$/);
+        expect(session.status).toBe('created');
+        expect(session.progress).toBe(0);
     });
 
-    describe('setEncodeConfig', () => {
-        it('should store encode config', () => {
-            const session = service.create(makeConfig());
-            const encodeConfig = {
-                type: 'video' as const,
-                videoRenditions: [{ width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd' }],
-                audioGroups: [{ id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac' as const, sourceTrackIndex: 0 }],
-            };
-            service.setEncodeConfig(session.id, encodeConfig);
+    it('gives every session its own id and token', () => {
+        const service = build();
+        const a = service.create(makeConfig());
+        const b = service.create(makeConfig());
 
-            expect(service.get(session.id)!.encodeConfig).toEqual(encodeConfig);
-        });
+        expect(a.id).not.toBe(b.id);
+        expect(a.sessionToken).not.toBe(b.sessionToken);
     });
 
-    describe('setCompleted', () => {
-        it('should mark session as completed with files and playlist', () => {
-            const session = service.create(makeConfig());
-            const files = ['master.m3u8', 'v0/playlist.m3u8'];
-            service.setCompleted(session.id, files, 'master.m3u8');
+    it('mints a read token only for a session a CMS opened', () => {
+        // The local UI already holds the instance key, so it has nothing to do
+        // with a weaker credential. A read token exists so a CMS can watch a
+        // session it is not allowed to drive.
+        const service = build();
 
-            const updated = service.get(session.id)!;
-            expect(updated.status).toBe('completed');
-            expect(updated.progress).toBe(100);
-            expect(updated.files).toEqual(files);
-            expect(updated.masterPlaylist).toBe('master.m3u8');
-        });
+        expect(service.create(makeConfig()).readToken).toBeUndefined();
+        expect(service.create(makeConfig(), { origin: 'local' }).readToken)
+            .toBeUndefined();
+        expect(service.create(makeConfig(), { origin: 'cms' }).readToken)
+            .toMatch(/^read_[0-9a-f]{32}$/);
     });
 
-    describe('setFailed', () => {
-        it('should mark session as failed with an error message', () => {
-            const session = service.create(makeConfig());
-            service.setFailed(session.id, 'FFmpeg crashed');
+    it('hands the builder the id so the config can name its own folder', () => {
+        // The CMS gives each session a subfolder named after it, so the id has
+        // to exist before the config does.
+        const session = build().createWith(
+            (id) => makeConfig({ s3: { ...makeConfig().s3, pathPrefix: `media/${id}` } }),
+            { origin: 'cms' },
+        );
 
-            const updated = service.get(session.id)!;
-            expect(updated.status).toBe('failed');
-            expect(updated.error).toBe('FFmpeg crashed');
-        });
+        expect(session.config.s3.pathPrefix).toBe(`media/${session.id}`);
     });
 
-    describe('cleanupAbandoned', () => {
-        const idle = (id: string, hours: number) => {
-            (service.get(id) as any).lastActivityAt =
-                Date.now() - hours * 3_600_000;
-        };
-
-        it('removes an upload that was never encoded', () => {
-            // The 7 GB-and-a-closed-tab case: nothing else has ever bounded
-            // these, not size and not age.
-            const session = service.create(makeConfig());
-            service.updateStatus(session.id, 'uploaded');
-            idle(session.id, 8);
-
-            expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(1);
-            expect(service.get(session.id)).toBeUndefined();
+    it('carries the CMS metadata it was given', () => {
+        const session = build().create(makeConfig(), {
+            origin: 'cms',
+            title: 'Episode 12',
+            documentId: 'post_01HTZ8Y0J4',
+            publicBaseUrl: 'https://cdn.example.com/media',
         });
 
-        it('leaves a session that is still doing something', () => {
-            const session = service.create(makeConfig());
-            service.updateStatus(session.id, 'uploaded');
-            idle(session.id, 1);
+        expect(session.title).toBe('Episode 12');
+        expect(session.documentId).toBe('post_01HTZ8Y0J4');
+        expect(session.publicBaseUrl).toBe('https://cdn.example.com/media');
+    });
+});
 
-            expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(0);
-            expect(service.get(session.id)).toBeDefined();
+describe('SessionService — looking up', () => {
+    it('resolves a session by either of its tokens', () => {
+        const service = build();
+        const session = service.create(makeConfig(), { origin: 'cms' });
+
+        expect(service.getBySessionToken(session.sessionToken)?.id).toBe(session.id);
+        expect(service.getByReadToken(session.readToken!)?.id).toBe(session.id);
+    });
+
+    it('does not resolve one token through the other index', () => {
+        // The tiers differ in what they may do, so a read token arriving where a
+        // session token is expected must not be honoured.
+        const service = build();
+        const session = service.create(makeConfig(), { origin: 'cms' });
+
+        expect(service.getBySessionToken(session.readToken!)).toBeUndefined();
+        expect(service.getByReadToken(session.sessionToken)).toBeUndefined();
+    });
+
+    it('lists newest first', () => {
+        const service = build();
+        const first = service.create(makeConfig());
+        vi.setSystemTime(Date.now() + 1000);
+        const second = service.create(makeConfig());
+        vi.useRealTimers();
+
+        expect(service.list().map((s) => s.id)).toEqual([second.id, first.id]);
+    });
+
+    describe('findActiveByDocumentId', () => {
+        it('returns the session already in flight for that document', () => {
+            // A double click on "upload media" must land back on the session
+            // already running, not start a second one against the same post.
+            const service = build();
+            const session = service.create(makeConfig(), {
+                origin: 'cms',
+                documentId: 'post_1',
+            });
+
+            expect(service.findActiveByDocumentId('post_1')?.id).toBe(session.id);
         });
 
-        it('spares a slow upload that is still delivering bytes', () => {
-            // A tus upload reports progress to tusd, not to us, so nothing here
-            // moves while gigabytes arrive — `touch` is the only sign of life a
-            // long transfer gives. Without it this session is swept mid-upload.
-            const session = service.create(makeConfig());
-            service.updateStatus(session.id, 'uploading');
-            idle(session.id, 20);
-
-            service.touch(session.id);
-
-            expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(0);
-            expect(service.get(session.id)).toBeDefined();
-        });
-
-        it('sweeps an upload that stopped delivering', () => {
-            const session = service.create(makeConfig());
-            service.updateStatus(session.id, 'uploading');
-            idle(session.id, 20);
-
-            expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(1);
-        });
-
-        it('never touches a session mid-encode', () => {
-            // Deleting the source out from under a running encode would be far
-            // worse than the disk it reclaims.
-            for (const status of ['encoding', 'encrypting', 'uploading_to_s3'] as const) {
-                const session = service.create(makeConfig());
+        it.each(['completed', 'failed'] as const)(
+            'ignores a %s session — that click means replace what is there',
+            (status) => {
+                const service = build();
+                const session = service.create(makeConfig(), {
+                    origin: 'cms',
+                    documentId: 'post_1',
+                });
                 service.updateStatus(session.id, status);
-                idle(session.id, 100);
 
-                expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(0);
-                expect(service.get(session.id)).toBeDefined();
-            }
-        });
+                expect(service.findActiveByDocumentId('post_1')).toBeUndefined();
+            },
+        );
 
-        it('leaves queued sessions alone', () => {
-            // The source is needed, and a long backlog is a legitimate reason
-            // for a session to sit still.
-            const session = service.create(makeConfig());
-            service.updateStatus(session.id, 'queued');
-            idle(session.id, 100);
+        it('does not match a different document', () => {
+            const service = build();
+            service.create(makeConfig(), { origin: 'cms', documentId: 'post_1' });
 
-            expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(0);
-            expect(service.get(session.id)).toBeDefined();
-        });
-
-        it('leaves finished sessions to the other sweep', () => {
-            const done = service.create(makeConfig());
-            service.setCompleted(done.id, [], '');
-            idle(done.id, 100);
-            const failed = service.create(makeConfig());
-            service.setFailed(failed.id, 'err');
-            idle(failed.id, 100);
-
-            expect(service.cleanupAbandoned(6 * 3_600_000)).toBe(0);
-            expect(service.get(done.id)).toBeDefined();
-            expect(service.get(failed.id)).toBeDefined();
-        });
-
-        it('releases the session token too', () => {
-            const session = service.create(makeConfig());
-            service.updateStatus(session.id, 'uploaded');
-            idle(session.id, 8);
-
-            service.cleanupAbandoned(6 * 3_600_000);
-            expect(
-                service.getBySessionToken(session.sessionToken),
-            ).toBeUndefined();
-        });
-    });
-
-    describe('cleanup', () => {
-        it('should remove old completed/failed sessions', () => {
-            const s1 = service.create(makeConfig());
-            const s2 = service.create(makeConfig());
-            const s3 = service.create(makeConfig());
-
-            service.setCompleted(s1.id, [], '');
-            (service.get(s1.id) as any).createdAt = Date.now() - 2 * 86400000;
-
-            service.setFailed(s2.id, 'err');
-            (service.get(s2.id) as any).createdAt = Date.now() - 2 * 86400000;
-
-            (service.get(s3.id) as any).createdAt = Date.now() - 2 * 86400000;
-
-            const removed = service.cleanup(86400000);
-            expect(removed).toBe(2);
-            expect(service.get(s1.id)).toBeUndefined();
-            expect(service.get(s2.id)).toBeUndefined();
-            expect(service.get(s3.id)).toBeDefined();
-        });
-
-        it('should not remove recent sessions', () => {
-            const session = service.create(makeConfig());
-            service.setCompleted(session.id, [], '');
-
-            const removed = service.cleanup(86400000);
-            expect(removed).toBe(0);
-            expect(service.get(session.id)).toBeDefined();
-        });
-
-        it('should remove token index entries for cleaned sessions', () => {
-            const session = service.create(makeConfig());
-            service.setCompleted(session.id, [], '');
-            (service.get(session.id) as any).createdAt = 0;
-
-            service.cleanup(1000);
-            expect(service.getBySessionToken(session.sessionToken)).toBeUndefined();
+            expect(service.findActiveByDocumentId('post_2')).toBeUndefined();
         });
     });
 });
-describe('SessionService — surviving a restart', () => {
-    let workDir: string;
 
-    beforeEach(() => {
-        workDir = mkdtempSync(join(tmpdir(), 'luminary-sessions-'));
-        process.env.WORK_DIR = workDir;
-    });
-
-    afterEach(() => {
-        rmSync(workDir, { recursive: true, force: true });
-        delete process.env.WORK_DIR;
-    });
-
-    /** A second service over the same work dir stands in for a restarted process. */
-    function restart(): SessionService {
-        const next = new SessionService(events);
-        next.onModuleInit();
-        return next;
-    }
-
-    it('writes a session to disk when it is created', () => {
-        const service = new SessionService(events);
+describe('SessionService — credentials on disk', () => {
+    it('never writes S3 keys into session.json', () => {
+        const service = build();
         const session = service.create(makeConfig());
-        const path = join(workDir, session.id, 'session.json');
+
+        const raw = readFileSync(join(workDir, session.id, 'session.json'), 'utf-8');
+        expect(raw).not.toContain('AKIAEXAMPLE');
+        expect(raw).not.toContain('sUp3rS3cret');
+        expect(JSON.parse(raw).config.s3.accessKey).toBe(REDACTED_CREDENTIAL);
+        expect(JSON.parse(raw).config.s3.secretKey).toBe(REDACTED_CREDENTIAL);
+    });
+
+    it('keeps the in-memory session usable while redacting only the copy', () => {
+        // Redaction is a property of what is written, not of the session itself:
+        // the encode still has to reach the bucket.
+        const service = build();
+        const session = service.create(makeConfig());
+
+        expect(session.config.s3.accessKey).toBe('AKIAEXAMPLE');
+        expect(service.hasUsableCredentials(session)).toBe(true);
+    });
+
+    it('puts the keys in an encrypted sidecar instead', () => {
+        const service = build();
+        const session = service.create(makeConfig());
+
+        const path = join(workDir, session.id, CREDENTIALS_FILENAME);
         expect(existsSync(path)).toBe(true);
-        expect(JSON.parse(readFileSync(path, 'utf-8')).id).toBe(session.id);
+
+        const blob = readFileSync(path, 'utf-8');
+        expect(blob).not.toContain('sUp3rS3cret');
+        expect(JSON.parse(cipher.decrypt(blob))).toEqual({
+            accessKey: 'AKIAEXAMPLE',
+            secretKey: 'sUp3rS3cret',
+        });
     });
 
-    it('finds the session again after a restart, token and all', () => {
-        const service = new SessionService(events);
+    it('writes both files owner-only', () => {
+        const service = build();
         const session = service.create(makeConfig());
-        service.updateStatus(session.id, 'uploaded');
-        service.setFilePath(session.id, '/tmp/source.mp4');
 
-        const after = restart();
-        expect(after.get(session.id)?.filePath).toBe('/tmp/source.mp4');
-        expect(after.getBySessionToken(session.sessionToken)?.id).toBe(session.id);
+        const mode = (name: string) =>
+            statSync(join(workDir, session.id, name)).mode & 0o777;
+        expect(mode('session.json')).toBe(0o600);
+        expect(mode(CREDENTIALS_FILENAME)).toBe(0o600);
     });
 
-    it('keeps the encode config, so a trimmed session still knows its ranges', () => {
-        const service = new SessionService(events);
+    it('writes no sidecar at all when there is no cipher', () => {
+        // Deliberate: a stranded session is a smaller problem than a plaintext
+        // key sitting in the work directory.
+        const service = build(false);
         const session = service.create(makeConfig());
-        service.setEncodeConfig(session.id, {
-            type: 'video',
-            trimSegments: [{ inSec: 10, outSec: 20 }],
-        } as any);
 
-        expect(restart().get(session.id)?.encodeConfig?.trimSegments).toEqual([
-            { inSec: 10, outSec: 20 },
-        ]);
+        expect(existsSync(join(workDir, session.id, CREDENTIALS_FILENAME))).toBe(false);
+        expect(
+            readFileSync(join(workDir, session.id, 'session.json'), 'utf-8'),
+        ).not.toContain('sUp3rS3cret');
     });
 
-    it('marks a session that was mid-encode as failed rather than still running', () => {
-        const service = new SessionService(events);
-        const session = service.create(makeConfig());
-        service.updateStatus(session.id, 'encoding');
-
-        const restored = restart().get(session.id);
-        // The FFmpeg process died with the old process; claiming otherwise would
-        // leave the client waiting forever.
-        expect(restored?.status).toBe('failed');
-        expect(restored?.error).toMatch(/restarted/i);
-    });
-
-    it('offers up the sessions the restart killed, so they can be reported', () => {
-        const service = new SessionService(events);
-        const session = service.create(makeConfig());
-        service.updateStatus(session.id, 'encoding');
-
-        // Nothing else tells the holder of the other half of this session that it
-        // stopped, and the record would otherwise read `encoding` forever.
-        expect(restart().takeRestartFailures().map((s) => s.id)).toEqual([
-            session.id,
-        ]);
-    });
-
-    it('offers each killed session only once', () => {
-        const service = new SessionService(events);
-        const session = service.create(makeConfig());
-        service.updateStatus(session.id, 'encoding');
-
-        const after = restart();
-        after.takeRestartFailures();
-        expect(after.takeRestartFailures()).toEqual([]);
-    });
-
-    it('has nothing to report when every session was already finished', () => {
-        const service = new SessionService(events);
-        const session = service.create(makeConfig());
-        service.setCompleted(session.id, ['master.m3u8'], 'master.m3u8');
-
-        expect(restart().takeRestartFailures()).toEqual([]);
-    });
-
-    it.each(['uploading', 'queued', 'encrypting', 'uploading_to_s3'] as const)(
-        'does the same for a session left in %s',
-        (status) => {
-            const service = new SessionService(events);
+    describe('hasUsableCredentials', () => {
+        it('is false when the config still holds placeholders', () => {
+            const service = build();
             const session = service.create(makeConfig());
-            service.updateStatus(session.id, status);
-            expect(restart().get(session.id)?.status).toBe('failed');
+            session.config.s3.accessKey = REDACTED_CREDENTIAL;
+
+            expect(service.hasUsableCredentials(session)).toBe(false);
+        });
+
+        it('is false when a key is missing outright', () => {
+            const service = build();
+            const session = service.create(makeConfig());
+            session.config.s3.secretKey = '';
+
+            expect(service.hasUsableCredentials(session)).toBe(false);
+        });
+    });
+});
+
+describe('SessionService — restoring after a restart', () => {
+    it('brings an idle session back with its credentials', () => {
+        const first = build();
+        const session = first.create(makeConfig());
+        first.updateStatus(session.id, 'uploaded');
+
+        const second = build();
+        second.onModuleInit();
+
+        const restored = second.get(session.id);
+        expect(restored?.status).toBe('uploaded');
+        expect(restored?.config.s3.secretKey).toBe('sUp3rS3cret');
+        expect(second.hasUsableCredentials(restored!)).toBe(true);
+    });
+
+    it('re-indexes both tokens so the client can carry on', () => {
+        const first = build();
+        const session = first.create(makeConfig(), { origin: 'cms' });
+
+        const second = build();
+        second.onModuleInit();
+
+        expect(second.getBySessionToken(session.sessionToken)?.id).toBe(session.id);
+        expect(second.getByReadToken(session.readToken!)?.id).toBe(session.id);
+    });
+
+    it.each(['uploading', 'queued', 'encoding', 'encrypting', 'uploading_to_s3'] as const)(
+        'fails a session left %s — the process driving it is gone',
+        (status) => {
+            seedOnDisk({ id: `in-flight-${status}`, status });
+
+            const service = build();
+            service.onModuleInit();
+
+            const restored = service.get(`in-flight-${status}`);
+            expect(restored?.status).toBe('failed');
+            expect(restored?.error).toMatch(/restarted/i);
         },
     );
 
-    it('leaves a completed session completed', () => {
-        const service = new SessionService(events);
-        const session = service.create(makeConfig());
-        service.setCompleted(session.id, ['master.m3u8'], 'master.m3u8');
+    it.each(['completed', 'failed'] as const)(
+        'discards a %s session and its directory rather than restoring it',
+        (status) => {
+            // Its output is already in the bucket and its URL already back with
+            // the CMS. Boot is the natural moment to be rid of both record and
+            // leftovers, instead of letting an age-based sweep do it hours later.
+            seedOnDisk({ id: `terminal-${status}`, status });
 
-        const restored = restart().get(session.id);
-        expect(restored?.status).toBe('completed');
-        expect(restored?.files).toEqual(['master.m3u8']);
+            const service = build();
+            service.onModuleInit();
+
+            expect(service.get(`terminal-${status}`)).toBeUndefined();
+            expect(existsSync(join(workDir, `terminal-${status}`))).toBe(false);
+        },
+    );
+
+    it('fails a session whose credentials cannot be recovered', () => {
+        // No sidecar on disk: a different machine, or a reset keychain. The
+        // config holds placeholders, and anything reaching S3 with those would
+        // fail at the far end with an error nobody could trace to a restart.
+        seedOnDisk({ id: 'stranded', status: 'uploaded' }, { withCredentials: false });
+
+        const service = build();
+        service.onModuleInit();
+
+        const restored = service.get('stranded');
+        expect(restored?.status).toBe('failed');
+        expect(restored?.error).toMatch(/credentials unavailable/i);
+        expect(service.hasUsableCredentials(restored!)).toBe(false);
     });
 
-    it('does not bring back a session that was deleted', () => {
-        const service = new SessionService(events);
-        const session = service.create(makeConfig());
-        service.remove(session.id);
+    it('prefers the credential reason over "the encoder restarted"', () => {
+        // Both apply: it was mid-encode *and* its keys are gone. Re-running is
+        // not what fixes the second, so that is the reason the user is shown.
+        seedOnDisk({ id: 'both', status: 'encoding' }, { withCredentials: false });
 
-        expect(existsSync(join(workDir, session.id, 'session.json'))).toBe(false);
-        expect(restart().get(session.id)).toBeUndefined();
+        const service = build();
+        service.onModuleInit();
+
+        expect(service.get('both')?.error).toMatch(/credentials unavailable/i);
     });
 
-    it('does not bring back a session that was cleaned up', () => {
-        const service = new SessionService(events);
-        const session = service.create(makeConfig());
-        service.setCompleted(session.id, [], '');
-        (service.get(session.id) as Session).createdAt = Date.now() - 48 * 60 * 60 * 1000;
-        service.cleanup();
+    it('fails the session when the sidecar cannot be decrypted', () => {
+        const first = build();
+        const session = first.create(makeConfig());
+        writeFileSync(
+            join(workDir, session.id, CREDENTIALS_FILENAME),
+            'not-our-ciphertext',
+        );
 
-        expect(restart().get(session.id)).toBeUndefined();
+        const service = build();
+        service.onModuleInit();
+
+        expect(service.get(session.id)?.status).toBe('failed');
     });
 
-    it('reclaims the working directory when a session ages out', () => {
-        // The record alone is not the point: the source upload lives here, and
-        // nothing else ever prunes it.
-        const service = new SessionService(events);
-        const session = service.create(makeConfig());
-        service.setCompleted(session.id, [], '');
-        writeFileSync(join(workDir, session.id, 'source.mp4'), 'pretend media');
-        (service.get(session.id) as Session).createdAt = Date.now() - 48 * 60 * 60 * 1000;
+    it('holds no credentials at all without a cipher', () => {
+        const first = build();
+        const session = first.create(makeConfig());
 
-        service.cleanup();
+        const second = build(false);
+        second.onModuleInit();
 
+        expect(second.get(session.id)?.status).toBe('failed');
+    });
+
+    it('falls back to createdAt for a record written before activity stamps', () => {
+        // Otherwise every pre-existing session looks freshly active and the
+        // sweep never touches it.
+        const createdAt = Date.now() - 10 * 3_600_000;
+        seedOnDisk({ id: 'legacy', status: 'uploaded', createdAt });
+        const path = join(workDir, 'legacy', 'session.json');
+        const record = JSON.parse(readFileSync(path, 'utf-8'));
+        delete record.lastActivityAt;
+        writeFileSync(path, JSON.stringify(record));
+
+        const service = build();
+        service.onModuleInit();
+
+        expect(service.get('legacy')?.lastActivityAt).toBe(createdAt);
+    });
+
+    it('skips a directory whose record is unreadable rather than failing to boot', () => {
+        mkdirSync(join(workDir, 'corrupt'), { recursive: true });
+        writeFileSync(join(workDir, 'corrupt', 'session.json'), '{ not json');
+        const first = build();
+        const good = first.create(makeConfig());
+
+        const service = build();
+        service.onModuleInit();
+
+        expect(service.get('corrupt')).toBeUndefined();
+        expect(service.get(good.id)).toBeDefined();
+    });
+
+    it('survives a work directory that does not exist yet', () => {
+        rmSync(workDir, { recursive: true, force: true });
+        const service = build();
+
+        expect(() => service.onModuleInit()).not.toThrow();
+        expect(service.list()).toEqual([]);
+    });
+});
+
+describe('SessionService — removing', () => {
+    it('drops the record, its tokens and its directory', () => {
+        const service = build();
+        const session = service.create(makeConfig(), { origin: 'cms' });
+
+        expect(service.remove(session.id)?.id).toBe(session.id);
+        expect(service.get(session.id)).toBeUndefined();
+        expect(service.getBySessionToken(session.sessionToken)).toBeUndefined();
+        expect(service.getByReadToken(session.readToken!)).toBeUndefined();
         expect(existsSync(join(workDir, session.id))).toBe(false);
     });
 
-    it('reclaims the working directory when a session is deleted', () => {
-        const service = new SessionService(events);
-        const session = service.create(makeConfig());
-        writeFileSync(join(workDir, session.id, 'source.mp4'), 'pretend media');
+    it('returns undefined for an id it does not hold', () => {
+        expect(build().remove('nope')).toBeUndefined();
+    });
 
+    it('does not bring the session back on the next boot', () => {
+        const service = build();
+        const session = service.create(makeConfig());
         service.remove(session.id);
 
-        expect(existsSync(join(workDir, session.id))).toBe(false);
+        const next = build();
+        next.onModuleInit();
+        expect(next.get(session.id)).toBeUndefined();
     });
+});
 
-    it('leaves a session that is still young alone', () => {
-        const service = new SessionService(events);
+describe('SessionService — sweeping abandoned sessions', () => {
+    const SIX_HOURS = 6 * 3_600_000;
+
+    function aged(service: SessionService, status: Session['status'], hours: number) {
         const session = service.create(makeConfig());
-        service.setCompleted(session.id, [], '');
+        service.updateStatus(session.id, status);
+        session.lastActivityAt = Date.now() - hours * 3_600_000;
+        return session;
+    }
 
-        service.cleanup();
+    it.each(['created', 'uploading', 'uploaded'] as const)(
+        'removes an idle %s session past the age limit',
+        (status) => {
+            const service = build();
+            const session = aged(service, status, 7);
 
+            expect(service.cleanupAbandoned(SIX_HOURS)).toBe(1);
+            expect(service.get(session.id)).toBeUndefined();
+            expect(existsSync(join(workDir, session.id))).toBe(false);
+        },
+    );
+
+    it.each(['queued', 'encoding', 'encrypting', 'uploading_to_s3'] as const)(
+        'never sweeps a %s session, however old',
+        (status) => {
+            // It is doing work someone is waiting on — and a long backlog is a
+            // legitimate reason for `queued` to sit still.
+            const service = build();
+            const session = aged(service, status, 99);
+
+            expect(service.cleanupAbandoned(SIX_HOURS)).toBe(0);
+            expect(service.get(session.id)).toBeDefined();
+        },
+    );
+
+    it('leaves a session that is idle but recent', () => {
+        const service = build();
+        const session = aged(service, 'uploaded', 1);
+
+        expect(service.cleanupAbandoned(SIX_HOURS)).toBe(0);
         expect(service.get(session.id)).toBeDefined();
-        expect(existsSync(join(workDir, session.id))).toBe(true);
     });
 
-    it('leaves an unfinished session alone however old it is', () => {
-        // Sweeping something mid-encode would delete the input from under FFmpeg.
-        const service = new SessionService(events);
+    it('judges on last activity, not on age', () => {
+        // A slow multi-gigabyte ingest is hours old and perfectly alive.
+        const service = build();
         const session = service.create(makeConfig());
-        service.updateStatus(session.id, 'encoding');
-        (service.get(session.id) as Session).createdAt = Date.now() - 48 * 60 * 60 * 1000;
+        service.updateStatus(session.id, 'uploading');
+        session.createdAt = Date.now() - 20 * 3_600_000;
+        service.touch(session.id);
 
-        service.cleanup();
-
+        expect(service.cleanupAbandoned(SIX_HOURS)).toBe(0);
         expect(service.get(session.id)).toBeDefined();
-        expect(existsSync(join(workDir, session.id))).toBe(true);
     });
 
-    it('ignores unreadable records instead of failing to start', () => {
-        mkdirSync(join(workDir, 'broken'), { recursive: true });
-        writeFileSync(join(workDir, 'broken', 'session.json'), '{ not json');
-        const service = new SessionService(events);
-        expect(() => service.onModuleInit()).not.toThrow();
-    });
+    it('reports how many it removed', () => {
+        const service = build();
+        aged(service, 'uploaded', 7);
+        aged(service, 'created', 8);
+        aged(service, 'encoding', 9);
 
-    it('ignores directories that hold no session record', () => {
-        mkdirSync(join(workDir, 'stray-output'), { recursive: true });
-        const service = new SessionService(events);
-        expect(() => service.onModuleInit()).not.toThrow();
+        expect(service.cleanupAbandoned(SIX_HOURS)).toBe(2);
     });
+});
 
-    it('keeps the record readable only by the owner — it carries S3 credentials', () => {
-        const service = new SessionService(events);
+describe('SessionService — events', () => {
+    it('emits on a status change', () => {
+        const service = build();
         const session = service.create(makeConfig());
-        const mode = statSync(join(workDir, session.id, 'session.json')).mode & 0o777;
-        expect(mode).toBe(0o600);
+        emit.mockClear();
+
+        service.updateStatus(session.id, 'uploaded');
+
+        expect(emit).toHaveBeenCalledWith(
+            expect.objectContaining({ sessionId: session.id, status: 'uploaded' }),
+        );
+    });
+
+    it('emits the failure reason with the failed status', () => {
+        const service = build();
+        const session = service.create(makeConfig());
+        emit.mockClear();
+
+        service.setFailed(session.id, 'Disk full');
+
+        expect(emit).toHaveBeenCalledWith(
+            expect.objectContaining({ status: 'failed', error: 'Disk full' }),
+        );
+    });
+
+    it('does not persist progress — it is worthless after a restart', () => {
+        const service = build();
+        const session = service.create(makeConfig());
+        service.updateProgress(session.id, 42);
+
+        const raw = JSON.parse(
+            readFileSync(join(workDir, session.id, 'session.json'), 'utf-8'),
+        );
+        expect(raw.progress).toBeFalsy();
     });
 });
