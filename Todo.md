@@ -8,22 +8,39 @@ Ordered roughly by value, not by effort.
 
 ## 0. Handover state (read this first)
 
-**Branch.** All migration work (issue #154, phases 1–10) is committed on `154-migrate-luminary-media-convert-to-a-local-only-electron-app-remove-saas-features` as seven logical commits (SaaS removal → hls lib → api → app → cms-mock → electron → docs). Phases that shared files were grouped by subsystem rather than split by hunk.
+**Branch.** All migration work (issue #154) is on `154-migrate-luminary-media-convert-to-a-local-only-electron-app-remove-saas-features`, open as PR #161. The original seven logical commits (SaaS removal → hls lib → api → app → cms-mock → electron → docs) have since been joined by the manual-verification fixes, the app icon, a merge of `main`, and the restored test suites.
 
-**Build state.** All workspaces build (`hls`, `api`, `app`, `cms-mock`, `electron`). Test suites are intentionally red (item 6). A packaged macOS `.app` (`npm -w electron run dist:mac`) was built and verified to boot the embedded API and serve the UI.
+**Build state.** All workspaces build, and all test suites pass: api 741, app 178, segment-editor 217, hls 26 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
 
-**Manual end-to-end verification has NOT been done yet.** What was verified during implementation was per-phase smoke testing (curl-level: CMS create/idempotency/403, SSE events with `hlsUrl` + `encryptionKeyHex`, local-file ingest by reference, credential redaction + restart recovery, packaged-app boot). Still outstanding — the acceptance pass:
+**Manual verification — mostly done.** A full pass was run through the Electron app and `cms-mock` against a local MinIO: CMS handshake and idempotency, TOFU origin gating, local-file ingest by reference, probe, trim, encode, SSE with `hlsUrl` + `encryptionKeyHex`, encrypted playback via the `luminary://key` swap, chapters, session delete, and credential recovery across a restart. Several defects were found and fixed in the process (storyboard cue clipping at a trim in-point, trim semantics, timeline duration during an encode, playhead clipping at the ends, waveform contrast on an audio source, storyboard polling on a source with no video track).
 
-- [ ] Full cms-mock flow in Chrome (`npm run dev` + `npm -w cms-mock run dev`, http://localhost:5199): health check → create against MinIO → TOFU/origin gating → SSE console → "not available yet" → playback proof. Verify the LNA/PNA preflight in devtools.
-- [ ] Real encode end-to-end from the Electron app (`npm run dev:electron`, note: unset `ELECTRON_RUN_AS_NODE` if your shell exports it): drag-drop path extraction, click-to-browse, trim, chapters, encrypted playback via `luminary://key` swap.
+Still outstanding:
+
 - [ ] Multi-angle source: single `master.m3u8` with `#EXT-X-MEDIA:TYPE=VIDEO` groups in S3; angle switching + audio-only in the app player (client-side extraction).
 - [ ] **Stock-player check (flagged risk, never tested):** confirm plain video.js/hls.js plays the *default angle* of a raw multi-angle master without the extraction helpers — Luminary clients that have not adopted `hls/` helpers depend on this.
-- [ ] Kill the app mid-encode → relaunch: non-terminal session restored as failed with the credentials-recovery behaviour; terminal sessions gone after restart.
 - [ ] Queue: three CMS sessions encoding FIFO with SSE `queuePosition` updates.
 - [ ] Protocol handler from a packaged install: `open luminary-convert://` launches/focuses the app.
-- [ ] Packaged mac build encodes with `encoder: 'apple'` (VideoToolbox) — note ffmpeg/ffprobe are **not bundled** yet (item 5a); the packaged app currently falls back to PATH.
+- [ ] Packaged mac build encodes with `encoder: 'apple'` (VideoToolbox) — blocked on item 5a; the packaged app currently falls back to PATH, so it cannot encode on a machine without a system ffmpeg.
 
-**Tests are not to be fixed until the manual verification above has been done and the owner explicitly asks** (item 6).
+---
+
+## 0c. Deployment workflows — decide before merging to main
+
+**Blocking.** Not a refinement: merging this branch to `main` as it stands will break the staging deploy.
+
+`.github/workflows/api-deploy-staging.yml` fires on a push to `main` filtered on `api/**`, and this branch rewrites all of `api/`. The job writes an `api/.env` and runs the API as a container — but:
+
+- The generated `.env` carries **no `HOST`**, and the API now defaults to `127.0.0.1` (`DEFAULT_HOST` in `api/src/bootstrap.ts`, read by `main.ts`). That default is correct for a desktop app and wrong for a container: bound to the loopback interface inside its own namespace, the process is unreachable through `docker run -p`. The job judges success on the app answering, so it will fail — after it has already replaced the running container.
+- The `.env` sets `CORS_ORIGIN`, `MASTER_API_KEY`, `KEY_VALIDATION_WEBHOOK_URL`, `MAX_UPLOAD_SIZE`, `S3_UPLOAD_CONCURRENCY`, `TUSD_BINARY_PATH` and more, of which the current API reads almost nothing. The origin allowlist is `CMS_ALLOWED_ORIGINS` now, not `CORS_ORIGIN`.
+
+`api-deploy-prod.yml` is the same shape on the `prod` branch.
+
+**The decision, which is a product one.** Is running the API as a shared remote service still a supported mode?
+
+- **If no** — delete both deploy workflows and `api/Dockerfile`. They are dead weight that currently reads as a supported deployment. `api-unit-tests.yml` stays.
+- **If yes** — it needs saying somewhere, and the workflows need `HOST=0.0.0.0` in the generated `.env` plus a pass over the variables. It also needs a threat-model answer the local-only design does not currently give: as a desktop app the API is reachable only from the machine it runs on, and the origin allowlist assumes exactly that.
+
+Either way, do it before the merge rather than discovering it from a red deploy.
 
 ---
 
@@ -149,11 +166,13 @@ Also removed with this work: the dead `node-tusd` alias in `api/vitest.config.ts
 
 ---
 
-## 8. Session focus refinement in the Electron main process
+## 8. Session focus refinement in the Electron main process — done
 
-**Today.** `onCmsSessionCreated` receives the `sessionId`, and `electron/src/main.ts` throws it away: `onCmsSessionCreated: () => focusWindow()`. The window comes forward, but on whatever session the user was last looking at. When a CMS opens a session for a different post, the user is shown the wrong one and has to find the new one in the list.
+`onCmsSessionCreated` now routes the session id through to the renderer instead of discarding it. The window used to come forward on whatever the user was last looking at, so a CMS opening a session for a different post showed them the wrong one.
 
-**Wanted.** Route the id through to the renderer — an IPC event the app listens for and navigates to `/sessions/:id` on — so the click in the browser lands on the session it created. Worth handling the case where the window does not exist yet (the app was launched by the protocol handler): the navigation has to be held until the renderer is ready.
+Two arrivals are covered, because they differ in whether a renderer exists yet: a push over IPC when the window is already up, and a one-shot claim on mount when the click that created the session also launched the app through the protocol handler. The claim is one-shot on the host side, so a later reload does not yank the user back to a session they have moved on from. Navigation uses `replace`, since arriving there is not a step the user took.
+
+`app/src/composables/useCmsSessionRouting.ts`, covered by 7 tests including the plain-browser case where there is no preload bridge at all.
 
 ---
 
@@ -161,7 +180,7 @@ Also removed with this work: the dead `node-tusd` alias in `api/vitest.config.ts
 
 Small, low-risk, and each independently droppable.
 
-- **Deployment artefacts from the service era.** `api/Dockerfile` and `.github/workflows/api-deploy-{prod,staging}.yml` still build and deploy the API as a long-running container to remote hosts. If the API is only ever embedded in the desktop app, these are dead weight and misleading; if running it as a shared service is still a supported mode, that should be stated somewhere rather than implied by a Dockerfile. Decide, then either document or delete. `api-unit-tests.yml` stays either way (see item 6).
+- **Deployment artefacts from the service era.** Promoted out of housekeeping to **item 0c** — it turned out to block a clean merge rather than merely being untidy.
 - **Stale SaaS-era documents.** `docs/URS-saas-adaptation.md`, `docs/FDS-saas-adaptation.md` and `docs/implementation-plan.md` describe the multi-tenant product. `security-review.md`, `security-audit-v1.md` and `privacy-review.md` are dated audits of a codebase that no longer exists in this shape (`privacy-review.md` now carries a note saying so). Archive them, or re-run the security and privacy reviews against the local-only architecture — the threat model changed completely: no shared service, no user database, credentials in an OS keychain, and a new network-facing surface in the CMS origin gate.
 - **Naming: `MASTER_API_KEY` vs the instance token.** The injection token is `LOCAL_API_TOKEN`, the env fallback is `MASTER_API_KEY`, the guard calls it `masterKey`, and `@AuthTypes('master')` names the tier. It is one thing with four names, and "master key" carries multi-tenant connotations it no longer has. A rename to something like `LOCAL_API_TOKEN` throughout (with the old env name accepted for a release) would remove a recurring source of confusion.
 - **Unused DTOs.** `api/src/encode/dto/rendition.dto.ts` and `review-range.dto.ts` are not referenced by any controller or service.

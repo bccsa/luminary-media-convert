@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { useAppLayout } from './composables/useAppLayout';
+import { useCmsSessionRouting } from './composables/useCmsSessionRouting';
 
 /**
  * There is no chrome above the content any more. The header held a brand, a nav
@@ -15,6 +16,11 @@ import { useAppLayout } from './composables/useAppLayout';
 
 const route = useRoute();
 const isSessionDetail = computed(() => route.name === 'session-detail');
+
+// Lives on the shell rather than on the session list: a session can be opened
+// from the CMS while the user is looking at any route, including another
+// session.
+useCmsSessionRouting();
 
 const { headerLayout } = useAppLayout();
 

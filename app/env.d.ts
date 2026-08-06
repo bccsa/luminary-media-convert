@@ -29,6 +29,17 @@ interface LuminaryBridge {
     getPathForFile(file: File): string;
     /** Native open dialog; resolves to an absolute path, or null if cancelled. */
     showOpenDialog(): Promise<string | null>;
+    /**
+     * A CMS opened a session while this window was already up. Returns an
+     * unsubscribe function.
+     */
+    onShowSession(handler: (sessionId: string) => void): () => void;
+    /**
+     * A session opened before this renderer existed, because the click that
+     * created it also launched the app. Claimed once — a reload will not
+     * navigate away from wherever the user has got to since.
+     */
+    takePendingSession(): Promise<string | null>;
 }
 
 interface Window {

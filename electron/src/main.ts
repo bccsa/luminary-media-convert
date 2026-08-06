@@ -188,6 +188,36 @@ function focusWindow(): void {
     app.focus({ steal: true });
 }
 
+/**
+ * A session the renderer should be showing but may not have been told about yet.
+ *
+ * The CMS can open a session before this app has a window at all — the click
+ * that created it is often the same click that launched us through the
+ * `luminary-convert://` handler. Delivering the id to a renderer that has not
+ * finished loading drops it silently, so it is parked here and claimed by the
+ * renderer when it is ready.
+ */
+let pendingSessionId: string | null = null;
+
+/**
+ * Bring the window forward on the session that was just opened.
+ *
+ * Focusing alone was not enough: the window came up on whichever session the
+ * user was last looking at, so a CMS opening one for a different post showed
+ * them the wrong one and left them to find the new one in the list.
+ */
+function focusSession(sessionId: string): void {
+    pendingSessionId = sessionId;
+    focusWindow();
+
+    const contents = mainWindow?.webContents;
+    // `isLoading()` covers the launch case: the renderer is mid-navigation and
+    // any message sent now lands in a document that is about to be replaced.
+    if (!contents || contents.isLoading()) return;
+    contents.send('luminary:showSession', sessionId);
+    pendingSessionId = null;
+}
+
 function createWindow(): void {
     if (mainWindow && !mainWindow.isDestroyed()) {
         focusWindow();
@@ -270,6 +300,16 @@ function registerIpc(): void {
             : await dialog.showOpenDialog(options);
         return result.canceled ? null : (result.filePaths[0] ?? null);
     });
+
+    // Claimed once, by the renderer, when it is ready to act on it. Pull rather
+    // than push because the renderer decides when that is — a session opened
+    // while the app was still launching would otherwise be sent into a document
+    // that never received it.
+    ipcMain.handle('luminary:takePendingSession', () => {
+        const sessionId = pendingSessionId;
+        pendingSessionId = null;
+        return sessionId;
+    });
 }
 
 /* ------------------------------------------------------------------ *
@@ -323,7 +363,7 @@ async function start(): Promise<void> {
             cmsAllowedOrigins: settings.allowedOrigins,
             originApprover: approveOrigin,
             credentialCipher: buildCipher(),
-            onCmsSessionCreated: () => focusWindow(),
+            onCmsSessionCreated: (sessionId) => focusSession(sessionId),
             ffmpegPath: bundledBinary('ffmpeg'),
             ffprobePath: bundledBinary('ffprobe'),
             staticAppDir: bundledWebClient(),
