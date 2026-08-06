@@ -102,12 +102,56 @@ function exitFullscreen(): void {
     void exit();
 }
 
+function toggleFullscreen(): void {
+    if (isFullscreen.value) exitFullscreen();
+    else void enterFullscreen();
+}
+
+/**
+ * Double-click / double-tap the picture to toggle fullscreen.
+ *
+ * The gesture stays with the player because it belongs to the video surface;
+ * the button that does the same thing does not, and lives in the host app's
+ * controls.
+ *
+ * Touch is detected by hand rather than left to `dblclick`, which mobile
+ * browsers fire late, inconsistently, or not at all. Where a browser does both,
+ * `handledAt` swallows the synthesised click that follows the taps.
+ */
+const DOUBLE_TAP_MS = 300;
+let lastTapAt = 0;
+let handledAt = 0;
+
+function onDoubleClick(): void {
+    if (Date.now() - handledAt < DOUBLE_TAP_MS * 2) return;
+    toggleFullscreen();
+}
+
+function onPointerUp(event: PointerEvent): void {
+    if (event.pointerType !== 'touch') return;
+    const now = Date.now();
+    if (now - lastTapAt < DOUBLE_TAP_MS) {
+        lastTapAt = 0;
+        handledAt = now;
+        toggleFullscreen();
+        return;
+    }
+    lastTapAt = now;
+}
+
 defineExpose({ controller, state, enterFullscreen, exitFullscreen });
 </script>
 
 <template>
     <div ref="containerEl" class="lmp-root" :class="{ 'lmp-is-fullscreen': isFullscreen }">
-        <video ref="videoEl" class="lmp-video" playsinline webkit-playsinline></video>
+        <video
+            ref="videoEl"
+            class="lmp-video"
+            playsinline
+            webkit-playsinline
+            @dblclick="onDoubleClick"
+            @pointerup="onPointerUp"
+        ></video>
 
         <div class="lmp-slot">
             <slot :state="state" :controller="controller"></slot>
@@ -131,19 +175,6 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen });
                 </div>
             </slot>
         </template>
-
-        <button
-            v-if="!isFullscreen"
-            type="button"
-            class="lmp-icon-btn lmp-enter-fs"
-            :aria-label="msg.enterFullscreen"
-            :title="msg.enterFullscreen"
-            @click="enterFullscreen"
-        >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 9V4h5v2H6v3zM15 4h5v5h-2V6h-3zM6 15v3h3v2H4v-5zM18 15h2v5h-5v-2h3z" />
-            </svg>
-        </button>
 
         <FullscreenControls
             v-if="showCustomControls && controller"

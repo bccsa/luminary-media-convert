@@ -82,13 +82,22 @@ const playerAudioOptions = computed(() =>
 
 const showPlayerAudioSelect = computed(() => playerAudioOptions.value.length > 1);
 
+/** There is a picture to make full screen. */
+const canPlay = computed(() => state.value.lifecycle === 'ready');
+
 const showPlaybackControlsRow = computed(
     () =>
         showAngleRow.value ||
         props.showAudioSelect ||
         showPlayerAudioSelect.value ||
-        showQualitySelect.value,
+        showQualitySelect.value ||
+        canPlay.value,
 );
+
+/** The player exposes fullscreen; it deliberately draws no button for it. */
+function enterFullscreen(): void {
+    void luminaryPlayerRef.value?.enterFullscreen();
+}
 
 watch(() => state.value.playing, (playing) => emit('playingChange', playing));
 watch(() => state.value.duration, (duration) => {
@@ -412,6 +421,30 @@ defineExpose({
                                 @update:model-value="controller?.setQuality(String($event))"
                             />
                         </span>
+                        <!--
+                            The player draws no chrome over the picture, so the
+                            way in sits with the other playback controls. It
+                            also answers a double-click on the video itself.
+                        -->
+                        <button
+                            v-if="canPlay"
+                            type="button"
+                            class="playback-slot-button"
+                            aria-label="Full screen"
+                            title="Full screen"
+                            @click="enterFullscreen"
+                        >
+                            <svg
+                                class="h-4 w-4"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
+                                aria-hidden="true"
+                            >
+                                <path
+                                    d="M4 9V4h5v2H6v3zM15 4h5v5h-2V6h-3zM6 15v3h3v2H4v-5zM18 15h2v5h-5v-2h3z"
+                                />
+                            </svg>
+                        </button>
                     </div>
                 </div>
             </div>

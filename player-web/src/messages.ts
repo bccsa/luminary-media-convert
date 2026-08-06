@@ -33,7 +33,11 @@ export interface PlayerMessages {
     remainingLabel: string;
 
     // --- Fullscreen --------------------------------------------------------
-    enterFullscreen: string;
+    /**
+     * Only the exit affordance is ours. Entering fullscreen is the host app's
+     * to place and label — it belongs with that app's own playback controls,
+     * not floating over the picture. Call `enterFullscreen()` on the player.
+     */
     exitFullscreen: string;
 
     // --- Track menus -------------------------------------------------------
@@ -60,7 +64,6 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     elapsedLabel: 'Elapsed time',
     remainingLabel: 'Remaining time',
 
-    enterFullscreen: 'Full screen',
     exitFullscreen: 'Exit full screen',
 
     audioMenuLabel: 'Audio',

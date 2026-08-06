@@ -159,13 +159,13 @@ describe('LuminaryPlayer — errors', () => {
 });
 
 describe('LuminaryPlayer — fullscreen', () => {
-    it('offers a fullscreen affordance labelled from messages and no controls inline', () => {
-        const { wrapper } = mountPlayer({
-            props: { messages: { enterFullscreen: 'Plein écran' } },
-        });
+    it('draws no chrome over the picture — entering is the host app\'s to place', () => {
+        const { wrapper } = mountPlayer();
 
-        expect(wrapper.get('.lmp-enter-fs').attributes('aria-label')).toBe('Plein écran');
+        expect(wrapper.find('button').exists()).toBe(false);
         expect(wrapper.find('.lmp-fs').exists()).toBe(false);
+        // The host drives it through the exposed method instead.
+        expect(typeof wrapper.vm.enterFullscreen).toBe('function');
     });
 
     it('mounts the custom controls only for element fullscreen', async () => {
@@ -181,11 +181,10 @@ describe('LuminaryPlayer — fullscreen', () => {
             document.dispatchEvent(new Event('fullscreenchange'));
         });
 
-        await wrapper.get('.lmp-enter-fs').trigger('click');
+        await wrapper.vm.enterFullscreen();
         await flushPromises();
 
         expect(wrapper.find('.lmp-fs').exists()).toBe(true);
-        expect(wrapper.find('.lmp-enter-fs').exists()).toBe(false);
 
         Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true });
     });
@@ -202,7 +201,7 @@ describe('LuminaryPlayer — fullscreen', () => {
         };
         video.webkitEnterFullscreen = vi.fn();
 
-        await wrapper.get('.lmp-enter-fs').trigger('click');
+        await wrapper.vm.enterFullscreen();
         await flushPromises();
 
         expect(video.webkitEnterFullscreen).toHaveBeenCalled();
