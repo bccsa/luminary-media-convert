@@ -142,8 +142,10 @@ describe('SegmentEditor — mark in / mark out', () => {
         await flush();
         w.vm.markIn();
         await flush();
+        // The marker on the track is the whole of the feedback — the toolbar
+        // banner that used to restate it in words was removed.
         expect(w.find('.se-pending-marker').exists()).toBe(true);
-        expect(w.find('.se-pending').exists()).toBe(true);
+        expect(w.find('.se-pending').exists()).toBe(false);
     });
 
     it('creates a segment when Mark Out closes a pending-in marker', async () => {

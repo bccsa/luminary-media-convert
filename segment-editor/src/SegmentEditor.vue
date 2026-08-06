@@ -1636,10 +1636,6 @@ defineExpose({
                     title="Redo"
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
                 <slot name="toolbar-before-clear" />
-                <span v-if="pendingInSec !== null" class="se-pending">
-                    In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
-                    · <span class="se-pending-cancel">Esc cancels</span>
-                </span>
                 <label v-if="showTimeline" class="se-zoom">
                     Zoom
                     <input
@@ -2069,10 +2065,12 @@ defineExpose({
                     @click="redo"
                     title="Redo"
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
-                <span v-if="pendingInSec !== null" class="se-pending">
-                    In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
-                    · <span class="se-pending-cancel">Esc cancels</span>
-                </span>
+                <!--
+                    No textual "In … — Mark Out …" hint here: the pending
+                    in-point is already drawn on the track itself, and the ?
+                    overlay documents the I / O / Esc keys. The banner restated
+                    both in the toolbar and mostly read as noise.
+                -->
             </div>
 
             <div v-if="showToolbar" class="se-controls-bar__zoom">
