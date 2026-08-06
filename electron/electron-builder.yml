@@ -1,0 +1,89 @@
+appId: org.bccsa.luminary-media-convert
+productName: Luminary Media Convert
+copyright: Copyright © BCC South Africa
+
+# electron-builder would otherwise run its own production `npm install` inside
+# this workspace before packaging, which in a hoisted monorepo prunes the root
+# node_modules out from under the build that is running. Nothing here is a
+# native module, so there is nothing to rebuild.
+npmRebuild: false
+
+directories:
+    output: release
+    buildResources: build
+
+# The main process loads the API out of the workspace package, so both this
+# workspace's build output and the hoisted node_modules have to be in the app.
+files:
+    - dist/**/*
+    - package.json
+    - '!**/*.map'
+    - '!**/*.ts'
+    # The API workspace is copied whole. Its dev environment file is not ours to
+    # ship, and `work/` is scratch space that can hold gigabytes of somebody's
+    # last encode.
+    - '!**/.env'
+    - '!**/node_modules/@luminary-media-converter/api/work'
+    - '!**/node_modules/@luminary-media-converter/api/{Dockerfile,.dockerignore,.node-version,nest-cli.json,eslint.config.mjs}'
+
+# On, and this was tested rather than assumed: the packaged app was launched
+# from outside the repository (so nothing could resolve upwards into the
+# development node_modules) and the API started, served the client and answered
+# requests from inside the archive.
+#
+# One thing to know if this ever regresses: electron-builder 25 collected the
+# hoisted workspace dependencies incompletely — `call-bind-apply-helpers` ended
+# up only nested under `call-bind`, express failed to load, and Nest reported it
+# as "No driver (HTTP) has been selected", which points nowhere near the real
+# cause. Version 26 collects it correctly. Symptom to look for: the packaged app
+# exits or logs a missing-driver error while the same code runs fine unpackaged.
+asar: true
+
+extraResources:
+    # Served at / by the API in the packaged app; see bundledWebClient().
+    - from: ../app/dist
+      to: app
+    # ffmpeg/ffprobe for this platform, dropped beside the app's resources where
+    # bundledBinary() looks for them. See bin/README.md — the binaries are not
+    # in the repository.
+    - from: bin/${platform}-${arch}
+      to: .
+      filter:
+          - ffmpeg*
+          - ffprobe*
+
+protocols:
+    - name: Luminary Media Convert
+      schemes:
+          - luminary-convert
+
+mac:
+    category: public.app-category.video
+    target:
+        - target: dmg
+          arch:
+              - arm64
+        - target: zip
+          arch:
+              - arm64
+    # Unsigned for now: there is no Developer ID certificate in this project, and
+    # electron-builder would otherwise try to sign with whatever is in the
+    # keychain. Gatekeeper will require a right-click → Open on first launch.
+    identity: null
+    hardenedRuntime: false
+    gatekeeperAssess: false
+
+dmg:
+    title: Luminary Media Convert
+
+win:
+    target:
+        - target: nsis
+          arch:
+              - x64
+
+nsis:
+    oneClick: false
+    perMachine: false
+    allowToChangeInstallationDirectory: true
+    shortcutName: Luminary Media Convert

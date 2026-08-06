@@ -15,6 +15,10 @@ work
 dispatchQueue.json
 jobQueue.json
 tusd/bin/
+# Desktop build output, and the ffmpeg binaries that are fetched rather than
+# committed (see electron/bin/README.md).
+electron/release/
+electron/bin/*/
 *.tsbuildinfo
 docs/todo.md
 

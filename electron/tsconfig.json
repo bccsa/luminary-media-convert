@@ -1,0 +1,19 @@
+{
+    "compilerOptions": {
+        // CommonJS, matching what `nest build` emits for the API this process
+        // loads in-process. Electron's main process runs either, but mixing
+        // them buys nothing here and costs a `require` of an ESM package.
+        "module": "node16",
+        "moduleResolution": "node16",
+        "target": "ES2023",
+        "lib": ["ES2023"],
+        "outDir": "./dist",
+        "rootDir": "./src",
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "sourceMap": true,
+        "forceConsistentCasingInFileNames": true
+    },
+    "include": ["src/**/*.ts"]
+}
