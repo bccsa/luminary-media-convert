@@ -83,6 +83,41 @@ describe('retimeStoryboardVtt', () => {
         expect(cueTimes(out)).toHaveLength(3);
     });
 
+    it('clips a cue straddling the in-point instead of discarding it', () => {
+        // The regression: a cue was kept only when its *start* fell inside a
+        // retained range, so a cut landing mid-cue — which is the normal case,
+        // since cuts do not respect the sampling interval — threw away the only
+        // frame covering the first seconds of the programme. The filmstrip then
+        // opened on a blank stretch, which read as the kept selection having
+        // been deleted.
+        const out = retimeStoryboardVtt(sourceVtt(3), URL_, [
+            { inSec: 4, outSec: 20 },
+        ] as never);
+
+        expect(cueTimes(out)).toEqual([
+            // 4-10 of the source is the first 6 seconds of the output...
+            '00:00:00.000 --> 00:00:06.000',
+            // ...and the whole 10-20 cue follows it.
+            '00:00:06.000 --> 00:00:16.000',
+        ]);
+        // The clipped cue still shows the frame sampled at 0, not the next one.
+        expect(out).toContain('#xywh=0,0,160,90');
+    });
+
+    it('emits a cue either side of a cut it spans', () => {
+        // Keeping 0-5 and 6-10 leaves both halves of the 0-10 cue in the output,
+        // now adjacent. Both are still that frame, so both are drawn.
+        const out = retimeStoryboardVtt(sourceVtt(1), URL_, [
+            { inSec: 0, outSec: 5 },
+            { inSec: 6, outSec: 10 },
+        ] as never);
+
+        expect(cueTimes(out)).toEqual([
+            '00:00:00.000 --> 00:00:05.000',
+            '00:00:05.000 --> 00:00:09.000',
+        ]);
+    });
+
     it('returns a header-only vtt when nothing survives the trim', () => {
         // Better than leaving the previous strip in place, which would show
         // frames for a timeline that no longer exists.

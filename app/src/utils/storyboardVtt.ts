@@ -29,42 +29,48 @@ export function retimeStoryboardVtt(
 
     const lines: string[] = ['WEBVTT', ''];
     for (const cue of cues) {
-        const mapped = mapCue(cue.startTime, cue.endTime, ranges);
-        if (!mapped) continue;
-        lines.push(
-            `${formatVttTimestamp(mapped.start)} --> ${formatVttTimestamp(mapped.end)}`,
-            `${cue.spriteUrl}#xywh=${cue.x},${cue.y},${cue.w},${cue.h}`,
-            '',
-        );
+        for (const mapped of mapCue(cue.startTime, cue.endTime, ranges)) {
+            lines.push(
+                `${formatVttTimestamp(mapped.start)} --> ${formatVttTimestamp(mapped.end)}`,
+                `${cue.spriteUrl}#xywh=${cue.x},${cue.y},${cue.w},${cue.h}`,
+                '',
+            );
+        }
     }
 
     return lines.join('\n');
 }
 
 /**
- * Where a cue belongs on the output timeline, or null when the frame it shows
- * was cut and so has no place there.
+ * Where a cue belongs on the output timeline — one entry per retained range it
+ * overlaps, empty when the frame it shows was cut entirely.
  *
- * A cue that starts inside a retained range but runs past its end is truncated
- * at the cut rather than allowed to spill across it — beyond that point the
- * frame no longer describes what is playing.
+ * A cue is clipped to each range rather than tested for membership. Cut points
+ * rarely land on a sampling boundary, so the cue straddling the in-point holds
+ * the only frame there is for the first seconds of the programme: dropping it
+ * for starting too early left the head of the filmstrip blank — which read as
+ * the *kept* material having been deleted. Clipping keeps the frame and lets it
+ * describe just the part that survived; a cue spanning a cut can legitimately
+ * appear twice, since the material either side of the cut is now adjacent and
+ * both halves are still that frame.
  */
 function mapCue(
     startTime: number,
     endTime: number,
     ranges: readonly TrimSegment[],
-): { start: number; end: number } | null {
-    const start = sourceToOutput(startTime, ranges);
-    if (start === null) return null;
+): { start: number; end: number }[] {
+    const out: { start: number; end: number }[] = [];
 
-    const containing = ranges.find(
-        (r) => startTime >= r.inSec && startTime < r.outSec,
-    );
-    if (!containing) return null;
+    for (const r of [...ranges].sort((a, b) => a.inSec - b.inSec)) {
+        const from = Math.max(startTime, r.inSec);
+        const to = Math.min(endTime, r.outSec);
+        if (to <= from) continue;
 
-    const available = containing.outSec - startTime;
-    const duration = Math.min(endTime - startTime, available);
-    if (duration <= 0) return null;
+        const start = sourceToOutput(from, ranges);
+        if (start === null) continue;
 
-    return { start, end: start + duration };
+        out.push({ start, end: start + (to - from) });
+    }
+
+    return out;
 }

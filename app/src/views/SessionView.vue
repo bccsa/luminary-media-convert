@@ -112,12 +112,6 @@ const byteRangeEnabled = ref(true);
 const submitting = ref(false);
 const waveformPeaks = ref<number[] | null>(null);
 const editorSegments = ref<Segment[]>([]);
-const trimSegments = computed<TrimSegment[]>(() =>
-    editorSegments.value.map((s: Segment) => ({
-        inSec: s.inSec,
-        outSec: s.outSec,
-    }))
-);
 /**
  * Ranges removed from the trim timeline. They stay listed beside the player so a
  * deletion can be undone, right up until the encode consumes the markers.
@@ -747,13 +741,13 @@ function seekPlayerTime(t: number) {
  * collapsing it would make marking one clip look like discarding everything else.
  */
 /**
- * The ranges the encode will keep. Normally the clips; when every clip has been
- * deleted, the source minus what was deleted — otherwise deleting them all would
- * send no trim at all and the encoder would take the whole source back, deletions
- * included.
+ * The ranges the encode will keep: the source minus what was deleted, and
+ * nothing else. Only deletion is a statement about the output — a marked
+ * selection is a marker, the thing you draw *before* deciding to cut it, and
+ * treating it as "keep only this" meant selecting a passage to look at and
+ * pressing Start Encoding silently threw the rest of the video away.
  */
 const effectiveKeepRanges = computed<TrimSegment[]>(() => {
-    if (trimSegments.value.length > 0) return trimSegments.value;
     if (deletedRanges.value.length === 0) return [];
     return invertRanges(deletedRanges.value, sourceProbeDuration.value);
 });
@@ -1305,7 +1299,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
 
         // Reload preview with filtered playlist when trim segments are active
         if (
-            trimSegments.value.length > 0 &&
+            submittedTrims.length > 0 &&
             playerRef.value &&
             previewPlaybackUrl.value
         ) {
