@@ -1,4 +1,12 @@
 /**
+ * Placeholder URI written into `#EXT-X-KEY` when no explicit key URL is
+ * configured. The key never leaves the machine, so there is nothing to serve
+ * it over HTTP — players are expected to recognise this sentinel and swap in
+ * the key they already hold client-side.
+ */
+export const LUMINARY_KEY_PLACEHOLDER_URI = 'luminary://key';
+
+/**
  * Reduce a user-entered value (which may be a full S3 URL, a
  * bucket-qualified path, or a bare object key) to an object key
  * suitable for the S3 API.
