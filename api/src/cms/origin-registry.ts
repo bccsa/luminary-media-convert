@@ -14,6 +14,12 @@ export interface OriginPolicy {
     /** Origins trusted without asking. Compared exactly, after normalisation. */
     allowedOrigins?: string[];
     /**
+     * Origins the user has refused. Remembered so a site that keeps trying
+     * cannot turn "no" into a dialog every few seconds until someone clicks the
+     * wrong button.
+     */
+    deniedOrigins?: string[];
+    /**
      * Consulted once per unknown origin. Resolving true is a trust-on-first-use
      * grant: the origin is remembered for the life of the process.
      *
@@ -22,6 +28,18 @@ export interface OriginPolicy {
      * trusting anything it was not configured with.
      */
     originApprover?: (origin: string) => Promise<boolean>;
+    /**
+     * Called whenever a decision changes, so the host can write it somewhere
+     * that outlives the process. The registry is the decision point and holds
+     * the live answer; persistence is the host's business, because only it
+     * knows where its settings live.
+     */
+    onDecisionsChanged?: (decisions: OriginDecisions) => void;
+}
+
+export interface OriginDecisions {
+    allowed: string[];
+    denied: string[];
 }
 
 /** Split a comma-separated env value into normalised origins. */
@@ -62,23 +80,74 @@ export class OriginRegistry {
      */
     private readonly pending = new Map<string, Promise<boolean>>();
 
+    /**
+     * Origins the user said no to. Held here rather than by the host because
+     * this class is the decision point: a denial the host checked separately
+     * was a second place for the answer to live, and revoking one from the
+     * settings screen would have had to reach both.
+     */
+    private readonly denied = new Set<string>();
+
+    private readonly onDecisionsChanged?: (decisions: OriginDecisions) => void;
+
     constructor(@Inject(ORIGIN_POLICY) policy: OriginPolicy) {
         for (const origin of policy.allowedOrigins ?? []) {
             const normalized = normalizeOrigin(origin);
             if (normalized) this.approved.add(normalized);
         }
+        for (const origin of policy.deniedOrigins ?? []) {
+            const normalized = normalizeOrigin(origin);
+            if (normalized) this.denied.add(normalized);
+        }
         this.approver = policy.originApprover;
+        this.onDecisionsChanged = policy.onDecisionsChanged;
     }
 
     /** Remember an origin as trusted for the life of this process. */
     approve(origin: string): void {
         const normalized = normalizeOrigin(origin);
-        if (normalized) this.approved.add(normalized);
+        if (!normalized) return;
+        this.approved.add(normalized);
+        this.denied.delete(normalized);
+        this.publish();
     }
 
     /** Every origin trusted right now — the static list plus anything granted since. */
     list(): string[] {
         return [...this.approved];
+    }
+
+    /** Every decision this instance is holding, for the settings screen. */
+    decisions(): OriginDecisions {
+        return { allowed: [...this.approved], denied: [...this.denied] };
+    }
+
+    /**
+     * Forget a decision, whichever way it went.
+     *
+     * Revoking an allow shuts a site out; revoking a deny lets it ask again.
+     * The second is the one that matters: clicking "Block" on your own CMS
+     * otherwise locked you out of your own encoder with no route back inside
+     * the product, only a settings file to edit by hand.
+     *
+     * Takes effect at once, because this registry is what the CORS layer asks
+     * on every request — there is no cached copy anywhere to go stale.
+     */
+    revoke(origin: string): boolean {
+        const normalized = normalizeOrigin(origin);
+        if (!normalized) return false;
+
+        const removed =
+            this.approved.delete(normalized) || this.denied.delete(normalized);
+        if (removed) {
+            this.logger.log(`Origin decision revoked: ${normalized}`);
+            this.publish();
+        }
+        return removed;
+    }
+
+    private publish(): void {
+        this.onDecisionsChanged?.(this.decisions());
     }
 
     /**
@@ -90,6 +159,9 @@ export class OriginRegistry {
         const normalized = normalizeOrigin(origin);
         if (!normalized) return false;
         if (this.approved.has(normalized)) return true;
+        // Answered already, and the answer was no. Asking again on every
+        // request would let a site that keeps trying wear the user down.
+        if (this.denied.has(normalized)) return false;
         if (!this.approver) return false;
 
         const inFlight = this.pending.get(normalized);
@@ -101,8 +173,10 @@ export class OriginRegistry {
                     this.approved.add(normalized);
                     this.logger.log(`Origin approved: ${normalized}`);
                 } else {
+                    this.denied.add(normalized);
                     this.logger.warn(`Origin refused: ${normalized}`);
                 }
+                this.publish();
                 return granted;
             })
             .catch((err: Error) => {

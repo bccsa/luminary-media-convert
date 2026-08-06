@@ -164,13 +164,24 @@ describe('OriginRegistry — trust on first use', () => {
         expect(approver).toHaveBeenCalledTimes(2);
     });
 
-    it('can be asked again after a refusal', async () => {
-        // The in-flight entry has to be cleared whatever the answer, or a
-        // refused origin could never be reconsidered.
-        const approver = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    it('does not ask again after a refusal', async () => {
+        // A site that keeps trying would otherwise raise a dialog every few
+        // seconds until someone clicked the wrong button.
+        const approver = vi.fn().mockResolvedValue(false);
         const registry = build({ originApprover: approver });
 
         await expect(registry.isAllowed('https://cms.test')).resolves.toBe(false);
+        expect(registry.isAllowed('https://cms.test')).toBe(false);
+        expect(approver).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks again once the refusal is revoked', async () => {
+        const approver = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+        const registry = build({ originApprover: approver });
+
+        await registry.isAllowed('https://cms.test');
+        registry.revoke('https://cms.test');
+
         await expect(registry.isAllowed('https://cms.test')).resolves.toBe(true);
         expect(approver).toHaveBeenCalledTimes(2);
     });
@@ -192,6 +203,133 @@ describe('OriginRegistry — trust on first use', () => {
 
         expect(registry.isAllowed('https://cms.test')).toBe(true);
         expect(approver).not.toHaveBeenCalled();
+    });
+});
+
+describe('OriginRegistry — revoking a decision', () => {
+    it('shuts out an origin that was allowed', () => {
+        const registry = build({ allowedOrigins: ['https://cms.test'] });
+
+        expect(registry.revoke('https://cms.test')).toBe(true);
+        expect(registry.isAllowed('https://cms.test')).toBe(false);
+    });
+
+    it('takes effect at once, with no restart', () => {
+        // This registry is what the CORS layer asks on every request, so there
+        // is no cached copy anywhere to go stale.
+        const registry = build({ allowedOrigins: ['https://cms.test'] });
+        expect(registry.isAllowed('https://cms.test')).toBe(true);
+
+        registry.revoke('https://cms.test');
+
+        expect(registry.isAllowed('https://cms.test')).toBe(false);
+    });
+
+    it('lets a blocked site ask again', () => {
+        // The case that matters: clicking "Block" on your own CMS otherwise
+        // locked you out of your own encoder with no route back.
+        const registry = build({
+            deniedOrigins: ['https://cms.test'],
+            originApprover: vi.fn().mockResolvedValue(true),
+        });
+        expect(registry.isAllowed('https://cms.test')).toBe(false);
+
+        registry.revoke('https://cms.test');
+
+        expect(registry.isAllowed('https://cms.test')).toBeInstanceOf(Promise);
+    });
+
+    it('reports whether it held anything to revoke', () => {
+        const registry = build({ allowedOrigins: ['https://cms.test'] });
+
+        expect(registry.revoke('https://other.test')).toBe(false);
+        expect(registry.revoke('   ')).toBe(false);
+    });
+
+    it('normalises before looking, as everywhere else', () => {
+        const registry = build({ allowedOrigins: ['https://cms.test'] });
+
+        expect(registry.revoke('HTTPS://CMS.test/')).toBe(true);
+    });
+});
+
+describe('OriginRegistry — telling the host what changed', () => {
+    it('reports both lists', () => {
+        const registry = build({
+            allowedOrigins: ['https://yes.test'],
+            deniedOrigins: ['https://no.test'],
+        });
+
+        expect(registry.decisions()).toEqual({
+            allowed: ['https://yes.test'],
+            denied: ['https://no.test'],
+        });
+    });
+
+    it('publishes a grant so the host can persist it', async () => {
+        const onDecisionsChanged = vi.fn();
+        const registry = build({
+            originApprover: vi.fn().mockResolvedValue(true),
+            onDecisionsChanged,
+        });
+
+        await registry.isAllowed('https://cms.test');
+
+        expect(onDecisionsChanged).toHaveBeenCalledWith({
+            allowed: ['https://cms.test'],
+            denied: [],
+        });
+    });
+
+    it('publishes a refusal too', async () => {
+        const onDecisionsChanged = vi.fn();
+        const registry = build({
+            originApprover: vi.fn().mockResolvedValue(false),
+            onDecisionsChanged,
+        });
+
+        await registry.isAllowed('https://cms.test');
+
+        expect(onDecisionsChanged).toHaveBeenCalledWith({
+            allowed: [],
+            denied: ['https://cms.test'],
+        });
+    });
+
+    it('publishes a revocation', () => {
+        const onDecisionsChanged = vi.fn();
+        const registry = build({
+            allowedOrigins: ['https://cms.test'],
+            onDecisionsChanged,
+        });
+
+        registry.revoke('https://cms.test');
+
+        expect(onDecisionsChanged).toHaveBeenCalledWith({ allowed: [], denied: [] });
+    });
+
+    it('says nothing when there was nothing to revoke', () => {
+        const onDecisionsChanged = vi.fn();
+        const registry = build({ onDecisionsChanged });
+
+        registry.revoke('https://nobody.test');
+
+        expect(onDecisionsChanged).not.toHaveBeenCalled();
+    });
+
+    it('moves an origin out of denied when it is later allowed', () => {
+        const onDecisionsChanged = vi.fn();
+        const registry = build({
+            deniedOrigins: ['https://cms.test'],
+            onDecisionsChanged,
+        });
+
+        registry.approve('https://cms.test');
+
+        expect(registry.decisions()).toEqual({
+            allowed: ['https://cms.test'],
+            denied: [],
+        });
     });
 });
 

@@ -7,7 +7,10 @@ import helmet from 'helmet';
 import { join } from 'path';
 import { AppModule } from './app.module.js';
 import type { CmsSessionHook } from './cms/cms-session-hook.js';
-import { OriginRegistry } from './cms/origin-registry.js';
+import {
+    OriginRegistry,
+    type OriginDecisions,
+} from './cms/origin-registry.js';
 import {
     createCorsOptions,
     privateNetworkAccessMiddleware,
@@ -43,8 +46,15 @@ export interface CreateServerOptions {
     localApiToken?: string;
     /** Origins trusted without asking. */
     cmsAllowedOrigins?: string[];
+    /** Origins the user has already refused; they are not asked about again. */
+    cmsDeniedOrigins?: string[];
     /** Asked about origins that are not on the list; resolving true grants trust. */
     originApprover?: (origin: string) => Promise<boolean>;
+    /**
+     * Notified whenever a trust decision changes — granted, refused or revoked
+     * — so the host can write it somewhere that outlives the process.
+     */
+    onOriginDecisionsChanged?: (decisions: OriginDecisions) => void;
     /** Somewhere safe to keep S3 credentials across a restart. */
     credentialCipher?: CredentialCipher;
     /** Notified when a CMS opens a session, so a host can surface its window. */
@@ -146,10 +156,15 @@ export async function createServer(
     // makes the provider fall back to `CMS_ALLOWED_ORIGINS`. An object with two
     // undefined fields is still an answer, and it would be the wrong one.
     const originPolicy =
-        options.cmsAllowedOrigins || options.originApprover
+        options.cmsAllowedOrigins ||
+        options.cmsDeniedOrigins ||
+        options.originApprover ||
+        options.onOriginDecisionsChanged
             ? {
                   allowedOrigins: options.cmsAllowedOrigins,
+                  deniedOrigins: options.cmsDeniedOrigins,
                   originApprover: options.originApprover,
+                  onDecisionsChanged: options.onOriginDecisionsChanged,
               }
             : undefined;
 

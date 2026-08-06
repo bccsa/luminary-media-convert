@@ -185,6 +185,34 @@ export function subscribeSessionEvents(
 }
 
 // ---------------------------------------------------------------------------
+// Trusted origins
+// ---------------------------------------------------------------------------
+
+export interface OriginDecisions {
+    allowed: string[];
+    denied: string[];
+}
+
+/** Every site this encoder has been told to trust, or to refuse. */
+export async function listOrigins(): Promise<OriginDecisions> {
+    return requestJson(`${API_BASE}/api/origins`, {
+        apiKey: true,
+        errorPrefix: 'Failed to load trusted sites',
+    });
+}
+
+/**
+ * Forget a decision. Revoking an allow shuts the site out; revoking a block
+ * lets it ask again the next time it calls.
+ */
+export async function revokeOrigin(origin: string): Promise<void> {
+    return requestVoid(
+        `${API_BASE}/api/origins?origin=${encodeURIComponent(origin)}`,
+        { method: 'DELETE', apiKey: true, errorPrefix: 'Failed to update trusted sites' },
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Chapter sidecar
 // ---------------------------------------------------------------------------
 

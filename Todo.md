@@ -24,6 +24,17 @@ Still outstanding:
 
 ---
 
+## 0b. CMS-side integration (bccsa/luminary — out of this repo)
+
+The encoder's half of the contract is done and documented (CLAUDE.md "CMS contract"; `cms-mock/` is the executable reference). The Luminary side still needs, on branch `1878-api-cms-hls-media-data-model` or successor:
+
+- The "upload / edit media" button: health-check `GET /api/cms/health` on `http://127.0.0.1:31711`, `luminary-convert://` launch fallback, then `POST /api/cms/sessions` (Chrome LNA; Chrome-only at time of writing).
+- SSE consumer on `eventsUrl`: on the first `encoding` event, save `MediaDto { hlsUrl, hlsKey: encryptionKeyHex }` — the post can be saved before encoding completes.
+- Player-side: "not available yet" notice while `hlsUrl` 404s; adopt the `@luminary-media-converter/hls` extraction helpers (`listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist`) and the `luminary://key` → crypto-object key swap for encrypted playback.
+- Passing `existingMedia { hlsUrl, hlsKey }` for edit mode once item 1 lands (the DTO already accepts it).
+
+---
+
 ## 0c. Deployment workflows — decide before merging to main
 
 **Blocking.** Not a refinement: merging this branch to `main` as it stands will break the staging deploy.
@@ -41,17 +52,6 @@ Still outstanding:
 - **If yes** — it needs saying somewhere, and the workflows need `HOST=0.0.0.0` in the generated `.env` plus a pass over the variables. It also needs a threat-model answer the local-only design does not currently give: as a desktop app the API is reachable only from the machine it runs on, and the origin allowlist assumes exactly that.
 
 Either way, do it before the merge rather than discovering it from a red deploy.
-
----
-
-## 0b. CMS-side integration (bccsa/luminary — out of this repo)
-
-The encoder's half of the contract is done and documented (CLAUDE.md "CMS contract"; `cms-mock/` is the executable reference). The Luminary side still needs, on branch `1878-api-cms-hls-media-data-model` or successor:
-
-- The "upload / edit media" button: health-check `GET /api/cms/health` on `http://127.0.0.1:31711`, `luminary-convert://` launch fallback, then `POST /api/cms/sessions` (Chrome LNA; Chrome-only at time of writing).
-- SSE consumer on `eventsUrl`: on the first `encoding` event, save `MediaDto { hlsUrl, hlsKey: encryptionKeyHex }` — the post can be saved before encoding completes.
-- Player-side: "not available yet" notice while `hlsUrl` 404s; adopt the `@luminary-media-converter/hls` extraction helpers (`listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist`) and the `luminary://key` → crypto-object key swap for encrypted playback.
-- Passing `existingMedia { hlsUrl, hlsKey }` for edit mode once item 1 lands (the DTO already accepts it).
 
 ---
 
@@ -158,11 +158,17 @@ Also removed with this work: the dead `node-tusd` alias in `api/vitest.config.ts
 
 ---
 
-## 7. Origin trust management UI
+## 7. Origin trust management UI — done
 
-**Today.** Allowed and denied origins are decided in a one-time native dialog and persisted to `settings.json` in the app's `userData` directory. There is no way to review them, revoke an allow, or undo a mistaken deny except by editing that file by hand and restarting. A user who clicks "Block" on their own CMS has no route back inside the product.
+Trust decisions were made once in a native dialog and were then unreachable: a user who clicked "Block" on their own CMS was locked out of their own encoder with no route back inside the product, only a settings file to find and edit by hand.
 
-**Wanted.** A small settings surface in the renderer listing trusted and blocked origins with a remove action per entry. The API side already has most of what is needed: `OriginRegistry.list()` exists and is currently unused; it needs a matching `revoke()`, an endpoint (instance-token authenticated), and a write-back into the Electron settings file. Note that the registry is also the CORS decision point, so revocation must take effect without a restart.
+Denial memory moved from the Electron host into `OriginRegistry`, which is the decision point the CORS layer already consults on every request. Holding it in two places would have meant a revocation had to reach both, and only one of them takes effect without a restart.
+
+- `OriginRegistry` gains `decisions()`, `revoke()` and an `onDecisionsChanged` callback; the host supplies both lists at boot and writes back whatever the registry decides.
+- `GET`/`DELETE /api/origins`, instance-token only — a site able to read the allowlist would learn which others to impersonate.
+- `TrustedSitesPanel` on the sessions list, listing allowed and blocked sites with a remove action. No new route: there is no nav to reach one with, and the list is the screen every launch lands on.
+
+Deliberately over HTTP rather than on the preload bridge, which keeps one set of rules about what the renderer may do. Covered by 12 new registry tests and 7 panel tests — one of which caught the panel claiming "No site has asked yet" beside a connection error, which is a reassuring thing to say and not something a failed request is evidence for.
 
 ---
 

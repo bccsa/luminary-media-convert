@@ -95,16 +95,15 @@ function queueDialog<T>(run: () => Promise<T>): Promise<T> {
     return next;
 }
 
+/**
+ * Ask the user about an origin the registry has never seen.
+ *
+ * Only asks. Remembering the answer belongs to the registry, which is the
+ * decision point the CORS layer consults — a second copy here was a second
+ * place the settings screen would have had to reach in order to undo one.
+ */
 async function approveOrigin(origin: string): Promise<boolean> {
-    if (settings.allowedOrigins.includes(origin)) return true;
-    if (settings.deniedOrigins.includes(origin)) return false;
-
     return queueDialog(async () => {
-        // Re-checked inside the queue: while this request waited its turn the
-        // user may have already answered the same question.
-        if (settings.allowedOrigins.includes(origin)) return true;
-        if (settings.deniedOrigins.includes(origin)) return false;
-
         focusWindow();
 
         const { response } = await dialog.showMessageBox({
@@ -120,11 +119,7 @@ async function approveOrigin(origin: string): Promise<boolean> {
             noLink: true,
         });
 
-        const allowed = response === 0;
-        if (allowed) settings.allowedOrigins.push(origin);
-        else settings.deniedOrigins.push(origin);
-        void saveSettings();
-        return allowed;
+        return response === 0;
     });
 }
 
@@ -361,7 +356,15 @@ async function start(): Promise<void> {
             workDir: join(app.getPath('userData'), 'work'),
             localApiToken: apiToken,
             cmsAllowedOrigins: settings.allowedOrigins,
+            cmsDeniedOrigins: settings.deniedOrigins,
             originApprover: approveOrigin,
+            // The registry holds the live answer; this writes it somewhere that
+            // outlives the process. Only the host knows where its settings go.
+            onOriginDecisionsChanged: ({ allowed, denied }) => {
+                settings.allowedOrigins = allowed;
+                settings.deniedOrigins = denied;
+                void saveSettings();
+            },
             credentialCipher: buildCipher(),
             onCmsSessionCreated: (sessionId) => focusSession(sessionId),
             ffmpegPath: bundledBinary('ffmpeg'),

@@ -6,6 +6,7 @@ import { setSessionToken, forgetSessionToken } from '../session-tokens';
 import { clearChapterDraftForSession } from '../composables/useChapters';
 import ProgressBar from '../components/ProgressBar.vue';
 import AccountMenu from '../components/AccountMenu.vue';
+import TrustedSitesPanel from '../components/TrustedSitesPanel.vue';
 import { formatRelative } from '../utils/format';
 import { errorMessage } from '../utils/errors';
 import { isActiveStatus, isTerminalStatus, statusLabel } from '../utils/status';
@@ -349,5 +350,12 @@ onUnmounted(() => {
                 </div>
             </template>
         </section>
+
+        <!--
+            App-level configuration, on the app's home rather than behind a
+            route of its own — there is no nav to reach one with, and this is
+            the screen every launch lands on.
+        -->
+        <TrustedSitesPanel class="mt-10 lg:mt-12" />
     </div>
 </template>

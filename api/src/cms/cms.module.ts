@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module.js';
 import { OriginRegistry } from './origin-registry.js';
+import { OriginsController } from './origins.controller.js';
 
 /**
  * Origin policy, kept out of the encode module so both the CMS controller and
@@ -10,6 +12,8 @@ import { OriginRegistry } from './origin-registry.js';
  * machine has been told to trust, or how to ask its user about a new one.
  */
 @Module({
+    imports: [AuthModule],
+    controllers: [OriginsController],
     providers: [OriginRegistry],
     exports: [OriginRegistry],
 })
