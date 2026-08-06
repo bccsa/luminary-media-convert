@@ -313,7 +313,15 @@ export class EncodeService {
             // AES-128 encrypted; the text assets only leave in
             // `uploadRemainingFiles`, immediately below, so this is the last
             // moment they exist in plaintext anywhere.
-            if (encryptionEnabled && session.config.encryption?.encryptPlaylists) {
+            //
+            // One decision, not two: encrypting the segments and leaving the
+            // playlists, chapters and subtitles beside them in the clear
+            // protects very little, so this follows `enabled` unless a caller
+            // explicitly opts out for a player that cannot decrypt playlists.
+            if (
+                encryptionEnabled &&
+                session.config.encryption?.encryptPlaylists !== false
+            ) {
                 await this.encryptionService.encryptTextAssets(
                     outputDir,
                     encryptionKey!

@@ -289,7 +289,7 @@ Encryption keys are generated locally (`randomBytes(16)`) and never leave the ma
 
 A Luminary player is therefore expected to:
 
-1. Fetch the master and media playlists (decrypting LMCENC-wrapped ones when the session opted into `encryptPlaylists`).
+1. Fetch the master and media playlists, decrypting LMCENC-wrapped ones (an encrypted session encrypts its playlists and sidecars too, unless it opted out).
 2. Supply the key for `luminary://key` (and any other AES-128 key URI — a locally supplied key always wins). The wrapper normalizes key URIs to the sentinel and the engine adapter serves the raw bytes **from memory** (hls.js custom key loader; `AVAssetResourceLoaderDelegate` / ExoPlayer `DataSource` later) — a key blob URL is only the fallback for adapters without a key hook.
 3. Feed the munged playlists to the engine. **`player-core` (`PlayerController` + pipeline) is the reference implementation**, with `player-web`'s `HlsJsAdapter`/`LuminaryPlayer` as the web engine binding; the media encoder app consumes exactly these.
 
@@ -319,7 +319,7 @@ S3 credentials arrive per session and must survive a restart without ever sittin
 6. FIFO queue, one encode at a time.
 7. `EncodeService` clears any previous output, generates the AES key/IV **before** flipping to `encoding`, publishes `hlsUrl` (`publicBaseUrl` + `/` + `<prefix>/master.m3u8`), and starts `SegmentPipelineService`, which polls the FFmpeg output directory and streams each new segment through encrypt → upload → byte-range pack with bounded concurrency, instead of waiting for the encode to finish.
 8. FFmpeg probes per-stream start times: aligned streams (spread < 50 ms) get fMP4 (`.m4s` + `init.mp4`), misaligned streams fall back to MPEG-TS (`.ts`), because the player's TS transmuxer resynchronises audio/video PTS during playback. The choice is reported as `segmentFormat`.
-9. After drain: `#EXT-X-KEY` tags injected (when encrypted), thumbnail sprites + `thumbnails.vtt` generated for video encodes, `waveform.json` written as a sidecar next to `master.m3u8`. When the session opted into `encryption.encryptPlaylists`, every `.m3u8` and `.vtt` is then LMCENC-encrypted (AES-128-CBC, fresh IV per file, `LMCENC01` magic — see `docs/encrypted-sidecar-format.md`) as the **final** pre-upload step; encrypted objects upload as `application/octet-stream`.
+9. After drain: `#EXT-X-KEY` tags injected (when encrypted), thumbnail sprites + `thumbnails.vtt` generated for video encodes, `waveform.json` written as a sidecar next to `master.m3u8`. On an encrypted session every `.m3u8` and `.vtt` is then LMCENC-encrypted with the same key (AES-128-CBC, fresh IV per file, `LMCENC01` magic — see `docs/encrypted-sidecar-format.md`) as the **final** pre-upload step; encrypted objects upload as `application/octet-stream`. `encryption.encryptPlaylists: false` opts out, for output that must stay readable by players that cannot decrypt playlists.
 10. Completion sets `files`, `masterPlaylist`, `thumbnailsVtt` and `segmentFormat`, and emits the final event. The key is never in the payload — clients use `GET /api/sessions/:id/key`.
 
 Disk is guarded on both ends: `disk-space.ts` refuses an ingest or an encode that will not fit, keeping a reserve (`DISK_RESERVE_BYTES`, default 2 GB), so a full volume cannot take the next encode down with it.
@@ -422,6 +422,7 @@ created -> uploading -> uploaded -> queued -> encoding -> encrypting -> uploadin
 - All playback behavior lives in `player-core` (munging, quality capping, angle switching, recovery/stall policy, coming-soon polling, chapters/subtitles) so web and future native players behave identically; engine specifics live behind `PlayerAdapter` implementations (`player-web`'s `HlsJsAdapter`). Implementing apps talk to `PlayerController` only
 - Quality capping is **load-time only**: `PlayerSource.maxHeight` munges higher renditions out of the playlist; a playing video keeps its old cap until the next `load()`. Selecting the `Audio only` pseudo-angle (`AUDIO_ONLY_ANGLE_ID`) plays a munged master with zero video variants — no video bytes are downloaded
 - LMCENC (`docs/encrypted-sidecar-format.md`) is the only sanctioned way to encrypt playlists/VTTs; detection is by magic prefix, never by absence-sniffing, and plaintext assets keep working when a key is configured
+- Encryption is one decision: an encrypted session encrypts segments, playlists, chapters and (once written) subtitles under the same key. Chapters saved after the encode are encrypted on write and decrypted on read by the same rule, so the output never ends up half-readable. Anything in the app that reads a delivered `.vtt` directly — the storyboard filmstrip — must decrypt it (`useStoryboardVttUrl`)
 - The renderer's only privileged capabilities are the three preload calls. Everything else it does goes over HTTP to the local API like any other client, which keeps one set of rules about what is allowed
 
 ## Environment Variables

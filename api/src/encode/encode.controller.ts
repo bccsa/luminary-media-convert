@@ -745,9 +745,14 @@ export class EncodeController {
                     'create the session again from the CMS'
             );
         }
+        // Mirrors the encode: text assets follow `enabled` unless explicitly
+        // opted out of. Sidecars written after the encode have to be encrypted
+        // exactly when the encode's own were, or the chapter the user just
+        // saved becomes the one file in the output nothing can read.
         const encryptsText =
-            session.config.encryption?.enabled !== false &&
-            session.config.encryption?.encryptPlaylists === true;
+            session.config.encryption != null &&
+            session.config.encryption.enabled !== false &&
+            session.config.encryption.encryptPlaylists !== false;
 
         return {
             s3: session.config.s3,

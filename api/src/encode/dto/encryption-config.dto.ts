@@ -29,14 +29,20 @@ export class EncryptionConfigDto {
 
     @ApiPropertyOptional({
         description:
-            'Encrypt master/media playlists and WebVTT sidecars with the session ' +
-            'key (LMCENC01 format, see docs/encrypted-sidecar-format.md). ' +
-            'Segments are already AES-128 encrypted when encryption is enabled; ' +
-            'this extends coverage to the text assets, so generic HLS tooling ' +
-            'cannot read the stream layout, chapter titles or subtitles from the ' +
-            'bucket. Encrypted objects upload as application/octet-stream under ' +
-            'their existing keys and extensions. Defaults to false.',
-        default: false,
+            'Encrypt master/media playlists and WebVTT sidecars (chapters, and ' +
+            'subtitles once they are written) with the same session key as the ' +
+            'segments, in LMCENC01 format — see docs/encrypted-sidecar-format.md. ' +
+            'Defaults to true whenever encryption is enabled: asking for an ' +
+            'encrypted stream and publishing its layout, chapter titles and ' +
+            'subtitles in the clear beside it protects very little. Encrypted ' +
+            'objects upload as application/octet-stream under their existing ' +
+            'keys and extensions.\n\n' +
+            'Set false only for output that has to stay readable by players ' +
+            'which cannot decrypt playlists — a stock hls.js or Video.js that ' +
+            'fetches the key by URI can play AES-128 segments, but cannot read ' +
+            'an LMCENC playlist. Players built on ' +
+            '@luminary-media-converter/player-core handle both.',
+        default: true,
     })
     @IsBoolean()
     @IsOptional()

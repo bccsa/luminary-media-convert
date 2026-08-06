@@ -1,10 +1,12 @@
 # LMCENC — encrypted playlist / WebVTT format (v1)
 
-Sessions created with `encryption.encryptPlaylists: true` upload their HLS
-playlists and WebVTT sidecars encrypted, so third-party players cannot read
-the stream layout, chapter titles, or subtitles without the session key. The
-segment files were already AES-128 encrypted; this extends coverage to the
-text assets.
+An encrypted session encrypts its whole output, not just the media: the HLS
+playlists and every WebVTT sidecar are wrapped too, so nothing without the
+session key can read the stream layout, chapter titles, or subtitles. Asking
+for an encrypted stream and publishing its table of contents beside it
+protects very little, so this follows `encryption.enabled` — set
+`encryption.encryptPlaylists: false` to opt out, for output that has to stay
+readable by players which cannot decrypt playlists.
 
 ## Layout
 
@@ -17,7 +19,9 @@ text assets.
 - **Key**: the session's AES-128 segment key (16 bytes). The same key
   decrypts segments, playlists, and VTTs.
 - **Scope**: `master.m3u8`, every media playlist, and every `.vtt` sidecar
-  (subtitles, chapters, thumbnails VTT) when the session flag is set.
+  (subtitles, chapters, thumbnails VTT). Sidecars written after the encode —
+  chapters saved from the editor — are encrypted on write by the same rule,
+  and decrypted on read, so the output stays internally consistent.
 - **Not covered** (accepted gap): thumbnail sprite images referenced by the
   thumbnails VTT remain plaintext JPEGs.
 

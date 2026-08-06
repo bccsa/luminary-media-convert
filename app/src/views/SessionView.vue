@@ -47,7 +47,7 @@ import {
 } from '../session-tokens';
 import { useSessionPoller } from '../composables/useSessionPoller';
 import { useStoryboard } from '../composables/useStoryboard';
-import { useTrimmedStoryboard } from '../composables/useTrimmedStoryboard';
+import { useStoryboardVttUrl } from '../composables/useStoryboardVttUrl';
 import { useAppLayout } from '../composables/useAppLayout';
 import { useEncodeEta } from '../composables/useEncodeEta';
 import { useChapterTrimSync } from '../composables/useChapterTrimSync';
@@ -949,12 +949,17 @@ const storyboardTrimRanges = computed<TrimSegment[]>(() => {
     return [];
 });
 
-const trimmedStoryboard = useTrimmedStoryboard({
+const storyboardVtt = useStoryboardVttUrl({
     url: rawThumbnailVttUrl,
     ranges: storyboardTrimRanges,
+    // The encoder's own storyboard is served in the clear from this machine;
+    // only the one delivered beside the output can be encrypted.
+    keyHex: computed(() =>
+        sourceStoryboardActive.value ? undefined : encryptionKeyHex.value
+    ),
 });
 
-const thumbnailVttUrl = computed(() => trimmedStoryboard.url.value);
+const thumbnailVttUrl = computed(() => storyboardVtt.url.value);
 
 /** Frames are still being made — the timeline is incomplete rather than broken. */
 const storyboardPending = computed(

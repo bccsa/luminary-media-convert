@@ -1071,7 +1071,7 @@ describe('EncodeService — encrypting the text assets last', () => {
         );
     });
 
-    it('leaves the text assets alone when the session did not opt in', async () => {
+    it('leaves the text assets alone when the session opted out', async () => {
         await run(makeEncryptedConfig(false));
 
         expect(encryptionService.injectKeyTagsIntoPlaylists).toHaveBeenCalled();
