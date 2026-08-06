@@ -31,7 +31,6 @@ export function useSessionPoller() {
     const encoder = ref<AccelMode | undefined>();
     const segmentFormat = ref<SegmentFormat | undefined>();
     const thumbnailsVtt = ref<string | undefined>();
-    const encryptionKeyHex = ref<string | undefined>();
     const ingestTotalBytes = ref<number | undefined>();
     const trimSegments = ref<TrimSegment[] | undefined>();
     const hlsUrl = ref<string | undefined>();
@@ -60,7 +59,6 @@ export function useSessionPoller() {
         encoder.value = data.encoder;
         segmentFormat.value = data.segmentFormat;
         thumbnailsVtt.value = data.thumbnailsVtt;
-        encryptionKeyHex.value = data.encryptionKeyHex;
         // Carry through the ingest total — once the URL probe reports it,
         // it remains valid for the duration of the upload phase, so don't
         // clear it on subsequent events that omit the field.
@@ -103,7 +101,6 @@ export function useSessionPoller() {
         encoder.value = undefined;
         segmentFormat.value = undefined;
         thumbnailsVtt.value = undefined;
-        encryptionKeyHex.value = undefined;
         ingestTotalBytes.value = undefined;
         trimSegments.value = undefined;
         hlsUrl.value = undefined;
@@ -173,7 +170,6 @@ export function useSessionPoller() {
         encoder: readonly(encoder),
         segmentFormat: readonly(segmentFormat),
         thumbnailsVtt: readonly(thumbnailsVtt),
-        encryptionKeyHex: readonly(encryptionKeyHex),
         ingestTotalBytes: readonly(ingestTotalBytes),
         trimSegments: readonly(trimSegments),
         hlsUrl: readonly(hlsUrl),

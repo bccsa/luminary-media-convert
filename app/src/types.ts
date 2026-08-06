@@ -74,7 +74,6 @@ export interface SessionStatusResponse {
     files?: string[];
     masterPlaylist?: string;
     thumbnailsVtt?: string;
-    encryptionKeyHex?: string;
     /** Public URL of the master playlist, known from the moment encoding starts. */
     hlsUrl?: string;
     /** Title supplied by the CMS that opened the session. */

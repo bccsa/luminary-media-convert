@@ -1,58 +1,158 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import type { VideoAngle } from '@luminary-media-converter/hls';
-import HlsPlayer from '../HlsPlayer.vue';
-import type { AudioTrackInfo, QualityLevelInfo } from '../HlsPlayer.vue';
+import { computed, ref, watch } from 'vue';
+import { LuminaryPlayer, usePlayerState } from '@luminary-media-converter/player-web';
+import type {
+    PlayerControllerApi,
+    PlayerSource,
+} from '@luminary-media-converter/player-core';
 import FormSelect from '../FormSelect.vue';
 
 const props = defineProps<{
-    activePlaybackUrl: string | null;
-    isCompleted: boolean;
-    thumbnailVttUrl: string | null | undefined;
-    encodingType: 'video' | 'audio';
-    isAudioOnly: boolean;
-    encryptionKeyHex: string | undefined;
-    pollerEncryptionKeyHex: string | undefined;
+    /** What the player should present. `null` renders nothing at all. */
+    source: PlayerSource | null;
     /** Whether to show the aside column beside the player. */
     showAside: boolean;
     activeTab: string;
-    showAngleSwitcher: boolean;
-    angleSelectOptions: { value: number; label: string }[];
-    currentAngleIndex: number;
-    /** Angle the player should pin, by id; null plays the master's default. */
-    angleId: string | null;
-    /** Play the master's audio renditions with no video. */
-    audioOnlyRendition: boolean;
     /** When true, hide the below-player angle row (e.g. on tabs other than the player view). */
     hideAngleSwitcher?: boolean;
+    /**
+     * Server-side preview audio tracks. The preview stream carries one audio
+     * rendition chosen by URL, so switching it is a source swap rather than a
+     * track change — which is why it is separate from the player's own
+     * `audioTracks` below.
+     */
     showAudioSelect: boolean;
     previewAudioSelectOptions: { value: number; label: string }[];
-    showQualitySelect: boolean;
-    previewQualitySelectOptions: { value: string; label: string }[];
 }>();
 
 const selectedAudioTrack = defineModel<number>('selectedAudioTrack', { required: true });
-const selectedQualityId = defineModel<string | null>('selectedQualityId', { required: true });
-
-const showAngleRow = computed(
-    () => props.isCompleted && props.showAngleSwitcher && !props.hideAngleSwitcher,
-);
-
-const showPlaybackControlsRow = computed(
-    () => showAngleRow.value || props.showAudioSelect || props.showQualitySelect,
-);
 
 const emit = defineEmits<{
-    qualityLevels: [levels: QualityLevelInfo[]];
     playingChange: [playing: boolean];
     durationChange: [d: number];
-    audioTracks: [tracks: AudioTrackInfo[]];
-    angleChange: [index: number];
-    anglesLoaded: [info: { angles: VideoAngle[]; hasAudioOnly: boolean }];
 }>();
 
 const playerShellRef = ref<HTMLElement | null>(null);
-const hlsPlayerRef = ref<InstanceType<typeof HlsPlayer> | null>(null);
+const luminaryPlayerRef = ref<InstanceType<typeof LuminaryPlayer> | null>(null);
+
+const controller = computed<PlayerControllerApi | null>(
+    () => luminaryPlayerRef.value?.controller ?? null,
+);
+
+const state = usePlayerState(controller);
+
+// ---- Player-driven selectors (angles / qualities / audio tracks) ----
+//
+// All three come from the controller's state: the master is parsed once by the
+// wrapper, so the angle list (including the synthesized "Audio only" rendering)
+// and the post-cap quality ladder are whatever it found there.
+
+const angleOptions = computed(() =>
+    state.value.angles.map((angle) => ({ value: angle.id, label: angle.name })),
+);
+
+const showAngleRow = computed(
+    () => angleOptions.value.length > 1 && !props.hideAngleSwitcher,
+);
+
+const qualityOptions = computed(() => [
+    { value: 'auto', label: 'Auto' },
+    ...state.value.qualities.map((quality) => ({
+        value: quality.id,
+        label: quality.label,
+    })),
+]);
+
+const showQualitySelect = computed(
+    () => state.value.qualities.length >= 1 && !state.value.isAudioOnly,
+);
+
+/**
+ * Audio tracks the stream itself offers. The preview stream never has more than
+ * one (its track is picked by URL), so this only lights up post-encode.
+ */
+const playerAudioOptions = computed(() =>
+    state.value.audioTracks.map((track) => ({
+        value: track.id,
+        label: track.lang && track.lang !== track.label
+            ? `${track.label} (${track.lang})`
+            : track.label,
+    })),
+);
+
+const showPlayerAudioSelect = computed(() => playerAudioOptions.value.length > 1);
+
+const showPlaybackControlsRow = computed(
+    () =>
+        showAngleRow.value ||
+        props.showAudioSelect ||
+        showPlayerAudioSelect.value ||
+        showQualitySelect.value,
+);
+
+watch(() => state.value.playing, (playing) => emit('playingChange', playing));
+watch(() => state.value.duration, (duration) => {
+    if (duration > 0) emit('durationChange', duration);
+});
+
+// ---- Playback surface exposed to the view ----
+
+/**
+ * The play position, read straight off the media element when there is one.
+ *
+ * `state.currentTime` follows the engine's `timeupdate`, which fires about four
+ * times a second — fine for a readout, far too coarse for a playhead drawn on
+ * animation frames or for the trim-preview jumps that have to land within a
+ * frame of a cut. The element is the same one the wrapper drives, so reading it
+ * directly is a refresh-rate concern only, not a second source of truth.
+ */
+function mediaElement(): HTMLMediaElement | null {
+    return playerShellRef.value?.querySelector('video') ?? null;
+}
+
+function getCurrentTime(): number {
+    const el = mediaElement();
+    if (el && Number.isFinite(el.currentTime)) return el.currentTime;
+    return state.value.currentTime;
+}
+
+function getDuration(): number | null {
+    const d = state.value.duration;
+    return d > 0 ? d : null;
+}
+
+/**
+ * Transport is only honoured while the player has something playable. In
+ * `waiting-for-master` / `error` the engine may still hold the previous
+ * source; driving it from the timeline would resume playback underneath the
+ * coming-soon or error surface.
+ */
+function transportReady(): boolean {
+    return state.value.lifecycle === 'ready';
+}
+
+function seek(time: number): void {
+    if (!transportReady()) return;
+    controller.value?.seek(Math.max(0, time));
+}
+
+function togglePlay(): void {
+    if (!transportReady()) return;
+    controller.value?.togglePlay();
+}
+
+function isPlaying(): boolean {
+    return state.value.playing;
+}
+
+/**
+ * Re-run the load for the current source. The player reloads by itself whenever
+ * the `source` object changes, so this is for the case where the URL is stable
+ * but what it serves is not — the preview playlist after trims are submitted.
+ */
+function reload(): void {
+    if (props.source) void controller.value?.load(props.source);
+}
 
 // ---- Split resizer (player ↔ aside) ----
 const SPLIT_KEY = 'lmc:session-player-split';
@@ -148,8 +248,17 @@ const asideColStyle = computed(() =>
     props.showAside ? { flex: `0 0 ${100 - splitPercent.value}%` } : undefined,
 );
 
+const lifecycle = computed(() => state.value.lifecycle);
+
 defineExpose({
-    playerRef: hlsPlayerRef,
+    controller,
+    lifecycle,
+    getCurrentTime,
+    getDuration,
+    seek,
+    togglePlay,
+    isPlaying,
+    reload,
 });
 </script>
 
@@ -163,7 +272,7 @@ defineExpose({
             up with the player's bottom instead of clipping above it.
         -->
         <div
-            v-if="activePlaybackUrl"
+            v-if="source"
             ref="splitRowRef"
             class="flex min-h-0 flex-1"
             :class="[
@@ -195,23 +304,35 @@ defineExpose({
                         ? 'session-trim-player-shell overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'
                         : 'w-full overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'"
                 >
-                    <HlsPlayer
-                        ref="hlsPlayerRef"
-                        :playback-url="activePlaybackUrl"
-                        :thumbnail-vtt-url="isCompleted ? thumbnailVttUrl : undefined"
-                        :encoding-type="encodingType"
-                        :is-audio-only="isAudioOnly"
-                        :encryption-key-hex="isCompleted ? (encryptionKeyHex || pollerEncryptionKeyHex) : undefined"
-                        :show-controls="false"
-                        :angle-id="angleId"
-                        :audio-only-rendition="audioOnlyRendition"
-                        preserve-state-on-source-change
-                        @quality-levels="emit('qualityLevels', $event)"
-                        @playing-change="emit('playingChange', $event)"
-                        @duration-change="(d) => { if (d != null) emit('durationChange', d) }"
-                        @audio-tracks="emit('audioTracks', $event)"
-                        @angles-loaded="emit('anglesLoaded', $event)"
-                    />
+                    <LuminaryPlayer
+                        ref="luminaryPlayerRef"
+                        :source="source"
+                    >
+                        <!--
+                            Audio-only renderings have nothing to show, so the
+                            black rectangle gets a glyph rather than looking
+                            like a player that failed to start.
+                        -->
+                        <div
+                            v-if="state.isAudioOnly"
+                            class="flex h-full w-full items-center justify-center"
+                        >
+                            <svg
+                                class="h-16 w-16 text-slate-600"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.5"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                aria-hidden="true"
+                            >
+                                <path d="M4 16V11a8 8 0 0 1 16 0v5" />
+                                <rect x="2" y="14" width="4" height="7" rx="2" />
+                                <rect x="18" y="14" width="4" height="7" rx="2" />
+                            </svg>
+                        </div>
+                    </LuminaryPlayer>
                 </div>
                 <!--
                     Below-player row: Angle / Audio / Quality dropdowns, on the
@@ -242,12 +363,11 @@ defineExpose({
                             <FormSelect
                                 variant="playback"
                                 presentation="custom"
-                                numeric
                                 wrapper-class="min-w-[7rem] max-w-[min(100%,14rem)]"
-                                :model-value="currentAngleIndex"
-                                :options="angleSelectOptions"
+                                :model-value="state.activeAngleId ?? ''"
+                                :options="angleOptions"
                                 aria-label="Camera angle"
-                                @update:model-value="emit('angleChange', Number($event))"
+                                @update:model-value="controller?.setAngle(String($event))"
                             />
                         </span>
                         <span
@@ -265,6 +385,20 @@ defineExpose({
                             />
                         </span>
                         <span
+                            v-else-if="showPlayerAudioSelect"
+                            class="inline-flex shrink-0 items-center gap-1.5"
+                        >
+                            <label class="playback-slot-label shrink-0">Audio:</label>
+                            <FormSelect
+                                variant="playback"
+                                presentation="custom"
+                                :model-value="state.activeAudioTrackId ?? ''"
+                                :options="playerAudioOptions"
+                                aria-label="Audio track"
+                                @update:model-value="controller?.setAudioTrack(String($event))"
+                            />
+                        </span>
+                        <span
                             v-if="showQualitySelect"
                             class="inline-flex shrink-0 items-center gap-1.5"
                         >
@@ -272,10 +406,10 @@ defineExpose({
                             <FormSelect
                                 variant="playback"
                                 presentation="custom"
-                                :model-value="selectedQualityId ?? ''"
-                                :options="previewQualitySelectOptions"
+                                :model-value="state.activeQualityId"
+                                :options="qualityOptions"
                                 aria-label="Quality"
-                                @update:model-value="selectedQualityId = $event === '' ? null : String($event)"
+                                @update:model-value="controller?.setQuality(String($event))"
                             />
                         </span>
                     </div>
@@ -329,7 +463,7 @@ defineExpose({
  * the player's bottom edge.
  *
  * max-height: 100% guards against extreme short windows where 16/9 of
- * the column width would exceed the row's height; video-js then shrinks
+ * the column width would exceed the row's height; the player then shrinks
  * proportionally rather than overflowing.
  */
 .session-trim-player-shell {
@@ -337,15 +471,11 @@ defineExpose({
     aspect-ratio: 16 / 9;
     max-height: 100%;
 }
-.session-trim-player-shell :deep(> div) {
+.session-trim-player-shell :deep(.lmp-root) {
     height: 100%;
 }
-.session-trim-player-shell :deep(.video-js.vjs-fluid) {
-    padding-top: 0 !important;
-    width: 100%;
+.session-trim-player-shell :deep(.lmp-video) {
     height: 100%;
-}
-.session-trim-player-shell :deep(.video-js .vjs-tech) {
     object-fit: cover;
 }
 

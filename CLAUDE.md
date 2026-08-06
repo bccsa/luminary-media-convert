@@ -10,13 +10,15 @@ A local-only desktop media encoder. A folder-based npm workspaces monorepo conta
 - **`cms-mock/`** — Dev-only Vue 3 app standing in for the Luminary CMS, so the whole CMS → encoder flow (origin gating, `documentId` reuse, `hlsUrl`/key delivery, `luminary://key` substitution, angle extraction) can be exercised locally. Not shipped; nothing depends on it.
 - **`encode-config/`** — Shared Vue 3 component library providing the `EncodeConfigForm` component, encoding/probe type definitions, and layout-based config persistence. Published as `@luminary-media-converter/encode-config`.
 - **`segment-editor/`** — Shared Vue 3 component library providing a player-agnostic timeline `SegmentEditor` for trim / chapters / subtitles authoring, plus WebVTT helpers (`exportChaptersVtt`, `exportSubtitlesVtt`, `parseVtt`). Published as `@luminary-media-converter/segment-editor`.
-- **`hls/`** — Shared TypeScript library providing HLS master/media playlist parsing and building, key/IV utilities, sidecar path conventions, the `LUMINARY_KEY_PLACEHOLDER_URI` constant, and the client-side angle/audio-only extraction helpers (`angles.ts`). Published as `@luminary-media-converter/hls`; consumed by `api/`, `app/` and `cms-mock/`.
+- **`hls/`** — Shared TypeScript library providing **lossless** HLS master/media playlist parsing and building (round-trips real FFmpeg output byte-faithfully, unknown tags/attributes preserved via WeakMap-backed metadata), the LMCENC encrypted-text-asset format helpers (`enc-format.ts`), S3-key utilities, sidecar path conventions, the `LUMINARY_KEY_PLACEHOLDER_URI` constant, and angle/audio-only extraction (text helpers + model-level `extractAngle`). Published as `@luminary-media-converter/hls`; consumed by `api/`, `app/`, `cms-mock/` and `player-core/`.
+- **`player-core/`** — Framework-agnostic, headless player wrapper: HLS munging pipeline (client-side angle extraction, quality capping, key handling, LMCENC decryption), `PlayerController` state store, recovery/stall/coming-soon policy, and the `PlayerAdapter` contract for pluggable engines (hls.js today; AVPlayer/ExoPlayer adapters later in a Capacitor shell). Published as `@luminary-media-converter/player-core`. See `player-core/src/types.ts` for the full contract.
+- **`player-web/`** — Web reference implementation of the player: `HlsJsAdapter` (hls.js on a plain `<video>`, in-memory AES key delivery via a custom key loader — no key blob URLs), `LuminaryPlayer.vue`, iOS-style fullscreen controls with orientation lock, and `PlayerMessages` i18n (every user-facing string overridable; scoped slots for full custom UI). Published as `@luminary-media-converter/player-web`; consumed by `app/`.
 
 There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, webhook delivery, or PWA/Cloudflare deployment. Those workspaces (`saas/`, `admin/`, `tusd/`) were removed in the local-only migration.
 
 ## Monorepo Structure
 
-- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls", "segment-editor", "cms-mock", "electron"]`)
+- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls", "segment-editor", "player-core", "player-web", "cms-mock", "electron"]`)
 - Dependencies are hoisted to the root `node_modules/`
 - Run workspace scripts from root: `npm -w api run <script>` or `npm -w app run <script>`
 - Root `npm run dev` — browser development: builds the shared libraries, then runs encode-config / segment-editor / hls watch builds, the API dev server and the Vite web client concurrently
@@ -52,12 +54,12 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 ### Web Client (`app/`)
 
 - **Framework**: Vue 3 (Composition API, `<script setup>`)
-- **Build**: Vite 6, Tailwind CSS v4, TypeScript, `resolve.dedupe: ['video.js']`
+- **Build**: Vite 6, Tailwind CSS v4, TypeScript
 - **Routing**: Vue Router 4 (history mode) — `/` → `/sessions`, `/sessions`, `/sessions/:id`
 - **Auth**: no sign-in. The UI's credential is the instance API token, taken from the preload bridge in the desktop app and from `VITE_API_TOKEN` in browser development (`src/auth-token.ts`)
 - **API base**: same-origin by default (the packaged app is served by the API); `VITE_API_URL` for browser development
-- **Media playback**: Video.js 8 with custom HLS quality selector and thumbnail preview plugins; encrypted HLS played client-side by rewriting `#EXT-X-KEY` URIs to a blob URL of the key
-- **Shared packages**: `@luminary-media-converter/encode-config`, `@luminary-media-converter/segment-editor`, `@luminary-media-converter/hls`
+- **Media playback**: `LuminaryPlayer` from `@luminary-media-converter/player-web` (hls.js on a plain `<video>`, driven by the `player-core` controller). Angle switching, quality selection, audio tracks and encrypted playback all go through the controller; the AES key is fetched masked from `GET /api/sessions/:id/key`, unmasked in memory (`utils/keyMask.ts`) and handed to the player, which serves it to hls.js from memory — no key blob URLs
+- **Shared packages**: `@luminary-media-converter/encode-config`, `@luminary-media-converter/segment-editor`, `@luminary-media-converter/hls`, `@luminary-media-converter/player-core`, `@luminary-media-converter/player-web`
 - **Real-time updates**: SSE via `GET /api/sessions/:id/events`, with a polling fallback in `useSessionPoller`
 - **Testing**: Vitest + `@vue/test-utils` + jsdom
 
@@ -171,18 +173,15 @@ app/
 │   ├── auth-token.ts                    # Preload bridge token, else VITE_API_TOKEN
 │   ├── session-tokens.ts                # Session token map seeded from GET /api/sessions
 │   ├── types.ts                         # App types + re-exports from encode-config
-│   ├── videojs-quality-selector.ts      # Custom Video.js quality selector (native ES6 classes)
-│   ├── videojs-thumbnail-preview.ts     # Custom Video.js thumbnail preview plugin
 │   ├── components/
 │   │   ├── AppPrimaryNav.vue, AccountMenu.vue   # nav shell; the "account" menu is now appearance/theme only
-│   │   ├── HlsPlayer.vue                # Video.js HLS player, client-side decryption, chapter cue injection
 │   │   ├── FileDropZone.vue             # Drop / pick a local file (paths via the preload bridge)
 │   │   ├── ProgressBar.vue, StatusBadge.vue, FormSelect.vue, FormSelectListbox.vue
 │   │   ├── ConfirmDangerModal.vue, DeleteSessionModal.vue
 │   │   └── session-view/
 │   │       ├── SessionWorkflowPanel.vue      # Probe → encode config → start
 │   │       ├── SessionTrimWorkspace.vue      # Trim timeline (waveform, storyboard, zoom, cuts)
-│   │       ├── SessionPlayerStrip.vue        # Player + track/quality selectors
+│   │       ├── SessionPlayerStrip.vue        # LuminaryPlayer + angle/quality/audio selectors (usePlayerState)
 │   │       ├── SessionPostProcessPanel.vue   # Chapters authoring
 │   │       └── SessionOutputPanel.vue        # Output summary / playback URLs
 │   ├── composables/
@@ -190,11 +189,11 @@ app/
 │   │   ├── useChapters.ts               # Chapter load/save (localStorage draft + debounced write to the API)
 │   │   ├── useChapterTrimSync.ts, useTrimDeletions.ts, useTrimPlayback.ts, useTrimmedStoryboard.ts
 │   │   └── useStoryboard.ts, useEncodeEta.ts, useAppLayout.ts, useTheme.ts
-│   ├── utils/                           # errors, format, status, storyboardVtt, trimPlayback, trimTimeline
+│   ├── utils/                           # errors, format, status, storyboardVtt, trimPlayback, trimTimeline, keyMask
 │   └── views/
 │       ├── ActiveSessionsView.vue       # Session list (polls GET /api/sessions)
 │       └── SessionView.vue              # Full session lifecycle
-└── vite.config.ts                       # Port 5173, strictPort, video.js dedupe, Vitest config
+└── vite.config.ts                       # Port 5173, strictPort, Vitest config
 
 cms-mock/
 ├── src/
@@ -253,11 +252,11 @@ The CMS is an ordinary web app on another origin; the encoder listens on loopbac
 3. **SSE** — the CMS subscribes to `eventsUrl` with `EventSource`. Events are the `SessionEvent` shape:
    ```ts
    { sessionId, status, progress?, pipelineProgress?, queuePosition?, error?, files?,
-     masterPlaylist?, thumbnailsVtt?, encryptionKeyHex?, hlsUrl?, segmentFormat?,
+     masterPlaylist?, thumbnailsVtt?, hlsUrl?, segmentFormat?,
      encoder?, probeResult?, ingestTotalBytes? }
    ```
-   **The event that matters** is the first `status: "encoding"`: it carries both `hlsUrl` and (when encryption was requested) `encryptionKeyHex`. Both are published at encode *start*, not at completion — the destination key is settled long before the first segment exists, and a CMS that learned the key only at completion would hold a playable URL it could not decrypt for the length of the encode. That pair is what Luminary saves as `MediaDto { hlsUrl, hlsKey }`.
-4. **Polling fallback** — `GET /api/sessions/:id?token=read_…` returns the same `hlsUrl` and `encryptionKeyHex`, so a CMS that reconnects mid-encode can ask again.
+   **The event that matters** is the first `status: "encoding"`: it carries `hlsUrl`, published at encode *start*, not at completion — the destination key is settled long before the first segment exists. The decryption key is **no longer part of any status/SSE payload**: the CMS fetches it from `GET /api/sessions/:id/key?token=read_…` → `{ maskedKeyHex }` and unmasks it (XOR with the first 16 bytes of `SHA-256(sessionId)` — self-inverse, formula published; an obscurity measure keeping raw keys out of logs/proxies, not DRM). `hlsUrl` + the unmasked key are what Luminary saves as `MediaDto { hlsUrl, hlsKey }`. `cms-mock/src/store.ts` (`captureHlsKey`) is the reference implementation.
+4. **Polling fallback** — `GET /api/sessions/:id?token=read_…` returns the same `hlsUrl`, so a CMS that reconnects mid-encode can ask again; the key comes from the key endpoint as above.
 
 ### Trust model: three token tiers plus an origin allowlist
 
@@ -290,9 +289,9 @@ Encryption keys are generated locally (`randomBytes(16)`) and never leave the ma
 
 A Luminary player is therefore expected to:
 
-1. Fetch the master and media playlists.
-2. Replace the `luminary://key` URI with a blob URL (or equivalent) containing the raw key bytes decoded from the `hlsKey` hex it stored alongside `hlsUrl`.
-3. Feed the rewritten playlists to the player. `app/src/components/HlsPlayer.vue` is the reference implementation.
+1. Fetch the master and media playlists (decrypting LMCENC-wrapped ones when the session opted into `encryptPlaylists`).
+2. Supply the key for `luminary://key` (and any other AES-128 key URI — a locally supplied key always wins). The wrapper normalizes key URIs to the sentinel and the engine adapter serves the raw bytes **from memory** (hls.js custom key loader; `AVAssetResourceLoaderDelegate` / ExoPlayer `DataSource` later) — a key blob URL is only the fallback for adapters without a key hook.
+3. Feed the munged playlists to the engine. **`player-core` (`PlayerController` + pipeline) is the reference implementation**, with `player-web`'s `HlsJsAdapter`/`LuminaryPlayer` as the web engine binding; the media encoder app consumes exactly these.
 
 The encoder writes **one** spec-correct multi-angle `master.m3u8`: each camera angle is an `#EXT-X-MEDIA:TYPE=VIDEO` rendition group and every `#EXT-X-STREAM-INF` carries `VIDEO="<group>"`. Most players ignore video rendition groups and simply play whichever variant their ABR logic picks, so narrowing happens client-side with the `hls/` helpers — this is the contract, not an implementation detail:
 
@@ -320,8 +319,8 @@ S3 credentials arrive per session and must survive a restart without ever sittin
 6. FIFO queue, one encode at a time.
 7. `EncodeService` clears any previous output, generates the AES key/IV **before** flipping to `encoding`, publishes `hlsUrl` (`publicBaseUrl` + `/` + `<prefix>/master.m3u8`), and starts `SegmentPipelineService`, which polls the FFmpeg output directory and streams each new segment through encrypt → upload → byte-range pack with bounded concurrency, instead of waiting for the encode to finish.
 8. FFmpeg probes per-stream start times: aligned streams (spread < 50 ms) get fMP4 (`.m4s` + `init.mp4`), misaligned streams fall back to MPEG-TS (`.ts`), because the player's TS transmuxer resynchronises audio/video PTS during playback. The choice is reported as `segmentFormat`.
-9. After drain: `#EXT-X-KEY` tags injected (when encrypted), thumbnail sprites + `thumbnails.vtt` generated for video encodes, `waveform.json` written as a sidecar next to `master.m3u8`.
-10. Completion sets `files`, `masterPlaylist`, `thumbnailsVtt`, `segmentFormat` and `encryptionKeyHex`, and emits the final event.
+9. After drain: `#EXT-X-KEY` tags injected (when encrypted), thumbnail sprites + `thumbnails.vtt` generated for video encodes, `waveform.json` written as a sidecar next to `master.m3u8`. When the session opted into `encryption.encryptPlaylists`, every `.m3u8` and `.vtt` is then LMCENC-encrypted (AES-128-CBC, fresh IV per file, `LMCENC01` magic — see `docs/encrypted-sidecar-format.md`) as the **final** pre-upload step; encrypted objects upload as `application/octet-stream`.
+10. Completion sets `files`, `masterPlaylist`, `thumbnailsVtt` and `segmentFormat`, and emits the final event. The key is never in the payload — clients use `GET /api/sessions/:id/key`.
 
 Disk is guarded on both ends: `disk-space.ts` refuses an ingest or an encode that will not fit, keeping a reserve (`DISK_RESERVE_BYTES`, default 2 GB), so a full volume cannot take the next encode down with it.
 
@@ -368,8 +367,9 @@ Auth column: **instance** = the instance `X-API-Key` token; **session** = `Beare
 | GET | `/api/sessions` | token | List every session on this instance, newest first, including session tokens (the UI is the only holder of the instance token) |
 | POST | `/api/sessions/:id/local-file` | token, session | Attach an absolute path to a file already on this machine. Returns once probed |
 | POST | `/api/sessions/:id/encode` | token, session | Submit the encode config and enqueue. `202` |
-| GET | `/api/sessions/:id` | token, session, read | Poll status: probe results, progress, `hlsUrl`, `encryptionKeyHex`, `canRetry`, `queuePosition`, trim segments, files on completion |
+| GET | `/api/sessions/:id` | token, session, read | Poll status: probe results, progress, `hlsUrl`, `canRetry`, `queuePosition`, trim segments, files on completion (no key — see `/key`) |
 | GET | `/api/sessions/:id/events` | query token (session **or** read) | SSE event stream |
+| GET | `/api/sessions/:id/key` | token, session, read | Masked AES-128 session key `{ maskedKeyHex }` (XOR `SHA-256(sessionId)[0..16]`, self-inverse). 404 when the session has no encryption |
 | DELETE | `/api/sessions/:id` | token, session | Cancel and delete. Allowed from `created`, `uploading`, `uploaded`, `queued`, `encoding`, `failed`, `completed` — the terminal two included, which is the only way their disk is reclaimed. `encrypting` and `uploading_to_s3` are refused: the pipeline is mid-write |
 | GET | `/api/sessions/:id/chapters?lang=en` | token, session | Read `chapters/<lang>.vtt` from the session's own prefix |
 | PUT | `/api/sessions/:id/chapters?lang=en` | token, session | Write `chapters/<lang>.vtt` (≤ 1 MiB, `text/vtt`). `204` |
@@ -411,7 +411,7 @@ created -> uploading -> uploaded -> queued -> encoding -> encrypting -> uploadin
 ## Key Conventions
 
 - DTOs use `class-validator` and are validated by a global `ValidationPipe` (whitelist + forbidNonWhitelisted). Even fields nothing acts on yet — `existingMedia` — are validated, because a shape that was never checked is a shape that will be wrong by the time something reads it
-- Session-level options (`segmentDuration`, `byteRange`, `byteRangeMaxFileSizeMB`, `thumbnails`, `encryption`) belong to session creation; `trimSegments` belongs to the encode config submitted at encode start
+- Session-level options (`segmentDuration`, `byteRange`, `byteRangeMaxFileSizeMB`, `thumbnails`, `encryption` — incl. `encryption.encryptPlaylists`) belong to session creation; `trimSegments` belongs to the encode config submitted at encode start
 - Host-specific values reach the API through `AppModule.forRoot()` → `RuntimeOptionsModule` (a `@Global` module): `LOCAL_API_TOKEN`, `ORIGIN_POLICY`, `CREDENTIAL_CIPHER`, `CMS_SESSION_HOOK`. Never import `AppModule` directly — a bare import leaves those tokens unbound. `workDir` and the ffmpeg paths go through `process.env` instead, because that is how the services already read them and they are process-wide anyway
 - ffmpeg/ffprobe are resolved per call through `ffbin.ts` (`FFMPEG_PATH` / `FFPROBE_PATH`, else PATH), never captured at import time, so the host can set them before Nest instantiates anything. `shellQuote()` exists because a macOS install path always contains a space
 - The API binds loopback unconditionally (`DEFAULT_HOST`). CORS and tokens answer questions a remote caller only gets to ask if it can open the socket
@@ -419,8 +419,9 @@ created -> uploading -> uploaded -> queued -> encoding -> encrypting -> uploadin
 - Responses a COEP-`credentialless` page embeds cross-origin (storyboard VTT and sprites) set `Cross-Origin-Resource-Policy: cross-origin`; Helmet's default of `same-origin` would have the browser drop them
 - Object keys always go through `S3Service.canonicalPrefix()` — no leading, trailing or doubled slashes
 - Graceful shutdown: `app.enableShutdownHooks()`; `QueueService` and `FfmpegService` implement `OnModuleDestroy`. The Electron host intercepts `before-quit`, awaits `server.close()`, and only then quits — quitting out from under Nest leaves orphan ffmpeg processes and half-written output
-- The Video.js quality selector is a custom plugin (`videojs-quality-selector.ts`) using native ES6 classes — the `videojs-hls-quality-selector` npm package is incompatible with Video.js 8 (Babel `_inheritsLoose` cannot extend native ES6 classes)
-- `resolve.dedupe: ['video.js']` in `app/vite.config.ts` keeps a single Video.js instance across modules
+- All playback behavior lives in `player-core` (munging, quality capping, angle switching, recovery/stall policy, coming-soon polling, chapters/subtitles) so web and future native players behave identically; engine specifics live behind `PlayerAdapter` implementations (`player-web`'s `HlsJsAdapter`). Implementing apps talk to `PlayerController` only
+- Quality capping is **load-time only**: `PlayerSource.maxHeight` munges higher renditions out of the playlist; a playing video keeps its old cap until the next `load()`. Selecting the `Audio only` pseudo-angle (`AUDIO_ONLY_ANGLE_ID`) plays a munged master with zero video variants — no video bytes are downloaded
+- LMCENC (`docs/encrypted-sidecar-format.md`) is the only sanctioned way to encrypt playlists/VTTs; detection is by magic prefix, never by absence-sniffing, and plaintext assets keep working when a key is configured
 - The renderer's only privileged capabilities are the three preload calls. Everything else it does goes over HTTP to the local API like any other client, which keeps one set of rules about what is allowed
 
 ## Environment Variables

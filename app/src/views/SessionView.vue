@@ -1,13 +1,5 @@
 <script setup lang="ts">
-import {
-    ref,
-    computed,
-    watch,
-    onMounted,
-    onUnmounted,
-    unref,
-    nextTick,
-} from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
     computeLayoutKey,
@@ -23,15 +15,11 @@ import {
     formatTime,
 } from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
-import type { VideoAngle } from '@luminary-media-converter/hls';
+import type { PlayerSource } from '@luminary-media-converter/player-core';
 import {
     useChapters,
     clearChapterDraftForSession,
 } from '../composables/useChapters';
-import type {
-    AudioTrackInfo,
-    QualityLevelInfo,
-} from '../components/HlsPlayer.vue';
 import FileDropZone from '../components/FileDropZone.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
@@ -45,6 +33,7 @@ import SessionWorkflowPanel from '../components/session-view/SessionWorkflowPane
 import {
     API_BASE,
     getSession,
+    getSessionKey,
     getSessionStatus,
     ingestLocalFile,
     listSessions,
@@ -81,6 +70,7 @@ import type {
     SessionSummary,
 } from '../types';
 import { formatBytes, formatRelative } from '../utils/format';
+import { unmaskSessionKey } from '../utils/keyMask';
 import { errorMessage } from '../utils/errors';
 import { statusLabel } from '../utils/status';
 
@@ -187,8 +177,16 @@ const sessionName = computed(
     () => session.value?.title ?? summary.value?.title ?? ''
 );
 
-// Encryption key
+/**
+ * The session's AES-128 key, once asked for.
+ *
+ * It no longer rides along on status reads or the event stream: it is served
+ * masked from its own endpoint and unmasked here, in memory, on the way to the
+ * player. `keyFetched` says the question has been put — a session with no
+ * encryption answers 404, so "no key" is an answer rather than a gap.
+ */
 const encryptionKeyHex = ref<string | undefined>();
+const keyFetched = ref(false);
 
 const sessionId = computed(() => route.params.id as string);
 
@@ -284,9 +282,7 @@ const isCompleted = computed(() => {
     return pollerStatus.value === 'completed' || sessionDocStatus.value === 'completed';
 });
 
-const isEncrypted = computed(
-    () => !!(encryptionKeyHex.value || poller.encryptionKeyHex.value)
-);
+const isEncrypted = computed(() => !!encryptionKeyHex.value);
 
 // ---------------------------------------------------------------------------
 // Source file selection — the encoder reads the file where it lies
@@ -476,62 +472,19 @@ function audioTrackLabel(track: PreviewAudioTrack): string {
 
 const previewAudioTracks = ref<PreviewAudioTrack[]>([]);
 const selectedAudioTrack = ref(0);
-const previewQualityLevels = ref<QualityLevelInfo[]>([]);
-const selectedQualityId = ref<string | null>(null);
 const isPreviewPlaying = ref(false);
-// Native HLS audio tracks (post-encode). Driven via player.audioTracks() so
-// we leverage VHS's built-in track switching rather than re-fetching playlists.
-const nativeAudioTracks = ref<AudioTrackInfo[]>([]);
-const selectedNativeAudioId = computed(() => {
-    const enabled = nativeAudioTracks.value.find((t) => t.enabled);
-    return enabled?.id ?? null;
-});
 
-function onPreviewQualityLevels(levels: QualityLevelInfo[]) {
-    previewQualityLevels.value = levels;
-}
-
-function onTrimQualityChange(id: string | null) {
-    playerRef.value?.setQuality(id);
-}
-
-function onNativeAudioTracks(tracks: AudioTrackInfo[]) {
-    nativeAudioTracks.value = tracks;
-}
-
-function onNativeAudioChange(id: string) {
-    playerRef.value?.setAudioTrack(id);
-}
-
-function nativeAudioLabel(t: AudioTrackInfo): string {
-    const parts: string[] = [];
-    if (t.label) parts.push(t.label);
-    if (t.language && t.language !== t.label) parts.push(`(${t.language})`);
-    return parts.join(' ') || t.id;
-}
-
+/**
+ * Quality, camera angle and post-encode audio tracks are all read off the
+ * master by the player wrapper and driven through its controller, so the strip
+ * owns those selectors now. The preview's audio track is the one exception —
+ * the encoder bakes a single audio rendition into the preview stream, so
+ * choosing another is a source swap, which is why it still lives here.
+ */
 const previewAudioSelectOptions = computed(() =>
     previewAudioTracks.value.map((t) => ({
         value: t.index,
         label: audioTrackLabel(t),
-    }))
-);
-
-const previewQualitySelectOptions = computed(() => [
-    { value: '', label: 'Auto' },
-    ...previewQualityLevels.value.map((level) => ({
-        value: level.id,
-        label:
-            level.height > 0
-                ? `${level.height}p`
-                : `${Math.round(level.bitrate / 1000)}kbps`,
-    })),
-]);
-
-const nativeAudioSelectOptions = computed(() =>
-    nativeAudioTracks.value.map((t) => ({
-        value: t.id,
-        label: nativeAudioLabel(t),
     }))
 );
 
@@ -572,16 +525,29 @@ watch(previewPlaybackUrl, (url) => {
     }
 });
 
+/**
+ * Whether the key question has been settled for this session.
+ *
+ * Without a session token there is nobody to ask, and nothing to ask for — the
+ * delivered output is all there is, so treat that as settled rather than
+ * withholding playback forever.
+ */
+const keySettled = computed(() => keyFetched.value || !sessionToken.value);
+
 // Active playback URL — preview during encoding, the delivered HLS after completion.
-// For encrypted sessions, wait for the encryption key before switching over
-// (otherwise the player loads the raw playlist with unrewritten #EXT-X-KEY URIs).
+// The swap waits on the key endpoint: until it has answered we cannot know
+// whether the delivered playlist needs a key, and handing the player an
+// encrypted stream without one fails the load rather than degrading.
+//
+// Once the session is finished there is deliberately no fall back to the
+// preview. The preview is a different thing — renditions the encoder made up
+// on the spot, transcoded on this machine for as long as someone watches — so
+// serving it in place of the delivered output would misreport what is playing
+// and hide the reason the output cannot be reached. A session with no
+// deliverable address shows `deliveryProblem` instead of a player.
 const activePlaybackUrl = computed(() => {
     if (isCompleted.value) {
-        const hasKey = !!(
-            encryptionKeyHex.value || poller.encryptionKeyHex.value
-        );
-        if (isEncrypted.value && !hasKey) return previewPlaybackUrl.value;
-        return playbackUrl.value ?? previewPlaybackUrl.value;
+        return keySettled.value ? playbackUrl.value : previewPlaybackUrl.value;
     }
     return previewPlaybackUrl.value;
 });
@@ -731,22 +697,20 @@ const { etaDisplay: ingestEtaDisplay } = useEncodeEta(() =>
 );
 
 // ---------------------------------------------------------------------------
-// Player — angle switching, playback URL, copy, files
+// Player — playback source, copy, files
 // ---------------------------------------------------------------------------
 
 const sessionPlayerStripRef = ref<InstanceType<
     typeof SessionPlayerStrip
 > | null>(null);
 const chapterSegmentEditorRef = ref<{ focus?: () => void } | null>(null);
-const playerRef = computed(() => {
-    const inner = sessionPlayerStripRef.value?.playerRef;
-    if (inner == null) return null;
-    return unref(inner);
-});
-
-function seekPlayerTime(t: number) {
-    playerRef.value?.seek(t);
-}
+/**
+ * The playback surface the strip exposes over the player's controller. Angle,
+ * quality and audio selection are the strip's own business; what the view still
+ * drives is the playhead — seeking, play/pause and the current time the trim
+ * timeline and the chapter list are drawn against.
+ */
+const playerRef = computed(() => sessionPlayerStripRef.value ?? null);
 
 /**
  * Deleting a clip takes that material out of the video, so the timeline loses it:
@@ -821,7 +785,6 @@ useTrimPlayback({
     seek: (t: number) => playerRef.value?.seek(t),
 });
 
-const currentAngleIndex = ref(0);
 const copied = ref(false);
 const copiedKey = ref(false);
 const showFiles = ref(false);
@@ -838,58 +801,12 @@ const displayThumbnailsVtt = computed(
     () => poller.thumbnailsVtt.value ?? session.value?.thumbnailsVtt
 );
 
-/**
- * What the encoded output offers, as reported by the player.
- *
- * The encoder writes one multi-angle master and the per-angle / audio-only
- * split happens client-side, so the only way to know what a session contains
- * is to read its master — which the player does on load.
+/*
+ * Camera angles are no longer this view's business. The encoder writes one
+ * multi-angle master; the player wrapper parses it, derives the angle list
+ * (including the synthesized audio-only rendering) and switches between them
+ * with the position and play state preserved. The strip drives that directly.
  */
-const masterAngles = ref<VideoAngle[]>([]);
-const masterHasAudioOnly = ref(false);
-
-interface AngleOption {
-    label: string;
-    /** Video rendition group to pin, or null for the master's own default. */
-    angleId: string | null;
-    audioOnly: boolean;
-}
-
-const angleOptions = computed<AngleOption[]>(() => {
-    const options: AngleOption[] = masterAngles.value.map((angle) => ({
-        label: angle.name,
-        angleId: angle.id,
-        audioOnly: false,
-    }));
-    if (options.length === 0) {
-        options.push({ label: 'Video', angleId: null, audioOnly: false });
-    }
-    // A pure-audio encode has nothing to drop, so offering "Audio only"
-    // alongside its own output would be a switch between two identical things.
-    if (masterHasAudioOnly.value && encodingType.value !== 'audio') {
-        options.push({ label: 'Audio only', angleId: null, audioOnly: true });
-    }
-    return options;
-});
-
-const currentAngle = computed(
-    () => angleOptions.value[currentAngleIndex.value] ?? angleOptions.value[0]
-);
-
-const showAngleSwitcher = computed(() => angleOptions.value.length > 1);
-
-const angleSelectOptions = computed(() =>
-    angleOptions.value.map((option, i) => ({ value: i, label: option.label }))
-);
-
-const selectedAngleId = computed(() => currentAngle.value?.angleId ?? null);
-
-const audioOnlyRendition = computed(() => currentAngle.value?.audioOnly ?? false);
-
-const isAudioOnly = computed(
-    () => encodingType.value === 'audio' || audioOnlyRendition.value
-);
-
 /**
  * Whether the source file itself carries video, read from the probe rather than
  * from `encodingType` — the latter is a choice about the output and can be set
@@ -902,17 +819,6 @@ const sourceHasVideoTrack = computed(() => {
         session.value?.probeResult?.videoTracks;
     return (tracks?.length ?? 0) > 0;
 });
-
-function onAnglesLoaded(info: {
-    angles: VideoAngle[];
-    hasAudioOnly: boolean;
-}): void {
-    masterAngles.value = info.angles;
-    masterHasAudioOnly.value = info.hasAudioOnly;
-    if (currentAngleIndex.value >= angleOptions.value.length) {
-        currentAngleIndex.value = 0;
-    }
-}
 
 /**
  * Where the finished output is published. The caller that opened the session
@@ -938,14 +844,45 @@ const playbackUrl = computed(() => s3Url.value);
  * name where they are — which otherwise presents as a player that spins for no
  * stated reason.
  */
-const deliveryProblem = computed<'blocked' | 'missing' | null>(() => {
+const deliveryProblem = computed<
+    'blocked' | 'missing' | 'unreachable' | null
+>(() => {
     if (!isCompleted.value) return null;
     const url = s3Url.value;
     if (!url) return 'missing';
     const pageIsSecure =
         typeof window !== 'undefined' && window.location.protocol === 'https:';
     if (pageIsSecure && url.startsWith('http://')) return 'blocked';
+    // Completed means the upload finished, so a player still waiting on the
+    // delivered master has an address problem (wrong public base URL, or a
+    // bucket that refuses anonymous reads) — not a timing one. Without this
+    // the page shows an indefinite "coming soon" for a finished encode.
+    if (playerRef.value?.lifecycle === 'waiting-for-master') {
+        return 'unreachable';
+    }
     return null;
+});
+
+const deliveryProblemText = computed(() => {
+    switch (deliveryProblem.value) {
+        case 'blocked':
+            return {
+                title: 'This output cannot be played from a secure page',
+                body: 'The output is served over http:// while this page is https://, so the browser blocks it. The encode is fine — the storage needs to be reachable over https://.',
+            };
+        case 'missing':
+            return {
+                title: 'This session has no public playback URL',
+                body: 'The encode finished and the files are in the bucket, but the session was opened without a public base URL, so nothing here can say where they are. Set one on the CMS side.',
+            };
+        case 'unreachable':
+            return {
+                title: 'The delivered output is not reachable at its playback URL',
+                body: `The encode finished, but ${s3Url.value ?? 'the playback URL'} does not answer with the master playlist (the player re-checks every 30 seconds). Check the S3 config's public base URL and that the bucket allows public reads.`,
+            };
+        default:
+            return null;
+    }
 });
 
 /**
@@ -1028,14 +965,40 @@ const shouldCollapseFiles = computed(
     () => (displayFiles.value?.length ?? 0) > 10
 );
 
-function switchToAngle(index: number) {
-    if (index === currentAngleIndex.value) return;
-    if (playerRef.value) {
-        const currentTime = playerRef.value.getCurrentTime();
-        playerRef.value.setPendingSeek(currentTime);
-    }
-    currentAngleIndex.value = index;
-}
+/**
+ * Chapter cues for the player, once the output is published.
+ *
+ * The same `chapters/<lang>.vtt` the editor writes beside the master. A session
+ * that has never had chapters saved simply has no such object, and a sidecar
+ * that 404s costs the player nothing — it reports the miss and plays on.
+ */
+const playerChapterSidecars = computed(() => {
+    if (!isCompleted.value) return undefined;
+    const base = deliveryBaseUrl.value;
+    if (!base) return undefined;
+    return [{ lang: 'en', label: 'Chapters', url: `${base}/chapters/en.vtt` }];
+});
+
+/**
+ * What the player is asked to present.
+ *
+ * A new object here is a reload, so this is deliberately thin: the URL, the
+ * key once it is known, and the chapter sidecar. Everything else the player
+ * needs — angles, the quality ladder, audio and subtitle tracks — it reads out
+ * of the master itself. `preservePosition` covers the one swap that matters:
+ * preview to delivered output, which should not send the viewer back to zero.
+ */
+const playerSource = computed<PlayerSource | null>(() => {
+    const url = activePlaybackUrl.value;
+    if (!url) return null;
+    const chapters = playerChapterSidecars.value;
+    return {
+        masterUrl: url,
+        preservePosition: true,
+        ...(encryptionKeyHex.value ? { keyHex: encryptionKeyHex.value } : {}),
+        ...(chapters ? { sidecars: { chapters } } : {}),
+    };
+});
 
 async function copyPlaybackUrl() {
     if (!s3Url.value) return;
@@ -1127,7 +1090,6 @@ async function fetchSession() {
             return;
         }
         session.value = detail;
-        encryptionKeyHex.value = detail.encryptionKeyHex ?? undefined;
         if (detail.probeResult) {
             probeResult.value = detail.probeResult;
             encodingType.value = detail.probeResult.videoTracks.length
@@ -1348,13 +1310,11 @@ async function onEncodeSubmit(config: EncodeConfig) {
             saveConfig(layoutKey, config);
         }
 
-        // Reload preview with filtered playlist when trim segments are active
-        if (
-            submittedTrims.length > 0 &&
-            playerRef.value &&
-            previewPlaybackUrl.value
-        ) {
-            playerRef.value.setSource(previewPlaybackUrl.value);
+        // The preview playlist is regenerated against the submitted trims, at
+        // the same URL — so nothing about the source changes and the player has
+        // to be told to read it again.
+        if (submittedTrims.length > 0 && previewPlaybackUrl.value) {
+            playerRef.value?.reload();
         }
 
         // Start polling for encoding progress
@@ -1400,14 +1360,61 @@ async function onCancelEncode() {
 }
 
 // ---------------------------------------------------------------------------
-// Watch for encryption key from poller (included in the SSE payloads)
+// Encryption key — asked for, never broadcast
 // ---------------------------------------------------------------------------
 
-watch(
-    () => poller.encryptionKeyHex.value,
-    (key) => {
-        if (key) encryptionKeyHex.value = key;
+/**
+ * Ask the encoder for this session's key, once it can have one.
+ *
+ * The key is generated when encoding starts, so there is nothing to fetch
+ * before then; a 404 means this session is not encrypted, which is an answer
+ * and is recorded as one. Attempts repeat on each status change until the
+ * question is answered, since a session reaching `encoding` and the key being
+ * recorded are not quite the same instant.
+ */
+async function fetchEncryptionKey() {
+    const token = sessionToken.value;
+    if (!token || encryptionKeyHex.value) return;
+    // A 404 only settles the question if the session was already finished when
+    // the request went out; earlier than that it may just be ahead of the key
+    // being recorded.
+    const askedAfterCompletion = isCompleted.value;
+    try {
+        const masked = await getSessionKey(sessionId.value, token);
+        if (masked?.maskedKeyHex) {
+            encryptionKeyHex.value = await unmaskSessionKey(
+                sessionId.value,
+                masked.maskedKeyHex
+            );
+            keyFetched.value = true;
+        } else if (askedAfterCompletion) {
+            keyFetched.value = true;
+        }
+    } catch {
+        // Unreachable or unreadable. Before completion, leave the question open
+        // so the next status change asks again; after it, settle anyway — an
+        // unanswerable key endpoint is no reason to hold the finished output
+        // back behind the preview stream forever.
+        if (askedAfterCompletion) keyFetched.value = true;
     }
+}
+
+const KEY_BEARING_STATUSES = [
+    'encoding',
+    'encrypting',
+    'uploading_to_s3',
+    'completed',
+];
+
+watch(
+    [() => sessionToken.value, currentStatus],
+    ([token, status]) => {
+        if (!token || !status) return;
+        if (!KEY_BEARING_STATUSES.includes(status)) return;
+        if (encryptionKeyHex.value) return;
+        void fetchEncryptionKey();
+    },
+    { immediate: true }
 );
 
 // Ingest runs server-side, so the flip to 'uploaded' arrives over the event
@@ -1858,20 +1865,12 @@ onUnmounted(() => {
                                     d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"
                                 />
                             </svg>
-                            <div>
+                            <div v-if="deliveryProblemText">
                                 <p class="font-medium">
-                                    {{
-                                        deliveryProblem === 'blocked'
-                                            ? 'This output cannot be played from a secure page'
-                                            : 'This session has no public playback URL'
-                                    }}
+                                    {{ deliveryProblemText.title }}
                                 </p>
                                 <p class="mt-1">
-                                    {{
-                                        deliveryProblem === 'blocked'
-                                            ? 'The output is served over http:// while this page is https://, so the browser blocks it. The encode is fine — the storage needs to be reachable over https://.'
-                                            : 'The encode finished and the files are in the bucket, but the session was opened without a public base URL, so nothing here can say where they are. Set one on the CMS side.'
-                                    }}
+                                    {{ deliveryProblemText.body }}
                                 </p>
                             </div>
                         </div>
@@ -1879,42 +1878,18 @@ onUnmounted(() => {
                         <SessionPlayerStrip
                             ref="sessionPlayerStripRef"
                             class="flex-1 min-h-0"
-                            :active-playback-url="activePlaybackUrl"
-                            :is-completed="isCompleted"
-                            :thumbnail-vtt-url="thumbnailVttUrl"
-                            :encoding-type="encodingType"
-                            :is-audio-only="isAudioOnly"
-                            :encryption-key-hex="encryptionKeyHex"
-                            :poller-encryption-key-hex="
-                                poller.encryptionKeyHex.value ?? undefined
-                            "
+                            :source="playerSource"
                             :show-aside="showAside"
                             :active-tab="activeTab"
-                            :show-angle-switcher="showAngleSwitcher"
-                            :angle-select-options="angleSelectOptions"
-                            :current-angle-index="currentAngleIndex"
-                            :angle-id="selectedAngleId"
-                            :audio-only-rendition="audioOnlyRendition"
-                            :show-audio-select="previewAudioTracks.length > 1"
+                            :show-audio-select="
+                                !isCompleted && previewAudioTracks.length > 1
+                            "
                             :preview-audio-select-options="
                                 previewAudioSelectOptions
                             "
-                            :show-quality-select="
-                                previewQualityLevels.length >= 1 &&
-                                encodingType !== 'audio'
-                            "
-                            :preview-quality-select-options="
-                                previewQualitySelectOptions
-                            "
                             v-model:selected-audio-track="selectedAudioTrack"
-                            v-model:selected-quality-id="selectedQualityId"
-                            @update:selected-quality-id="onTrimQualityChange"
-                            @quality-levels="onPreviewQualityLevels"
                             @playing-change="isPreviewPlaying = $event"
                             @duration-change="playerDuration = $event"
-                            @audio-tracks="onNativeAudioTracks"
-                            @angle-change="switchToAngle"
-                            @angles-loaded="onAnglesLoaded"
                         >
                             <!--
                                 Title, status and created label used to sit here,

@@ -163,6 +163,24 @@ export async function deleteSession(
     });
 }
 
+/**
+ * The session's AES-128 key, XOR-masked with the first 16 bytes of
+ * SHA-256(sessionId) — see {@link ../utils/keyMask!unmaskSessionKey}.
+ *
+ * Null when the encoder answers 404, which is also how a caller learns the
+ * session was encoded without encryption: there is no key to serve rather than
+ * an empty one.
+ */
+export async function getSessionKey(
+    sessionId: string,
+    sessionToken: string
+): Promise<{ maskedKeyHex: string } | null> {
+    return requestJsonOrNull(`${API_BASE}/api/sessions/${sessionId}/key`, {
+        token: sessionToken,
+        errorPrefix: 'Failed to read the session key',
+    });
+}
+
 export function subscribeSessionEvents(
     sessionId: string,
     sessionToken: string,

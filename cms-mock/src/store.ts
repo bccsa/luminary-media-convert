@@ -231,10 +231,11 @@ export function subscribe(eventsUrl: string): void {
         const isSavePoint = !stream.media && typeof data.hlsUrl === 'string';
         if (isSavePoint && data.hlsUrl) {
             // This is exactly where the real CMS writes its MediaDto.
-            stream.media = {
-                hlsUrl: data.hlsUrl,
-                hlsKey: data.encryptionKeyHex ?? null,
-            };
+            stream.media = { hlsUrl: data.hlsUrl, hlsKey: null };
+            // The key no longer rides along on the event; it is asked for.
+            void captureHlsKey(
+                session.response?.sessionId ?? data.sessionId ?? ''
+            );
         }
 
         stream.events.push({
@@ -248,6 +249,58 @@ export function subscribe(eventsUrl: string): void {
             stream.events.splice(0, stream.events.length - MAX_EVENTS);
         }
     };
+}
+
+/**
+ * Fetch the session's AES-128 key and record it against the saved media.
+ *
+ * The encoder stopped publishing the key on status reads and event frames: it
+ * is served, masked, from its own endpoint, and the holder unmasks it. That is
+ * the flow a real CMS has to implement, so the mock implements it too — right
+ * at the save point, where the key used to arrive for free.
+ *
+ *     mask = SHA-256(sessionId)[0..15]
+ *     key  = masked XOR mask          (XOR is its own inverse)
+ *
+ * Obscurity rather than security, and documented as such on the API side.
+ */
+async function captureHlsKey(sessionId: string): Promise<void> {
+    const token = session.response?.readToken;
+    if (!sessionId || !token) return;
+    try {
+        const res = await fetch(
+            `${trimBase()}/api/sessions/${encodeURIComponent(sessionId)}/key` +
+                `?token=${encodeURIComponent(token)}`
+        );
+        // 404 is the answer for a session encoded without encryption, and 401
+        // for a credential this endpoint does not accept. Either way there is
+        // no key to save, which `null` already says.
+        if (!res.ok) return;
+        const body = (await res.json()) as { maskedKeyHex?: string };
+        if (!body.maskedKeyHex || !stream.media) return;
+        stream.media.hlsKey = await unmaskKeyHex(sessionId, body.maskedKeyHex);
+    } catch {
+        /* encoder unreachable — the save point itself still stands */
+    }
+}
+
+async function unmaskKeyHex(
+    sessionId: string,
+    maskedKeyHex: string
+): Promise<string> {
+    const digest = await crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(sessionId)
+    );
+    const mask = new Uint8Array(digest).subarray(0, 16);
+    const masked = new Uint8Array(maskedKeyHex.length >> 1);
+    for (let i = 0; i < masked.length; i++) {
+        masked[i] = parseInt(maskedKeyHex.substring(i * 2, i * 2 + 2), 16);
+    }
+    return Array.from(
+        masked,
+        (byte, i) => (byte ^ mask[i % mask.length]).toString(16).padStart(2, '0')
+    ).join('');
 }
 
 function resetPlayback(): void {
