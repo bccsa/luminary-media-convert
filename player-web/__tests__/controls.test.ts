@@ -119,7 +119,7 @@ describe('FullscreenControls — track menus', () => {
 });
 
 describe('FullscreenControls — auto-hide', () => {
-    it('hides after inactivity while playing and returns on pointer movement', async () => {
+    it('hides after inactivity while playing and returns on movement anywhere', async () => {
         vi.useFakeTimers();
         const { wrapper } = mountControls({ playing: true });
         const overlay = wrapper.get('.lmp-fs');
@@ -130,7 +130,10 @@ describe('FullscreenControls — auto-hide', () => {
         await wrapper.vm.$nextTick();
         expect(overlay.classes()).toContain('lmp-fs-hidden');
 
-        await overlay.trigger('pointermove');
+        // Deliberately not on the overlay: hidden, it takes no pointer events
+        // at all, so anything listening there could never bring itself back.
+        document.dispatchEvent(new Event('pointermove'));
+        await wrapper.vm.$nextTick();
         expect(overlay.classes()).not.toContain('lmp-fs-hidden');
 
         vi.advanceTimersByTime(3000);

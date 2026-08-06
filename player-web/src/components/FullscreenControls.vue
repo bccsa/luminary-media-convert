@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { PlayerControllerApi, PlayerState } from '@luminary-media-converter/player-core';
 import type { PlayerMessages } from '../messages';
 import '../styles.css';
@@ -60,7 +60,26 @@ watch(
     { immediate: true },
 );
 
-onBeforeUnmount(clearHideTimer);
+/**
+ * Activity is watched on the document, not on this overlay.
+ *
+ * Hiding sets `pointer-events: none` — which is what lets a click through to
+ * the picture underneath, and equally what stops the overlay ever seeing the
+ * movement that should bring it back. Listening a level up means the pointer
+ * is found wherever it moves, hidden or not.
+ */
+onMounted(() => {
+    document.addEventListener('pointermove', reveal);
+    document.addEventListener('pointerdown', reveal);
+    document.addEventListener('keydown', reveal);
+});
+
+onBeforeUnmount(() => {
+    clearHideTimer();
+    document.removeEventListener('pointermove', reveal);
+    document.removeEventListener('pointerdown', reveal);
+    document.removeEventListener('keydown', reveal);
+});
 
 // --- readouts -------------------------------------------------------------
 
@@ -114,12 +133,7 @@ function onSubtitleChange(event: Event): void {
 </script>
 
 <template>
-    <div
-        class="lmp-fs"
-        :class="{ 'lmp-fs-hidden': !visible }"
-        @pointermove="reveal"
-        @pointerdown="reveal"
-    >
+    <div class="lmp-fs" :class="{ 'lmp-fs-hidden': !visible }">
         <div class="lmp-fs-center">
             <button
                 type="button"

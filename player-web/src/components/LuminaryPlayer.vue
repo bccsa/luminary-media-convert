@@ -108,11 +108,17 @@ function toggleFullscreen(): void {
 }
 
 /**
- * Double-click / double-tap the picture to toggle fullscreen.
+ * Double-click / double-tap toggles fullscreen.
  *
  * The gesture stays with the player because it belongs to the video surface;
  * the button that does the same thing does not, and lives in the host app's
  * controls.
+ *
+ * Bound to the root rather than to the video, because the fullscreen overlay
+ * covers the video whenever it is showing — bound any lower, the gesture would
+ * work only in the moments the controls happened to be hidden. Anything the
+ * viewer can actually operate is exempt, so double-clicking play/pause is two
+ * play/pauses and nothing more.
  *
  * Touch is detected by hand rather than left to `dblclick`, which mobile
  * browsers fire late, inconsistently, or not at all. Where a browser does both,
@@ -122,13 +128,21 @@ const DOUBLE_TAP_MS = 300;
 let lastTapAt = 0;
 let handledAt = 0;
 
-function onDoubleClick(): void {
+function isOnControl(target: EventTarget | null): boolean {
+    return (
+        target instanceof Element &&
+        target.closest('button, input, select, textarea, a, [role="slider"]') !== null
+    );
+}
+
+function onDoubleClick(event: MouseEvent): void {
+    if (isOnControl(event.target)) return;
     if (Date.now() - handledAt < DOUBLE_TAP_MS * 2) return;
     toggleFullscreen();
 }
 
 function onPointerUp(event: PointerEvent): void {
-    if (event.pointerType !== 'touch') return;
+    if (event.pointerType !== 'touch' || isOnControl(event.target)) return;
     const now = Date.now();
     if (now - lastTapAt < DOUBLE_TAP_MS) {
         lastTapAt = 0;
@@ -143,15 +157,14 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen });
 </script>
 
 <template>
-    <div ref="containerEl" class="lmp-root" :class="{ 'lmp-is-fullscreen': isFullscreen }">
-        <video
-            ref="videoEl"
-            class="lmp-video"
-            playsinline
-            webkit-playsinline
-            @dblclick="onDoubleClick"
-            @pointerup="onPointerUp"
-        ></video>
+    <div
+        ref="containerEl"
+        class="lmp-root"
+        :class="{ 'lmp-is-fullscreen': isFullscreen }"
+        @dblclick="onDoubleClick"
+        @pointerup="onPointerUp"
+    >
+        <video ref="videoEl" class="lmp-video" playsinline webkit-playsinline></video>
 
         <div class="lmp-slot">
             <slot :state="state" :controller="controller"></slot>
