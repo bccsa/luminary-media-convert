@@ -1818,10 +1818,21 @@ defineExpose({
                     :style="draftRangeStyle"
                     aria-hidden="true"
                 />
+                <!--
+                    The bar is positioned by its left edge, so at 100% it sat
+                    entirely past the track's right edge and was clipped — the
+                    playhead vanished exactly at the end of playback. The
+                    translateX slides it back by its own width in proportion to
+                    its position: flush left at 0%, flush right at 100%, and
+                    imperceptibly offset in between.
+                -->
                 <div
                     v-if="playheadPercent >= 0 && playheadPercent <= 100"
                     class="se-playhead"
-                    :style="{ left: `${playheadPercent}%` }"
+                    :style="{
+                        left: `${playheadPercent}%`,
+                        transform: `translateX(-${playheadPercent}%)`,
+                    }"
                 />
                 <div
                     v-if="snapGuide !== null"

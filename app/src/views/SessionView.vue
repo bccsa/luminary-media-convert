@@ -645,13 +645,19 @@ const sourceProbeDuration = computed(() => {
 
 const trimEditorProbeDuration = computed(() => {
     if (timelineIsShortened.value) return trimmedDuration(timelineRanges.value);
-    // Prefer player-reported duration (reflects encoded trim cuts); fall back through
-    // in-memory probe then session probe so completed sessions always get a value.
     if (showsOutputTimeline.value) {
-        const player = playerDuration.value;
-        if (player != null && player > 0) return player;
-        // Playback not ready yet: use the retained ranges rather than letting the
-        // fallbacks stretch the timeline back out to the full source duration.
+        // Completed: the player holds the encoded file, whose reported duration
+        // is the output's real length — and the storyboard beside it was sampled
+        // from that same file, so the two agree.
+        if (isCompleted.value) {
+            const player = playerDuration.value;
+            if (player != null && player > 0) return player;
+        }
+        // During the encode the player still holds the *preview*, which cuts on
+        // its 4-second segment grid and so reports up to ~8s more than the trims
+        // actually keep. Sizing the timeline from it left a strip of ruler past
+        // the last thumbnail — the storyboard is re-timed from the exact trim
+        // ranges, so the exact trimmed duration is what matches it.
         return trimmedDuration(submittedTrimSegments.value);
     }
     return chaptersSidePanelDuration.value;
