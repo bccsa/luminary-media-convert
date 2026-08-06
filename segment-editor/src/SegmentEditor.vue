@@ -1368,14 +1368,25 @@ function canObserveResize(): boolean {
 /** Resolved once per colour change: reading a CSS variable forces style recalc. */
 let waveformColorCache: { key: string; value: string } | null = null;
 
+/**
+ * Peaks are drawn white over the filmstrip, which carries a dark gradient along
+ * its bottom for exactly that purpose. An audio source has no frames, so that
+ * gradient is not there either and white peaks all but vanished into a light
+ * track. Without a strip behind them they take a colour that contrasts with the
+ * track itself, which means it has to follow the theme rather than being fixed.
+ */
 function resolveWaveformColor(): string {
     if (props.waveformColor) return props.waveformColor;
     const rootEl = rootElRef.value || document.documentElement;
-    const key = rootEl.className;
+    const overFilmstrip = thumbnailStripTiles.value.length > 0;
+    const variable = overFilmstrip ? '--se-waveform' : '--se-waveform-bare';
+    // The variant is part of the key: the same element resolves two different
+    // colours depending on what is behind the canvas.
+    const key = `${rootEl.className}|${variable}`;
     if (waveformColorCache?.key === key) return waveformColorCache.value;
     const value =
-        getComputedStyle(rootEl).getPropertyValue('--se-waveform').trim() ||
-        'rgba(255,255,255,0.35)';
+        getComputedStyle(rootEl).getPropertyValue(variable).trim() ||
+        (overFilmstrip ? 'rgba(255,255,255,0.35)' : 'rgba(51,85,125,0.72)');
     waveformColorCache = { key, value };
     return value;
 }
@@ -1484,6 +1495,19 @@ watch([viewStart, visibleSpan], () => {
     measureTrackWidth();
     scheduleWaveformDraw();
 });
+
+// The peaks' colour depends on whether the filmstrip is behind them, so the
+// canvas has to be repainted when the strip appears or goes away — thumbnails
+// arrive well after the waveform on a source that is still being sampled, and
+// without this the peaks kept the colour chosen for a bare track underneath a
+// filmstrip that had since loaded.
+watch(
+    () => thumbnailStripTiles.value.length > 0,
+    () => {
+        waveformColorCache = null;
+        scheduleWaveformDraw();
+    },
+);
 
 
 onMounted(() => {

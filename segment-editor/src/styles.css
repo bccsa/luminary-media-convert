@@ -22,7 +22,16 @@
     --se-segment-label: #ffffff;
     --se-segment-label-bg: rgb(15 23 42 / 0.78);
     --se-ruler-tick: rgba(100, 116, 139, 0.28);
+    /* Over the filmstrip, against its dark bottom gradient. */
     --se-waveform: rgba(255, 255, 255, 0.85);
+    /* On the bare track — an audio source has no frames, so the gradient that
+       made white peaks legible is not there either. On such a timeline the
+       waveform is the only content, so it carries colour rather than sitting
+       back in grey: a desaturated slate-blue, kin to the app's sky without
+       being it. The distance matters — the playhead is sky-700 and marked
+       segments wash in sky at 14%, and an accent-coloured waveform would blur
+       both the playhead during playback and the edge of a selection. */
+    --se-waveform-bare: rgba(51, 85, 125, 0.72);
     --se-list-hover: rgba(14, 165, 233, 0.08);
     --se-list-selected: rgba(14, 165, 233, 0.12);
     --se-kbd-bg: rgb(250 250 250);
@@ -72,6 +81,10 @@ html.dark .se-root {
     --se-segment-label-bg: rgb(2 6 23 / 0.82);
     --se-ruler-tick: rgba(148, 163, 184, 0.22);
     --se-waveform: rgba(255, 255, 255, 0.85);
+    /* Dark theme: the same slate-blue read from the other side — the peaks
+       lighten instead of darkening, and stay short of the white used over the
+       filmstrip, which glared against a plain background. */
+    --se-waveform-bare: rgba(125, 190, 235, 0.75);
     --se-list-hover: rgba(56, 189, 248, 0.08);
     --se-list-selected: rgba(56, 189, 248, 0.14);
     --se-kbd-bg: rgb(15 23 42 / 0.45);
