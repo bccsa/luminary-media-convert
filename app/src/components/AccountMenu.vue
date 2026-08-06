@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useAuth0 } from '@auth0/auth0-vue';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useTheme, type ThemePreference } from '../composables/useTheme';
 
-const { user, logout } = useAuth0();
-const { preference, setPreference } = useTheme();
+/**
+ * Appearance menu. There is no account any more — the app runs locally with no
+ * sign-in — so what was the account menu keeps its place and its shape, and
+ * carries the one setting that was ever really in it.
+ */
 
-const returnTo = window.location.origin;
+const { preference, setPreference } = useTheme();
 
 const open = ref(false);
 const rootEl = ref<HTMLElement | null>(null);
@@ -16,24 +18,6 @@ const themeOptions: { value: ThemePreference; label: string; description: string
     { value: 'system', label: 'Auto', description: 'Match system' },
     { value: 'dark', label: 'Dark', description: 'Always dark' },
 ];
-
-const email = computed(() => user.value?.email ?? '');
-
-const initials = computed(() => {
-    const u = user.value;
-    if (!u) return '?';
-    const name = typeof u.name === 'string' ? u.name.trim() : '';
-    if (name) {
-        const parts = name.split(/\s+/).filter(Boolean);
-        if (parts.length >= 2) {
-            return (parts[0]!.charAt(0) + parts[parts.length - 1]!.charAt(0)).toUpperCase();
-        }
-        return name.slice(0, 2).toUpperCase();
-    }
-    const em = typeof u.email === 'string' ? u.email.trim() : '';
-    if (em) return em.slice(0, 2).toUpperCase();
-    return '?';
-});
 
 function toggle() {
     open.value = !open.value;
@@ -70,24 +54,33 @@ watch(open, (v) => {
 function pickTheme(p: ThemePreference) {
     setPreference(p);
 }
-
-function signOut() {
-    close();
-    logout({ logoutParams: { returnTo } });
-}
 </script>
 
 <template>
     <div ref="rootEl" class="relative shrink-0">
         <button
             type="button"
-            class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-800 shadow-sm ring-slate-900/5 transition-colors hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 dark:ring-white/10"
+            class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-slate-700 shadow-sm ring-slate-900/5 transition-colors hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:ring-white/10"
             :aria-expanded="open"
             aria-haspopup="true"
-            aria-label="Account menu"
+            aria-label="Appearance"
+            title="Appearance"
             @click.stop="toggle"
         >
-            {{ initials }}
+            <svg
+                class="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="1.75"
+                aria-hidden="true"
+            >
+                <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M12 3v1.5m0 15V21m9-9h-1.5m-15 0H3m15.36-6.36-1.06 1.06M6.7 17.3l-1.06 1.06m12.72 0-1.06-1.06M6.7 6.7 5.64 5.64M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z"
+                />
+            </svg>
         </button>
 
         <Transition
@@ -102,16 +95,9 @@ function signOut() {
                 v-if="open"
                 class="absolute right-0 top-full z-50 mt-2 w-[min(18rem,calc(100vw-2rem))] origin-top-right rounded-xl border border-slate-200 bg-white py-1 shadow-xl ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10"
                 role="menu"
-                aria-label="Account"
+                aria-label="Appearance"
                 @click.stop
             >
-                <div class="border-b border-slate-100 px-3 py-3 dark:border-slate-700">
-                    <p class="text-xs font-medium text-slate-500 dark:text-slate-400">Signed in as</p>
-                    <p class="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-slate-100" :title="email">
-                        {{ email || '—' }}
-                    </p>
-                </div>
-
                 <div class="px-2 py-2" role="none">
                     <p
                         id="account-appearance-label"
@@ -152,17 +138,6 @@ function signOut() {
                             </span>
                         </button>
                     </div>
-                </div>
-
-                <div class="border-t border-slate-100 px-2 py-2 dark:border-slate-700">
-                    <button
-                        type="button"
-                        role="menuitem"
-                        class="flex w-full cursor-pointer items-center justify-center rounded-lg px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                        @click="signOut"
-                    >
-                        Sign out
-                    </button>
                 </div>
             </div>
         </Transition>

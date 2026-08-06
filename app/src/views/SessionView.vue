@@ -8,7 +8,6 @@ import {
     unref,
     nextTick,
 } from 'vue';
-import { useAuth0 } from '@auth0/auth0-vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
     computeLayoutKey,
@@ -24,6 +23,7 @@ import {
     formatTime,
 } from '@luminary-media-converter/segment-editor';
 import type { Segment } from '@luminary-media-converter/segment-editor';
+import type { VideoAngle } from '@luminary-media-converter/hls';
 import {
     useChapters,
     clearChapterDraftForSession,
@@ -32,6 +32,7 @@ import type {
     AudioTrackInfo,
     QualityLevelInfo,
 } from '../components/HlsPlayer.vue';
+import FileDropZone from '../components/FileDropZone.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import DeleteSessionModal from '../components/DeleteSessionModal.vue';
@@ -41,20 +42,24 @@ import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vu
 import SessionTrimWorkspace from '../components/session-view/SessionTrimWorkspace.vue';
 import SessionWorkflowPanel from '../components/session-view/SessionWorkflowPanel.vue';
 import {
-    getSessionDetail,
+    API_BASE,
+    getSession,
     getSessionStatus,
+    ingestLocalFile,
+    listSessions,
     startEncode,
     deleteSession,
-    updateSessionName,
-    getSessionWaveform,
 } from '../api';
+import {
+    forgetSessionToken,
+    getSessionToken,
+    setSessionToken,
+} from '../session-tokens';
 import { useSessionPoller } from '../composables/useSessionPoller';
 import { useStoryboard } from '../composables/useStoryboard';
 import { useTrimmedStoryboard } from '../composables/useTrimmedStoryboard';
-import { useActiveUploads } from '../composables/useActiveUploads';
 import { useAppLayout } from '../composables/useAppLayout';
 import { useEncodeEta } from '../composables/useEncodeEta';
-import { useSessionFileOps } from '../composables/useSessionFileOps';
 import { useChapterTrimSync } from '../composables/useChapterTrimSync';
 import { useTrimDeletions } from '../composables/useTrimDeletions';
 import { useTrimPlayback } from '../composables/useTrimPlayback';
@@ -64,16 +69,19 @@ import {
     mapSegmentsToTimeline,
     outputToSource,
     slicePeaksToTrims,
-    sourceToOutput,
     sourceToOutputClamped,
     trimmedDuration,
 } from '../utils/trimTimeline';
-import type { AccelMode, SegmentFormat } from '../types';
-import { formatBytes, formatDateTime, formatRelative } from '../utils/format';
+import type {
+    AccelMode,
+    SegmentFormat,
+    SessionStatusResponse,
+    SessionSummary,
+} from '../types';
+import { formatBytes, formatRelative } from '../utils/format';
 import { errorMessage } from '../utils/errors';
 import { statusLabel } from '../utils/status';
 
-const { getAccessTokenSilently } = useAuth0();
 const route = useRoute();
 const router = useRouter();
 
@@ -81,14 +89,19 @@ const router = useRouter();
 // State
 // ---------------------------------------------------------------------------
 
-const session = ref<any>(null);
+const session = ref<SessionStatusResponse | null>(null);
+/**
+ * The session's row in `GET /api/sessions`. It is the only place the creation
+ * time and the session token are published, so the detail view reads it even
+ * though the status response covers everything else.
+ */
+const summary = ref<SessionSummary | null>(null);
 const loading = ref(true);
 const error = ref<string | null>(null);
+const notFound = ref(false);
 const submissionError = ref<string | null>(null);
 
-// Active session tokens (from SaaS detail response)
 const sessionToken = ref<string | null>(null);
-const encodingApiUrl = ref<string | null>(null);
 
 // Probe/encode state
 const probeResult = ref<ProbeResult | null>(null);
@@ -135,27 +148,22 @@ const encodeConfigCanSubmit = ref(false);
 
 // Chapter editor — sidecar VTT in S3, autosaves to localStorage, explicit save to S3.
 const chapters = useChapters({
-    getAccessToken: () => getAccessTokenSilently(),
+    getSessionToken: () => sessionToken.value ?? '',
 });
 const chapterSegments = chapters.segments;
 const chaptersSaveError = ref<string | null>(null);
 
 // Playback duration as reported by the player — the only correct source for
-// the chapter timeline since it reflects trim cuts on encoded output and is
-// the only signal available for imported sessions (which never run probe).
+// the chapter timeline since it reflects trim cuts on encoded output.
 const playerDuration = ref<number | null>(null);
-const chapterTimelineDuration = computed(
-    () => playerDuration.value ?? probeResult.value?.format?.duration ?? 0
-);
 
-/** Duration for the beside-player chapters panel (player > in-memory probe > session doc probe). */
+/** Duration for the beside-player chapters panel (player > probe). */
 const chaptersSidePanelDuration = computed(() => {
     const pd = playerDuration.value;
     if (pd != null && pd > 0) return pd;
     const pr = probeResult.value?.format?.duration;
     if (typeof pr === 'number' && pr > 0) return pr;
-    const sp = (session.value?.probeResult as ProbeResult | undefined)?.format
-        ?.duration;
+    const sp = session.value?.probeResult?.format?.duration;
     if (typeof sp === 'number' && sp > 0) return sp;
     return 0;
 });
@@ -168,49 +176,20 @@ const segmentEditorProbeFps = computed(() => {
     return Math.round(f);
 });
 
-// Session name
-const sessionName = ref('');
-const editingName = ref(false);
-const nameInput = ref('');
-const savingName = ref(false);
-
-async function startEditName() {
-    nameInput.value = sessionName.value;
-    editingName.value = true;
-}
-
-async function saveName() {
-    const trimmed = nameInput.value.trim();
-    if (trimmed === sessionName.value) {
-        editingName.value = false;
-        return;
-    }
-    savingName.value = true;
-    try {
-        const token = await getAccessTokenSilently();
-        await updateSessionName(token, sessionId.value, trimmed);
-        sessionName.value = trimmed;
-        if (session.value) session.value.name = trimmed;
-    } catch {
-        // Non-critical
-    } finally {
-        savingName.value = false;
-        editingName.value = false;
-    }
-}
-
-function cancelEditName() {
-    editingName.value = false;
-}
+/**
+ * Session title. It belongs to the CMS document the session was opened for, so
+ * it is displayed and never edited here.
+ */
+const sessionName = computed(
+    () => session.value?.title ?? summary.value?.title ?? ''
+);
 
 // Encryption key
 const encryptionKeyHex = ref<string | undefined>();
 
-// SaaS polling for non-local uploads
 const sessionId = computed(() => route.params.id as string);
 
 const poller = useSessionPoller();
-const activeUploads = useActiveUploads();
 const { setHeaderLayout, headerLayout } = useAppLayout();
 
 // ---------------------------------------------------------------------------
@@ -218,7 +197,7 @@ const { setHeaderLayout, headerLayout } = useAppLayout();
 // ---------------------------------------------------------------------------
 
 // Status text/border colors for the badge under the player. Labels live in
-// utils/status.ts (shared with the history list); colors stay local because the
+// utils/status.ts (shared with the session list); colors stay local because the
 // two surfaces use different visual treatments.
 const statusColors: Record<string, { color: string; borderColor: string }> = {
     created: {
@@ -257,10 +236,6 @@ const statusColors: Record<string, { color: string; borderColor: string }> = {
         color: 'text-red-700 dark:text-red-400',
         borderColor: 'border-red-300 dark:border-red-700/60',
     },
-    imported: {
-        color: 'text-violet-700 dark:text-violet-400',
-        borderColor: 'border-violet-300 dark:border-violet-700/60',
-    },
 };
 
 const ICON_PATHS = {
@@ -280,7 +255,7 @@ const encoderConfig: Record<string, { label: string; icon: string }> = {
 // Computed
 // ---------------------------------------------------------------------------
 
-// Use poller status for active sessions, session doc status for historical
+// Poller status leads while it runs; the loaded status covers the rest.
 const pollerStatus = computed(() => poller.status.value);
 const sessionDocStatus = computed(() => session.value?.status ?? null);
 
@@ -288,9 +263,8 @@ const currentStatus = computed<string | null>(() => {
     return pollerStatus.value ?? sessionDocStatus.value;
 });
 
-const isActiveSession = computed(
-    () => !!sessionToken.value && !!encodingApiUrl.value
-);
+/** Every session on this instance is live — a token is all that is needed to drive it. */
+const isActiveSession = computed(() => !!sessionToken.value);
 
 const isTerminal = computed(() => {
     const ps = pollerStatus.value;
@@ -299,74 +273,113 @@ const isTerminal = computed(() => {
         ps === 'completed' ||
         ps === 'failed' ||
         ss === 'completed' ||
-        ss === 'failed' ||
-        ss === 'imported'
+        ss === 'failed'
     );
 });
 
 const isCompleted = computed(() => {
-    const ps = pollerStatus.value;
-    const ss = sessionDocStatus.value;
-    return ps === 'completed' || ss === 'completed' || ss === 'imported';
+    return pollerStatus.value === 'completed' || sessionDocStatus.value === 'completed';
 });
 
-const isExpired = computed(() => {
-    // Non-terminal status but no session token means the encoding session expired
-    return (
-        !isTerminal.value &&
-        !isActiveSession.value &&
-        !loading.value &&
-        session.value
-    );
-});
+const isEncrypted = computed(
+    () => !!(encryptionKeyHex.value || poller.encryptionKeyHex.value)
+);
 
-const s3PublicBaseUrl = computed(() => {
-    const s3 = session.value?.s3Config;
-    if (s3?.publicUrl) return s3.publicUrl.replace(/\/+$/, '');
-    if (!s3?.endPoint || !s3?.bucket) return undefined;
-    // Strip any protocol prefix from endPoint to avoid double https://
-    const bareHost = s3.endPoint
-        .replace(/^https?:\/\//, '')
-        .replace(/\/+$/, '');
-    const protocol = s3.useSSL === false ? 'http' : 'https';
-    const port = s3.port ? ':' + s3.port : '';
-    return protocol + '://' + bareHost + port + '/' + s3.bucket;
-});
+// ---------------------------------------------------------------------------
+// Source file selection — the encoder reads the file where it lies
+// ---------------------------------------------------------------------------
 
-const isEncrypted = computed(() => !!session.value?.encrypted);
+/** The preload bridge, absent when the UI is open in a plain browser. */
+const desktop = computed(() =>
+    typeof window !== 'undefined' ? window.luminary : undefined
+);
+const isDev = import.meta.env.DEV;
 
-// Access the uploads ref directly for reactivity
-const activeUpload = computed(() => {
-    const id = sessionId.value;
-    return id ? activeUploads.uploads.value[id] : undefined;
-});
+const ingesting = ref(false);
+const ingestError = ref<string | null>(null);
+/** Dev-only escape hatch: type an absolute path when there is no native dialog. */
+const manualPath = ref('');
 
-const showUploadProgress = computed(() => {
-    const s = currentStatus.value;
-    return !!(
-        (s === 'created' || s === 'uploading') &&
-        activeUpload.value &&
-        !activeUpload.value.done
-    );
-});
+const showFilePicker = computed(
+    () =>
+        currentStatus.value === 'created' &&
+        isActiveSession.value &&
+        !ingesting.value
+);
 
-const showUploadDoneWaiting = computed(() => {
-    const s = currentStatus.value;
-    return !!(
-        (s === 'created' || s === 'uploading') &&
-        activeUpload.value?.done &&
-        !activeUpload.value?.error
-    );
-});
+async function attachPath(path: string) {
+    if (!sessionToken.value || !path) return;
+    ingesting.value = true;
+    ingestError.value = null;
+    try {
+        const status = await ingestLocalFile(
+            sessionId.value,
+            path,
+            sessionToken.value
+        );
+        session.value = status;
+        if (status.probeResult) {
+            probeResult.value = status.probeResult;
+            encodingType.value = status.probeResult.videoTracks.length
+                ? 'video'
+                : 'audio';
+        }
+        poller.start(sessionId.value, sessionToken.value);
+        fetchWaveform();
+    } catch (e) {
+        ingestError.value = errorMessage(e);
+    } finally {
+        ingesting.value = false;
+    }
+}
 
-const showUploadRemoteMessage = computed(() => {
-    const s = currentStatus.value;
-    return (s === 'created' || s === 'uploading') && !activeUpload.value;
-});
+/**
+ * A dropped File carries no path in a browser — only the desktop shell can say
+ * where it came from, and without one there is nothing to hand the encoder.
+ */
+function onFileSelected(file: File | null) {
+    if (!file) return;
+    const bridge = desktop.value;
+    if (!bridge) {
+        ingestError.value =
+            'Choosing a file needs the desktop app — the browser will not reveal where a dropped file lives.';
+        return;
+    }
+    const path = bridge.getPathForFile(file);
+    if (!path) {
+        ingestError.value = 'Could not resolve that file on disk.';
+        return;
+    }
+    void attachPath(path);
+}
 
-// Server-side ingest (URL download): show poller-driven progress when there
-// is no client-side tus upload in flight. progress=0 means total length is
-// unknown — fall back to indeterminate display.
+async function onBrowseForFile() {
+    const bridge = desktop.value;
+    if (!bridge) {
+        ingestError.value =
+            'Choosing a file needs the desktop app — the browser will not reveal where a dropped file lives.';
+        return;
+    }
+    const path = await bridge.showOpenDialog();
+    if (path) void attachPath(path);
+}
+
+function onManualPathSubmit() {
+    const path = manualPath.value.trim();
+    if (path) void attachPath(path);
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Source ingestion runs server-side and reports through the same event stream
+ * as everything else, so there is no client-side upload to track.
+ */
+const showUploadRemoteMessage = computed(
+    () => currentStatus.value === 'uploading' || ingesting.value
+);
+
+// progress=0 means the total length is unknown — fall back to indeterminate.
 const remoteIngestProgress = computed<number | undefined>(() => {
     const p = poller.progress.value;
     if (typeof p !== 'number' || p <= 0) return undefined;
@@ -375,9 +388,7 @@ const remoteIngestProgress = computed<number | undefined>(() => {
 
 const remoteIngestLabel = computed<string>(() => {
     const total = poller.ingestTotalBytes.value;
-    return total != null
-        ? `Uploading from URL... (${formatBytes(total)})`
-        : 'Uploading from URL...';
+    return total != null ? `Reading source (${formatBytes(total)})` : 'Reading source';
 });
 
 const canRetryEncode = computed(
@@ -416,19 +427,10 @@ const showSessionWorkflowPanel = computed(() => {
         !submitting.value &&
         !(showEncoding.value || isCompleted.value || cs === 'failed');
     if (preEncodeFlow) {
-        if (showUploadProgress.value && activeUpload.value?.progress != null)
-            return true;
-        if (showUploadDoneWaiting.value) return true;
+        if (showFilePicker.value) return true;
         if (showUploadRemoteMessage.value) return true;
         if (cs === 'uploaded' && probeLoading.value) return true;
         return false;
-    }
-    if (
-        showProbeConfig.value &&
-        showUploadProgress.value &&
-        activeUpload.value?.progress != null
-    ) {
-        return true;
     }
     if (submitting.value) return true;
     if (
@@ -439,9 +441,6 @@ const showSessionWorkflowPanel = computed(() => {
     return false;
 });
 
-// Server-side preview — API serves on-demand HLS segments.
-// The preview URL is set once the session has a token and encoding API URL.
-// The API generates segments from the source file (copy or transcode).
 // ---------------------------------------------------------------------------
 // Preview audio tracks
 // ---------------------------------------------------------------------------
@@ -534,10 +533,10 @@ const nativeAudioSelectOptions = computed(() =>
 );
 
 async function fetchPreviewAudioTracks() {
-    if (!sessionToken.value || !encodingApiUrl.value) return;
+    if (!sessionToken.value) return;
     try {
         const res = await fetch(
-            `${encodingApiUrl.value}/api/sessions/${sessionId.value}/preview/audio-tracks?token=${sessionToken.value}`
+            `${API_BASE}/api/sessions/${sessionId.value}/preview/audio-tracks?token=${sessionToken.value}`
         );
         if (res.ok) {
             const tracks = await res.json();
@@ -553,10 +552,10 @@ async function fetchPreviewAudioTracks() {
 }
 
 const previewPlaybackUrl = computed(() => {
-    if (!sessionToken.value || !encodingApiUrl.value) return null;
+    if (!sessionToken.value) return null;
     const s = currentStatus.value;
     if (!s || s === 'created' || s === 'uploading') return null;
-    let url = `${encodingApiUrl.value}/api/sessions/${sessionId.value}/preview/playlist.m3u8?token=${sessionToken.value}`;
+    let url = `${API_BASE}/api/sessions/${sessionId.value}/preview/playlist.m3u8?token=${sessionToken.value}`;
     if (previewAudioTracks.value.length > 1) {
         url += `&audio=${selectedAudioTrack.value}`;
     }
@@ -570,8 +569,8 @@ watch(previewPlaybackUrl, (url) => {
     }
 });
 
-// Active playback URL — preview during encoding, S3 after completion (ABR)
-// For encrypted sessions, wait for the encryption key before switching to S3
+// Active playback URL — preview during encoding, the delivered HLS after completion.
+// For encrypted sessions, wait for the encryption key before switching over
 // (otherwise the player loads the raw playlist with unrewritten #EXT-X-KEY URIs).
 const activePlaybackUrl = computed(() => {
     if (isCompleted.value) {
@@ -600,22 +599,9 @@ const canEditChaptersPlayback = computed(
     () => showProbeConfig.value || showEncoding.value || isCompleted.value
 );
 
-/** Preview is ready for chapter editing (duration + URL); Trim segments tab, panel beside player. */
-const showChaptersSidePanel = computed(
-    () =>
-        !!session.value &&
-        !isExpired.value &&
-        !!activePlaybackUrl.value &&
-        currentStatus.value !== 'failed' &&
-        chaptersSidePanelDuration.value > 0 &&
-        canEditChaptersPlayback.value
-);
-
 /**
  * The panel beside the player is a clip list before the encode and a chapter list
- * after it, so it has to read whichever list is live for the phase. It used to be
- * bound to the chapter list alone, which only showed trim ranges because the two
- * were mirrored — once that mirroring went (#51), the clip list came up empty.
+ * after it, so it has to read whichever list is live for the phase.
  */
 const asidePanelSegments = computed<Segment[]>({
     get: () =>
@@ -640,7 +626,10 @@ const showTrimSegmentEditor = computed(
  * timeline still renders correctly after a page reload mid-encode.
  */
 const submittedTrimSegments = computed<TrimSegment[]>(
-    () => (poller.trimSegments.value as TrimSegment[] | undefined) ?? []
+    () =>
+        (poller.trimSegments.value as TrimSegment[] | undefined) ??
+        session.value?.trimSegments ??
+        []
 );
 
 /**
@@ -655,15 +644,14 @@ const showsOutputTimeline = computed(
 const sourceProbeDuration = computed(() => {
     const pr = probeResult.value?.format?.duration;
     if (typeof pr === 'number' && pr > 0) return pr;
-    const sp = (session.value?.probeResult as ProbeResult | undefined)?.format
-        ?.duration;
+    const sp = session.value?.probeResult?.format?.duration;
     return typeof sp === 'number' && sp > 0 ? sp : 0;
 });
 
 const trimEditorProbeDuration = computed(() => {
     if (timelineIsShortened.value) return trimmedDuration(timelineRanges.value);
     // Prefer player-reported duration (reflects encoded trim cuts); fall back through
-    // in-memory probe then session-doc probe so completed sessions always get a value.
+    // in-memory probe then session probe so completed sessions always get a value.
     if (showsOutputTimeline.value) {
         const player = playerDuration.value;
         if (player != null && player > 0) return player;
@@ -675,10 +663,13 @@ const trimEditorProbeDuration = computed(() => {
 });
 
 /**
- * Waveform drawn under the timeline. Peaks are computed from the source file
- * pre-encode, so once trimming is applied they have to be sliced down to the
- * retained ranges. After completion the sidecar fetched from S3 is generated from
- * the concat list and is already trimmed — slicing again would cut it twice.
+ * Waveform drawn under the timeline.
+ *
+ * The peaks always come from the source file — the encoder computes them from
+ * the file the session was given, and that file stays where it is for the whole
+ * life of the session. So once trimming is applied they have to be sliced down
+ * to the retained ranges, completed sessions included: there is no separately
+ * trimmed sidecar to fall back on any more.
  */
 const timelineWaveformPeaks = computed(() => {
     if (timelineIsShortened.value) {
@@ -688,7 +679,7 @@ const timelineWaveformPeaks = computed(() => {
             timelineRanges.value
         );
     }
-    if (!showsOutputTimeline.value || isCompleted.value) {
+    if (!showsOutputTimeline.value) {
         return waveformPeaks.value;
     }
     return slicePeaksToTrims(
@@ -698,7 +689,7 @@ const timelineWaveformPeaks = computed(() => {
     );
 });
 
-// Display metadata from the session detail or poller
+// Display metadata from the session status or poller
 const displayEncoder = computed<AccelMode | string | undefined>(
     () => poller.encoder.value ?? session.value?.encoder
 );
@@ -718,7 +709,7 @@ const displaySegmentFormat = computed<SegmentFormat | string | undefined>(
 );
 
 // ---------------------------------------------------------------------------
-// ETA labels — encoding (pipeline) + URL ingest. Each phase keeps its own
+// ETA labels — encoding (pipeline) + source ingest. Each phase keeps its own
 // sample buffer inside useEncodeEta, since their rates differ by orders of
 // magnitude and would otherwise pollute each other.
 // ---------------------------------------------------------------------------
@@ -748,11 +739,6 @@ function seekPlayerTime(t: number) {
     playerRef.value?.seek(t);
 }
 
-/**
- * Preview playback follows the trim: discarded stretches are skipped, so what you
- * hear and see while previewing is the programme that will be encoded. Only while
- * the markers are live — afterwards the preview is already trim-aware server-side.
- */
 /**
  * Deleting a clip takes that material out of the video, so the timeline loses it:
  * the waveform closes up, the total shortens, and the clips after it move earlier.
@@ -836,9 +822,6 @@ let copyKeyTimeout: ReturnType<typeof setTimeout> | null = null;
 const displayMasterPlaylist = computed(
     () => poller.masterPlaylist.value ?? session.value?.masterPlaylist
 );
-const displayAnglePlaylists = computed(
-    () => poller.anglePlaylists.value ?? session.value?.anglePlaylists
-);
 const displayFiles = computed<string[] | undefined>(
     () => (poller.files.value ?? session.value?.files) as string[] | undefined
 );
@@ -846,88 +829,106 @@ const displayThumbnailsVtt = computed(
     () => poller.thumbnailsVtt.value ?? session.value?.thumbnailsVtt
 );
 
-const uniqueAnglePlaylists = computed(() => {
-    const lists = displayAnglePlaylists.value;
-    if (!lists?.length) return [];
-    const seen = new Set<string>();
-    const result: { name: string; key: string }[] = [];
-    for (const ap of lists) {
-        if (seen.has(ap.name)) continue;
-        seen.add(ap.name);
-        result.push(ap);
+/**
+ * What the encoded output offers, as reported by the player.
+ *
+ * The encoder writes one multi-angle master and the per-angle / audio-only
+ * split happens client-side, so the only way to know what a session contains
+ * is to read its master — which the player does on load.
+ */
+const masterAngles = ref<VideoAngle[]>([]);
+const masterHasAudioOnly = ref(false);
+
+interface AngleOption {
+    label: string;
+    /** Video rendition group to pin, or null for the master's own default. */
+    angleId: string | null;
+    audioOnly: boolean;
+}
+
+const angleOptions = computed<AngleOption[]>(() => {
+    const options: AngleOption[] = masterAngles.value.map((angle) => ({
+        label: angle.name,
+        angleId: angle.id,
+        audioOnly: false,
+    }));
+    if (options.length === 0) {
+        options.push({ label: 'Video', angleId: null, audioOnly: false });
     }
-    return result;
+    // A pure-audio encode has nothing to drop, so offering "Audio only"
+    // alongside its own output would be a switch between two identical things.
+    if (masterHasAudioOnly.value && encodingType.value !== 'audio') {
+        options.push({ label: 'Audio only', angleId: null, audioOnly: true });
+    }
+    return options;
 });
 
-const showAngleSwitcher = computed(() => uniqueAnglePlaylists.value.length > 1);
-
-const previewAngleSelectOptions = computed(() =>
-    uniqueAnglePlaylists.value.map((ap, i) => ({ value: i, label: ap.name }))
+const currentAngle = computed(
+    () => angleOptions.value[currentAngleIndex.value] ?? angleOptions.value[0]
 );
 
-const currentAngleIsAudioOnly = computed(() => {
-    const lists = uniqueAnglePlaylists.value;
-    if (!lists.length) return false;
-    return lists[currentAngleIndex.value]?.name === 'Audio only';
-});
+const showAngleSwitcher = computed(() => angleOptions.value.length > 1);
+
+const angleSelectOptions = computed(() =>
+    angleOptions.value.map((option, i) => ({ value: i, label: option.label }))
+);
+
+const selectedAngleId = computed(() => currentAngle.value?.angleId ?? null);
+
+const audioOnlyRendition = computed(() => currentAngle.value?.audioOnly ?? false);
 
 const isAudioOnly = computed(
-    () => encodingType.value === 'audio' || currentAngleIsAudioOnly.value
+    () => encodingType.value === 'audio' || audioOnlyRendition.value
 );
 
-const primaryPlaylistKey = computed(() => {
-    const lists = uniqueAnglePlaylists.value;
-    if (lists.length) {
-        return lists[currentAngleIndex.value]?.key ?? lists[0]?.key;
+function onAnglesLoaded(info: {
+    angles: VideoAngle[];
+    hasAudioOnly: boolean;
+}): void {
+    masterAngles.value = info.angles;
+    masterHasAudioOnly.value = info.hasAudioOnly;
+    if (currentAngleIndex.value >= angleOptions.value.length) {
+        currentAngleIndex.value = 0;
     }
-    return displayMasterPlaylist.value;
-});
+}
 
-const s3Url = computed(() => {
-    if (!primaryPlaylistKey.value || !s3PublicBaseUrl.value) return null;
-    return `${s3PublicBaseUrl.value}/${primaryPlaylistKey.value}`;
-});
+/**
+ * Where the finished output is published. The caller that opened the session
+ * supplied the public base URL, so the encoder — not this page — is the one
+ * that knows the address, and it reports it as soon as encoding starts.
+ */
+const s3Url = computed<string | null>(
+    () =>
+        poller.hlsUrl.value ??
+        session.value?.hlsUrl ??
+        summary.value?.hlsUrl ??
+        null
+);
 
-const playbackUrl = computed(() => {
-    if (!primaryPlaylistKey.value) return null;
-    return s3Url.value;
-});
+const playbackUrl = computed(() => s3Url.value);
 
 /**
  * Why the finished output cannot be delivered to this page, if it cannot.
  *
- * Without a Public URL the base falls back to the S3 API endpoint, which is not
- * a delivery host: R2 answers unsigned browser requests with 400, and a MinIO
- * endpoint is typically an internal hostname. The encode succeeds, the objects
- * are written correctly, and playback then spins with the reason visible only
- * in the console — which cost a full morning to diagnose on staging.
- *
  * `blocked` is a certainty (the browser refuses before the request leaves the
- * page); `unreachable` is a strong likelihood, so it warns without hiding a
- * player that may yet work against a genuinely public endpoint.
+ * page); `missing` means the session was opened without a public base URL, so
+ * the encode succeeded and the objects are in the bucket but nothing here can
+ * name where they are — which otherwise presents as a player that spins for no
+ * stated reason.
  */
-const deliveryProblem = computed<'blocked' | 'unreachable' | null>(() => {
+const deliveryProblem = computed<'blocked' | 'missing' | null>(() => {
     if (!isCompleted.value) return null;
-    const base = s3PublicBaseUrl.value;
-    if (!base) return null;
+    const url = s3Url.value;
+    if (!url) return 'missing';
     const pageIsSecure =
         typeof window !== 'undefined' && window.location.protocol === 'https:';
-    if (pageIsSecure && base.startsWith('http://')) return 'blocked';
-    if (!session.value?.s3Config?.publicUrl) return 'unreachable';
+    if (pageIsSecure && url.startsWith('http://')) return 'blocked';
     return null;
 });
 
 /**
- * Before the encode there is no storyboard in S3 — the encode is what writes one.
- * The API samples the source instead, so the trim timeline has frames while the
- * user is still choosing what to keep.
- */
-/**
  * The encoder's sampled storyboard is the only one that exists until the encode
- * writes its own to S3 — which happens at completion, not before. Gating this on
- * the pre-encode state alone meant the timeline lost all its frames the moment
- * Start Encoding was pressed, for the whole run, despite 29 finished sprites
- * sitting on the encoder's disk.
+ * writes its own to S3 — which happens at completion, not before.
  */
 const sourceStoryboardActive = computed(
     () => showProbeConfig.value || showEncoding.value
@@ -935,9 +936,9 @@ const sourceStoryboardActive = computed(
 
 const sourceStoryboardUrl = computed(() => {
     if (!sourceStoryboardActive.value) return null;
-    if (!encodingApiUrl.value || !sessionToken.value) return null;
+    if (!sessionToken.value) return null;
     return (
-        `${encodingApiUrl.value}/api/sessions/${sessionId.value}` +
+        `${API_BASE}/api/sessions/${sessionId.value}` +
         `/thumbnails/thumbnails.vtt?token=${encodeURIComponent(sessionToken.value)}`
     );
 });
@@ -949,10 +950,23 @@ const storyboard = useStoryboard({
     active: sourceStoryboardActive,
 });
 
+/**
+ * Post-encode the storyboard lives beside the master playlist in the bucket, so
+ * its address is the delivered URL with the object key swapped in.
+ */
+const deliveryBaseUrl = computed<string | null>(() => {
+    const master = displayMasterPlaylist.value;
+    const url = s3Url.value;
+    if (!master || !url) return null;
+    if (!url.endsWith(master)) return null;
+    return url.slice(0, url.length - master.length).replace(/\/+$/, '');
+});
+
 const rawThumbnailVttUrl = computed(() => {
     if (sourceStoryboardActive.value) return storyboard.versionedUrl.value;
-    if (!displayThumbnailsVtt.value || !s3PublicBaseUrl.value) return null;
-    return `${s3PublicBaseUrl.value}/${displayThumbnailsVtt.value}`;
+    const base = deliveryBaseUrl.value;
+    if (!displayThumbnailsVtt.value || !base) return null;
+    return `${base}/${displayThumbnailsVtt.value}`;
 });
 
 /**
@@ -1020,13 +1034,6 @@ async function copyEncryptionKey() {
 // ---------------------------------------------------------------------------
 
 const deleting = ref(false);
-
-const hasS3Files = computed(
-    () =>
-        !!session.value?.s3ConfigId &&
-        !!(session.value?.s3Config?.pathPrefix || session.value?.files?.length)
-);
-
 const deleteModalOpen = ref(false);
 
 const deleteModalLabel = computed(() => {
@@ -1037,12 +1044,16 @@ const deleteModalLabel = computed(() => {
     return id.length > 16 ? `${id.slice(0, 12)}…` : id;
 });
 
-async function onConfirmDelete(withFiles: boolean) {
+async function removeSession() {
+    await deleteSession(sessionId.value, sessionToken.value ?? undefined);
+    clearChapterDraftForSession(sessionId.value);
+    forgetSessionToken(sessionId.value);
+}
+
+async function onConfirmDelete() {
     deleting.value = true;
     try {
-        const token = await getAccessTokenSilently();
-        await deleteSession(sessionId.value, token, withFiles);
-        clearChapterDraftForSession(sessionId.value);
+        await removeSession();
         deleteModalOpen.value = false;
         router.push('/sessions');
     } catch (e) {
@@ -1053,73 +1064,51 @@ async function onConfirmDelete(withFiles: boolean) {
 }
 
 // ---------------------------------------------------------------------------
-// Move + rename output files (post-encode)
+// Load the session
 // ---------------------------------------------------------------------------
 
-const {
-    showMoveForm,
-    moving,
-    moveError,
-    selectedTargetConfigId,
-    moveNewPrefix,
-    movePrefixWarning,
-    moveConfirmedOverwrite,
-    checkingMovePrefix,
-    moveTargetS3SelectOptions,
-    openMoveForm,
-    checkMovePrefix,
-    canMove,
-    confirmMove,
-    showRenameForm,
-    renaming,
-    renameError,
-    renameNewPrefix,
-    renamePrefixWarning,
-    renameConfirmedOverwrite,
-    checkingRenamePrefix,
-    openRenameForm,
-    checkRenamePrefix,
-    canRename,
-    confirmRename,
-} = useSessionFileOps({
-    getAccessToken: () => getAccessTokenSilently(),
-    sessionId,
-    session,
-    refresh: fetchSession,
-});
-
-// ---------------------------------------------------------------------------
-// Fetch session detail from SaaS
-// ---------------------------------------------------------------------------
+/**
+ * The session token comes down with the session list and nowhere else. The list
+ * view seeds the shared map on every refresh, so navigating in is instant; a
+ * deep link or a reload lands here cold and has to ask for the list itself.
+ */
+async function resolveSessionToken(): Promise<string | null> {
+    try {
+        const rows = await listSessions();
+        for (const row of rows) setSessionToken(row.sessionId, row.sessionToken);
+        summary.value =
+            rows.find((row) => row.sessionId === sessionId.value) ?? null;
+    } catch {
+        // The map may still hold a token from the list view; fall through.
+    }
+    return (
+        summary.value?.sessionToken ?? getSessionToken(sessionId.value) ?? null
+    );
+}
 
 async function fetchSession() {
     loading.value = true;
     error.value = null;
+    notFound.value = false;
     try {
-        const token = await getAccessTokenSilently();
-        const detail = await getSessionDetail(token, sessionId.value);
+        sessionToken.value = await resolveSessionToken();
+
+        const detail = await getSession(sessionId.value);
+        if (!detail) {
+            notFound.value = true;
+            return;
+        }
         session.value = detail;
-        sessionName.value = detail.name ?? '';
         encryptionKeyHex.value = detail.encryptionKeyHex ?? undefined;
+        if (detail.probeResult) {
+            probeResult.value = detail.probeResult;
+            encodingType.value = detail.probeResult.videoTracks.length
+                ? 'video'
+                : 'audio';
+        }
 
-        // Store active session tokens if present
-        sessionToken.value = detail.sessionToken ?? null;
-        encodingApiUrl.value = detail.encodingApiUrl ?? null;
-
-        // Kick off waveform fetch (non-critical):
-        // - completed sessions read the persisted sidecar via the SaaS proxy
-        // - active pre-encode sessions compute it on-demand from the source
         fetchWaveform();
 
-        // Determine encoding type from session data
-        if (detail.encodingType) {
-            encodingType.value = detail.encodingType;
-        }
-        if (detail.byteRange != null) {
-            byteRangeEnabled.value = detail.byteRange !== false;
-        }
-
-        // Route to appropriate behavior based on status
         await handleStatusAfterLoad(detail.status);
     } catch (e) {
         error.value = errorMessage(e);
@@ -1129,70 +1118,43 @@ async function fetchSession() {
 }
 
 // ---------------------------------------------------------------------------
-// Status-based initialization after loading session detail
+// Status-based initialization after loading the session
 // ---------------------------------------------------------------------------
 
 async function handleStatusAfterLoad(status: string) {
-    if (status === 'uploaded' && isActiveSession.value) {
-        // Fetch probe results from encoding API
+    if (!isActiveSession.value) return;
+
+    if (status === 'uploaded') {
         await fetchProbeResults();
-    } else if (
-        (status === 'queued' ||
-            status === 'encoding' ||
-            status === 'encrypting' ||
-            status === 'uploading_to_s3') &&
-        isActiveSession.value
-    ) {
-        // Start poller for encoding progress
-        poller.start(
-            sessionId.value,
-            encodingApiUrl.value!,
-            sessionToken.value!
-        );
-    } else if (
-        (status === 'created' || status === 'uploading') &&
-        isActiveSession.value &&
-        !activeUploads.uploads.value[sessionId.value]
-    ) {
-        // No client-side upload tracked — ingest is happening server-side
-        // (URL download or initiated from another tab). Poller delivers the
-        // server-emitted progress events and the eventual flip to 'uploaded'.
-        poller.start(
-            sessionId.value,
-            encodingApiUrl.value!,
-            sessionToken.value!
-        );
-    } else if (status === 'failed' && isActiveSession.value) {
+        return;
+    }
+
+    if (status === 'failed') {
         // Only the encoder knows whether the source survived the failure, and
         // that decides whether this session can simply be run again. `failed` is
         // terminal, so the poller reads it once and stops — a single request,
         // not a loop.
         await fetchProbeResults();
-        poller.start(
-            sessionId.value,
-            encodingApiUrl.value!,
-            sessionToken.value!
-        );
     }
-    // completed / imported / expired => no additional setup needed
+
+    // A completed session has nothing left to stream. Everything else does —
+    // including `created`, because the file may be attached from another window
+    // and this page should see that happen rather than sit on a stale picker.
+    if (status !== 'completed') {
+        poller.start(sessionId.value, sessionToken.value!);
+    }
 }
 
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Fetch probe results from Encoding API
+// Fetch probe results
 // ---------------------------------------------------------------------------
 
 async function fetchProbeResults() {
-    if (!encodingApiUrl.value || !sessionToken.value) return;
+    if (!sessionToken.value) return;
     probeLoading.value = true;
     try {
         // Status is already 'uploaded' so probe results should be available — poll directly
-        const probe = await pollForProbe(
-            encodingApiUrl.value,
-            sessionId.value,
-            sessionToken.value
-        );
+        const probe = await pollForProbe(sessionId.value, sessionToken.value);
         probeResult.value = probe;
         if (probe) {
             encodingType.value = probe.videoTracks.length ? 'video' : 'audio';
@@ -1205,46 +1167,35 @@ async function fetchProbeResults() {
 }
 
 async function pollForProbe(
-    apiUrl: string,
     sid: string,
     token: string
 ): Promise<ProbeResult | null> {
     for (let i = 0; i < 60; i++) {
-        const data = await getSessionStatus(apiUrl, sid, token);
-        // Update session status from encoding API so the UI reflects
-        // the actual state (e.g. 'uploaded' after probe completes)
-        if (session.value && data.status) {
-            session.value = { ...session.value, status: data.status };
-        }
+        const data = await getSessionStatus(sid, token);
+        // Keep the loaded status in step with the encoder so the UI reflects
+        // the actual state (e.g. 'uploaded' once the probe completes).
+        session.value = { ...(session.value ?? data), ...data };
         if (data.probeResult) return data.probeResult;
         await new Promise((r) => setTimeout(r, 500));
     }
     return null;
 }
 
+/**
+ * Waveform peaks for the timeline.
+ *
+ * There is one endpoint and one source: the encoder computes the peaks from the
+ * file the session was given. That file is referenced where it lies and is never
+ * copied or removed, so this works for the whole life of the session — before
+ * the encode and after it — and the peaks are always on the source timeline.
+ */
 async function fetchWaveform() {
-    // Post-encode: fetch the persisted waveform.json sidecar from S3 via the
-    // SaaS proxy. Imported sessions or sessions encoded before the sidecar
-    // landed return 404 — the proxy returns null and we silently skip render.
-    if (isCompleted.value) {
-        try {
-            const token = await getAccessTokenSilently();
-            const data = await getSessionWaveform(token, sessionId.value);
-            waveformPeaks.value = data?.peaks ?? null;
-        } catch {
-            // Non-critical: waveform is a UX enhancement, don't error the whole view
-        }
-        return;
-    }
-
-    // Pre-encode: compute on-demand from the source file still on the API's disk.
-    if (!encodingApiUrl.value || !sessionToken.value) return;
+    if (!sessionToken.value) return;
     try {
         const response = await fetch(
-            `${encodingApiUrl.value}/api/sessions/${sessionId.value}/waveform?token=${sessionToken.value}`
+            `${API_BASE}/api/sessions/${sessionId.value}/waveform?token=${sessionToken.value}`
         );
         if (!response.ok) {
-            // Waveform generation may not be available or may fail - don't treat as critical error
             scheduleWaveformRetry();
             return;
         }
@@ -1269,7 +1220,7 @@ let waveformRetryTimer: ReturnType<typeof setTimeout> | null = null;
  * happened to reload. Keep asking, slower each time.
  */
 function scheduleWaveformRetry() {
-    if (waveformRetryTimer || isCompleted.value) return;
+    if (waveformRetryTimer) return;
     const delay =
         WAVEFORM_RETRY_MS[
             Math.min(waveformRetries, WAVEFORM_RETRY_MS.length - 1)
@@ -1277,28 +1228,19 @@ function scheduleWaveformRetry() {
     waveformRetries++;
     waveformRetryTimer = setTimeout(() => {
         waveformRetryTimer = null;
-        // Only while the trim UI can still use it.
-        if (!waveformPeaks.value?.length && showProbeConfig.value) {
+        // Only while the timeline can still use it.
+        if (!waveformPeaks.value?.length && canEditTrimTimeline.value) {
             void fetchWaveform();
         }
     }, delay);
 }
-
-// Re-fetch the waveform when a session transitions to completed: the encode
-// pipeline writes waveform.json to S3 at the end, so the persisted sidecar
-// becomes available exactly when we cross this edge.
-watch(isCompleted, (now, prev) => {
-    if (now && !prev) {
-        fetchWaveform();
-    }
-});
 
 // ---------------------------------------------------------------------------
 // Encode submission
 // ---------------------------------------------------------------------------
 
 async function onEncodeSubmit(config: EncodeConfig) {
-    if (!encodingApiUrl.value || !sessionToken.value) return;
+    if (!sessionToken.value) return;
 
     submitting.value = true;
     submissionError.value = null;
@@ -1306,19 +1248,14 @@ async function onEncodeSubmit(config: EncodeConfig) {
     try {
         encodingType.value = config.type;
 
-        // If upload is still in progress, wait for it to complete
-        if (activeUpload.value && !activeUpload.value.done) {
-            await activeUpload.value.promise;
-        }
-
         // Wait for status to become 'uploaded' (probe may still be running)
-        if (currentStatus.value !== 'uploaded') {
+        if (currentStatus.value !== 'uploaded' && !canRetryEncode.value) {
             await new Promise<void>((resolve, reject) => {
                 const timeout = setTimeout(
                     () =>
                         reject(
                             new Error(
-                                'Timed out waiting for upload to complete'
+                                'Timed out waiting for the source to be read'
                             )
                         ),
                     120_000
@@ -1333,7 +1270,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
                         } else if (s === 'failed') {
                             clearTimeout(timeout);
                             unwatch();
-                            reject(new Error('Upload failed'));
+                            reject(new Error('Reading the source failed'));
                         }
                     },
                     { immediate: true }
@@ -1348,12 +1285,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
             submittedTrims.length > 0
                 ? { ...apiConfig, trimSegments: submittedTrims }
                 : apiConfig;
-        await startEncode(
-            encodingApiUrl.value,
-            sessionId.value,
-            submitConfig,
-            sessionToken.value
-        );
+        await startEncode(sessionId.value, submitConfig, sessionToken.value);
 
         // The trim ranges have now been consumed by the encode. They are markers,
         // not content: they described which parts of the source to keep, and say
@@ -1380,7 +1312,7 @@ async function onEncodeSubmit(config: EncodeConfig) {
         }
 
         // Start polling for encoding progress
-        poller.start(sessionId.value, encodingApiUrl.value, sessionToken.value);
+        poller.start(sessionId.value, sessionToken.value);
     } catch (e) {
         submissionError.value = errorMessage(e);
     } finally {
@@ -1409,38 +1341,20 @@ async function onStartEncodingFromTrim() {
 // Cancel actions
 // ---------------------------------------------------------------------------
 
-async function cancelUpload() {
-    const upload = activeUpload.value;
-    if (upload) {
-        upload.abort();
-        activeUploads.remove(sessionId.value);
-    }
-
-    try {
-        const accessToken = await getAccessTokenSilently();
-        await deleteSession(sessionId.value, accessToken);
-    } catch {
-        // Best-effort cleanup
-    }
-
-    router.push('/sessions/new');
-}
-
 async function onCancelEncode() {
     poller.stop();
 
     try {
-        const accessToken = await getAccessTokenSilently();
-        await deleteSession(sessionId.value, accessToken);
+        await removeSession();
     } catch {
         // Best-effort cleanup
     }
 
-    router.push('/sessions/new');
+    router.push('/sessions');
 }
 
 // ---------------------------------------------------------------------------
-// Watch for encryption key from poller (included in completion SSE event)
+// Watch for encryption key from poller (included in the SSE payloads)
 // ---------------------------------------------------------------------------
 
 watch(
@@ -1450,25 +1364,8 @@ watch(
     }
 );
 
-// Watch for the upload completing (if tracked locally)
-// After tus upload finishes, the Encoding API probes the file which takes time.
-// Poll the SaaS until the status advances beyond uploading.
-watch(
-    () => activeUpload.value?.done,
-    (done) => {
-        if (done && !activeUpload.value?.error) {
-            // Poll encoding API for probe results after upload completes
-            if (encodingApiUrl.value && sessionToken.value) {
-                fetchProbeResults();
-                fetchWaveform();
-            }
-        }
-    }
-);
-
-// URL-ingest path: no client-side upload entry exists, so the tus-completion
-// watch above never fires. Watch the poller's status flip to 'uploaded' and
-// fetch probe results from the same handler.
+// Ingest runs server-side, so the flip to 'uploaded' arrives over the event
+// stream rather than from a client-side upload finishing.
 watch(
     () => poller.status.value,
     (status, prev) => {
@@ -1477,7 +1374,7 @@ watch(
             prev !== 'uploaded' &&
             !probeResult.value
         ) {
-            if (encodingApiUrl.value && sessionToken.value) {
+            if (sessionToken.value) {
                 fetchProbeResults();
                 fetchWaveform();
             }
@@ -1502,9 +1399,9 @@ watch(
 );
 
 watch(
-    [() => sessionId.value, activePlaybackUrl, isExpired],
-    async ([id, url, expired]) => {
-        if (!id || !url || expired) return;
+    [() => sessionId.value, activePlaybackUrl, () => sessionToken.value],
+    async ([id, url, token]) => {
+        if (!id || !url || !token) return;
         if (chapters.isLoaded.value && chapters.loadedSessionId.value === id)
             return;
         try {
@@ -1538,7 +1435,7 @@ async function onDiscardChapters() {
 
 // Once the encode is submitted the bottom timeline becomes the chapter editor,
 // and it stays in step with the chapter list beside the player in both
-// directions. Trim markers never take part — see #51.
+// directions. Trim markers never take part.
 const { syncChaptersFromTimeline } = useChapterTrimSync({
     editorSegments,
     chapterSegments,
@@ -1590,7 +1487,6 @@ const showAside = computed(
 const showChaptersBesidePlayer = computed(
     () =>
         !!session.value &&
-        !isExpired.value &&
         currentStatus.value !== 'failed' &&
         chaptersSidePanelDuration.value > 0 &&
         canEditChaptersPlayback.value
@@ -1612,7 +1508,7 @@ const canSaveChapters = computed(
         !submitting.value
 );
 
-/** Detail card: only visible during pre-encode upload/probe flow (progress below the player). */
+/** Detail card: only visible during the pre-encode file/probe flow (progress below the player). */
 const showSessionDetailCard = computed(
     () =>
         showSessionWorkflowPanel.value &&
@@ -1621,23 +1517,29 @@ const showSessionDetailCard = computed(
         !isCompleted.value
 );
 
-const sessionDetailChromeCollapsed = computed(() => false);
-
 const sessionDetailCardSurfaceClass = computed(
     () =>
         'rounded-xl border border-slate-200/90 bg-white/90 p-3 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur sm:p-4 dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10'
 );
 
-/** Wide container for trim tab — fills available width up to 96rem with standard padding. */
-const trimPlayerBreakoutClass = computed(() => {
-    if (activeTab.value !== 'trim' || !showTrimSegmentEditor.value) {
-        return '';
-    }
-    return 'w-full max-w-[96rem] mx-auto px-4 sm:px-6';
+/** Sub-tab within the aside panel after encoding completes. */
+const completedAsideTab = ref<'chapters' | 'delivery'>('chapters');
+
+// Reset aside sub-tab back to encode settings when probe config becomes available again.
+watch(showProbeConfig, (ready) => {
+    if (ready) encodeSidePanelTab.value = 'encode';
 });
 
-/** Primary editing tab: timeline + trim before encode; chapters after. */
-const trimTabLabel = computed(() => (isCompleted.value ? 'Chapters' : 'Trim'));
+function relativeCreatedLabel(createdAt: number | null | undefined): string {
+    if (!createdAt) return '';
+    return `Created ${formatRelative(new Date(createdAt).toISOString())}`;
+}
+
+async function copyOutputObjectKey(key: string) {
+    const base = deliveryBaseUrl.value;
+    const text = base ? `${base}/${key}` : key;
+    await navigator.clipboard.writeText(text);
+}
 
 // Lock page scroll and fix header max-width to the trim layout (single view now).
 watch(
@@ -1649,25 +1551,6 @@ watch(
     },
     { immediate: true }
 );
-
-/** Sub-tab within the aside panel after encoding completes. */
-const completedAsideTab = ref<'chapters' | 'delivery'>('chapters');
-
-// Reset aside sub-tab back to encode settings when probe config becomes available again.
-watch(showProbeConfig, (ready) => {
-    if (ready) encodeSidePanelTab.value = 'encode';
-});
-
-function relativeCreatedLabel(dateStr: string | null | undefined): string {
-    if (!dateStr) return '';
-    return `Created ${formatRelative(dateStr)}`;
-}
-
-async function copyOutputObjectKey(key: string) {
-    const base = s3PublicBaseUrl.value;
-    const text = base ? `${base}/${key}` : key;
-    await navigator.clipboard.writeText(text);
-}
 
 // ---------------------------------------------------------------------------
 // Lifecycle
@@ -1726,6 +1609,57 @@ onUnmounted(() => {
                 </svg>
             </div>
 
+            <!--
+                The encoder holds every session it knows about, so a session it
+                cannot find is one that was dismissed, cancelled, or lost to a
+                restart — not one that merely expired somewhere else.
+            -->
+            <div
+                v-else-if="notFound"
+                class="flex min-h-[70dvh] w-full items-center justify-center px-4 py-10"
+            >
+                <div
+                    class="w-full max-w-md rounded-2xl border border-slate-200/90 bg-white/90 p-8 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10"
+                >
+                    <div class="flex flex-col items-center gap-4 text-center">
+                        <div
+                            class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800/80"
+                        >
+                            <svg
+                                class="h-6 w-6 text-slate-600 dark:text-slate-300"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                stroke-width="1.5"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+                                />
+                            </svg>
+                        </div>
+                        <h2
+                            class="text-base font-semibold text-slate-800 dark:text-slate-100"
+                        >
+                            Session not found
+                        </h2>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">
+                            This encoder has no session with that id. It may
+                            have been dismissed, or lost when the app restarted.
+                            Open it again from Luminary CMS.
+                        </p>
+                        <button
+                            type="button"
+                            class="mt-2 w-full cursor-pointer rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                            @click="router.push('/sessions')"
+                        >
+                            Back to sessions
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <div
                 v-else-if="error"
                 class="rounded-2xl border border-red-300 bg-red-50 p-4 dark:border-red-800/50 dark:bg-red-950/30"
@@ -1765,108 +1699,8 @@ onUnmounted(() => {
                     </router-link>
                 </Teleport>
 
-                <!--
-                    Expired: card centered vertically + horizontally in the
-                    remaining viewport. Uses min-h-[70dvh] so it sits in the
-                    middle whether or not the parent gives this branch a fixed
-                    height (App.vue's main switches between full-height and
-                    constrained layouts depending on tab).
-                -->
-                <div
-                    v-if="isExpired"
-                    class="flex min-h-[70dvh] w-full items-center justify-center px-4 py-10"
-                >
-                    <div
-                        class="w-full max-w-md rounded-2xl border border-slate-200/90 bg-white/90 p-8 shadow-lg shadow-slate-900/5 ring-1 ring-slate-900/5 backdrop-blur dark:border-slate-700 dark:bg-slate-800/60 dark:ring-white/10"
-                    >
-                        <div
-                            class="flex flex-col items-center gap-4 text-center"
-                        >
-                            <div
-                                class="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800/80"
-                            >
-                                <svg
-                                    class="h-6 w-6 text-slate-600 dark:text-slate-300"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                    stroke-width="1.5"
-                                >
-                                    <path
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-                                    />
-                                </svg>
-                            </div>
-                            <h2
-                                class="text-base font-semibold text-slate-800 dark:text-slate-100"
-                            >
-                                Session expired
-                            </h2>
-                            <p
-                                class="text-xs text-slate-500 dark:text-slate-400"
-                            >
-                                The encoding session is no longer active and
-                                cannot be interacted with.
-                            </p>
-                            <div
-                                class="mt-2 grid w-full grid-cols-2 gap-3 text-left"
-                            >
-                                <div
-                                    class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60"
-                                >
-                                    <p
-                                        class="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500"
-                                    >
-                                        Status
-                                    </p>
-                                    <p
-                                        class="text-sm text-slate-800 dark:text-slate-200"
-                                    >
-                                        {{ statusLabel(session.status) }}
-                                    </p>
-                                </div>
-                                <div
-                                    class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60"
-                                >
-                                    <p
-                                        class="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500"
-                                    >
-                                        Created
-                                    </p>
-                                    <p
-                                        class="text-sm text-slate-800 dark:text-slate-200"
-                                    >
-                                        {{ formatDateTime(session.createdAt) }}
-                                    </p>
-                                </div>
-                            </div>
-                            <div
-                                class="mt-2 flex w-full flex-col gap-2 sm:flex-row"
-                            >
-                                <button
-                                    type="button"
-                                    class="flex-1 cursor-pointer rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                                    @click="router.push('/sessions')"
-                                >
-                                    Back to sessions
-                                </button>
-                                <button
-                                    type="button"
-                                    class="flex-1 cursor-pointer rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-sky-500 dark:bg-sky-700 dark:hover:bg-sky-600"
-                                    @click="router.push('/sessions/new')"
-                                >
-                                    New session
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
                 <!-- Main column -->
                 <div
-                    v-else
                     :class="[
                         'min-w-0 flex flex-col',
                         activeTab === 'trim' ? 'flex-1 min-h-0' : 'space-y-5',
@@ -1912,15 +1746,15 @@ onUnmounted(() => {
                                 <p class="font-medium">
                                     {{
                                         deliveryProblem === 'blocked'
-                                            ? 'This storage cannot be played from a secure page'
-                                            : 'This storage has no Public URL'
+                                            ? 'This output cannot be played from a secure page'
+                                            : 'This session has no public playback URL'
                                     }}
                                 </p>
                                 <p class="mt-1">
                                     {{
                                         deliveryProblem === 'blocked'
                                             ? 'The output is served over http:// while this page is https://, so the browser blocks it. The encode is fine — the storage needs to be reachable over https://.'
-                                            : 'The encode finished and the files are in the bucket, but without a Public URL the player is pointed at the S3 API endpoint, which does not serve browsers. Set one on the storage config.'
+                                            : 'The encode finished and the files are in the bucket, but the session was opened without a public base URL, so nothing here can say where they are. Set one on the CMS side.'
                                     }}
                                 </p>
                             </div>
@@ -1941,8 +1775,10 @@ onUnmounted(() => {
                             :show-aside="showAside"
                             :active-tab="activeTab"
                             :show-angle-switcher="showAngleSwitcher"
-                            :unique-angle-playlists="uniqueAnglePlaylists"
+                            :angle-select-options="angleSelectOptions"
                             :current-angle-index="currentAngleIndex"
+                            :angle-id="selectedAngleId"
+                            :audio-only-rendition="audioOnlyRendition"
                             :show-audio-select="previewAudioTracks.length > 1"
                             :preview-audio-select-options="
                                 previewAudioSelectOptions
@@ -1962,6 +1798,7 @@ onUnmounted(() => {
                             @duration-change="playerDuration = $event"
                             @audio-tracks="onNativeAudioTracks"
                             @angle-change="switchToAngle"
+                            @angles-loaded="onAnglesLoaded"
                         >
                             <!--
                                     Session title + status + relative created label,
@@ -1972,50 +1809,14 @@ onUnmounted(() => {
                                 -->
                             <template #below-player>
                                 <div
-                                    v-if="editingName"
-                                    class="flex min-w-0 flex-wrap items-center gap-2"
-                                >
-                                    <input
-                                        v-model="nameInput"
-                                        type="text"
-                                        class="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-base font-semibold text-slate-800 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                                        placeholder="Session name"
-                                        autofocus
-                                        @keyup.enter="saveName"
-                                        @keyup.escape="cancelEditName"
-                                    />
-                                    <button
-                                        type="button"
-                                        class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
-                                        :disabled="savingName"
-                                        @click="saveName"
-                                    >
-                                        {{ savingName ? '…' : 'Save' }}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="cursor-pointer rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-700"
-                                        @click="cancelEditName"
-                                    >
-                                        Cancel
-                                    </button>
-                                </div>
-                                <div
-                                    v-else
                                     class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"
                                 >
-                                    <button
-                                        type="button"
-                                        class="min-w-0 truncate text-base font-semibold text-slate-800 transition-colors hover:text-slate-600 dark:text-slate-100 dark:hover:text-slate-300 cursor-pointer"
-                                        :title="
-                                            sessionName
-                                                ? 'Click to rename'
-                                                : 'Click to add a name'
-                                        "
-                                        @click="startEditName"
+                                    <span
+                                        class="min-w-0 truncate text-base font-semibold text-slate-800 dark:text-slate-100"
+                                        :title="sessionName || sessionId"
                                     >
                                         {{ sessionName || 'Untitled session' }}
-                                    </button>
+                                    </span>
                                     <StatusBadge
                                         v-if="currentStatus"
                                         class="shrink-0"
@@ -2029,12 +1830,12 @@ onUnmounted(() => {
                                         "
                                     />
                                     <span
-                                        v-if="session?.createdAt"
+                                        v-if="summary?.createdAt"
                                         class="shrink-0 text-xs text-slate-500 dark:text-slate-400"
                                     >
                                         {{
                                             relativeCreatedLabel(
-                                                session.createdAt
+                                                summary.createdAt
                                             )
                                         }}
                                     </span>
@@ -2537,19 +2338,6 @@ onUnmounted(() => {
                                 >
                                     <SessionPostProcessPanel
                                         v-model:show-files="showFiles"
-                                        v-model:selected-target-config-id="
-                                            selectedTargetConfigId
-                                        "
-                                        v-model:move-new-prefix="moveNewPrefix"
-                                        v-model:move-confirmed-overwrite="
-                                            moveConfirmedOverwrite
-                                        "
-                                        v-model:rename-new-prefix="
-                                            renameNewPrefix
-                                        "
-                                        v-model:rename-confirmed-overwrite="
-                                            renameConfirmedOverwrite
-                                        "
                                         :is-completed="isCompleted"
                                         :is-terminal="isTerminal"
                                         :current-status="currentStatus"
@@ -2565,36 +2353,12 @@ onUnmounted(() => {
                                         :should-collapse-files="
                                             shouldCollapseFiles
                                         "
-                                        :session="session"
-                                        :has-s3-files="hasS3Files"
-                                        :show-move-form="showMoveForm"
-                                        :show-rename-form="showRenameForm"
-                                        :move-target-s3-select-options="
-                                            moveTargetS3SelectOptions
-                                        "
-                                        :move-prefix-warning="movePrefixWarning"
-                                        :move-error="moveError"
-                                        :can-move="canMove"
-                                        :moving="moving"
-                                        :rename-prefix-warning="
-                                            renamePrefixWarning
-                                        "
-                                        :rename-error="renameError"
-                                        :can-rename="canRename"
-                                        :renaming="renaming"
+                                        :created-at="summary?.createdAt"
                                         @copy-playback-url="copyPlaybackUrl"
                                         @copy-encryption-key="copyEncryptionKey"
                                         @copy-output-object-key="
                                             copyOutputObjectKey
                                         "
-                                        @open-move-form="openMoveForm"
-                                        @open-rename-form="openRenameForm"
-                                        @check-move-prefix="checkMovePrefix"
-                                        @confirm-move="confirmMove"
-                                        @cancel-move="showMoveForm = false"
-                                        @check-rename-prefix="checkRenamePrefix"
-                                        @confirm-rename="confirmRename"
-                                        @cancel-rename="showRenameForm = false"
                                         @delete-session="deleteModalOpen = true"
                                     />
                                 </div>
@@ -2654,7 +2418,99 @@ onUnmounted(() => {
                         <div
                             class="flex w-full flex-1 items-center justify-center px-4 py-10 sm:px-6 min-h-[70dvh]"
                         >
+                            <!--
+                                The encoder reads the source where it lies, so
+                                what it needs is a path, not a transfer. That is
+                                why this is a picker and not an upload: a
+                                multi-gigabyte pick costs no disk and no wait.
+                            -->
                             <div
+                                v-if="showFilePicker"
+                                :class="[
+                                    sessionDetailCardSurfaceClass,
+                                    'w-full max-w-lg space-y-4',
+                                ]"
+                            >
+                                <div class="space-y-1 text-center">
+                                    <h2
+                                        class="text-base font-semibold text-slate-900 dark:text-slate-100"
+                                    >
+                                        Choose the source file
+                                    </h2>
+                                    <p
+                                        class="text-xs leading-relaxed text-slate-500 dark:text-slate-400"
+                                    >
+                                        The file stays where it is — nothing is
+                                        copied, and nothing is written to it.
+                                    </p>
+                                </div>
+
+                                <FileDropZone @update:file="onFileSelected" />
+
+                                <div class="flex justify-center">
+                                    <button
+                                        type="button"
+                                        class="cursor-pointer rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                                        @click="onBrowseForFile"
+                                    >
+                                        Browse…
+                                    </button>
+                                </div>
+
+                                <p
+                                    v-if="!desktop"
+                                    class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-snug text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/50 dark:text-amber-100"
+                                >
+                                    Picking a file needs the desktop app — a
+                                    browser will not say where a dropped file
+                                    lives on disk.
+                                </p>
+
+                                <!--
+                                    Dev-only: without the shell there is no way
+                                    to name a file at all, and that would make
+                                    the whole flow untestable in a browser.
+                                -->
+                                <div
+                                    v-if="!desktop && isDev"
+                                    class="space-y-2 border-t border-slate-200 pt-3 dark:border-slate-700"
+                                >
+                                    <label
+                                        for="manual-source-path"
+                                        class="block text-xs font-medium text-slate-500 dark:text-slate-400"
+                                    >
+                                        Absolute path (development only)
+                                    </label>
+                                    <div class="flex gap-2">
+                                        <input
+                                            id="manual-source-path"
+                                            v-model="manualPath"
+                                            type="text"
+                                            placeholder="/Users/you/Movies/source.mp4"
+                                            class="input min-w-0 flex-1"
+                                            @keyup.enter="onManualPathSubmit"
+                                        />
+                                        <button
+                                            type="button"
+                                            class="shrink-0 cursor-pointer rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-sky-700 dark:hover:bg-sky-600"
+                                            :disabled="!manualPath.trim()"
+                                            @click="onManualPathSubmit"
+                                        >
+                                            Use
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <p
+                                    v-if="ingestError"
+                                    class="text-xs text-red-600 dark:text-red-400"
+                                >
+                                    {{ ingestError }}
+                                </p>
+                            </div>
+
+                            <div
+                                v-else
                                 :class="[
                                     sessionDetailCardSurfaceClass,
                                     'w-full max-w-lg',
@@ -2666,20 +2522,8 @@ onUnmounted(() => {
                                     :show-encoding="showEncoding"
                                     :is-completed="isCompleted"
                                     :current-status="currentStatus"
-                                    :show-upload-progress="showUploadProgress"
-                                    :show-upload-done-waiting="
-                                        showUploadDoneWaiting
-                                    "
                                     :show-upload-remote-message="
                                         showUploadRemoteMessage
-                                    "
-                                    :active-upload-progress="
-                                        activeUpload?.progress
-                                    "
-                                    :active-upload-can-cancel="
-                                        activeUpload
-                                            ? activeUpload.progress < 100
-                                            : false
                                     "
                                     :remote-ingest-progress="
                                         remoteIngestProgress
@@ -2715,9 +2559,7 @@ onUnmounted(() => {
                                     :poller-progress="poller.progress.value"
                                     :poller-error="poller.error.value"
                                     :is-encrypted="isEncrypted"
-                                    :imported-session="!!session?.imported"
                                     @switch-tab="completedAsideTab = 'delivery'"
-                                    @cancel-upload="cancelUpload"
                                     @cancel-encode="onCancelEncode"
                                 />
                             </div>
@@ -2757,7 +2599,6 @@ onUnmounted(() => {
         <DeleteSessionModal
             v-model:open="deleteModalOpen"
             :session-label="deleteModalLabel"
-            :has-s3-files="hasS3Files"
             :loading="deleting"
             @confirm="onConfirmDelete"
         />

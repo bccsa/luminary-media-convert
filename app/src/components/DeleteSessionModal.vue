@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue';
 import ConfirmDangerModal from './ConfirmDangerModal.vue';
 
-const props = withDefaults(
+withDefaults(
     defineProps<{
         open: boolean;
         sessionLabel: string;
-        hasS3Files: boolean;
         loading?: boolean;
     }>(),
     { loading: false },
@@ -14,39 +12,27 @@ const props = withDefaults(
 
 const emit = defineEmits<{
     'update:open': [value: boolean];
-    confirm: [withFiles: boolean];
+    confirm: [];
 }>();
-
-const s3Option = computed(() =>
-    props.hasS3Files
-        ? {
-              label: 'Also delete output files from S3 (objects under this session’s prefix).',
-          }
-        : undefined,
-);
-
-function onConfirm(withFiles: boolean) {
-    emit('confirm', withFiles);
-}
 </script>
 
 <template>
     <ConfirmDangerModal
         :open="open"
-        title="Delete session"
-        :danger-option="s3Option"
-        confirm-label="Delete session"
-        loading-label="Deleting…"
+        title="Dismiss session"
+        confirm-label="Dismiss session"
+        loading-label="Dismissing…"
         :loading="loading"
         @update:open="emit('update:open', $event)"
-        @confirm="onConfirm"
+        @confirm="emit('confirm')"
     >
         <p>
             Remove
             <span class="font-medium text-slate-900 dark:text-slate-200">{{
                 sessionLabel?.trim() || 'this session'
             }}</span>
-            from your account. This cannot be undone.
+            from the encoder and free its working files. The encoded output
+            stays in your bucket. This cannot be undone.
         </p>
     </ConfirmDangerModal>
 </template>

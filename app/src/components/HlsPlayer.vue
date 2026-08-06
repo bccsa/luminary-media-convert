@@ -3,6 +3,12 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import videojs from 'video.js';
 import type Player from 'video.js/dist/types/player';
 import 'video.js/dist/video-js.css';
+import {
+    extractAnglePlaylist,
+    extractAudioOnlyPlaylist,
+    listVideoAngles,
+    type VideoAngle,
+} from '@luminary-media-converter/hls';
 import { registerQualitySelector } from '../videojs-quality-selector';
 import { registerThumbnailPreview } from '../videojs-thumbnail-preview';
 
@@ -19,6 +25,14 @@ const props = withDefaults(
         preserveStateOnSourceChange?: boolean;
         /** Show the built-in Video.js control bar + custom plugin chrome. Default true. */
         showControls?: boolean;
+        /**
+         * Camera angle to pin, by `VideoAngle.id` from the `angles-loaded` event.
+         * `null`/omitted plays the master's DEFAULT=YES angle (or the master
+         * as-is when it carries no video rendition groups).
+         */
+        angleId?: string | null;
+        /** Drop video entirely and play the master's audio renditions. */
+        audioOnlyRendition?: boolean;
     }>(),
     { showControls: true },
 );
@@ -55,6 +69,12 @@ const emit = defineEmits<{
      * so consumer UI can switch tracks via player.audioTracks() directly.
      */
     'audio-tracks': [tracks: AudioTrackInfo[]];
+    /**
+     * Fires once the master playlist has been read, with what it offers:
+     * the camera angles it declares (empty for a single-angle master) and
+     * whether an audio-only rendering can be derived from its audio groups.
+     */
+    'angles-loaded': [info: { angles: VideoAngle[]; hasAudioOnly: boolean }];
 }>();
 
 const playerEl = ref<HTMLVideoElement | null>(null);
@@ -114,38 +134,42 @@ function resolveUrl(base: string, relative: string): string {
 }
 
 /**
- * Rewrite HLS playlists to replace encryption key URIs with a blob URL.
- * Fetches the master playlist, all referenced sub-playlists, rewrites
- * #EXT-X-KEY URIs, and returns a blob URL for the modified master.
+ * Serve a master playlist to the player from a blob URL.
+ *
+ * Two things force this. Encryption: the key is held client-side and never
+ * published, so every `#EXT-X-KEY` URI has to be swapped for a blob of the raw
+ * key bytes — which means rewriting each media playlist too. Angle extraction:
+ * the master handed to the player is a narrowed copy, not the file in S3.
+ *
+ * Either way the playlist the player loads no longer sits at its original URL,
+ * so all relative references in it are resolved against `masterUrl` first.
  * Works with both Video.js VHS and Safari's native HLS player.
  */
-async function rewriteEncryptedPlaylist(playbackUrl: string, keyHex: string): Promise<string> {
+async function buildMasterBlobUrl(
+    masterUrl: string,
+    masterContent: string,
+    keyHex: string | null,
+): Promise<string> {
     revokeAllBlobs();
 
-    // Create blob URL for the raw key bytes
-    const keyBytes = new Uint8Array(keyHex.match(/.{2}/g)!.map((b) => parseInt(b, 16)));
-    const keyBlob = new Blob([keyBytes], { type: 'application/octet-stream' });
-    const keyBlobUrl = URL.createObjectURL(keyBlob);
-    blobUrls.push(keyBlobUrl);
+    let keyBlobUrl: string | null = null;
+    if (keyHex) {
+        const keyBytes = new Uint8Array(keyHex.match(/.{2}/g)!.map((b) => parseInt(b, 16)));
+        const keyBlob = new Blob([keyBytes], { type: 'application/octet-stream' });
+        keyBlobUrl = URL.createObjectURL(keyBlob);
+        blobUrls.push(keyBlobUrl);
+    }
 
-    // Fetch master playlist
-    const masterRes = await fetch(playbackUrl);
-    if (!masterRes.ok) throw new Error(`Failed to fetch master playlist (${masterRes.status})`);
-    const masterContent = await masterRes.text();
+    const baseUrl = masterUrl.substring(0, masterUrl.lastIndexOf('/') + 1);
 
-    // Check if this is a master playlist (contains #EXT-X-STREAM-INF or #EXT-X-MEDIA)
-    const isMaster = masterContent.includes('#EXT-X-STREAM-INF') || masterContent.includes('#EXT-X-MEDIA');
-
-    const baseUrl = playbackUrl.substring(0, playbackUrl.lastIndexOf('/') + 1);
-
-    if (!isMaster) {
+    if (!isMasterPlaylist(masterContent)) {
         // Single media playlist — rewrite key URIs and make segments absolute
         const rewritten = rewriteMediaPlaylist(masterContent, keyBlobUrl, baseUrl);
         return createBlobUrl(rewritten, 'application/vnd.apple.mpegurl');
     }
 
-    // Master playlist — find and rewrite all referenced playlists
-    const playlistMap = new Map<string, string>(); // original relative URI → blob URL
+    // original relative URI → URL the rewritten master should point at
+    const playlistMap = new Map<string, string>();
 
     const lines = masterContent.split('\n');
 
@@ -167,22 +191,30 @@ async function rewriteEncryptedPlaylist(playbackUrl: string, keyHex: string): Pr
         }
     }
 
-    // Fetch, rewrite, and create blob URLs for each sub-playlist
-    await Promise.all([...playlistUris].map(async (uri) => {
-        try {
-            const url = resolveUrl(baseUrl, uri);
-            const res = await fetch(url);
-            if (!res.ok) return;
-            const content = await res.text();
-            const subBaseUrl = url.substring(0, url.lastIndexOf('/') + 1);
-            const rewritten = rewriteMediaPlaylist(content, keyBlobUrl, subBaseUrl);
-            playlistMap.set(uri, createBlobUrl(rewritten, 'application/vnd.apple.mpegurl'));
-        } catch {
-            // Skip failed sub-playlists
+    if (keyBlobUrl) {
+        // Fetch, rewrite, and create blob URLs for each sub-playlist
+        await Promise.all([...playlistUris].map(async (uri) => {
+            try {
+                const url = resolveUrl(baseUrl, uri);
+                const res = await fetch(url);
+                if (!res.ok) return;
+                const content = await res.text();
+                const subBaseUrl = url.substring(0, url.lastIndexOf('/') + 1);
+                const rewritten = rewriteMediaPlaylist(content, keyBlobUrl, subBaseUrl);
+                playlistMap.set(uri, createBlobUrl(rewritten, 'application/vnd.apple.mpegurl'));
+            } catch {
+                // Skip failed sub-playlists
+            }
+        }));
+    } else {
+        // Unencrypted: the sub-playlists are fine as they are, they just have to
+        // be addressed absolutely now that the master is served from a blob.
+        for (const uri of playlistUris) {
+            playlistMap.set(uri, resolveUrl(baseUrl, uri));
         }
-    }));
+    }
 
-    // Rewrite master playlist to point to blob URLs for sub-playlists
+    // Rewrite master playlist to point at the resolved sub-playlists
     const rewrittenMaster = lines.map((line, i) => {
         const trimmed = line.trim();
         // Replace variant stream URI
@@ -208,10 +240,10 @@ async function rewriteEncryptedPlaylist(playbackUrl: string, keyHex: string): Pr
  * - Replace #EXT-X-KEY URIs with the key blob URL
  * - Make all segment/init URIs absolute (required since the playlist is served as a blob)
  */
-function rewriteMediaPlaylist(content: string, keyBlobUrl: string, playlistBaseUrl: string): string {
+function rewriteMediaPlaylist(content: string, keyBlobUrl: string | null, playlistBaseUrl: string): string {
     return content.split('\n').map((line) => {
         // Rewrite key URIs
-        if (line.startsWith('#EXT-X-KEY:') && line.includes('URI="')) {
+        if (keyBlobUrl && line.startsWith('#EXT-X-KEY:') && line.includes('URI="')) {
             return line.replace(/URI="[^"]*"/, `URI="${keyBlobUrl}"`);
         }
         // Rewrite EXT-X-MAP URI (init segment)
@@ -231,18 +263,77 @@ function rewriteMediaPlaylist(content: string, keyBlobUrl: string, playlistBaseU
     }).join('\n');
 }
 
+function isMasterPlaylist(content: string): boolean {
+    return content.includes('#EXT-X-STREAM-INF') || content.includes('#EXT-X-MEDIA');
+}
+
+/**
+ * Narrow a multi-angle master to what the caller asked to watch.
+ * Returns the text unchanged when nothing needs narrowing.
+ */
+function selectRendering(masterContent: string): string {
+    if (props.audioOnlyRendition) {
+        return extractAudioOnlyPlaylist(masterContent) ?? masterContent;
+    }
+    const angles = listVideoAngles(masterContent);
+    if (angles.length === 0) return masterContent;
+    // Un-narrowed multi-angle playback is at the mercy of the player's ABR,
+    // which is free to hop between angles mid-stream; pin the master's own
+    // default instead.
+    const angleId =
+        props.angleId ?? (angles.find((a) => a.isDefault) ?? angles[0]).id;
+    return extractAnglePlaylist(masterContent, angleId);
+}
+
+/**
+ * Resolve what the player should actually load for `url`.
+ *
+ * The master is always read first — it is the only place the available camera
+ * angles are declared. From there: extract the requested angle (or the
+ * audio-only rendering), then hand the result to the blob pipeline if it was
+ * narrowed or the segments are encrypted. An untouched, unencrypted master is
+ * passed through by URL so the player streams it directly, as before.
+ */
+async function resolveSource(url: string): Promise<string> {
+    let masterContent: string | null = null;
+    try {
+        const res = await fetch(url);
+        if (res.ok) masterContent = await res.text();
+    } catch {
+        // Unreadable master — fall through to direct playback below.
+    }
+
+    if (masterContent === null) {
+        emit('angles-loaded', { angles: [], hasAudioOnly: false });
+        // Nothing to read, so nothing to rewrite — direct playback is all that
+        // is left (and will fail on Safari if the segments are encrypted).
+        revokeAllBlobs();
+        return url;
+    }
+
+    const isMaster = isMasterPlaylist(masterContent);
+    emit('angles-loaded', {
+        angles: isMaster ? listVideoAngles(masterContent) : [],
+        hasAudioOnly: isMaster && extractAudioOnlyPlaylist(masterContent) !== null,
+    });
+
+    const selected = isMaster ? selectRendering(masterContent) : masterContent;
+    if (selected === masterContent && !props.encryptionKeyHex) {
+        revokeAllBlobs();
+        return url;
+    }
+
+    try {
+        return await buildMasterBlobUrl(url, selected, props.encryptionKeyHex ?? null);
+    } catch (e) {
+        console.error('Failed to prepare playlist for playback:', e);
+        return url;
+    }
+}
+
 async function getEffectivePlaybackUrl(): Promise<string | null> {
     if (!props.playbackUrl) return null;
-    if (props.encryptionKeyHex) {
-        try {
-            return await rewriteEncryptedPlaylist(props.playbackUrl, props.encryptionKeyHex);
-        } catch (e) {
-            console.error('Failed to rewrite encrypted playlist:', e);
-            // Fall back to direct URL (will fail on Safari for encrypted content)
-            return props.playbackUrl;
-        }
-    }
-    return props.playbackUrl;
+    return resolveSource(props.playbackUrl);
 }
 
 async function initPlayer() {
@@ -419,6 +510,14 @@ watch(() => props.playbackUrl, async (url, oldUrl) => {
     }
 }, { flush: 'post' });
 
+// Switching angle (or to audio-only) re-derives the playlist from the same
+// master URL, so the source has to be rebuilt even though playbackUrl is stable.
+watch(() => [props.angleId, props.audioOnlyRendition], async () => {
+    if (!props.playbackUrl || !player) return;
+    await nextTick();
+    await initPlayer();
+}, { flush: 'post' });
+
 // Re-init when encryption key becomes available (e.g. fetched async after completion)
 watch(() => props.encryptionKeyHex, async (keyHex) => {
     if (keyHex && props.playbackUrl && player) {
@@ -445,16 +544,7 @@ onBeforeUnmount(() => {
 // Expose methods for parent components (angle switching, etc.)
 async function setSource(url: string) {
     if (!player) return;
-
-    let effectiveUrl = url;
-    if (props.encryptionKeyHex) {
-        try {
-            effectiveUrl = await rewriteEncryptedPlaylist(url, props.encryptionKeyHex);
-        } catch {
-            // Fall back to direct URL
-        }
-    }
-
+    const effectiveUrl = await resolveSource(url);
     player.src({ src: effectiveUrl, type: 'application/x-mpegURL' });
 }
 

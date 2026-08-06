@@ -27,7 +27,6 @@ export function useSessionPoller() {
     const canRetry = ref<boolean | undefined>();
     const files = ref<string[] | undefined>();
     const masterPlaylist = ref<string | undefined>();
-    const anglePlaylists = ref<{ name: string; key: string }[] | undefined>();
     const error = ref<string | undefined>();
     const encoder = ref<AccelMode | undefined>();
     const segmentFormat = ref<SegmentFormat | undefined>();
@@ -35,6 +34,7 @@ export function useSessionPoller() {
     const encryptionKeyHex = ref<string | undefined>();
     const ingestTotalBytes = ref<number | undefined>();
     const trimSegments = ref<TrimSegment[] | undefined>();
+    const hlsUrl = ref<string | undefined>();
     const polling = ref(false);
 
     let eventSource: EventSource | null = null;
@@ -56,7 +56,6 @@ export function useSessionPoller() {
         canRetry.value = data.canRetry;
         files.value = data.files;
         masterPlaylist.value = data.masterPlaylist;
-        anglePlaylists.value = data.anglePlaylists;
         error.value = data.error;
         encoder.value = data.encoder;
         segmentFormat.value = data.segmentFormat;
@@ -73,6 +72,11 @@ export function useSessionPoller() {
         if (data.trimSegments?.length) {
             trimSegments.value = data.trimSegments;
         }
+        // The playback URL is settled once encoding starts and never changes
+        // after; progress events that omit it are not saying it went away.
+        if (data.hlsUrl) {
+            hlsUrl.value = data.hlsUrl;
+        }
     }
 
     function stop() {
@@ -85,11 +89,7 @@ export function useSessionPoller() {
         polling.value = false;
     }
 
-    function start(
-        sessionId: string,
-        encodingApiUrl: string,
-        sessionToken: string,
-    ) {
+    function start(sessionId: string, sessionToken: string) {
         stop();
 
         status.value = null;
@@ -99,7 +99,6 @@ export function useSessionPoller() {
         canRetry.value = undefined;
         files.value = undefined;
         masterPlaylist.value = undefined;
-        anglePlaylists.value = undefined;
         error.value = undefined;
         encoder.value = undefined;
         segmentFormat.value = undefined;
@@ -107,10 +106,11 @@ export function useSessionPoller() {
         encryptionKeyHex.value = undefined;
         ingestTotalBytes.value = undefined;
         trimSegments.value = undefined;
+        hlsUrl.value = undefined;
 
         polling.value = true;
 
-        getSessionStatus(encodingApiUrl, sessionId, sessionToken)
+        getSessionStatus(sessionId, sessionToken)
             .then((data) => {
                 applyUpdate(data);
                 if (TERMINAL_STATUSES.includes(data.status)) {
@@ -122,13 +122,12 @@ export function useSessionPoller() {
             });
 
         eventSource = subscribeSessionEvents(
-            encodingApiUrl,
             sessionId,
             sessionToken,
             (event) => {
                 applyUpdate(event);
                 if (TERMINAL_STATUSES.includes(event.status)) {
-                    getSessionStatus(encodingApiUrl, sessionId, sessionToken)
+                    getSessionStatus(sessionId, sessionToken)
                         .then(applyUpdate)
                         .catch(() => {})
                         .finally(() => stop());
@@ -143,7 +142,6 @@ export function useSessionPoller() {
                     fallbackTimer = setInterval(async () => {
                         try {
                             const data = await getSessionStatus(
-                                encodingApiUrl,
                                 sessionId,
                                 sessionToken,
                             );
@@ -171,7 +169,6 @@ export function useSessionPoller() {
         canRetry: readonly(canRetry),
         files: readonly(files),
         masterPlaylist: readonly(masterPlaylist),
-        anglePlaylists: readonly(anglePlaylists),
         error: readonly(error),
         encoder: readonly(encoder),
         segmentFormat: readonly(segmentFormat),
@@ -179,6 +176,7 @@ export function useSessionPoller() {
         encryptionKeyHex: readonly(encryptionKeyHex),
         ingestTotalBytes: readonly(ingestTotalBytes),
         trimSegments: readonly(trimSegments),
+        hlsUrl: readonly(hlsUrl),
         polling: readonly(polling),
         start,
         stop,

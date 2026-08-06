@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import FormSelect from '../FormSelect.vue';
 import { formatDateTime } from '../../utils/format';
 
-const props = defineProps<{
+defineProps<{
     isCompleted: boolean;
-    /** true when status is completed | failed | imported — shows delete option */
+    /** true when status is completed | failed — shows the delete option */
     isTerminal: boolean;
     currentStatus: string | null;
     displayMasterPlaylist?: string;
+    /** Public playback URL reported by the encoder, once it has one. */
     s3Url: string | null;
     copied: boolean;
     isEncrypted: boolean;
@@ -15,40 +15,16 @@ const props = defineProps<{
     copiedKey: boolean;
     displayFiles?: string[];
     shouldCollapseFiles: boolean;
-    session: Record<string, any> | null;
-    hasS3Files: boolean;
-    showMoveForm: boolean;
-    showRenameForm: boolean;
-    moveTargetS3SelectOptions: { value: string; label: string }[];
-    movePrefixWarning: string | null;
-    moveError: string | null;
-    canMove: boolean;
-    moving: boolean;
-    renamePrefixWarning: string | null;
-    renameError: string | null;
-    canRename: boolean;
-    renaming: boolean;
+    /** Epoch milliseconds, from the session list. */
+    createdAt?: number;
 }>();
 
 const showFiles = defineModel<boolean>('showFiles', { required: true });
-const selectedTargetConfigId = defineModel<string>('selectedTargetConfigId', { required: true });
-const moveNewPrefix = defineModel<string>('moveNewPrefix', { required: true });
-const moveConfirmedOverwrite = defineModel<boolean>('moveConfirmedOverwrite', { required: true });
-const renameNewPrefix = defineModel<string>('renameNewPrefix', { required: true });
-const renameConfirmedOverwrite = defineModel<boolean>('renameConfirmedOverwrite', { required: true });
 
 const emit = defineEmits<{
     copyPlaybackUrl: [];
     copyEncryptionKey: [];
     copyOutputObjectKey: [key: string];
-    openMoveForm: [];
-    openRenameForm: [];
-    checkMovePrefix: [];
-    confirmMove: [];
-    cancelMove: [];
-    checkRenamePrefix: [];
-    confirmRename: [];
-    cancelRename: [];
     deleteSession: [];
 }>();
 
@@ -63,12 +39,16 @@ function inferOutputFileKind(key: string): string {
     return 'Object';
 }
 
+function createdLabel(createdAt: number | undefined): string {
+    if (!createdAt) return '—';
+    return formatDateTime(new Date(createdAt).toISOString());
+}
 </script>
 
 <template>
     <div class="space-y-3">
         <p v-if="!isCompleted && currentStatus !== 'failed'" class="text-sm text-slate-500 dark:text-slate-400">
-            When the package completes, this tab lists output keys, URLs, prefix tools, and delete options.
+            When the package completes, this tab lists output keys, URLs, and delete options.
         </p>
         <p v-else-if="currentStatus === 'failed'" class="text-sm text-slate-500 dark:text-slate-400">
             Encoding did not complete. See the Workflow tab for the error detail.
@@ -177,120 +157,14 @@ function inferOutputFileKind(key: string): string {
             </details>
 
             <div class="rounded-lg border border-slate-200 bg-slate-50/90 p-3 dark:border-slate-700 dark:bg-slate-800/55">
-                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Session &amp; storage</h3>
+                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Session</h3>
                 <dl class="mt-2 grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-                    <div v-if="session?.s3Config?.endPoint">
-                        <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Storage endpoint</dt>
-                        <dd class="mt-0.5 break-all font-mono text-slate-800 dark:text-slate-200">
-                            {{ session.s3Config.endPoint }}{{ session.s3Config.port ? `:${session.s3Config.port}` : '' }}
-                        </dd>
-                    </div>
-                    <div v-if="session?.s3Config?.bucket">
-                        <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Bucket</dt>
-                        <dd class="mt-0.5 text-slate-800 dark:text-slate-200">{{ session.s3Config.bucket }}</dd>
-                    </div>
-                    <div v-if="session">
+                    <div>
                         <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Created</dt>
-                        <dd class="mt-0.5 text-slate-800 dark:text-slate-200">{{ formatDateTime(session.createdAt) }}</dd>
-                    </div>
-                    <div v-if="session?.completedAt">
-                        <dt class="text-xs font-semibold uppercase tracking-wider text-slate-500">Completed</dt>
-                        <dd class="mt-0.5 text-slate-800 dark:text-slate-200">{{ formatDateTime(session.completedAt) }}</dd>
+                        <dd class="mt-0.5 text-slate-800 dark:text-slate-200">{{ createdLabel(createdAt) }}</dd>
                     </div>
                 </dl>
             </div>
-
-            <div
-                class="flex flex-col gap-2 rounded-lg border border-slate-200/90 bg-slate-50/60 px-3 py-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between dark:border-slate-700 dark:bg-slate-800/40"
-            >
-                <p class="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Bucket tools
-                </p>
-                <div class="flex flex-wrap gap-2 sm:justify-end">
-                    <button
-                        v-if="hasS3Files && !showMoveForm && !showRenameForm"
-                        type="button"
-                        class="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                        @click="emit('openMoveForm')"
-                    >
-                        Move files
-                    </button>
-                    <button
-                        v-if="hasS3Files && !showMoveForm && !showRenameForm"
-                        type="button"
-                        class="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                        @click="emit('openRenameForm')"
-                    >
-                        Rename prefix
-                    </button>
-                </div>
-            </div>
-
-            <div
-                v-if="showMoveForm && hasS3Files"
-                class="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2 dark:border-slate-700 dark:bg-slate-800/80"
-            >
-                <p class="text-sm font-semibold text-slate-800 dark:text-slate-200">Move files to another storage config</p>
-                <div>
-                    <label class="mb-1 block text-xs text-slate-500 dark:text-slate-400">Target storage config</label>
-                    <FormSelect
-                        v-model="selectedTargetConfigId"
-                        :options="moveTargetS3SelectOptions"
-                        placeholder="Select a config…"
-                        @change="emit('checkMovePrefix')"
-                    />
-                </div>
-                <div>
-                    <label class="mb-1 block text-xs text-slate-500 dark:text-slate-400">Path prefix</label>
-                    <input v-model="moveNewPrefix" type="text" placeholder="e.g. videos/project-1/" class="input" @blur="emit('checkMovePrefix')" />
-                </div>
-                <div v-if="movePrefixWarning" class="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/50 dark:bg-amber-950/40">
-                    <p class="text-xs text-amber-800 dark:text-amber-400">{{ movePrefixWarning }}</p>
-                    <label class="mt-2 flex cursor-pointer items-center gap-2 text-xs text-amber-700 dark:text-amber-300">
-                        <input v-model="moveConfirmedOverwrite" type="checkbox" class="rounded accent-amber-600" />
-                        I understand, proceed anyway
-                    </label>
-                </div>
-                <p v-if="moveError" class="text-xs text-red-700 dark:text-red-400">{{ moveError }}</p>
-                <div class="flex flex-wrap gap-2">
-                    <button
-                        type="button"
-                        :disabled="!canMove"
-                        class="cursor-pointer rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600"
-                        @click="emit('confirmMove')"
-                    >{{ moving ? 'Moving…' : 'Apply move' }}</button>
-                    <button type="button" :disabled="moving" class="cursor-pointer rounded-lg border border-slate-300 px-4 py-2 text-sm dark:border-slate-600" @click="emit('cancelMove')">Cancel</button>
-                </div>
-            </div>
-
-            <div
-                v-if="showRenameForm && hasS3Files"
-                class="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2 dark:border-slate-700 dark:bg-slate-800/80"
-            >
-                <p class="text-sm font-semibold text-slate-800 dark:text-slate-200">Rename path prefix</p>
-                <div>
-                    <label class="mb-1 block text-xs text-slate-500 dark:text-slate-400">New prefix</label>
-                    <input v-model="renameNewPrefix" type="text" placeholder="e.g. production/client-x/" class="input" @blur="emit('checkRenamePrefix')" />
-                </div>
-                <div v-if="renamePrefixWarning" class="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800/50 dark:bg-amber-950/40">
-                    <p class="text-xs text-amber-800 dark:text-amber-400">{{ renamePrefixWarning }}</p>
-                    <label class="mt-2 flex cursor-pointer items-center gap-2 text-xs text-amber-700 dark:text-amber-300">
-                        <input v-model="renameConfirmedOverwrite" type="checkbox" class="rounded accent-amber-600" />
-                        I understand, proceed anyway
-                    </label>
-                </div>
-                <p v-if="renameError" class="text-xs text-red-700 dark:text-red-400">{{ renameError }}</p>
-                <div class="flex flex-wrap gap-2">
-                    <button
-                        type="button"
-                        :disabled="!canRename"
-                        class="cursor-pointer rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600"
-                        @click="emit('confirmRename')"
-                    >{{ renaming ? 'Renaming…' : 'Apply rename' }}</button>
-                    <button type="button" :disabled="renaming" class="cursor-pointer rounded-lg border border-slate-300 px-4 py-2 text-sm dark:border-slate-600" @click="emit('cancelRename')">Cancel</button>
-                </div>
-            </div>
-
         </template>
 
         <div
@@ -298,13 +172,16 @@ function inferOutputFileKind(key: string): string {
             class="rounded-lg border border-red-200/80 bg-red-50/50 p-3 dark:border-red-900/40 dark:bg-red-950/20"
         >
             <p class="text-sm font-semibold text-red-900 dark:text-red-300">Danger zone</p>
-            <p class="mt-0.5 text-xs leading-snug text-red-800/90 dark:text-red-400/90">Deleting removes this session from your history. Optionally delete objects from your bucket with the checkbox in the dialog.</p>
+            <p class="mt-0.5 text-xs leading-snug text-red-800/90 dark:text-red-400/90">
+                Dismissing removes this session from the encoder and frees its working files.
+                The encoded output stays in your bucket.
+            </p>
             <button
                 type="button"
                 class="mt-2 cursor-pointer rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-semibold text-red-700 transition-colors hover:bg-red-50 dark:border-red-800 dark:bg-red-950/40 dark:text-red-400 dark:hover:bg-red-950/60"
                 @click="emit('deleteSession')"
             >
-                Delete session permanently
+                Dismiss session
             </button>
         </div>
     </div>

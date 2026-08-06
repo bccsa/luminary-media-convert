@@ -18,49 +18,7 @@ export type {
     TrimSegment,
 } from '@luminary-media-converter/encode-config';
 
-// --- S3 & Webhook Config ---
-
-export interface S3Config {
-    endPoint: string;
-    port?: number;
-    useSSL?: boolean;
-    bucket: string;
-    region?: string;
-    accessKey: string;
-    secretKey: string;
-    pathPrefix?: string;
-    publicUrl?: string;
-}
-
-export interface WebhookConfig {
-    url: string;
-    sessionToken: string;
-}
-
-export interface EncryptionConfig {
-    enabled?: boolean;
-    keyUrl?: string;
-}
-
 // --- Session Request/Response Types ---
-
-export interface CreateSessionRequest {
-    segmentDuration?: number;
-    byteRange?: boolean;
-    byteRangeMaxFileSizeMB?: number;
-    thumbnails?: boolean;
-    s3: S3Config;
-    webhook?: WebhookConfig;
-    encryption?: EncryptionConfig;
-    s3ConfigId?: string;
-}
-
-export interface SaasSessionResponse {
-    sessionId: string;
-    encodingApiUrl: string;
-    sessionToken: string;
-    maxUploadSize: number;
-}
 
 export interface EncodeStartResponse {
     sessionId: string;
@@ -88,6 +46,22 @@ export interface PipelineProgress {
     uploading?: number;
 }
 
+/**
+ * One row of `GET /api/sessions`. Carries the session token, which the status
+ * response never does — the list is the only place the UI can pick one up.
+ */
+export interface SessionSummary {
+    sessionId: string;
+    title?: string;
+    status: SessionStatus;
+    progress: number;
+    /** Epoch milliseconds. */
+    createdAt: number;
+    sessionToken: string;
+    hlsUrl?: string;
+    error?: string;
+}
+
 export interface SessionStatusResponse {
     sessionId: string;
     status: SessionStatus;
@@ -98,69 +72,18 @@ export interface SessionStatusResponse {
     probeResult?: ProbeResult;
     files?: string[];
     masterPlaylist?: string;
-    anglePlaylists?: { name: string; key: string }[];
     thumbnailsVtt?: string;
     encryptionKeyHex?: string;
+    /** Public URL of the master playlist, known from the moment encoding starts. */
+    hlsUrl?: string;
+    /** Title supplied by the CMS that opened the session. */
+    title?: string;
+    /** The CMS document this session's output belongs to. */
+    documentId?: string;
     error?: string;
     encoder?: AccelMode;
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
     /** Trim ranges submitted with the encode config, in source-timeline seconds. */
     trimSegments?: TrimSegment[];
-}
-
-// --- SaaS API response shapes ---
-
-export interface ApiKeyResponse {
-    id: string;
-    name: string;
-    prefix: string;
-    status: 'active' | 'revoked';
-    lastUsedAt: string | null;
-    createdAt: string;
-}
-
-export interface S3ConfigSummary {
-    id: string;
-    name: string;
-    endPoint: string;
-    port?: number;
-    useSSL: boolean;
-    bucket: string;
-    region?: string;
-    publicUrl?: string;
-    createdAt: string;
-}
-
-export interface S3ConfigDetail extends S3ConfigSummary {
-    accessKey: string;
-    secretKey: string;
-}
-
-export interface ImportSessionResponse {
-    id?: string;
-    sessionId?: string;
-    chaptersLanguages?: string[];
-}
-
-/**
- * Partial view of a stored session document. Only the fields read directly off
- * the API result are typed; the full CouchDB doc carries more (consumed loosely
- * through reactive `any` state in the views).
- */
-export interface SessionDetailResponse {
-    sessionId?: string;
-    status: string;
-    name?: string;
-    encodingType?: 'video' | 'audio';
-    byteRange?: boolean;
-    encryptionKeyHex?: string;
-    sessionToken?: string;
-    encodingApiUrl?: string;
-    [key: string]: unknown;
-}
-
-export interface SessionListResponse {
-    sessions: SessionDetailResponse[];
-    total: number;
 }

@@ -1,16 +1,38 @@
 /// <reference types="vite/client" />
-/// <reference types="vite-plugin-pwa/vue" />
 
 interface ImportMetaEnv {
-    readonly VITE_AUTH0_DOMAIN: string;
-    readonly VITE_AUTH0_CLIENT_ID: string;
-    readonly VITE_AUTH0_AUDIENCE: string;
-    readonly VITE_API_BASE_URL: string;
-    readonly VITE_TUS_PARALLEL_UPLOADS?: string;
+    /**
+     * Base URL of the local Encoding API. Left unset in the packaged app —
+     * the renderer and the API share an origin there — and set to the API's
+     * dev port when the UI runs in a plain browser.
+     */
+    readonly VITE_API_URL?: string;
+    /**
+     * UI token for the Encoding API, used only outside Electron. In the
+     * packaged app the token comes from `window.luminary.getApiToken()`.
+     */
+    readonly VITE_API_TOKEN?: string;
 }
 
 interface ImportMeta {
     readonly env: ImportMetaEnv;
+}
+
+/**
+ * Bridge exposed by the Electron preload script. Absent when the UI is opened
+ * in a plain browser, which is why every caller has to guard on it.
+ */
+interface LuminaryBridge {
+    /** The API token this desktop instance was started with. */
+    getApiToken(): Promise<string>;
+    /** Absolute path of a dropped File — the browser File API has none. */
+    getPathForFile(file: File): string;
+    /** Native open dialog; resolves to an absolute path, or null if cancelled. */
+    showOpenDialog(): Promise<string | null>;
+}
+
+interface Window {
+    luminary?: LuminaryBridge;
 }
 
 declare module '*.vue' {

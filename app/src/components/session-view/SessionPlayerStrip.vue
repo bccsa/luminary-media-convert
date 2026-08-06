@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import type { VideoAngle } from '@luminary-media-converter/hls';
 import HlsPlayer from '../HlsPlayer.vue';
 import type { AudioTrackInfo, QualityLevelInfo } from '../HlsPlayer.vue';
 import FormSelect from '../FormSelect.vue';
@@ -16,8 +17,12 @@ const props = defineProps<{
     showAside: boolean;
     activeTab: string;
     showAngleSwitcher: boolean;
-    uniqueAnglePlaylists: { name: string; key: string }[];
+    angleSelectOptions: { value: number; label: string }[];
     currentAngleIndex: number;
+    /** Angle the player should pin, by id; null plays the master's default. */
+    angleId: string | null;
+    /** Play the master's audio renditions with no video. */
+    audioOnlyRendition: boolean;
     /** When true, hide the below-player angle row (e.g. on tabs other than the player view). */
     hideAngleSwitcher?: boolean;
     showAudioSelect: boolean;
@@ -28,10 +33,6 @@ const props = defineProps<{
 
 const selectedAudioTrack = defineModel<number>('selectedAudioTrack', { required: true });
 const selectedQualityId = defineModel<string | null>('selectedQualityId', { required: true });
-
-const angleSelectOptions = computed(() =>
-    props.uniqueAnglePlaylists.map((ap, i) => ({ value: i, label: ap.name })),
-);
 
 const showAngleRow = computed(
     () => props.isCompleted && props.showAngleSwitcher && !props.hideAngleSwitcher,
@@ -47,6 +48,7 @@ const emit = defineEmits<{
     durationChange: [d: number];
     audioTracks: [tracks: AudioTrackInfo[]];
     angleChange: [index: number];
+    anglesLoaded: [info: { angles: VideoAngle[]; hasAudioOnly: boolean }];
 }>();
 
 const playerShellRef = ref<HTMLElement | null>(null);
@@ -201,11 +203,14 @@ defineExpose({
                         :is-audio-only="isAudioOnly"
                         :encryption-key-hex="isCompleted ? (encryptionKeyHex || pollerEncryptionKeyHex) : undefined"
                         :show-controls="false"
+                        :angle-id="angleId"
+                        :audio-only-rendition="audioOnlyRendition"
                         preserve-state-on-source-change
                         @quality-levels="emit('qualityLevels', $event)"
                         @playing-change="emit('playingChange', $event)"
                         @duration-change="(d) => { if (d != null) emit('durationChange', d) }"
                         @audio-tracks="emit('audioTracks', $event)"
+                        @angles-loaded="emit('anglesLoaded', $event)"
                     />
                 </div>
                 <!--
