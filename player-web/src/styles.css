@@ -139,6 +139,16 @@
     pointer-events: none;
 }
 
+/* Dismissal sits apart from the transport, top right, where a full-screen
+   thing is closed — and clear of the notch on a landscape phone. */
+.lmp-fs-top {
+    display: flex;
+    justify-content: flex-end;
+    padding: calc(0.75rem + env(safe-area-inset-top, 0px)) calc(0.75rem + env(safe-area-inset-right, 0px))
+        0.75rem 0.75rem;
+    background: linear-gradient(to bottom, var(--lmp-surface-strong), transparent);
+}
+
 .lmp-fs-center {
     flex: 1;
     display: flex;

@@ -134,6 +134,22 @@ function onSubtitleChange(event: Event): void {
 
 <template>
     <div class="lmp-fs" :class="{ 'lmp-fs-hidden': !visible }">
+        <div class="lmp-fs-top">
+            <button
+                type="button"
+                class="lmp-icon-btn lmp-fs-exit"
+                :aria-label="messages.exitFullscreen"
+                :title="messages.exitFullscreen"
+                @click="emit('exit')"
+            >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                        d="M18.3 5.71 12 12.01l-6.3-6.3-1.41 1.41 6.3 6.3-6.3 6.3 1.41 1.41 6.3-6.3 6.3 6.3 1.41-1.41-6.3-6.3 6.3-6.3z"
+                    />
+                </svg>
+            </button>
+        </div>
+
         <div class="lmp-fs-center">
             <button
                 type="button"
@@ -196,20 +212,6 @@ function onSubtitleChange(event: Event): void {
                         {{ track.label }}
                     </option>
                 </select>
-
-                <button
-                    type="button"
-                    class="lmp-icon-btn lmp-fs-exit"
-                    :aria-label="messages.exitFullscreen"
-                    :title="messages.exitFullscreen"
-                    @click="emit('exit')"
-                >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path
-                            d="M5 16h3v3h2v-5H5zM14 19h2v-3h3v-2h-5zM19 8h-3V5h-2v5h5zM10 5H8v3H5v2h5z"
-                        />
-                    </svg>
-                </button>
             </div>
         </div>
     </div>
