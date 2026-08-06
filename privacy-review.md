@@ -1,5 +1,7 @@
 # Privacy Review — Luminary Media Convert
 
+> **Note (2026-08-05):** This audit predates the local-only migration. It describes a multi-tenant SaaS product — the `saas/`, `admin/` and `tusd/` workspaces, CouchDB, Auth0 and webhook delivery — none of which exists any more. It is kept as a dated snapshot; the findings below should not be read as describing current behaviour. A fresh review against the local-only architecture is tracked in [`Todo.md`](Todo.md).
+
 **Date:** 2026-03-21
 **Scope:** Complete codebase — API, SaaS Service, Web Client, Admin Panel, Encode Config, Tusd Wrapper
 **Frameworks:** GDPR (EU), CCPA/CPRA (California), VCDPA (Virginia), CPA (Colorado), CTDPA (Connecticut), state-level US privacy laws
