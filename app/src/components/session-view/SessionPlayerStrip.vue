@@ -214,25 +214,15 @@ defineExpose({
                     />
                 </div>
                 <!--
-                    Below-player row: session title/status on the left,
-                    Angle / Audio / Quality dropdowns on the right.
-                    Title truncates first; if the container is too narrow to
-                    fit the dropdowns alongside, the row wraps and the
-                    dropdowns slide to a second line, still right-aligned.
+                    Below-player row: Angle / Audio / Quality dropdowns, on the
+                    left edge the session title used to hold. The title moved to
+                    the topline above the player, and these selects took the
+                    alignment rather than staying pinned right against nothing.
                 -->
                 <div
                     v-if="showPlaybackControlsRow || $slots['below-player']"
                     class="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 pt-3"
                 >
-                    <!--
-                        A real flex-basis, not `flex-1`. With `flex-basis: 0%`
-                        this side never asks for any width, so the line never
-                        overflows, `flex-wrap` never fires, and the dropdowns
-                        stayed pinned alongside while the title and status were
-                        squeezed underneath them until they collided. Given a
-                        basis to fall below, the row wraps as it was meant to
-                        and the dropdowns take a second line.
-                    -->
                     <div
                         v-if="$slots['below-player']"
                         class="min-w-0 flex-[1_1_16rem]"
@@ -241,7 +231,8 @@ defineExpose({
                     </div>
                     <div
                         v-if="showPlaybackControlsRow"
-                        class="shrink-0 ml-auto flex flex-wrap items-center justify-end gap-x-4 gap-y-2"
+                        class="flex flex-wrap items-center gap-x-4 gap-y-2"
+                        :class="$slots['below-player'] ? 'shrink-0 ml-auto justify-end' : 'min-w-0'"
                     >
                         <span
                             v-if="showAngleRow"

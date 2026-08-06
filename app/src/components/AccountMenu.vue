@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useTheme, type ThemePreference } from '../composables/useTheme';
 
 /**
@@ -8,10 +8,42 @@ import { useTheme, type ThemePreference } from '../composables/useTheme';
  * carries the one setting that was ever really in it.
  */
 
+const props = withDefaults(
+    defineProps<{
+        /**
+         * Which way the panel opens. It lives in the timeline's controls at the
+         * very bottom of the window on the session view, where a panel dropping
+         * downwards opens past the edge of the screen.
+         */
+        drop?: 'down' | 'up';
+        /**
+         * `editor` borrows the segment editor's own button styling, for the
+         * instance that sits in the timeline's controls bar next to the
+         * keyboard-shortcuts button. Those classes are injected globally by the
+         * library, and `.se-controls-bar .se-btn` sizes them to match, so the
+         * two buttons come out identical rather than merely similar.
+         */
+        variant?: 'default' | 'editor';
+    }>(),
+    { drop: 'down', variant: 'default' },
+);
+
 const { preference, setPreference } = useTheme();
 
 const open = ref(false);
 const rootEl = ref<HTMLElement | null>(null);
+
+const panelPositionClass = computed(() =>
+    props.drop === 'up'
+        ? 'bottom-full mb-2 origin-bottom-right'
+        : 'top-full mt-2 origin-top-right',
+);
+
+const triggerClass = computed(() =>
+    props.variant === 'editor'
+        ? 'se-btn se-btn--icon cursor-pointer'
+        : 'flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-slate-700 shadow-sm ring-slate-900/5 transition-colors hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:ring-white/10',
+);
 
 const themeOptions: { value: ThemePreference; label: string; description: string }[] = [
     { value: 'light', label: 'Light', description: 'Always light' },
@@ -60,7 +92,7 @@ function pickTheme(p: ThemePreference) {
     <div ref="rootEl" class="relative shrink-0">
         <button
             type="button"
-            class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-slate-700 shadow-sm ring-slate-900/5 transition-colors hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:ring-white/10"
+            :class="triggerClass"
             :aria-expanded="open"
             aria-haspopup="true"
             aria-label="Appearance"
@@ -68,7 +100,7 @@ function pickTheme(p: ThemePreference) {
             @click.stop="toggle"
         >
             <svg
-                class="h-5 w-5"
+                :class="variant === 'editor' ? 'se-icon' : 'h-5 w-5'"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -93,7 +125,8 @@ function pickTheme(p: ThemePreference) {
         >
             <div
                 v-if="open"
-                class="absolute right-0 top-full z-50 mt-2 w-[min(18rem,calc(100vw-2rem))] origin-top-right rounded-xl border border-slate-200 bg-white py-1 shadow-xl ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10"
+                class="absolute right-0 z-50 w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white py-1 shadow-xl ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10"
+                :class="panelPositionClass"
                 role="menu"
                 aria-label="Appearance"
                 @click.stop

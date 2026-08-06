@@ -2106,14 +2106,24 @@ defineExpose({
             </div>
 
             <!-- When the header is suppressed, the keyboard-shortcuts button moves to the
-                 far right of the controls bar (so users still have a way to open help). -->
-            <button
-                v-if="showHelp && !showHeader"
-                type="button"
-                class="se-btn se-btn--icon se-controls-bar__help"
-                title="Keyboard shortcuts (?)"
-                @click="helpOpen = !helpOpen"
-            ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
+                 far right of the controls bar (so users still have a way to open help).
+                 `controls-end` puts a host's own icon buttons in the same cluster: the bar
+                 is a three-column grid, so anything rendered as its own grid item lands in
+                 a different cell and reads as unrelated to the help button rather than
+                 grouped with it. -->
+            <div
+                v-if="(showHelp && !showHeader) || $slots['controls-end']"
+                class="se-controls-bar__end"
+            >
+                <slot name="controls-end" />
+                <button
+                    v-if="showHelp && !showHeader"
+                    type="button"
+                    class="se-btn se-btn--icon se-controls-bar__help"
+                    title="Keyboard shortcuts (?)"
+                    @click="helpOpen = !helpOpen"
+                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
+            </div>
         </div>
 
         <div

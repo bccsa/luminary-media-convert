@@ -856,9 +856,20 @@ html.dark .se-root {
     max-width: min(28rem, calc(100vw - 4rem));
 }
 
-.se-controls-bar__help {
+/*
+ * The end cluster of the controls bar: host-supplied icon buttons sitting with
+ * the keyboard-shortcuts button rather than in a grid cell of their own.
+ */
+.se-controls-bar__end {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
     flex-shrink: 0;
     justify-self: end;
+}
+
+.se-controls-bar__help {
+    flex-shrink: 0;
 }
 
 .se-playback-controls__center {

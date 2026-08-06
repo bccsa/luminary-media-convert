@@ -35,6 +35,7 @@ import type {
 import FileDropZone from '../components/FileDropZone.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import StatusBadge from '../components/StatusBadge.vue';
+import AccountMenu from '../components/AccountMenu.vue';
 import DeleteSessionModal from '../components/DeleteSessionModal.vue';
 import SessionOutputPanel from '../components/session-view/SessionOutputPanel.vue';
 import SessionPostProcessPanel from '../components/session-view/SessionPostProcessPanel.vue';
@@ -1670,35 +1671,6 @@ onUnmounted(() => {
             </div>
 
             <template v-else-if="session">
-                <!--
-                    Header teleport keeps the back-arrow only — title, created
-                    label, and status badge now sit under the player (rendered
-                    via the SessionPlayerStrip #below-player slot below).
-                -->
-                <Teleport to="#app-session-meta-teleport">
-                    <router-link
-                        to="/sessions"
-                        class="inline-flex shrink-0 items-center justify-center rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                        title="Back to sessions"
-                    >
-                        <svg
-                            class="h-6 w-6"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            stroke-width="2.25"
-                            aria-hidden="true"
-                        >
-                            <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                d="M15 19l-7-7 7-7"
-                            />
-                        </svg>
-                        <span class="sr-only">Back to sessions</span>
-                    </router-link>
-                </Teleport>
-
                 <!-- Main column -->
                 <div
                     :class="[
@@ -1706,6 +1678,105 @@ onUnmounted(() => {
                         activeTab === 'trim' ? 'flex-1 min-h-0' : 'space-y-5',
                     ]"
                 >
+                    <!--
+                        Session topline, above the player: where you are, what it
+                        is, and the one action that applies to it. This replaces
+                        the app header — the back arrow and the session's identity
+                        were split across a global bar and the row under the
+                        player, which put the name of the thing further from it
+                        than the app's own name was.
+                    -->
+                    <div
+                        class="session-topline flex min-w-0 shrink-0 items-center gap-2 px-4 pt-3"
+                        :class="activeTab === 'trim' ? 'order-first' : ''"
+                    >
+                        <router-link
+                            to="/sessions"
+                            class="inline-flex shrink-0 items-center justify-center rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                            title="Back to sessions"
+                        >
+                            <svg
+                                class="h-5 w-5"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                stroke-width="2.25"
+                                aria-hidden="true"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    d="M15 19l-7-7 7-7"
+                                />
+                            </svg>
+                            <span class="sr-only">Back to sessions</span>
+                        </router-link>
+
+                        <span
+                            class="shrink-0 select-none text-base font-light text-slate-300 dark:text-slate-600"
+                            aria-hidden="true"
+                            >|</span
+                        >
+
+                        <span
+                            class="min-w-0 truncate text-base font-semibold text-slate-800 dark:text-slate-100"
+                            :title="sessionName || sessionId"
+                        >
+                            {{ sessionName || 'Untitled session' }}
+                        </span>
+
+                        <template v-if="currentStatus">
+                            <span
+                                class="shrink-0 text-slate-300 dark:text-slate-600"
+                                aria-hidden="true"
+                                >·</span
+                            >
+                            <StatusBadge
+                                class="shrink-0"
+                                :label="statusLabel(currentStatus)"
+                                :color="statusColors[currentStatus]?.color"
+                                :border-color="
+                                    statusColors[currentStatus]?.borderColor
+                                "
+                            />
+                        </template>
+
+                        <template v-if="summary?.createdAt">
+                            <span
+                                class="shrink-0 text-slate-300 dark:text-slate-600"
+                                aria-hidden="true"
+                                >·</span
+                            >
+                            <span
+                                class="shrink-0 text-xs text-slate-500 dark:text-slate-400"
+                            >
+                                {{ relativeCreatedLabel(summary.createdAt) }}
+                            </span>
+                        </template>
+
+                        <div class="min-w-0 flex-1" />
+
+                        <!--
+                            The encode action, previously teleported into the app
+                            header. It acts on this session, so it belongs on the
+                            session's own row.
+                        -->
+                        <button
+                            v-if="showProbeConfig"
+                            type="button"
+                            class="shrink-0 cursor-pointer rounded-lg bg-sky-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600 sm:px-5 sm:py-2.5 sm:text-sm"
+                            :disabled="!encodeConfigCanSubmit || submitting"
+                            :title="
+                                !encodeConfigCanSubmit && !submitting
+                                    ? 'Open Encode settings and complete the ladder (all required options) first.'
+                                    : undefined
+                            "
+                            @click="onStartEncodingFromTrim"
+                        >
+                            {{ submitting ? 'Starting…' : 'Start encoding' }}
+                        </button>
+                    </div>
+
                     <!-- On trim: flex order shows progress card above player; player fills remaining height.
                          Hidden during pure upload/probe-loading state so the centered upload card can use the full viewport. -->
                     <div
@@ -1801,47 +1872,13 @@ onUnmounted(() => {
                             @angles-loaded="onAnglesLoaded"
                         >
                             <!--
-                                    Session title + status + relative created label,
-                                    shown directly under the player so the page
-                                    header stays minimal (just the back arrow).
-                                    Clicking the title swaps in an inline rename
-                                    field (Enter to save, Esc to cancel).
-                                -->
-                            <template #below-player>
-                                <div
-                                    class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1"
-                                >
-                                    <span
-                                        class="min-w-0 truncate text-base font-semibold text-slate-800 dark:text-slate-100"
-                                        :title="sessionName || sessionId"
-                                    >
-                                        {{ sessionName || 'Untitled session' }}
-                                    </span>
-                                    <StatusBadge
-                                        v-if="currentStatus"
-                                        class="shrink-0"
-                                        :label="statusLabel(currentStatus)"
-                                        :color="
-                                            statusColors[currentStatus]?.color
-                                        "
-                                        :border-color="
-                                            statusColors[currentStatus]
-                                                ?.borderColor
-                                        "
-                                    />
-                                    <span
-                                        v-if="summary?.createdAt"
-                                        class="shrink-0 text-xs text-slate-500 dark:text-slate-400"
-                                    >
-                                        {{
-                                            relativeCreatedLabel(
-                                                summary.createdAt
-                                            )
-                                        }}
-                                    </span>
-                                </div>
-                            </template>
-
+                                Title, status and created label used to sit here,
+                                under the player, leaving the row's left side to
+                                them and pushing the playback selects to the right
+                                edge. They now head the session on the topline
+                                above the player, and the selects take the left
+                                edge in their place.
+                            -->
                             <template #aside>
                                 <!-- Tab switcher: pre-encode (Encode settings / Chapters) -->
                                 <div
@@ -2365,25 +2402,6 @@ onUnmounted(() => {
                             </template>
                         </SessionPlayerStrip>
 
-                        <Teleport to="#app-session-workflow-teleport">
-                            <!-- Start Encoding button (pre-encode only) -->
-                            <button
-                                v-if="showProbeConfig"
-                                type="button"
-                                class="cursor-pointer rounded-lg bg-sky-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600 sm:px-3 sm:py-1.5 sm:text-xs"
-                                :disabled="!encodeConfigCanSubmit || submitting"
-                                :title="
-                                    !encodeConfigCanSubmit && !submitting
-                                        ? 'Open Encode settings and complete the ladder (all required options) first.'
-                                        : undefined
-                                "
-                                @click="onStartEncodingFromTrim"
-                            >
-                                {{
-                                    submitting ? 'Starting…' : 'Start encoding'
-                                }}
-                            </button>
-                        </Teleport>
                     </div>
 
                     <SessionTrimWorkspace
@@ -2408,7 +2426,12 @@ onUnmounted(() => {
                         :on-play-pause="() => playerRef?.togglePlay()"
                         :is-preview-playing="isPreviewPlaying"
                         :segment-editor-probe-fps="segmentEditorProbeFps"
-                    />
+                    >
+                        <template #timeline-end>
+                            <!-- Opens upward: the controls bar is at the floor of the window. -->
+                            <AccountMenu drop="up" variant="editor" />
+                        </template>
+                    </SessionTrimWorkspace>
 
                     <div
                         v-if="showSessionDetailCard"

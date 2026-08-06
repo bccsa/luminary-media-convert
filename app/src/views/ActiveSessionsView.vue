@@ -5,6 +5,7 @@ import { listSessions, deleteSession } from '../api';
 import { setSessionToken, forgetSessionToken } from '../session-tokens';
 import { clearChapterDraftForSession } from '../composables/useChapters';
 import ProgressBar from '../components/ProgressBar.vue';
+import AccountMenu from '../components/AccountMenu.vue';
 import { formatRelative } from '../utils/format';
 import { errorMessage } from '../utils/errors';
 import { isActiveStatus, isTerminalStatus, statusLabel } from '../utils/status';
@@ -127,18 +128,26 @@ onUnmounted(() => {
 
 <template>
     <div class="app-view font-sans">
-        <div class="mb-6 space-y-2 lg:mb-8">
-            <h1
-                class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100"
-            >
-                Encoding Sessions
-            </h1>
-            <p
-                class="max-w-xl text-sm leading-relaxed text-slate-500 dark:text-slate-400"
-            >
-                Sessions opened from Luminary CMS, and what each one is doing
-                right now.
-            </p>
+        <!--
+            This page has no timeline to hang the appearance menu off, and with
+            the header gone it would otherwise be unreachable from the one screen
+            you always land on. It sits with the page heading instead.
+        -->
+        <div class="mb-6 flex items-start gap-4 lg:mb-8">
+            <div class="min-w-0 flex-1 space-y-2">
+                <h1
+                    class="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100"
+                >
+                    Encoding Sessions
+                </h1>
+                <p
+                    class="max-w-xl text-sm leading-relaxed text-slate-500 dark:text-slate-400"
+                >
+                    Sessions opened from Luminary CMS, and what each one is doing
+                    right now.
+                </p>
+            </div>
+            <AccountMenu class="mt-1" />
         </div>
 
         <section
