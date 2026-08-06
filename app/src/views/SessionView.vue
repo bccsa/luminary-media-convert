@@ -547,7 +547,12 @@ const keySettled = computed(() => keyFetched.value || !sessionToken.value);
 // deliverable address shows `deliveryProblem` instead of a player.
 const activePlaybackUrl = computed(() => {
     if (isCompleted.value) {
-        return keySettled.value ? playbackUrl.value : previewPlaybackUrl.value;
+        // Delivered output or nothing. While the key question is open we hold
+        // rather than reach for the preview: it is the wrong renditions, it
+        // transcodes on this machine for as long as anyone watches, and it
+        // would stand in for the delivered output indefinitely if the key
+        // question never closed.
+        return keySettled.value ? playbackUrl.value : null;
     }
     return previewPlaybackUrl.value;
 });
