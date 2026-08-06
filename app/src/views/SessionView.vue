@@ -71,6 +71,7 @@ import {
     outputToSource,
     slicePeaksToTrims,
     sourceToOutputClamped,
+    toOutputSegments,
     trimmedDuration,
 } from '../utils/trimTimeline';
 import type {
@@ -1307,12 +1308,30 @@ async function onEncodeSubmit(config: EncodeConfig) {
                 : apiConfig;
         await startEncode(sessionId.value, submitConfig, sessionToken.value);
 
-        // The trim ranges have now been consumed by the encode. They are markers,
-        // not content: they described which parts of the source to keep, and say
-        // nothing about the encoded result. Drop them rather than leaving source
-        // positions drawn over a timeline that no longer matches them.
+        // The timeline switches to the encoded programme here, so the ranges
+        // have to move with it: they are in source time, and the ruler is not
+        // any more.
+        //
+        // They are deliberately not dropped. Marking a range is a selection,
+        // not a deletion — clearing it on submit read as the app throwing the
+        // work away, and left nothing on screen describing what had just been
+        // sent to encode.
+        //
+        // Mapped through the submitted ranges rather than laid end to end from
+        // zero. Laying them out was right while a selection *was* the material
+        // kept, because the output then simply was those ranges concatenated.
+        // Only deletions restrict the encode now, so the output is the source
+        // minus what was cut, and a selection's place in it is its source
+        // position carried through the ranges that survived — end-to-end would
+        // park the first selection at zero wherever it actually came from.
         if (submittedTrims.length > 0) {
-            editorSegments.value = [];
+            editorSegments.value = mapSegmentsToTimeline(
+                editorSegments.value,
+                submittedTrims,
+            );
+            // Deletions are the one thing that genuinely does not survive: they
+            // described material the encode has already removed, so there is
+            // nothing left for them to refer to.
             trimDeletions.clear();
         }
 

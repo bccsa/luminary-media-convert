@@ -43,34 +43,36 @@ export function retimeStoryboardVtt(
 
 /**
  * Where a cue belongs on the output timeline — one entry per retained range it
- * overlaps, empty when the frame it shows was cut entirely.
+ * overlaps, and none at all when the frame it shows was cut entirely.
  *
- * A cue is clipped to each range rather than tested for membership. Cut points
- * rarely land on a sampling boundary, so the cue straddling the in-point holds
- * the only frame there is for the first seconds of the programme: dropping it
- * for starting too early left the head of the filmstrip blank — which read as
- * the *kept* material having been deleted. Clipping keeps the frame and lets it
- * describe just the part that survived; a cue spanning a cut can legitimately
- * appear twice, since the material either side of the cut is now adjacent and
- * both halves are still that frame.
+ * Overlap is the test, not where the cue starts. Cues are sampled from the
+ * source at a fixed interval, so a trim almost never begins exactly on one: the
+ * cue covering the first seconds of a retained range usually starts before that
+ * range does. Keying on the start dropped that cue, which left the opening of
+ * every such range with no thumbnail at all — and the coarser the sampling, or
+ * the more ranges a trim creates, the more of the strip went blank.
+ *
+ * Each entry is clipped to the range it falls in, so a cue is never drawn
+ * spilling across a cut into material it does not describe.
  */
 function mapCue(
     startTime: number,
     endTime: number,
     ranges: readonly TrimSegment[],
 ): { start: number; end: number }[] {
-    const out: { start: number; end: number }[] = [];
+    const mapped: { start: number; end: number }[] = [];
 
-    for (const r of [...ranges].sort((a, b) => a.inSec - b.inSec)) {
-        const from = Math.max(startTime, r.inSec);
-        const to = Math.min(endTime, r.outSec);
+    for (const range of ranges) {
+        const from = Math.max(startTime, range.inSec);
+        const to = Math.min(endTime, range.outSec);
         if (to <= from) continue;
 
+        // `from` sits inside this range by construction, so it always maps.
         const start = sourceToOutput(from, ranges);
         if (start === null) continue;
 
-        out.push({ start, end: start + (to - from) });
+        mapped.push({ start, end: start + (to - from) });
     }
 
-    return out;
+    return mapped.sort((a, b) => a.start - b.start);
 }

@@ -111,10 +111,21 @@ export function useChapterTrimSync(deps: ChapterTrimSyncDeps) {
     watch(chapterSegments, () => syncEditorFromChapters(), { deep: true });
 
     watch(mirrorActive, (active) => {
-        // Entering chapter editing: the chapter list is the source of truth, so
-        // adopt it rather than pushing whatever the timeline happens to hold.
-        if (!active) timelineHadSegments.value = false;
-        else syncEditorFromChapters();
+        if (!active) {
+            timelineHadSegments.value = false;
+            return;
+        }
+
+        // Entering chapter editing. Where chapters already exist they are the
+        // source of truth and the timeline adopts them.
+        //
+        // Where there are none, the timeline seeds them instead of being
+        // emptied by them. This is the moment an encode is submitted, so the
+        // timeline is holding the ranges the user just selected — adopting an
+        // empty chapter list here erased that selection in front of them, and
+        // those ranges are a reasonable first draft of the chapters anyway.
+        if (chapterSegments.value.length > 0) syncEditorFromChapters();
+        else syncChaptersFromTimeline();
     });
 
     return { syncChaptersFromTimeline };
