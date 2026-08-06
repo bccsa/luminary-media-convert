@@ -20,22 +20,24 @@ const { detail, status, waveform } = vi.hoisted(() => ({
     waveform: vi.fn(),
 }));
 
-vi.mock('@auth0/auth0-vue', () => ({
-    useAuth0: () => ({ getAccessTokenSilently: async () => 'token' }),
-}));
-
 vi.mock('vue-router', () => ({
     useRoute: () => ({ params: { id: 'sess-1' } }),
     useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
 vi.mock('../api', () => ({
-    getSessionDetail: detail,
+    API_BASE: '',
+    getSession: detail,
     getSessionStatus: status,
+    listSessions: vi
+        .fn()
+        .mockResolvedValue([{ sessionId: 'sess-1', sessionToken: 'sess_token' }]),
+    ingestLocalFile: vi.fn().mockResolvedValue({}),
     startEncode: vi.fn().mockResolvedValue({}),
     deleteSession: vi.fn().mockResolvedValue({}),
-    updateSessionName: vi.fn().mockResolvedValue({}),
-    getSessionWaveform: waveform,
+    subscribeSessionEvents: vi.fn(),
+    getChapters: vi.fn().mockResolvedValue(null),
+    putChapters: vi.fn().mockResolvedValue(undefined),
 }));
 
 import SessionView from './SessionView.vue';
@@ -43,10 +45,9 @@ import SessionView from './SessionView.vue';
 /** A probed session sitting in the pre-encode state, which is where trimming happens. */
 function uploadedSession(overrides: Record<string, unknown> = {}) {
     return {
-        id: 'sess-1',
+        sessionId: 'sess-1',
         status: 'uploaded',
-        name: 'test',
-        encodingApiUrl: 'https://api.example.com',
+        title: 'test',
         sessionToken: 'sess_token',
         probeResult: {
             format: { duration: 120 },
@@ -111,7 +112,7 @@ describe('SessionView', () => {
     it('loads the session it was routed to', async () => {
         await mountView();
 
-        expect(detail).toHaveBeenCalledWith('token', 'sess-1');
+        expect(detail).toHaveBeenCalledWith('sess-1');
     });
 
     it('surfaces a load failure instead of rendering an empty shell', async () => {
@@ -155,15 +156,15 @@ describe('SessionView', () => {
      * reason visible only in the console.
      */
     describe('undeliverable storage', () => {
-        function completedWith(s3Config: Record<string, unknown>) {
+        function completedWith(hlsUrl: string | undefined) {
             detail.mockResolvedValue(
                 uploadedSession({
                     status: 'completed',
                     masterPlaylist: 'out/master.m3u8',
-                    s3Config,
+                    hlsUrl,
                 })
             );
-            status.mockResolvedValue({ status: 'completed' });
+            status.mockResolvedValue({ status: 'completed', hlsUrl });
         }
 
         const banner = (w: Awaited<ReturnType<typeof mountView>>) =>
@@ -176,15 +177,14 @@ describe('SessionView', () => {
         });
 
         it('warns when the storage config has no Public URL', async () => {
-            completedWith({
-                endPoint: 'https://acct.r2.cloudflarestorage.com',
-                bucket: 'medias',
-            });
+            // Opened without a public base URL, so nothing can say where the
+            // finished files are.
+            completedWith(undefined);
 
             const wrapper = await mountView();
 
             expect(banner(wrapper).exists()).toBe(true);
-            expect(banner(wrapper).text()).toContain('no Public URL');
+            expect(banner(wrapper).text()).toContain('no public playback URL');
         });
 
         it('names mixed content as the cause when the page is secure', async () => {
@@ -195,11 +195,7 @@ describe('SessionView', () => {
                 protocol: 'https:',
             });
             // Certain to fail: the browser refuses before the request is sent.
-            completedWith({
-                endPoint: 'https://acct.r2.cloudflarestorage.com',
-                bucket: 'medias',
-                publicUrl: 'http://10.0.0.1:9000/medias',
-            });
+            completedWith('http://10.0.0.1:9000/medias/master.m3u8');
 
             const wrapper = await mountView();
 
@@ -207,11 +203,7 @@ describe('SessionView', () => {
         });
 
         it('stays quiet when a usable Public URL is set', async () => {
-            completedWith({
-                endPoint: 'https://acct.r2.cloudflarestorage.com',
-                bucket: 'medias',
-                publicUrl: 'https://pub-abc.r2.dev',
-            });
+            completedWith('https://pub-abc.r2.dev/master.m3u8');
 
             const wrapper = await mountView();
 

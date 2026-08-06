@@ -19,7 +19,7 @@ describe('useChapters', () => {
         vi.useRealTimers();
     });
 
-    function setup(opts: Parameters<typeof useChapters>[0] = { getAccessToken: async () => 'token' }) {
+    function setup(opts: Parameters<typeof useChapters>[0] = { getSessionToken: async () => 'token' }) {
         return useChapters({
             autosaveMs: 50,
             ...opts,
@@ -29,7 +29,7 @@ describe('useChapters', () => {
     describe('load', () => {
         it('starts with an empty list when neither local nor remote has data', async () => {
             const fetchRemote = vi.fn().mockResolvedValue(null);
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote });
 
             await c.load('sess-1');
 
@@ -43,7 +43,7 @@ describe('useChapters', () => {
             const fetchRemote = vi.fn().mockResolvedValue({
                 vtt: 'WEBVTT\n\n00:00:00.000 --> 00:00:30.000\nIntro\n',
             });
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote });
 
             await c.load('sess-1');
 
@@ -64,7 +64,7 @@ describe('useChapters', () => {
             const fetchRemote = vi.fn().mockResolvedValue({
                 vtt: 'WEBVTT\n\n00:00:00.000 --> 00:00:30.000\nServer\n',
             });
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote });
 
             await c.load('sess-1');
 
@@ -75,7 +75,7 @@ describe('useChapters', () => {
 
         it('surfaces a load error when the server call throws', async () => {
             const fetchRemote = vi.fn().mockRejectedValue(new Error('boom'));
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote });
 
             await c.load('sess-1');
 
@@ -87,7 +87,7 @@ describe('useChapters', () => {
         it('ignores corrupt localStorage entries', async () => {
             localStorage.setItem(STORAGE_PREFIX + 'sess-1', 'not-json');
             const fetchRemote = vi.fn().mockResolvedValue(null);
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote });
 
             await c.load('sess-1');
 
@@ -97,7 +97,7 @@ describe('useChapters', () => {
 
         it('sets loadedSessionId to the session that was loaded', async () => {
             const fetchRemote = vi.fn().mockResolvedValue(null);
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote });
             await c.load('sess-a');
             expect(c.loadedSessionId.value).toBe('sess-a');
         });
@@ -108,7 +108,7 @@ describe('useChapters', () => {
                 resolveRemote = r;
             });
             const fetchRemote = vi.fn().mockReturnValue(remotePromise);
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote });
             const p = c.load('sess-old');
             c.unload();
             resolveRemote({
@@ -124,7 +124,7 @@ describe('useChapters', () => {
     describe('autosave', () => {
         it('writes segments to localStorage after the debounce window', async () => {
             const fetchRemote = vi.fn().mockResolvedValue(null);
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote });
             await c.load('sess-1');
             await flushMicrotasks();
 
@@ -146,7 +146,7 @@ describe('useChapters', () => {
 
         it('coalesces multiple rapid edits into a single localStorage write', async () => {
             const fetchRemote = vi.fn().mockResolvedValue(null);
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote });
             await c.load('sess-1');
             await flushMicrotasks();
             const setSpy = vi.spyOn(Storage.prototype, 'setItem');
@@ -169,7 +169,7 @@ describe('useChapters', () => {
             const fetchRemote = vi.fn().mockResolvedValue({
                 vtt: 'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nA\n',
             });
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote });
             await c.load('sess-1');
 
             vi.advanceTimersByTime(200);
@@ -184,7 +184,7 @@ describe('useChapters', () => {
             const fetchRemote = vi.fn().mockResolvedValue(null);
             const saveRemoteImpl = vi.fn().mockResolvedValue(undefined);
             const c = setup({
-                getAccessToken: async () => 'tok',
+                getSessionToken: async () => 'tok',
                 fetchRemote,
                 saveRemoteImpl,
             });
@@ -207,7 +207,7 @@ describe('useChapters', () => {
         it('keeps the dirty state when the upload fails', async () => {
             const fetchRemote = vi.fn().mockResolvedValue(null);
             const saveRemoteImpl = vi.fn().mockRejectedValue(new Error('500'));
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote, saveRemoteImpl });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote, saveRemoteImpl });
             await c.load('sess-1');
             await flushMicrotasks();
             c.segments.value = [{ id: 'a', inSec: 0, outSec: 10 }];
@@ -232,7 +232,7 @@ describe('useChapters', () => {
             const fetchRemote = vi.fn().mockResolvedValue({
                 vtt: 'WEBVTT\n\n00:00:00.000 --> 00:00:30.000\nServer\n',
             });
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote });
             await c.load('sess-1');
             expect(c.isDirty.value).toBe(true);
 
@@ -247,7 +247,7 @@ describe('useChapters', () => {
     describe('unload', () => {
         it('cancels pending autosave timers and resets state', async () => {
             const fetchRemote = vi.fn().mockResolvedValue(null);
-            const c = setup({ getAccessToken: async () => 'tok', fetchRemote });
+            const c = setup({ getSessionToken: async () => 'tok', fetchRemote });
             await c.load('sess-1');
             await flushMicrotasks();
             c.segments.value = [{ id: 'a', inSec: 0, outSec: 5 }];

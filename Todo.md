@@ -115,24 +115,29 @@ Whatever is chosen must cope with the case where the CMS document was deleted en
 
 ---
 
-## 6. Restore the test suites
+## 6. Restore the test suites — done
 
-**Today.** Specs were left broken on purpose through migration phases 1–9, to avoid churning tests against code that was still moving. Current state:
+**Done.** Every workspace is green, and `vue-tsc` typechecks the specs again.
 
 | Workspace | Result |
 |---|---|
-| `api/` | 9 failing spec files, 180 failing / 714 tests — `auth/auth-resolver.guard.spec.ts`, `cors.config.spec.ts`, `encode/encode.controller.spec.ts`, `encode/services/{encode,encryption,ffmpeg,queue,session-cleanup,session}.service.spec.ts` |
-| `app/` | 3 failing spec files, 17 failing / 137 tests — `api.spec.ts`, `composables/useChapters.spec.ts`, `views/SessionView.spec.ts` |
-| `hls/` | passing (26) |
-| `segment-editor/` | passing (216) |
+| `api/` | 22 files, 741 tests |
+| `app/` | 10 files, 178 tests |
+| `segment-editor/` | 5 files, 217 tests |
+| `hls/` | 4 files, 26 tests |
 
-The failures are the expected shape of the migration: specs still calling `SessionService.cleanup()` (now `cleanupAbandoned(maxAgeMs)`), `createSession(config, jwt)` in the app client (the app no longer creates sessions), CORS options that are no longer static, and auth cases for API-key-webhook and tus paths that no longer exist.
+Rewritten against what the code does now rather than patched into passing. Two suites were deleted rather than repaired, because their subject moved: the angle and audio-only playlist generation in `ffmpeg.service` (the encoder writes one spec-correct master and the player narrows it), and everything about webhook delivery in `encode.service` (the CMS watches over SSE).
 
-**Wanted.** Rewrite rather than patch, and add coverage for what is genuinely new and currently untested: the CMS controller (origin gating, `documentId` reuse, per-session prefix), `OriginRegistry` (normalisation, single in-flight approval, denial memory), credential redaction and recovery in `SessionService`, and `hls/src/angles.ts` extraction against real multi-angle masters.
+New coverage for what the migration added and nothing tested: `OriginRegistry` (33) and `CmsController` (31) — the origin allowlist is the whole perimeter for a remote caller, since the API binds to the loopback interface of someone's laptop. Credential redaction and restore in `SessionService` is covered too.
 
-Also: `api/vitest.config.ts` still aliases `node-tusd` to a path under `node_modules` that no longer exists — dead config to remove with this work. And `app/tsconfig.app.json` excludes `src/**/*.spec.ts` so `vue-tsc` stops typechecking the broken specs — re-include them when the suites are restored.
+**Two defects the new tests found**, both fixed here:
 
-**The user will ask for this explicitly after manual verification.** Do not start it unprompted.
+- `createCorsOptions` promised in its own comment to refuse by withholding the header and never by raising, but called `registry.isAllowed(origin)` before building the promise, so only an async rejection was caught. `isAllowed` has a synchronous return path and calls the host's approver directly — a native dialog throwing synchronously would have become a 500 on a request the API meant to quietly turn away.
+- `encode.service.spec` constructed `EncodeService` with eight services when it takes seven, so every assertion in that suite was made against the wrong object. `encode.controller.spec` had the same fault with nine.
+
+**Still worth adding.** `hls/src/angles.ts` extraction against real multi-angle masters — the natural home for the coverage deleted from `ffmpeg.service`. And `cms-mock/` has no tests at all, deliberately: it is a dev-only bench, nothing depends on it, and its bugs surface immediately in use.
+
+Also removed with this work: the dead `node-tusd` alias in `api/vitest.config.ts`, and the `src/**/*.spec.ts` exclusion in `app/tsconfig.app.json`.
 
 ---
 
