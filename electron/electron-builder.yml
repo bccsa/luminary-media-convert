@@ -44,13 +44,16 @@ extraResources:
     - from: ../app/dist
       to: app
     # ffmpeg/ffprobe for this platform, dropped beside the app's resources where
-    # bundledBinary() looks for them. See bin/README.md — the binaries are not
-    # in the repository.
+    # bundledBinary() looks for them. Fetched by `npm run fetch-binaries`, which
+    # dist:mac / dist:win depend on — they are not in the repository. The GPL
+    # licence text travels with them, which is the condition of shipping a GPL
+    # build at all.
     - from: bin/${platform}-${arch}
       to: .
       filter:
           - ffmpeg*
           - ffprobe*
+          - LICENSE-ffmpeg.txt
 
 protocols:
     - name: Luminary Media Convert

@@ -124,11 +124,17 @@ Whatever is chosen must cope with the case where the CMS document was deleted en
 
 ---
 
-## 5a. Bundle ffmpeg/ffprobe binaries (macOS too)
+## 5a. Bundle ffmpeg/ffprobe binaries — done for macOS
 
-**Today.** `electron/bin/` contains only a README. The packaged app looks for `ffmpeg`/`ffprobe` under `process.resourcesPath` and, finding nothing, falls back to whatever is on the user's PATH — which on a clean end-user Mac is nothing. The packaged-app verification so far only proved the server boots and serves the UI, not that it can encode on a machine without Homebrew ffmpeg.
+`npm -w electron run fetch-binaries` downloads the pair, checks a pinned SHA-256, verifies the architecture and the encoders the app actually asks for, and writes the GPL licence text beside them. `dist:mac` and `dist:win` depend on it, so a build can no longer quietly produce an app with no encoder in it.
 
-**Needed.** Source a VideoToolbox-enabled darwin-arm64 `ffmpeg`/`ffprobe` pair into `electron/bin/darwin-arm64/` (see `electron/bin/README.md` for sources and licence notes), confirm `extraResources` places them and `ffbin.ts` resolution picks them up in a packaged build, and verify an encode reports `encoder: 'apple'`. The Windows equivalent is folded into item 5.
+**Verified rather than assumed:** the packaged `.app` was launched with `PATH=/usr/bin:/bin` — no Homebrew, no system ffmpeg — and reported `Apple Silicon detected, using VideoToolbox acceleration`, which it can only do by running the bundled binary. The `.dmg` is 146 MB.
+
+Two things checked along the way and recorded in `bin/README.md`: evermeet.cx publishes x86_64 only, which would run under Rosetta on the machines this app targets; and Homebrew's ffmpeg links against eighteen dylibs under `/opt/homebrew`, so it cannot start anywhere those are absent.
+
+**The licence choice is not free.** LGPL builds omit `libx264`, the CPU fallback in `FfmpegService` — without it the app cannot encode at all on a machine with no VideoToolbox or NVENC, which is the case bundling exists to serve. A GPL build ships; ffmpeg runs as a separate process and is never linked, so the obligation travels with ffmpeg rather than with this Apache-2.0 codebase. Worth a look from whoever owns licensing at BCC before a public release.
+
+**Still to do:** `win32-x64`. Add a `TARGETS` entry with the URL, digest and required capabilities (`h264_nvenc`, `scale_cuda`) — the script handles the rest. Folded into item 5, which needs a Windows machine anyway.
 
 ---
 
