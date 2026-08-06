@@ -525,7 +525,7 @@ Run it against a running API (default `http://127.0.0.1:31711`, editable in the 
 - **ffmpeg binaries are not in the repository** — tens of megabytes each and separately licensed. See `electron/bin/README.md` for where to get builds with VideoToolbox (macOS arm64) and NVENC (Windows x64), how to verify them, and the GPL/LGPL consequences of shipping them. Without them the packaged app falls back to whatever `ffmpeg` is on PATH: runnable on a developer machine, not shippable
 - **Unsigned.** `mac.identity: null`, `hardenedRuntime: false` — there is no Developer ID certificate in this project, so Gatekeeper requires right-click → Open on first launch. Windows builds are likewise unsigned, and have never been built or tested
 - **Protocol**: `luminary-convert://` is registered so a CMS can offer a launch link when the encoder is not running. From source, the scheme is registered against `process.execPath` plus the resolved project path, or the OS would launch a bare Electron with no app to run
-- Excluded from the package: `.env`, the API workspace's `work/` directory, its Dockerfile and its lint/build config
+- Excluded from the package: `.env`, the API workspace's `work/` directory, and its lint/build config
 
 ## Follow-ups
 

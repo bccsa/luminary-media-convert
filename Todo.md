@@ -35,23 +35,19 @@ The encoder's half of the contract is done and documented (CLAUDE.md "CMS contra
 
 ---
 
-## 0c. Deployment workflows — decide before merging to main
+## 0c. Deployment workflows — decided and removed
 
-**Blocking.** Not a refinement: merging this branch to `main` as it stands will break the staging deploy.
+**Resolved: running the API as a shared remote service is no longer a supported mode.** The deploy workflows and `api/Dockerfile` are gone.
 
-`.github/workflows/api-deploy-staging.yml` fires on a push to `main` filtered on `api/**`, and this branch rewrites all of `api/`. The job writes an `api/.env` and runs the API as a container — but:
+The architecture decided this, not the cleanup. `DEFAULT_HOST` is `127.0.0.1` unconditionally, and the comment on it says why: nothing here is meant to be reachable from the network the machine is on. The perimeter for any remote caller is a browser-origin allowlist with a native approval dialog — a control that only means anything when the approver is sitting at the machine. S3 credentials arrive per session and are sealed with an OS-keychain key belonging to the logged-in user. `docs/security-review.md` rests its every conclusion on one process, one user, one machine, and says so in its closing section.
 
-- The generated `.env` carries **no `HOST`**, and the API now defaults to `127.0.0.1` (`DEFAULT_HOST` in `api/src/bootstrap.ts`, read by `main.ts`). That default is correct for a desktop app and wrong for a container: bound to the loopback interface inside its own namespace, the process is unreachable through `docker run -p`. The job judges success on the app answering, so it will fail — after it has already replaced the running container.
-- The `.env` sets `CORS_ORIGIN`, `MASTER_API_KEY`, `KEY_VALIDATION_WEBHOOK_URL`, `MAX_UPLOAD_SIZE`, `S3_UPLOAD_CONCURRENCY`, `TUSD_BINARY_PATH` and more, of which the current API reads almost nothing. The origin allowlist is `CMS_ALLOWED_ORIGINS` now, not `CORS_ORIGIN`.
+Keeping workflows that deployed the API as a long-running container to a remote host would have been worse than untidy: they would have been the only documentation of a deployment nobody could safely run. And they would have broken on merge — the generated `.env` carries no `HOST`, so the process would have bound loopback inside its own container namespace and been unreachable through `docker run -p`, failing the health check after replacing the container already there.
 
-`api-deploy-prod.yml` is the same shape on the `prod` branch.
+Removed: `.github/workflows/api-deploy-{prod,staging}.yml`, `api/Dockerfile`, `api/.dockerignore`. `api-unit-tests.yml` stays — it is the CI that guards the branch.
 
-**The decision, which is a product one.** Is running the API as a shared remote service still a supported mode?
+**One thing this cannot do for you.** If a staging or production container is still running on `za-scc-dhe03`, nothing here stops it. It is running the old SaaS-era API against a CouchDB and an Auth0 tenant that this branch removes; it will simply go stale rather than break. Decommissioning it is a manual step on that host.
 
-- **If no** — delete both deploy workflows and `api/Dockerfile`. They are dead weight that currently reads as a supported deployment. `api-unit-tests.yml` stays.
-- **If yes** — it needs saying somewhere, and the workflows need `HOST=0.0.0.0` in the generated `.env` plus a pass over the variables. It also needs a threat-model answer the local-only design does not currently give: as a desktop app the API is reachable only from the machine it runs on, and the origin allowlist assumes exactly that.
-
-Either way, do it before the merge rather than discovering it from a red deploy.
+**If the decision is ever reversed**, it takes more than restoring these files: `HOST=0.0.0.0` in the generated environment, a pass over variables the current API no longer reads (`CORS_ORIGIN` is `CMS_ALLOWED_ORIGINS` now), and — the real work — a fresh answer to the threat model, because an origin allowlist approved by a native dialog is not a perimeter for a service with no one sitting at it.
 
 ---
 

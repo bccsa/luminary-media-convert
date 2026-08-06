@@ -183,11 +183,12 @@ disagree with the reasoning rather than rediscover the fact.
 - **A GPL ffmpeg is shipped.** It runs as a separate process and is never linked,
   so the obligation travels with ffmpeg, not with this Apache-2.0 codebase. A
   technical reading, not legal advice — see `electron/bin/README.md`.
-- **The deploy workflows still describe a remote service.** If the API is ever run
-  as one again, this entire review's central assumption — that it is reachable
-  only from the machine it runs on — no longer holds, and the origin allowlist
-  stops being a sufficient perimeter. Tracked as Todo item 0c, and it should
-  block that decision.
+- **Running the API as a remote service would invalidate this review.** The
+  deploy workflows and Dockerfile that still described that mode have since been
+  removed (Todo item 0c), which is why this is now a note rather than an open
+  risk. Should it ever be reversed, the origin allowlist stops being a sufficient
+  perimeter: a native approval dialog only means something when someone is
+  sitting at the machine.
 
 ---
 

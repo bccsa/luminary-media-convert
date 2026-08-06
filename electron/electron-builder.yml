@@ -24,7 +24,7 @@ files:
     # last encode.
     - '!**/.env'
     - '!**/node_modules/@luminary-media-converter/api/work'
-    - '!**/node_modules/@luminary-media-converter/api/{Dockerfile,.dockerignore,.node-version,nest-cli.json,eslint.config.mjs}'
+    - '!**/node_modules/@luminary-media-converter/api/{.node-version,nest-cli.json,eslint.config.mjs}'
 
 # On, and this was tested rather than assumed: the packaged app was launched
 # from outside the repository (so nothing could resolve upwards into the
