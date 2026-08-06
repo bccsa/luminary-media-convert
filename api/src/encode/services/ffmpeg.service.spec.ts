@@ -45,7 +45,7 @@ vi.mock('worker_threads', async (importOriginal) => {
     return { ...actual, Worker: ProxiedWorker };
 });
 
-import { FfmpegService, type AccelMode, type EncodeOptions, type AnglePlaylist } from './ffmpeg.service.js';
+import { FfmpegService, type AccelMode, type EncodeOptions } from './ffmpeg.service.js';
 
 const flushPromises = async () => {
     for (let i = 0; i < 10; i++) {
@@ -1019,196 +1019,13 @@ describe('FfmpegService', () => {
         });
     });
 
-    describe('generateAudioOnlyPlaylist (private, tested via reflection)', () => {
-        const generateAudioOnlyPlaylist = (outputDir: string, config: EncodeConfigDto): Promise<AnglePlaylist | null> => {
-            return (service as any).generateAudioOnlyPlaylist(outputDir, config);
-        };
 
-        let tmpDir: string;
-
-        beforeEach(() => {
-            tmpDir = mkdtempSync(join(tmpdir(), 'ffmpeg-audio-only-'));
-        });
-
-        afterEach(() => {
-            rmSync(tmpDir, { recursive: true, force: true });
-        });
-
-        it('should return null when no audio groups', async () => {
-            const result = await generateAudioOnlyPlaylist(tmpDir, {
-                type: 'video',
-                videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
-                ],
-            });
-            expect(result).toBeNull();
-        });
-
-        it('should return null when audio groups array is empty', async () => {
-            const result = await generateAudioOnlyPlaylist(tmpDir, {
-                type: 'video',
-                audioGroups: [],
-            });
-            expect(result).toBeNull();
-        });
-
-        it('should generate audio_only.m3u8 with correct structure for single group', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:6\n', 'utf-8');
-
-            const result = await generateAudioOnlyPlaylist(tmpDir, {
-                type: 'video',
-                audioGroups: [
-                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                ],
-            });
-
-            expect(result).toEqual({ name: 'Audio only', filename: 'audio_only.m3u8' });
-
-            const content = readFileSync(join(tmpDir, 'audio_only.m3u8'), 'utf-8');
-            expect(content).toContain('#EXTM3U');
-            expect(content).toContain('#EXT-X-VERSION:6');
-            expect(content).toContain('TYPE=AUDIO');
-            expect(content).toContain('GROUP-ID="hd"');
-            // Single language → uses language code as NAME
-            expect(content).toContain('NAME="eng"');
-            expect(content).toContain('DEFAULT=YES');
-            expect(content).toContain('LANGUAGE="eng"');
-            expect(content).toContain('URI="stream_hd_HD_Audio/playlist.m3u8"');
-            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2",AUDIO="hd"');
-            expect(content).toContain('stream_hd_HD_Audio/playlist.m3u8');
-        });
-
-        it('should generate audio_only.m3u8 with multiple groups', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:7\n', 'utf-8');
-
-            const result = await generateAudioOnlyPlaylist(tmpDir, {
-                type: 'video',
-                audioGroups: [
-                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
-                    { id: 'mid', label: 'Standard Audio', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
-                ],
-            });
-
-            expect(result).toEqual({ name: 'Audio only', filename: 'audio_only.m3u8' });
-
-            const content = readFileSync(join(tmpDir, 'audio_only.m3u8'), 'utf-8');
-            expect(content).toContain('GROUP-ID="hd"');
-            expect(content).toContain('GROUP-ID="mid"');
-            // No language set → all share empty language → uniform NAME "Audio"
-            expect(content).toContain('NAME="Audio"');
-            expect(content).toMatch(/NAME="Audio",DEFAULT=YES/);
-            expect(content).toContain('URI="stream_hd_HD_Audio/playlist.m3u8"');
-            expect(content).toContain('URI="stream_mid_Standard_Audio/playlist.m3u8"');
-            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2",AUDIO="hd"');
-            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS="mp4a.40.2",AUDIO="mid"');
-        });
-
-        it('should use default version when master.m3u8 does not exist', async () => {
-            const result = await generateAudioOnlyPlaylist(tmpDir, {
-                type: 'video',
-                audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
-                ],
-            });
-
-            expect(result).not.toBeNull();
-            const content = readFileSync(join(tmpDir, 'audio_only.m3u8'), 'utf-8');
-            expect(content).toContain('#EXT-X-VERSION:7');
-        });
-
-        it('should fall back to bitrate-based name and "Audio" label when no label or language', async () => {
-            const result = await generateAudioOnlyPlaylist(tmpDir, {
-                type: 'video',
-                audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
-                ],
-            });
-
-            expect(result).not.toBeNull();
-            const content = readFileSync(join(tmpDir, 'audio_only.m3u8'), 'utf-8');
-            expect(content).toContain('NAME="Audio"');
-            expect(content).toContain('URI="stream_hd_192kbps/playlist.m3u8"');
-            expect(content).not.toContain('LANGUAGE=');
-        });
-
-        it('should generate multi-language tiers with correct EXT-X-MEDIA and STREAM-INF per tier', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:7\n', 'utf-8');
-
-            const result = await generateAudioOnlyPlaylist(tmpDir, {
-                type: 'video',
-                audioGroups: [
-                    { id: 'hd', label: 'English', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'hd', label: 'Spanish', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'spa' },
-                    { id: 'low', label: 'English', audioBitrateKbps: 64, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'low', label: 'Spanish', audioBitrateKbps: 64, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'spa' },
-                ],
-            });
-
-            expect(result).toEqual({ name: 'Audio only', filename: 'audio_only.m3u8' });
-
-            const content = readFileSync(join(tmpDir, 'audio_only.m3u8'), 'utf-8');
-
-            // Two tiers: hd and low
-            expect(content).toContain('GROUP-ID="hd"');
-            expect(content).toContain('GROUP-ID="low"');
-
-            // EXT-X-MEDIA entries with languages
-            expect(content).toContain('GROUP-ID="hd",NAME="English",DEFAULT=YES,LANGUAGE="eng"');
-            expect(content).toContain('GROUP-ID="hd",NAME="Spanish",DEFAULT=NO,LANGUAGE="spa"');
-            expect(content).toContain('GROUP-ID="low",NAME="English",DEFAULT=YES,LANGUAGE="eng"');
-            expect(content).toContain('GROUP-ID="low",NAME="Spanish",DEFAULT=NO,LANGUAGE="spa"');
-
-            // One STREAM-INF per tier with correct bandwidth and AUDIO group
-            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=256000,CODECS="mp4a.40.2",AUDIO="hd"');
-            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS="mp4a.40.2",AUDIO="low"');
-
-            // STREAM-INF lines reference the default (first) stream in each tier
-            expect(content).toContain('stream_hd_English/playlist.m3u8');
-            expect(content).toContain('stream_low_English/playlist.m3u8');
-        });
-
-        it('should use highest bandwidth within a tier for STREAM-INF', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:7\n', 'utf-8');
-
-            await generateAudioOnlyPlaylist(tmpDir, {
-                type: 'video',
-                audioGroups: [
-                    { id: 'hd', label: 'Stereo', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
-                    { id: 'hd', label: 'Surround', audioBitrateKbps: 384, channels: 6, audioCodec: 'aac', sourceTrackIndex: 1 },
-                ],
-            });
-
-            const content = readFileSync(join(tmpDir, 'audio_only.m3u8'), 'utf-8');
-
-            // Should use the max bitrate (384) for the tier STREAM-INF
-            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=384000,CODECS="mp4a.40.2",AUDIO="hd"');
-            // Default stream should be the first group in the tier
-            const streamInfIdx = content.indexOf('#EXT-X-STREAM-INF:BANDWIDTH=384000');
-            const uriLine = content.substring(streamInfIdx).split('\n')[1];
-            expect(uriLine).toBe('stream_hd_Stereo/playlist.m3u8');
-        });
-
-        it('should set DEFAULT=YES only for first entry in each tier', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:7\n', 'utf-8');
-
-            await generateAudioOnlyPlaylist(tmpDir, {
-                type: 'video',
-                audioGroups: [
-                    { id: 'mid', label: 'Track A', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
-                    { id: 'mid', label: 'Track B', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1 },
-                    { id: 'mid', label: 'Track C', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 2 },
-                ],
-            });
-
-            const content = readFileSync(join(tmpDir, 'audio_only.m3u8'), 'utf-8');
-            const mediaLines = content.split('\n').filter(l => l.startsWith('#EXT-X-MEDIA:'));
-
-            expect(mediaLines).toHaveLength(3);
-            expect(mediaLines[0]).toContain('DEFAULT=YES');
-            expect(mediaLines[1]).toContain('DEFAULT=NO');
-            expect(mediaLines[2]).toContain('DEFAULT=NO');
-        });
-    });
+    // The `generateAudioOnlyPlaylist` and `generateAnglePlaylists` suites lived
+    // here. Both methods are gone: the encoder writes a single spec-correct
+    // master and the player narrows it, so that behaviour and its tests belong
+    // to the hls package (listVideoAngles / extractAnglePlaylist /
+    // extractAudioOnlyPlaylist), against real multi-angle masters rather than
+    // against a mocked filesystem.
 
     describe('fixAudioOnlyMasterPlaylist (private, tested via reflection)', () => {
         const fixAudioOnlyMasterPlaylist = (outputDir: string, config: EncodeConfigDto): Promise<void> => {
@@ -1518,8 +1335,6 @@ describe('FfmpegService', () => {
         let areAlignedSpy: MockInstance;
         let probeDurationSpy: MockInstance;
         let fixMasterPlaylistSpy: MockInstance;
-        let generateAnglePlaylistsSpy: MockInstance;
-        let generateAudioOnlyPlaylistSpy: MockInstance;
         let fixAudioOnlyMasterPlaylistSpy: MockInstance;
         let probeFrameRateSpy: MockInstance;
         let probeGopDurationSpy: MockInstance;
@@ -1553,8 +1368,6 @@ describe('FfmpegService', () => {
             areAlignedSpy = vi.spyOn(service as any, 'areStreamStartTimesAligned').mockResolvedValue(true);
             probeDurationSpy = vi.spyOn(service as any, 'probeDuration').mockResolvedValue(100);
             fixMasterPlaylistSpy = vi.spyOn(service as any, 'fixMasterPlaylist').mockResolvedValue(undefined);
-            generateAnglePlaylistsSpy = vi.spyOn(service as any, 'generateAnglePlaylists').mockResolvedValue([]);
-            generateAudioOnlyPlaylistSpy = vi.spyOn(service as any, 'generateAudioOnlyPlaylist').mockResolvedValue(null);
             fixAudioOnlyMasterPlaylistSpy = vi.spyOn(service as any, 'fixAudioOnlyMasterPlaylist').mockResolvedValue(undefined);
             probeFrameRateSpy = vi.spyOn(service as any, 'probeFrameRate').mockResolvedValue(30);
             probeGopDurationSpy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
@@ -1566,8 +1379,6 @@ describe('FfmpegService', () => {
             areAlignedSpy.mockRestore();
             probeDurationSpy.mockRestore();
             fixMasterPlaylistSpy.mockRestore();
-            generateAnglePlaylistsSpy.mockRestore();
-            generateAudioOnlyPlaylistSpy.mockRestore();
             fixAudioOnlyMasterPlaylistSpy.mockRestore();
             probeFrameRateSpy.mockRestore();
             probeGopDurationSpy.mockRestore();
@@ -1587,7 +1398,7 @@ describe('FfmpegService', () => {
             const result = await promise;
             expect(result.outputDir).toBe(opts.outputDir);
             expect(result.masterPlaylist).toBe('master.m3u8');
-            expect(result.anglePlaylists).toEqual([]);
+            expect(result.segmentFormat).toBe('fmp4');
         });
 
         it('should call spawn with "ffmpeg" and correct args', async () => {
@@ -1714,7 +1525,7 @@ describe('FfmpegService', () => {
             expect(calls.at(-1)).toBe(100);
         });
 
-        it('should call fixMasterPlaylist and generateAnglePlaylists for video type', async () => {
+        it('should fix the single master playlist for video type', async () => {
             const mockProc = createMockProcess();
             mockSpawn.mockReturnValue(mockProc);
 
@@ -1726,7 +1537,9 @@ describe('FfmpegService', () => {
             await promise;
 
             expect(fixMasterPlaylistSpy).toHaveBeenCalledWith(opts.outputDir, opts.encodeConfig);
-            expect(generateAnglePlaylistsSpy).toHaveBeenCalledWith(opts.outputDir, opts.encodeConfig);
+            // One spec-correct master carries every angle as an EXT-X-MEDIA
+            // rendition group; nothing writes a file per angle any more.
+            expect(fixAudioOnlyMasterPlaylistSpy).not.toHaveBeenCalled();
         });
 
         it('should not call fixMasterPlaylist for audio type', async () => {
@@ -1751,47 +1564,15 @@ describe('FfmpegService', () => {
             expect(fixMasterPlaylistSpy).not.toHaveBeenCalled();
         });
 
-        it('should call generateAudioOnlyPlaylist for video type', async () => {
+        it('always resolves to master.m3u8, whatever the angles', async () => {
+            // The encoder writes one spec-correct master carrying every camera
+            // angle as an EXT-X-MEDIA rendition group. It used to emit a file
+            // per angle plus an audio_only.m3u8 and hand back a list; narrowing
+            // is the player's job now (extractAnglePlaylist /
+            // extractAudioOnlyPlaylist in the hls package), so there is one
+            // name and it never varies.
             const mockProc = createMockProcess();
             mockSpawn.mockReturnValue(mockProc);
-
-            const opts = makeEncodeOpts();
-            const promise = service.encode(opts);
-            await flushPromises();
-
-            mockProc.emitClose(0);
-            await promise;
-
-            expect(generateAudioOnlyPlaylistSpy).toHaveBeenCalledWith(opts.outputDir, opts.encodeConfig);
-        });
-
-        it('should not call generateAudioOnlyPlaylist for audio type', async () => {
-            const mockProc = createMockProcess();
-            mockSpawn.mockReturnValue(mockProc);
-
-            const opts = makeEncodeOpts({
-                encodeConfig: {
-                    type: 'audio',
-                    segmentDuration: 6,
-                    audioGroups: [
-                        { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
-                    ],
-                },
-            });
-            const promise = service.encode(opts);
-            await flushPromises();
-
-            mockProc.emitClose(0);
-            await promise;
-
-            expect(generateAudioOnlyPlaylistSpy).not.toHaveBeenCalled();
-        });
-
-        it('should append audio-only angle and rename Default to Video', async () => {
-            const mockProc = createMockProcess();
-            mockSpawn.mockReturnValue(mockProc);
-            generateAnglePlaylistsSpy.mockResolvedValue([{ name: 'Default', filename: 'master.m3u8' }]);
-            generateAudioOnlyPlaylistSpy.mockResolvedValue({ name: 'Audio only', filename: 'audio_only.m3u8' });
 
             const promise = service.encode(makeEncodeOpts());
             await flushPromises();
@@ -1800,33 +1581,6 @@ describe('FfmpegService', () => {
             const result = await promise;
 
             expect(result.masterPlaylist).toBe('master.m3u8');
-            expect(result.anglePlaylists).toEqual([
-                { name: 'Video', filename: 'master.m3u8' },
-                { name: 'Audio only', filename: 'audio_only.m3u8' },
-            ]);
-        });
-
-        it('should append audio-only angle to multi-angle playlists without renaming', async () => {
-            const mockProc = createMockProcess();
-            mockSpawn.mockReturnValue(mockProc);
-            generateAnglePlaylistsSpy.mockResolvedValue([
-                { name: 'Main', filename: 'Main.m3u8' },
-                { name: 'Side', filename: 'Side.m3u8' },
-            ]);
-            generateAudioOnlyPlaylistSpy.mockResolvedValue({ name: 'Audio only', filename: 'audio_only.m3u8' });
-
-            const promise = service.encode(makeEncodeOpts());
-            await flushPromises();
-
-            mockProc.emitClose(0);
-            const result = await promise;
-
-            expect(result.masterPlaylist).toBe('Main.m3u8');
-            expect(result.anglePlaylists).toEqual([
-                { name: 'Main', filename: 'Main.m3u8' },
-                { name: 'Side', filename: 'Side.m3u8' },
-                { name: 'Audio only', filename: 'audio_only.m3u8' },
-            ]);
         });
 
         it('should call fixAudioOnlyMasterPlaylist for audio type', async () => {
@@ -2228,124 +1982,6 @@ describe('FfmpegService', () => {
         });
     });
 
-    describe('generateAnglePlaylists', () => {
-        let tempDir: string;
-
-        beforeEach(() => {
-            tempDir = mkdtempSync(join(tmpdir(), 'ffmpeg-angle-test-'));
-        });
-
-        afterEach(() => {
-            rmSync(tempDir, { recursive: true, force: true });
-        });
-
-        it('should return Default for single source track', async () => {
-            const config = {
-                type: 'video' as const,
-                videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
-                    { width: 1280, height: 720, videoBitrateKbps: 3000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
-                ],
-            };
-
-            const result: AnglePlaylist[] = await (service as any).generateAnglePlaylists(tempDir, config);
-            expect(result).toEqual([{ name: 'Default', filename: 'master.m3u8' }]);
-        });
-
-        it('should return empty array when videoRenditions is empty', async () => {
-            const config = { type: 'video' as const, videoRenditions: [] };
-            const result: AnglePlaylist[] = await (service as any).generateAnglePlaylists(tempDir, config);
-            expect(result).toEqual([]);
-        });
-
-        it('should return empty array when master.m3u8 does not exist', async () => {
-            const config = {
-                type: 'video' as const,
-                videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 1, audioGroupId: 'hd' },
-                ],
-            };
-
-            // No master.m3u8 written
-            const result: AnglePlaylist[] = await (service as any).generateAnglePlaylists(tempDir, config);
-            expect(result).toEqual([]);
-        });
-
-        it('should generate per-angle playlists for multiple tracks', async () => {
-            const config = {
-                type: 'video' as const,
-                videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 1, audioGroupId: 'hd' },
-                ],
-            };
-
-            // Write a master playlist with VIDEO= attributes (as produced by fixMasterPlaylistVideoGroups)
-            const masterContent = [
-                '#EXTM3U',
-                '#EXT-X-VERSION:7',
-                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="eng",DEFAULT=YES,URI="stream_hd_192kbps/playlist.m3u8"',
-                '#EXT-X-STREAM-INF:BANDWIDTH=5000000,VIDEO="Angle_0",AUDIO="hd"',
-                'stream_0/playlist.m3u8',
-                '#EXT-X-STREAM-INF:BANDWIDTH=5000000,VIDEO="Angle_1",AUDIO="hd"',
-                'stream_1/playlist.m3u8',
-            ].join('\n');
-            writeFileSync(join(tempDir, 'master.m3u8'), masterContent);
-
-            const result: AnglePlaylist[] = await (service as any).generateAnglePlaylists(tempDir, config);
-
-            expect(result).toHaveLength(2);
-            expect(result[0]).toEqual({ name: 'Angle_0', filename: 'Angle_0.m3u8' });
-            expect(result[1]).toEqual({ name: 'Angle_1', filename: 'Angle_1.m3u8' });
-
-            // Verify files were written
-            const angle0Content = readFileSync(join(tempDir, 'Angle_0.m3u8'), 'utf-8');
-            expect(angle0Content).toContain('#EXTM3U');
-            expect(angle0Content).toContain('#EXT-X-VERSION:7');
-            expect(angle0Content).toContain('stream_0/playlist.m3u8');
-            expect(angle0Content).not.toContain('VIDEO=');
-            // Audio media lines should be included
-            expect(angle0Content).toContain('#EXT-X-MEDIA:TYPE=AUDIO');
-
-            const angle1Content = readFileSync(join(tempDir, 'Angle_1.m3u8'), 'utf-8');
-            expect(angle1Content).toContain('stream_1/playlist.m3u8');
-            expect(angle1Content).not.toContain('stream_0/playlist.m3u8');
-        });
-
-        it('should use videoTrackNames for angle display names', async () => {
-            const config = {
-                type: 'video' as const,
-                videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 1, audioGroupId: 'hd' },
-                ],
-                videoTrackNames: [
-                    { index: 0, name: 'Main Camera' },
-                    { index: 1, name: 'Side Camera' },
-                ],
-            };
-
-            const masterContent = [
-                '#EXTM3U',
-                '#EXT-X-VERSION:7',
-                '#EXT-X-STREAM-INF:BANDWIDTH=5000000,VIDEO="Main_Camera"',
-                'stream_0/playlist.m3u8',
-                '#EXT-X-STREAM-INF:BANDWIDTH=5000000,VIDEO="Side_Camera"',
-                'stream_1/playlist.m3u8',
-            ].join('\n');
-            writeFileSync(join(tempDir, 'master.m3u8'), masterContent);
-
-            const result: AnglePlaylist[] = await (service as any).generateAnglePlaylists(tempDir, config);
-
-            expect(result).toHaveLength(2);
-            expect(result[0]).toEqual({ name: 'Main Camera', filename: 'Main_Camera.m3u8' });
-            expect(result[1]).toEqual({ name: 'Side Camera', filename: 'Side_Camera.m3u8' });
-
-            expect(existsSync(join(tempDir, 'Main_Camera.m3u8'))).toBe(true);
-            expect(existsSync(join(tempDir, 'Side_Camera.m3u8'))).toBe(true);
-        });
-    });
 
     describe('buildVideoStreamName', () => {
         it('should use label and track index when multiTrack is true', () => {
@@ -2390,8 +2026,6 @@ describe('FfmpegService', () => {
         let areAlignedSpy: MockInstance;
         let probeDurationSpy: MockInstance;
         let fixMasterPlaylistSpy: MockInstance;
-        let generateAnglePlaylistsSpy: MockInstance;
-        let generateAudioOnlyPlaylistSpy: MockInstance;
         let fixAudioOnlyMasterPlaylistSpy: MockInstance;
         let probeFrameRateSpy: MockInstance;
         let probeGopDurationSpy: MockInstance;
@@ -2415,8 +2049,6 @@ describe('FfmpegService', () => {
             areAlignedSpy = vi.spyOn(service as any, 'areStreamStartTimesAligned').mockResolvedValue(true);
             probeDurationSpy = vi.spyOn(service as any, 'probeDuration').mockResolvedValue(100);
             fixMasterPlaylistSpy = vi.spyOn(service as any, 'fixMasterPlaylist').mockResolvedValue(undefined);
-            generateAnglePlaylistsSpy = vi.spyOn(service as any, 'generateAnglePlaylists').mockResolvedValue([]);
-            generateAudioOnlyPlaylistSpy = vi.spyOn(service as any, 'generateAudioOnlyPlaylist').mockResolvedValue(null);
             fixAudioOnlyMasterPlaylistSpy = vi.spyOn(service as any, 'fixAudioOnlyMasterPlaylist').mockResolvedValue(undefined);
             probeFrameRateSpy = vi.spyOn(service as any, 'probeFrameRate').mockResolvedValue(30);
             probeGopDurationSpy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
@@ -2429,8 +2061,6 @@ describe('FfmpegService', () => {
             areAlignedSpy.mockRestore();
             probeDurationSpy.mockRestore();
             fixMasterPlaylistSpy.mockRestore();
-            generateAnglePlaylistsSpy.mockRestore();
-            generateAudioOnlyPlaylistSpy.mockRestore();
             fixAudioOnlyMasterPlaylistSpy.mockRestore();
             probeFrameRateSpy.mockRestore();
             probeGopDurationSpy.mockRestore();
@@ -3264,8 +2894,6 @@ describe('FfmpegService', () => {
         let areAlignedSpy: MockInstance;
         let probeDurationSpy: MockInstance;
         let fixMasterPlaylistSpy: MockInstance;
-        let generateAnglePlaylistsSpy: MockInstance;
-        let generateAudioOnlyPlaylistSpy: MockInstance;
         let fixAudioOnlyMasterPlaylistSpy: MockInstance;
         let probeFrameRateSpy: MockInstance;
         let probeGopDurationSpy: MockInstance;
@@ -3277,8 +2905,6 @@ describe('FfmpegService', () => {
             areAlignedSpy = vi.spyOn(service as any, 'areStreamStartTimesAligned').mockResolvedValue(true);
             probeDurationSpy = vi.spyOn(service as any, 'probeDuration').mockResolvedValue(100);
             fixMasterPlaylistSpy = vi.spyOn(service as any, 'fixMasterPlaylist').mockResolvedValue(undefined);
-            generateAnglePlaylistsSpy = vi.spyOn(service as any, 'generateAnglePlaylists').mockResolvedValue([]);
-            generateAudioOnlyPlaylistSpy = vi.spyOn(service as any, 'generateAudioOnlyPlaylist').mockResolvedValue(null);
             fixAudioOnlyMasterPlaylistSpy = vi.spyOn(service as any, 'fixAudioOnlyMasterPlaylist').mockResolvedValue(undefined);
             probeFrameRateSpy = vi.spyOn(service as any, 'probeFrameRate').mockResolvedValue(30);
             probeGopDurationSpy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
@@ -3290,8 +2916,6 @@ describe('FfmpegService', () => {
             areAlignedSpy.mockRestore();
             probeDurationSpy.mockRestore();
             fixMasterPlaylistSpy.mockRestore();
-            generateAnglePlaylistsSpy.mockRestore();
-            generateAudioOnlyPlaylistSpy.mockRestore();
             fixAudioOnlyMasterPlaylistSpy.mockRestore();
             probeFrameRateSpy.mockRestore();
             probeGopDurationSpy.mockRestore();
@@ -3384,46 +3008,6 @@ describe('FfmpegService', () => {
         });
     });
 
-    describe('generateAnglePlaylists edge cases', () => {
-        let tempDir: string;
-
-        beforeEach(() => {
-            tempDir = mkdtempSync(join(tmpdir(), 'ffmpeg-angle-edge-'));
-        });
-
-        afterEach(() => {
-            rmSync(tempDir, { recursive: true, force: true });
-        });
-
-        it('should skip STREAM-INF when next line is a comment or empty', async () => {
-            const config = {
-                type: 'video' as const,
-                videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 1, audioGroupId: 'hd' },
-                ],
-            };
-
-            // Master playlist where STREAM-INF is followed by a comment instead of a URI
-            const masterContent = [
-                '#EXTM3U',
-                '#EXT-X-VERSION:7',
-                '#EXT-X-STREAM-INF:BANDWIDTH=5000000,VIDEO="Angle_0"',
-                '# This is a comment instead of a URI',
-                '#EXT-X-STREAM-INF:BANDWIDTH=5000000,VIDEO="Angle_1"',
-                'stream_1/playlist.m3u8',
-            ].join('\n');
-            writeFileSync(join(tempDir, 'master.m3u8'), masterContent);
-
-            const result: AnglePlaylist[] = await (service as any).generateAnglePlaylists(tempDir, config);
-
-            // The first STREAM-INF should be skipped (next line is a comment)
-            // Only "Angle_1" should be collected
-            expect(result.length).toBeGreaterThanOrEqual(1);
-            const angle1 = result.find((p: AnglePlaylist) => p.name === 'Angle_1');
-            expect(angle1).toBeDefined();
-        });
-    });
 
     describe('fixMasterPlaylistVideoGroups edge cases', () => {
         it('should skip duplicate groupIds when multiple renditions map to the same angle', () => {
