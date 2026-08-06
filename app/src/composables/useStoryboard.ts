@@ -74,6 +74,17 @@ export function useStoryboard(opts: {
         if (disposed || !opts.url.value || !opts.active.value) return;
         try {
             const response = await doFetch();
+            // 404 is the API saying this source has no storyboard and never
+            // will — no video track, or nothing to sample. Every other failure
+            // may still be transient, so only this one ends the watch. Without
+            // it the poll ran for the life of the session and the timeline kept
+            // claiming frames were on their way.
+            if (response.status === 404) {
+                complete.value = true;
+                hasFrames.value = false;
+                stop();
+                return;
+            }
             if (response.ok) {
                 const done =
                     response.headers.get('X-Storyboard-Complete') === 'true';

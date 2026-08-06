@@ -882,6 +882,19 @@ const isAudioOnly = computed(
     () => encodingType.value === 'audio' || audioOnlyRendition.value
 );
 
+/**
+ * Whether the source file itself carries video, read from the probe rather than
+ * from `encodingType` — the latter is a choice about the output and can be set
+ * to audio for a video source, which says nothing about whether frames exist to
+ * sample.
+ */
+const sourceHasVideoTrack = computed(() => {
+    const tracks =
+        probeResult.value?.videoTracks ??
+        session.value?.probeResult?.videoTracks;
+    return (tracks?.length ?? 0) > 0;
+});
+
 function onAnglesLoaded(info: {
     angles: VideoAngle[];
     hasAudioOnly: boolean;
@@ -932,7 +945,13 @@ const deliveryProblem = computed<'blocked' | 'missing' | null>(() => {
  * writes its own to S3 — which happens at completion, not before.
  */
 const sourceStoryboardActive = computed(
-    () => showProbeConfig.value || showEncoding.value
+    () =>
+        // A source with no video track has no frames to sample, and the API
+        // answers 404 for it. Asking anyway left the timeline showing
+        // "Generating thumbnails…" for the whole session on an audio file,
+        // for frames that were never coming.
+        sourceHasVideoTrack.value &&
+        (showProbeConfig.value || showEncoding.value)
 );
 
 const sourceStoryboardUrl = computed(() => {

@@ -106,9 +106,33 @@ describe('useStoryboard', () => {
         expect(fetcher).not.toHaveBeenCalled();
     });
 
+    it('gives up when the source has no storyboard at all', async () => {
+        // 404 is the API saying this source has no video track to sample. It is
+        // the one failure that will not resolve itself, so the watch ends and
+        // nothing claims frames are on their way — an audio-only session used
+        // to show "Generating thumbnails…" for its whole life.
+        const fetcher = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 404,
+            headers: { get: () => null },
+            text: async () => '',
+        } as unknown as Response);
+        const s = useStoryboard({ url: url(), active: ref(true), fetcher });
+        await settle();
+
+        expect(s.complete.value).toBe(true);
+        expect(s.hasFrames.value).toBe(false);
+        expect(s.pending.value).toBe(false);
+
+        // And it stays given up rather than resuming on the next tick.
+        await vi.advanceTimersByTimeAsync(30_000);
+        await settle();
+        expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
     it('keeps trying after a failed request', async () => {
-        // A storyboard that 404s while the first sprites are still being written
-        // must not end the watch.
+        // A network error, unlike a 404, may well clear on the next attempt —
+        // the first sprites can still be being written.
         const fetcher = vi
             .fn()
             .mockRejectedValueOnce(new Error('network'))
