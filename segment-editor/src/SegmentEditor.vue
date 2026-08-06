@@ -1026,6 +1026,8 @@ function onKeyDown(e: KeyboardEvent) {
         }
         case 'j': case 'J': { e.preventDefault(); return stepSeek(-1, 10); }
         case 'l': case 'L': { e.preventDefault(); return stepSeek(1, 10); }
+        case 'Home': { e.preventDefault(); return emitSeek(0, true); }
+        case 'End': { e.preventDefault(); return emitSeek(props.duration, true); }
         case 'k': case 'K': { if (props.onPlayPause) { e.preventDefault(); props.onPlayPause(); } return; }
         case ',': { if (props.fps > 0) { e.preventDefault(); return frameStep(-1); } return; }
         case '.': { if (props.fps > 0) { e.preventDefault(); return frameStep(1); } return; }
@@ -2324,6 +2326,7 @@ defineExpose({
                         <dt>← / →</dt><dd>Step 1 second back / forward</dd>
                         <dt>1 / 2 / 3 + arrow</dt><dd>Step 10s / 30s / 60s</dd>
                         <dt>J / L</dt><dd>Step 10s back / forward</dd>
+                        <dt>Home / End</dt><dd>Jump to start / end</dd>
                         <dt v-if="fps > 0">, / .</dt><dd v-if="fps > 0">Step one frame ({{ fps }} fps)</dd>
                         <dt>I</dt><dd>Mark In at playhead (Resolve-style)</dd>
                         <dt>O</dt><dd>Mark Out at playhead</dd>

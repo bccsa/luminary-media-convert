@@ -1442,6 +1442,23 @@ describe('SegmentEditor — list rendering', () => {
         expect(onSeek).toHaveBeenCalledWith(21);
     });
 
+    it('Home and End jump exactly to the start and end of the timeline', async () => {
+        // The two positions the step keys only ever creep toward. Home/End land
+        // on them in one press — 0 and the full duration, not one step short.
+        const onSeek = vi.fn();
+        const t = { value: 42.7 };
+        const w = mountEditor({ currentTime: t, props: { onSeek } });
+        await flush();
+
+        keyOn(getTimeline(w), 'Home');
+        await flush();
+        expect(onSeek).toHaveBeenLastCalledWith(0);
+
+        keyOn(getTimeline(w), 'End');
+        await flush();
+        expect(onSeek).toHaveBeenLastCalledWith(100);
+    });
+
     it('play/pause button triggers onPlayPause', async () => {
         const onPlayPause = vi.fn();
         const w = mountEditor({ props: { onPlayPause, isPlaying: true } });
