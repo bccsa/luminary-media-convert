@@ -21,7 +21,7 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 - Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls", "segment-editor", "player-core", "player-web", "cms-mock", "electron"]`)
 - Dependencies are hoisted to the root `node_modules/`
 - Run workspace scripts from root: `npm -w api run <script>` or `npm -w app run <script>`
-- Root `npm run dev` — browser development: builds the shared libraries, then runs encode-config / segment-editor / hls watch builds, the API dev server and the Vite web client concurrently
+- Root `npm run dev` — browser development: builds the shared libraries, then runs their watch builds (each Vue library watches JS and `.d.ts` side by side, so a type-check during dev is not left staring at a `dist` with no declarations), the API dev server and the Vite web client concurrently
 - Root `npm run dev:electron` — desktop development: same watch builds plus a compiled API build, the Vite web client, and the Electron shell pointed at it
 
 ## Tech Stack
@@ -485,7 +485,11 @@ Starts the shared-library watch builds, the API on `http://127.0.0.1:3000` (Swag
 
 ```bash
 LOCAL_API_TOKEN=dev-token
-CMS_ALLOWED_ORIGINS=http://localhost:5199
+# Every browser page that calls the API needs an entry — including the web
+# client itself. In Electron it is same-origin and sends no Origin header, so
+# it needs none there; in browser dev it is a cross-origin page like any other
+# and is refused without this (there is no approver dialog outside Electron).
+CMS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5199
 ```
 
 `app/.env`:
@@ -494,6 +498,8 @@ CMS_ALLOWED_ORIGINS=http://localhost:5199
 VITE_API_URL=http://127.0.0.1:3000
 VITE_API_TOKEN=dev-token
 ```
+
+`VITE_API_URL` and the API's `PORT` have to agree; Electron's own default is `31711` (`DEFAULT_PORT` in `api/src/bootstrap.ts`), so setting `PORT` to that lets one `app/.env` serve both modes — at the cost of not being able to run `dev` and `dev:electron` at once.
 
 Browser dev has no preload bridge, so a dropped file cannot be resolved to a real path — the local-file flow only works inside the Electron shell.
 
