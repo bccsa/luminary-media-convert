@@ -11,7 +11,8 @@ export class HlsChaptersWriteRequestDto {
     s3: S3ConfigDto;
 
     @ApiProperty({
-        description: 'Folder prefix containing the HLS output. Trailing slash optional.',
+        description:
+            'Folder prefix containing the HLS output. Trailing slash optional.',
     })
     @IsString()
     @Expose()
@@ -28,7 +29,8 @@ export class HlsChaptersWriteRequestDto {
     lang: string;
 
     @ApiProperty({
-        description: 'WebVTT chapter document. Must start with `WEBVTT`. Max 1 MiB.',
+        description:
+            'WebVTT chapter document. Must start with `WEBVTT`. Max 1 MiB.',
     })
     @IsString()
     @Expose()

@@ -54,7 +54,9 @@ const parseOriginList = (raw: string | undefined): string[] =>
  * sides: lower-cased, no trailing slash. A browser sends `https://cms.test`,
  * and an allowlist entry of `https://cms.test/` would never match it.
  */
-export function normalizeOrigin(origin: string | undefined | null): string | null {
+export function normalizeOrigin(
+    origin: string | undefined | null
+): string | null {
     const trimmed = origin?.trim().toLowerCase().replace(/\/+$/, '');
     return trimmed ? trimmed : null;
 }
@@ -182,7 +184,7 @@ export class OriginRegistry {
             .catch((err: Error) => {
                 // A dialog that failed to open is not consent.
                 this.logger.warn(
-                    `Origin approval failed for ${normalized}: ${err.message}`,
+                    `Origin approval failed for ${normalized}: ${err.message}`
                 );
                 return false;
             })
@@ -200,8 +202,12 @@ export class OriginRegistry {
  * is read from `CMS_ALLOWED_ORIGINS` at module-init time (so `dotenv` has
  * already run) and no approver is installed; pass a policy to override both.
  */
-export const createOriginPolicyProvider = (policy?: OriginPolicy): Provider => ({
+export const createOriginPolicyProvider = (
+    policy?: OriginPolicy
+): Provider => ({
     provide: ORIGIN_POLICY,
     useFactory: (): OriginPolicy =>
-        policy ?? { allowedOrigins: parseOriginList(process.env.CMS_ALLOWED_ORIGINS) },
+        policy ?? {
+            allowedOrigins: parseOriginList(process.env.CMS_ALLOWED_ORIGINS),
+        },
 });

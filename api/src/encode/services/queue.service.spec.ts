@@ -69,7 +69,9 @@ describe('QueueService — enqueueing', () => {
 
     it('runs one encode at a time', async () => {
         const first = deferred();
-        processSession.mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+        processSession
+            .mockReturnValueOnce(first.promise)
+            .mockResolvedValue(undefined);
         const queue = build();
 
         queue.enqueue('a');
@@ -185,7 +187,7 @@ describe('QueueService — dequeueing', () => {
         queue.dequeue('b');
 
         expect(emit).toHaveBeenCalledWith(
-            expect.objectContaining({ sessionId: 'c', queuePosition: 1 }),
+            expect.objectContaining({ sessionId: 'c', queuePosition: 1 })
         );
 
         job.release();
@@ -256,7 +258,9 @@ describe('QueueService — shutdown', () => {
 
     it('stops draining rather than starting the next job', async () => {
         const first = deferred();
-        processSession.mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+        processSession
+            .mockReturnValueOnce(first.promise)
+            .mockResolvedValue(undefined);
         const queue = build();
         queue.enqueue('a');
         queue.enqueue('b');

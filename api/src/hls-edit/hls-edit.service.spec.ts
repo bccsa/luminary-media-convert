@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { BadRequestException, ConflictException, NotImplementedException, PayloadTooLargeException } from '@nestjs/common';
+import {
+    BadRequestException,
+    ConflictException,
+    NotImplementedException,
+    PayloadTooLargeException,
+} from '@nestjs/common';
 import { HlsEditService } from './hls-edit.service.js';
 import type { S3ConfigDto } from '../encode/dto/s3-config.dto.js';
 
@@ -48,7 +53,10 @@ describe('HlsEditService', () => {
                 masterPlaylistKey: 'http://host/media/output/master.m3u8',
             });
 
-            expect(etag.getObjectWithEtag).toHaveBeenCalledWith(s3, 'output/master.m3u8');
+            expect(etag.getObjectWithEtag).toHaveBeenCalledWith(
+                s3,
+                'output/master.m3u8'
+            );
             expect(result.etag).toBe('abc');
             expect(result.folderPrefix).toBe('output/');
             expect(result.masterPlaylistKey).toBe('output/master.m3u8');
@@ -58,7 +66,10 @@ describe('HlsEditService', () => {
 
     describe('mutate', () => {
         it('rewrites master.m3u8 conditionally on empty operations (no-op plumbing)', async () => {
-            etag.getObjectWithEtag.mockResolvedValue({ body: Buffer.from(MASTER), etag: 'old' });
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from(MASTER),
+                etag: 'old',
+            });
             etag.putObjectIfMatch.mockResolvedValue({ etag: 'new' });
 
             const result = await service.mutate({
@@ -81,18 +92,29 @@ describe('HlsEditService', () => {
         });
 
         it('propagates ConflictException from putObjectIfMatch', async () => {
-            etag.getObjectWithEtag.mockResolvedValue({ body: Buffer.from(MASTER), etag: 'old' });
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from(MASTER),
+                etag: 'old',
+            });
             etag.putObjectIfMatch.mockRejectedValue(
-                new ConflictException({ code: 'ETAG_MISMATCH' }),
+                new ConflictException({ code: 'ETAG_MISMATCH' })
             );
 
             await expect(
-                service.mutate({ s3, masterPlaylistKey: 'm.m3u8', ifMatch: 'stale', operations: [] }),
+                service.mutate({
+                    s3,
+                    masterPlaylistKey: 'm.m3u8',
+                    ifMatch: 'stale',
+                    operations: [],
+                })
             ).rejects.toBeInstanceOf(ConflictException);
         });
 
         it('rejects unknown operation types with BadRequestException', async () => {
-            etag.getObjectWithEtag.mockResolvedValue({ body: Buffer.from(MASTER), etag: 'old' });
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from(MASTER),
+                etag: 'old',
+            });
 
             await expect(
                 service.mutate({
@@ -100,13 +122,16 @@ describe('HlsEditService', () => {
                     masterPlaylistKey: 'm.m3u8',
                     ifMatch: 'old',
                     operations: [{ type: 'nonsense' } as any],
-                }),
+                })
             ).rejects.toBeInstanceOf(BadRequestException);
             expect(etag.putObjectIfMatch).not.toHaveBeenCalled();
         });
 
         it('known-but-unimplemented operations yield NotImplementedException (501)', async () => {
-            etag.getObjectWithEtag.mockResolvedValue({ body: Buffer.from(MASTER), etag: 'old' });
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from(MASTER),
+                etag: 'old',
+            });
 
             await expect(
                 service.mutate({
@@ -114,14 +139,16 @@ describe('HlsEditService', () => {
                     masterPlaylistKey: 'm.m3u8',
                     ifMatch: 'old',
                     operations: [{ type: 'upsertSubtitle' } as any],
-                }),
+                })
             ).rejects.toBeInstanceOf(NotImplementedException);
         });
     });
 
     describe('discover', () => {
         it('throws when neither field is provided', async () => {
-            await expect(service.discover({ s3 } as any)).rejects.toBeInstanceOf(BadRequestException);
+            await expect(
+                service.discover({ s3 } as any)
+            ).rejects.toBeInstanceOf(BadRequestException);
         });
 
         it('derives folderPrefix from an .m3u8 key', async () => {
@@ -130,7 +157,10 @@ describe('HlsEditService', () => {
                 IsTruncated: false,
             });
             etag.createClient.mockReturnValue({ send: listMock } as any);
-            etag.getObjectWithEtag.mockResolvedValue({ body: Buffer.from(MASTER), etag: 'e' });
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from(MASTER),
+                etag: 'e',
+            });
 
             const result = await service.discover({
                 s3,
@@ -152,9 +182,15 @@ describe('HlsEditService', () => {
                 IsTruncated: false,
             });
             etag.createClient.mockReturnValue({ send: listMock } as any);
-            etag.getObjectWithEtag.mockResolvedValue({ body: Buffer.from(MASTER), etag: 'e' });
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from(MASTER),
+                etag: 'e',
+            });
 
-            const result = await service.discover({ s3, folderPrefix: 'output/' });
+            const result = await service.discover({
+                s3,
+                folderPrefix: 'output/',
+            });
 
             expect(result.masterPlaylistKey).toBe('output/audio_only.m3u8');
             expect(result.anglePlaylists).toEqual([
@@ -175,9 +211,9 @@ describe('HlsEditService', () => {
                 etag: 'e',
             });
 
-            await expect(service.discover({ s3, folderPrefix: 'output/' })).rejects.toThrow(
-                /No HLS master playlist/,
-            );
+            await expect(
+                service.discover({ s3, folderPrefix: 'output/' })
+            ).rejects.toThrow(/No HLS master playlist/);
         });
 
         it('reports chapters/<lang>.vtt sidecars from the same listing', async () => {
@@ -191,9 +227,15 @@ describe('HlsEditService', () => {
                 IsTruncated: false,
             });
             etag.createClient.mockReturnValue({ send: listMock } as any);
-            etag.getObjectWithEtag.mockResolvedValue({ body: Buffer.from(MASTER), etag: 'e' });
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from(MASTER),
+                etag: 'e',
+            });
 
-            const result = await service.discover({ s3, folderPrefix: 'output/' });
+            const result = await service.discover({
+                s3,
+                folderPrefix: 'output/',
+            });
 
             expect(result.chaptersLanguages).toEqual(['en', 'fr']);
         });
@@ -204,9 +246,15 @@ describe('HlsEditService', () => {
                 IsTruncated: false,
             });
             etag.createClient.mockReturnValue({ send: listMock } as any);
-            etag.getObjectWithEtag.mockResolvedValue({ body: Buffer.from(MASTER), etag: 'e' });
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from(MASTER),
+                etag: 'e',
+            });
 
-            const result = await service.discover({ s3, folderPrefix: 'output/' });
+            const result = await service.discover({
+                s3,
+                folderPrefix: 'output/',
+            });
 
             expect(result.chaptersLanguages).toBeUndefined();
         });
@@ -215,20 +263,31 @@ describe('HlsEditService', () => {
     describe('readChapters', () => {
         it('returns the VTT body when the file exists', async () => {
             etag.getObjectWithEtag.mockResolvedValue({
-                body: Buffer.from('WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nIntro'),
+                body: Buffer.from(
+                    'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nIntro'
+                ),
                 etag: 'x',
             });
 
             const result = await service.readChapters(s3, 'output/', 'en');
 
-            expect(etag.getObjectWithEtag).toHaveBeenCalledWith(s3, 'output/chapters/en.vtt');
+            expect(etag.getObjectWithEtag).toHaveBeenCalledWith(
+                s3,
+                'output/chapters/en.vtt'
+            );
             expect(result?.vtt).toMatch(/^WEBVTT/);
         });
 
         it('handles a folder prefix without a trailing slash', async () => {
-            etag.getObjectWithEtag.mockResolvedValue({ body: Buffer.from('WEBVTT'), etag: 'x' });
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from('WEBVTT'),
+                etag: 'x',
+            });
             await service.readChapters(s3, 'output', 'en');
-            expect(etag.getObjectWithEtag).toHaveBeenCalledWith(s3, 'output/chapters/en.vtt');
+            expect(etag.getObjectWithEtag).toHaveBeenCalledWith(
+                s3,
+                'output/chapters/en.vtt'
+            );
         });
 
         it('returns null on NoSuchKey', async () => {
@@ -241,9 +300,15 @@ describe('HlsEditService', () => {
         });
 
         it('rejects malformed lang codes', async () => {
-            await expect(service.readChapters(s3, 'output/', 'EN')).rejects.toBeInstanceOf(BadRequestException);
-            await expect(service.readChapters(s3, 'output/', 'english')).rejects.toBeInstanceOf(BadRequestException);
-            await expect(service.readChapters(s3, 'output/', '../etc')).rejects.toBeInstanceOf(BadRequestException);
+            await expect(
+                service.readChapters(s3, 'output/', 'EN')
+            ).rejects.toBeInstanceOf(BadRequestException);
+            await expect(
+                service.readChapters(s3, 'output/', 'english')
+            ).rejects.toBeInstanceOf(BadRequestException);
+            await expect(
+                service.readChapters(s3, 'output/', '../etc')
+            ).rejects.toBeInstanceOf(BadRequestException);
         });
     });
 
@@ -251,46 +316,56 @@ describe('HlsEditService', () => {
         it('puts the VTT body with the right key, body, and content-type', async () => {
             etag.putObject.mockResolvedValue({ etag: 'y' });
 
-            await service.writeChapters(s3, 'output/', 'en', 'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nIntro');
+            await service.writeChapters(
+                s3,
+                'output/',
+                'en',
+                'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nIntro'
+            );
 
             expect(etag.putObject).toHaveBeenCalledWith(
                 s3,
                 'output/chapters/en.vtt',
                 expect.stringMatching(/^WEBVTT/),
-                'text/vtt',
+                'text/vtt'
             );
         });
 
         it('normalizes uppercase lang codes before writing the sidecar path', async () => {
             etag.putObject.mockResolvedValue({ etag: 'y' });
 
-            await service.writeChapters(s3, 'output/', 'EN', 'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nIntro');
+            await service.writeChapters(
+                s3,
+                'output/',
+                'EN',
+                'WEBVTT\n\n00:00:00.000 --> 00:00:10.000\nIntro'
+            );
 
             expect(etag.putObject).toHaveBeenCalledWith(
                 s3,
                 'output/chapters/en.vtt',
                 expect.stringMatching(/^WEBVTT/),
-                'text/vtt',
+                'text/vtt'
             );
         });
 
         it('rejects bodies that do not start with WEBVTT', async () => {
             await expect(
-                service.writeChapters(s3, 'output/', 'en', 'not vtt'),
+                service.writeChapters(s3, 'output/', 'en', 'not vtt')
             ).rejects.toBeInstanceOf(BadRequestException);
             expect(etag.putObject).not.toHaveBeenCalled();
         });
 
         it('rejects malformed lang codes', async () => {
             await expect(
-                service.writeChapters(s3, 'output/', 'en_US', 'WEBVTT'),
+                service.writeChapters(s3, 'output/', 'en_US', 'WEBVTT')
             ).rejects.toBeInstanceOf(BadRequestException);
         });
 
         it('rejects bodies larger than 1 MiB', async () => {
             const big = 'WEBVTT\n' + 'x'.repeat(1024 * 1024 + 100);
             await expect(
-                service.writeChapters(s3, 'output/', 'en', big),
+                service.writeChapters(s3, 'output/', 'en', big)
             ).rejects.toBeInstanceOf(PayloadTooLargeException);
         });
     });

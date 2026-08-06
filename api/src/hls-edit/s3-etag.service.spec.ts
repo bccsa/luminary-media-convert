@@ -24,7 +24,9 @@ describe('S3EtagService', () => {
     beforeEach(() => {
         service = new S3EtagService();
         sendMock = vi.fn();
-        vi.spyOn(service, 'createClient').mockReturnValue({ send: sendMock } as any);
+        vi.spyOn(service, 'createClient').mockReturnValue({
+            send: sendMock,
+        } as any);
     });
 
     describe('getObjectWithEtag', () => {
@@ -34,7 +36,10 @@ describe('S3EtagService', () => {
                 ETag: '"abc123"',
             });
 
-            const result = await service.getObjectWithEtag(config, 'master.m3u8');
+            const result = await service.getObjectWithEtag(
+                config,
+                'master.m3u8'
+            );
             expect(result.body.toString()).toBe('hello');
             expect(result.etag).toBe('abc123');
         });
@@ -45,7 +50,11 @@ describe('S3EtagService', () => {
             sendMock.mockResolvedValue({ ETag: '"newEtag"' });
 
             const result = await service.putObjectIfMatch(
-                config, 'master.m3u8', '#EXTM3U\n', 'oldEtag', 'application/vnd.apple.mpegurl',
+                config,
+                'master.m3u8',
+                '#EXTM3U\n',
+                'oldEtag',
+                'application/vnd.apple.mpegurl'
             );
 
             expect(result.etag).toBe('newEtag');
@@ -64,12 +73,20 @@ describe('S3EtagService', () => {
                 name: 'PreconditionFailed',
                 $metadata: { httpStatusCode: 412 },
             });
-            sendMock.mockImplementationOnce(async () => { throw err; });
+            sendMock.mockImplementationOnce(async () => {
+                throw err;
+            });
             // HEAD follow-up returns the current etag
             sendMock.mockResolvedValueOnce({ ETag: '"currentEtag"' });
 
             await expect(
-                service.putObjectIfMatch(config, 'master.m3u8', '', 'stale', 'text/plain'),
+                service.putObjectIfMatch(
+                    config,
+                    'master.m3u8',
+                    '',
+                    'stale',
+                    'text/plain'
+                )
             ).rejects.toBeInstanceOf(ConflictException);
         });
 
@@ -77,11 +94,19 @@ describe('S3EtagService', () => {
             const err = Object.assign(new Error('mismatch'), {
                 $metadata: { httpStatusCode: 412 },
             });
-            sendMock.mockImplementationOnce(async () => { throw err; });
+            sendMock.mockImplementationOnce(async () => {
+                throw err;
+            });
             sendMock.mockResolvedValueOnce({ ETag: '"liveEtag"' });
 
             try {
-                await service.putObjectIfMatch(config, 'k', '', 'stale', 'text/plain');
+                await service.putObjectIfMatch(
+                    config,
+                    'k',
+                    '',
+                    'stale',
+                    'text/plain'
+                );
                 throw new Error('should have thrown');
             } catch (e: any) {
                 expect(e).toBeInstanceOf(ConflictException);
@@ -100,7 +125,13 @@ describe('S3EtagService', () => {
             sendMock.mockRejectedValue(err);
 
             await expect(
-                service.putObjectIfMatch(config, 'k', '', 'anything', 'text/plain'),
+                service.putObjectIfMatch(
+                    config,
+                    'k',
+                    '',
+                    'anything',
+                    'text/plain'
+                )
             ).rejects.toBe(err);
         });
     });
@@ -109,7 +140,12 @@ describe('S3EtagService', () => {
         it('does not send IfMatch', async () => {
             sendMock.mockResolvedValue({ ETag: '"e"' });
 
-            await service.putObject(config, 'chapters.vtt', 'WEBVTT\n', 'text/vtt');
+            await service.putObject(
+                config,
+                'chapters.vtt',
+                'WEBVTT\n',
+                'text/vtt'
+            );
             const cmd = sendMock.mock.calls[0][0];
             expect(cmd.input.IfMatch).toBeUndefined();
             expect(cmd.input.ContentType).toBe('text/vtt');

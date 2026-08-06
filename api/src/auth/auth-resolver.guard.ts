@@ -33,11 +33,10 @@ export class AuthResolverGuard implements CanActivate {
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
-        const allowedTypes =
-            this.reflector.getAllAndOverride<AuthType[]>(AUTH_TYPES_KEY, [
-                context.getHandler(),
-                context.getClass(),
-            ]) ?? ['instance'];
+        const allowedTypes = this.reflector.getAllAndOverride<AuthType[]>(
+            AUTH_TYPES_KEY,
+            [context.getHandler(), context.getClass()]
+        ) ?? ['instance'];
 
         const request = context.switchToHttp().getRequest<Request>();
 
@@ -48,7 +47,10 @@ export class AuthResolverGuard implements CanActivate {
             if (
                 instanceToken &&
                 apiKeyHeader.length === instanceToken.length &&
-                timingSafeEqual(Buffer.from(apiKeyHeader), Buffer.from(instanceToken))
+                timingSafeEqual(
+                    Buffer.from(apiKeyHeader),
+                    Buffer.from(instanceToken)
+                )
             ) {
                 (request as any).authType = 'instance';
                 return true;
@@ -65,13 +67,15 @@ export class AuthResolverGuard implements CanActivate {
                 const token = authHeader.slice('Bearer '.length).trim();
                 const session = this.sessionService.getBySessionToken(token);
                 if (!session) {
-                    throw new UnauthorizedException('Invalid or expired session token');
+                    throw new UnauthorizedException(
+                        'Invalid or expired session token'
+                    );
                 }
 
                 const sessionId = request.params.sessionId;
                 if (sessionId && session.id !== sessionId) {
                     throw new UnauthorizedException(
-                        'Token does not match the requested session',
+                        'Token does not match the requested session'
                     );
                 }
 
@@ -106,7 +110,7 @@ export class AuthResolverGuard implements CanActivate {
         }
 
         throw new UnauthorizedException(
-            'No valid authentication credentials provided',
+            'No valid authentication credentials provided'
         );
     }
 }

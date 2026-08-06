@@ -85,7 +85,9 @@ describe('media-extensions', () => {
         });
 
         it('strips parameters like charset', () => {
-            expect(extensionFromContentType('video/mp4; charset=binary')).toBe('.mp4');
+            expect(extensionFromContentType('video/mp4; charset=binary')).toBe(
+                '.mp4'
+            );
         });
 
         it('is case-insensitive', () => {
@@ -94,7 +96,9 @@ describe('media-extensions', () => {
         });
 
         it('returns null for unknown MIME types', () => {
-            expect(extensionFromContentType('application/octet-stream')).toBeNull();
+            expect(
+                extensionFromContentType('application/octet-stream')
+            ).toBeNull();
             expect(extensionFromContentType('text/html')).toBeNull();
         });
 

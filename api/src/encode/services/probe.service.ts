@@ -86,7 +86,9 @@ export class ProbeService {
                     width: s.width ?? 0,
                     height: s.height ?? 0,
                     bitrateKbps: this.extractBitrateKbps(s),
-                    frameRate: this.parseFrameRate(s.avg_frame_rate ?? s.r_frame_rate ?? '0/1'),
+                    frameRate: this.parseFrameRate(
+                        s.avg_frame_rate ?? s.r_frame_rate ?? '0/1'
+                    ),
                     profile: s.profile,
                     language: s.tags?.language,
                     name: s.tags?.title,
@@ -97,7 +99,9 @@ export class ProbeService {
                     codec: s.codec_name ?? 'unknown',
                     bitrateKbps: this.extractBitrateKbps(s),
                     channels: s.channels ?? 2,
-                    sampleRate: s.sample_rate ? parseInt(s.sample_rate, 10) : 44100,
+                    sampleRate: s.sample_rate
+                        ? parseInt(s.sample_rate, 10)
+                        : 44100,
                     language: s.tags?.language,
                     name: s.tags?.title,
                 });
@@ -108,31 +112,52 @@ export class ProbeService {
             ? Math.round(parseInt(data.format.bit_rate, 10) / 1000)
             : 0;
 
-        const hasMissingBitrates = [...videoTracks, ...audioTracks].some(t => t.bitrateKbps === 0);
+        const hasMissingBitrates = [...videoTracks, ...audioTracks].some(
+            (t) => t.bitrateKbps === 0
+        );
         if (hasMissingBitrates) {
-            const duration = data.format.duration ? parseFloat(data.format.duration) : 0;
-            await this.computeBitratesFromPackets(filePath, data.streams, videoTracks, audioTracks, duration);
+            const duration = data.format.duration
+                ? parseFloat(data.format.duration)
+                : 0;
+            await this.computeBitratesFromPackets(
+                filePath,
+                data.streams,
+                videoTracks,
+                audioTracks,
+                duration
+            );
         }
 
         const format = {
-            duration: data.format.duration ? parseFloat(data.format.duration) : 0,
+            duration: data.format.duration
+                ? parseFloat(data.format.duration)
+                : 0,
             bitrateKbps: formatBitrateKbps,
             formatName: data.format.format_name ?? 'unknown',
         };
 
         this.logger.log(
             `Probed: ${videoTracks.length} video track(s), ${audioTracks.length} audio track(s), ` +
-            `duration=${format.duration.toFixed(1)}s`,
+                `duration=${format.duration.toFixed(1)}s`
         );
 
         return { format, videoTracks, audioTracks };
     }
 
     private async runFfprobe(filePath: string): Promise<FfprobeOutput> {
-        const { stdout } = await execFileAsync(ffprobeBin(), [
-            '-v', 'quiet', '-print_format', 'json',
-            '-show_format', '-show_streams', filePath,
-        ], { timeout: 60000 });
+        const { stdout } = await execFileAsync(
+            ffprobeBin(),
+            [
+                '-v',
+                'quiet',
+                '-print_format',
+                'json',
+                '-show_format',
+                '-show_streams',
+                filePath,
+            ],
+            { timeout: 60000 }
+        );
         return JSON.parse(stdout);
     }
 
@@ -162,11 +187,13 @@ export class ProbeService {
         rawStreams: FfprobeStream[],
         videoTracks: VideoTrackInfo[],
         audioTracks: AudioTrackInfo[],
-        duration: number,
+        duration: number
     ): Promise<void> {
         if (duration <= 0) return;
 
-        this.logger.log('Stream-level bitrates missing, computing from packet data...');
+        this.logger.log(
+            'Stream-level bitrates missing, computing from packet data...'
+        );
 
         try {
             // Scanning a multi-GB file to price it is not worth the wait, so
@@ -178,11 +205,21 @@ export class ProbeService {
             // what the stream actually needs.
             const sampleDuration = Math.min(10, duration);
             const starts = this.packetSampleStarts(duration, sampleDuration);
-            const { stdout: csv } = await execFileAsync(ffprobeBin(), [
-                '-v', 'quiet', '-print_format', 'csv=p=0',
-                '-read_intervals', this.readIntervalsArg(starts, sampleDuration),
-                '-show_entries', 'packet=stream_index,size,pts_time', filePath,
-            ], { timeout: 30000, maxBuffer: 10 * 1024 * 1024 });
+            const { stdout: csv } = await execFileAsync(
+                ffprobeBin(),
+                [
+                    '-v',
+                    'quiet',
+                    '-print_format',
+                    'csv=p=0',
+                    '-read_intervals',
+                    this.readIntervalsArg(starts, sampleDuration),
+                    '-show_entries',
+                    'packet=stream_index,size,pts_time',
+                    filePath,
+                ],
+                { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
+            );
 
             // Kept per sample so a quiet stretch cannot drag down a loud one.
             // Each packet carries the timestamp that places it in its sample.
@@ -195,9 +232,15 @@ export class ProbeService {
                 const size = parseInt(parts[1], 10);
                 if (isNaN(streamIndex) || isNaN(size)) continue;
                 if (!bytesPerSample.has(streamIndex)) {
-                    bytesPerSample.set(streamIndex, new Array(starts.length).fill(0));
+                    bytesPerSample.set(
+                        streamIndex,
+                        new Array(starts.length).fill(0)
+                    );
                 }
-                const sample = this.sampleIndexFor(parseFloat(parts[2]), starts);
+                const sample = this.sampleIndexFor(
+                    parseFloat(parts[2]),
+                    starts
+                );
                 bytesPerSample.get(streamIndex)![sample] += size;
             }
 
@@ -206,22 +249,33 @@ export class ProbeService {
                 bytesPerStream.set(streamIndex, Math.max(...samples));
             }
 
-            const avStreamToType = new Map<number, { type: 'video' | 'audio'; localIndex: number }>();
+            const avStreamToType = new Map<
+                number,
+                { type: 'video' | 'audio'; localIndex: number }
+            >();
             let vi = 0;
             let ai = 0;
             for (const s of rawStreams) {
                 if (s.codec_type === 'video') {
                     if (s.disposition?.attached_pic === 1) continue;
-                    avStreamToType.set(s.index, { type: 'video', localIndex: vi++ });
+                    avStreamToType.set(s.index, {
+                        type: 'video',
+                        localIndex: vi++,
+                    });
                 } else if (s.codec_type === 'audio') {
-                    avStreamToType.set(s.index, { type: 'audio', localIndex: ai++ });
+                    avStreamToType.set(s.index, {
+                        type: 'audio',
+                        localIndex: ai++,
+                    });
                 }
             }
 
             for (const [streamIndex, totalBytes] of bytesPerStream) {
                 const mapping = avStreamToType.get(streamIndex);
                 if (!mapping) continue;
-                const bitrateKbps = Math.round((totalBytes * 8) / sampleDuration / 1000);
+                const bitrateKbps = Math.round(
+                    (totalBytes * 8) / sampleDuration / 1000
+                );
                 if (mapping.type === 'video') {
                     const track = videoTracks[mapping.localIndex];
                     if (track && track.bitrateKbps === 0) {
@@ -241,7 +295,7 @@ export class ProbeService {
             );
         } catch (err) {
             this.logger.warn(
-                `Packet-based bitrate computation failed: ${(err as Error).message}`,
+                `Packet-based bitrate computation failed: ${(err as Error).message}`
             );
         }
     }
@@ -251,12 +305,18 @@ export class ProbeService {
      * opening cannot speak for the whole of it. A file barely longer than one
      * sample has nowhere else to look and keeps the original head-only read.
      */
-    private packetSampleStarts(duration: number, sampleDuration: number): number[] {
+    private packetSampleStarts(
+        duration: number,
+        sampleDuration: number
+    ): number[] {
         if (duration <= sampleDuration * 2) return [0];
         const latestStart = duration - sampleDuration;
         const starts = [0.1, 0.5, 0.9].map(
             (fraction) =>
-                Math.round(Math.max(0, Math.min(latestStart, duration * fraction)) * 1000) / 1000,
+                Math.round(
+                    Math.max(0, Math.min(latestStart, duration * fraction)) *
+                        1000
+                ) / 1000
         );
         // Clamping to the last usable start can collide on shorter files.
         // Overlapping samples are harmless; duplicate reads are just waste.
@@ -267,7 +327,8 @@ export class ProbeService {
     private readIntervalsArg(starts: number[], sampleDuration: number): string {
         // A lone sample from the top keeps the original spelling, so short
         // files issue exactly the request they always did.
-        if (starts.length === 1 && starts[0] === 0) return `%+${sampleDuration}`;
+        if (starts.length === 1 && starts[0] === 0)
+            return `%+${sampleDuration}`;
         return starts.map((s) => `${s}%+${sampleDuration}`).join(',');
     }
 
@@ -288,7 +349,11 @@ export class ProbeService {
     private parseDurationTag(duration: string): number {
         const match = duration.match(/^(\d+):(\d+):(\d+(?:\.\d+)?)$/);
         if (!match) return 0;
-        return parseInt(match[1], 10) * 3600 + parseInt(match[2], 10) * 60 + parseFloat(match[3]);
+        return (
+            parseInt(match[1], 10) * 3600 +
+            parseInt(match[2], 10) * 60 +
+            parseFloat(match[3])
+        );
     }
 
     private parseFrameRate(rate: string): number {

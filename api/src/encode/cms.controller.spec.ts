@@ -14,7 +14,9 @@ let workDir: string;
 let sessions: SessionService;
 const onSessionCreated = vi.fn();
 
-function makeDto(overrides: Partial<CmsCreateSessionDto> = {}): CmsCreateSessionDto {
+function makeDto(
+    overrides: Partial<CmsCreateSessionDto> = {}
+): CmsCreateSessionDto {
     return {
         documentId: 'post_01HTZ8Y0J4',
         title: 'Episode 12',
@@ -40,19 +42,21 @@ function makeRequest(
         remoteAddress?: string;
         host?: string;
         protocol?: string;
-    } = {},
+    } = {}
 ): Request {
     const { origin, host = '127.0.0.1:31711', protocol = 'http' } = opts;
     // Presence, not value: passing `remoteAddress: undefined` to a defaulted
     // parameter would use the default, so "the socket reported no address"
     // could not be expressed and that test would pass for the wrong reason.
-    const remoteAddress = 'remoteAddress' in opts ? opts.remoteAddress : '127.0.0.1';
+    const remoteAddress =
+        'remoteAddress' in opts ? opts.remoteAddress : '127.0.0.1';
 
     return {
         headers: origin === undefined ? {} : { origin },
         socket: { remoteAddress },
         protocol,
-        get: (name: string) => (name.toLowerCase() === 'host' ? host : undefined),
+        get: (name: string) =>
+            name.toLowerCase() === 'host' ? host : undefined,
     } as unknown as Request;
 }
 
@@ -60,7 +64,7 @@ function build(allowedOrigins: string[] = ['https://cms.test']): CmsController {
     return new CmsController(
         sessions,
         new OriginRegistry({ allowedOrigins }),
-        onSessionCreated,
+        onSessionCreated
     );
 }
 
@@ -81,7 +85,10 @@ describe('CmsController — health', () => {
         // The CMS calls this before showing the "upload media" affordance at
         // all. Saying only "something is listening here, and it is us" gives
         // away nothing worth withholding.
-        expect(build().health()).toEqual({ status: 'ok', apiVersion: API_VERSION });
+        expect(build().health()).toEqual({
+            status: 'ok',
+            apiVersion: API_VERSION,
+        });
     });
 });
 
@@ -89,7 +96,7 @@ describe('CmsController — who may open a session', () => {
     it('accepts an allowed origin', async () => {
         const result = await build().createSession(
             makeDto(),
-            makeRequest({ origin: 'https://cms.test' }),
+            makeRequest({ origin: 'https://cms.test' })
         );
 
         expect(result.sessionId).toBeTruthy();
@@ -97,7 +104,10 @@ describe('CmsController — who may open a session', () => {
 
     it('refuses an origin it was not told to trust', async () => {
         await expect(
-            build().createSession(makeDto(), makeRequest({ origin: 'https://evil.test' })),
+            build().createSession(
+                makeDto(),
+                makeRequest({ origin: 'https://evil.test' })
+            )
         ).rejects.toThrow(ForbiddenException);
     });
 
@@ -105,7 +115,10 @@ describe('CmsController — who may open a session', () => {
         // A refusal that still left a session behind would let an unknown site
         // fill the work directory with records nobody can reach.
         await build()
-            .createSession(makeDto(), makeRequest({ origin: 'https://evil.test' }))
+            .createSession(
+                makeDto(),
+                makeRequest({ origin: 'https://evil.test' })
+            )
             .catch(() => undefined);
 
         expect(sessions.list()).toEqual([]);
@@ -118,17 +131,17 @@ describe('CmsController — who may open a session', () => {
             // report inconsistently.
             const result = await build().createSession(
                 makeDto(),
-                makeRequest({ remoteAddress }),
+                makeRequest({ remoteAddress })
             );
 
             expect(result.sessionId).toBeTruthy();
-        },
+        }
     );
 
     it('accepts an Origin of "null" from this machine', async () => {
         const result = await build().createSession(
             makeDto(),
-            makeRequest({ origin: 'null', remoteAddress: '127.0.0.1' }),
+            makeRequest({ origin: 'null', remoteAddress: '127.0.0.1' })
         );
 
         expect(result.sessionId).toBeTruthy();
@@ -138,13 +151,19 @@ describe('CmsController — who may open a session', () => {
         // Otherwise omitting the header would be a way round the allowlist,
         // which is the whole of the perimeter for a remote caller.
         await expect(
-            build().createSession(makeDto(), makeRequest({ remoteAddress: '192.168.1.50' })),
+            build().createSession(
+                makeDto(),
+                makeRequest({ remoteAddress: '192.168.1.50' })
+            )
         ).rejects.toThrow(ForbiddenException);
     });
 
     it('refuses an Origin-less request whose peer address is unknown', async () => {
         await expect(
-            build().createSession(makeDto(), makeRequest({ remoteAddress: undefined })),
+            build().createSession(
+                makeDto(),
+                makeRequest({ remoteAddress: undefined })
+            )
         ).rejects.toThrow(ForbiddenException);
     });
 
@@ -153,7 +172,7 @@ describe('CmsController — who may open a session', () => {
 
         const result = await controller.createSession(
             makeDto(),
-            makeRequest({ origin: 'https://cms.test' }),
+            makeRequest({ origin: 'https://cms.test' })
         );
 
         expect(result.sessionId).toBeTruthy();
@@ -194,7 +213,7 @@ describe('CmsController — a repeated click on the same post', () => {
         const first = await controller.createSession(makeDto(), req);
         const second = await controller.createSession(
             makeDto({ documentId: 'post_other' }),
-            req,
+            req
         );
 
         expect(second.sessionId).not.toBe(first.sessionId);
@@ -219,7 +238,7 @@ describe('CmsController — the session it builds', () => {
         const controller = build();
         const response = await controller.createSession(
             dto,
-            makeRequest({ origin: 'https://cms.test' }),
+            makeRequest({ origin: 'https://cms.test' })
         );
         return { response, session: sessions.get(response.sessionId)! };
     }
@@ -229,10 +248,14 @@ describe('CmsController — the session it builds', () => {
         // and a replacement would be live — half old, half new — for as long as
         // the second encode took.
         const { response, session } = await create(
-            makeDto({ s3: { ...makeDto().s3, pathPrefix: 'library/videos' } } as never),
+            makeDto({
+                s3: { ...makeDto().s3, pathPrefix: 'library/videos' },
+            } as never)
         );
 
-        expect(session.config.s3.pathPrefix).toBe(`library/videos/${response.sessionId}`);
+        expect(session.config.s3.pathPrefix).toBe(
+            `library/videos/${response.sessionId}`
+        );
     });
 
     it('uses the session id alone when the CMS sent no prefix', async () => {
@@ -243,16 +266,20 @@ describe('CmsController — the session it builds', () => {
 
     it('canonicalises a prefix with stray separators', async () => {
         const { response, session } = await create(
-            makeDto({ s3: { ...makeDto().s3, pathPrefix: '//library//videos//' } } as never),
+            makeDto({
+                s3: { ...makeDto().s3, pathPrefix: '//library//videos//' },
+            } as never)
         );
 
-        expect(session.config.s3.pathPrefix).toBe(`library/videos/${response.sessionId}`);
+        expect(session.config.s3.pathPrefix).toBe(
+            `library/videos/${response.sessionId}`
+        );
     });
 
     it('turns a stated encryption requirement into an enabled encryption config', async () => {
         // A CMS states a requirement; key delivery is not its business.
         const { session } = await create(
-            makeDto({ encryption: { required: true } } as never),
+            makeDto({ encryption: { required: true } } as never)
         );
 
         expect(session.config.encryption).toEqual({ enabled: true });
@@ -264,7 +291,7 @@ describe('CmsController — the session it builds', () => {
             const { session } = await create(makeDto({ encryption } as never));
 
             expect(session.config.encryption).toBeUndefined();
-        },
+        }
     );
 
     it('carries the document metadata onto the session', async () => {
@@ -283,7 +310,7 @@ describe('CmsController — the session it builds', () => {
                 byteRange: false,
                 byteRangeMaxFileSizeMB: 250,
                 thumbnails: false,
-            } as never),
+            } as never)
         );
 
         expect(session.config.segmentDuration).toBe(4);
@@ -298,7 +325,7 @@ describe('CmsController — what it answers with', () => {
         const controller = build();
         const response = await controller.createSession(
             makeDto(),
-            makeRequest({ origin: 'https://cms.test' }),
+            makeRequest({ origin: 'https://cms.test' })
         );
         const session = sessions.get(response.sessionId)!;
 
@@ -309,7 +336,7 @@ describe('CmsController — what it answers with', () => {
     it('never echoes the S3 credentials back', async () => {
         const response = await build().createSession(
             makeDto(),
-            makeRequest({ origin: 'https://cms.test' }),
+            makeRequest({ origin: 'https://cms.test' })
         );
 
         expect(JSON.stringify(response)).not.toContain('sUp3rS3cret');
@@ -321,28 +348,30 @@ describe('CmsController — what it answers with', () => {
         // idea of it than the caller does.
         const response = await build().createSession(
             makeDto(),
-            makeRequest({ origin: 'https://cms.test', host: '127.0.0.1:45678' }),
+            makeRequest({ origin: 'https://cms.test', host: '127.0.0.1:45678' })
         );
 
         expect(response.eventsUrl).toBe(
             `http://127.0.0.1:45678/api/sessions/${response.sessionId}` +
-                `/events?token=${response.readToken}`,
+                `/events?token=${response.readToken}`
         );
     });
 
     it('url-encodes the token it puts in the query string', async () => {
         const response = await build().createSession(
             makeDto(),
-            makeRequest({ origin: 'https://cms.test' }),
+            makeRequest({ origin: 'https://cms.test' })
         );
 
-        expect(response.eventsUrl).toContain(encodeURIComponent(response.readToken));
+        expect(response.eventsUrl).toContain(
+            encodeURIComponent(response.readToken)
+        );
     });
 
     it('reports the API version so the CMS can tell what it is talking to', async () => {
         const response = await build().createSession(
             makeDto(),
-            makeRequest({ origin: 'https://cms.test' }),
+            makeRequest({ origin: 'https://cms.test' })
         );
 
         expect(response.apiVersion).toBe(API_VERSION);
@@ -354,7 +383,7 @@ describe('CmsController — the host notification', () => {
         const controller = build();
         const response = await controller.createSession(
             makeDto(),
-            makeRequest({ origin: 'https://cms.test' }),
+            makeRequest({ origin: 'https://cms.test' })
         );
 
         expect(onSessionCreated).toHaveBeenCalledWith(response.sessionId);
@@ -369,7 +398,7 @@ describe('CmsController — the host notification', () => {
 
         const response = await build().createSession(
             makeDto(),
-            makeRequest({ origin: 'https://cms.test' }),
+            makeRequest({ origin: 'https://cms.test' })
         );
 
         expect(response.sessionId).toBeTruthy();
@@ -379,11 +408,14 @@ describe('CmsController — the host notification', () => {
         const controller = new CmsController(
             sessions,
             new OriginRegistry({ allowedOrigins: ['https://cms.test'] }),
-            undefined,
+            undefined
         );
 
         await expect(
-            controller.createSession(makeDto(), makeRequest({ origin: 'https://cms.test' })),
+            controller.createSession(
+                makeDto(),
+                makeRequest({ origin: 'https://cms.test' })
+            )
         ).resolves.toBeTruthy();
     });
 });

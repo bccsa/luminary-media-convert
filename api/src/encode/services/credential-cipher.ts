@@ -34,7 +34,7 @@ export const CREDENTIAL_CIPHER = Symbol('CREDENTIAL_CIPHER');
  * host is expected to pass a cipher.
  */
 export const createCredentialCipherProvider = (
-    cipher?: CredentialCipher,
+    cipher?: CredentialCipher
 ): Provider => ({
     provide: CREDENTIAL_CIPHER,
     useFactory: (): CredentialCipher | undefined => cipher,

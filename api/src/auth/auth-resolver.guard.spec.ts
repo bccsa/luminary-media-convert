@@ -3,14 +3,20 @@ import { UnauthorizedException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
 import { AuthResolverGuard } from './auth-resolver.guard.js';
-import type { SessionService, Session } from '../encode/services/session.service.js';
+import type {
+    SessionService,
+    Session,
+} from '../encode/services/session.service.js';
 import type { AuthType } from './auth-types.decorator.js';
 
 const INSTANCE_TOKEN = 'a'.repeat(64);
 
 const getBySessionToken = vi.fn<(t: string) => Session | undefined>();
 const getByReadToken = vi.fn<(t: string) => Session | undefined>();
-const sessions = { getBySessionToken, getByReadToken } as unknown as SessionService;
+const sessions = {
+    getBySessionToken,
+    getByReadToken,
+} as unknown as SessionService;
 
 function session(id: string): Session {
     return { id } as Session;
@@ -45,7 +51,10 @@ function contextFor(req: any): ExecutionContext {
  * could not express "this instance has no token" at all — the test asking for it
  * would have been handed the real one and passed for the wrong reason.
  */
-function buildWith(allowed: AuthType[] | undefined, instanceToken: string | undefined) {
+function buildWith(
+    allowed: AuthType[] | undefined,
+    instanceToken: string | undefined
+) {
     const reflector = {
         getAllAndOverride: () => allowed,
     } as unknown as Reflector;
@@ -74,7 +83,9 @@ describe('AuthResolverGuard — the instance token', () => {
         // everything, so no endpoint gets to refuse it.
         const req = request({ headers: { 'x-api-key': INSTANCE_TOKEN } });
 
-        await expect(build(['read']).canActivate(contextFor(req))).resolves.toBe(true);
+        await expect(
+            build(['read']).canActivate(contextFor(req))
+        ).resolves.toBe(true);
     });
 
     it('rejects a wrong key outright instead of trying the weaker tiers', async () => {
@@ -82,13 +93,16 @@ describe('AuthResolverGuard — the instance token', () => {
         // Falling through would let a stale key quietly downgrade to read
         // access, which is worse than telling them plainly.
         const req = request({
-            headers: { 'x-api-key': 'b'.repeat(64), authorization: 'Bearer sess_ok' },
+            headers: {
+                'x-api-key': 'b'.repeat(64),
+                authorization: 'Bearer sess_ok',
+            },
         });
         getBySessionToken.mockReturnValue(session('s1'));
 
-        await expect(build(['session']).canActivate(contextFor(req))).rejects.toThrow(
-            UnauthorizedException,
-        );
+        await expect(
+            build(['session']).canActivate(contextFor(req))
+        ).rejects.toThrow(UnauthorizedException);
         expect(getBySessionToken).not.toHaveBeenCalled();
     });
 
@@ -98,15 +112,16 @@ describe('AuthResolverGuard — the instance token', () => {
         const req = request({ headers: { 'x-api-key': 'short' } });
 
         await expect(build().canActivate(contextFor(req))).rejects.toThrow(
-            UnauthorizedException,
+            UnauthorizedException
         );
     });
 
     it('refuses every key when the instance has none configured', async () => {
         const req = request({ headers: { 'x-api-key': INSTANCE_TOKEN } });
 
-        await expect(buildWith(['instance'], undefined).canActivate(contextFor(req)))
-            .rejects.toThrow(UnauthorizedException);
+        await expect(
+            buildWith(['instance'], undefined).canActivate(contextFor(req))
+        ).rejects.toThrow(UnauthorizedException);
     });
 });
 
@@ -115,7 +130,9 @@ describe('AuthResolverGuard — session tokens', () => {
         const req = request({ headers: { authorization: 'Bearer sess_abc' } });
         getBySessionToken.mockReturnValue(session('s1'));
 
-        await expect(build(['session']).canActivate(contextFor(req))).resolves.toBe(true);
+        await expect(
+            build(['session']).canActivate(contextFor(req))
+        ).resolves.toBe(true);
         expect(req.authType).toBe('session');
         expect(req.session.id).toBe('s1');
     });
@@ -124,17 +141,17 @@ describe('AuthResolverGuard — session tokens', () => {
         const req = request({ headers: { authorization: 'Bearer sess_abc' } });
         getBySessionToken.mockReturnValue(session('s1'));
 
-        await expect(build(['instance']).canActivate(contextFor(req))).rejects.toThrow(
-            UnauthorizedException,
-        );
+        await expect(
+            build(['instance']).canActivate(contextFor(req))
+        ).rejects.toThrow(UnauthorizedException);
     });
 
     it('rejects a token no session answers to', async () => {
         const req = request({ headers: { authorization: 'Bearer sess_gone' } });
 
-        await expect(build(['session']).canActivate(contextFor(req))).rejects.toThrow(
-            'Invalid or expired session token',
-        );
+        await expect(
+            build(['session']).canActivate(contextFor(req))
+        ).rejects.toThrow('Invalid or expired session token');
     });
 
     it('refuses a valid token aimed at somebody else’s session', async () => {
@@ -145,17 +162,17 @@ describe('AuthResolverGuard — session tokens', () => {
         });
         getBySessionToken.mockReturnValue(session('s1'));
 
-        await expect(build(['session']).canActivate(contextFor(req))).rejects.toThrow(
-            'Token does not match the requested session',
-        );
+        await expect(
+            build(['session']).canActivate(contextFor(req))
+        ).rejects.toThrow('Token does not match the requested session');
     });
 
     it('ignores an Authorization header that is not a session token', async () => {
         const req = request({ headers: { authorization: 'Bearer read_abc' } });
 
-        await expect(build(['session']).canActivate(contextFor(req))).rejects.toThrow(
-            'No valid authentication credentials provided',
-        );
+        await expect(
+            build(['session']).canActivate(contextFor(req))
+        ).rejects.toThrow('No valid authentication credentials provided');
     });
 });
 
@@ -166,7 +183,9 @@ describe('AuthResolverGuard — read tokens on the query string', () => {
         const req = request({ query: { token: 'read_abc' } });
         getByReadToken.mockReturnValue(session('s1'));
 
-        await expect(build(['read']).canActivate(contextFor(req))).resolves.toBe(true);
+        await expect(
+            build(['read']).canActivate(contextFor(req))
+        ).resolves.toBe(true);
         expect(req.authType).toBe('read');
         expect(req.session.id).toBe('s1');
     });
@@ -177,34 +196,39 @@ describe('AuthResolverGuard — read tokens on the query string', () => {
         const req = request({ query: { token: 'sess_abc' } });
         getBySessionToken.mockReturnValue(session('s1'));
 
-        await expect(build(['read']).canActivate(contextFor(req))).resolves.toBe(true);
+        await expect(
+            build(['read']).canActivate(contextFor(req))
+        ).resolves.toBe(true);
     });
 
     it('is ignored on an endpoint that does not opt in', async () => {
         const req = request({ query: { token: 'read_abc' } });
         getByReadToken.mockReturnValue(session('s1'));
 
-        await expect(build(['session']).canActivate(contextFor(req))).rejects.toThrow(
-            UnauthorizedException,
-        );
+        await expect(
+            build(['session']).canActivate(contextFor(req))
+        ).rejects.toThrow(UnauthorizedException);
         expect(getByReadToken).not.toHaveBeenCalled();
     });
 
     it('refuses a read token aimed at another session', async () => {
-        const req = request({ query: { token: 'read_abc' }, params: { sessionId: 's2' } });
+        const req = request({
+            query: { token: 'read_abc' },
+            params: { sessionId: 's2' },
+        });
         getByReadToken.mockReturnValue(session('s1'));
 
-        await expect(build(['read']).canActivate(contextFor(req))).rejects.toThrow(
-            'Invalid or expired token',
-        );
+        await expect(
+            build(['read']).canActivate(contextFor(req))
+        ).rejects.toThrow('Invalid or expired token');
     });
 
     it('rejects an unknown token rather than falling through', async () => {
         const req = request({ query: { token: 'read_gone' } });
 
-        await expect(build(['read']).canActivate(contextFor(req))).rejects.toThrow(
-            'Invalid or expired token',
-        );
+        await expect(
+            build(['read']).canActivate(contextFor(req))
+        ).rejects.toThrow('Invalid or expired token');
     });
 
     it('ignores a repeated token parameter', async () => {
@@ -212,9 +236,9 @@ describe('AuthResolverGuard — read tokens on the query string', () => {
         // a credential; an array must not be coerced into one.
         const req = request({ query: { token: ['read_abc', 'read_def'] } });
 
-        await expect(build(['read']).canActivate(contextFor(req))).rejects.toThrow(
-            'No valid authentication credentials provided',
-        );
+        await expect(
+            build(['read']).canActivate(contextFor(req))
+        ).rejects.toThrow('No valid authentication credentials provided');
     });
 });
 
@@ -223,14 +247,16 @@ describe('AuthResolverGuard — defaults', () => {
         const req = request({ headers: { authorization: 'Bearer sess_abc' } });
         getBySessionToken.mockReturnValue(session('s1'));
 
-        await expect(build(undefined).canActivate(contextFor(req))).rejects.toThrow(
-            UnauthorizedException,
-        );
+        await expect(
+            build(undefined).canActivate(contextFor(req))
+        ).rejects.toThrow(UnauthorizedException);
     });
 
     it('refuses a request carrying nothing at all', async () => {
         await expect(
-            build(['instance', 'session', 'read']).canActivate(contextFor(request())),
+            build(['instance', 'session', 'read']).canActivate(
+                contextFor(request())
+            )
         ).rejects.toThrow('No valid authentication credentials provided');
     });
 });

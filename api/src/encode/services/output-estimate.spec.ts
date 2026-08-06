@@ -20,7 +20,10 @@ describe('estimateOutputBytes', () => {
     it('sums every rendition and audio group', () => {
         // 1000 kbps for 8s = 1 MB exactly, before overhead.
         const bytes = estimateOutputBytes(
-            { videoRenditions: [{ videoBitrateKbps: 600 }] as any, audioGroups: [{ audioBitrateKbps: 400 }] as any },
+            {
+                videoRenditions: [{ videoBitrateKbps: 600 }] as any,
+                audioGroups: [{ audioBitrateKbps: 400 }] as any,
+            },
             8
         );
 
@@ -61,7 +64,10 @@ describe('estimateOutputBytes', () => {
     it('returns 0 when nothing declares a bitrate', () => {
         expect(estimateOutputBytes({}, 600)).toBe(0);
         expect(
-            estimateOutputBytes({ videoRenditions: [], audioGroups: [] } as any, 600)
+            estimateOutputBytes(
+                { videoRenditions: [], audioGroups: [] } as any,
+                600
+            )
         ).toBe(0);
     });
 

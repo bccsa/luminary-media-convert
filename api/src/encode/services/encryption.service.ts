@@ -24,7 +24,7 @@ export class EncryptionService {
     async encryptSegment(
         filePath: string,
         key: Buffer,
-        iv: Buffer,
+        iv: Buffer
     ): Promise<void> {
         const tmpPath = filePath + '.enc.tmp';
         try {
@@ -32,7 +32,7 @@ export class EncryptionService {
             await pipeline(
                 createReadStream(filePath),
                 cipher,
-                createWriteStream(tmpPath),
+                createWriteStream(tmpPath)
             );
             await rename(tmpPath, filePath);
         } catch (err) {
@@ -44,15 +44,13 @@ export class EncryptionService {
     async injectKeyTagsIntoPlaylists(
         outputDir: string,
         keyUrl: string,
-        iv: Buffer,
+        iv: Buffer
     ): Promise<void> {
         const keyTag = `#EXT-X-KEY:METHOD=AES-128,URI="${keyUrl}",IV=0x${iv.toString('hex')}`;
         const playlists = await this.findPlaylistFiles(outputDir);
-        await Promise.all(
-            playlists.map((p) => this.injectKeyTag(p, keyTag)),
-        );
+        await Promise.all(playlists.map((p) => this.injectKeyTag(p, keyTag)));
         this.logger.log(
-            `Injected key tags into ${playlists.length} playlist(s)`,
+            `Injected key tags into ${playlists.length} playlist(s)`
         );
     }
 
@@ -72,7 +70,7 @@ export class EncryptionService {
 
     private async injectKeyTag(
         filePath: string,
-        keyTag: string,
+        keyTag: string
     ): Promise<void> {
         const content = await readFile(filePath, 'utf-8');
         if (!content.includes('#EXTINF:')) return;

@@ -14,4 +14,5 @@ import { SetMetadata } from '@nestjs/common';
  */
 export type AuthType = 'instance' | 'session' | 'read';
 export const AUTH_TYPES_KEY = 'authTypes';
-export const AuthTypes = (...types: AuthType[]) => SetMetadata(AUTH_TYPES_KEY, types);
+export const AuthTypes = (...types: AuthType[]) =>
+    SetMetadata(AUTH_TYPES_KEY, types);

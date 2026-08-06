@@ -7,7 +7,12 @@ import {
     Query,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import {
+    ApiOperation,
+    ApiResponse,
+    ApiSecurity,
+    ApiTags,
+} from '@nestjs/swagger';
 import { AuthResolverGuard } from '../auth/auth-resolver.guard.js';
 import { AuthTypes } from '../auth/auth-types.decorator.js';
 import { OriginDecisionsDto } from './dto/origin-decisions.dto.js';

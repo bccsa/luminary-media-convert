@@ -39,15 +39,21 @@ describe('normalizeOrigin', () => {
         expect(normalizeOrigin(input)).toBe(expected);
     });
 
-    it.each([undefined, null, '', '   ', '/'])('rejects %o as no origin', (input) => {
-        expect(normalizeOrigin(input)).toBeNull();
-    });
+    it.each([undefined, null, '', '   ', '/'])(
+        'rejects %o as no origin',
+        (input) => {
+            expect(normalizeOrigin(input)).toBeNull();
+        }
+    );
 });
 
 describe('OriginRegistry — a configured allowlist', () => {
     it('allows an origin it was given', () => {
-        expect(build({ allowedOrigins: ['https://cms.test'] }).isAllowed('https://cms.test'))
-            .toBe(true);
+        expect(
+            build({ allowedOrigins: ['https://cms.test'] }).isAllowed(
+                'https://cms.test'
+            )
+        ).toBe(true);
     });
 
     it('answers synchronously for a known origin', () => {
@@ -55,7 +61,9 @@ describe('OriginRegistry — a configured allowlist', () => {
         // round trip; only a genuinely unknown origin does.
         const registry = build({ allowedOrigins: ['https://cms.test'] });
 
-        expect(registry.isAllowed('https://cms.test')).not.toBeInstanceOf(Promise);
+        expect(registry.isAllowed('https://cms.test')).not.toBeInstanceOf(
+            Promise
+        );
     });
 
     it('matches regardless of case and trailing slashes on either side', () => {
@@ -65,7 +73,9 @@ describe('OriginRegistry — a configured allowlist', () => {
     });
 
     it('discards entries that normalise to nothing', () => {
-        const registry = build({ allowedOrigins: ['', '   ', 'https://cms.test'] });
+        const registry = build({
+            allowedOrigins: ['', '   ', 'https://cms.test'],
+        });
 
         expect(registry.list()).toEqual(['https://cms.test']);
     });
@@ -73,12 +83,17 @@ describe('OriginRegistry — a configured allowlist', () => {
     it('refuses an unknown origin when nothing can ask the user', () => {
         // A headless run cannot be talked into trusting something it was not
         // configured with.
-        expect(build({ allowedOrigins: ['https://cms.test'] }).isAllowed('https://evil.test'))
-            .toBe(false);
+        expect(
+            build({ allowedOrigins: ['https://cms.test'] }).isAllowed(
+                'https://evil.test'
+            )
+        ).toBe(false);
     });
 
     it('refuses an origin that normalises to nothing', () => {
-        expect(build({ allowedOrigins: ['https://cms.test'] }).isAllowed('   ')).toBe(false);
+        expect(
+            build({ allowedOrigins: ['https://cms.test'] }).isAllowed('   ')
+        ).toBe(false);
     });
 });
 
@@ -87,7 +102,9 @@ describe('OriginRegistry — trust on first use', () => {
         const approver = vi.fn().mockResolvedValue(true);
         const registry = build({ originApprover: approver });
 
-        await expect(registry.isAllowed('https://cms.test')).resolves.toBe(true);
+        await expect(registry.isAllowed('https://cms.test')).resolves.toBe(
+            true
+        );
         expect(approver).toHaveBeenCalledWith('https://cms.test');
     });
 
@@ -130,7 +147,9 @@ describe('OriginRegistry — trust on first use', () => {
         const approver = vi.fn().mockResolvedValue(false);
         const registry = build({ originApprover: approver });
 
-        await expect(registry.isAllowed('https://evil.test')).resolves.toBe(false);
+        await expect(registry.isAllowed('https://evil.test')).resolves.toBe(
+            false
+        );
         expect(registry.list()).toEqual([]);
     });
 
@@ -170,27 +189,38 @@ describe('OriginRegistry — trust on first use', () => {
         const approver = vi.fn().mockResolvedValue(false);
         const registry = build({ originApprover: approver });
 
-        await expect(registry.isAllowed('https://cms.test')).resolves.toBe(false);
+        await expect(registry.isAllowed('https://cms.test')).resolves.toBe(
+            false
+        );
         expect(registry.isAllowed('https://cms.test')).toBe(false);
         expect(approver).toHaveBeenCalledTimes(1);
     });
 
     it('asks again once the refusal is revoked', async () => {
-        const approver = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+        const approver = vi
+            .fn()
+            .mockResolvedValueOnce(false)
+            .mockResolvedValueOnce(true);
         const registry = build({ originApprover: approver });
 
         await registry.isAllowed('https://cms.test');
         registry.revoke('https://cms.test');
 
-        await expect(registry.isAllowed('https://cms.test')).resolves.toBe(true);
+        await expect(registry.isAllowed('https://cms.test')).resolves.toBe(
+            true
+        );
         expect(approver).toHaveBeenCalledTimes(2);
     });
 
     it('treats a failed dialog as a refusal, not as consent', async () => {
-        const approver = vi.fn().mockRejectedValue(new Error('no window to attach to'));
+        const approver = vi
+            .fn()
+            .mockRejectedValue(new Error('no window to attach to'));
         const registry = build({ originApprover: approver });
 
-        await expect(registry.isAllowed('https://cms.test')).resolves.toBe(false);
+        await expect(registry.isAllowed('https://cms.test')).resolves.toBe(
+            false
+        );
         expect(registry.list()).toEqual([]);
     });
 
@@ -305,7 +335,10 @@ describe('OriginRegistry — telling the host what changed', () => {
 
         registry.revoke('https://cms.test');
 
-        expect(onDecisionsChanged).toHaveBeenCalledWith({ allowed: [], denied: [] });
+        expect(onDecisionsChanged).toHaveBeenCalledWith({
+            allowed: [],
+            denied: [],
+        });
     });
 
     it('says nothing when there was nothing to revoke', () => {
@@ -350,7 +383,9 @@ describe('OriginRegistry — approve()', () => {
 });
 
 describe('createOriginPolicyProvider', () => {
-    function resolve(provider: ReturnType<typeof createOriginPolicyProvider>): OriginPolicy {
+    function resolve(
+        provider: ReturnType<typeof createOriginPolicyProvider>
+    ): OriginPolicy {
         return (provider as { useFactory: () => OriginPolicy }).useFactory();
     }
 
@@ -367,7 +402,9 @@ describe('createOriginPolicyProvider', () => {
     });
 
     it('yields an empty allowlist when the variable is unset', () => {
-        expect(resolve(createOriginPolicyProvider()).allowedOrigins).toEqual([]);
+        expect(resolve(createOriginPolicyProvider()).allowedOrigins).toEqual(
+            []
+        );
     });
 
     it('drops empty entries from a trailing or doubled comma', () => {
@@ -379,13 +416,18 @@ describe('createOriginPolicyProvider', () => {
     });
 
     it('installs no approver by default', () => {
-        expect(resolve(createOriginPolicyProvider()).originApprover).toBeUndefined();
+        expect(
+            resolve(createOriginPolicyProvider()).originApprover
+        ).toBeUndefined();
     });
 
     it('lets an embedding host override both', () => {
         process.env.CMS_ALLOWED_ORIGINS = 'https://ignored.test';
         const approver = vi.fn();
-        const policy = { allowedOrigins: ['https://host.test'], originApprover: approver };
+        const policy = {
+            allowedOrigins: ['https://host.test'],
+            originApprover: approver,
+        };
 
         expect(resolve(createOriginPolicyProvider(policy))).toBe(policy);
     });

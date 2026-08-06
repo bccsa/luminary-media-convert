@@ -18,14 +18,21 @@ import { S3ConfigDto } from '../../encode/dto/s3-config.dto.js';
 export class HlsOperationDto {
     @ApiProperty({
         description: 'Operation discriminator.',
-        enum: ['upsertSubtitle', 'removeSubtitle', 'upsertChapters', 'removeChapters'],
+        enum: [
+            'upsertSubtitle',
+            'removeSubtitle',
+            'upsertChapters',
+            'removeChapters',
+        ],
     })
     @IsString()
     @IsNotEmpty()
     @Expose()
     type: string;
 
-    @ApiPropertyOptional({ description: 'BCP-47 or ISO-639 language tag (subtitles).' })
+    @ApiPropertyOptional({
+        description: 'BCP-47 or ISO-639 language tag (subtitles).',
+    })
     @IsString()
     @IsOptional()
     @Expose()
@@ -37,7 +44,9 @@ export class HlsOperationDto {
     @Expose()
     name?: string;
 
-    @ApiPropertyOptional({ description: 'Base64-encoded WebVTT content (upsert operations).' })
+    @ApiPropertyOptional({
+        description: 'Base64-encoded WebVTT content (upsert operations).',
+    })
     @IsString()
     @IsOptional()
     @Expose()
@@ -71,7 +80,8 @@ export class HlsMutateRequestDto {
     masterPlaylistKey: string;
 
     @ApiProperty({
-        description: 'ETag returned from /api/hls/read. Sent as If-Match on the write.',
+        description:
+            'ETag returned from /api/hls/read. Sent as If-Match on the write.',
     })
     @IsString()
     @IsNotEmpty()
@@ -80,7 +90,8 @@ export class HlsMutateRequestDto {
 
     @ApiProperty({
         type: [HlsOperationDto],
-        description: 'Ordered list of operations. An empty array is a no-op that still rewrites master.m3u8 (useful for ETag plumbing verification).',
+        description:
+            'Ordered list of operations. An empty array is a no-op that still rewrites master.m3u8 (useful for ETag plumbing verification).',
     })
     @IsArray()
     @ValidateNested({ each: true })

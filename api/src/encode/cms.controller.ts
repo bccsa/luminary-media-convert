@@ -57,7 +57,7 @@ export class CmsController {
         private readonly sessionService: SessionService,
         private readonly originRegistry: OriginRegistry,
         @Inject(CMS_SESSION_HOOK)
-        private readonly onSessionCreated?: CmsSessionHook,
+        private readonly onSessionCreated?: CmsSessionHook
     ) {}
 
     @Get('health')
@@ -81,21 +81,26 @@ export class CmsController {
             'Creates a session bound to a CMS document and returns a read-only ' +
             'token for its event stream. Clicking twice on the same post returns ' +
             'the session already in flight rather than starting a second one. ' +
-            'Authorised by the caller\'s Origin, not by an API key.',
+            "Authorised by the caller's Origin, not by an API key.",
     })
     @ApiResponse({ status: 201, type: CmsSessionResponseDto })
     @ApiResponse({ status: 400, description: 'Invalid request body.' })
-    @ApiResponse({ status: 403, description: 'Origin is not allowed to use this encoder.' })
+    @ApiResponse({
+        status: 403,
+        description: 'Origin is not allowed to use this encoder.',
+    })
     async createSession(
         @Body() dto: CmsCreateSessionDto,
-        @Req() req: Request,
+        @Req() req: Request
     ): Promise<CmsSessionResponseDto> {
         await this.assertOriginAllowed(req);
 
-        const existing = this.sessionService.findActiveByDocumentId(dto.documentId);
+        const existing = this.sessionService.findActiveByDocumentId(
+            dto.documentId
+        );
         if (existing?.readToken) {
             this.logger.log(
-                `Reusing session ${existing.id} for document ${dto.documentId}`,
+                `Reusing session ${existing.id} for document ${dto.documentId}`
             );
             // Still the click that means "get on with it", so the window comes
             // forward again — the user is very likely looking for the file
@@ -111,12 +116,12 @@ export class CmsController {
                 documentId: dto.documentId,
                 publicBaseUrl: dto.publicBaseUrl,
                 origin: 'cms',
-            },
+            }
         );
 
         this.logger.log(
             `Session ${session.id} opened for document ${dto.documentId} ` +
-                `by ${req.headers.origin ?? 'a local caller'}`,
+                `by ${req.headers.origin ?? 'a local caller'}`
         );
 
         this.notifyHost(session.id);
@@ -138,7 +143,7 @@ export class CmsController {
             this.logger.warn(
                 `Host notification failed for session ${sessionId}: ${
                     (err as Error).message
-                }`,
+                }`
             );
         }
     }
@@ -153,14 +158,14 @@ export class CmsController {
      */
     private toCreateSessionDto(
         dto: CmsCreateSessionDto,
-        sessionId: string,
+        sessionId: string
     ): CreateSessionDto {
         const config = new CreateSessionDto();
         config.s3 = {
             ...dto.s3,
             pathPrefix: posix.join(
                 S3Service.canonicalPrefix(dto.s3.pathPrefix),
-                sessionId,
+                sessionId
             ),
         };
         config.segmentDuration = dto.segmentDuration;
@@ -169,14 +174,16 @@ export class CmsController {
         config.thumbnails = dto.thumbnails;
         // A CMS states a requirement; key delivery is not its business. Leaving
         // this undefined is what the encoder reads as "no encryption".
-        config.encryption = dto.encryption?.required ? { enabled: true } : undefined;
+        config.encryption = dto.encryption?.required
+            ? { enabled: true }
+            : undefined;
         return config;
     }
 
     private describe(
         session: Session,
         req: Request,
-        reused: boolean,
+        reused: boolean
     ): CmsSessionResponseDto {
         // Built from the request's own host so the CMS reaches the encoder on the
         // address it already found it at — the port is assigned by the host app
@@ -209,7 +216,7 @@ export class CmsController {
             const remote = req.socket.remoteAddress ?? '';
             if (LOOPBACK.has(remote)) return;
             throw new ForbiddenException(
-                'Requests without an Origin are only accepted from this machine',
+                'Requests without an Origin are only accepted from this machine'
             );
         }
 
@@ -217,7 +224,7 @@ export class CmsController {
 
         this.logger.warn(`Refused session request from origin ${origin}`);
         throw new ForbiddenException(
-            'This site is not allowed to use the local encoder',
+            'This site is not allowed to use the local encoder'
         );
     }
 }

@@ -55,7 +55,7 @@ describe('SessionCleanupService', () => {
             build().sweep();
 
             expect(cleanupAbandoned).toHaveBeenCalledWith(6 * HOUR_MS);
-        },
+        }
     );
 
     it('ignores surrounding whitespace', () => {

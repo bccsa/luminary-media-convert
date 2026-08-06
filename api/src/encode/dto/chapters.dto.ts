@@ -10,7 +10,8 @@ import { ApiProperty } from '@nestjs/swagger';
  */
 export class ChaptersWriteDto {
     @ApiProperty({
-        description: 'WebVTT chapter document. Must start with `WEBVTT`. Max 1 MiB.',
+        description:
+            'WebVTT chapter document. Must start with `WEBVTT`. Max 1 MiB.',
         example: 'WEBVTT\n\n00:00:00.000 --> 00:01:30.000\nOpening\n',
     })
     @IsString()

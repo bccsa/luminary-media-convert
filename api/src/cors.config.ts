@@ -69,7 +69,7 @@ export const createCorsOptions = (registry: OriginRegistry): CorsOptions => ({
             .then(() => registry.isAllowed(origin))
             .then(
                 (allowed) => callback(null, allowed),
-                () => callback(null, false),
+                () => callback(null, false)
             );
     },
 });
@@ -89,7 +89,7 @@ export const createCorsOptions = (registry: OriginRegistry): CorsOptions => ({
 export const privateNetworkAccessMiddleware = (
     req: Request,
     res: Response,
-    next: NextFunction,
+    next: NextFunction
 ): void => {
     if (
         req.method === 'OPTIONS' &&

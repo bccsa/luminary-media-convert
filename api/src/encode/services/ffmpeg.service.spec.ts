@@ -1,18 +1,25 @@
 import { type MockInstance } from 'vitest';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import {
+    mkdtempSync,
+    rmSync,
+    writeFileSync,
+    readFileSync,
+    existsSync,
+} from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 
-const { mockSpawn, mockExecSync, mockExecFile, MockWorker, useRealWorker } = vi.hoisted(() => ({
-    mockSpawn: vi.fn(),
-    mockExecSync: vi.fn(),
-    mockExecFile: vi.fn(),
-    MockWorker: vi.fn(),
-    useRealWorker: { value: true },
-}));
+const { mockSpawn, mockExecSync, mockExecFile, MockWorker, useRealWorker } =
+    vi.hoisted(() => ({
+        mockSpawn: vi.fn(),
+        mockExecSync: vi.fn(),
+        mockExecFile: vi.fn(),
+        MockWorker: vi.fn(),
+        useRealWorker: { value: true },
+    }));
 
 vi.mock('child_process', async (importOriginal) => {
     const actual = await importOriginal<typeof import('child_process')>();
@@ -45,23 +52,33 @@ vi.mock('worker_threads', async (importOriginal) => {
     return { ...actual, Worker: ProxiedWorker };
 });
 
-import { FfmpegService, type AccelMode, type EncodeOptions } from './ffmpeg.service.js';
+import {
+    FfmpegService,
+    type AccelMode,
+    type EncodeOptions,
+} from './ffmpeg.service.js';
 
 const flushPromises = async () => {
     for (let i = 0; i < 10; i++) {
-        await new Promise(resolve => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
     }
 };
 
-function createMockProcess(): ChildProcess & { emitStderr: (data: string) => void; emitClose: (code: number, signal?: string) => void; emitError: (err: Error) => void } {
+function createMockProcess(): ChildProcess & {
+    emitStderr: (data: string) => void;
+    emitClose: (code: number, signal?: string) => void;
+    emitError: (err: Error) => void;
+} {
     const proc = new EventEmitter() as any;
     proc.stderr = new EventEmitter();
     proc.stdout = { resume: vi.fn() };
     proc.kill = vi.fn();
     proc.killed = false;
     proc.pid = 12345;
-    proc.emitStderr = (data: string) => proc.stderr.emit('data', Buffer.from(data));
-    proc.emitClose = (code: number, signal?: string) => proc.emit('close', code, signal ?? null);
+    proc.emitStderr = (data: string) =>
+        proc.stderr.emit('data', Buffer.from(data));
+    proc.emitClose = (code: number, signal?: string) =>
+        proc.emit('close', code, signal ?? null);
     proc.emitError = (err: Error) => proc.emit('error', err);
     return proc;
 }
@@ -124,16 +141,12 @@ describe('FfmpegService', () => {
         });
 
         it('should parse out_time HH:MM:SS format', () => {
-            const result = parseProgressTime(
-                'out_time=01:02:03.500000\n',
-            );
+            const result = parseProgressTime('out_time=01:02:03.500000\n');
             expect(result).toBe(3723.5);
         });
 
         it('should parse out_time with zero hours', () => {
-            const result = parseProgressTime(
-                'out_time=00:00:30.000000\n',
-            );
+            const result = parseProgressTime('out_time=00:00:30.000000\n');
             expect(result).toBe(30);
         });
 
@@ -148,7 +161,7 @@ describe('FfmpegService', () => {
 
         it('should prefer out_time_us when both are present', () => {
             const result = parseProgressTime(
-                'out_time_us=10000000\nout_time=00:00:10.000000\n',
+                'out_time_us=10000000\nout_time=00:00:10.000000\n'
             );
             expect(result).toBe(10);
         });
@@ -224,12 +237,40 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
-                    { width: 854, height: 480, videoBitrateKbps: 1000, copyStream: false, audioGroupId: 'mid', label: '480p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
+                    {
+                        width: 854,
+                        height: 480,
+                        videoBitrateKbps: 1000,
+                        copyStream: false,
+                        audioGroupId: 'mid',
+                        label: '480p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
-                    { id: 'mid', label: 'Standard Audio', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        label: 'HD Audio',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                    {
+                        id: 'mid',
+                        label: 'Standard Audio',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -274,10 +315,23 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -312,10 +366,23 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -355,11 +422,31 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
-                    { width: 854, height: 480, videoBitrateKbps: 1000, copyStream: false, audioGroupId: 'hd', label: '480p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
+                    {
+                        width: 854,
+                        height: 480,
+                        videoBitrateKbps: 1000,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '480p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -389,10 +476,24 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2000, copyStream: false, audioGroupId: 'hd', label: '720p', vbr: true },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2000,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                        vbr: true,
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -414,10 +515,24 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2000, copyStream: false, audioGroupId: 'hd', label: '720p', vbr: false },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2000,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                        vbr: false,
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -439,10 +554,23 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -464,10 +592,23 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -487,10 +628,23 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -509,10 +663,24 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: true, sourceTrackIndex: 0, audioGroupId: 'hd', label: '1080p' },
+                    {
+                        width: 1920,
+                        height: 1080,
+                        videoBitrateKbps: 5000,
+                        copyStream: true,
+                        sourceTrackIndex: 0,
+                        audioGroupId: 'hd',
+                        label: '1080p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -531,10 +699,23 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 10,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -553,10 +734,25 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', label: 'English', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    {
+                        id: 'hd',
+                        label: 'English',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
                 ],
             };
 
@@ -577,10 +773,23 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -603,10 +812,23 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -623,16 +845,31 @@ describe('FfmpegService', () => {
 
         it('should fall back to segmentDuration when GOP detection fails in byte-range mode', async () => {
             vi.spyOn(service as any, 'probeFrameRate').mockResolvedValue(30);
-            vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(null);
+            vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(
+                null
+            );
 
             const encodeConfig: EncodeConfigDto = {
                 type: 'video',
                 segmentDuration: 8,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -652,10 +889,23 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 10,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -675,12 +925,38 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
-                    { width: 640, height: 360, videoBitrateKbps: 600, copyStream: false, audioGroupId: 'low', label: '360p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
+                    {
+                        width: 640,
+                        height: 360,
+                        videoBitrateKbps: 600,
+                        copyStream: false,
+                        audioGroupId: 'low',
+                        label: '360p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
-                    { id: 'low', audioBitrateKbps: 64, channels: 1, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                    {
+                        id: 'low',
+                        audioBitrateKbps: 64,
+                        channels: 1,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -695,7 +971,6 @@ describe('FfmpegService', () => {
             expect(args).not.toContain('-ac:0');
             expect(args).not.toContain('-ac:1');
         });
-
     });
 
     describe('buildVideoArgs with trimSegments', () => {
@@ -716,10 +991,22 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
                 trimSegments: [
                     { inSec: 10, outSec: 30 },
@@ -755,10 +1042,22 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -792,11 +1091,15 @@ describe('FfmpegService', () => {
                 type: 'audio',
                 segmentDuration: 6,
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
-                trimSegments: [
-                    { inSec: 5, outSec: 15 },
-                ],
+                trimSegments: [{ inSec: 5, outSec: 15 }],
             };
 
             const args = await buildAudioArgs({
@@ -819,7 +1122,10 @@ describe('FfmpegService', () => {
     });
 
     describe('fixMasterPlaylist (private, tested via reflection)', () => {
-        const fixMasterPlaylist = (outputDir: string, config: EncodeConfigDto): Promise<void> => {
+        const fixMasterPlaylist = (
+            outputDir: string,
+            config: EncodeConfigDto
+        ): Promise<void> => {
             return (service as any).fixMasterPlaylist(outputDir, config);
         };
 
@@ -846,9 +1152,33 @@ describe('FfmpegService', () => {
             await fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 audioGroups: [
-                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'mid', label: 'Standard Audio', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'low', label: 'Low Audio', audioBitrateKbps: 64, channels: 1, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    {
+                        id: 'hd',
+                        label: 'HD Audio',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
+                    {
+                        id: 'mid',
+                        label: 'Standard Audio',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
+                    {
+                        id: 'low',
+                        label: 'Low Audio',
+                        audioBitrateKbps: 64,
+                        channels: 1,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
                 ],
             });
 
@@ -856,7 +1186,11 @@ describe('FfmpegService', () => {
             // All single-language quality tiers share the same NAME so HLS
             // players treat them as one logical audio track (not separate selectable tracks)
             const nameMatches = result.match(/NAME="([^"]+)"/g);
-            expect(nameMatches).toEqual(['NAME="eng"', 'NAME="eng"', 'NAME="eng"']);
+            expect(nameMatches).toEqual([
+                'NAME="eng"',
+                'NAME="eng"',
+                'NAME="eng"',
+            ]);
         });
 
         it('should normalize uppercase LANGUAGE attributes from FFmpeg output', async () => {
@@ -871,8 +1205,24 @@ describe('FfmpegService', () => {
             await fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 audioGroups: [
-                    { id: 'hd', label: 'English', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'hd', label: 'French', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'fra' },
+                    {
+                        id: 'hd',
+                        label: 'English',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
+                    {
+                        id: 'hd',
+                        label: 'French',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 1,
+                        language: 'fra',
+                    },
                 ],
             });
 
@@ -894,8 +1244,24 @@ describe('FfmpegService', () => {
             await fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 audioGroups: [
-                    { id: 'hd', label: 'English', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'hd', label: 'Spanish', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'spa' },
+                    {
+                        id: 'hd',
+                        label: 'English',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
+                    {
+                        id: 'hd',
+                        label: 'Spanish',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 1,
+                        language: 'spa',
+                    },
                 ],
             });
 
@@ -914,7 +1280,15 @@ describe('FfmpegService', () => {
             await fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 audioGroups: [
-                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    {
+                        id: 'hd',
+                        label: 'HD Audio',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
                 ],
             });
 
@@ -934,8 +1308,24 @@ describe('FfmpegService', () => {
             await fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 audioGroups: [
-                    { id: 'eng', label: 'English', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'spa', label: 'Spanish', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'spa' },
+                    {
+                        id: 'eng',
+                        label: 'English',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
+                    {
+                        id: 'spa',
+                        label: 'Spanish',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 1,
+                        language: 'spa',
+                    },
                 ],
             });
 
@@ -954,7 +1344,13 @@ describe('FfmpegService', () => {
             await fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             });
 
@@ -973,14 +1369,26 @@ describe('FfmpegService', () => {
             await fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 audioGroups: [
-                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    {
+                        id: 'hd',
+                        label: 'HD Audio',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
                 ],
             });
 
             const result = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
-            expect(result).toContain('TYPE=SUBTITLES,GROUP-ID="subs",NAME="English"');
+            expect(result).toContain(
+                'TYPE=SUBTITLES,GROUP-ID="subs",NAME="English"'
+            );
             // Single language → uses language code as NAME
-            expect(result).toContain('TYPE=AUDIO,GROUP-ID="group_hd",NAME="eng"');
+            expect(result).toContain(
+                'TYPE=AUDIO,GROUP-ID="group_hd",NAME="eng"'
+            );
         });
 
         it('should add VIDEO groups and VIDEO attribute for multi-angle streams', async () => {
@@ -999,26 +1407,53 @@ describe('FfmpegService', () => {
             await fixMasterPlaylist(tmpDir, {
                 type: 'video',
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'tier_0', label: 'main', sourceTrackIndex: 0 },
-                    { width: 854, height: 480, videoBitrateKbps: 1000, copyStream: false, audioGroupId: 'tier_0', label: 'pulpit', sourceTrackIndex: 1 },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'tier_0',
+                        label: 'main',
+                        sourceTrackIndex: 0,
+                    },
+                    {
+                        width: 854,
+                        height: 480,
+                        videoBitrateKbps: 1000,
+                        copyStream: false,
+                        audioGroupId: 'tier_0',
+                        label: 'pulpit',
+                        sourceTrackIndex: 1,
+                    },
                 ],
                 videoTrackNames: [
                     { index: 0, name: 'main' },
                     { index: 1, name: 'pulpit' },
                 ],
                 audioGroups: [
-                    { id: 'tier_0', label: 'English', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    {
+                        id: 'tier_0',
+                        label: 'English',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
                 ],
             });
 
             const result = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
-            expect(result).toContain('#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="main",NAME="main",DEFAULT=YES');
-            expect(result).toContain('#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="pulpit",NAME="pulpit",DEFAULT=NO');
+            expect(result).toContain(
+                '#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="main",NAME="main",DEFAULT=YES'
+            );
+            expect(result).toContain(
+                '#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="pulpit",NAME="pulpit",DEFAULT=NO'
+            );
             expect(result).toContain('VIDEO="main",AUDIO="group_tier_0"');
             expect(result).toContain('VIDEO="pulpit",AUDIO="group_tier_0"');
         });
     });
-
 
     // The `generateAudioOnlyPlaylist` and `generateAnglePlaylists` suites lived
     // here. Both methods are gone: the encoder writes a single spec-correct
@@ -1028,8 +1463,14 @@ describe('FfmpegService', () => {
     // against a mocked filesystem.
 
     describe('fixAudioOnlyMasterPlaylist (private, tested via reflection)', () => {
-        const fixAudioOnlyMasterPlaylist = (outputDir: string, config: EncodeConfigDto): Promise<void> => {
-            return (service as any).fixAudioOnlyMasterPlaylist(outputDir, config);
+        const fixAudioOnlyMasterPlaylist = (
+            outputDir: string,
+            config: EncodeConfigDto
+        ): Promise<void> => {
+            return (service as any).fixAudioOnlyMasterPlaylist(
+                outputDir,
+                config
+            );
         };
 
         let tmpDir: string;
@@ -1043,7 +1484,11 @@ describe('FfmpegService', () => {
         });
 
         it('should do nothing when no audio groups', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:7\n', 'utf-8');
+            writeFileSync(
+                join(tmpDir, 'master.m3u8'),
+                '#EXTM3U\n#EXT-X-VERSION:7\n',
+                'utf-8'
+            );
 
             await fixAudioOnlyMasterPlaylist(tmpDir, { type: 'audio' });
 
@@ -1056,69 +1501,151 @@ describe('FfmpegService', () => {
             await fixAudioOnlyMasterPlaylist(tmpDir, {
                 type: 'audio',
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             });
         });
 
         it('should rewrite master.m3u8 with proper EXT-X-MEDIA and STREAM-INF structure', async () => {
             // Simulate FFmpeg's raw output for audio-only encode
-            writeFileSync(join(tmpDir, 'master.m3u8'), [
-                '#EXTM3U',
-                '#EXT-X-VERSION:7',
-                '#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2"',
-                'stream_hd_HD_Audio/playlist.m3u8',
-                '#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS="mp4a.40.2"',
-                'stream_low_Low_Audio/playlist.m3u8',
-                '',
-            ].join('\n'), 'utf-8');
+            writeFileSync(
+                join(tmpDir, 'master.m3u8'),
+                [
+                    '#EXTM3U',
+                    '#EXT-X-VERSION:7',
+                    '#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2"',
+                    'stream_hd_HD_Audio/playlist.m3u8',
+                    '#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS="mp4a.40.2"',
+                    'stream_low_Low_Audio/playlist.m3u8',
+                    '',
+                ].join('\n'),
+                'utf-8'
+            );
 
             await fixAudioOnlyMasterPlaylist(tmpDir, {
                 type: 'audio',
                 audioGroups: [
-                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'low', label: 'Low Audio', audioBitrateKbps: 64, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
+                    {
+                        id: 'hd',
+                        label: 'HD Audio',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
+                    {
+                        id: 'low',
+                        label: 'Low Audio',
+                        audioBitrateKbps: 64,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
                 ],
             });
 
             const content = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
 
             // Single language → all quality tiers share the same NAME
-            expect(content).toContain('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="eng",DEFAULT=YES,LANGUAGE="eng"');
-            expect(content).toContain('#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="low",NAME="eng",DEFAULT=YES,LANGUAGE="eng"');
+            expect(content).toContain(
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="eng",DEFAULT=YES,LANGUAGE="eng"'
+            );
+            expect(content).toContain(
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="low",NAME="eng",DEFAULT=YES,LANGUAGE="eng"'
+            );
 
             // Should have STREAM-INF per tier
-            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2",AUDIO="hd"');
-            expect(content).toContain('#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS="mp4a.40.2",AUDIO="low"');
+            expect(content).toContain(
+                '#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2",AUDIO="hd"'
+            );
+            expect(content).toContain(
+                '#EXT-X-STREAM-INF:BANDWIDTH=64000,CODECS="mp4a.40.2",AUDIO="low"'
+            );
 
             // Should preserve version from original
             expect(content).toContain('#EXT-X-VERSION:7');
         });
 
         it('should rewrite multi-language audio-only master playlist', async () => {
-            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n#EXT-X-VERSION:7\n', 'utf-8');
+            writeFileSync(
+                join(tmpDir, 'master.m3u8'),
+                '#EXTM3U\n#EXT-X-VERSION:7\n',
+                'utf-8'
+            );
 
             await fixAudioOnlyMasterPlaylist(tmpDir, {
                 type: 'audio',
                 audioGroups: [
-                    { id: 'hd', label: 'English', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'hd', label: 'French', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'fra' },
-                    { id: 'low', label: 'English', audioBitrateKbps: 64, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'low', label: 'French', audioBitrateKbps: 64, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'fra' },
+                    {
+                        id: 'hd',
+                        label: 'English',
+                        audioBitrateKbps: 256,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
+                    {
+                        id: 'hd',
+                        label: 'French',
+                        audioBitrateKbps: 256,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 1,
+                        language: 'fra',
+                    },
+                    {
+                        id: 'low',
+                        label: 'English',
+                        audioBitrateKbps: 64,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
+                    {
+                        id: 'low',
+                        label: 'French',
+                        audioBitrateKbps: 64,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 1,
+                        language: 'fra',
+                    },
                 ],
             });
 
             const content = readFileSync(join(tmpDir, 'master.m3u8'), 'utf-8');
 
             // EXT-X-MEDIA entries with correct DEFAULT flags
-            expect(content).toContain('GROUP-ID="hd",NAME="English",DEFAULT=YES,LANGUAGE="eng"');
-            expect(content).toContain('GROUP-ID="hd",NAME="French",DEFAULT=NO,LANGUAGE="fra"');
-            expect(content).toContain('GROUP-ID="low",NAME="English",DEFAULT=YES,LANGUAGE="eng"');
-            expect(content).toContain('GROUP-ID="low",NAME="French",DEFAULT=NO,LANGUAGE="fra"');
+            expect(content).toContain(
+                'GROUP-ID="hd",NAME="English",DEFAULT=YES,LANGUAGE="eng"'
+            );
+            expect(content).toContain(
+                'GROUP-ID="hd",NAME="French",DEFAULT=NO,LANGUAGE="fra"'
+            );
+            expect(content).toContain(
+                'GROUP-ID="low",NAME="English",DEFAULT=YES,LANGUAGE="eng"'
+            );
+            expect(content).toContain(
+                'GROUP-ID="low",NAME="French",DEFAULT=NO,LANGUAGE="fra"'
+            );
 
             // Two STREAM-INFs
-            expect(content).toContain('BANDWIDTH=256000,CODECS="mp4a.40.2",AUDIO="hd"');
-            expect(content).toContain('BANDWIDTH=64000,CODECS="mp4a.40.2",AUDIO="low"');
+            expect(content).toContain(
+                'BANDWIDTH=256000,CODECS="mp4a.40.2",AUDIO="hd"'
+            );
+            expect(content).toContain(
+                'BANDWIDTH=64000,CODECS="mp4a.40.2",AUDIO="low"'
+            );
         });
     });
 
@@ -1132,7 +1659,14 @@ describe('FfmpegService', () => {
                 type: 'audio',
                 segmentDuration: 6,
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'HD' },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        label: 'HD',
+                    },
                 ],
             };
 
@@ -1161,9 +1695,30 @@ describe('FfmpegService', () => {
                 type: 'audio',
                 segmentDuration: 4,
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'HD' },
-                    { id: 'mid', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'Standard' },
-                    { id: 'low', audioBitrateKbps: 64, channels: 1, audioCodec: 'aac', sourceTrackIndex: 0, label: 'Mono' },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 256,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        label: 'HD',
+                    },
+                    {
+                        id: 'mid',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        label: 'Standard',
+                    },
+                    {
+                        id: 'low',
+                        audioBitrateKbps: 64,
+                        channels: 1,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        label: 'Mono',
+                    },
                 ],
             };
 
@@ -1188,7 +1743,13 @@ describe('FfmpegService', () => {
                 type: 'audio',
                 segmentDuration: 6,
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -1208,7 +1769,14 @@ describe('FfmpegService', () => {
                 type: 'audio',
                 segmentDuration: 6,
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, copyStream: true },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        copyStream: true,
+                    },
                 ],
             };
 
@@ -1227,7 +1795,14 @@ describe('FfmpegService', () => {
                 type: 'audio',
                 segmentDuration: 6,
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'HD' },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        label: 'HD',
+                    },
                 ],
             };
 
@@ -1246,7 +1821,14 @@ describe('FfmpegService', () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'HD' },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        label: 'HD',
+                    },
                 ],
             };
 
@@ -1265,7 +1847,14 @@ describe('FfmpegService', () => {
                 type: 'audio',
                 segmentDuration: 4,
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, label: 'HD' },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        label: 'HD',
+                    },
                 ],
             };
 
@@ -1285,8 +1874,24 @@ describe('FfmpegService', () => {
                 type: 'audio',
                 segmentDuration: 6,
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, language: 'eng', label: 'English HD' },
-                    { id: 'hd', audioBitrateKbps: 256, channels: 2, audioCodec: 'aac', sourceTrackIndex: 1, language: 'fra', label: 'French HD' },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 256,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                        label: 'English HD',
+                    },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 256,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 1,
+                        language: 'fra',
+                        label: 'French HD',
+                    },
                 ],
             };
 
@@ -1309,22 +1914,37 @@ describe('FfmpegService', () => {
         // The async I/O correctness is validated through integration in buildVideoArgs/encode tests.
 
         it('should return a number when keyframes are detected', async () => {
-            const spy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(1);
-            const result = await (service as any).probeGopDuration('/tmp/input.mp4', 30);
+            const spy = vi
+                .spyOn(service as any, 'probeGopDuration')
+                .mockResolvedValue(1);
+            const result = await (service as any).probeGopDuration(
+                '/tmp/input.mp4',
+                30
+            );
             expect(result).toBe(1);
             spy.mockRestore();
         });
 
         it('should return fractional GOP duration for non-standard frame rates', async () => {
-            const spy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
-            const result = await (service as any).probeGopDuration('/tmp/input.mp4', 24);
+            const spy = vi
+                .spyOn(service as any, 'probeGopDuration')
+                .mockResolvedValue(2);
+            const result = await (service as any).probeGopDuration(
+                '/tmp/input.mp4',
+                24
+            );
             expect(result).toBe(2);
             spy.mockRestore();
         });
 
         it('should return null when detection fails', async () => {
-            const spy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(null);
-            const result = await (service as any).probeGopDuration('/tmp/input.mp4', 30);
+            const spy = vi
+                .spyOn(service as any, 'probeGopDuration')
+                .mockResolvedValue(null);
+            const result = await (service as any).probeGopDuration(
+                '/tmp/input.mp4',
+                30
+            );
             expect(result).toBeNull();
             spy.mockRestore();
         });
@@ -1344,14 +1964,29 @@ describe('FfmpegService', () => {
             type: 'video',
             segmentDuration: 6,
             videoRenditions: [
-                { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                {
+                    width: 1280,
+                    height: 720,
+                    videoBitrateKbps: 2500,
+                    copyStream: false,
+                    audioGroupId: 'hd',
+                    label: '720p',
+                },
             ],
             audioGroups: [
-                { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                {
+                    id: 'hd',
+                    audioBitrateKbps: 192,
+                    channels: 2,
+                    audioCodec: 'aac',
+                    sourceTrackIndex: 0,
+                },
             ],
         };
 
-        function makeEncodeOpts(overrides: Partial<EncodeOptions> = {}): EncodeOptions {
+        function makeEncodeOpts(
+            overrides: Partial<EncodeOptions> = {}
+        ): EncodeOptions {
             return {
                 sessionId: 'test-session',
                 inputPath: '/tmp/input.mp4',
@@ -1365,13 +2000,27 @@ describe('FfmpegService', () => {
         beforeEach(() => {
             tmpDir = mkdtempSync(join(tmpdir(), 'ffmpeg-encode-'));
             mockSpawn.mockReset();
-            areAlignedSpy = vi.spyOn(service as any, 'areStreamStartTimesAligned').mockResolvedValue(true);
-            probeDurationSpy = vi.spyOn(service as any, 'probeDuration').mockResolvedValue(100);
-            fixMasterPlaylistSpy = vi.spyOn(service as any, 'fixMasterPlaylist').mockResolvedValue(undefined);
-            fixAudioOnlyMasterPlaylistSpy = vi.spyOn(service as any, 'fixAudioOnlyMasterPlaylist').mockResolvedValue(undefined);
-            probeFrameRateSpy = vi.spyOn(service as any, 'probeFrameRate').mockResolvedValue(30);
-            probeGopDurationSpy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
-            convertToByteRangeSpy = vi.spyOn(service as any, 'convertToByteRange').mockResolvedValue(undefined);
+            areAlignedSpy = vi
+                .spyOn(service as any, 'areStreamStartTimesAligned')
+                .mockResolvedValue(true);
+            probeDurationSpy = vi
+                .spyOn(service as any, 'probeDuration')
+                .mockResolvedValue(100);
+            fixMasterPlaylistSpy = vi
+                .spyOn(service as any, 'fixMasterPlaylist')
+                .mockResolvedValue(undefined);
+            fixAudioOnlyMasterPlaylistSpy = vi
+                .spyOn(service as any, 'fixAudioOnlyMasterPlaylist')
+                .mockResolvedValue(undefined);
+            probeFrameRateSpy = vi
+                .spyOn(service as any, 'probeFrameRate')
+                .mockResolvedValue(30);
+            probeGopDurationSpy = vi
+                .spyOn(service as any, 'probeGopDuration')
+                .mockResolvedValue(2);
+            convertToByteRangeSpy = vi
+                .spyOn(service as any, 'convertToByteRange')
+                .mockResolvedValue(undefined);
         });
 
         afterEach(() => {
@@ -1409,9 +2058,13 @@ describe('FfmpegService', () => {
             const promise = service.encode(opts);
             await flushPromises();
 
-            expect(mockSpawn).toHaveBeenCalledWith('ffmpeg', expect.any(Array), {
-                stdio: ['ignore', 'pipe', 'pipe'],
-            });
+            expect(mockSpawn).toHaveBeenCalledWith(
+                'ffmpeg',
+                expect.any(Array),
+                {
+                    stdio: ['ignore', 'pipe', 'pipe'],
+                }
+            );
 
             const args: string[] = mockSpawn.mock.calls[0][1];
             expect(args).toContain('-i');
@@ -1458,7 +2111,9 @@ describe('FfmpegService', () => {
 
             mockProc.emitError(new Error('ENOENT: ffmpeg not found'));
 
-            await expect(promise).rejects.toThrow('FFmpeg spawn error: ENOENT: ffmpeg not found');
+            await expect(promise).rejects.toThrow(
+                'FFmpeg spawn error: ENOENT: ffmpeg not found'
+            );
         });
 
         it('should report progress via onProgress callback', async () => {
@@ -1500,7 +2155,9 @@ describe('FfmpegService', () => {
 
             // Nothing can be said about how far along it is, but finishing is
             // still worth reporting — the bar otherwise sits empty at the end.
-            expect(onProgress.mock.calls.map((c: any[]) => c[0])).toEqual([100]);
+            expect(onProgress.mock.calls.map((c: any[]) => c[0])).toEqual([
+                100,
+            ]);
         });
 
         it('caps running progress at 99.9% and reports 100 once finished', async () => {
@@ -1521,7 +2178,9 @@ describe('FfmpegService', () => {
             // Capped while running, so a rounded 100 never claims a finish that
             // has not happened. Nothing used to lift it afterwards, so a
             // finished encode sat at 99.9% through the whole upload phase.
-            expect(calls.slice(0, -1).every((v: number) => v <= 99.9)).toBe(true);
+            expect(calls.slice(0, -1).every((v: number) => v <= 99.9)).toBe(
+                true
+            );
             expect(calls.at(-1)).toBe(100);
         });
 
@@ -1536,7 +2195,10 @@ describe('FfmpegService', () => {
             mockProc.emitClose(0);
             await promise;
 
-            expect(fixMasterPlaylistSpy).toHaveBeenCalledWith(opts.outputDir, opts.encodeConfig);
+            expect(fixMasterPlaylistSpy).toHaveBeenCalledWith(
+                opts.outputDir,
+                opts.encodeConfig
+            );
             // One spec-correct master carries every angle as an EXT-X-MEDIA
             // rendition group; nothing writes a file per angle any more.
             expect(fixAudioOnlyMasterPlaylistSpy).not.toHaveBeenCalled();
@@ -1551,7 +2213,13 @@ describe('FfmpegService', () => {
                     type: 'audio',
                     segmentDuration: 6,
                     audioGroups: [
-                        { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                        {
+                            id: 'hd',
+                            audioBitrateKbps: 128,
+                            channels: 2,
+                            audioCodec: 'aac',
+                            sourceTrackIndex: 0,
+                        },
                     ],
                 },
             });
@@ -1592,8 +2260,20 @@ describe('FfmpegService', () => {
                     type: 'audio',
                     segmentDuration: 6,
                     audioGroups: [
-                        { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
-                        { id: 'low', audioBitrateKbps: 64, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                        {
+                            id: 'hd',
+                            audioBitrateKbps: 192,
+                            channels: 2,
+                            audioCodec: 'aac',
+                            sourceTrackIndex: 0,
+                        },
+                        {
+                            id: 'low',
+                            audioBitrateKbps: 64,
+                            channels: 2,
+                            audioCodec: 'aac',
+                            sourceTrackIndex: 0,
+                        },
                     ],
                 },
             });
@@ -1603,7 +2283,10 @@ describe('FfmpegService', () => {
             mockProc.emitClose(0);
             await promise;
 
-            expect(fixAudioOnlyMasterPlaylistSpy).toHaveBeenCalledWith(opts.outputDir, opts.encodeConfig);
+            expect(fixAudioOnlyMasterPlaylistSpy).toHaveBeenCalledWith(
+                opts.outputDir,
+                opts.encodeConfig
+            );
         });
 
         it('should not call fixAudioOnlyMasterPlaylist for video type', async () => {
@@ -1669,11 +2352,15 @@ describe('FfmpegService', () => {
             mockSpawn.mockReturnValue(mockProc);
 
             const callOrder: string[] = [];
-            const convertSpy = vi.spyOn(service as any, 'convertToByteRange').mockImplementation(async () => {
-                callOrder.push('convertToByteRange');
-            });
+            const convertSpy = vi
+                .spyOn(service as any, 'convertToByteRange')
+                .mockImplementation(async () => {
+                    callOrder.push('convertToByteRange');
+                });
 
-            const hook = vi.fn(() => { callOrder.push('preByteRangeHook'); });
+            const hook = vi.fn(() => {
+                callOrder.push('preByteRangeHook');
+            });
             const opts = makeEncodeOpts({ preByteRangeHook: hook });
             const promise = service.encode(opts);
             await flushPromises();
@@ -1692,7 +2379,9 @@ describe('FfmpegService', () => {
             const mockProc = createMockProcess();
             mockSpawn.mockReturnValue(mockProc);
 
-            const convertSpy = vi.spyOn(service as any, 'convertToByteRange').mockResolvedValue(undefined);
+            const convertSpy = vi
+                .spyOn(service as any, 'convertToByteRange')
+                .mockResolvedValue(undefined);
 
             const opts = makeEncodeOpts();
             const promise = service.encode(opts);
@@ -1784,8 +2473,24 @@ describe('FfmpegService', () => {
             const config = {
                 type: 'video' as const,
                 audioGroups: [
-                    { id: 'hd', label: 'English HD', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac' as const, sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'hd', label: 'Spanish HD', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac' as const, sourceTrackIndex: 1, language: 'spa' },
+                    {
+                        id: 'hd',
+                        label: 'English HD',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac' as const,
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
+                    {
+                        id: 'hd',
+                        label: 'Spanish HD',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac' as const,
+                        sourceTrackIndex: 1,
+                        language: 'spa',
+                    },
                 ],
             };
 
@@ -1796,7 +2501,10 @@ describe('FfmpegService', () => {
                 '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="old",DEFAULT=NO,URI="stream_hd_Spanish_HD/playlist.m3u8"',
             ].join('\n');
 
-            const result = (service as any).fixMasterPlaylistAudioNames(content, config);
+            const result = (service as any).fixMasterPlaylistAudioNames(
+                content,
+                config
+            );
             const lines = result.split('\n');
 
             expect(lines[2]).toContain('NAME="English HD"');
@@ -1807,8 +2515,24 @@ describe('FfmpegService', () => {
             const config = {
                 type: 'video' as const,
                 audioGroups: [
-                    { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac' as const, sourceTrackIndex: 0, language: 'eng' },
-                    { id: 'low', label: 'Low Audio', audioBitrateKbps: 96, channels: 2, audioCodec: 'aac' as const, sourceTrackIndex: 0, language: 'eng' },
+                    {
+                        id: 'hd',
+                        label: 'HD Audio',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac' as const,
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
+                    {
+                        id: 'low',
+                        label: 'Low Audio',
+                        audioBitrateKbps: 96,
+                        channels: 2,
+                        audioCodec: 'aac' as const,
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
                 ],
             };
 
@@ -1818,7 +2542,10 @@ describe('FfmpegService', () => {
                 '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="low",NAME="old",DEFAULT=YES,URI="stream_low_Low_Audio/playlist.m3u8"',
             ].join('\n');
 
-            const result = (service as any).fixMasterPlaylistAudioNames(content, config);
+            const result = (service as any).fixMasterPlaylistAudioNames(
+                content,
+                config
+            );
             const lines = result.split('\n');
 
             // Single language: both should use language name "eng"
@@ -1830,33 +2557,56 @@ describe('FfmpegService', () => {
             const config = {
                 type: 'video' as const,
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac' as const, sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac' as const,
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
-            const content = '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="old",DEFAULT=YES,URI="stream_hd_192kbps/playlist.m3u8"';
+            const content =
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="old",DEFAULT=YES,URI="stream_hd_192kbps/playlist.m3u8"';
 
-            const result = (service as any).fixMasterPlaylistAudioNames(content, config);
+            const result = (service as any).fixMasterPlaylistAudioNames(
+                content,
+                config
+            );
             expect(result).toContain('NAME="Audio"');
         });
 
         it('should return content unchanged when audioGroups is empty', () => {
             const config = { type: 'video' as const, audioGroups: [] };
-            const content = '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="old",URI="stream_hd_foo/playlist.m3u8"';
-            expect((service as any).fixMasterPlaylistAudioNames(content, config)).toBe(content);
+            const content =
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="old",URI="stream_hd_foo/playlist.m3u8"';
+            expect(
+                (service as any).fixMasterPlaylistAudioNames(content, config)
+            ).toBe(content);
         });
 
         it('should return content unchanged when audioGroups is undefined', () => {
             const config = { type: 'video' as const };
-            const content = '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="old",URI="stream_hd_foo/playlist.m3u8"';
-            expect((service as any).fixMasterPlaylistAudioNames(content, config)).toBe(content);
+            const content =
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="old",URI="stream_hd_foo/playlist.m3u8"';
+            expect(
+                (service as any).fixMasterPlaylistAudioNames(content, config)
+            ).toBe(content);
         });
 
         it('should leave lines without a matching URI unchanged', () => {
             const config = {
                 type: 'video' as const,
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac' as const, sourceTrackIndex: 0, language: 'eng' },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac' as const,
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
                 ],
             };
 
@@ -1866,7 +2616,10 @@ describe('FfmpegService', () => {
                 'stream_hd_192kbps/playlist.m3u8',
             ].join('\n');
 
-            const result = (service as any).fixMasterPlaylistAudioNames(content, config);
+            const result = (service as any).fixMasterPlaylistAudioNames(
+                content,
+                config
+            );
             const lines = result.split('\n');
 
             // The audio line URI doesn't match any built URI, so NAME stays "old"
@@ -1882,27 +2635,60 @@ describe('FfmpegService', () => {
             const config = {
                 type: 'video' as const,
                 videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
-                    { width: 1280, height: 720, videoBitrateKbps: 3000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
+                    {
+                        width: 1920,
+                        height: 1080,
+                        videoBitrateKbps: 5000,
+                        copyStream: false,
+                        sourceTrackIndex: 0,
+                        audioGroupId: 'hd',
+                    },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 3000,
+                        copyStream: false,
+                        sourceTrackIndex: 0,
+                        audioGroupId: 'hd',
+                    },
                 ],
             };
 
-            const content = '#EXT-X-STREAM-INF:BANDWIDTH=5000000\nstream_0/playlist.m3u8';
-            expect((service as any).fixMasterPlaylistVideoGroups(content, config)).toBe(content);
+            const content =
+                '#EXT-X-STREAM-INF:BANDWIDTH=5000000\nstream_0/playlist.m3u8';
+            expect(
+                (service as any).fixMasterPlaylistVideoGroups(content, config)
+            ).toBe(content);
         });
 
         it('should return content unchanged when videoRenditions is empty', () => {
             const config = { type: 'video' as const, videoRenditions: [] };
             const content = '#EXTM3U\n#EXT-X-VERSION:7';
-            expect((service as any).fixMasterPlaylistVideoGroups(content, config)).toBe(content);
+            expect(
+                (service as any).fixMasterPlaylistVideoGroups(content, config)
+            ).toBe(content);
         });
 
         it('should add VIDEO attributes and EXT-X-MEDIA VIDEO entries for multiple tracks', () => {
             const config = {
                 type: 'video' as const,
                 videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 1, audioGroupId: 'hd' },
+                    {
+                        width: 1920,
+                        height: 1080,
+                        videoBitrateKbps: 5000,
+                        copyStream: false,
+                        sourceTrackIndex: 0,
+                        audioGroupId: 'hd',
+                    },
+                    {
+                        width: 1920,
+                        height: 1080,
+                        videoBitrateKbps: 5000,
+                        copyStream: false,
+                        sourceTrackIndex: 1,
+                        audioGroupId: 'hd',
+                    },
                 ],
             };
 
@@ -1915,11 +2701,18 @@ describe('FfmpegService', () => {
                 'stream_1/playlist.m3u8',
             ].join('\n');
 
-            const result = (service as any).fixMasterPlaylistVideoGroups(content, config);
+            const result = (service as any).fixMasterPlaylistVideoGroups(
+                content,
+                config
+            );
 
             // Should contain EXT-X-MEDIA VIDEO entries
-            expect(result).toContain('#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="Angle_0",NAME="Angle 0",DEFAULT=YES');
-            expect(result).toContain('#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="Angle_1",NAME="Angle 1",DEFAULT=NO');
+            expect(result).toContain(
+                '#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="Angle_0",NAME="Angle 0",DEFAULT=YES'
+            );
+            expect(result).toContain(
+                '#EXT-X-MEDIA:TYPE=VIDEO,GROUP-ID="Angle_1",NAME="Angle 1",DEFAULT=NO'
+            );
             // Should add VIDEO= to STREAM-INF lines
             expect(result).toContain('VIDEO="Angle_0"');
             expect(result).toContain('VIDEO="Angle_1"');
@@ -1929,8 +2722,22 @@ describe('FfmpegService', () => {
             const config = {
                 type: 'video' as const,
                 videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 1, audioGroupId: 'hd' },
+                    {
+                        width: 1920,
+                        height: 1080,
+                        videoBitrateKbps: 5000,
+                        copyStream: false,
+                        sourceTrackIndex: 0,
+                        audioGroupId: 'hd',
+                    },
+                    {
+                        width: 1920,
+                        height: 1080,
+                        videoBitrateKbps: 5000,
+                        copyStream: false,
+                        sourceTrackIndex: 1,
+                        audioGroupId: 'hd',
+                    },
                 ],
                 videoTrackNames: [
                     { index: 0, name: 'Main Camera' },
@@ -1946,7 +2753,10 @@ describe('FfmpegService', () => {
                 'stream_1/playlist.m3u8',
             ].join('\n');
 
-            const result = (service as any).fixMasterPlaylistVideoGroups(content, config);
+            const result = (service as any).fixMasterPlaylistVideoGroups(
+                content,
+                config
+            );
 
             expect(result).toContain('NAME="Main Camera"');
             expect(result).toContain('NAME="Side Camera"');
@@ -1958,8 +2768,22 @@ describe('FfmpegService', () => {
             const config = {
                 type: 'video' as const,
                 videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 1, audioGroupId: 'hd' },
+                    {
+                        width: 1920,
+                        height: 1080,
+                        videoBitrateKbps: 5000,
+                        copyStream: false,
+                        sourceTrackIndex: 0,
+                        audioGroupId: 'hd',
+                    },
+                    {
+                        width: 1920,
+                        height: 1080,
+                        videoBitrateKbps: 5000,
+                        copyStream: false,
+                        sourceTrackIndex: 1,
+                        audioGroupId: 'hd',
+                    },
                 ],
             };
 
@@ -1971,52 +2795,116 @@ describe('FfmpegService', () => {
                 'stream_1/playlist.m3u8',
             ].join('\n');
 
-            const result = (service as any).fixMasterPlaylistVideoGroups(content, config);
+            const result = (service as any).fixMasterPlaylistVideoGroups(
+                content,
+                config
+            );
             const lines = result.split('\n');
 
             // Find the STREAM-INF lines and check VIDEO is placed before AUDIO
-            const streamInfLines = lines.filter(l => l.startsWith('#EXT-X-STREAM-INF:'));
+            const streamInfLines = lines.filter((l) =>
+                l.startsWith('#EXT-X-STREAM-INF:')
+            );
             for (const line of streamInfLines) {
                 expect(line).toMatch(/VIDEO="[^"]+",AUDIO="hd"/);
             }
         });
     });
 
-
     describe('buildVideoStreamName', () => {
         it('should use label and track index when multiTrack is true', () => {
-            const rendition = { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, audioGroupId: 'hd', label: '1080p', sourceTrackIndex: 2 };
-            const result = (service as any).buildVideoStreamName(rendition, true);
+            const rendition = {
+                width: 1920,
+                height: 1080,
+                videoBitrateKbps: 5000,
+                copyStream: false,
+                audioGroupId: 'hd',
+                label: '1080p',
+                sourceTrackIndex: 2,
+            };
+            const result = (service as any).buildVideoStreamName(
+                rendition,
+                true
+            );
             expect(result).toBe('1080p_t2_1920x1080');
         });
 
         it('should use label without track index when multiTrack is false', () => {
-            const rendition = { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, audioGroupId: 'hd', label: '1080p' };
-            const result = (service as any).buildVideoStreamName(rendition, false);
+            const rendition = {
+                width: 1920,
+                height: 1080,
+                videoBitrateKbps: 5000,
+                copyStream: false,
+                audioGroupId: 'hd',
+                label: '1080p',
+            };
+            const result = (service as any).buildVideoStreamName(
+                rendition,
+                false
+            );
             expect(result).toBe('1080p_1920x1080');
         });
 
         it('should fall back to heightp when label is not set', () => {
-            const rendition = { width: 1280, height: 720, videoBitrateKbps: 3000, copyStream: false, audioGroupId: 'hd' };
-            const result = (service as any).buildVideoStreamName(rendition, false);
+            const rendition = {
+                width: 1280,
+                height: 720,
+                videoBitrateKbps: 3000,
+                copyStream: false,
+                audioGroupId: 'hd',
+            };
+            const result = (service as any).buildVideoStreamName(
+                rendition,
+                false
+            );
             expect(result).toBe('720p_1280x720');
         });
 
         it('should fall back to heightp with track index when label is not set and multiTrack is true', () => {
-            const rendition = { width: 1280, height: 720, videoBitrateKbps: 3000, copyStream: false, audioGroupId: 'hd', sourceTrackIndex: 1 };
-            const result = (service as any).buildVideoStreamName(rendition, true);
+            const rendition = {
+                width: 1280,
+                height: 720,
+                videoBitrateKbps: 3000,
+                copyStream: false,
+                audioGroupId: 'hd',
+                sourceTrackIndex: 1,
+            };
+            const result = (service as any).buildVideoStreamName(
+                rendition,
+                true
+            );
             expect(result).toBe('720p_t1_1280x720');
         });
 
         it('should replace spaces in label with underscores', () => {
-            const rendition = { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, audioGroupId: 'hd', label: 'Full HD' };
-            const result = (service as any).buildVideoStreamName(rendition, false);
+            const rendition = {
+                width: 1920,
+                height: 1080,
+                videoBitrateKbps: 5000,
+                copyStream: false,
+                audioGroupId: 'hd',
+                label: 'Full HD',
+            };
+            const result = (service as any).buildVideoStreamName(
+                rendition,
+                false
+            );
             expect(result).toBe('Full_HD_1920x1080');
         });
 
         it('should default sourceTrackIndex to 0 when not set and multiTrack is true', () => {
-            const rendition = { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, audioGroupId: 'hd', label: '1080p' };
-            const result = (service as any).buildVideoStreamName(rendition, true);
+            const rendition = {
+                width: 1920,
+                height: 1080,
+                videoBitrateKbps: 5000,
+                copyStream: false,
+                audioGroupId: 'hd',
+                label: '1080p',
+            };
+            const result = (service as any).buildVideoStreamName(
+                rendition,
+                true
+            );
             expect(result).toBe('1080p_t0_1920x1080');
         });
     });
@@ -2035,10 +2923,23 @@ describe('FfmpegService', () => {
             type: 'video',
             segmentDuration: 6,
             videoRenditions: [
-                { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                {
+                    width: 1280,
+                    height: 720,
+                    videoBitrateKbps: 2500,
+                    copyStream: false,
+                    audioGroupId: 'hd',
+                    label: '720p',
+                },
             ],
             audioGroups: [
-                { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                {
+                    id: 'hd',
+                    audioBitrateKbps: 192,
+                    channels: 2,
+                    audioCodec: 'aac',
+                    sourceTrackIndex: 0,
+                },
             ],
         };
 
@@ -2046,13 +2947,27 @@ describe('FfmpegService', () => {
             vi.useFakeTimers();
             tmpDir = mkdtempSync(join(tmpdir(), 'ffmpeg-timeout-'));
             mockSpawn.mockReset();
-            areAlignedSpy = vi.spyOn(service as any, 'areStreamStartTimesAligned').mockResolvedValue(true);
-            probeDurationSpy = vi.spyOn(service as any, 'probeDuration').mockResolvedValue(100);
-            fixMasterPlaylistSpy = vi.spyOn(service as any, 'fixMasterPlaylist').mockResolvedValue(undefined);
-            fixAudioOnlyMasterPlaylistSpy = vi.spyOn(service as any, 'fixAudioOnlyMasterPlaylist').mockResolvedValue(undefined);
-            probeFrameRateSpy = vi.spyOn(service as any, 'probeFrameRate').mockResolvedValue(30);
-            probeGopDurationSpy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
-            convertToByteRangeSpy = vi.spyOn(service as any, 'convertToByteRange').mockResolvedValue(undefined);
+            areAlignedSpy = vi
+                .spyOn(service as any, 'areStreamStartTimesAligned')
+                .mockResolvedValue(true);
+            probeDurationSpy = vi
+                .spyOn(service as any, 'probeDuration')
+                .mockResolvedValue(100);
+            fixMasterPlaylistSpy = vi
+                .spyOn(service as any, 'fixMasterPlaylist')
+                .mockResolvedValue(undefined);
+            fixAudioOnlyMasterPlaylistSpy = vi
+                .spyOn(service as any, 'fixAudioOnlyMasterPlaylist')
+                .mockResolvedValue(undefined);
+            probeFrameRateSpy = vi
+                .spyOn(service as any, 'probeFrameRate')
+                .mockResolvedValue(30);
+            probeGopDurationSpy = vi
+                .spyOn(service as any, 'probeGopDuration')
+                .mockResolvedValue(2);
+            convertToByteRangeSpy = vi
+                .spyOn(service as any, 'convertToByteRange')
+                .mockResolvedValue(undefined);
         });
 
         afterEach(() => {
@@ -2086,7 +3001,9 @@ describe('FfmpegService', () => {
             // Advance past the timeout threshold
             vi.advanceTimersByTime(600);
 
-            await expect(promise).rejects.toThrow('FFmpeg timed out after 500ms');
+            await expect(promise).rejects.toThrow(
+                'FFmpeg timed out after 500ms'
+            );
             expect(proc.kill).toHaveBeenCalledWith('SIGKILL');
         });
 
@@ -2145,29 +3062,48 @@ describe('FfmpegService', () => {
 
     describe('fixMasterPlaylist read error path', () => {
         it('should return silently when master.m3u8 does not exist', async () => {
-            const nonExistentDir = join(tmpdir(), 'non-existent-dir-' + Date.now());
+            const nonExistentDir = join(
+                tmpdir(),
+                'non-existent-dir-' + Date.now()
+            );
             // Should not throw — the method catches readFile errors and returns
             await expect(
                 (service as any).fixMasterPlaylist(nonExistentDir, {
                     type: 'video',
                     audioGroups: [
-                        { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                        {
+                            id: 'hd',
+                            label: 'HD Audio',
+                            audioBitrateKbps: 192,
+                            channels: 2,
+                            audioCodec: 'aac',
+                            sourceTrackIndex: 0,
+                        },
                     ],
-                }),
+                })
             ).resolves.toBeUndefined();
         });
     });
 
     describe('fixAudioOnlyMasterPlaylist read error path', () => {
         it('should return silently when master.m3u8 does not exist', async () => {
-            const nonExistentDir = join(tmpdir(), 'non-existent-dir-' + Date.now());
+            const nonExistentDir = join(
+                tmpdir(),
+                'non-existent-dir-' + Date.now()
+            );
             await expect(
                 (service as any).fixAudioOnlyMasterPlaylist(nonExistentDir, {
                     type: 'audio',
                     audioGroups: [
-                        { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                        {
+                            id: 'hd',
+                            audioBitrateKbps: 192,
+                            channels: 2,
+                            audioCodec: 'aac',
+                            sourceTrackIndex: 0,
+                        },
                     ],
-                }),
+                })
             ).resolves.toBeUndefined();
         });
     });
@@ -2178,7 +3114,10 @@ describe('FfmpegService', () => {
             if (existingSpy) existingSpy.mockRestore();
 
             await expect(
-                (service as any).convertToByteRange('/non/existent/dir', 500 * 1024 * 1024),
+                (service as any).convertToByteRange(
+                    '/non/existent/dir',
+                    500 * 1024 * 1024
+                )
             ).rejects.toThrow();
         });
 
@@ -2187,7 +3126,10 @@ describe('FfmpegService', () => {
             const fakeWorker = new EventEmitter();
             MockWorker.mockReturnValue(fakeWorker);
 
-            const promise = (service as any).convertToByteRange('/tmp/output', 500 * 1024 * 1024);
+            const promise = (service as any).convertToByteRange(
+                '/tmp/output',
+                500 * 1024 * 1024
+            );
             fakeWorker.emit('message', { streamCount: 3 });
 
             await expect(promise).resolves.toBeUndefined();
@@ -2200,10 +3142,15 @@ describe('FfmpegService', () => {
             const fakeWorker = new EventEmitter();
             MockWorker.mockReturnValue(fakeWorker);
 
-            const promise = (service as any).convertToByteRange('/tmp/output', 500 * 1024 * 1024);
+            const promise = (service as any).convertToByteRange(
+                '/tmp/output',
+                500 * 1024 * 1024
+            );
             fakeWorker.emit('exit', 1);
 
-            await expect(promise).rejects.toThrow('Byte-range worker exited with code 1');
+            await expect(promise).rejects.toThrow(
+                'Byte-range worker exited with code 1'
+            );
             useRealWorker.value = true;
             MockWorker.mockReset();
         });
@@ -2213,10 +3160,15 @@ describe('FfmpegService', () => {
             const fakeWorker = new EventEmitter();
             MockWorker.mockReturnValue(fakeWorker);
 
-            const promise = (service as any).convertToByteRange('/tmp/output', 500 * 1024 * 1024);
+            const promise = (service as any).convertToByteRange(
+                '/tmp/output',
+                500 * 1024 * 1024
+            );
             fakeWorker.emit('error', new Error('worker crashed'));
 
-            await expect(promise).rejects.toThrow('Byte-range worker error: worker crashed');
+            await expect(promise).rejects.toThrow(
+                'Byte-range worker error: worker crashed'
+            );
             useRealWorker.value = true;
             MockWorker.mockReset();
         });
@@ -2226,7 +3178,8 @@ describe('FfmpegService', () => {
         it('should detect NVIDIA GPU when nvidia-smi succeeds and hwaccels includes cuda', async () => {
             mockExecSync.mockImplementation((cmd: string) => {
                 if (cmd === 'nvidia-smi') return '';
-                if (cmd === 'ffmpeg -hwaccels 2>/dev/null') return 'Hardware acceleration methods:\ncuda\n';
+                if (cmd === 'ffmpeg -hwaccels 2>/dev/null')
+                    return 'Hardware acceleration methods:\ncuda\n';
                 throw new Error('not available');
             });
 
@@ -2247,15 +3200,24 @@ describe('FfmpegService', () => {
         it('should detect Apple GPU on darwin/arm64 with correct ffmpeg capabilities', async () => {
             const origPlatform = process.platform;
             const origArch = process.arch;
-            Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-            Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
+            Object.defineProperty(process, 'platform', {
+                value: 'darwin',
+                configurable: true,
+            });
+            Object.defineProperty(process, 'arch', {
+                value: 'arm64',
+                configurable: true,
+            });
 
             try {
                 mockExecSync.mockImplementation((cmd: string) => {
                     if (cmd === 'nvidia-smi') throw new Error('not available');
-                    if (cmd === 'ffmpeg -hwaccels 2>/dev/null') return 'Hardware acceleration methods:\nvideotoolbox\n';
-                    if (cmd === 'ffmpeg -encoders 2>/dev/null') return 'h264_videotoolbox';
-                    if (cmd === 'ffmpeg -filters 2>/dev/null') return 'scale_vt';
+                    if (cmd === 'ffmpeg -hwaccels 2>/dev/null')
+                        return 'Hardware acceleration methods:\nvideotoolbox\n';
+                    if (cmd === 'ffmpeg -encoders 2>/dev/null')
+                        return 'h264_videotoolbox';
+                    if (cmd === 'ffmpeg -filters 2>/dev/null')
+                        return 'scale_vt';
                     throw new Error('not available');
                 });
 
@@ -2263,8 +3225,14 @@ describe('FfmpegService', () => {
                 expect(service.getAccelMode()).toBe('apple');
                 expect(service.isGpuAvailable()).toBe(true);
             } finally {
-                Object.defineProperty(process, 'platform', { value: origPlatform, configurable: true });
-                Object.defineProperty(process, 'arch', { value: origArch, configurable: true });
+                Object.defineProperty(process, 'platform', {
+                    value: origPlatform,
+                    configurable: true,
+                });
+                Object.defineProperty(process, 'arch', {
+                    value: origArch,
+                    configurable: true,
+                });
             }
         });
 
@@ -2281,22 +3249,36 @@ describe('FfmpegService', () => {
         it('should fall back to CPU when Apple platform but missing videotoolbox encoder', async () => {
             const origPlatform = process.platform;
             const origArch = process.arch;
-            Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-            Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
+            Object.defineProperty(process, 'platform', {
+                value: 'darwin',
+                configurable: true,
+            });
+            Object.defineProperty(process, 'arch', {
+                value: 'arm64',
+                configurable: true,
+            });
 
             try {
                 mockExecSync.mockImplementation((cmd: string) => {
                     if (cmd === 'nvidia-smi') throw new Error('not available');
-                    if (cmd === 'ffmpeg -hwaccels 2>/dev/null') return 'Hardware acceleration methods:\nvideotoolbox\n';
-                    if (cmd === 'ffmpeg -encoders 2>/dev/null') return 'some_other_encoder';
+                    if (cmd === 'ffmpeg -hwaccels 2>/dev/null')
+                        return 'Hardware acceleration methods:\nvideotoolbox\n';
+                    if (cmd === 'ffmpeg -encoders 2>/dev/null')
+                        return 'some_other_encoder';
                     throw new Error('not available');
                 });
 
                 await service.onModuleInit();
                 expect(service.getAccelMode()).toBe('cpu');
             } finally {
-                Object.defineProperty(process, 'platform', { value: origPlatform, configurable: true });
-                Object.defineProperty(process, 'arch', { value: origArch, configurable: true });
+                Object.defineProperty(process, 'platform', {
+                    value: origPlatform,
+                    configurable: true,
+                });
+                Object.defineProperty(process, 'arch', {
+                    value: origArch,
+                    configurable: true,
+                });
             }
         });
     });
@@ -2318,7 +3300,9 @@ describe('FfmpegService', () => {
                 }
             });
 
-            const result = await (service as any).probeStreamStartTimes('/test.mp4');
+            const result = await (service as any).probeStreamStartTimes(
+                '/test.mp4'
+            );
             expect(result.video).toEqual([0, 0.1]);
             expect(result.audio).toEqual([0.02322]);
         });
@@ -2327,19 +3311,22 @@ describe('FfmpegService', () => {
             mockExecFile.mockImplementation((...args: any[]) => {
                 const cb = args[args.length - 1];
                 if (typeof cb === 'function') {
-                    cb(new Error('ffprobe not found'), { stdout: '', stderr: '' });
+                    cb(new Error('ffprobe not found'), {
+                        stdout: '',
+                        stderr: '',
+                    });
                 }
             });
 
-            const result = await (service as any).probeStreamStartTimes('/test.mp4');
+            const result = await (service as any).probeStreamStartTimes(
+                '/test.mp4'
+            );
             expect(result).toEqual({ video: [], audio: [] });
         });
 
         it('should default NaN start_time to 0', async () => {
             const ffprobeOutput = JSON.stringify({
-                streams: [
-                    { codec_type: 'video', start_time: 'N/A' },
-                ],
+                streams: [{ codec_type: 'video', start_time: 'N/A' }],
             });
 
             mockExecFile.mockImplementation((...args: any[]) => {
@@ -2349,7 +3336,9 @@ describe('FfmpegService', () => {
                 }
             });
 
-            const result = await (service as any).probeStreamStartTimes('/test.mp4');
+            const result = await (service as any).probeStreamStartTimes(
+                '/test.mp4'
+            );
             expect(result.video).toEqual([0]);
         });
     });
@@ -2373,11 +3362,33 @@ describe('FfmpegService', () => {
             const config: EncodeConfigDto = {
                 type: 'video',
                 segmentDuration: 6,
-                videoRenditions: [{ width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'a1', label: '720p', sourceTrackIndex: 0 }],
-                audioGroups: [{ id: 'a1', label: 'Audio', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 }],
+                videoRenditions: [
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'a1',
+                        label: '720p',
+                        sourceTrackIndex: 0,
+                    },
+                ],
+                audioGroups: [
+                    {
+                        id: 'a1',
+                        label: 'Audio',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                ],
             };
 
-            const result = await (service as any).areStreamStartTimesAligned('/test.mp4', config);
+            const result = await (service as any).areStreamStartTimesAligned(
+                '/test.mp4',
+                config
+            );
             expect(result).toBe(true);
         });
 
@@ -2399,19 +3410,39 @@ describe('FfmpegService', () => {
             const config: EncodeConfigDto = {
                 type: 'video',
                 segmentDuration: 6,
-                videoRenditions: [{ width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'a1', label: '720p', sourceTrackIndex: 0 }],
-                audioGroups: [{ id: 'a1', label: 'Audio', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 }],
+                videoRenditions: [
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'a1',
+                        label: '720p',
+                        sourceTrackIndex: 0,
+                    },
+                ],
+                audioGroups: [
+                    {
+                        id: 'a1',
+                        label: 'Audio',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                ],
             };
 
-            const result = await (service as any).areStreamStartTimesAligned('/test.mp4', config);
+            const result = await (service as any).areStreamStartTimesAligned(
+                '/test.mp4',
+                config
+            );
             expect(result).toBe(false);
         });
 
         it('should return true when fewer than 2 used start times', async () => {
             const ffprobeOutput = JSON.stringify({
-                streams: [
-                    { codec_type: 'audio', start_time: '0.500000' },
-                ],
+                streams: [{ codec_type: 'audio', start_time: '0.500000' }],
             });
 
             mockExecFile.mockImplementation((...args: any[]) => {
@@ -2424,10 +3455,22 @@ describe('FfmpegService', () => {
             const config: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 6,
-                audioGroups: [{ id: 'a1', label: 'Audio', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 }],
+                audioGroups: [
+                    {
+                        id: 'a1',
+                        label: 'Audio',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                ],
             };
 
-            const result = await (service as any).areStreamStartTimesAligned('/test.mp4', config);
+            const result = await (service as any).areStreamStartTimesAligned(
+                '/test.mp4',
+                config
+            );
             expect(result).toBe(true);
         });
     });
@@ -2523,7 +3566,12 @@ describe('FfmpegService', () => {
     describe('probeGopDuration (private, tested via reflection)', () => {
         it('should return GOP duration from frame analysis', async () => {
             // Simulate: I at frame 0, then P/B frames, then I at frame 60 → GOP = 60 frames
-            const frames = ['I', ...Array(59).fill('P'), 'I', ...Array(39).fill('P')];
+            const frames = [
+                'I',
+                ...Array(59).fill('P'),
+                'I',
+                ...Array(39).fill('P'),
+            ];
             const stdout = frames.join('\n') + '\n';
 
             mockExecFile.mockImplementation((...args: any[]) => {
@@ -2533,7 +3581,10 @@ describe('FfmpegService', () => {
                 }
             });
 
-            const result = await (service as any).probeGopDuration('/test.mp4', 30);
+            const result = await (service as any).probeGopDuration(
+                '/test.mp4',
+                30
+            );
             // GOP = 60 frames / 30 fps = 2.0 seconds
             expect(result).toBe(2);
         });
@@ -2548,7 +3599,10 @@ describe('FfmpegService', () => {
                 }
             });
 
-            const result = await (service as any).probeGopDuration('/test.mp4', 30);
+            const result = await (service as any).probeGopDuration(
+                '/test.mp4',
+                30
+            );
             expect(result).toBeNull();
         });
 
@@ -2560,7 +3614,10 @@ describe('FfmpegService', () => {
                 }
             });
 
-            const result = await (service as any).probeGopDuration('/test.mp4', 30);
+            const result = await (service as any).probeGopDuration(
+                '/test.mp4',
+                30
+            );
             expect(result).toBeNull();
         });
     });
@@ -2609,8 +3666,16 @@ describe('FfmpegService', () => {
     });
 
     describe('bitrateToVideoCrf (private, tested via reflection)', () => {
-        const bitrateToVideoCrf = (bitrateKbps: number, width: number, height: number): number => {
-            return (service as any).bitrateToVideoCrf(bitrateKbps, width, height);
+        const bitrateToVideoCrf = (
+            bitrateKbps: number,
+            width: number,
+            height: number
+        ): number => {
+            return (service as any).bitrateToVideoCrf(
+                bitrateKbps,
+                width,
+                height
+            );
         };
 
         it('should return a CRF value for standard parameters', () => {
@@ -2642,10 +3707,24 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p', vbr: true },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                        vbr: true,
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -2679,12 +3758,39 @@ describe('FfmpegService', () => {
                     type: 'video',
                     segmentDuration: 6,
                     videoRenditions: [
-                        { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, audioGroupId: 'hd', vbr: true },
-                        { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', vbr: true },
-                        { width: 640, height: 360, videoBitrateKbps: 600, copyStream: false, audioGroupId: 'hd', vbr: true },
+                        {
+                            width: 1920,
+                            height: 1080,
+                            videoBitrateKbps: 5000,
+                            copyStream: false,
+                            audioGroupId: 'hd',
+                            vbr: true,
+                        },
+                        {
+                            width: 1280,
+                            height: 720,
+                            videoBitrateKbps: 2500,
+                            copyStream: false,
+                            audioGroupId: 'hd',
+                            vbr: true,
+                        },
+                        {
+                            width: 640,
+                            height: 360,
+                            videoBitrateKbps: 600,
+                            copyStream: false,
+                            audioGroupId: 'hd',
+                            vbr: true,
+                        },
                     ],
                     audioGroups: [
-                        { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                        {
+                            id: 'hd',
+                            audioBitrateKbps: 128,
+                            channels: 2,
+                            audioCodec: 'aac',
+                            sourceTrackIndex: 0,
+                        },
                     ],
                 } as EncodeConfigDto,
             });
@@ -2703,16 +3809,30 @@ describe('FfmpegService', () => {
             // rendition reached 20 on six rungs and broke every encode.
             (service as any).accelMode = 'nvidia';
             const many = Array.from({ length: 20 }, (_, i) => ({
-                width: 640, height: 360 + i, videoBitrateKbps: 600,
-                copyStream: false, audioGroupId: 'hd', vbr: true,
+                width: 640,
+                height: 360 + i,
+                videoBitrateKbps: 600,
+                copyStream: false,
+                audioGroupId: 'hd',
+                vbr: true,
             }));
 
             const args = await buildVideoArgs({
                 inputPath: '/tmp/input.mp4',
                 outputDir: '/tmp/output',
                 encodeConfig: {
-                    type: 'video', segmentDuration: 6, videoRenditions: many,
-                    audioGroups: [{ id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 }],
+                    type: 'video',
+                    segmentDuration: 6,
+                    videoRenditions: many,
+                    audioGroups: [
+                        {
+                            id: 'hd',
+                            audioBitrateKbps: 128,
+                            channels: 2,
+                            audioCodec: 'aac',
+                            sourceTrackIndex: 0,
+                        },
+                    ],
                 } as EncodeConfigDto,
             });
 
@@ -2732,10 +3852,23 @@ describe('FfmpegService', () => {
                     type: 'video',
                     segmentDuration: 6,
                     videoRenditions: [
-                        { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, audioGroupId: 'hd', vbr: true },
+                        {
+                            width: 1920,
+                            height: 1080,
+                            videoBitrateKbps: 5000,
+                            copyStream: false,
+                            audioGroupId: 'hd',
+                            vbr: true,
+                        },
                     ],
                     audioGroups: [
-                        { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                        {
+                            id: 'hd',
+                            audioBitrateKbps: 128,
+                            channels: 2,
+                            audioCodec: 'aac',
+                            sourceTrackIndex: 0,
+                        },
                     ],
                 } as EncodeConfigDto,
             });
@@ -2750,16 +3883,30 @@ describe('FfmpegService', () => {
             // sources were asked for more quality than their rate cap could pay
             // for — the encoder rode the cap and motion fell apart (#93).
             (service as any).accelMode = 'nvidia';
-            const cfg = () => ({
-                type: 'video',
-                segmentDuration: 6,
-                videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, audioGroupId: 'hd', vbr: true },
-                ],
-                audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
-                ],
-            }) as EncodeConfigDto;
+            const cfg = () =>
+                ({
+                    type: 'video',
+                    segmentDuration: 6,
+                    videoRenditions: [
+                        {
+                            width: 1920,
+                            height: 1080,
+                            videoBitrateKbps: 5000,
+                            copyStream: false,
+                            audioGroupId: 'hd',
+                            vbr: true,
+                        },
+                    ],
+                    audioGroups: [
+                        {
+                            id: 'hd',
+                            audioBitrateKbps: 128,
+                            channels: 2,
+                            audioCodec: 'aac',
+                            sourceTrackIndex: 0,
+                        },
+                    ],
+                }) as EncodeConfigDto;
 
             const cqAt = async (fps: number) => {
                 const spy = vi
@@ -2786,10 +3933,24 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p', vbr: true },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                        vbr: true,
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 128, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -2820,10 +3981,24 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, copyStream: true },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        copyStream: true,
+                    },
                 ],
             };
 
@@ -2846,10 +4021,24 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, vbr: true },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        vbr: true,
+                    },
                 ],
             };
 
@@ -2874,7 +4063,14 @@ describe('FfmpegService', () => {
                 type: 'audio',
                 segmentDuration: 6,
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0, vbr: true },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                        vbr: true,
+                    },
                 ],
             };
 
@@ -2902,13 +4098,27 @@ describe('FfmpegService', () => {
         beforeEach(() => {
             tmpDir = mkdtempSync(join(tmpdir(), 'ffmpeg-stderr-'));
             mockSpawn.mockReset();
-            areAlignedSpy = vi.spyOn(service as any, 'areStreamStartTimesAligned').mockResolvedValue(true);
-            probeDurationSpy = vi.spyOn(service as any, 'probeDuration').mockResolvedValue(100);
-            fixMasterPlaylistSpy = vi.spyOn(service as any, 'fixMasterPlaylist').mockResolvedValue(undefined);
-            fixAudioOnlyMasterPlaylistSpy = vi.spyOn(service as any, 'fixAudioOnlyMasterPlaylist').mockResolvedValue(undefined);
-            probeFrameRateSpy = vi.spyOn(service as any, 'probeFrameRate').mockResolvedValue(30);
-            probeGopDurationSpy = vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
-            convertToByteRangeSpy = vi.spyOn(service as any, 'convertToByteRange').mockResolvedValue(undefined);
+            areAlignedSpy = vi
+                .spyOn(service as any, 'areStreamStartTimesAligned')
+                .mockResolvedValue(true);
+            probeDurationSpy = vi
+                .spyOn(service as any, 'probeDuration')
+                .mockResolvedValue(100);
+            fixMasterPlaylistSpy = vi
+                .spyOn(service as any, 'fixMasterPlaylist')
+                .mockResolvedValue(undefined);
+            fixAudioOnlyMasterPlaylistSpy = vi
+                .spyOn(service as any, 'fixAudioOnlyMasterPlaylist')
+                .mockResolvedValue(undefined);
+            probeFrameRateSpy = vi
+                .spyOn(service as any, 'probeFrameRate')
+                .mockResolvedValue(30);
+            probeGopDurationSpy = vi
+                .spyOn(service as any, 'probeGopDuration')
+                .mockResolvedValue(2);
+            convertToByteRangeSpy = vi
+                .spyOn(service as any, 'convertToByteRange')
+                .mockResolvedValue(undefined);
         });
 
         afterEach(() => {
@@ -2930,10 +4140,23 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -2966,10 +4189,23 @@ describe('FfmpegService', () => {
                 type: 'video',
                 segmentDuration: 6,
                 videoRenditions: [
-                    { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
                 ],
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
                 ],
             };
 
@@ -2997,26 +4233,57 @@ describe('FfmpegService', () => {
             const config = {
                 type: 'video' as const,
                 audioGroups: [
-                    { id: 'hd', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac' as const, sourceTrackIndex: 0, language: 'eng' },
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac' as const,
+                        sourceTrackIndex: 0,
+                        language: 'eng',
+                    },
                 ],
             };
 
-            const content = '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="old",DEFAULT=YES';
+            const content =
+                '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="hd",NAME="old",DEFAULT=YES';
 
-            const result = (service as any).fixMasterPlaylistAudioNames(content, config);
+            const result = (service as any).fixMasterPlaylistAudioNames(
+                content,
+                config
+            );
             expect(result).toContain('NAME="old"');
         });
     });
-
 
     describe('fixMasterPlaylistVideoGroups edge cases', () => {
         it('should skip duplicate groupIds when multiple renditions map to the same angle', () => {
             const config = {
                 type: 'video' as const,
                 videoRenditions: [
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
-                    { width: 1280, height: 720, videoBitrateKbps: 3000, copyStream: false, sourceTrackIndex: 0, audioGroupId: 'hd' },
-                    { width: 1920, height: 1080, videoBitrateKbps: 5000, copyStream: false, sourceTrackIndex: 1, audioGroupId: 'hd' },
+                    {
+                        width: 1920,
+                        height: 1080,
+                        videoBitrateKbps: 5000,
+                        copyStream: false,
+                        sourceTrackIndex: 0,
+                        audioGroupId: 'hd',
+                    },
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 3000,
+                        copyStream: false,
+                        sourceTrackIndex: 0,
+                        audioGroupId: 'hd',
+                    },
+                    {
+                        width: 1920,
+                        height: 1080,
+                        videoBitrateKbps: 5000,
+                        copyStream: false,
+                        sourceTrackIndex: 1,
+                        audioGroupId: 'hd',
+                    },
                 ],
                 videoTrackNames: [
                     { index: 0, name: 'Main' },
@@ -3035,10 +4302,15 @@ describe('FfmpegService', () => {
                 'stream_2/playlist.m3u8',
             ].join('\n');
 
-            const result = (service as any).fixMasterPlaylistVideoGroups(content, config);
+            const result = (service as any).fixMasterPlaylistVideoGroups(
+                content,
+                config
+            );
 
             // Should only have one EXT-X-MEDIA:TYPE=VIDEO entry (duplicate groupId skipped)
-            const videoMediaLines = result.split('\n').filter((l: string) => l.startsWith('#EXT-X-MEDIA:TYPE=VIDEO'));
+            const videoMediaLines = result
+                .split('\n')
+                .filter((l: string) => l.startsWith('#EXT-X-MEDIA:TYPE=VIDEO'));
             expect(videoMediaLines).toHaveLength(1);
             expect(videoMediaLines[0]).toContain('GROUP-ID="Main"');
         });

@@ -1,6 +1,20 @@
-import { Inject, Injectable, Logger, Optional, type OnModuleInit } from '@nestjs/common';
+import {
+    Inject,
+    Injectable,
+    Logger,
+    Optional,
+    type OnModuleInit,
+} from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
+import {
+    existsSync,
+    mkdirSync,
+    readdirSync,
+    readFileSync,
+    renameSync,
+    rmSync,
+    writeFileSync,
+} from 'fs';
 import { join } from 'path';
 import { CreateSessionDto } from '../dto/create-session.dto.js';
 import type { SessionStatus } from '../session-status.js';
@@ -8,7 +22,10 @@ import type { ProbeResult } from './probe.service.js';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 import type { SegmentFormat } from './ffmpeg.service.js';
 import type { PipelineProgress } from './segment-pipeline.service.js';
-import { SessionEventsService, type SessionEvent } from './session-events.service.js';
+import {
+    SessionEventsService,
+    type SessionEvent,
+} from './session-events.service.js';
 import {
     CREDENTIAL_CIPHER,
     type CredentialCipher,
@@ -146,7 +163,7 @@ export class SessionService implements OnModuleInit {
         private readonly sessionEvents: SessionEventsService,
         @Optional()
         @Inject(CREDENTIAL_CIPHER)
-        private readonly cipher?: CredentialCipher,
+        private readonly cipher?: CredentialCipher
     ) {}
 
     /**
@@ -172,7 +189,7 @@ export class SessionService implements OnModuleInit {
         this.warnedMemoryOnly = true;
         this.logger.warn(
             'No credential cipher available — S3 credentials are held in memory ' +
-                'only and sessions will not survive a restart',
+                'only and sessions will not survive a restart'
         );
     }
 
@@ -189,12 +206,12 @@ export class SessionService implements OnModuleInit {
             // is found, and nothing reading `session.json` needs them.
             this.writeAtomic(
                 this.sessionFile(session.id),
-                JSON.stringify(this.withoutCredentials(session)),
+                JSON.stringify(this.withoutCredentials(session))
             );
             this.persistCredentials(session);
         } catch (err) {
             this.logger.warn(
-                `Could not persist session ${session.id}: ${(err as Error).message}`,
+                `Could not persist session ${session.id}: ${(err as Error).message}`
             );
         }
     }
@@ -255,8 +272,8 @@ export class SessionService implements OnModuleInit {
                 JSON.stringify({
                     accessKey: s3.accessKey,
                     secretKey: s3.secretKey,
-                }),
-            ),
+                })
+            )
         );
     }
 
@@ -276,7 +293,7 @@ export class SessionService implements OnModuleInit {
 
         try {
             const { accessKey, secretKey } = JSON.parse(
-                this.cipher.decrypt(readFileSync(path, 'utf-8')),
+                this.cipher.decrypt(readFileSync(path, 'utf-8'))
             ) as { accessKey?: string; secretKey?: string };
             if (!accessKey || !secretKey) return false;
 
@@ -285,7 +302,7 @@ export class SessionService implements OnModuleInit {
             return true;
         } catch (err) {
             this.logger.warn(
-                `Could not recover credentials for session ${session.id}: ${(err as Error).message}`,
+                `Could not recover credentials for session ${session.id}: ${(err as Error).message}`
             );
             return false;
         }
@@ -322,7 +339,7 @@ export class SessionService implements OnModuleInit {
             rmSync(join(this.workDir, id), { recursive: true, force: true });
         } catch (err) {
             this.logger.warn(
-                `Could not remove working directory for session ${id}: ${(err as Error).message}`,
+                `Could not remove working directory for session ${id}: ${(err as Error).message}`
             );
         }
     }
@@ -334,13 +351,17 @@ export class SessionService implements OnModuleInit {
         let abandoned = 0;
         let discarded = 0;
         let stranded = 0;
-        for (const entry of readdirSync(this.workDir, { withFileTypes: true })) {
+        for (const entry of readdirSync(this.workDir, {
+            withFileTypes: true,
+        })) {
             if (!entry.isDirectory()) continue;
             const path = join(this.workDir, entry.name, 'session.json');
             if (!existsSync(path)) continue;
 
             try {
-                const session = JSON.parse(readFileSync(path, 'utf-8')) as Session;
+                const session = JSON.parse(
+                    readFileSync(path, 'utf-8')
+                ) as Session;
                 if (!session?.id || !session?.sessionToken) continue;
 
                 // A finished session has nothing left to do and nothing left to
@@ -390,7 +411,7 @@ export class SessionService implements OnModuleInit {
                 restored++;
             } catch (err) {
                 this.logger.warn(
-                    `Could not restore session from ${path}: ${(err as Error).message}`,
+                    `Could not restore session from ${path}: ${(err as Error).message}`
                 );
             }
         }
@@ -398,11 +419,15 @@ export class SessionService implements OnModuleInit {
         if (restored > 0 || discarded > 0) {
             this.logger.log(
                 `Restored ${restored} session(s) from disk` +
-                    (abandoned > 0 ? `, ${abandoned} marked failed after restart` : '') +
+                    (abandoned > 0
+                        ? `, ${abandoned} marked failed after restart`
+                        : '') +
                     (stranded > 0
                         ? `, ${stranded} failed for want of their credentials`
                         : '') +
-                    (discarded > 0 ? `, discarded ${discarded} finished session(s)` : ''),
+                    (discarded > 0
+                        ? `, discarded ${discarded} finished session(s)`
+                        : '')
             );
         }
     }
@@ -439,7 +464,7 @@ export class SessionService implements OnModuleInit {
      */
     createWith(
         build: (sessionId: string) => CreateSessionDto,
-        init: SessionInit = {},
+        init: SessionInit = {}
     ): Session {
         const id = randomUUID();
         const sessionToken = `sess_${randomUUID().replace(/-/g, '')}`;
@@ -478,7 +503,7 @@ export class SessionService implements OnModuleInit {
     /** Every session this instance knows about, newest first. */
     list(): Session[] {
         return [...this.sessions.values()].sort(
-            (a, b) => b.createdAt - a.createdAt,
+            (a, b) => b.createdAt - a.createdAt
         );
     }
 
@@ -507,7 +532,7 @@ export class SessionService implements OnModuleInit {
         return this.list().find(
             (session) =>
                 session.documentId === documentId &&
-                ACTIVE.includes(session.status),
+                ACTIVE.includes(session.status)
         );
     }
 
@@ -542,7 +567,10 @@ export class SessionService implements OnModuleInit {
         if (session) session.lastActivityAt = Date.now();
     }
 
-    updatePipelineProgress(id: string, pipelineProgress: PipelineProgress): void {
+    updatePipelineProgress(
+        id: string,
+        pipelineProgress: PipelineProgress
+    ): void {
         const session = this.sessions.get(id);
         if (session) {
             session.pipelineProgress = pipelineProgress;
@@ -633,7 +661,7 @@ export class SessionService implements OnModuleInit {
         masterPlaylist: string,
         thumbnailsVtt?: string,
         segmentFormat?: SegmentFormat,
-        encryptionKeyHex?: string,
+        encryptionKeyHex?: string
     ): void {
         const session = this.sessions.get(id);
         if (session) {
@@ -709,7 +737,7 @@ export class SessionService implements OnModuleInit {
             // which should never be something you discover by its absence.
             this.logger.log(
                 `Removed abandoned session ${id} (${session.status}, ` +
-                    `idle ${Math.round((Date.now() - session.lastActivityAt) / 3_600_000)}h)`,
+                    `idle ${Math.round((Date.now() - session.lastActivityAt) / 3_600_000)}h)`
             );
             removed++;
         }

@@ -33,30 +33,46 @@ export class VideoRenditionDto {
     @Expose()
     videoBitrateKbps: number;
 
-    @ApiProperty({ description: 'If true, copies the source stream without re-encoding.', example: false })
+    @ApiProperty({
+        description: 'If true, copies the source stream without re-encoding.',
+        example: false,
+    })
     @IsBoolean()
     @Expose()
     copyStream: boolean;
 
-    @ApiPropertyOptional({ description: 'Source video track index (required when copyStream is true).', example: 0 })
+    @ApiPropertyOptional({
+        description:
+            'Source video track index (required when copyStream is true).',
+        example: 0,
+    })
     @IsNumber()
     @IsOptional()
     @Expose()
     sourceTrackIndex?: number;
 
-    @ApiProperty({ description: 'Audio group ID this rendition uses.', example: 'hd' })
+    @ApiProperty({
+        description: 'Audio group ID this rendition uses.',
+        example: 'hd',
+    })
     @IsString()
     @IsNotEmpty()
     @Expose()
     audioGroupId: string;
 
-    @ApiPropertyOptional({ description: 'Human-readable label for the HLS NAME attribute.', example: '1080p' })
+    @ApiPropertyOptional({
+        description: 'Human-readable label for the HLS NAME attribute.',
+        example: '1080p',
+    })
     @IsString()
     @IsOptional()
     @Expose()
     label?: string;
 
-    @ApiPropertyOptional({ description: 'Use VBR encoding (CRF/CQ) instead of fixed bitrate.', example: true })
+    @ApiPropertyOptional({
+        description: 'Use VBR encoding (CRF/CQ) instead of fixed bitrate.',
+        example: true,
+    })
     @IsBoolean()
     @IsOptional()
     @Expose()
@@ -64,13 +80,19 @@ export class VideoRenditionDto {
 }
 
 export class AudioGroupDto {
-    @ApiProperty({ description: 'Unique ID for this audio group.', example: 'hd' })
+    @ApiProperty({
+        description: 'Unique ID for this audio group.',
+        example: 'hd',
+    })
     @IsString()
     @IsNotEmpty()
     @Expose()
     id: string;
 
-    @ApiPropertyOptional({ description: 'Human-readable label.', example: 'HD Audio' })
+    @ApiPropertyOptional({
+        description: 'Human-readable label.',
+        example: 'HD Audio',
+    })
     @IsString()
     @IsOptional()
     @Expose()
@@ -82,7 +104,10 @@ export class AudioGroupDto {
     @Expose()
     audioBitrateKbps: number;
 
-    @ApiProperty({ description: 'Number of audio channels (1=mono, 2=stereo).', example: 2 })
+    @ApiProperty({
+        description: 'Number of audio channels (1=mono, 2=stereo).',
+        example: 2,
+    })
     @IsNumber()
     @IsIn([1, 2, 6, 8])
     @Expose()
@@ -99,19 +124,28 @@ export class AudioGroupDto {
     @Expose()
     sourceTrackIndex: number;
 
-    @ApiPropertyOptional({ description: 'ISO 639 language code.', example: 'eng' })
+    @ApiPropertyOptional({
+        description: 'ISO 639 language code.',
+        example: 'eng',
+    })
     @IsString()
     @IsOptional()
     @Expose()
     language?: string;
 
-    @ApiPropertyOptional({ description: 'Copy source audio without re-encoding.', example: false })
+    @ApiPropertyOptional({
+        description: 'Copy source audio without re-encoding.',
+        example: false,
+    })
     @IsBoolean()
     @IsOptional()
     @Expose()
     copyStream?: boolean;
 
-    @ApiPropertyOptional({ description: 'Use VBR encoding instead of CBR.', example: true })
+    @ApiPropertyOptional({
+        description: 'Use VBR encoding instead of CBR.',
+        example: true,
+    })
     @IsBoolean()
     @IsOptional()
     @Expose()
@@ -125,7 +159,10 @@ export class VideoTrackNameDto {
     @Expose()
     index: number;
 
-    @ApiProperty({ description: 'Display name for the video track.', example: 'Main angle' })
+    @ApiProperty({
+        description: 'Display name for the video track.',
+        example: 'Main angle',
+    })
     @IsString()
     @IsNotEmpty()
     @MaxLength(100)
@@ -148,30 +185,44 @@ export class TrimSegmentDto {
 }
 
 export class EncodeConfigDto {
-    @ApiProperty({ description: 'Encoding type.', enum: ['video', 'audio'], example: 'video' })
+    @ApiProperty({
+        description: 'Encoding type.',
+        enum: ['video', 'audio'],
+        example: 'video',
+    })
     @IsString()
     @IsNotEmpty()
     @IsIn(['video', 'audio'])
     @Expose()
     type: 'video' | 'audio';
 
-    @ApiPropertyOptional({ description: 'HLS segment duration in seconds.', default: 6, example: 6 })
+    @ApiPropertyOptional({
+        description: 'HLS segment duration in seconds.',
+        default: 6,
+        example: 6,
+    })
     @IsNumber()
     @IsOptional()
     @Min(1)
     @Expose()
     segmentDuration?: number;
 
-    @ApiPropertyOptional({ description: 'Video renditions (required when type is video).', type: [VideoRenditionDto] })
+    @ApiPropertyOptional({
+        description: 'Video renditions (required when type is video).',
+        type: [VideoRenditionDto],
+    })
     @IsArray()
     @IsOptional()
     @ValidateNested({ each: true })
     @Type(() => VideoRenditionDto)
-    @ValidateIf(o => o.type === 'video')
+    @ValidateIf((o) => o.type === 'video')
     @Expose()
     videoRenditions?: VideoRenditionDto[];
 
-    @ApiPropertyOptional({ description: 'Audio groups for quality tiers and language grouping.', type: [AudioGroupDto] })
+    @ApiPropertyOptional({
+        description: 'Audio groups for quality tiers and language grouping.',
+        type: [AudioGroupDto],
+    })
     @IsArray()
     @IsOptional()
     @ValidateNested({ each: true })
@@ -182,13 +233,16 @@ export class EncodeConfigDto {
     @ApiPropertyOptional({
         description:
             'Video track display names for angle playlist naming (used when type is video).',
-        example: [{ index: 0, name: 'Main angle' }, { index: 1, name: 'Side angle' }],
+        example: [
+            { index: 0, name: 'Main angle' },
+            { index: 1, name: 'Side angle' },
+        ],
     })
     @IsArray()
     @IsOptional()
     @ValidateNested({ each: true })
     @Type(() => VideoTrackNameDto)
-    @ValidateIf(o => o.type === 'video')
+    @ValidateIf((o) => o.type === 'video')
     @Expose()
     videoTrackNames?: VideoTrackNameDto[];
 

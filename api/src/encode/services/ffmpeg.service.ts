@@ -112,10 +112,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
 
         try {
-            const hwaccels = execSync(`${ffmpegShellBin()} -hwaccels 2>/dev/null`, {
-                encoding: 'utf-8',
-                timeout: 5000,
-            });
+            const hwaccels = execSync(
+                `${ffmpegShellBin()} -hwaccels 2>/dev/null`,
+                {
+                    encoding: 'utf-8',
+                    timeout: 5000,
+                }
+            );
             return hwaccels.includes('cuda');
         } catch {
             return false;
@@ -127,22 +130,31 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             return false;
         }
         try {
-            const hwaccels = execSync(`${ffmpegShellBin()} -hwaccels 2>/dev/null`, {
-                encoding: 'utf-8',
-                timeout: 5000,
-            });
+            const hwaccels = execSync(
+                `${ffmpegShellBin()} -hwaccels 2>/dev/null`,
+                {
+                    encoding: 'utf-8',
+                    timeout: 5000,
+                }
+            );
             if (!hwaccels.includes('videotoolbox')) return false;
 
-            const encoders = execSync(`${ffmpegShellBin()} -encoders 2>/dev/null`, {
-                encoding: 'utf-8',
-                timeout: 5000,
-            });
+            const encoders = execSync(
+                `${ffmpegShellBin()} -encoders 2>/dev/null`,
+                {
+                    encoding: 'utf-8',
+                    timeout: 5000,
+                }
+            );
             if (!encoders.includes('h264_videotoolbox')) return false;
 
-            const filters = execSync(`${ffmpegShellBin()} -filters 2>/dev/null`, {
-                encoding: 'utf-8',
-                timeout: 5000,
-            });
+            const filters = execSync(
+                `${ffmpegShellBin()} -filters 2>/dev/null`,
+                {
+                    encoding: 'utf-8',
+                    timeout: 5000,
+                }
+            );
             return filters.includes('scale_vt');
         } catch {
             return false;

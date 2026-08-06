@@ -22,7 +22,9 @@ export const CMS_SESSION_HOOK = Symbol('CMS_SESSION_HOOK');
  * Builds the provider for {@link CMS_SESSION_HOOK}. With no argument it
  * resolves to `undefined`, which is the standalone case: there is no window.
  */
-export const createCmsSessionHookProvider = (hook?: CmsSessionHook): Provider => ({
+export const createCmsSessionHookProvider = (
+    hook?: CmsSessionHook
+): Provider => ({
     provide: CMS_SESSION_HOOK,
     useFactory: (): CmsSessionHook | undefined => hook,
 });

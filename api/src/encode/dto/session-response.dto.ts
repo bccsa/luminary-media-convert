@@ -55,11 +55,16 @@ export class SessionSummaryDto {
     @Expose()
     sessionId: string;
 
-    @ApiPropertyOptional({ description: 'Title supplied when the session was created.' })
+    @ApiPropertyOptional({
+        description: 'Title supplied when the session was created.',
+    })
     @Expose()
     title?: string;
 
-    @ApiProperty({ description: 'Current session status.', example: 'encoding' })
+    @ApiProperty({
+        description: 'Current session status.',
+        example: 'encoding',
+    })
     @Expose()
     status: string;
 
@@ -81,11 +86,15 @@ export class SessionSummaryDto {
     @Expose()
     sessionToken: string;
 
-    @ApiPropertyOptional({ description: 'Public playback URL, once encoding has started.' })
+    @ApiPropertyOptional({
+        description: 'Public playback URL, once encoding has started.',
+    })
     @Expose()
     hlsUrl?: string;
 
-    @ApiPropertyOptional({ description: 'Failure message, when status is "failed".' })
+    @ApiPropertyOptional({
+        description: 'Failure message, when status is "failed".',
+    })
     @Expose()
     error?: string;
 }
@@ -131,7 +140,11 @@ export class SessionStatusDto {
         example: { encoding: 45.5, encrypting: 30, uploading: 10 },
     })
     @Expose()
-    pipelineProgress?: { encoding: number; encrypting?: number; uploading?: number };
+    pipelineProgress?: {
+        encoding: number;
+        encrypting?: number;
+        uploading?: number;
+    };
 
     @ApiPropertyOptional({
         description:
@@ -163,7 +176,8 @@ export class SessionStatusDto {
     byteRange?: boolean;
 
     @ApiPropertyOptional({
-        description: 'Probe results from the uploaded file. Present when status is "uploaded".',
+        description:
+            'Probe results from the uploaded file. Present when status is "uploaded".',
         type: ProbeResultDto,
     })
     @Type(() => ProbeResultDto)
@@ -212,7 +226,7 @@ export class SessionStatusDto {
     @ApiPropertyOptional({
         description:
             'Public URL of the master playlist, built from the caller-supplied ' +
-            'publicBaseUrl and the session\'s object key. Present from the moment ' +
+            "publicBaseUrl and the session's object key. Present from the moment " +
             'encoding starts, for sessions created with a publicBaseUrl.',
         example: 'https://cdn.example.com/media/a1b2c3d4/master.m3u8',
     })
@@ -227,15 +241,14 @@ export class SessionStatusDto {
     title?: string;
 
     @ApiPropertyOptional({
-        description: 'The CMS document this session\'s output belongs to.',
+        description: "The CMS document this session's output belongs to.",
         example: 'post_01HTZ8Y0J4',
     })
     @Expose()
     documentId?: string;
 
     @ApiPropertyOptional({
-        description:
-            'Error message. Present when status is "failed".',
+        description: 'Error message. Present when status is "failed".',
         example: 'FFmpeg exited with code 1: Invalid input file',
     })
     @Expose()
@@ -254,7 +267,7 @@ export class SessionStatusDto {
         description:
             'HLS segment format used for encoding. "fmp4" (CMAF-compatible, lower overhead) ' +
             'is used when source stream start times are aligned. "mpegts" is used as a fallback ' +
-            'when source streams have misaligned start times, because the player\'s TS transmuxer ' +
+            "when source streams have misaligned start times, because the player's TS transmuxer " +
             'can synchronize audio and video during playback.',
         enum: ['fmp4', 'mpegts'],
         example: 'fmp4',

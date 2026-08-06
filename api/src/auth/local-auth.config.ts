@@ -26,7 +26,9 @@ const logger = new Logger('LocalApiToken');
  * like the API had stopped accepting a key that is right there in the file. It
  * warns, so the deprecation is visible rather than permanent.
  */
-export const createLocalApiTokenProvider = (token?: LocalApiToken): Provider => ({
+export const createLocalApiTokenProvider = (
+    token?: LocalApiToken
+): Provider => ({
     provide: LOCAL_API_TOKEN,
     useFactory: (): LocalApiToken => {
         if (token) return token;
@@ -39,7 +41,7 @@ export const createLocalApiTokenProvider = (token?: LocalApiToken): Provider => 
             logger.warn(
                 'MASTER_API_KEY is deprecated — rename it to LOCAL_API_TOKEN. ' +
                     'It is one token scoped to this instance, not a key over ' +
-                    'other people\'s data.',
+                    "other people's data."
             );
         }
         return legacy;

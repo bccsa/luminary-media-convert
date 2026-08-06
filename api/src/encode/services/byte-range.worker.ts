@@ -1,12 +1,6 @@
 import { parentPort, workerData } from 'worker_threads';
 import { createReadStream, createWriteStream } from 'fs';
-import {
-    readdir,
-    readFile,
-    writeFile,
-    stat,
-    unlink,
-} from 'fs/promises';
+import { readdir, readFile, writeFile, stat, unlink } from 'fs/promises';
 import { pipeline } from 'stream/promises';
 import { join } from 'path';
 
@@ -17,7 +11,7 @@ interface WorkerData {
 
 async function convertStreamToByteRange(
     streamDir: string,
-    maxFileSizeBytes: number,
+    maxFileSizeBytes: number
 ): Promise<void> {
     const playlistPath = join(streamDir, 'playlist.m3u8');
     let content: string;
@@ -65,7 +59,7 @@ async function convertStreamToByteRange(
             } catch {
                 return 0;
             }
-        }),
+        })
     );
 
     const byteRanges: {
@@ -85,18 +79,15 @@ async function convertStreamToByteRange(
         const segSize = segSizes[i];
         if (segSize === 0) continue;
 
-        if (
-            currentOffset > 0 &&
-            currentOffset + segSize > maxFileSizeBytes
-        ) {
+        if (currentOffset > 0 && currentOffset + segSize > maxFileSizeBytes) {
             writeStream.end();
-            await new Promise<void>((resolve) => writeStream.on('finish', resolve));
+            await new Promise<void>((resolve) =>
+                writeStream.on('finish', resolve)
+            );
             fileIndex++;
             currentOffset = 0;
             currentMediaFile = `media_${fileIndex}.${segExt}`;
-            writeStream = createWriteStream(
-                join(streamDir, currentMediaFile),
-            );
+            writeStream = createWriteStream(join(streamDir, currentMediaFile));
             writeStream.setMaxListeners(0);
         }
 
@@ -132,8 +123,8 @@ async function convertStreamToByteRange(
     // Delete original segment files
     await Promise.all(
         segments.map((seg) =>
-            unlink(join(streamDir, seg.filename)).catch(() => {}),
-        ),
+            unlink(join(streamDir, seg.filename)).catch(() => {})
+        )
     );
 }
 
@@ -147,10 +138,7 @@ async function convertStreamToByteRange(
         .sort();
 
     for (const dir of streamDirs) {
-        await convertStreamToByteRange(
-            join(outputDir, dir),
-            maxFileSizeBytes,
-        );
+        await convertStreamToByteRange(join(outputDir, dir), maxFileSizeBytes);
     }
 
     parentPort!.postMessage({ streamCount: streamDirs.length });

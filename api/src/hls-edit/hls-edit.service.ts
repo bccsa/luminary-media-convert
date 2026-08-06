@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
+import {
+    BadRequestException,
+    Injectable,
+    Logger,
+    PayloadTooLargeException,
+} from '@nestjs/common';
 import {
     S3Client,
     ListObjectsV2Command,
@@ -50,12 +55,15 @@ export class HlsEditService {
     constructor(private readonly s3EtagService: S3EtagService) {}
 
     async read(dto: HlsReadRequestDto): Promise<HlsReadResult> {
-        const masterPlaylistKey = normalizeS3Key(dto.masterPlaylistKey, dto.s3.bucket);
+        const masterPlaylistKey = normalizeS3Key(
+            dto.masterPlaylistKey,
+            dto.s3.bucket
+        );
         const folderPrefix = folderOf(masterPlaylistKey);
 
         const { body, etag } = await this.s3EtagService.getObjectWithEtag(
             dto.s3,
-            masterPlaylistKey,
+            masterPlaylistKey
         );
         const master = parseMasterPlaylist(body.toString('utf-8'));
 
@@ -63,12 +71,18 @@ export class HlsEditService {
     }
 
     async mutate(dto: HlsMutateRequestDto): Promise<HlsMutateResult> {
-        const masterPlaylistKey = normalizeS3Key(dto.masterPlaylistKey, dto.s3.bucket);
+        const masterPlaylistKey = normalizeS3Key(
+            dto.masterPlaylistKey,
+            dto.s3.bucket
+        );
 
         // Read with an independent round-trip so we can both parse and carry the ETag.
         // Caller supplies `ifMatch` — we do NOT require it to match what we read here,
         // the conditional write enforces the real invariant.
-        const { body } = await this.s3EtagService.getObjectWithEtag(dto.s3, masterPlaylistKey);
+        const { body } = await this.s3EtagService.getObjectWithEtag(
+            dto.s3,
+            masterPlaylistKey
+        );
         const master = parseMasterPlaylist(body.toString('utf-8'));
 
         const ctx: OperationContext = {
@@ -92,7 +106,7 @@ export class HlsEditService {
             masterPlaylistKey,
             rebuilt,
             dto.ifMatch,
-            'application/vnd.apple.mpegurl',
+            'application/vnd.apple.mpegurl'
         );
         ctx.writtenKeys.push(masterPlaylistKey);
 
@@ -107,7 +121,7 @@ export class HlsEditService {
         const raw = dto.masterPlaylistKey ?? dto.folderPrefix;
         if (!raw) {
             throw new BadRequestException(
-                'Either masterPlaylistKey or folderPrefix must be provided',
+                'Either masterPlaylistKey or folderPrefix must be provided'
             );
         }
         const normalized = normalizeS3Key(raw, dto.s3.bucket);
@@ -116,31 +130,38 @@ export class HlsEditService {
         if (normalized.endsWith('.m3u8')) {
             folderPrefix = folderOf(normalized);
         } else {
-            folderPrefix = normalized.endsWith('/') ? normalized : normalized + '/';
+            folderPrefix = normalized.endsWith('/')
+                ? normalized
+                : normalized + '/';
         }
 
         const keys = await this.listObjects(dto.s3, folderPrefix);
         const m3u8Keys = keys.filter((k) => k.endsWith('.m3u8')).sort();
         if (m3u8Keys.length === 0) {
-            throw new BadRequestException('No HLS playlist found under the given prefix');
+            throw new BadRequestException(
+                'No HLS playlist found under the given prefix'
+            );
         }
 
         // Only master playlists — identified by presence of #EXT-X-STREAM-INF
         const playlists: string[] = [];
         for (const key of m3u8Keys) {
-            const { body } = await this.s3EtagService.getObjectWithEtag(dto.s3, key);
+            const { body } = await this.s3EtagService.getObjectWithEtag(
+                dto.s3,
+                key
+            );
             if (body.toString('utf-8').includes('#EXT-X-STREAM-INF')) {
                 playlists.push(key);
             }
         }
         if (playlists.length === 0) {
             throw new BadRequestException(
-                'No HLS master playlist found under the given prefix',
+                'No HLS master playlist found under the given prefix'
             );
         }
 
         const primaryIdx = playlists.findIndex(
-            (k) => k === 'master.m3u8' || k.endsWith('/master.m3u8'),
+            (k) => k === 'master.m3u8' || k.endsWith('/master.m3u8')
         );
         if (primaryIdx > 0) {
             const [primary] = playlists.splice(primaryIdx, 1);
@@ -172,14 +193,19 @@ export class HlsEditService {
     async readChapters(
         s3: S3ConfigDto,
         folderPrefix: string,
-        lang: string,
+        lang: string
     ): Promise<{ vtt: string } | null> {
         if (!LANG_PATTERN.test(lang)) {
-            throw new BadRequestException('lang must be a BCP-47 language code');
+            throw new BadRequestException(
+                'lang must be a BCP-47 language code'
+            );
         }
         const key = chaptersKey(folderPrefix, lang);
         try {
-            const { body } = await this.s3EtagService.getObjectWithEtag(s3, key);
+            const { body } = await this.s3EtagService.getObjectWithEtag(
+                s3,
+                key
+            );
             return { vtt: body.toString('utf-8') };
         } catch (err) {
             if (isNoSuchKey(err)) return null;
@@ -194,7 +220,7 @@ export class HlsEditService {
      */
     async readWaveform(
         s3: S3ConfigDto,
-        folderPrefix: string,
+        folderPrefix: string
     ): Promise<{
         version: number;
         sampleRate: number;
@@ -203,7 +229,10 @@ export class HlsEditService {
     } | null> {
         const key = waveformKey(folderPrefix);
         try {
-            const { body } = await this.s3EtagService.getObjectWithEtag(s3, key);
+            const { body } = await this.s3EtagService.getObjectWithEtag(
+                s3,
+                key
+            );
             const parsed = JSON.parse(body.toString('utf-8'));
             // Trust the sidecar shape — the encode pipeline is the only writer.
             return parsed;
@@ -221,27 +250,34 @@ export class HlsEditService {
         s3: S3ConfigDto,
         folderPrefix: string,
         lang: string,
-        vtt: string,
+        vtt: string
     ): Promise<void> {
         lang = lang.toLowerCase();
         if (!LANG_PATTERN.test(lang)) {
-            throw new BadRequestException('lang must be a BCP-47 language code');
+            throw new BadRequestException(
+                'lang must be a BCP-47 language code'
+            );
         }
         const trimmedHead = vtt.slice(0, 16).trimStart();
         if (!/^WEBVTT(\b|$)/.test(trimmedHead)) {
-            throw new BadRequestException('Body must be a WebVTT document (start with WEBVTT)');
+            throw new BadRequestException(
+                'Body must be a WebVTT document (start with WEBVTT)'
+            );
         }
         const byteLength = Buffer.byteLength(vtt, 'utf-8');
         if (byteLength > MAX_VTT_BYTES) {
             throw new PayloadTooLargeException(
-                `Chapter VTT body exceeds ${MAX_VTT_BYTES} bytes`,
+                `Chapter VTT body exceeds ${MAX_VTT_BYTES} bytes`
             );
         }
         const key = chaptersKey(folderPrefix, lang);
         await this.s3EtagService.putObject(s3, key, vtt, 'text/vtt');
     }
 
-    private async listObjects(config: S3ConfigDto, prefix: string): Promise<string[]> {
+    private async listObjects(
+        config: S3ConfigDto,
+        prefix: string
+    ): Promise<string[]> {
         const client: S3Client = this.s3EtagService.createClient(config);
         const out: string[] = [];
         let continuationToken: string | undefined;
@@ -251,12 +287,14 @@ export class HlsEditService {
                     Bucket: config.bucket,
                     Prefix: prefix,
                     ContinuationToken: continuationToken,
-                }),
+                })
             );
             for (const obj of (resp.Contents ?? []) as S3Object[]) {
                 if (obj.Key) out.push(obj.Key);
             }
-            continuationToken = resp.IsTruncated ? resp.NextContinuationToken : undefined;
+            continuationToken = resp.IsTruncated
+                ? resp.NextContinuationToken
+                : undefined;
         } while (continuationToken);
         return out;
     }
@@ -279,14 +317,21 @@ function chaptersKey(folderPrefix: string, lang: string): string {
 }
 
 function waveformKey(folderPrefix: string): string {
-    const prefix = folderPrefix.endsWith('/') ? folderPrefix : folderPrefix + '/';
+    const prefix = folderPrefix.endsWith('/')
+        ? folderPrefix
+        : folderPrefix + '/';
     return `${prefix}waveform.json`;
 }
 
-function collectChaptersLanguages(keys: string[], folderPrefix: string): string[] {
-    const prefix = folderPrefix.endsWith('/') ? folderPrefix : folderPrefix + '/';
+function collectChaptersLanguages(
+    keys: string[],
+    folderPrefix: string
+): string[] {
+    const prefix = folderPrefix.endsWith('/')
+        ? folderPrefix
+        : folderPrefix + '/';
     const matcher = new RegExp(
-        `^${escapeRegExp(prefix)}chapters/([a-z]{2,3}(?:-[A-Z]{2})?)\\.vtt$`,
+        `^${escapeRegExp(prefix)}chapters/([a-z]{2,3}(?:-[A-Z]{2})?)\\.vtt$`
     );
     const langs = new Set<string>();
     for (const key of keys) {
@@ -302,7 +347,11 @@ function escapeRegExp(s: string): string {
 
 function isNoSuchKey(err: unknown): boolean {
     if (!err || typeof err !== 'object') return false;
-    const e = err as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
+    const e = err as {
+        name?: string;
+        Code?: string;
+        $metadata?: { httpStatusCode?: number };
+    };
     return (
         e.name === 'NoSuchKey' ||
         e.Code === 'NoSuchKey' ||

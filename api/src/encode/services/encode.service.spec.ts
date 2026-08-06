@@ -19,18 +19,27 @@ import { EncryptionService } from './encryption.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
 import { WaveformService } from './waveform.service.js';
 import { S3Service } from './s3.service.js';
-import { SegmentPipelineService, type SegmentPipeline } from './segment-pipeline.service.js';
+import {
+    SegmentPipelineService,
+    type SegmentPipeline,
+} from './segment-pipeline.service.js';
 import type { CreateSessionDto } from '../dto/create-session.dto.js';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 
-function makeMockPipeline(keys: string[] = ['master.m3u8', 'v0/playlist.m3u8', 'v0/segment_000.ts']): SegmentPipeline {
+function makeMockPipeline(
+    keys: string[] = ['master.m3u8', 'v0/playlist.m3u8', 'v0/segment_000.ts']
+): SegmentPipeline {
     return {
         start: vi.fn(),
         drain: vi.fn().mockResolvedValue(keys),
         abort: vi.fn(),
         uploadRemainingFiles: vi.fn().mockResolvedValue([]),
-        get error() { return null; },
-        get keys() { return keys; },
+        get error() {
+            return null;
+        },
+        get keys() {
+            return keys;
+        },
     } as any;
 }
 
@@ -50,10 +59,24 @@ function makeEncodeConfig(): EncodeConfigDto {
         type: 'video',
         segmentDuration: 6,
         videoRenditions: [
-            { width: 1280, height: 720, videoBitrateKbps: 2500, copyStream: false, audioGroupId: 'hd', label: '720p' },
+            {
+                width: 1280,
+                height: 720,
+                videoBitrateKbps: 2500,
+                copyStream: false,
+                audioGroupId: 'hd',
+                label: '720p',
+            },
         ],
         audioGroups: [
-            { id: 'hd', label: 'HD Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+            {
+                id: 'hd',
+                label: 'HD Audio',
+                audioBitrateKbps: 192,
+                channels: 2,
+                audioCodec: 'aac',
+                sourceTrackIndex: 0,
+            },
         ],
     };
 }
@@ -119,7 +142,7 @@ describe('EncodeService', () => {
             thumbnailService,
             waveformService,
             s3Service,
-            segmentPipelineService,
+            segmentPipelineService
         );
     });
 
@@ -345,7 +368,10 @@ describe('EncodeService', () => {
 
         const outputDir = join(testWorkDir, session.id, 'output');
         mkdirSync(outputDir, { recursive: true });
-        writeFileSync(join(outputDir, 'stale_segment.m4s'), 'from the failed run');
+        writeFileSync(
+            join(outputDir, 'stale_segment.m4s'),
+            'from the failed run'
+        );
 
         await service.processSession(session.id);
 
@@ -365,7 +391,7 @@ describe('EncodeService', () => {
                 sessionId: session.id,
                 inputPath: '/tmp/input.mp4',
                 encodeConfig: expect.objectContaining({ type: 'video' }),
-            }),
+            })
         );
 
         expect(segmentPipelineService.createPipeline).toHaveBeenCalledTimes(1);
@@ -382,8 +408,6 @@ describe('EncodeService', () => {
         expect(updated.masterPlaylist).toBe('master.m3u8');
     });
 
-
-
     it('should always pass byteRange: false to ffmpeg (pipeline handles byte-range)', async () => {
         const config = makeConfig();
         config.byteRange = true;
@@ -396,7 +420,7 @@ describe('EncodeService', () => {
         expect(ffmpegService.encode).toHaveBeenCalledWith(
             expect.objectContaining({
                 byteRange: false,
-            }),
+            })
         );
     });
 
@@ -412,13 +436,13 @@ describe('EncodeService', () => {
         expect(segmentPipelineService.createPipeline).toHaveBeenCalledWith(
             expect.objectContaining({
                 byteRange: false,
-            }),
+            })
         );
     });
 
     it('should mark session as failed when FFmpeg errors', async () => {
         ffmpegService.encode.mockRejectedValue(
-            new Error('FFmpeg exited with code 1'),
+            new Error('FFmpeg exited with code 1')
         );
 
         const session = sessionService.create(makeConfig());
@@ -432,10 +456,9 @@ describe('EncodeService', () => {
         expect(updated.error).toBe('FFmpeg exited with code 1');
     });
 
-
     it('should mark session as failed when pipeline drain errors', async () => {
         (mockPipeline.drain as ReturnType<typeof vi.fn>).mockRejectedValue(
-            new Error('S3 connection refused'),
+            new Error('S3 connection refused')
         );
 
         const session = sessionService.create(makeConfig());
@@ -451,12 +474,13 @@ describe('EncodeService', () => {
 
     it('should update status through encoding phases', async () => {
         const statuses: string[] = [];
-        const origUpdateStatus = sessionService.updateStatus.bind(sessionService);
+        const origUpdateStatus =
+            sessionService.updateStatus.bind(sessionService);
         vi.spyOn(sessionService, 'updateStatus').mockImplementation(
             (id, status) => {
                 statuses.push(status);
                 origUpdateStatus(id, status);
-            },
+            }
         );
 
         const session = sessionService.create(makeConfig());
@@ -468,7 +492,6 @@ describe('EncodeService', () => {
         expect(statuses).toContain('encoding');
         expect(statuses).toContain('uploading_to_s3');
     });
-
 
     it('should pre-compute encryption materials and pass to pipeline when encryption is enabled', async () => {
         const config: CreateSessionDto = {
@@ -493,7 +516,7 @@ describe('EncodeService', () => {
             expect.objectContaining({
                 encryptionKey: expect.any(Buffer),
                 encryptionIV: expect.any(Buffer),
-            }),
+            })
         );
     });
 
@@ -511,10 +534,12 @@ describe('EncodeService', () => {
 
         await service.processSession(session.id);
 
-        expect(encryptionService.injectKeyTagsIntoPlaylists).toHaveBeenCalledWith(
+        expect(
+            encryptionService.injectKeyTagsIntoPlaylists
+        ).toHaveBeenCalledWith(
             expect.any(String),
             'https://myapp.example.com/keys/abc',
-            expect.any(Buffer),
+            expect.any(Buffer)
         );
     });
 
@@ -535,7 +560,7 @@ describe('EncodeService', () => {
             expect.objectContaining({
                 encryptionKey: undefined,
                 encryptionIV: undefined,
-            }),
+            })
         );
     });
 
@@ -550,10 +575,9 @@ describe('EncodeService', () => {
             expect.objectContaining({
                 encryptionKey: undefined,
                 encryptionIV: undefined,
-            }),
+            })
         );
     });
-
 
     it('should pass encryption config to pipeline when encryption is enabled', async () => {
         const config: CreateSessionDto = {
@@ -574,7 +598,7 @@ describe('EncodeService', () => {
             expect.objectContaining({
                 byteRange: false,
                 preByteRangeHook: undefined,
-            }),
+            })
         );
 
         // Pipeline should receive encryption key/IV
@@ -582,7 +606,7 @@ describe('EncodeService', () => {
             expect.objectContaining({
                 encryptionKey: expect.any(Buffer),
                 encryptionIV: expect.any(Buffer),
-            }),
+            })
         );
     });
 
@@ -591,8 +615,21 @@ describe('EncodeService', () => {
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
         sessionService.setEncodeConfig(session.id, makeEncodeConfig());
         sessionService.setProbeResult(session.id, {
-            format: { duration: 120, bitrateKbps: 5000, formatName: 'matroska' },
-            videoTracks: [{ index: 0, codec: 'h264', width: 1920, height: 1080, bitrateKbps: 5000, frameRate: 24 }],
+            format: {
+                duration: 120,
+                bitrateKbps: 5000,
+                formatName: 'matroska',
+            },
+            videoTracks: [
+                {
+                    index: 0,
+                    codec: 'h264',
+                    width: 1920,
+                    height: 1080,
+                    bitrateKbps: 5000,
+                    frameRate: 24,
+                },
+            ],
             audioTracks: [],
         });
 
@@ -604,7 +641,7 @@ describe('EncodeService', () => {
                 duration: 120,
                 sourceWidth: 1920,
                 sourceHeight: 1080,
-            }),
+            })
         );
     });
 
@@ -626,7 +663,14 @@ describe('EncodeService', () => {
         sessionService.setEncodeConfig(session.id, {
             type: 'audio',
             audioGroups: [
-                { id: 'main', label: 'Audio', audioBitrateKbps: 192, channels: 2, audioCodec: 'aac', sourceTrackIndex: 0 },
+                {
+                    id: 'main',
+                    label: 'Audio',
+                    audioBitrateKbps: 192,
+                    channels: 2,
+                    audioCodec: 'aac',
+                    sourceTrackIndex: 0,
+                },
             ],
         });
 
@@ -637,7 +681,7 @@ describe('EncodeService', () => {
 
     it('should complete session even when thumbnail generation fails', async () => {
         thumbnailService.generateThumbnails.mockRejectedValue(
-            new Error('FFmpeg thumbnail error'),
+            new Error('FFmpeg thumbnail error')
         );
 
         const session = sessionService.create(makeConfig());
@@ -652,8 +696,15 @@ describe('EncodeService', () => {
     });
 
     it('records the thumbnail VTT on the completed session', async () => {
-        mockPipeline = makeMockPipeline(['master.m3u8', 'v0/playlist.m3u8', 'thumbnails/thumbnails.vtt', 'thumbnails/sprite_001.webp']);
-        (segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>).mockReturnValue(mockPipeline);
+        mockPipeline = makeMockPipeline([
+            'master.m3u8',
+            'v0/playlist.m3u8',
+            'thumbnails/thumbnails.vtt',
+            'thumbnails/sprite_001.webp',
+        ]);
+        (
+            segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>
+        ).mockReturnValue(mockPipeline);
 
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
@@ -673,7 +724,7 @@ describe('EncodeService', () => {
         sessionService.setEncodeConfig(session.id, makeEncodeConfig());
 
         await expect(
-            service.processSession(session.id),
+            service.processSession(session.id)
         ).resolves.toBeUndefined();
     });
 
@@ -688,7 +739,7 @@ describe('EncodeService', () => {
             thumbnailService,
             waveformService,
             s3Service,
-            segmentPipelineService,
+            segmentPipelineService
         );
 
         const session = sessionService.create(makeConfig());
@@ -765,12 +816,12 @@ describe('EncodeService', () => {
 
     it('should invoke pipeline onProgress and update session pipeline progress', async () => {
         let capturedOnProgress: ((update: any) => void) | undefined;
-        (segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>).mockImplementation(
-            (opts: any) => {
-                capturedOnProgress = opts.onProgress;
-                return mockPipeline;
-            },
-        );
+        (
+            segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>
+        ).mockImplementation((opts: any) => {
+            capturedOnProgress = opts.onProgress;
+            return mockPipeline;
+        });
 
         const updateSpy = vi.spyOn(sessionService, 'updatePipelineProgress');
 
@@ -789,7 +840,7 @@ describe('EncodeService', () => {
             expect.objectContaining({
                 encrypting: 30,
                 uploading: 20,
-            }),
+            })
         );
     });
 
@@ -822,21 +873,21 @@ describe('EncodeService', () => {
         capturedOnProgress!(10);
         expect(updateSpy).toHaveBeenCalledWith(
             session.id,
-            expect.objectContaining({ encoding: 10 }),
+            expect.objectContaining({ encoding: 10 })
         );
 
         updateSpy.mockClear();
         capturedOnProgress!(3);
         expect(updateSpy).toHaveBeenCalledWith(
             session.id,
-            expect.objectContaining({ encoding: 3 }),
+            expect.objectContaining({ encoding: 3 })
         );
 
         updateSpy.mockClear();
         capturedOnProgress!(99);
         expect(updateSpy).toHaveBeenCalledWith(
             session.id,
-            expect.objectContaining({ encoding: 99 }),
+            expect.objectContaining({ encoding: 99 })
         );
     });
 
@@ -850,7 +901,7 @@ describe('EncodeService', () => {
             thumbnailService,
             waveformService,
             s3Service,
-            segmentPipelineService,
+            segmentPipelineService
         );
 
         const loggerWarnSpy = vi.spyOn((service as any).logger, 'warn');
@@ -864,7 +915,7 @@ describe('EncodeService', () => {
         const updated = sessionService.get(session.id)!;
         expect(updated.status).toBe('completed');
         expect(loggerWarnSpy).toHaveBeenCalledWith(
-            expect.stringContaining('Failed to clean up session'),
+            expect.stringContaining('Failed to clean up session')
         );
     });
 
@@ -874,10 +925,16 @@ describe('EncodeService', () => {
             drain: vi.fn().mockResolvedValue([]),
             abort: vi.fn(),
             uploadRemainingFiles: vi.fn().mockResolvedValue([]),
-            get error() { return new Error('Pipeline segment upload failed'); },
-            get keys() { return []; },
+            get error() {
+                return new Error('Pipeline segment upload failed');
+            },
+            get keys() {
+                return [];
+            },
         } as any;
-        (segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>).mockReturnValue(errorPipeline);
+        (
+            segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>
+        ).mockReturnValue(errorPipeline);
 
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');

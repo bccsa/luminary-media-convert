@@ -120,7 +120,10 @@ export class EncodeService {
             if (session.publicBaseUrl) {
                 const masterKey = posix.join(s3PathPrefix, 'master.m3u8');
                 const base = session.publicBaseUrl.replace(/\/+$/, '');
-                this.sessionService.setHlsUrl(sessionId, `${base}/${masterKey}`);
+                this.sessionService.setHlsUrl(
+                    sessionId,
+                    `${base}/${masterKey}`
+                );
             }
 
             // Current pipeline progress state (updated by both FFmpeg and pipeline callbacks)
@@ -260,8 +263,7 @@ export class EncodeService {
                     const concatFilePath = join(outputDir, 'concat.txt');
                     const hasConcatFile = existsSync(concatFilePath);
                     const outputSidecarPath = join(outputDir, 'waveform.json');
-                    const cachePath =
-                        this.waveformService.cachePath(sessionId);
+                    const cachePath = this.waveformService.cachePath(sessionId);
 
                     if (!hasConcatFile && existsSync(cachePath)) {
                         // Upload-time prime already produced peaks for this
@@ -338,7 +340,7 @@ export class EncodeService {
                 .removePreview(sessionId)
                 .catch((err: Error) => {
                     this.logger.warn(
-                        `Could not drop source storyboard for ${sessionId}: ${err.message}`,
+                        `Could not drop source storyboard for ${sessionId}: ${err.message}`
                     );
                 });
 
@@ -384,7 +386,10 @@ export class EncodeService {
      */
     private async diskShortfall(session: Session): Promise<string | null> {
         const duration = session.probeResult?.format?.duration ?? 0;
-        const needed = estimateOutputBytes(session.encodeConfig ?? {}, duration);
+        const needed = estimateOutputBytes(
+            session.encodeConfig ?? {},
+            duration
+        );
         if (needed <= 0) return null;
 
         const free = await freeBytes(this.workDir);

@@ -27,11 +27,11 @@ export class SessionCleanupService {
     sweep(): number {
         const idleHours = this.abandonedMaxAgeHours();
         const abandoned = this.sessionService.cleanupAbandoned(
-            idleHours * 60 * 60 * 1000,
+            idleHours * 60 * 60 * 1000
         );
         if (abandoned > 0) {
             this.logger.log(
-                `Swept ${abandoned} session(s) abandoned for over ${idleHours}h`,
+                `Swept ${abandoned} session(s) abandoned for over ${idleHours}h`
             );
         }
 
@@ -50,7 +50,7 @@ export class SessionCleanupService {
         const parsed = Number(raw);
         if (!Number.isFinite(parsed) || parsed <= 0) {
             this.logger.warn(
-                `Ignoring SESSION_ABANDONED_MAX_AGE_HOURS="${raw}"; using ${DEFAULT_ABANDONED_MAX_AGE_HOURS}h`,
+                `Ignoring SESSION_ABANDONED_MAX_AGE_HOURS="${raw}"; using ${DEFAULT_ABANDONED_MAX_AGE_HOURS}h`
             );
             return DEFAULT_ABANDONED_MAX_AGE_HOURS;
         }

@@ -21,7 +21,7 @@ export class IngestService {
         private readonly probeService: ProbeService,
         private readonly previewService: PreviewService,
         private readonly waveformService: WaveformService,
-        private readonly thumbnailService: ThumbnailService,
+        private readonly thumbnailService: ThumbnailService
     ) {}
 
     /**
@@ -43,7 +43,7 @@ export class IngestService {
             await this.previewService.init(sessionId);
         } catch (err) {
             this.logger.warn(
-                `Preview init failed for ${sessionId}: ${(err as Error).message}`,
+                `Preview init failed for ${sessionId}: ${(err as Error).message}`
             );
         }
 
@@ -57,7 +57,7 @@ export class IngestService {
                 .getOrComputeCached(sessionId, { inputPath: destPath })
                 .catch((err) => {
                     this.logger.warn(
-                        `Background waveform prime failed for ${sessionId}: ${(err as Error).message}`,
+                        `Background waveform prime failed for ${sessionId}: ${(err as Error).message}`
                     );
                 });
         }
@@ -76,7 +76,7 @@ export class IngestService {
                 })
                 .catch((err) => {
                     this.logger.warn(
-                        `Background storyboard prime failed for ${sessionId}: ${(err as Error).message}`,
+                        `Background storyboard prime failed for ${sessionId}: ${(err as Error).message}`
                     );
                 });
         }
@@ -84,7 +84,7 @@ export class IngestService {
         this.logger.log(
             `Ingest complete for session ${sessionId}: ` +
                 `${probeResult.videoTracks.length} video, ` +
-                `${probeResult.audioTracks.length} audio track(s)`,
+                `${probeResult.audioTracks.length} audio track(s)`
         );
     }
 }

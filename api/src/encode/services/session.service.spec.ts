@@ -44,7 +44,9 @@ const cipher: CredentialCipher = {
     },
 };
 
-function makeConfig(overrides: Partial<CreateSessionDto> = {}): CreateSessionDto {
+function makeConfig(
+    overrides: Partial<CreateSessionDto> = {}
+): CreateSessionDto {
     return {
         s3: {
             endPoint: 's3.example.com',
@@ -70,7 +72,7 @@ function build(withCipher = true): SessionService {
  */
 function seedOnDisk(
     session: Partial<Session> & { id: string },
-    { withCredentials = true } = {},
+    { withCredentials = true } = {}
 ): void {
     const dir = join(workDir, session.id);
     mkdirSync(dir, { recursive: true });
@@ -93,7 +95,7 @@ function seedOnDisk(
                     secretKey: REDACTED_CREDENTIAL,
                 },
             },
-        }),
+        })
     );
 
     if (withCredentials) {
@@ -103,8 +105,8 @@ function seedOnDisk(
                 JSON.stringify({
                     accessKey: config.s3.accessKey,
                     secretKey: config.s3.secretKey,
-                }),
-            ),
+                })
+            )
         );
     }
 }
@@ -146,18 +148,23 @@ describe('SessionService — creating', () => {
         const service = build();
 
         expect(service.create(makeConfig()).readToken).toBeUndefined();
-        expect(service.create(makeConfig(), { origin: 'local' }).readToken)
-            .toBeUndefined();
-        expect(service.create(makeConfig(), { origin: 'cms' }).readToken)
-            .toMatch(/^read_[0-9a-f]{32}$/);
+        expect(
+            service.create(makeConfig(), { origin: 'local' }).readToken
+        ).toBeUndefined();
+        expect(
+            service.create(makeConfig(), { origin: 'cms' }).readToken
+        ).toMatch(/^read_[0-9a-f]{32}$/);
     });
 
     it('hands the builder the id so the config can name its own folder', () => {
         // The CMS gives each session a subfolder named after it, so the id has
         // to exist before the config does.
         const session = build().createWith(
-            (id) => makeConfig({ s3: { ...makeConfig().s3, pathPrefix: `media/${id}` } }),
-            { origin: 'cms' },
+            (id) =>
+                makeConfig({
+                    s3: { ...makeConfig().s3, pathPrefix: `media/${id}` },
+                }),
+            { origin: 'cms' }
         );
 
         expect(session.config.s3.pathPrefix).toBe(`media/${session.id}`);
@@ -182,7 +189,9 @@ describe('SessionService — looking up', () => {
         const service = build();
         const session = service.create(makeConfig(), { origin: 'cms' });
 
-        expect(service.getBySessionToken(session.sessionToken)?.id).toBe(session.id);
+        expect(service.getBySessionToken(session.sessionToken)?.id).toBe(
+            session.id
+        );
         expect(service.getByReadToken(session.readToken!)?.id).toBe(session.id);
     });
 
@@ -216,7 +225,9 @@ describe('SessionService — looking up', () => {
                 documentId: 'post_1',
             });
 
-            expect(service.findActiveByDocumentId('post_1')?.id).toBe(session.id);
+            expect(service.findActiveByDocumentId('post_1')?.id).toBe(
+                session.id
+            );
         });
 
         it.each(['completed', 'failed'] as const)(
@@ -229,13 +240,18 @@ describe('SessionService — looking up', () => {
                 });
                 service.updateStatus(session.id, status);
 
-                expect(service.findActiveByDocumentId('post_1')).toBeUndefined();
-            },
+                expect(
+                    service.findActiveByDocumentId('post_1')
+                ).toBeUndefined();
+            }
         );
 
         it('does not match a different document', () => {
             const service = build();
-            service.create(makeConfig(), { origin: 'cms', documentId: 'post_1' });
+            service.create(makeConfig(), {
+                origin: 'cms',
+                documentId: 'post_1',
+            });
 
             expect(service.findActiveByDocumentId('post_2')).toBeUndefined();
         });
@@ -247,7 +263,10 @@ describe('SessionService — credentials on disk', () => {
         const service = build();
         const session = service.create(makeConfig());
 
-        const raw = readFileSync(join(workDir, session.id, 'session.json'), 'utf-8');
+        const raw = readFileSync(
+            join(workDir, session.id, 'session.json'),
+            'utf-8'
+        );
         expect(raw).not.toContain('AKIAEXAMPLE');
         expect(raw).not.toContain('sUp3rS3cret');
         expect(JSON.parse(raw).config.s3.accessKey).toBe(REDACTED_CREDENTIAL);
@@ -295,9 +314,11 @@ describe('SessionService — credentials on disk', () => {
         const service = build(false);
         const session = service.create(makeConfig());
 
-        expect(existsSync(join(workDir, session.id, CREDENTIALS_FILENAME))).toBe(false);
         expect(
-            readFileSync(join(workDir, session.id, 'session.json'), 'utf-8'),
+            existsSync(join(workDir, session.id, CREDENTIALS_FILENAME))
+        ).toBe(false);
+        expect(
+            readFileSync(join(workDir, session.id, 'session.json'), 'utf-8')
         ).not.toContain('sUp3rS3cret');
     });
 
@@ -342,11 +363,19 @@ describe('SessionService — restoring after a restart', () => {
         const second = build();
         second.onModuleInit();
 
-        expect(second.getBySessionToken(session.sessionToken)?.id).toBe(session.id);
+        expect(second.getBySessionToken(session.sessionToken)?.id).toBe(
+            session.id
+        );
         expect(second.getByReadToken(session.readToken!)?.id).toBe(session.id);
     });
 
-    it.each(['uploading', 'queued', 'encoding', 'encrypting', 'uploading_to_s3'] as const)(
+    it.each([
+        'uploading',
+        'queued',
+        'encoding',
+        'encrypting',
+        'uploading_to_s3',
+    ] as const)(
         'fails a session left %s — the process driving it is gone',
         (status) => {
             seedOnDisk({ id: `in-flight-${status}`, status });
@@ -357,7 +386,7 @@ describe('SessionService — restoring after a restart', () => {
             const restored = service.get(`in-flight-${status}`);
             expect(restored?.status).toBe('failed');
             expect(restored?.error).toMatch(/restarted/i);
-        },
+        }
     );
 
     it.each(['completed', 'failed'] as const)(
@@ -373,14 +402,17 @@ describe('SessionService — restoring after a restart', () => {
 
             expect(service.get(`terminal-${status}`)).toBeUndefined();
             expect(existsSync(join(workDir, `terminal-${status}`))).toBe(false);
-        },
+        }
     );
 
     it('fails a session whose credentials cannot be recovered', () => {
         // No sidecar on disk: a different machine, or a reset keychain. The
         // config holds placeholders, and anything reaching S3 with those would
         // fail at the far end with an error nobody could trace to a restart.
-        seedOnDisk({ id: 'stranded', status: 'uploaded' }, { withCredentials: false });
+        seedOnDisk(
+            { id: 'stranded', status: 'uploaded' },
+            { withCredentials: false }
+        );
 
         const service = build();
         service.onModuleInit();
@@ -394,7 +426,10 @@ describe('SessionService — restoring after a restart', () => {
     it('prefers the credential reason over "the encoder restarted"', () => {
         // Both apply: it was mid-encode *and* its keys are gone. Re-running is
         // not what fixes the second, so that is the reason the user is shown.
-        seedOnDisk({ id: 'both', status: 'encoding' }, { withCredentials: false });
+        seedOnDisk(
+            { id: 'both', status: 'encoding' },
+            { withCredentials: false }
+        );
 
         const service = build();
         service.onModuleInit();
@@ -407,7 +442,7 @@ describe('SessionService — restoring after a restart', () => {
         const session = first.create(makeConfig());
         writeFileSync(
             join(workDir, session.id, CREDENTIALS_FILENAME),
-            'not-our-ciphertext',
+            'not-our-ciphertext'
         );
 
         const service = build();
@@ -494,7 +529,11 @@ describe('SessionService — removing', () => {
 describe('SessionService — sweeping abandoned sessions', () => {
     const SIX_HOURS = 6 * 3_600_000;
 
-    function aged(service: SessionService, status: Session['status'], hours: number) {
+    function aged(
+        service: SessionService,
+        status: Session['status'],
+        hours: number
+    ) {
         const session = service.create(makeConfig());
         service.updateStatus(session.id, status);
         session.lastActivityAt = Date.now() - hours * 3_600_000;
@@ -510,7 +549,7 @@ describe('SessionService — sweeping abandoned sessions', () => {
             expect(service.cleanupAbandoned(SIX_HOURS)).toBe(1);
             expect(service.get(session.id)).toBeUndefined();
             expect(existsSync(join(workDir, session.id))).toBe(false);
-        },
+        }
     );
 
     it.each(['queued', 'encoding', 'encrypting', 'uploading_to_s3'] as const)(
@@ -523,7 +562,7 @@ describe('SessionService — sweeping abandoned sessions', () => {
 
             expect(service.cleanupAbandoned(SIX_HOURS)).toBe(0);
             expect(service.get(session.id)).toBeDefined();
-        },
+        }
     );
 
     it('leaves a session that is idle but recent', () => {
@@ -565,7 +604,10 @@ describe('SessionService — events', () => {
         service.updateStatus(session.id, 'uploaded');
 
         expect(emit).toHaveBeenCalledWith(
-            expect.objectContaining({ sessionId: session.id, status: 'uploaded' }),
+            expect.objectContaining({
+                sessionId: session.id,
+                status: 'uploaded',
+            })
         );
     });
 
@@ -577,7 +619,7 @@ describe('SessionService — events', () => {
         service.setFailed(session.id, 'Disk full');
 
         expect(emit).toHaveBeenCalledWith(
-            expect.objectContaining({ status: 'failed', error: 'Disk full' }),
+            expect.objectContaining({ status: 'failed', error: 'Disk full' })
         );
     });
 
@@ -587,7 +629,7 @@ describe('SessionService — events', () => {
         service.updateProgress(session.id, 42);
 
         const raw = JSON.parse(
-            readFileSync(join(workDir, session.id, 'session.json'), 'utf-8'),
+            readFileSync(join(workDir, session.id, 'session.json'), 'utf-8')
         );
         expect(raw.progress).toBeFalsy();
     });

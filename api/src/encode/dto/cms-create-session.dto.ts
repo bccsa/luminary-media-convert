@@ -42,10 +42,15 @@ export class CmsEncryptionRequirementDto {
  */
 export class CmsExistingMediaDto {
     @ApiProperty({
-        description: 'Public URL of the master playlist already attached to the post.',
+        description:
+            'Public URL of the master playlist already attached to the post.',
         example: 'https://cdn.example.com/media/abc123/master.m3u8',
     })
-    @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
+    @IsUrl({
+        protocols: ['http', 'https'],
+        require_protocol: true,
+        require_tld: false,
+    })
     @MaxLength(2048)
     @Expose()
     hlsUrl: string;
@@ -84,7 +89,8 @@ export class CmsCreateSessionDto {
     documentId: string;
 
     @ApiProperty({
-        description: 'Post title, shown in the local app so the user can tell sessions apart.',
+        description:
+            'Post title, shown in the local app so the user can tell sessions apart.',
         example: 'Episode 12 — The Long Way Round',
     })
     @IsString()
@@ -105,17 +111,22 @@ export class CmsCreateSessionDto {
     @ApiProperty({
         description:
             'Public base URL the bucket is served from. The final playback URL is this ' +
-            'joined with the session\'s object key, and is reported to the CMS over SSE ' +
+            "joined with the session's object key, and is reported to the CMS over SSE " +
             'as soon as encoding starts.',
         example: 'https://cdn.example.com/media',
     })
-    @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
+    @IsUrl({
+        protocols: ['http', 'https'],
+        require_protocol: true,
+        require_tld: false,
+    })
     @MaxLength(2048)
     @Expose()
     publicBaseUrl: string;
 
     @ApiPropertyOptional({
-        description: 'Whether the output must be encrypted. Omitted means unencrypted.',
+        description:
+            'Whether the output must be encrypted. Omitted means unencrypted.',
         type: CmsEncryptionRequirementDto,
     })
     @IsOptional()

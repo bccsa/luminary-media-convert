@@ -62,7 +62,7 @@ export class S3Service {
         bucket: string,
         filePath: string,
         objectKey: string,
-        onBytes?: (bytes: number) => void,
+        onBytes?: (bytes: number) => void
     ): Promise<void> {
         const contentType = this.getContentType(filePath);
 
@@ -86,14 +86,13 @@ export class S3Service {
             objectKey,
             createReadStream(filePath).pipe(counter),
             size,
-            { 'Content-Type': contentType },
+            { 'Content-Type': contentType }
         );
         this.logger.debug(`Uploaded: ${objectKey}`);
     }
 
     getContentType(filePath: string): string {
-        if (filePath.endsWith('.m3u8'))
-            return 'application/vnd.apple.mpegurl';
+        if (filePath.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl';
         if (filePath.endsWith('.m4s')) return 'video/iso.segment';
         if (filePath.endsWith('.ts')) return 'video/mp2t';
         if (filePath.endsWith('.mp4')) return 'video/mp4';

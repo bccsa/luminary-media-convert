@@ -11,7 +11,8 @@ export class HlsChaptersReadRequestDto {
     s3: S3ConfigDto;
 
     @ApiProperty({
-        description: 'Folder prefix containing the HLS output. Trailing slash optional.',
+        description:
+            'Folder prefix containing the HLS output. Trailing slash optional.',
     })
     @IsString()
     @Expose()

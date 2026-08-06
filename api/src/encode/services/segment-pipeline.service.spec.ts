@@ -2,9 +2,15 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { Logger } from '@nestjs/common';
-import { SegmentPipeline, type SegmentPipelineConfig } from './segment-pipeline.service.js';
+import {
+    SegmentPipeline,
+    type SegmentPipelineConfig,
+} from './segment-pipeline.service.js';
 
-function makePipeline(outputDir: string, overrides?: Partial<SegmentPipelineConfig>): SegmentPipeline {
+function makePipeline(
+    outputDir: string,
+    overrides?: Partial<SegmentPipelineConfig>
+): SegmentPipeline {
     const mockS3Service = {
         createClient: vi.fn().mockReturnValue({}),
         uploadFile: vi.fn().mockResolvedValue(undefined),
@@ -12,7 +18,14 @@ function makePipeline(outputDir: string, overrides?: Partial<SegmentPipelineConf
 
     const config: SegmentPipelineConfig = {
         outputDir,
-        s3Config: { endPoint: 'localhost', port: 9000, useSSL: false, accessKey: 'x', secretKey: 'x', bucket: 'b' } as any,
+        s3Config: {
+            endPoint: 'localhost',
+            port: 9000,
+            useSSL: false,
+            accessKey: 'x',
+            secretKey: 'x',
+            bucket: 'b',
+        } as any,
         s3PathPrefix: 'prefix',
         byteRange: false,
         byteRangeMaxFileSizeBytes: 500 * 1024 * 1024,
@@ -23,7 +36,7 @@ function makePipeline(outputDir: string, overrides?: Partial<SegmentPipelineConf
         config,
         {} as any,
         mockS3Service as any,
-        new Logger('Test'),
+        new Logger('Test')
     );
 }
 
@@ -44,7 +57,10 @@ describe('SegmentPipeline', () => {
             writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n');
             writeFileSync(join(tmpDir, 'concat.txt'), 'ffconcat version 1.0\n');
             mkdirSync(join(tmpDir, 'stream_0'));
-            writeFileSync(join(tmpDir, 'stream_0', 'playlist.m3u8'), '#EXTM3U\n');
+            writeFileSync(
+                join(tmpDir, 'stream_0', 'playlist.m3u8'),
+                '#EXTM3U\n'
+            );
 
             const pipeline = makePipeline(tmpDir);
             const keys = await pipeline.uploadRemainingFiles(tmpDir);
@@ -57,7 +73,10 @@ describe('SegmentPipeline', () => {
         it('should upload all files when no concat.txt present', async () => {
             writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n');
             mkdirSync(join(tmpDir, 'thumbnails'));
-            writeFileSync(join(tmpDir, 'thumbnails', 'thumbnails.vtt'), 'WEBVTT\n');
+            writeFileSync(
+                join(tmpDir, 'thumbnails', 'thumbnails.vtt'),
+                'WEBVTT\n'
+            );
 
             const pipeline = makePipeline(tmpDir);
             const keys = await pipeline.uploadRemainingFiles(tmpDir);
@@ -72,7 +91,10 @@ describe('SegmentPipeline', () => {
             writeFileSync(join(tmpDir, 'other.m3u8'), '#EXTM3U\n');
 
             const pipeline = makePipeline(tmpDir);
-            const keys = await pipeline.uploadRemainingFiles(tmpDir, new Set([excludedPath]));
+            const keys = await pipeline.uploadRemainingFiles(
+                tmpDir,
+                new Set([excludedPath])
+            );
 
             expect(keys).not.toContain('prefix/master.m3u8');
             expect(keys).toContain('prefix/other.m3u8');
@@ -96,7 +118,11 @@ describe('SegmentPipeline', () => {
             rmSync(tmpDir, { recursive: true, force: true });
         });
 
-        function progressAfter(uploaded: number, produced: number, estimate: number) {
+        function progressAfter(
+            uploaded: number,
+            produced: number,
+            estimate: number
+        ) {
             const seen: number[] = [];
             const pipeline = makePipeline(tmpDir, {
                 estimatedTotalSegments: estimate,

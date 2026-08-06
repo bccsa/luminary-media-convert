@@ -36,8 +36,8 @@ export class SessionEventsService {
     }
 
     forSession(sessionId: string): Observable<SessionEvent> {
-        return this.subject.asObservable().pipe(
-            filter((e) => e.sessionId === sessionId),
-        );
+        return this.subject
+            .asObservable()
+            .pipe(filter((e) => e.sessionId === sessionId));
     }
 }

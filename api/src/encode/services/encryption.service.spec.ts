@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDecipheriv } from 'crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import {
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { EncryptionService } from './encryption.service.js';
@@ -28,7 +34,9 @@ describe('EncryptionService — key material', () => {
         // compromises exactly one session's output. A derived key would make
         // every past and future encode readable from one leak.
         const keys = new Set(
-            Array.from({ length: 50 }, () => service.generateKey().toString('hex')),
+            Array.from({ length: 50 }, () =>
+                service.generateKey().toString('hex')
+            )
         );
 
         expect(keys.size).toBe(50);
@@ -36,7 +44,9 @@ describe('EncryptionService — key material', () => {
 
     it('never repeats an IV', () => {
         const ivs = new Set(
-            Array.from({ length: 50 }, () => service.generateIV().toString('hex')),
+            Array.from({ length: 50 }, () =>
+                service.generateIV().toString('hex')
+            )
         );
 
         expect(ivs.size).toBe(50);
@@ -45,7 +55,9 @@ describe('EncryptionService — key material', () => {
 
 describe('EncryptionService — encrypting a segment', () => {
     it('rewrites the file in place, and it decrypts back to the original', async () => {
-        const plain = Buffer.from('a fake mpeg-ts segment, but a real round trip');
+        const plain = Buffer.from(
+            'a fake mpeg-ts segment, but a real round trip'
+        );
         const path = join(dir, 'media_0.ts');
         writeFileSync(path, plain);
 
@@ -57,7 +69,10 @@ describe('EncryptionService — encrypting a segment', () => {
         expect(onDisk.equals(plain)).toBe(false);
 
         const decipher = createDecipheriv('aes-128-cbc', key, iv);
-        const round = Buffer.concat([decipher.update(onDisk), decipher.final()]);
+        const round = Buffer.concat([
+            decipher.update(onDisk),
+            decipher.final(),
+        ]);
         expect(round.equals(plain)).toBe(true);
     });
 
@@ -65,7 +80,11 @@ describe('EncryptionService — encrypting a segment', () => {
         const path = join(dir, 'media_0.ts');
         writeFileSync(path, 'x');
 
-        await service.encryptSegment(path, service.generateKey(), service.generateIV());
+        await service.encryptSegment(
+            path,
+            service.generateKey(),
+            service.generateIV()
+        );
 
         expect(() => readFileSync(`${path}.enc.tmp`)).toThrow();
     });
@@ -77,7 +96,7 @@ describe('EncryptionService — encrypting a segment', () => {
         writeFileSync(path, 'x');
 
         await expect(
-            service.encryptSegment(path, Buffer.alloc(3), service.generateIV()),
+            service.encryptSegment(path, Buffer.alloc(3), service.generateIV())
         ).rejects.toThrow();
 
         expect(() => readFileSync(`${path}.enc.tmp`)).toThrow();
@@ -123,7 +142,7 @@ describe('EncryptionService — injecting key tags', () => {
         await service.injectKeyTagsIntoPlaylists(dir, 'luminary://key', iv);
 
         expect(readFileSync(path, 'utf-8')).toContain(
-            '#EXT-X-KEY:METHOD=AES-128,URI="luminary://key",IV=0x000102030405060708090a0b0c0d0e0f',
+            '#EXT-X-KEY:METHOD=AES-128,URI="luminary://key",IV=0x000102030405060708090a0b0c0d0e0f'
         );
     });
 
@@ -131,7 +150,11 @@ describe('EncryptionService — injecting key tags', () => {
         const a = write('stream_720p/playlist.m3u8', MEDIA);
         const b = write('stream_1080p/playlist.m3u8', MEDIA);
 
-        await service.injectKeyTagsIntoPlaylists(dir, 'luminary://key', Buffer.alloc(16));
+        await service.injectKeyTagsIntoPlaylists(
+            dir,
+            'luminary://key',
+            Buffer.alloc(16)
+        );
 
         expect(readFileSync(a, 'utf-8')).toContain('#EXT-X-KEY:');
         expect(readFileSync(b, 'utf-8')).toContain('#EXT-X-KEY:');
@@ -147,7 +170,11 @@ describe('EncryptionService — injecting key tags', () => {
         ].join('\n');
         const path = write('master.m3u8', master);
 
-        await service.injectKeyTagsIntoPlaylists(dir, 'luminary://key', Buffer.alloc(16));
+        await service.injectKeyTagsIntoPlaylists(
+            dir,
+            'luminary://key',
+            Buffer.alloc(16)
+        );
 
         expect(readFileSync(path, 'utf-8')).not.toContain('#EXT-X-KEY:');
     });
@@ -155,7 +182,11 @@ describe('EncryptionService — injecting key tags', () => {
     it('inserts exactly one tag, however many segments there are', async () => {
         const path = write('stream_720p/playlist.m3u8', MEDIA);
 
-        await service.injectKeyTagsIntoPlaylists(dir, 'luminary://key', Buffer.alloc(16));
+        await service.injectKeyTagsIntoPlaylists(
+            dir,
+            'luminary://key',
+            Buffer.alloc(16)
+        );
 
         const count = readFileSync(path, 'utf-8')
             .split('\n')
@@ -166,7 +197,11 @@ describe('EncryptionService — injecting key tags', () => {
     it('keeps every original line', async () => {
         const path = write('stream_720p/playlist.m3u8', MEDIA);
 
-        await service.injectKeyTagsIntoPlaylists(dir, 'luminary://key', Buffer.alloc(16));
+        await service.injectKeyTagsIntoPlaylists(
+            dir,
+            'luminary://key',
+            Buffer.alloc(16)
+        );
 
         const after = readFileSync(path, 'utf-8');
         for (const line of MEDIA.split('\n')) {
@@ -180,11 +215,11 @@ describe('EncryptionService — injecting key tags', () => {
         await service.injectKeyTagsIntoPlaylists(
             dir,
             'https://keys.example.com/s1.key',
-            Buffer.alloc(16),
+            Buffer.alloc(16)
         );
 
         expect(readFileSync(path, 'utf-8')).toContain(
-            'URI="https://keys.example.com/s1.key"',
+            'URI="https://keys.example.com/s1.key"'
         );
     });
 });

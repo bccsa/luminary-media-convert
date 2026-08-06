@@ -9,7 +9,10 @@ describe('resampleEnvelope', () => {
     });
 
     it('returns exactly the number of peaks asked for', () => {
-        const envelope = Array.from({ length: 36_000 }, (_, i) => (i % 100) / 100);
+        const envelope = Array.from(
+            { length: 36_000 },
+            (_, i) => (i % 100) / 100
+        );
 
         expect(resampleEnvelope(envelope, 1000)).toHaveLength(1000);
     });
@@ -17,7 +20,9 @@ describe('resampleEnvelope', () => {
     it('leaves a short envelope alone rather than inventing detail', () => {
         // Stretching 3 samples across 1000 peaks would draw structure that was
         // never in the audio.
-        expect(resampleEnvelope([0.2, 0.4, 0.6], 1000)).toEqual([0.2, 0.4, 0.6]);
+        expect(resampleEnvelope([0.2, 0.4, 0.6], 1000)).toEqual([
+            0.2, 0.4, 0.6,
+        ]);
     });
 
     it('covers the whole envelope, including the tail', () => {

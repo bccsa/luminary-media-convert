@@ -173,7 +173,8 @@ export class EncodeController {
     })
     @ApiResponse({
         status: 400,
-        description: 'Path is missing, not a file, not a media file, or the session is past "created".',
+        description:
+            'Path is missing, not a file, not a media file, or the session is past "created".',
     })
     @ApiResponse({
         status: 401,
@@ -458,10 +459,12 @@ export class EncodeController {
         // client that sent them. Reporting them lets the UI keep showing the output
         // timeline (duration, waveform) after a reload mid-encode.
         if (session.encodeConfig?.trimSegments?.length) {
-            result.trimSegments = session.encodeConfig.trimSegments.map((t) => ({
-                inSec: t.inSec,
-                outSec: t.outSec,
-            }));
+            result.trimSegments = session.encodeConfig.trimSegments.map(
+                (t) => ({
+                    inSec: t.inSec,
+                    outSec: t.outSec,
+                })
+            );
         }
 
         // A failed encode can be run again while its source is still on disk and
@@ -603,13 +606,16 @@ export class EncodeController {
     @ApiOperation({
         summary: 'Read the chapter sidecar for this session',
         description:
-            'Resolves the session\'s own bucket and prefix, so the caller supplies ' +
+            "Resolves the session's own bucket and prefix, so the caller supplies " +
             'nothing but a language. Same storage and layout as /api/hls/chapters/read.',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     @ApiResponse({ status: 200, description: 'Chapter VTT body.' })
     @ApiResponse({ status: 400, description: 'Malformed language code.' })
-    @ApiResponse({ status: 404, description: 'Session or chapter file not found.' })
+    @ApiResponse({
+        status: 404,
+        description: 'Session or chapter file not found.',
+    })
     async getChapters(
         @Param('sessionId') sessionId: string,
         @Query('lang') lang = 'en'
@@ -634,12 +640,15 @@ export class EncodeController {
     @ApiOperation({
         summary: 'Write the chapter sidecar for this session',
         description:
-            'Stores the document at chapters/<lang>.vtt under the session\'s own ' +
+            "Stores the document at chapters/<lang>.vtt under the session's own " +
             'prefix, with Content-Type: text/vtt.',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
     @ApiResponse({ status: 204, description: 'Chapter VTT stored.' })
-    @ApiResponse({ status: 400, description: 'Malformed language code or VTT body.' })
+    @ApiResponse({
+        status: 400,
+        description: 'Malformed language code or VTT body.',
+    })
     @ApiResponse({ status: 404, description: 'Session not found.' })
     @ApiResponse({ status: 413, description: 'VTT body exceeds 1 MiB.' })
     async putChapters(
@@ -675,7 +684,9 @@ export class EncodeController {
         }
         return {
             s3: session.config.s3,
-            folderPrefix: S3Service.canonicalPrefix(session.config.s3.pathPrefix),
+            folderPrefix: S3Service.canonicalPrefix(
+                session.config.s3.pathPrefix
+            ),
         };
     }
 
@@ -730,7 +741,7 @@ export class EncodeController {
         try {
             const sidecar = await this.waveformService.getOrComputeCached(
                 sessionId,
-                { inputPath: filePath },
+                { inputPath: filePath }
             );
             return { peaks: sidecar.peaks, numPeaks: sidecar.numPeaks };
         } catch (err) {
@@ -865,7 +876,7 @@ export class EncodeController {
         @Param('sessionId') sessionId: string,
         @Query('token') token: string,
         @Req() req: Request,
-        @Res() res: Response,
+        @Res() res: Response
     ): Promise<void> {
         this.validatePreviewToken(sessionId, token);
 
@@ -887,7 +898,7 @@ export class EncodeController {
                 duration,
                 sourceWidth: video.width,
                 sourceHeight: video.height,
-            },
+            }
         );
         if (!result) throw new NotFoundException('Storyboard unavailable');
 
@@ -898,7 +909,7 @@ export class EncodeController {
         const vtt = result.vtt.replace(
             /^(sprite_\d+\.\w+)(#.*)?$/gm,
             (_m, file: string, frag = '') =>
-                `${base}/${file}?token=${encodeURIComponent(token)}${frag}`,
+                `${base}/${file}?token=${encodeURIComponent(token)}${frag}`
         );
 
         res.set({
@@ -927,7 +938,7 @@ export class EncodeController {
         @Param('sessionId') sessionId: string,
         @Param('filename') filename: string,
         @Query('token') token: string,
-        @Res() res: Response,
+        @Res() res: Response
     ): Promise<void> {
         this.validatePreviewToken(sessionId, token);
 
@@ -939,7 +950,7 @@ export class EncodeController {
         const path = join(
             this.thumbnailService.previewDir(sessionId),
             'thumbnails',
-            filename,
+            filename
         );
         if (!existsSync(path)) throw new NotFoundException('Sprite not found');
 

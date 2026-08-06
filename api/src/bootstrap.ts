@@ -7,10 +7,7 @@ import helmet from 'helmet';
 import { join } from 'path';
 import { AppModule } from './app.module.js';
 import type { CmsSessionHook } from './cms/cms-session-hook.js';
-import {
-    OriginRegistry,
-    type OriginDecisions,
-} from './cms/origin-registry.js';
+import { OriginRegistry, type OriginDecisions } from './cms/origin-registry.js';
 import {
     createCorsOptions,
     privateNetworkAccessMiddleware,
@@ -102,8 +99,20 @@ const buildHelmet = (servingApp: boolean) =>
                     ? {
                           // Any S3-compatible endpoint the user configured,
                           // including a MinIO on plain http next door.
-                          connectSrc: ["'self'", 'https:', 'http:', 'blob:', 'data:'],
-                          mediaSrc: ["'self'", 'https:', 'http:', 'blob:', 'data:'],
+                          connectSrc: [
+                              "'self'",
+                              'https:',
+                              'http:',
+                              'blob:',
+                              'data:',
+                          ],
+                          mediaSrc: [
+                              "'self'",
+                              'https:',
+                              'http:',
+                              'blob:',
+                              'data:',
+                          ],
                           workerSrc: ["'self'", 'blob:'],
                       }
                     : {}),
@@ -147,7 +156,7 @@ const serveWebClient = (app: NestExpressApplication, dir: string): void => {
  * tokens.
  */
 export async function createServer(
-    options: CreateServerOptions = {},
+    options: CreateServerOptions = {}
 ): Promise<RunningServer> {
     if (options.workDir) process.env.WORK_DIR = options.workDir;
     if (options.ffmpegPath) process.env.FFMPEG_PATH = options.ffmpegPath;
@@ -175,7 +184,7 @@ export async function createServer(
             originPolicy,
             credentialCipher: options.credentialCipher,
             onCmsSessionCreated: options.onCmsSessionCreated,
-        }),
+        })
     );
 
     app.use(buildHelmet(!!options.staticAppDir));
@@ -186,7 +195,7 @@ export async function createServer(
             whitelist: true,
             forbidNonWhitelisted: true,
             transformOptions: { enableImplicitConversion: true },
-        }),
+        })
     );
 
     // Graceful shutdown: onModuleDestroy is what drains the encode queue and
@@ -199,7 +208,7 @@ export async function createServer(
             .setDescription(
                 'Local HLS/ABR media encoding service. Open a session, point it at a ' +
                     'file already on this machine, and follow progress and the S3 output ' +
-                    'location over SSE or by polling. Nothing is uploaded through this API.',
+                    'location over SSE or by polling. Nothing is uploaded through this API.'
             )
             // The real one, so the docs and the version the CMS reads off
             // /api/cms/health cannot disagree. The hardcoded 2.0.0 outlived the
@@ -215,7 +224,7 @@ export async function createServer(
                         'read from LOCAL_API_TOKEN when the API runs standalone. Accepted on ' +
                         'every endpoint regardless of what it declares.',
                 },
-                'apikey',
+                'apikey'
             )
             .addBearerAuth({
                 type: 'http',
@@ -229,7 +238,7 @@ export async function createServer(
         SwaggerModule.setup(
             'api/docs',
             app,
-            SwaggerModule.createDocument(app, config),
+            SwaggerModule.createDocument(app, config)
         );
     }
 

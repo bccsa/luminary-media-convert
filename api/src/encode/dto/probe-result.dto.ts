@@ -34,7 +34,10 @@ export class VideoTrackInfoDto {
     @Expose()
     language?: string;
 
-    @ApiPropertyOptional({ example: 'Main Video', description: 'Human-readable name (HLS NAME attribute).' })
+    @ApiPropertyOptional({
+        example: 'Main Video',
+        description: 'Human-readable name (HLS NAME attribute).',
+    })
     @Expose()
     name?: string;
 }
@@ -64,7 +67,10 @@ export class AudioTrackInfoDto {
     @Expose()
     language?: string;
 
-    @ApiPropertyOptional({ example: 'English', description: 'Human-readable name (HLS NAME attribute).' })
+    @ApiPropertyOptional({
+        example: 'English',
+        description: 'Human-readable name (HLS NAME attribute).',
+    })
     @Expose()
     name?: string;
 }
