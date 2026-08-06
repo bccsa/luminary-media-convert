@@ -200,8 +200,11 @@ Two arrivals are covered, because they differ in whether a renderer exists yet: 
 - **Stale SaaS-era documents.** Moved to `docs/archive-saas/` with a README explaining why their conclusions do not transfer: no shared service, no user database, credentials in an OS keychain, a new perimeter in the origin allowlist, nothing uploaded, and a loopback-only bind. Kept rather than deleted — an audit is evidence of what was examined and when.
 - **Prettier baseline.** A `prettier --write` pass over `api/src`, as its own commit.
 
-**Still open.**
+**Done since.** The security and privacy reviews were re-run against the local-only architecture: `docs/security-review.md` and `docs/privacy-review.md`. The security review found the origin allowlist bypassable by an opaque (`null`) origin — any website could open a session on a user's encoder through a sandboxed iframe, bypassing the approval dialog and the memory of every origin they had refused. Fixed, with the two specs that asserted the old behaviour now asserting the opposite. A second, narrower finding (a read token leaking between two approved sites via `documentId` reuse) was also fixed.
 
-- **Re-run the security and privacy reviews** against the local-only architecture. The archive README lists what changed in the threat model; that is the input, not the answer.
+**Still open, from those reviews.**
+
+- **`encryptionKeyHex` and `readToken` sit in plaintext in `session.json`**, while S3 credentials in the same file are redacted. Consistent — anything that can read the file is the logged-in user — but it means the AES key for a finished encode is on disk without keychain protection, so an unencrypted backup or a cloned drive yields the media key. Encrypt those two fields with the same cipher, or decide the gap is acceptable and say so.
+- **`settings.json` accumulates origins forever.** Prunable by hand in the trusted sites panel; nothing prunes it automatically. A small record of which CMS instances a user has touched, kept for the life of the install.
 
 ---
