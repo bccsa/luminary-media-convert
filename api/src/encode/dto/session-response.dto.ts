@@ -153,6 +153,16 @@ export class SessionStatusDto {
     canRetry?: boolean;
 
     @ApiPropertyOptional({
+        description:
+            'Whether the output will use byte-range HLS. Set at session creation ' +
+            'and not editable afterwards, so the client has no other way to learn ' +
+            'it — the encode config form used to assume the API default.',
+        example: true,
+    })
+    @Expose()
+    byteRange?: boolean;
+
+    @ApiPropertyOptional({
         description: 'Probe results from the uploaded file. Present when status is "uploaded".',
         type: ProbeResultDto,
     })

@@ -6,7 +6,7 @@ import { AuthResolverGuard } from './auth-resolver.guard.js';
 import type { SessionService, Session } from '../encode/services/session.service.js';
 import type { AuthType } from './auth-types.decorator.js';
 
-const MASTER = 'a'.repeat(64);
+const INSTANCE_TOKEN = 'a'.repeat(64);
 
 const getBySessionToken = vi.fn<(t: string) => Session | undefined>();
 const getByReadToken = vi.fn<(t: string) => Session | undefined>();
@@ -42,18 +42,18 @@ function contextFor(req: any): ExecutionContext {
  *
  * Two functions rather than one with a defaulted key: passing `undefined`
  * explicitly to a defaulted parameter uses the default, so a single builder
- * could not express "this instance has no key" at all — the test asking for it
+ * could not express "this instance has no token" at all — the test asking for it
  * would have been handed the real one and passed for the wrong reason.
  */
-function buildWith(allowed: AuthType[] | undefined, masterKey: string | undefined) {
+function buildWith(allowed: AuthType[] | undefined, instanceToken: string | undefined) {
     const reflector = {
         getAllAndOverride: () => allowed,
     } as unknown as Reflector;
-    return new AuthResolverGuard(reflector, sessions, masterKey);
+    return new AuthResolverGuard(reflector, sessions, instanceToken);
 }
 
 function build(allowed?: AuthType[]) {
-    return buildWith(allowed, MASTER);
+    return buildWith(allowed, INSTANCE_TOKEN);
 }
 
 beforeEach(() => {
@@ -63,16 +63,16 @@ beforeEach(() => {
 
 describe('AuthResolverGuard — the instance token', () => {
     it('lets the app’s own UI through', async () => {
-        const req = request({ headers: { 'x-api-key': MASTER } });
+        const req = request({ headers: { 'x-api-key': INSTANCE_TOKEN } });
 
         await expect(build().canActivate(contextFor(req))).resolves.toBe(true);
-        expect(req.authType).toBe('master');
+        expect(req.authType).toBe('instance');
     });
 
     it('is accepted on an endpoint that does not list it', async () => {
         // It is a superkey by design: the local UI holds it and drives
         // everything, so no endpoint gets to refuse it.
-        const req = request({ headers: { 'x-api-key': MASTER } });
+        const req = request({ headers: { 'x-api-key': INSTANCE_TOKEN } });
 
         await expect(build(['read']).canActivate(contextFor(req))).resolves.toBe(true);
     });
@@ -103,9 +103,9 @@ describe('AuthResolverGuard — the instance token', () => {
     });
 
     it('refuses every key when the instance has none configured', async () => {
-        const req = request({ headers: { 'x-api-key': MASTER } });
+        const req = request({ headers: { 'x-api-key': INSTANCE_TOKEN } });
 
-        await expect(buildWith(['master'], undefined).canActivate(contextFor(req)))
+        await expect(buildWith(['instance'], undefined).canActivate(contextFor(req)))
             .rejects.toThrow(UnauthorizedException);
     });
 });
@@ -124,7 +124,7 @@ describe('AuthResolverGuard — session tokens', () => {
         const req = request({ headers: { authorization: 'Bearer sess_abc' } });
         getBySessionToken.mockReturnValue(session('s1'));
 
-        await expect(build(['master']).canActivate(contextFor(req))).rejects.toThrow(
+        await expect(build(['instance']).canActivate(contextFor(req))).rejects.toThrow(
             UnauthorizedException,
         );
     });
@@ -230,7 +230,7 @@ describe('AuthResolverGuard — defaults', () => {
 
     it('refuses a request carrying nothing at all', async () => {
         await expect(
-            build(['master', 'session', 'read']).canActivate(contextFor(request())),
+            build(['instance', 'session', 'read']).canActivate(contextFor(request())),
         ).rejects.toThrow('No valid authentication credentials provided');
     });
 });

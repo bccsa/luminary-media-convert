@@ -13,21 +13,23 @@ import { AUTH_TYPES_KEY, type AuthType } from './auth-types.decorator.js';
 import { LOCAL_API_TOKEN, type LocalApiToken } from './local-auth.config.js';
 
 /**
- * Guard that resolves authentication via a priority chain:
- * Master Key -> Session Token -> Read Token
+ * Resolves a caller's credentials, in priority order:
+ * instance token -> session token -> read token.
  *
- * Uses the @AuthTypes() decorator to determine which methods are allowed.
- * Defaults to ['master'] if no decorator is present.
+ * Endpoints declare what they accept with `@AuthTypes(...)`, defaulting to
+ * `['instance']` — the strictest — so a route that says nothing is not
+ * accidentally open to a weaker credential.
  *
- * The master key is a superkey that is always accepted regardless of the
- * @AuthTypes() decorator on the endpoint.
+ * The instance token is a superkey: it is accepted wherever it appears,
+ * whatever the endpoint declared, because the only thing holding it is the
+ * app's own UI, which drives everything.
  */
 @Injectable()
 export class AuthResolverGuard implements CanActivate {
     constructor(
         private readonly reflector: Reflector,
         private readonly sessionService: SessionService,
-        @Inject(LOCAL_API_TOKEN) private readonly masterKey: LocalApiToken
+        @Inject(LOCAL_API_TOKEN) private readonly instanceToken: LocalApiToken
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -35,20 +37,20 @@ export class AuthResolverGuard implements CanActivate {
             this.reflector.getAllAndOverride<AuthType[]>(AUTH_TYPES_KEY, [
                 context.getHandler(),
                 context.getClass(),
-            ]) ?? ['master'];
+            ]) ?? ['instance'];
 
         const request = context.switchToHttp().getRequest<Request>();
 
-        // 1. Try X-API-Key header (master key)
+        // 1. The instance token, on X-API-Key.
         const apiKeyHeader = request.headers['x-api-key'] as string | undefined;
         if (apiKeyHeader) {
-            const masterKey = this.masterKey;
+            const instanceToken = this.instanceToken;
             if (
-                masterKey &&
-                apiKeyHeader.length === masterKey.length &&
-                timingSafeEqual(Buffer.from(apiKeyHeader), Buffer.from(masterKey))
+                instanceToken &&
+                apiKeyHeader.length === instanceToken.length &&
+                timingSafeEqual(Buffer.from(apiKeyHeader), Buffer.from(instanceToken))
             ) {
-                (request as any).authType = 'master';
+                (request as any).authType = 'instance';
                 return true;
             }
 

@@ -30,7 +30,7 @@ import {
  * variable or to nothing at all.
  */
 export interface RuntimeOptions {
-    /** Token accepted on `X-API-Key`. Falls back to `MASTER_API_KEY`. */
+    /** Token accepted on `X-API-Key`. Falls back to the environment. */
     localApiToken?: LocalApiToken;
     /** Allowlist and trust-on-first-use approver. Falls back to `CMS_ALLOWED_ORIGINS`. */
     originPolicy?: OriginPolicy;

@@ -30,7 +30,7 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 - **Framework**: NestJS 11 (Express platform)
 - **Embeddable**: `createServer(options)` in `bootstrap.ts` returns `{ app, port, url, close() }`. Host-specific values (API token, origin policy, credential cipher, window hook) arrive through the global `RuntimeOptionsModule`; `workDir` and the ffmpeg paths are set into `process.env` before Nest instantiates anything, because that is how the services already read them
 - **Bind address**: loopback only (`127.0.0.1`), default port `31711` (`DEFAULT_PORT`); standalone `main.ts` defaults to `PORT=3000`
-- **Authentication**: `AuthResolverGuard` resolving, in order, the instance API token (`X-API-Key`) → session token (`Authorization: Bearer sess_*`) → read token (`?token=read_*`, only on endpoints that opt in). Endpoints declare allowed methods with `@AuthTypes(...)`, defaulting to `['master']`. The CMS endpoints are gated by browser Origin instead of by a key
+- **Authentication**: `AuthResolverGuard` resolving, in order, the instance API token (`X-API-Key`) → session token (`Authorization: Bearer sess_*`) → read token (`?token=read_*`, only on endpoints that opt in). Endpoints declare allowed methods with `@AuthTypes(...)`, defaulting to `['instance']`. The CMS endpoints are gated by browser Origin instead of by a key
 - **Security headers**: `helmet` with a CSP that widens `img/connect/media/worker` sources only when the API is also serving the web client (playlists and segments come from whichever S3 endpoint the user configured, and are handed to the player as `blob:` URLs)
 - **CORS**: origin decided per request by `OriginRegistry`; refusal withholds the header rather than raising. `privateNetworkAccessMiddleware` answers Chrome's Local Network Access preflight. `EXPOSED_HEADERS` lists everything the client reads off a response (currently `X-Storyboard-Complete`)
 - **Rate limiting**: `@nestjs/throttler` (`short`: 100/sec, `medium`: 1000/min) with a global guard; the encode, CMS and HLS-edit controllers are `@SkipThrottle()`
@@ -103,7 +103,7 @@ api/
 │   │   ├── auth.module.ts
 │   │   ├── auth-resolver.guard.ts       # instance token → session token → read token
 │   │   ├── auth-types.decorator.ts      # @AuthTypes('master' | 'session' | 'read')
-│   │   └── local-auth.config.ts         # LOCAL_API_TOKEN injection token; falls back to MASTER_API_KEY
+│   │   └── local-auth.config.ts         # LOCAL_API_TOKEN injection token + env fallback
 │   ├── cms/
 │   │   ├── cms.module.ts                # Provides OriginRegistry (shared by the controller and the CORS layer)
 │   │   ├── origin-registry.ts           # Allowlist + trust-on-first-use approver, one approval in flight per origin
@@ -263,7 +263,7 @@ The CMS is an ordinary web app on another origin; the encoder listens on loopbac
 
 | Tier | Form | Who holds it | What it can do |
 |---|---|---|---|
-| Instance API token | `X-API-Key: <token>` | The app's own UI only | Everything. Minted per launch by the Electron main process (`randomBytes(32)`), handed to the renderer over the preload bridge, never written to disk. Standalone it falls back to `MASTER_API_KEY` |
+| Instance API token | `X-API-Key: <token>` | The app's own UI only | Everything. Minted per launch by the Electron main process (`randomBytes(32)`), handed to the renderer over the preload bridge, never written to disk. Standalone it falls back to `LOCAL_API_TOKEN` (or the deprecated `MASTER_API_KEY`) |
 | Session token | `Authorization: Bearer sess_*` (also accepted as `?token=` on preview / waveform / storyboard routes) | The UI, per session | Drive one session: attach a file, start the encode, poll, delete, read/write its chapters, stream its preview |
 | Read token | `?token=read_*` | The CMS that opened the session | Watch only: the SSE stream and the status endpoint. Cannot start, cancel, or reach the source file. Minted only for `origin: 'cms'` sessions |
 
@@ -358,7 +358,7 @@ Disk is guarded on both ends: `disk-space.ts` refuses an ingest or an encode tha
 
 ## API Endpoints
 
-Auth column: **token** = instance `X-API-Key`; **session** = `Bearer sess_*`; **read** = `?token=read_*`; **origin** = browser Origin allowlist; **query token** = `?token=` carrying the session token.
+Auth column: **instance** = the instance `X-API-Key` token; **session** = `Bearer sess_*`; **read** = `?token=read_*`; **origin** = browser Origin allowlist; **query token** = `?token=` carrying the session token.
 
 ### Encoding sessions (`/api/sessions`)
 
@@ -429,7 +429,7 @@ created -> uploading -> uploaded -> queued -> encoding -> encrypting -> uploadin
 
 | Variable | Default | Description |
 |---|---|---|
-| `MASTER_API_KEY` | — | The instance API token accepted on `X-API-Key`. Unset disables key auth entirely |
+| `LOCAL_API_TOKEN` | — | The instance API token accepted on `X-API-Key`. Unset disables key auth entirely. `MASTER_API_KEY` is still read, with a deprecation warning |
 | `PORT` | `3000` (standalone `main.ts`) | HTTP port. The embedded default is `31711` (`DEFAULT_PORT`) |
 | `HOST` | `127.0.0.1` | Bind address |
 | `WORK_DIR` | `./work` | Scratch directory for sessions, previews, sidecars |
@@ -482,7 +482,7 @@ Starts the shared-library watch builds, the API on `http://127.0.0.1:3000` (Swag
 `api/.env`:
 
 ```bash
-MASTER_API_KEY=dev-token
+LOCAL_API_TOKEN=dev-token
 CMS_ALLOWED_ORIGINS=http://localhost:5199
 ```
 

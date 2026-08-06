@@ -31,7 +31,7 @@ export class OriginsController {
 
     @Get()
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master')
+    @AuthTypes('instance')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'List the origins this instance has allowed and blocked',
@@ -44,7 +44,7 @@ export class OriginsController {
     @Delete()
     @HttpCode(HttpStatus.NO_CONTENT)
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master')
+    @AuthTypes('instance')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Forget a decision about an origin',

@@ -89,7 +89,7 @@ export class EncodeController {
 
     @Post()
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master')
+    @AuthTypes('instance')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Create an encoding session',
@@ -122,12 +122,12 @@ export class EncodeController {
 
     @Get()
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master')
+    @AuthTypes('instance')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'List every session on this instance',
         description:
-            'For the local UI, which is the only thing holding the master key. ' +
+            'For the local UI, which is the only thing holding the instance token. ' +
             'Includes each session token so the UI can reach the session-scoped ' +
             'preview and waveform routes without having kept one from creation. ' +
             'Newest first.',
@@ -152,7 +152,7 @@ export class EncodeController {
 
     @Post(':sessionId/local-file')
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master', 'session')
+    @AuthTypes('instance', 'session')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Attach a file already on this machine to the session',
@@ -239,7 +239,7 @@ export class EncodeController {
     @Post(':sessionId/encode')
     @HttpCode(HttpStatus.ACCEPTED)
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master', 'session')
+    @AuthTypes('instance', 'session')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Start encoding with the given configuration',
@@ -390,7 +390,7 @@ export class EncodeController {
 
     @Get(':sessionId')
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master', 'session', 'read')
+    @AuthTypes('instance', 'session', 'read')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Get session status',
@@ -399,7 +399,7 @@ export class EncodeController {
             'When status is "uploaded", includes probe results. ' +
             'When status is "encoding", includes progress percentage. ' +
             'When "completed", includes file listing. ' +
-            'Accepts the master key, the session Bearer token, or either the ' +
+            'Accepts the instance token, the session Bearer token, or either the ' +
             'session or read token as a `token` query parameter.',
     })
     @ApiParam({
@@ -448,6 +448,11 @@ export class EncodeController {
         ) {
             result.probeResult = session.probeResult as any;
         }
+
+        // Decided at session creation and not editable afterwards, so the client
+        // has no other way to learn it. The encode config form was assuming the
+        // API default, which is right until a CMS asks for anything else.
+        result.byteRange = session.config?.byteRange !== false;
 
         // Trim ranges are part of the submitted encode config, so they outlive the
         // client that sent them. Reporting them lets the UI keep showing the output
@@ -511,7 +516,7 @@ export class EncodeController {
     @Delete(':sessionId')
     @HttpCode(HttpStatus.NO_CONTENT)
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master', 'session')
+    @AuthTypes('instance', 'session')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Cancel and delete an encoding session',
@@ -593,7 +598,7 @@ export class EncodeController {
 
     @Get(':sessionId/chapters')
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master', 'session')
+    @AuthTypes('instance', 'session')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Read the chapter sidecar for this session',
@@ -624,7 +629,7 @@ export class EncodeController {
     @Put(':sessionId/chapters')
     @HttpCode(HttpStatus.NO_CONTENT)
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master', 'session')
+    @AuthTypes('instance', 'session')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Write the chapter sidecar for this session',

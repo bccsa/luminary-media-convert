@@ -16,6 +16,7 @@ import {
     privateNetworkAccessMiddleware,
 } from './cors.config.js';
 import type { CredentialCipher } from './encode/services/credential-cipher.js';
+import { API_VERSION } from './version.js';
 
 /**
  * Re-exported for the embedding host, whose file picker has to offer exactly
@@ -196,17 +197,23 @@ export async function createServer(
         const config = new DocumentBuilder()
             .setTitle('Luminary Media Convert')
             .setDescription(
-                'HLS/ABR media encoding service. Create encoding sessions, upload media files, ' +
-                    'and follow progress and S3 output locations over SSE or by polling.',
+                'Local HLS/ABR media encoding service. Open a session, point it at a ' +
+                    'file already on this machine, and follow progress and the S3 output ' +
+                    'location over SSE or by polling. Nothing is uploaded through this API.',
             )
-            .setVersion('2.0.0')
+            // The real one, so the docs and the version the CMS reads off
+            // /api/cms/health cannot disagree. The hardcoded 2.0.0 outlived the
+            // product it belonged to.
+            .setVersion(API_VERSION)
             .addApiKey(
                 {
                     type: 'apiKey',
                     in: 'header',
                     name: 'X-API-Key',
                     description:
-                        'The local instance API token (MASTER_API_KEY). Accepted on every endpoint.',
+                        'The instance API token. Minted per launch by the desktop host, or ' +
+                        'read from LOCAL_API_TOKEN when the API runs standalone. Accepted on ' +
+                        'every endpoint regardless of what it declares.',
                 },
                 'apikey',
             )
@@ -214,7 +221,8 @@ export async function createServer(
                 type: 'http',
                 scheme: 'bearer',
                 description:
-                    'Session token (sess_*) returned from the session creation endpoint.',
+                    'Session token (sess_*), returned when the session is created. Drives ' +
+                    'one session and nothing else.',
             })
             .build();
 

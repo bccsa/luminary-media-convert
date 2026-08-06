@@ -190,13 +190,18 @@ Two arrivals are covered, because they differ in whether a renderer exists yet: 
 
 ## 9. Housekeeping
 
-Small, low-risk, and each independently droppable.
+**Done.**
 
-- **Deployment artefacts from the service era.** Promoted out of housekeeping to **item 0c** — it turned out to block a clean merge rather than merely being untidy.
-- **Stale SaaS-era documents.** `docs/URS-saas-adaptation.md`, `docs/FDS-saas-adaptation.md` and `docs/implementation-plan.md` describe the multi-tenant product. `security-review.md`, `security-audit-v1.md` and `privacy-review.md` are dated audits of a codebase that no longer exists in this shape (`privacy-review.md` now carries a note saying so). Archive them, or re-run the security and privacy reviews against the local-only architecture — the threat model changed completely: no shared service, no user database, credentials in an OS keychain, and a new network-facing surface in the CMS origin gate.
-- **Naming: `MASTER_API_KEY` vs the instance token.** The injection token is `LOCAL_API_TOKEN`, the env fallback is `MASTER_API_KEY`, the guard calls it `masterKey`, and `@AuthTypes('master')` names the tier. It is one thing with four names, and "master key" carries multi-tenant connotations it no longer has. A rename to something like `LOCAL_API_TOKEN` throughout (with the old env name accepted for a release) would remove a recurring source of confusion.
-- **Unused DTOs.** `api/src/encode/dto/rendition.dto.ts` and `review-range.dto.ts` are not referenced by any controller or service.
-- **Swagger metadata drift.** `bootstrap.ts` hardcodes `.setVersion('2.0.0')` while `version.ts` reads the real package version for the CMS handshake, and the `X-API-Key` security scheme description still says "(MASTER_API_KEY)". Use `API_VERSION` and reword.
-- **Read tokens never expire.** A `read_*` token is valid for the life of the session record and is only invalidated when the session is removed. That is fine for a watch-only credential on loopback, but it is worth a deliberate decision rather than an accident.
-- **`byteRange` is not reported in the status response.** The session status DTO doesn't expose whether byte-range packing was enabled, so `SessionView` pins `byteRangeEnabled = true` (the API default). Either add the field to `SessionStatusDto` or drop the UI's dependence on it.
-- **Prettier baseline.** Several touched api/ files (`encryption.service.ts`, `encode.service.ts`, auth files, others) were already prettier-unclean at HEAD and remain so — new code follows the surrounding style, but a one-off `prettier --write` pass on api/src would clear the noise. Do it as its own commit.
+- **Unused DTOs.** `rendition.dto.ts` and `review-range.dto.ts` removed — nothing referenced any of their four exported classes.
+- **Swagger metadata drift.** The hardcoded `2.0.0` outlived the product it belonged to; the docs now report `API_VERSION`, the same value the CMS reads off `/api/cms/health`, so the two cannot disagree. The security-scheme descriptions were reworded.
+- **`byteRange` in the status response.** Added. It is fixed at session creation and not editable, so the client had no way to learn it and the encode config form was assuming the API default — right until a CMS asked for anything else.
+- **Read-token lifetime.** Recorded as a deliberate decision rather than an oversight, in `session.service.ts`. Its lifetime is the session's, which is a bound the session already has; an expiry shorter than that would break the case it exists for (a CMS watching an encode that can run for hours). What makes that acceptable is written down, along with what would make it unacceptable.
+- **Naming.** One thing had four names. The tier is `instance` now, not `master`; the guard holds an `instanceToken`; the env var is `LOCAL_API_TOKEN`, matching the injection token. `MASTER_API_KEY` is still read — it is what every existing `.env` says — but warns, so the deprecation is visible rather than permanent. Verified working with a real fallback.
+- **Stale SaaS-era documents.** Moved to `docs/archive-saas/` with a README explaining why their conclusions do not transfer: no shared service, no user database, credentials in an OS keychain, a new perimeter in the origin allowlist, nothing uploaded, and a loopback-only bind. Kept rather than deleted — an audit is evidence of what was examined and when.
+- **Prettier baseline.** A `prettier --write` pass over `api/src`, as its own commit.
+
+**Still open.**
+
+- **Re-run the security and privacy reviews** against the local-only architecture. The archive README lists what changed in the threat model; that is the input, not the answer.
+
+---

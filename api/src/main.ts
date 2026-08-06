@@ -8,7 +8,7 @@ dotenv.config();
  *
  * Everything it does is in `bootstrap.ts`; this file exists so that running
  * the service directly and embedding it in the desktop app are the same code
- * path with different arguments. `MASTER_API_KEY`, `WORK_DIR`,
+ * path with different arguments. `LOCAL_API_TOKEN`, `WORK_DIR`,
  * `CMS_ALLOWED_ORIGINS` and the ffmpeg paths are read by the providers and
  * services themselves, so they are deliberately not repeated here.
  */

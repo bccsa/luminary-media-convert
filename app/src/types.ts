@@ -69,6 +69,7 @@ export interface SessionStatusResponse {
     pipelineProgress?: PipelineProgress;
     queuePosition?: number;
     canRetry?: boolean;
+    byteRange?: boolean;
     probeResult?: ProbeResult;
     files?: string[];
     masterPlaylist?: string;

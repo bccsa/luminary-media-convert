@@ -46,6 +46,20 @@ export interface Session {
      * Read-only credential handed to whoever asked for the session but does not
      * drive it — today, the CMS that opened it. Watches the event stream and
      * polls status; cannot encode, cancel, or reach the source file.
+     *
+     * It has no expiry, and that is deliberate rather than overlooked. Its
+     * lifetime is the session's: it is minted with the session and stops
+     * resolving the moment the session is removed, which is a bound the session
+     * already has — sessions are purged at boot and swept when abandoned. An
+     * expiry shorter than that would break the case the token exists for, a CMS
+     * watching an encode that can legitimately run for hours; one longer than
+     * that would never be reached.
+     *
+     * What makes that acceptable is how little it can do and how far it can
+     * travel: read-only, scoped to one session, over a loopback interface, to a
+     * caller whose origin was approved by the user. Widen any of those — a
+     * network-reachable deployment, or a token that could start work — and this
+     * should be revisited.
      */
     readToken?: string;
     /** Post title from the CMS, so the local UI can name the session. */
@@ -442,7 +456,7 @@ export class SessionService implements OnModuleInit {
         };
 
         // Only a remote caller needs a credential it can hand to a browser: the
-        // local UI already holds the master key. A read token exists so the CMS
+        // local UI already holds the instance token. A read token exists so the CMS
         // can watch a session it is not allowed to drive.
         if (init.origin === 'cms') {
             session.readToken = `read_${randomUUID().replace(/-/g, '')}`;

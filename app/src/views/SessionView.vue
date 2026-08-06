@@ -109,7 +109,14 @@ const sessionToken = ref<string | null>(null);
 const probeResult = ref<ProbeResult | null>(null);
 const probeLoading = ref(false);
 const encodingType = ref<'video' | 'audio'>('video');
-const byteRangeEnabled = ref(true);
+/**
+ * Whether the output uses byte-range HLS. Reported by the encoder, because the
+ * CMS fixes it at session creation and nothing here can change it. It used to
+ * be pinned to the API default, which was a guess that happened to be right.
+ */
+const byteRangeEnabled = computed(
+    () => session.value?.byteRange ?? true,
+);
 const submitting = ref(false);
 const waveformPeaks = ref<number[] | null>(null);
 const editorSegments = ref<Segment[]>([]);

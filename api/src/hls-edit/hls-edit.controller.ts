@@ -22,7 +22,7 @@ export class HlsEditController {
     @Post('read')
     @HttpCode(HttpStatus.OK)
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master')
+    @AuthTypes('instance')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Fetch and parse a master playlist',
@@ -38,7 +38,7 @@ export class HlsEditController {
     @Post('mutate')
     @HttpCode(HttpStatus.OK)
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master')
+    @AuthTypes('instance')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Apply mutations to a master playlist',
@@ -56,7 +56,7 @@ export class HlsEditController {
     @Post('discover')
     @HttpCode(HttpStatus.OK)
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master')
+    @AuthTypes('instance')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Discover HLS master playlists under a folder prefix',
@@ -72,7 +72,7 @@ export class HlsEditController {
     @Post('chapters/read')
     @HttpCode(HttpStatus.OK)
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master')
+    @AuthTypes('instance')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Read the chapter sidecar VTT for a session prefix',
@@ -91,7 +91,7 @@ export class HlsEditController {
     @Post('chapters/write')
     @HttpCode(HttpStatus.NO_CONTENT)
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master')
+    @AuthTypes('instance')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Write the chapter sidecar VTT for a session prefix',
@@ -108,7 +108,7 @@ export class HlsEditController {
     @Post('waveform/read')
     @HttpCode(HttpStatus.OK)
     @UseGuards(AuthResolverGuard)
-    @AuthTypes('master')
+    @AuthTypes('instance')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Read the waveform sidecar JSON for a session prefix',
