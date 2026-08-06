@@ -302,6 +302,24 @@ export class EncodeService {
                 }
             }
 
+            // Encrypt the text assets — playlists and VTT sidecars — last.
+            //
+            // Strictly after everything that reads or rewrites a playlist:
+            // the pipeline drain (byte-range packing rewrites media
+            // playlists), key-tag injection, and thumbnail VTT generation.
+            // Anything moved below this line would be parsing ciphertext.
+            //
+            // Segments went to S3 as they were produced and are already
+            // AES-128 encrypted; the text assets only leave in
+            // `uploadRemainingFiles`, immediately below, so this is the last
+            // moment they exist in plaintext anywhere.
+            if (encryptionEnabled && session.config.encryption?.encryptPlaylists) {
+                await this.encryptionService.encryptTextAssets(
+                    outputDir,
+                    encryptionKey!
+                );
+            }
+
             // Upload remaining files (playlists, thumbnails, master.m3u8)
             this.sessionService.updateStatus(sessionId, 'uploading_to_s3');
             this.sessionService.updateProgress(sessionId, 0);

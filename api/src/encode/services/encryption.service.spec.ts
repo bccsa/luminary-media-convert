@@ -223,3 +223,105 @@ describe('EncryptionService — injecting key tags', () => {
         );
     });
 });
+
+describe('EncryptionService — encryptTextAssets (LMCENC01)', () => {
+    let service: EncryptionService;
+    let dir: string;
+
+    const KEY = Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex');
+    const MAGIC = 'LMCENC01';
+
+    /** Independent decryptor: the format spec, not the implementation. */
+    function decrypt(payload: Buffer, key: Buffer): string {
+        expect(payload.subarray(0, 8).toString('ascii')).toBe(MAGIC);
+        const iv = payload.subarray(8, 24);
+        const decipher = createDecipheriv('aes-128-cbc', key, iv);
+        return Buffer.concat([
+            decipher.update(payload.subarray(24)),
+            decipher.final(),
+        ]).toString('utf-8');
+    }
+
+    beforeEach(() => {
+        service = new EncryptionService();
+        dir = mkdtempSync(join(tmpdir(), 'lmcenc-test-'));
+    });
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('round-trips a playlist through the documented format', async () => {
+        const plaintext = '#EXTM3U\n#EXT-X-VERSION:7\n';
+        writeFileSync(join(dir, 'master.m3u8'), plaintext);
+
+        const encrypted = await service.encryptTextAssets(dir, KEY);
+
+        expect(encrypted).toEqual(['master.m3u8']);
+        const onDisk = readFileSync(join(dir, 'master.m3u8'));
+        expect(onDisk.subarray(0, 8).toString('ascii')).toBe(MAGIC);
+        expect(decrypt(onDisk, KEY)).toBe(plaintext);
+    });
+
+    it('walks nested directories and takes both .m3u8 and .vtt', async () => {
+        mkdirSync(join(dir, 'stream_0'));
+        mkdirSync(join(dir, 'thumbnails'));
+        writeFileSync(join(dir, 'master.m3u8'), '#EXTM3U\n');
+        writeFileSync(join(dir, 'stream_0', 'playlist.m3u8'), '#EXTM3U\nseg\n');
+        writeFileSync(join(dir, 'thumbnails', 'thumbnails.vtt'), 'WEBVTT\n');
+        // Not a text asset: stays exactly as it was.
+        writeFileSync(join(dir, 'waveform.json'), '{"peaks":[]}');
+
+        const encrypted = await service.encryptTextAssets(dir, KEY);
+
+        expect(encrypted.sort()).toEqual([
+            'master.m3u8',
+            'stream_0/playlist.m3u8',
+            'thumbnails/thumbnails.vtt',
+        ]);
+        expect(readFileSync(join(dir, 'waveform.json'), 'utf-8')).toBe(
+            '{"peaks":[]}',
+        );
+        expect(
+            decrypt(readFileSync(join(dir, 'thumbnails', 'thumbnails.vtt')), KEY),
+        ).toBe('WEBVTT\n');
+    });
+
+    it('gives every file its own IV', async () => {
+        // Identical plaintext, identical key: only a fresh IV per file keeps
+        // the two ciphertexts apart, and reusing one across a whole output
+        // would leak which playlists are the same.
+        writeFileSync(join(dir, 'a.m3u8'), '#EXTM3U\n');
+        writeFileSync(join(dir, 'b.m3u8'), '#EXTM3U\n');
+
+        await service.encryptTextAssets(dir, KEY);
+
+        const a = readFileSync(join(dir, 'a.m3u8'));
+        const b = readFileSync(join(dir, 'b.m3u8'));
+        expect(a.subarray(8, 24).equals(b.subarray(8, 24))).toBe(false);
+        expect(a.equals(b)).toBe(false);
+        expect(decrypt(a, KEY)).toBe('#EXTM3U\n');
+        expect(decrypt(b, KEY)).toBe('#EXTM3U\n');
+    });
+
+    it('leaves an already-encrypted file alone', async () => {
+        writeFileSync(join(dir, 'master.m3u8'), '#EXTM3U\n');
+        await service.encryptTextAssets(dir, KEY);
+        const first = readFileSync(join(dir, 'master.m3u8'));
+
+        const second = await service.encryptTextAssets(dir, KEY);
+
+        expect(second).toEqual([]);
+        expect(readFileSync(join(dir, 'master.m3u8')).equals(first)).toBe(true);
+        // Still one layer deep — a double wrap would decrypt to ciphertext.
+        expect(decrypt(first, KEY)).toBe('#EXTM3U\n');
+    });
+
+    it('refuses a key that is not AES-128', async () => {
+        writeFileSync(join(dir, 'master.m3u8'), '#EXTM3U\n');
+
+        await expect(
+            service.encryptTextAssets(dir, Buffer.alloc(32)),
+        ).rejects.toThrow(/16-byte/);
+    });
+});

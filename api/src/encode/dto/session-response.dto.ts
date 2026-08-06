@@ -213,15 +213,10 @@ export class SessionStatusDto {
     @Expose()
     thumbnailsVtt?: string;
 
-    @ApiPropertyOptional({
-        description:
-            'Hex-encoded AES-128 encryption key. Present from the moment encoding ' +
-            'starts, when encryption is enabled — the key is generated before the ' +
-            'first segment is written so the caller can store it alongside hlsUrl.',
-        example: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
-    })
-    @Expose()
-    encryptionKeyHex?: string;
+    // The AES-128 key is deliberately absent here. It used to ride along on
+    // every status read and SSE frame, which put it in logs, proxies and
+    // screenshots for the life of the session. Fetch it from
+    // GET /api/sessions/:sessionId/key instead — see SessionKeyResponseDto.
 
     @ApiPropertyOptional({
         description:
@@ -297,4 +292,27 @@ export class SessionStatusDto {
     })
     @Expose()
     trimSegments?: { inSec: number; outSec: number }[];
+}
+
+/**
+ * The session's AES-128 key, masked.
+ *
+ * Masking is an obscurity measure, not a security one, and the formula is
+ * published here on purpose — see {@link maskKeyHex}. Its whole job is to keep
+ * raw keys out of status payloads and the logs that copy them.
+ */
+export class SessionKeyResponseDto {
+    @ApiProperty({
+        description:
+            'Hex-encoded AES-128 session key, XOR-masked. Unmask with:\n\n' +
+            '    mask = SHA-256(sessionId)[0..15]\n' +
+            '    key  = maskedKey XOR mask\n\n' +
+            'XOR is its own inverse, so the same operation masks and unmasks. ' +
+            'This is obscurity, not DRM: it keeps the raw key out of status ' +
+            'responses, SSE frames and the logs that copy them, and nothing ' +
+            'more — any client able to play the media can recover the key.',
+        example: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
+    })
+    @Expose()
+    maskedKeyHex: string;
 }

@@ -7,7 +7,10 @@ import {
 import { rmSync, mkdtempSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { Reflector } from '@nestjs/core';
 import { EncodeController } from './encode.controller.js';
+import { AuthResolverGuard } from '../auth/auth-resolver.guard.js';
+import { maskKeyHex } from './services/key-mask.js';
 import { SessionService } from './services/session.service.js';
 import { QueueService } from './services/queue.service.js';
 import { FfmpegService } from './services/ffmpeg.service.js';
@@ -1567,5 +1570,142 @@ describe('EncodeController — storyboard sprite headers', () => {
                 )
             ).rejects.toThrow(/Sprite not found/);
         }
+    });
+});
+
+describe('EncodeController — masked session key', () => {
+    let controller: EncodeController;
+    let sessionService: SessionService;
+
+    function makeController(): EncodeController {
+        return new EncodeController(
+            sessionService,
+            { emit: vi.fn() } as any,
+            {} as any,
+            { getAccelMode: vi.fn().mockReturnValue('cpu') } as any,
+            {} as any,
+            {} as any,
+            {} as any,
+            {} as any,
+            {} as any,
+        );
+    }
+
+    /** An ExecutionContext for the given handler, as Nest would build one. */
+    function contextFor(handler: any, request: any): any {
+        return {
+            getHandler: () => handler,
+            getClass: () => EncodeController,
+            switchToHttp: () => ({ getRequest: () => request }),
+        };
+    }
+
+    beforeEach(() => {
+        sessionService = new SessionService({ emit: () => {} } as any);
+        controller = makeController();
+    });
+
+    it('returns the key masked, and the mask undoes to the original', async () => {
+        const session = sessionService.create(makeConfig());
+        const keyHex = '000102030405060708090a0b0c0d0e0f';
+        sessionService.setEncryptionKey(session.id, keyHex);
+
+        const result = controller.getSessionKey(session.id);
+
+        expect(result.maskedKeyHex).not.toBe(keyHex);
+        expect(maskKeyHex(session.id, result.maskedKeyHex)).toBe(keyHex);
+    });
+
+    it('404s when the session has no encryption key', () => {
+        const session = sessionService.create(makeConfig());
+
+        expect(() => controller.getSessionKey(session.id)).toThrow(
+            NotFoundException,
+        );
+    });
+
+    it('404s for an unknown session', () => {
+        expect(() => controller.getSessionKey('nope')).toThrow(
+            NotFoundException,
+        );
+    });
+
+    it('is not part of the status payload any more', () => {
+        // The key used to ride along on every poll and SSE frame, which put it
+        // in logs and screenshots for the life of the session.
+        const session = sessionService.create(makeConfig());
+        sessionService.setEncryptionKey(session.id, '000102030405060708090a0b0c0d0e0f');
+
+        const status = controller.getStatus(session.id, makeRequest());
+
+        expect(status).not.toHaveProperty('encryptionKeyHex');
+    });
+
+    it('turns away a request carrying no credentials', async () => {
+        const session = sessionService.create(makeConfig());
+        const guard = new AuthResolverGuard(
+            new Reflector(),
+            sessionService,
+            'local-token' as any,
+        );
+
+        await expect(
+            guard.canActivate(
+                contextFor(EncodeController.prototype.getSessionKey, {
+                    headers: {},
+                    params: { sessionId: session.id },
+                    query: {},
+                }),
+            ),
+        ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('accepts the session token, and the local API token', async () => {
+        const session = sessionService.create(makeConfig());
+        const guard = new AuthResolverGuard(
+            new Reflector(),
+            sessionService,
+            'local-token' as any,
+        );
+
+        await expect(
+            guard.canActivate(
+                contextFor(EncodeController.prototype.getSessionKey, {
+                    headers: { authorization: `Bearer ${session.sessionToken}` },
+                    params: { sessionId: session.id },
+                    query: {},
+                }),
+            ),
+        ).resolves.toBe(true);
+
+        await expect(
+            guard.canActivate(
+                contextFor(EncodeController.prototype.getSessionKey, {
+                    headers: { 'x-api-key': 'local-token' },
+                    params: { sessionId: session.id },
+                    query: {},
+                }),
+            ),
+        ).resolves.toBe(true);
+    });
+
+    it('turns away another session\'s token', async () => {
+        const mine = sessionService.create(makeConfig());
+        const theirs = sessionService.create(makeConfig());
+        const guard = new AuthResolverGuard(
+            new Reflector(),
+            sessionService,
+            'local-token' as any,
+        );
+
+        await expect(
+            guard.canActivate(
+                contextFor(EncodeController.prototype.getSessionKey, {
+                    headers: { authorization: `Bearer ${theirs.sessionToken}` },
+                    params: { sessionId: mine.id },
+                    query: {},
+                }),
+            ),
+        ).rejects.toBeInstanceOf(UnauthorizedException);
     });
 });

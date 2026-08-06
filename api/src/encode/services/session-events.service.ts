@@ -13,7 +13,9 @@ export interface SessionEvent {
     files?: string[];
     masterPlaylist?: string;
     thumbnailsVtt?: string;
-    encryptionKeyHex?: string;
+    // No encryptionKeyHex: the key is fetched from
+    // GET /api/sessions/:sessionId/key, masked, rather than broadcast on every
+    // frame of a stream that ends up in logs and consoles.
     /**
      * Where the output will be playable from. Present from the moment encoding
      * starts — the destination key is settled long before the first segment

@@ -26,4 +26,20 @@ export class EncryptionConfigDto {
     @IsOptional()
     @Expose()
     keyUrl?: string;
+
+    @ApiPropertyOptional({
+        description:
+            'Encrypt master/media playlists and WebVTT sidecars with the session ' +
+            'key (LMCENC01 format, see docs/encrypted-sidecar-format.md). ' +
+            'Segments are already AES-128 encrypted when encryption is enabled; ' +
+            'this extends coverage to the text assets, so generic HLS tooling ' +
+            'cannot read the stream layout, chapter titles or subtitles from the ' +
+            'bucket. Encrypted objects upload as application/octet-stream under ' +
+            'their existing keys and extensions. Defaults to false.',
+        default: false,
+    })
+    @IsBoolean()
+    @IsOptional()
+    @Expose()
+    encryptPlaylists?: boolean;
 }

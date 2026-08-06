@@ -17,6 +17,11 @@ import {
     type HlsParsedMaster,
 } from '@luminary-media-converter/hls';
 import { S3EtagService } from './s3-etag.service.js';
+import {
+    encryptTextAsset,
+    keyFromHex,
+    readMaybeEncrypted,
+} from '../encode/services/lmcenc.js';
 import type { S3ConfigDto } from '../encode/dto/s3-config.dto.js';
 import type { HlsReadRequestDto } from './dto/read.dto.js';
 import type { HlsMutateRequestDto } from './dto/mutate.dto.js';
@@ -48,6 +53,10 @@ export interface HlsDiscoverResult {
 const LANG_PATTERN = /^[a-z]{2,3}(?:-[A-Z]{2})?$/;
 const MAX_VTT_BYTES = 1024 * 1024;
 
+const OCTET_STREAM = 'application/octet-stream';
+const M3U8_CONTENT_TYPE = 'application/vnd.apple.mpegurl';
+const VTT_CONTENT_TYPE = 'text/vtt';
+
 @Injectable()
 export class HlsEditService {
     private readonly logger = new Logger(HlsEditService.name);
@@ -65,7 +74,7 @@ export class HlsEditService {
             dto.s3,
             masterPlaylistKey
         );
-        const master = parseMasterPlaylist(body.toString('utf-8'));
+        const master = parseMasterPlaylist(this.decode(body, dto.keyHex));
 
         return { master, etag, folderPrefix, masterPlaylistKey };
     }
@@ -83,7 +92,7 @@ export class HlsEditService {
             dto.s3,
             masterPlaylistKey
         );
-        const master = parseMasterPlaylist(body.toString('utf-8'));
+        const master = parseMasterPlaylist(this.decode(body, dto.keyHex));
 
         const ctx: OperationContext = {
             s3: dto.s3,
@@ -91,6 +100,7 @@ export class HlsEditService {
             master,
             s3EtagService: this.s3EtagService,
             writtenKeys: [],
+            keyHex: dto.keyHex,
         };
 
         for (const op of dto.operations) {
@@ -100,13 +110,18 @@ export class HlsEditService {
         // Always rewrite master.m3u8 — even on a no-op — so the ETag rotates
         // and the caller can observe plumbing. Conditional on the client's
         // `ifMatch` so stale writes fail with 409.
+        //
+        // An encrypted session goes back encrypted, with a new IV, and the
+        // plaintext only ever exists in this process's memory: writing the
+        // rebuilt master in the clear — even for the instant before a second
+        // request re-encrypted it — would publish the whole stream layout.
         const rebuilt = buildMasterPlaylist(master);
         const put = await this.s3EtagService.putObjectIfMatch(
             dto.s3,
             masterPlaylistKey,
-            rebuilt,
+            this.encode(rebuilt, dto.keyHex),
             dto.ifMatch,
-            'application/vnd.apple.mpegurl'
+            dto.keyHex ? OCTET_STREAM : M3U8_CONTENT_TYPE
         );
         ctx.writtenKeys.push(masterPlaylistKey);
 
@@ -150,7 +165,7 @@ export class HlsEditService {
                 dto.s3,
                 key
             );
-            if (body.toString('utf-8').includes('#EXT-X-STREAM-INF')) {
+            if (this.decode(body, dto.keyHex).includes('#EXT-X-STREAM-INF')) {
                 playlists.push(key);
             }
         }
@@ -193,7 +208,8 @@ export class HlsEditService {
     async readChapters(
         s3: S3ConfigDto,
         folderPrefix: string,
-        lang: string
+        lang: string,
+        keyHex?: string
     ): Promise<{ vtt: string } | null> {
         if (!LANG_PATTERN.test(lang)) {
             throw new BadRequestException(
@@ -206,7 +222,7 @@ export class HlsEditService {
                 s3,
                 key
             );
-            return { vtt: body.toString('utf-8') };
+            return { vtt: this.decode(body, keyHex) };
         } catch (err) {
             if (isNoSuchKey(err)) return null;
             throw err;
@@ -245,12 +261,19 @@ export class HlsEditService {
     /**
      * Write a WebVTT chapter sidecar to `{folderPrefix}chapters/{lang}.vtt`.
      * Validates language code, body size, and `WEBVTT` magic before uploading.
+     *
+     * `keyHex` is the caller stating that this session's text assets are
+     * encrypted — the body is wrapped in LMCENC01 with a fresh IV on the way
+     * out. There is nothing in the bucket to mirror on a first write, and
+     * chapter titles left in the clear beside an encrypted playlist would give
+     * away exactly what the encryption was for.
      */
     async writeChapters(
         s3: S3ConfigDto,
         folderPrefix: string,
         lang: string,
-        vtt: string
+        vtt: string,
+        keyHex?: string
     ): Promise<void> {
         lang = lang.toLowerCase();
         if (!LANG_PATTERN.test(lang)) {
@@ -271,7 +294,37 @@ export class HlsEditService {
             );
         }
         const key = chaptersKey(folderPrefix, lang);
-        await this.s3EtagService.putObject(s3, key, vtt, 'text/vtt');
+        await this.s3EtagService.putObject(
+            s3,
+            key,
+            this.encode(vtt, keyHex),
+            keyHex ? OCTET_STREAM : VTT_CONTENT_TYPE
+        );
+    }
+
+    /**
+     * Bytes from S3 as text, decrypting when they carry the LMCENC01 magic.
+     *
+     * Detection is by content, not by request: a session that was never
+     * encrypted reads the same whether or not a key was supplied, and an
+     * encrypted object without a key fails loudly rather than being parsed as
+     * whatever the ciphertext happens to look like.
+     */
+    private decode(body: Buffer, keyHex?: string): string {
+        try {
+            return readMaybeEncrypted(
+                body,
+                keyHex ? keyFromHex(keyHex) : undefined
+            );
+        } catch (err) {
+            throw new BadRequestException((err as Error).message);
+        }
+    }
+
+    /** Text on its way to S3, encrypted when the session holds a key. */
+    private encode(text: string, keyHex?: string): Buffer | string {
+        if (!keyHex) return text;
+        return encryptTextAsset(text, keyFromHex(keyHex));
     }
 
     private async listObjects(

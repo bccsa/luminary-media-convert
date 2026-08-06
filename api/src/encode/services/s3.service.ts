@@ -1,8 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as Minio from 'minio';
 import { createReadStream } from 'fs';
-import { stat } from 'fs/promises';
+import { open, stat } from 'fs/promises';
 import { Transform } from 'stream';
+import {
+    LMCENC_CIPHERTEXT_OFFSET,
+    isEncryptedPayload,
+} from '@luminary-media-converter/hls';
 import type { S3ConfigDto } from '../dto/s3-config.dto.js';
 
 @Injectable()
@@ -64,7 +68,7 @@ export class S3Service {
         objectKey: string,
         onBytes?: (bytes: number) => void
     ): Promise<void> {
-        const contentType = this.getContentType(filePath);
+        const contentType = await this.resolveContentType(filePath);
 
         if (!onBytes) {
             await client.fPutObject(bucket, objectKey, filePath, {
@@ -89,6 +93,55 @@ export class S3Service {
             { 'Content-Type': contentType }
         );
         this.logger.debug(`Uploaded: ${objectKey}`);
+    }
+
+    /**
+     * The Content-Type this file should be stored under, extension first and
+     * content second.
+     *
+     * A session with `encryption.encryptPlaylists` replaces its playlists and
+     * VTT sidecars with LMCENC01 ciphertext under the same names, so the
+     * extension no longer describes the bytes. Serving those as
+     * `application/vnd.apple.mpegurl` or `text/vtt` invites a CDN or proxy to
+     * transcode the charset or compress them, and either corrupts the
+     * ciphertext for every viewer.
+     *
+     * Sniffed here rather than threaded down from the encoder: uploads happen
+     * from two places (the segment pipeline and the final sweep), and only the
+     * bytes on disk know for certain whether they were encrypted. Costs one
+     * 8-byte read per playlist — never per segment.
+     */
+    async resolveContentType(filePath: string): Promise<string> {
+        const byExtension = this.getContentType(filePath);
+        if (
+            byExtension !== 'application/vnd.apple.mpegurl' &&
+            byExtension !== 'text/vtt'
+        ) {
+            return byExtension;
+        }
+
+        return (await this.isEncryptedFile(filePath))
+            ? 'application/octet-stream'
+            : byExtension;
+    }
+
+    private async isEncryptedFile(filePath: string): Promise<boolean> {
+        let handle;
+        try {
+            handle = await open(filePath, 'r');
+            // The whole header, not just the magic: isEncryptedPayload refuses
+            // anything too short to be a real payload. A shorter file leaves
+            // the tail zeroed, which is not the magic either way.
+            const header = Buffer.alloc(LMCENC_CIPHERTEXT_OFFSET);
+            await handle.read(header, 0, header.length, 0);
+            return isEncryptedPayload(header);
+        } catch {
+            // Unreadable here means unreadable a line later, when the upload
+            // opens it for real and fails with a better message.
+            return false;
+        } finally {
+            await handle?.close().catch(() => {});
+        }
     }
 
     getContentType(filePath: string): string {

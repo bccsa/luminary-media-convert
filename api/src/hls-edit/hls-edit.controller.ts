@@ -134,7 +134,8 @@ export class HlsEditController {
         const result = await this.service.readChapters(
             dto.s3,
             dto.folderPrefix,
-            dto.lang
+            dto.lang,
+            dto.keyHex
         );
         if (!result)
             throw new NotFoundException('No chapter file for this language');
@@ -165,7 +166,8 @@ export class HlsEditController {
             dto.s3,
             dto.folderPrefix,
             dto.lang,
-            dto.vtt
+            dto.vtt,
+            dto.keyHex
         );
     }
 

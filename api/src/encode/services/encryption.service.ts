@@ -3,7 +3,8 @@ import { createCipheriv, randomBytes } from 'crypto';
 import { createReadStream, createWriteStream } from 'fs';
 import { readdir, readFile, rename, unlink, writeFile } from 'fs/promises';
 import { pipeline } from 'stream/promises';
-import { join } from 'path';
+import { join, relative } from 'path';
+import { encryptTextAsset, isLmcencPayload } from './lmcenc.js';
 
 @Injectable()
 export class EncryptionService {
@@ -52,6 +53,59 @@ export class EncryptionService {
         this.logger.log(
             `Injected key tags into ${playlists.length} playlist(s)`
         );
+    }
+
+    /**
+     * Encrypt every playlist and WebVTT sidecar under `outputDir` in place.
+     *
+     * The last thing that happens to the output before it is uploaded: the
+     * files are replaced by their LMCENC01 wrappers under the same names, so
+     * S3 keys, extensions and playlist references are all unchanged. Anything
+     * that still needs to *read* a playlist — key-tag injection, byte-range
+     * rewriting, thumbnail VTT generation — must already have run, because
+     * from here on the files are ciphertext.
+     *
+     * Each file gets its own IV. Files that already carry the magic are left
+     * alone, so a re-run (a retry, a partially-completed pass) cannot
+     * double-encrypt and strand the output.
+     *
+     * Returns the encrypted paths, relative to `outputDir`.
+     */
+    async encryptTextAssets(outputDir: string, key: Buffer): Promise<string[]> {
+        const files = await this.findTextAssetFiles(outputDir);
+        const encrypted: string[] = [];
+
+        for (const filePath of files) {
+            const content = await readFile(filePath);
+            if (isLmcencPayload(content)) continue;
+            await writeFile(filePath, encryptTextAsset(content, key));
+            encrypted.push(
+                relative(outputDir, filePath).split(/[\\/]/).join('/'),
+            );
+        }
+
+        this.logger.log(
+            `Encrypted ${encrypted.length} playlist/VTT file(s) with the session key`,
+        );
+        return encrypted;
+    }
+
+    /** Every `.m3u8` and `.vtt` file under `dir`, recursively. */
+    private async findTextAssetFiles(dir: string): Promise<string[]> {
+        const found: string[] = [];
+        const entries = await readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = join(dir, entry.name);
+            if (entry.isDirectory()) {
+                found.push(...(await this.findTextAssetFiles(fullPath)));
+            } else if (
+                entry.name.endsWith('.m3u8') ||
+                entry.name.endsWith('.vtt')
+            ) {
+                found.push(fullPath);
+            }
+        }
+        return found;
     }
 
     private async findPlaylistFiles(dir: string): Promise<string[]> {

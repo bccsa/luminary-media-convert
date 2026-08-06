@@ -200,3 +200,80 @@ describe('S3Service', () => {
         });
     });
 });
+
+describe('S3Service — Content-Type for encrypted text assets', () => {
+    let service: S3Service;
+    let dir: string;
+
+    const LMCENC = (body: string): Buffer =>
+        Buffer.concat([
+            Buffer.from('LMCENC01', 'ascii'),
+            Buffer.alloc(16, 0x11), // IV
+            Buffer.from(body),
+        ]);
+
+    beforeEach(() => {
+        service = new S3Service();
+        dir = mkdtempSync(join(tmpdir(), 'lmcenc-ct-'));
+        mockFPutObject.mockReset();
+        mockFPutObject.mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true });
+    });
+
+    async function contentTypeOf(name: string, body: Buffer | string): Promise<string> {
+        const path = join(dir, name);
+        writeFileSync(path, body);
+        return service.resolveContentType(path);
+    }
+
+    it('stores an encrypted playlist as octet-stream', async () => {
+        // Anything that reads the extension and decides to transcode the
+        // charset or gzip the body corrupts the ciphertext for every viewer.
+        expect(await contentTypeOf('master.m3u8', LMCENC('cipher'))).toBe(
+            'application/octet-stream',
+        );
+    });
+
+    it('stores an encrypted VTT as octet-stream', async () => {
+        expect(await contentTypeOf('chapters.vtt', LMCENC('cipher'))).toBe(
+            'application/octet-stream',
+        );
+    });
+
+    it('leaves plaintext playlists and VTTs as they were', async () => {
+        expect(await contentTypeOf('master.m3u8', '#EXTM3U\n')).toBe(
+            'application/vnd.apple.mpegurl',
+        );
+        expect(await contentTypeOf('chapters.vtt', 'WEBVTT\n')).toBe('text/vtt');
+    });
+
+    it('does not sniff files that were never text assets', async () => {
+        expect(await contentTypeOf('segment_000.m4s', LMCENC('x'))).toBe(
+            'video/iso.segment',
+        );
+    });
+
+    it('falls back to the extension when the file cannot be read', async () => {
+        expect(
+            await service.resolveContentType(join(dir, 'missing.m3u8')),
+        ).toBe('application/vnd.apple.mpegurl');
+    });
+
+    it('uploads an encrypted playlist with the sniffed content type', async () => {
+        const path = join(dir, 'master.m3u8');
+        writeFileSync(path, LMCENC('cipher'));
+        const client = new (MockClient as any)();
+
+        await service.uploadFile(client, 'bucket', path, 'out/master.m3u8');
+
+        expect(mockFPutObject).toHaveBeenCalledWith(
+            'bucket',
+            'out/master.m3u8',
+            path,
+            { 'Content-Type': 'application/octet-stream' },
+        );
+    });
+});

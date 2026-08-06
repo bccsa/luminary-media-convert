@@ -947,3 +947,140 @@ describe('EncodeService', () => {
         expect(updated.error).toBe('Pipeline segment upload failed');
     });
 });
+
+describe('EncodeService — encrypting the text assets last', () => {
+    let service: EncodeService;
+    let sessionService: SessionService;
+    let encryptionService: Mocked<EncryptionService>;
+    let thumbnailService: Mocked<ThumbnailService>;
+    let mockPipeline: SegmentPipeline;
+    let calls: string[];
+    let testWorkDir: string;
+
+    function makeEncryptedConfig(encryptPlaylists: boolean): CreateSessionDto {
+        return {
+            ...makeConfig(),
+            encryption: { enabled: true, encryptPlaylists },
+        };
+    }
+
+    beforeEach(() => {
+        testWorkDir = mkdtempSync(join(tmpdir(), 'luminary-order-'));
+        process.env.WORK_DIR = testWorkDir;
+        calls = [];
+
+        sessionService = new SessionService({ emit: () => {} } as any);
+
+        const ffmpegService = {
+            encode: vi.fn().mockResolvedValue({
+                outputDir: '/tmp/output',
+                masterPlaylist: 'master.m3u8',
+                segmentFormat: 'fmp4',
+            }),
+        } as any;
+
+        encryptionService = {
+            generateKey: vi.fn().mockReturnValue(Buffer.alloc(16, 0xcd)),
+            generateIV: vi.fn().mockReturnValue(Buffer.alloc(16, 0xab)),
+            injectKeyTagsIntoPlaylists: vi.fn(async () => {
+                calls.push('injectKeyTags');
+            }),
+            encryptTextAssets: vi.fn(async () => {
+                calls.push('encryptTextAssets');
+                return ['master.m3u8'];
+            }),
+        } as any;
+
+        thumbnailService = {
+            generateThumbnails: vi.fn(async () => {
+                calls.push('thumbnails');
+                return { vttRelativePath: 'thumbnails/thumbnails.vtt' };
+            }),
+            removePreview: vi.fn().mockResolvedValue(undefined),
+        } as any;
+
+        const waveformService = {
+            generateWaveform: vi.fn().mockResolvedValue([0.1]),
+            cachePath: vi.fn().mockReturnValue(join(testWorkDir, 'nope.json')),
+        } as any;
+
+        mockPipeline = {
+            start: vi.fn(),
+            drain: vi.fn(async () => {
+                calls.push('drain');
+                return [];
+            }),
+            abort: vi.fn(),
+            uploadRemainingFiles: vi.fn(async () => {
+                calls.push('uploadRemainingFiles');
+                return [];
+            }),
+            get error() {
+                return null;
+            },
+            get keys() {
+                return ['out/master.m3u8'];
+            },
+        } as any;
+
+        service = new EncodeService(
+            sessionService,
+            ffmpegService,
+            encryptionService,
+            thumbnailService,
+            waveformService,
+            {} as any,
+            { createPipeline: vi.fn().mockReturnValue(mockPipeline) } as any,
+        );
+    });
+
+    afterEach(() => {
+        rmSync(testWorkDir, { recursive: true, force: true });
+        delete process.env.WORK_DIR;
+    });
+
+    async function run(config: CreateSessionDto): Promise<void> {
+        const session = sessionService.create(config);
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+        await service.processSession(session.id);
+    }
+
+    it('encrypts after the drain, the key tags and the thumbnail VTT, and before the upload', async () => {
+        // Order is the whole contract: every step above reads or rewrites a
+        // playlist, and every one of them would be parsing ciphertext if the
+        // encryption moved up. The upload has to come after, or plaintext
+        // reaches the bucket.
+        await run(makeEncryptedConfig(true));
+
+        expect(calls).toEqual([
+            'drain',
+            'injectKeyTags',
+            'thumbnails',
+            'encryptTextAssets',
+            'uploadRemainingFiles',
+        ]);
+    });
+
+    it('hands the encryptor the output directory and the session key', async () => {
+        await run(makeEncryptedConfig(true));
+
+        expect(encryptionService.encryptTextAssets).toHaveBeenCalledWith(
+            expect.stringContaining('output'),
+            Buffer.alloc(16, 0xcd),
+        );
+    });
+
+    it('leaves the text assets alone when the session did not opt in', async () => {
+        await run(makeEncryptedConfig(false));
+
+        expect(encryptionService.injectKeyTagsIntoPlaylists).toHaveBeenCalled();
+        expect(encryptionService.encryptTextAssets).not.toHaveBeenCalled();
+    });
+
+    it('leaves the text assets alone when the session is not encrypted at all', async () => {
+        await run(makeConfig());
+
+        expect(encryptionService.encryptTextAssets).not.toHaveBeenCalled();
+    });
+});
