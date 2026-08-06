@@ -59,10 +59,18 @@ export const createCorsOptions = (registry: OriginRegistry): CorsOptions => ({
             callback(null, true);
             return;
         }
-        void Promise.resolve(registry.isAllowed(origin)).then(
-            (allowed) => callback(null, allowed),
-            () => callback(null, false),
-        );
+        // The call is made *inside* the chain, not handed to Promise.resolve
+        // ready-made. `isAllowed` has a synchronous return path and invokes the
+        // host's approver directly, so it can throw before any promise exists —
+        // and such a throw would escape this callback and become a 500 from a
+        // request we meant to quietly turn away, which is the one outcome this
+        // function exists to avoid.
+        void Promise.resolve()
+            .then(() => registry.isAllowed(origin))
+            .then(
+                (allowed) => callback(null, allowed),
+                () => callback(null, false),
+            );
     },
 });
 
