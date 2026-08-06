@@ -89,6 +89,8 @@ export interface Session {
     hlsUrl?: string;
     /** Who opened the session: a CMS over the network, or the local UI. */
     origin?: 'cms' | 'local';
+    /** The normalised browser origin that opened it, for a CMS session. */
+    createdByOrigin?: string;
     status: SessionStatus;
     progress: number;
     pipelineProgress?: PipelineProgress;
@@ -145,6 +147,16 @@ export interface SessionInit {
     documentId?: string;
     publicBaseUrl?: string;
     origin?: 'cms' | 'local';
+    /**
+     * The normalised browser origin that opened this session, when one did.
+     *
+     * `origin` above says which tier opened it; this says *who*. Idempotency is
+     * a per-origin property: without an identity to compare, a repeat click was
+     * recognised by `documentId` alone, so one approved site naming another's
+     * document was handed that session's read token — the one thing approving a
+     * site is not supposed to grant.
+     */
+    createdByOrigin?: string;
 }
 
 @Injectable()
@@ -528,11 +540,19 @@ export class SessionService implements OnModuleInit {
      * flight rather than start a second one against the same post. Finished
      * sessions are not matched: that click means "replace what is there".
      */
-    findActiveByDocumentId(documentId: string): Session | undefined {
+    findActiveByDocumentId(
+        documentId: string,
+        callerOrigin?: string
+    ): Session | undefined {
         return this.list().find(
             (session) =>
                 session.documentId === documentId &&
-                ACTIVE.includes(session.status)
+                ACTIVE.includes(session.status) &&
+                // Same document is not enough — it has to be the same caller.
+                // Document ids are the CMS's own post identifiers and are
+                // routinely public, so matching on one alone let any other
+                // approved site collect a session's read token by naming it.
+                session.createdByOrigin === callerOrigin
         );
     }
 

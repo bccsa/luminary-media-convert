@@ -138,13 +138,29 @@ describe('CmsController — who may open a session', () => {
         }
     );
 
-    it('accepts an Origin of "null" from this machine', async () => {
-        const result = await build().createSession(
-            makeDto(),
-            makeRequest({ origin: 'null', remoteAddress: '127.0.0.1' })
-        );
+    it('refuses an Origin of "null", loopback peer or not', async () => {
+        // Browsers send it for an opaque origin — a sandboxed iframe. The
+        // loopback check is no defence: the browser sending it runs on the
+        // user's own machine, so it is always a loopback peer. Exempting it let
+        // any website open a session on someone's encoder, bypassing both the
+        // approval dialog and the memory of what they had already refused.
+        await expect(
+            build().createSession(
+                makeDto(),
+                makeRequest({ origin: 'null', remoteAddress: '127.0.0.1' })
+            )
+        ).rejects.toThrow(ForbiddenException);
+    });
 
-        expect(result.sessionId).toBeTruthy();
+    it('creates nothing for a "null" origin', async () => {
+        await build()
+            .createSession(
+                makeDto(),
+                makeRequest({ origin: 'null', remoteAddress: '127.0.0.1' })
+            )
+            .catch(() => undefined);
+
+        expect(sessions.list()).toEqual([]);
     });
 
     it('refuses an Origin-less request from anywhere else', async () => {
@@ -217,6 +233,46 @@ describe('CmsController — a repeated click on the same post', () => {
         );
 
         expect(second.sessionId).not.toBe(first.sessionId);
+    });
+
+    it('does not hand another approved site the same session', async () => {
+        // The reuse branch used to match on documentId alone, and document ids
+        // are the CMS's own post identifiers — routinely public. So a second
+        // site the user had also approved could name one and be handed that
+        // session's read token, and with it the playback URL and the AES key.
+        // Approving a site is not supposed to grant it access to another's work.
+        const controller = build(['https://cms.test', 'https://other.test']);
+
+        const first = await controller.createSession(
+            makeDto(),
+            makeRequest({ origin: 'https://cms.test' })
+        );
+        const second = await controller.createSession(
+            makeDto(),
+            makeRequest({ origin: 'https://other.test' })
+        );
+
+        expect(second.sessionId).not.toBe(first.sessionId);
+        expect(second.reused).toBe(false);
+        expect(second.readToken).not.toBe(first.readToken);
+    });
+
+    it('still recognises the same site spelled differently', async () => {
+        // Origins are normalised everywhere else, so idempotency must not break
+        // on a trailing slash or a capital letter.
+        const controller = build();
+
+        const first = await controller.createSession(
+            makeDto(),
+            makeRequest({ origin: 'https://cms.test' })
+        );
+        const second = await controller.createSession(
+            makeDto(),
+            makeRequest({ origin: 'HTTPS://CMS.test/' })
+        );
+
+        expect(second.sessionId).toBe(first.sessionId);
+        expect(second.reused).toBe(true);
     });
 
     it('starts a fresh session once the previous one has finished', async () => {

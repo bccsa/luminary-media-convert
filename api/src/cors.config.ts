@@ -42,11 +42,22 @@ export const CORS_OPTIONS: CorsOptions = {
 /**
  * CORS options bound to the instance's origin policy.
  *
- * Requests with no `Origin` are allowed: curl, same-origin navigation, and the
- * Electron renderer — whose origin is `file://` or a custom app scheme, and
- * which the browser may send as `null` or omit entirely. Those callers are
- * already inside the trust boundary; a page in someone's browser is not, and
- * has to be on the allowlist or granted by the approver.
+ * A request with **no** `Origin` header is allowed: curl, and same-origin
+ * navigation. That caller is not a browser page, so there is no origin to judge
+ * and nothing for CORS to protect.
+ *
+ * A literal `Origin: null` is **not** the same thing and is not allowed. It is
+ * what a browser sends for an opaque origin — a sandboxed iframe, a `data:`
+ * document, some cross-origin redirects — which is to say, exactly the caller
+ * this allowlist exists to stop. Treating it as "not a browser" reflected
+ * `Access-Control-Allow-Origin: null` back, which the Fetch CORS check accepts
+ * for an opaque origin, so any site could read the response of a request the
+ * user was never asked about. It falls through to the registry now, which
+ * refuses it: `null` can never be an allowlisted origin.
+ *
+ * Nothing in the app needed the exemption. The packaged renderer is served from
+ * the API's own origin (`http://127.0.0.1:<port>`, auto-approved after binding),
+ * and nothing loads over `file://`.
  *
  * Refusal is expressed by withholding the header rather than raising, so the
  * browser reports an ordinary CORS block instead of the API returning 500 to
@@ -55,7 +66,7 @@ export const CORS_OPTIONS: CorsOptions = {
 export const createCorsOptions = (registry: OriginRegistry): CorsOptions => ({
     ...CORS_OPTIONS,
     origin: (origin, callback) => {
-        if (!origin || origin === 'null') {
+        if (!origin) {
             callback(null, true);
             return;
         }

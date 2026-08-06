@@ -86,22 +86,39 @@ describe('CORS — the origin decision', () => {
         );
     });
 
-    it.each([undefined, 'null'])(
-        'allows a request whose origin is %o',
-        async (origin) => {
-            // curl, same-origin navigation, and the Electron renderer — whose origin
-            // browsers report inconsistently. These are already inside the trust
-            // boundary; the CMS route separately refuses an origin-less request that
-            // did not come from a loopback peer.
-            const registry = registryAllowing(() => false);
+    it('allows a request that carries no origin at all', async () => {
+        // curl, and same-origin navigation. Not a browser page, so there is no
+        // origin to judge; the CMS route separately refuses an origin-less
+        // request that did not come from a loopback peer.
+        const registry = registryAllowing(() => false);
 
-            await expect(
-                decide(createCorsOptions(registry), origin)
-            ).resolves.toBe(true);
-        }
-    );
+        await expect(
+            decide(createCorsOptions(registry), undefined)
+        ).resolves.toBe(true);
+    });
 
-    it('does not consult the registry for those', async () => {
+    it('refuses a literal "null" origin instead of exempting it', async () => {
+        // An opaque origin — a sandboxed iframe, a `data:` document — which is
+        // exactly the caller the allowlist exists to stop. Exempting it made the
+        // CORS layer reflect `Access-Control-Allow-Origin: null`, which the
+        // Fetch CORS check accepts, so any site could read the response of a
+        // request the user was never asked about.
+        const registry = registryAllowing(() => false);
+
+        await expect(decide(createCorsOptions(registry), 'null')).resolves.toBe(
+            false
+        );
+    });
+
+    it('asks the registry about it rather than deciding alone', async () => {
+        const registry = registryAllowing(() => false);
+
+        await decide(createCorsOptions(registry), 'null');
+
+        expect(registry.isAllowed).toHaveBeenCalledWith('null');
+    });
+
+    it('does not consult the registry for a genuinely absent origin', async () => {
         const registry = registryAllowing(() => false);
 
         await decide(createCorsOptions(registry), undefined);

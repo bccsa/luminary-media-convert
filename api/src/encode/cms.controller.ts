@@ -18,7 +18,7 @@ import {
     CMS_SESSION_HOOK,
     type CmsSessionHook,
 } from '../cms/cms-session-hook.js';
-import { OriginRegistry } from '../cms/origin-registry.js';
+import { normalizeOrigin, OriginRegistry } from '../cms/origin-registry.js';
 import { API_VERSION } from '../version.js';
 import { CmsCreateSessionDto } from './dto/cms-create-session.dto.js';
 import {
@@ -94,9 +94,16 @@ export class CmsController {
         @Req() req: Request
     ): Promise<CmsSessionResponseDto> {
         await this.assertOriginAllowed(req);
+        const callerOrigin = normalizeOrigin(req.headers.origin) ?? undefined;
 
+        // Matched on the document *and* the caller. Idempotency means "this site
+        // clicked twice", not "somebody named this document" — without the
+        // second half, one approved site could name another's post and be handed
+        // its read token, and with it the playback URL and the decryption key
+        // for media it had nothing to do with.
         const existing = this.sessionService.findActiveByDocumentId(
-            dto.documentId
+            dto.documentId,
+            callerOrigin
         );
         if (existing?.readToken) {
             this.logger.log(
@@ -116,6 +123,7 @@ export class CmsController {
                 documentId: dto.documentId,
                 publicBaseUrl: dto.publicBaseUrl,
                 origin: 'cms',
+                createdByOrigin: callerOrigin,
             }
         );
 
@@ -203,16 +211,24 @@ export class CmsController {
     /**
      * Refuse anything this instance has not been told to trust.
      *
-     * A request with no Origin is not a browser: curl, or the host app's own
-     * renderer, whose origin is a `file://` or custom-scheme value browsers
-     * report inconsistently. Those are allowed only from this machine, so an
-     * Origin-less request off the network cannot walk past the allowlist by
-     * simply omitting the header.
+     * A request with **no** Origin header is not a browser page: curl, or a
+     * local tool. There is no origin to judge, so it is allowed — but only from
+     * this machine, so an Origin-less request off the network cannot walk past
+     * the allowlist by simply omitting the header.
+     *
+     * A literal `Origin: null` is a different thing entirely and gets no such
+     * exemption. Browsers send it for an opaque origin — a sandboxed iframe, a
+     * `data:` document — which is precisely the caller this gate exists to stop.
+     * The loopback check is no defence there: the browser sending it is running
+     * on the user's own machine, so it is always a loopback peer. Exempting it
+     * let any website open a session on someone's encoder, bypassing both the
+     * approval dialog and the memory of everything they had already refused.
+     * It goes to the registry now, which refuses it.
      */
     private async assertOriginAllowed(req: Request): Promise<void> {
         const origin = req.headers.origin;
 
-        if (!origin || origin === 'null') {
+        if (!origin) {
             const remote = req.socket.remoteAddress ?? '';
             if (LOOPBACK.has(remote)) return;
             throw new ForbiddenException(
