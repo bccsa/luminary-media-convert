@@ -317,3 +317,89 @@ The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` throu
 **Play/pause needs a separate decision.** `.se-btn--playback` (line 584) is the only button given the accent treatment: sky border, `--se-accent-soft` fill, sky icon. Against navy neighbours that reads as an outlined toggle rather than the primary control, and on a slate bar it will read differently again. Worth deciding what it should be — solid accent fill, or plain like its neighbours since the timeline already has a keyboard space bar and a playhead to say what is happening — rather than just recolouring what is there.
 
 **Note.** `segment-editor` is a published library with its own token block and a light theme alongside the dark one, so this is a change to the library's defaults (both themes) or a set of overrides the app supplies — decide which, because the library is meant to be host-agnostic.
+
+---
+
+## 18. Theme popup: smaller, icons instead of tick-boxes, close on select
+
+**Today.** `app/src/components/AccountMenu.vue` opens an 18rem panel with an "APPEARANCE" heading and three rows, each a bordered square that holds a checkmark when selected, a bold label and a second line of description ("Always light" / "Match system" / "Always dark"). `pickTheme` (line 86) sets the preference and leaves the panel open.
+
+**Wanted.**
+
+- Smaller overall — the panel is wider and taller than three mutually exclusive options need.
+- Icons in place of the tick-box column (sun / auto / moon), matching how the Luminary app presents the same choice. Selection then has to be shown some other way — a highlighted row or a tinted icon — since the checkmark is what carries it today.
+- Close the popup on selection. `close()` already exists; `pickTheme` just does not call it.
+
+**Watch out for.** The rows are `role="menuitemradio"` with `aria-checked`, which is the part that must survive losing the visible checkbox; and the same component renders in two places via the `variant` prop (`editor` uses the `se-btn` trigger inside the timeline controls bar, the default is the round nav button), so both placements need looking at. Dropping the description line may make the labels alone ambiguous — "Auto" is the one that carries its meaning least well on its own.
+
+---
+
+## 19. Split divider between the player and the side pane is too bright in dark mode
+
+**Today.** The vertical rule is `.session-split-handle__bar` in `app/src/components/session-view/SessionPlayerStrip.vue` (styles from line 543). Its rest colour is `slate-200` with a `:global(html.dark)` override to `slate-700/60` — but on screen in the dark theme it reads as a near-white line running the full height of the view, far louder than anything else on the page.
+
+**Worth checking first whether the dark override is applying at all**, since `slate-200` is exactly what a failed override would look like. If it is applying, then `slate-700/60` is simply too bright against this background and wants to come down. The hover / focus / active states (sky, 2px) are doing their job and should stay — the rest state is the problem.
+
+---
+
+## 20. Timeline timecode is over-emphasised
+
+**Today.** `.se-controls-bar__time` (`segment-editor/src/styles.css`, line 799) is `1rem` monospace at `weight: 600` in full `--se-text`, while the buttons beside it are `0.75rem` at `weight: 500`. It is the loudest thing in the controls bar, and it is a readout rather than a control.
+
+**Wanted.** Smaller, or lighter, or both — enough that the transport buttons lead the bar. Monospace should stay: the digits must not jump width as the playhead moves.
+
+**Note.** There is a second readout with the same treatment — `.se-time-above` (line 929), `0.9375rem` at `weight: 600`, used when the controls are not in the combined bar. Both should move together, or the two layouts will disagree.
+
+---
+
+## 21. Move "Start encoding" below the video player
+
+**Today.** The button sits at the right end of the session topline (`app/src/views/SessionView.vue`, around line 1825, `v-if="showProbeConfig"`), which is the full-width bar above both columns. It got there from the app header, on the reasoning that an action on this session belongs on the session's own row — but that row is the furthest point on screen from the settings the button acts on.
+
+**Wanted.** Below the player, in the left column.
+
+**Do this with item 15**, which moves the topline into the player pane and so disturbs the same markup; doing them separately means moving this button twice. Whatever lands has to keep the disabled state and the title that explains it ("Open Encode settings and complete the ladder…"), which is the only thing telling a user why the button will not respond.
+
+---
+
+## 22. Audio language codes are not restored automatically
+
+**Reported.** Loading a video whose track layout has been encoded before restores the saved track *names* and the video angle names, but not the audio language codes — those only come back after pressing "Load saved track labels".
+
+**Likely cause.** `applySavedTrackLabels` (`encode-config/src/trackLabels.ts`) is called on mount with `overwrite: false` (`EncodeConfigForm.vue`, line 188), which fills blanks only — deliberately, so a file's real metadata is never destroyed by something typed once against the same layout. Language is guarded by `!track.language`, and `probe.service.ts` passes `s.tags?.language` straight through from ffprobe. FFprobe reports `und` for a stream with no language tag, and `und` is not blank — so the guard sees a language already present and skips the saved one. Track names have no such placeholder, which is why they restore and languages do not.
+
+**If that is it**, the fix is to treat `und` (and an empty tag) as absent, not to widen `overwrite` — the reasoning in the comment at the top of `trackLabels.ts` still holds, and it names the exact regression that widening caused before. Worth deciding at the same time whether `und` should be normalised away at the probe boundary rather than at each place that reads a language, since anything else consuming `probeResult` has the same trap waiting.
+
+**Verify before fixing.** Confirm against the actual source that the tracks really do report `und`; a layout key mismatch would produce the same symptom for a different reason, and `hasPreviousConfig` being true is not proof the auto-apply path read the same entry.
+
+---
+
+## 23. Validate language codes
+
+**Today.** Language is a free-text input in two places in `encode-config/src/EncodeConfigForm.vue` — per audio track (line 680, placeholder `und`) and per audio group (line 1085, placeholder `eng`). Nothing validates or normalises what is typed, so a typo, a two-letter code or a stray capital travels straight into `#EXT-X-MEDIA:LANGUAGE=` and out to every player.
+
+**Wanted.**
+
+- Accept only valid ISO 639-2 three-letter codes.
+- Lower-case on input, so `ENG` and `eng` are the same entry rather than two.
+- `mul` and `und` must both pass — they are real ISO 639-2 codes (multiple languages; undetermined), not escape hatches, and both already appear in this app's own output.
+
+**Decide.** Whether an invalid code blocks the encode or only warns, and whether the check is client-side only or also on `EncodeConfigDto` — the API accepts an arbitrary string today, and `POST /api/sessions` is a supported integration surface, so a validator in the form alone leaves the gap open for the CMS route and any direct caller.
+
+**Note.** ISO 639-2 has B/T variants for some languages (`ger`/`deu`, `fre`/`fra`), so the accepted set has to include both or reject codes that are perfectly valid. Interacts with item 22: if `und` is going to be treated as "absent" for label restoration, it still has to remain a *valid* thing to type.
+
+---
+
+## 24. `npm run dev` should work with no `.env` files
+
+**Today.** A fresh clone plus `npm install` plus `npm run dev` does not give a working browser dev environment. The `.env` files are gitignored, so a new machine has only the `.env.example` files and has to be told to copy them. Three separate things fail without that:
+
+- `VITE_API_TOKEN` unset → `getApiToken()` in `app/src/auth-token.ts` throws outright.
+- `VITE_API_URL` unset → the client calls same-origin, which in Vite dev is `:5173`, not the API on `:3000`.
+- `CMS_ALLOWED_ORIGINS` unset → the origin allowlist is empty and there is no approver standalone, so both `http://localhost:5173` and `cms-mock` on `:5199` are refused. This one is the least obvious of the three, because the web client being a cross-origin page like any other is only true in browser dev.
+
+(`LOCAL_API_TOKEN` unset is separately confusing rather than fatal: it disables key auth entirely, so the app works while the security model quietly does not.)
+
+**Wanted.** Defaults that make `npm run dev` and `npm -w cms-mock run dev` work out of the box, with `.env` reserved for overriding them.
+
+**Watch out for.** These defaults must not follow the code into a packaged build or a standalone run — a dev token that also works in production, or an allowlist that silently trusts `localhost` in a shipped app, would be worse than the current friction. Gate them on `import.meta.env.DEV` / `NODE_ENV`, and keep the port agreement in mind: the API's standalone default is `3000` while Electron's is `31711`, so whatever the client defaults to has to match the one it is actually paired with.
