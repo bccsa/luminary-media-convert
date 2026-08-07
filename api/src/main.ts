@@ -1,7 +1,11 @@
 import dotenv from 'dotenv';
 import { createServer, DEFAULT_HOST } from './bootstrap.js';
+import { applyDevDefaults } from './dev-defaults.js';
 
 dotenv.config();
+// After dotenv, so a real `.env` always wins, and before `createServer`,
+// because the providers read these from the environment at module init.
+applyDevDefaults();
 
 /**
  * The API on its own, configured by its environment.

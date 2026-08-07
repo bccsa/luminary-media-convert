@@ -13,7 +13,22 @@ import type {
  * default produces same-origin requests. `VITE_API_URL` covers browser dev,
  * where the UI is on Vite's port and the API on its own.
  */
-export const API_BASE = import.meta.env.VITE_API_URL ?? '';
+/**
+ * Where the local Encoding API is.
+ *
+ * Empty means same-origin, which is right for the packaged app: the API serves
+ * the client. In browser development the client is on Vite's port and the API is
+ * not, so same-origin would send every request to `:5173` — hence the dev
+ * default, which points at the standalone API's own default port. `31711` is the
+ * Electron host's port and deliberately not this one; browser dev is paired with
+ * `npm -w api run dev`.
+ *
+ * `import.meta.env.DEV` is false for every `vite build`, so this cannot follow
+ * the code into a packaged build.
+ */
+export const API_BASE =
+    import.meta.env.VITE_API_URL ??
+    (import.meta.env.DEV ? 'http://127.0.0.1:3000' : '');
 
 // ---------------------------------------------------------------------------
 // Fetch helpers

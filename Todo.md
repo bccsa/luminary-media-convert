@@ -10,7 +10,7 @@ Ordered roughly by value, not by effort.
 
 **Branch.** All migration work (issue #154) is on `154-migrate-luminary-media-convert-to-a-local-only-electron-app-remove-saas-features`, open as PR #161. The original seven logical commits (SaaS removal → hls lib → api → app → cms-mock → electron → docs) have since been joined by the manual-verification fixes, the app icon, a merge of `main`, and the restored test suites.
 
-**Build state.** All workspaces build, and all test suites pass: api 806, app 204, encode-config 34, segment-editor 217, hls 121, player-core 168, player-web 79 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
+**Build state.** All workspaces build, and all test suites pass: api 812, app 211, encode-config 34, segment-editor 217, hls 121, player-core 168, player-web 79 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
 
 **Player extraction (issue #153, PR #162) has since landed on top of this branch.** Playback logic left the app for two packages — `player-core` (headless: munging, controller, recovery, polling) and `player-web` (hls.js reference implementation) — Video.js is gone, and encryption now covers playlists, chapters and subtitles rather than segments alone. Items below are marked where that work closed or changed them.
 
@@ -438,19 +438,23 @@ Nothing downstream needed changing: `audioGroups.ts`'s `|| 'und'` fallback makes
 
 ---
 
-## 24. `npm run dev` should work with no `.env` files
+## 24. `npm run dev` should work with no `.env` files — done
 
-**Today.** A fresh clone plus `npm install` plus `npm run dev` does not give a working browser dev environment. The `.env` files are gitignored, so a new machine has only the `.env.example` files and has to be told to copy them. Three separate things fail without that:
+A fresh clone plus `npm install` plus `npm run dev` now gives a working browser dev environment. Verified by parking both `.env` files and running it: the API starts, `X-API-Key: dev-token` is accepted, a wrong token is still refused with 401, and the origin allowlist admits `localhost:5173` and `localhost:5199` while refusing anything else.
 
-- `VITE_API_TOKEN` unset → `getApiToken()` in `app/src/auth-token.ts` throws outright.
-- `VITE_API_URL` unset → the client calls same-origin, which in Vite dev is `:5173`, not the API on `:3000`.
-- `CMS_ALLOWED_ORIGINS` unset → the origin allowlist is empty and there is no approver standalone, so both `http://localhost:5173` and `cms-mock` on `:5199` are refused. This one is the least obvious of the three, because the web client being a cross-origin page like any other is only true in browser dev.
+**Where the defaults live.** `api/src/dev-defaults.ts`, called from `main.ts` after `dotenv` and before `createServer` — after, so a real `.env` always wins, and before, because the providers read the environment at module init. It fills only gaps, so `.env` goes back to being for overrides rather than for the minimum. On the client, `import.meta.env.DEV` guards a token fallback in `auth-token.ts` and an `API_BASE` of `http://127.0.0.1:3000` in `api.ts` — the standalone API's own default port, deliberately not Electron's `31711`, since browser dev is paired with `npm -w api run dev`.
 
-(`LOCAL_API_TOKEN` unset is separately confusing rather than fatal: it disables key auth entirely, so the app works while the security model quietly does not.)
+**It announces itself.** Applying a dev token silently is the failure this item warns about, so the API logs a warning naming exactly what it defaulted and that `NODE_ENV=production` disables it. A silent gate would be the more dangerous design: the log line is the only thing distinguishing "configured" from "defaulted" at a glance.
 
-**Wanted.** Defaults that make `npm run dev` and `npm -w cms-mock run dev` work out of the box, with `.env` reserved for overriding them.
+**Confirmed it cannot follow the code into a build.** Built with no `app/.env`, the bundle contains neither `dev-token` nor `127.0.0.1:3000`, and keeps the throw — `import.meta.env.DEV` is false for every `vite build`, so both branches are eliminated. The desktop app is unaffected either way: it hands `createServer()` a token minted per launch and an origin policy with a real approver, and never runs the standalone entry point.
 
-**Watch out for.** These defaults must not follow the code into a packaged build or a standalone run — a dev token that also works in production, or an allowlist that silently trusts `localhost` in a shipped app, would be worse than the current friction. Gate them on `import.meta.env.DEV` / `NODE_ENV`, and keep the port agreement in mind: the API's standalone default is `3000` while Electron's is `31711`, so whatever the client defaults to has to match the one it is actually paired with.
+**The `LOCAL_API_TOKEN`-unset note is addressed too**, though not as this item framed it. No token still means key auth is disabled and every request is accepted — that is legitimate, and it is how the API runs before anyone sets one — but it is indistinguishable at runtime from a working instance. It now says so at startup rather than leaving the security model switched off in silence. Behaviour is unchanged; only the silence is.
+
+13 tests: 6 on the defaults (production gate, never overriding, filling only the missing half, leaving a deprecated `MASTER_API_KEY` in charge, and warning exactly once), 4 on the token fallback including the bridge still winning and the throw surviving outside dev, and 3 on `API_BASE`.
+
+**Found while testing, not changed.** Vite folds env values into the bundle at build time, so a build made on a developer machine bakes in whatever `app/.env` says — `VITE_API_TOKEN` and `VITE_API_URL` both appear as literals in `app/dist`. Harmless for the packaged app, whose renderer takes its token from the preload bridge before ever reading the env, but it means packaging must not run against a developer's `.env`. Worth confirming what `electron-builder` actually builds from before the next release.
+
+**Not covered:** `cms-mock` still defaults its API base to `31711`, the Electron port, so pointing it at a browser-dev API on `3000` is still a manual edit in its own UI. The value persists to `localStorage`, so it is a one-time step rather than a recurring one.
 
 ---
 

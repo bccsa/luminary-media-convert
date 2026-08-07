@@ -43,7 +43,19 @@ export const createLocalApiTokenProvider = (
                     'It is one token scoped to this instance, not a key over ' +
                     "other people's data."
             );
+            return legacy;
         }
-        return legacy;
+
+        // No token at all means the guard accepts everything. That is a
+        // legitimate configuration — it is how the API runs before anyone has
+        // set one — but it is indistinguishable at runtime from a working
+        // instance, so it says so rather than leaving the security model
+        // switched off in silence.
+        logger.warn(
+            'No LOCAL_API_TOKEN configured — key authentication is DISABLED and ' +
+                'every request to this instance is accepted. Set LOCAL_API_TOKEN ' +
+                'to turn it on.'
+        );
+        return undefined;
     },
 });
