@@ -1200,8 +1200,11 @@ async function handleStatusAfterLoad(status: string) {
     if (!isActiveSession.value) return;
 
     if (status === 'uploaded') {
+        // No early return: the configure phase is live now. The storyboard
+        // fills over pushed thumbnail counts on the event stream, so a page
+        // (re)loaded at 'uploaded' without a running poller sat frameless
+        // until the slow safety-net poll found everything at once.
         await fetchProbeResults();
-        return;
     }
 
     if (status === 'failed') {
