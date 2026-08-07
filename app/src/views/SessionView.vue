@@ -1019,6 +1019,10 @@ const PIPELINE_PHASE_LABELS: Record<string, string> = {
     thumbnails: 'Generating thumbnails…',
     waveform: 'Generating waveform…',
     'encrypting-playlists': 'Encrypting playlists…',
+    // The one phase that outlives `encoding`: it captions the S3 bar as that
+    // bar restarts from 0 for the playlists and sprites, which are a different
+    // set of files from the segments it was counting until then.
+    'uploading-playlists': 'Uploading playlists & thumbnails…',
 };
 
 const pipelinePhaseLabel = computed(() => {
@@ -2192,11 +2196,12 @@ onUnmounted(() => {
                                             "
                                         />
                                         <!--
-                                            Draining at 100% is not the encode finishing: sprites, the
-                                            waveform sidecar and text-asset encryption still run before
-                                            the status leaves `encoding`, and on a long source the
-                                            sprites alone take minutes. Unnamed, a full bar over
-                                            unfinished work reads as stalled rather than busy.
+                                            Draining at 100% is not the encode finishing: segment
+                                            packing, the sprite sheets, the waveform sidecar and
+                                            text-asset encryption all still run before the status
+                                            leaves `encoding`, and the playlists and sprites are
+                                            uploaded after it. Unnamed, a full bar over unfinished
+                                            work reads as stalled rather than busy.
                                         -->
                                         <p
                                             v-if="pipelinePhaseLabel"
