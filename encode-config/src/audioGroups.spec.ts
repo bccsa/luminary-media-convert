@@ -156,6 +156,51 @@ describe('buildSuggestedAudioGroups', () => {
         });
     });
 
+    /**
+     * The probe reports no language for an untagged stream rather than ffprobe's
+     * literal `und`. This function buckets by `track.language || 'und'`, so the
+     * fallback has to make those two inputs indistinguishable — otherwise moving
+     * the normalisation upstream would silently change how such a source is
+     * grouped, and the docblock above names what that costs: one real session
+     * where changing quality changed language, hd→ENG, mid→FRA, low→NYA.
+     *
+     * This pins equivalence rather than a grouping, deliberately. Whether an
+     * untagged multi-track source *should* be read as an ABR ladder is a
+     * separate question, and not one this change is entitled to answer.
+     */
+    describe('tracks with no language at all', () => {
+        it.each([
+            [1, 'a single video track'],
+            [2, 'several video tracks'],
+        ])('groups them exactly as the literal "und" did, with %s (%s)', (videoCount) => {
+            const absent = buildSuggestedAudioGroups(
+                [
+                    track(0, { language: undefined, bitrateKbps: 256 }),
+                    track(1, { language: undefined, bitrateKbps: 192 }),
+                ],
+                videoCount
+            );
+            const placeholder = buildSuggestedAudioGroups(
+                [
+                    track(0, { language: 'und', bitrateKbps: 256 }),
+                    track(1, { language: 'und', bitrateKbps: 192 }),
+                ],
+                videoCount
+            );
+
+            expect(absent).toEqual(placeholder);
+        });
+
+        it('leaves the group language unset rather than writing a placeholder', () => {
+            const groups = buildSuggestedAudioGroups(
+                [track(0, { language: undefined })],
+                1
+            );
+
+            expect(groups.every((g) => g.language === undefined)).toBe(true);
+        });
+    });
+
     describe('a source that already carries its own ladder', () => {
         // Several video renditions and several tracks per language: here the
         // extra tracks really are the same audio at different bitrates, so each

@@ -64,6 +64,33 @@ interface FfprobeOutput {
     format: FfprobeFormat;
 }
 
+/**
+ * A stream's language, or nothing when it does not have one.
+ *
+ * FFprobe reports the literal `und` for an untagged stream — ISO 639-2 for
+ * "undetermined" — and a placeholder that is not blank is worse than a blank
+ * one, because every reader has to know it. Three places downstream already
+ * did: `audioGroups.ts` normalises it away before building a config, and
+ * `SessionView` filters it out of a label. The one that forgot was the guard in
+ * `applySavedTrackLabels`, which fills only fields it finds empty — `und` is
+ * truthy, so a saved language was never restored to a source that had none,
+ * while saved track names came back correctly and made the omission look
+ * arbitrary.
+ *
+ * Normalising here rather than at each reader means a language is present or it
+ * is absent, and nothing has to remember a third case. Empty and whitespace-only
+ * tags go the same way; casing is not guaranteed by ffprobe, so the comparison
+ * does not rely on it.
+ *
+ * Note this reaches the wire: `probeResult` travels on the status response and
+ * over SSE, so a consumer sees the field missing rather than carrying `und`.
+ */
+function normalizeLanguage(tag?: string): string | undefined {
+    const trimmed = tag?.trim();
+    if (!trimmed || trimmed.toLowerCase() === 'und') return undefined;
+    return trimmed;
+}
+
 @Injectable()
 export class ProbeService {
     private readonly logger = new Logger(ProbeService.name);
@@ -90,7 +117,7 @@ export class ProbeService {
                         s.avg_frame_rate ?? s.r_frame_rate ?? '0/1'
                     ),
                     profile: s.profile,
-                    language: s.tags?.language,
+                    language: normalizeLanguage(s.tags?.language),
                     name: s.tags?.title,
                 });
             } else if (s.codec_type === 'audio') {
@@ -102,7 +129,7 @@ export class ProbeService {
                     sampleRate: s.sample_rate
                         ? parseInt(s.sample_rate, 10)
                         : 44100,
-                    language: s.tags?.language,
+                    language: normalizeLanguage(s.tags?.language),
                     name: s.tags?.title,
                 });
             }

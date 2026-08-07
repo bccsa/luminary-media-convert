@@ -82,6 +82,90 @@ describe('ProbeService', () => {
         mockExecFile.mockReset();
     });
 
+    /**
+     * ffprobe reports `und` for a stream with no language tag. Passed through, it
+     * is a placeholder every reader downstream has to know about — and the guard
+     * in `applySavedTrackLabels` did not, so a saved language was never restored
+     * to a source that had none while saved track names came back fine.
+     */
+    describe('language normalisation', () => {
+        async function languagesFor(tags: Record<string, unknown> | undefined) {
+            mockExecFileResult(
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: 1920,
+                            height: 1080,
+                            avg_frame_rate: '25/1',
+                            ...(tags ? { tags } : {}),
+                        },
+                        {
+                            index: 1,
+                            codec_type: 'audio',
+                            codec_name: 'aac',
+                            channels: 2,
+                            sample_rate: '48000',
+                            ...(tags ? { tags } : {}),
+                        },
+                    ],
+                })
+            );
+            const result = await service.probe('/tmp/test.mp4');
+            return {
+                video: result.videoTracks[0]?.language,
+                audio: result.audioTracks[0]?.language,
+            };
+        }
+
+        it('treats "und" as no language at all', async () => {
+            expect(await languagesFor({ language: 'und' })).toEqual({
+                video: undefined,
+                audio: undefined,
+            });
+        });
+
+        it('does not rely on ffprobe\'s casing', async () => {
+            expect(await languagesFor({ language: 'UND' })).toEqual({
+                video: undefined,
+                audio: undefined,
+            });
+        });
+
+        it.each([['', 'empty'], ['   ', 'whitespace']])(
+            'treats an %s tag as no language (%s)',
+            async (value) => {
+                expect(await languagesFor({ language: value })).toEqual({
+                    video: undefined,
+                    audio: undefined,
+                });
+            }
+        );
+
+        it('leaves a real language alone', async () => {
+            expect(await languagesFor({ language: 'nor' })).toEqual({
+                video: 'nor',
+                audio: 'nor',
+            });
+        });
+
+        it('trims a padded tag rather than carrying the spaces', async () => {
+            expect(await languagesFor({ language: ' deu ' })).toEqual({
+                video: 'deu',
+                audio: 'deu',
+            });
+        });
+
+        it('reports nothing when the stream carries no tags object', async () => {
+            expect(await languagesFor(undefined)).toEqual({
+                video: undefined,
+                audio: undefined,
+            });
+        });
+    });
+
     describe('probe', () => {
         it('should parse a standard MP4 with 1 video + 1 audio track', async () => {
             mockExecFileResult(makeFfprobeOutput());

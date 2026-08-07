@@ -111,6 +111,42 @@ describe('applySavedTrackLabels', () => {
         });
     });
 
+    /**
+     * The probe now reports no language at all for an untagged stream, where it
+     * used to pass ffprobe's literal `und` through. That placeholder is truthy,
+     * so the fill-blanks-only guard treated it as a language already present and
+     * skipped the saved one — saved names came back and saved languages did not,
+     * which read as arbitrary rather than as a rule.
+     */
+    describe('a source with no language of its own', () => {
+        it('restores a saved language onto a track that has none', () => {
+            const tracks = [audio(0, { name: 'CH_0_MUL' })];
+
+            applySavedTrackLabels(
+                { audioTrackMetadata: [{ index: 0, language: 'nor' }] },
+                [],
+                tracks,
+                false
+            );
+
+            expect(tracks[0].language).toBe('nor');
+        });
+
+        it('still refuses to overwrite a language the source carries', () => {
+            // The rule this guard exists for: real metadata always wins.
+            const tracks = [audio(0, { language: 'eng' })];
+
+            applySavedTrackLabels(
+                { audioTrackMetadata: [{ index: 0, language: 'nor' }] },
+                [],
+                tracks,
+                false
+            );
+
+            expect(tracks[0].language).toBe('eng');
+        });
+    });
+
     describe('explicit restore (overwrite: true)', () => {
         it('replaces what is there, because the user asked for it', () => {
             const tracks = fromSource();

@@ -10,7 +10,7 @@ Ordered roughly by value, not by effort.
 
 **Branch.** All migration work (issue #154) is on `154-migrate-luminary-media-convert-to-a-local-only-electron-app-remove-saas-features`, open as PR #161. The original seven logical commits (SaaS removal → hls lib → api → app → cms-mock → electron → docs) have since been joined by the manual-verification fixes, the app icon, a merge of `main`, and the restored test suites.
 
-**Build state.** All workspaces build, and all test suites pass: api 799, app 204, segment-editor 217, hls 121, player-core 168, player-web 79 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
+**Build state.** All workspaces build, and all test suites pass: api 806, app 204, encode-config 34, segment-editor 217, hls 121, player-core 168, player-web 79 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
 
 **Player extraction (issue #153, PR #162) has since landed on top of this branch.** Playback logic left the app for two packages — `player-core` (headless: munging, controller, recovery, polling) and `player-web` (hls.js reference implementation) — Video.js is gone, and encryption now covers playlists, chapters and subtitles rather than segments alone. Items below are marked where that work closed or changed them.
 
@@ -402,15 +402,23 @@ The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` throu
 
 ---
 
-## 22. Audio language codes are not restored automatically
+## 22. Audio language codes are not restored automatically — done
 
-**Reported.** Loading a video whose track layout has been encoded before restores the saved track *names* and the video angle names, but not the audio language codes — those only come back after pressing "Load saved track labels".
+**The hypothesis was right.** ffprobe reports the literal `und` for a stream with no language tag, `probe.service.ts` passed `s.tags?.language` straight through, and the fill-blanks-only guard in `applySavedTrackLabels` is `overwrite || !track.language` — `und` is truthy, so a saved language was never restored. Track names have no equivalent placeholder, which is why they came back and languages did not, and why the omission read as arbitrary rather than as a rule.
 
-**Likely cause.** `applySavedTrackLabels` (`encode-config/src/trackLabels.ts`) is called on mount with `overwrite: false` (`EncodeConfigForm.vue`, line 188), which fills blanks only — deliberately, so a file's real metadata is never destroyed by something typed once against the same layout. Language is guarded by `!track.language`, and `probe.service.ts` passes `s.tags?.language` straight through from ffprobe. FFprobe reports `und` for a stream with no language tag, and `und` is not blank — so the guard sees a language already present and skips the saved one. Track names have no such placeholder, which is why they restore and languages do not.
+**It cannot reproduce on this repo's test media.** Both fixtures in `test-media/` carry real tags (`eng, spa, fra, deu`), and every session on disk records them correctly — so with those sources the guard skipping the saved value is *correct behaviour*: the file's own metadata wins. Reproducing it needs a source with untagged audio; one is made in seconds with `ffmpeg -i … -c copy -metadata:s:a:0 language= …`, and ffprobe then reports `und` on every track. Worth knowing before anyone tries to see this fail with the files to hand.
 
-**If that is it**, the fix is to treat `und` (and an empty tag) as absent, not to widen `overwrite` — the reasoning in the comment at the top of `trackLabels.ts` still holds, and it names the exact regression that widening caused before. Worth deciding at the same time whether `und` should be normalised away at the probe boundary rather than at each place that reads a language, since anything else consuming `probeResult` has the same trap waiting.
+**Fixed at the probe boundary**, which is what the item asked to decide. The deciding evidence was that `und` was already special-cased in four places across three workspaces: `audioGroups.ts` buckets by `track.language || 'und'` and normalises it back out before building a config, `SessionView` filters it out of a label, and `preview.service` uses it as a display fallback. Three readers had to remember a third case and one forgot — the definition of a convention belonging upstream of all of them. `normalizeLanguage()` in `probe.service.ts` now maps `und`, empty and whitespace-only tags to `undefined`, on audio *and* video streams, since both carry the same tag.
 
-**Verify before fixing.** Confirm against the actual source that the tracks really do report `und`; a layout key mismatch would produce the same symptom for a different reason, and `hasPreviousConfig` being true is not proof the auto-apply path read the same entry.
+Nothing downstream needed changing: `audioGroups.ts`'s `|| 'und'` fallback makes an absent language and the literal indistinguishable, and `trackLabels.ts` is fixed without being touched — so the comment there warning against widening `overwrite` stays honoured, which was the point.
+
+**The read-side guards stay deliberately.** `SessionView`'s `language !== 'und'` is redundant for fresh sessions but not for restored ones: a `session.json` written by an earlier build still carries the literal, and those are read back at boot.
+
+**This reaches the wire.** `probeResult` travels on the status response and over SSE, so a consumer sees `audioTracks[].language` absent rather than `und`. Same meaning, better expressed, but not a silent change.
+
+11 tests: 7 on the probe (including `UND` casing and a padded ` deu `), 2 on `applySavedTrackLabels` — a saved language landing on a track that has none, and still refusing to overwrite one the source carries — and 2 pinning that `audioGroups` builds identically from `undefined` and from `'und'`, which is the assumption the whole change rests on.
+
+**Found while testing, not acted on.** `isAlreadyABR` is `videoTrackCount > 1 && hasMultiAudioPerLang`, and it cannot tell "several encodings of one language" from "several languages, none tagged" — because untagged tracks all share one bucket. So an untagged multi-track source with more than one video track is read as an ABR ladder and each tier points at a different audio track, which is the shape of the hd→ENG / mid→FRA regression that function's own docblock describes. Pre-existing and unchanged by this work; possibly correct for genuinely-ABR sources. Worth its own item if it matters.
 
 ---
 
