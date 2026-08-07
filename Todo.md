@@ -10,7 +10,7 @@ Ordered roughly by value, not by effort.
 
 **Branch.** All migration work (issue #154) is on `154-migrate-luminary-media-convert-to-a-local-only-electron-app-remove-saas-features`, open as PR #161. The original seven logical commits (SaaS removal → hls lib → api → app → cms-mock → electron → docs) have since been joined by the manual-verification fixes, the app icon, a merge of `main`, and the restored test suites.
 
-**Build state.** All workspaces build, and all test suites pass: api 796, app 192, segment-editor 217, hls 121, player-core 168, player-web 72 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
+**Build state.** All workspaces build, and all test suites pass: api 796, app 192, segment-editor 217, hls 121, player-core 168, player-web 79 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
 
 **Player extraction (issue #153, PR #162) has since landed on top of this branch.** Playback logic left the app for two packages — `player-core` (headless: munging, controller, recovery, polling) and `player-web` (hls.js reference implementation) — Video.js is gone, and encryption now covers playlists, chapters and subtitles rather than segments alone. Items below are marked where that work closed or changed them.
 
@@ -562,3 +562,25 @@ Makes actionable the "no scrub preview" note recorded under item 10.
 - **Discovery.** Nothing tells a player where `thumbnails.vtt` is; it is a sidecar convention, not a playlist reference. Either `PlayerSource` gains an explicit URL (simplest, and consistent with how `keyHex` is supplied) or the player derives it from the master's prefix — in which case a missing file must be a silent no-op, since `thumbnails: false` sessions and audio-only encodes never have one.
 
 **Do this after item 30**, which reworks the same scrubber.
+
+---
+
+## 32. The scrubber shows what has played and what has loaded, and carries the track menus — done
+
+Beyond items 29 and 30, and worth recording as its own item because of that: this came from reference screenshots rather than from the plan, and it is the piece that touches `player-core`.
+
+**What it was.** The bar was a flat track with a handle on it. Nothing showed how much had played except where the handle sat, nothing showed what had been downloaded, the two readouts were the dimmest text on the surface, and the two `<select>` menus occupied a full-width row of their own to hold two controls at one end of it.
+
+**What it is now.**
+
+- **Three bands** — played, loaded, remainder — each a pill with rounded caps, drawn largest to smallest so every cap stays visible. Not the input's own pseudo-elements: WebKit exposes nothing for the value region, neither engine exposes anything for buffered, and none of them takes a cap independent of the track. So they are plain elements with the `<input>` over them at full size, keeping the drag, the keyboard and the accessible name.
+- **Bands are measured against the handle's travel**, not a raw percentage. An input insets its thumb by half its width at each end, so the handle covers `100% - thumb`; measuring against the full width leaves it ahead of the fill through the first half of the video and behind it through the second, meeting only at the midpoint.
+- **The far readout is the whole length, not what is left.** It is a fixed point to read progress against. Both readouts take their shape from the duration, so an hour-long video reads `0:08:03` at both ends and the elapsed figure does not gain a field and shift the layout as it crosses the hour. Both are now full white and larger — they are the one thing on the bar a viewer reads rather than operates.
+- **The handle appears on approach** — hover, focus or drag — and is absent at rest, where the bar is a readout rather than a control. Instant under `prefers-reduced-motion`.
+- **The menus moved onto the scrubber row**, and the bar lifted clear of the bottom edge, which on a phone is where the home indicator and the edge-swipe gesture live.
+
+**The `player-core` part.** `PlayerState` gains `bufferedEnd`, fed by a new `progress` adapter event. Additive on purpose: an adapter that cannot report it never emits, and the band never draws — which is what the AVPlayer and ExoPlayer adapters will need. `HlsJsAdapter` reports the end of the range **containing the playhead**, not the furthest range held: after a seek there is often media well ahead with a gap between, and drawing that as one band promises a smooth run into a stall. Playhead in a gap reports nought. It emits on `timeupdate` as well as `progress`, because `progress` fires on network activity and the band would otherwise sit still while the playhead ran through what was already loaded.
+
+7 new tests in `player-web` (72 → 79): three on the adapter's gap handling, four on the readouts and band sizing including the behind-the-playhead and unknown-duration cases.
+
+**Unseen on a device**, like the rest of this surface — see item 10.

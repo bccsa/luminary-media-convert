@@ -86,19 +86,54 @@ onBeforeUnmount(() => {
 
 // --- readouts -------------------------------------------------------------
 
-function formatClock(seconds: number): string {
+/**
+ * Clock in the shape the whole video needs, not the shape this instant needs.
+ *
+ * `withHours` is decided by the duration and applied to both readouts, so an
+ * hour-long video reads 0:08:03 rather than 8:03 — the two ends of the bar stay
+ * the same shape, and the elapsed figure does not gain a field and jog the
+ * layout sideways as it crosses the hour.
+ */
+function formatClock(seconds: number, withHours: boolean): string {
     const total = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
     const hours = Math.floor(total / 3600);
     const minutes = Math.floor((total % 3600) / 60);
     const secs = total % 60;
-    const mm = hours > 0 ? String(minutes).padStart(2, '0') : String(minutes);
-    return `${hours > 0 ? `${hours}:` : ''}${mm}:${String(secs).padStart(2, '0')}`;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return withHours
+        ? `${hours}:${pad(minutes)}:${pad(secs)}`
+        : `${minutes}:${pad(secs)}`;
 }
 
 const duration = computed(() => (props.state.duration > 0 ? props.state.duration : 0));
-const elapsedText = computed(() => formatClock(props.state.currentTime));
-const remainingText = computed(
-    () => `-${formatClock(Math.max(0, duration.value - props.state.currentTime))}`,
+const showHours = computed(() => duration.value >= 3600);
+
+const elapsedText = computed(() =>
+    formatClock(props.state.currentTime, showHours.value),
+);
+/** The whole length, not what is left of it — a fixed point to read against. */
+const durationText = computed(() => formatClock(duration.value, showHours.value));
+
+/**
+ * Played and buffered positions, as plain 0–1 numbers for the bar to size with.
+ *
+ * Ratios rather than percentages: a range input insets its thumb by half its
+ * width at each end, so the handle travels `100% - thumb` while a percentage
+ * would travel the full width. The two drift apart everywhere except the
+ * midpoint, leaving the handle ahead of the fill through the first half. The
+ * bands are measured against the same shortened run in CSS, which needs the
+ * bare number.
+ */
+function ratioOf(seconds: number): number {
+    if (duration.value <= 0) return 0;
+    return Math.min(1, Math.max(0, seconds / duration.value));
+}
+
+const progressRatio = computed(() => ratioOf(props.state.currentTime));
+
+/** Never behind the playhead: a band shorter than the fill would read as a gap. */
+const bufferedRatio = computed(() =>
+    Math.max(progressRatio.value, ratioOf(props.state.bufferedEnd)),
 );
 
 const playLabel = computed(() => (props.state.playing ? props.messages.pause : props.messages.play));
@@ -273,48 +308,72 @@ function onSubtitleChange(event: Event): void {
             <div class="lmp-fs-scrub-row">
                 <span class="lmp-fs-time" :aria-label="messages.elapsedLabel">{{ elapsedText }}</span>
 
-                <input
-                    class="lmp-fs-scrubber"
-                    type="range"
-                    min="0"
-                    step="0.1"
-                    :max="duration"
-                    :value="state.currentTime"
-                    :aria-label="messages.scrubberLabel"
-                    @input="onScrub"
-                />
+                <!--
+                    Three stacked bands rather than one styled track: each ends
+                    in a rounded cap, and the engines offer no styleable region
+                    for "played" in WebKit or "buffered" anywhere. They are
+                    decoration; the input lies over them at full size and keeps
+                    the dragging, the keyboard and the accessible name.
+                -->
+                <div
+                    class="lmp-fs-scrub"
+                    :style="{
+                        '--lmp-progress': progressRatio,
+                        '--lmp-buffered': bufferedRatio,
+                    }"
+                >
+                    <div class="lmp-fs-scrub-track" aria-hidden="true"></div>
+                    <div class="lmp-fs-scrub-buffered" aria-hidden="true"></div>
+                    <div class="lmp-fs-scrub-played" aria-hidden="true"></div>
+                    <input
+                        class="lmp-fs-scrubber"
+                        type="range"
+                        min="0"
+                        step="0.1"
+                        :max="duration"
+                        :value="state.currentTime"
+                        :aria-label="messages.scrubberLabel"
+                        @input="onScrub"
+                    />
+                </div>
+
                 <span
-                    class="lmp-fs-time lmp-fs-time-remaining"
-                    :aria-label="messages.remainingLabel"
-                    >{{ remainingText }}</span
+                    class="lmp-fs-time lmp-fs-time-duration"
+                    :aria-label="messages.durationLabel"
+                    >{{ durationText }}</span
                 >
-            </div>
 
-            <div class="lmp-fs-menu-row">
-                <select
-                    v-if="showAudioMenu"
-                    class="lmp-fs-select lmp-fs-audio"
-                    :aria-label="messages.audioMenuLabel"
-                    :value="state.activeAudioTrackId ?? ''"
-                    @change="onAudioChange"
-                >
-                    <option v-for="track in state.audioTracks" :key="track.id" :value="track.id">
-                        {{ track.label }}
-                    </option>
-                </select>
+                <!--
+                    The menus ride on the scrubber row rather than sitting in one
+                    of their own: a second row cost height across the whole width
+                    to hold two controls at one end of it.
+                -->
+                <div v-if="showAudioMenu || showSubtitleMenu" class="lmp-fs-menus">
+                    <select
+                        v-if="showAudioMenu"
+                        class="lmp-fs-select lmp-fs-audio"
+                        :aria-label="messages.audioMenuLabel"
+                        :value="state.activeAudioTrackId ?? ''"
+                        @change="onAudioChange"
+                    >
+                        <option v-for="track in state.audioTracks" :key="track.id" :value="track.id">
+                            {{ track.label }}
+                        </option>
+                    </select>
 
-                <select
-                    v-if="showSubtitleMenu"
-                    class="lmp-fs-select lmp-fs-subtitles"
-                    :aria-label="messages.subtitlesMenuLabel"
-                    :value="subtitleValue"
-                    @change="onSubtitleChange"
-                >
-                    <option :value="SUBTITLES_OFF">{{ messages.subtitlesOff }}</option>
-                    <option v-for="track in state.subtitleTracks" :key="track.id" :value="track.id">
-                        {{ track.label }}
-                    </option>
-                </select>
+                    <select
+                        v-if="showSubtitleMenu"
+                        class="lmp-fs-select lmp-fs-subtitles"
+                        :aria-label="messages.subtitlesMenuLabel"
+                        :value="subtitleValue"
+                        @change="onSubtitleChange"
+                    >
+                        <option :value="SUBTITLES_OFF">{{ messages.subtitlesOff }}</option>
+                        <option v-for="track in state.subtitleTracks" :key="track.id" :value="track.id">
+                            {{ track.label }}
+                        </option>
+                    </select>
+                </div>
             </div>
         </div>
     </div>

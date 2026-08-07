@@ -17,6 +17,7 @@ export function createInitialState(): PlayerState {
         stalled: false,
         currentTime: 0,
         duration: 0,
+        bufferedEnd: 0,
         playbackRate: 1,
 
         angles: [],

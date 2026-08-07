@@ -364,8 +364,15 @@ export class HlsJsAdapter implements PlayerAdapter {
             this.video.addEventListener(type, handler);
             this.mediaListeners.push([type, handler]);
         };
-        add('timeupdate', () => this.emit('timeupdate', { currentTime: this.getCurrentTime() }));
+        add('timeupdate', () => {
+            this.emit('timeupdate', { currentTime: this.getCurrentTime() });
+            // `progress` alone is too coarse: it fires on network activity, so
+            // the band would sit still while the playhead ran through media
+            // that is already buffered.
+            this.emitProgress();
+        });
         add('durationchange', () => this.emit('durationchange', { duration: this.getDuration() }));
+        add('progress', () => this.emitProgress());
         add('playing', () => this.emit('playing', undefined));
         // `play` fires before buffering completes; emitting on both keeps the
         // UI responsive. Consumers treat `playing` as idempotent.
@@ -374,6 +381,28 @@ export class HlsJsAdapter implements PlayerAdapter {
         add('ended', () => this.emit('ended', undefined));
         add('waiting', () => this.emit('waiting', undefined));
         add('seeked', () => this.emit('seeked', undefined));
+    }
+
+    /**
+     * How far the media is continuously buffered from where it is playing.
+     *
+     * `buffered` holds one range per contiguous run, and a seek leaves gaps: the
+     * furthest range may sit well ahead of the playhead with nothing between.
+     * Only the range containing the playhead can be played through, so that is
+     * the one reported — anything else draws a promise the engine cannot keep.
+     * Nought when the playhead sits in a gap, which is a stall in progress.
+     */
+    private emitProgress(): void {
+        const { buffered, currentTime } = this.video;
+        for (let i = 0; i < buffered.length; i++) {
+            // A hair of tolerance at the seam: the playhead routinely sits a
+            // few microseconds outside the range it is actually playing from.
+            if (currentTime >= buffered.start(i) - 0.1 && currentTime <= buffered.end(i)) {
+                this.emit('progress', { bufferedEnd: buffered.end(i) });
+                return;
+            }
+        }
+        this.emit('progress', { bufferedEnd: 0 });
     }
 
     private detachMediaListeners(): void {

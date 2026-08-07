@@ -204,6 +204,7 @@ export class PlayerController implements PlayerControllerApi {
 
         this.store.setState({
             lifecycle: 'loading',
+            bufferedEnd: 0,
             angles: info.angles,
             activeAngleId: angleId,
             audioTracks: info.audioTracks,
@@ -543,6 +544,9 @@ export class PlayerController implements PlayerControllerApi {
             }),
             this.adapter.on('durationchange', ({ duration }) => {
                 this.store.setState({ duration });
+            }),
+            this.adapter.on('progress', ({ bufferedEnd }) => {
+                this.store.setState({ bufferedEnd });
             }),
             this.adapter.on('playing', () => {
                 this.store.setState({

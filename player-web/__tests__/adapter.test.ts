@@ -184,6 +184,69 @@ describe('HlsJsAdapter — event mapping', () => {
         expect(seen).toHaveBeenCalledTimes(3);
     });
 
+    /** jsdom gives a video no buffered ranges; stand one in. */
+    function withBuffered(
+        video: HTMLVideoElement,
+        ranges: [number, number][],
+        currentTime: number,
+    ): void {
+        Object.defineProperty(video, 'buffered', {
+            configurable: true,
+            value: {
+                length: ranges.length,
+                start: (i: number) => ranges[i][0],
+                end: (i: number) => ranges[i][1],
+            },
+        });
+        Object.defineProperty(video, 'currentTime', {
+            configurable: true,
+            value: currentTime,
+        });
+    }
+
+    it('reports the buffered range the playhead is inside', async () => {
+        const video = createVideo();
+        const adapter = new HlsJsAdapter(video);
+        const seen = vi.fn();
+        adapter.on('progress', seen);
+        await adapter.loadSource({ url: 'blob:master', isBlob: true });
+
+        // A seek left a stale range behind and a fresh one around the playhead.
+        // The furthest end (400) is unreachable from here without a stall.
+        withBuffered(video, [[0, 20], [90, 140], [300, 400]], 100);
+        video.dispatchEvent(new Event('progress'));
+
+        expect(seen).toHaveBeenLastCalledWith({ bufferedEnd: 140 });
+    });
+
+    it('reports nothing buffered when the playhead sits in a gap', async () => {
+        const video = createVideo();
+        const adapter = new HlsJsAdapter(video);
+        const seen = vi.fn();
+        adapter.on('progress', seen);
+        await adapter.loadSource({ url: 'blob:master', isBlob: true });
+
+        withBuffered(video, [[0, 20], [300, 400]], 100);
+        video.dispatchEvent(new Event('progress'));
+
+        expect(seen).toHaveBeenLastCalledWith({ bufferedEnd: 0 });
+    });
+
+    it('follows the playhead into buffered media, not just network activity', async () => {
+        // `progress` fires on download; without also emitting on timeupdate the
+        // band would sit still while the playhead ran through what is buffered.
+        const video = createVideo();
+        const adapter = new HlsJsAdapter(video);
+        const seen = vi.fn();
+        adapter.on('progress', seen);
+        await adapter.loadSource({ url: 'blob:master', isBlob: true });
+
+        withBuffered(video, [[0, 60]], 10);
+        video.dispatchEvent(new Event('timeupdate'));
+
+        expect(seen).toHaveBeenLastCalledWith({ bufferedEnd: 60 });
+    });
+
     it('maps audio track events to audiotracks-updated', async () => {
         const adapter = new HlsJsAdapter(createVideo());
         const seen = vi.fn();

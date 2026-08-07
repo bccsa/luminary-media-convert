@@ -50,13 +50,66 @@ describe('FullscreenControls — transport', () => {
         await scrubber.trigger('input');
         expect(controller.seek).toHaveBeenCalledWith(42);
 
+        // The far end is the whole length, not what is left — a fixed point to
+        // read progress against, which does not move as the video plays.
         const times = wrapper.findAll('.lmp-fs-time').map((el) => el.text());
-        expect(times).toEqual(['1:05', '-1:05']);
+        expect(times).toEqual(['1:05', '2:10']);
     });
 
-    it('formats past the hour', () => {
+    it('gives both readouts the hours field when the video is over an hour', () => {
         const { wrapper } = mountControls({ currentTime: 3725, duration: 7200 });
-        expect(wrapper.findAll('.lmp-fs-time')[0]?.text()).toBe('1:02:05');
+        expect(wrapper.findAll('.lmp-fs-time').map((el) => el.text())).toEqual([
+            '1:02:05',
+            '2:00:00',
+        ]);
+    });
+
+    it('keeps both readouts short when the video is not', () => {
+        // 8:03 into an hour-long video reads 0:08:03; 8:03 into a short one
+        // does not gain an empty hours field it will never use.
+        const { wrapper } = mountControls({ currentTime: 483, duration: 600 });
+        expect(wrapper.findAll('.lmp-fs-time').map((el) => el.text())).toEqual([
+            '8:03',
+            '10:00',
+        ]);
+    });
+
+    it('sizes the played and buffered bands', () => {
+        const { wrapper } = mountControls({
+            currentTime: 30,
+            duration: 120,
+            bufferedEnd: 60,
+        });
+
+        // Ratios, not percentages: the bands are measured against the run the
+        // handle travels, which is a thumb-width short of the full track.
+        const style = wrapper.get('.lmp-fs-scrub').attributes('style');
+        expect(style).toContain('--lmp-progress: 0.25');
+        expect(style).toContain('--lmp-buffered: 0.5');
+    });
+
+    it('never draws the buffered band behind the playhead', () => {
+        // Between a seek and the first fill, buffered sits behind where we are.
+        // Drawing that literally would put a gap in front of the handle.
+        const { wrapper } = mountControls({
+            currentTime: 90,
+            duration: 120,
+            bufferedEnd: 10,
+        });
+        const style = wrapper.get('.lmp-fs-scrub').attributes('style');
+        expect(style).toContain('--lmp-progress: 0.75');
+        expect(style).toContain('--lmp-buffered: 0.75');
+    });
+
+    it('sizes nothing before the duration is known', () => {
+        const { wrapper } = mountControls({
+            currentTime: 5,
+            duration: 0,
+            bufferedEnd: 20,
+        });
+        const style = wrapper.get('.lmp-fs-scrub').attributes('style');
+        expect(style).toContain('--lmp-progress: 0');
+        expect(style).toContain('--lmp-buffered: 0');
     });
 
     it('emits exit rather than exiting fullscreen itself', async () => {
@@ -286,7 +339,7 @@ describe('FullscreenControls — localization', () => {
             {
                 scrubberLabel: 'Recherche',
                 elapsedLabel: 'Écoulé',
-                remainingLabel: 'Restant',
+                durationLabel: 'Durée',
                 exitFullscreen: 'Quitter',
                 audioMenuLabel: 'Audio FR',
                 subtitlesMenuLabel: 'Sous-titres',
@@ -296,7 +349,7 @@ describe('FullscreenControls — localization', () => {
 
         expect(wrapper.get('.lmp-fs-scrubber').attributes('aria-label')).toBe('Recherche');
         expect(wrapper.findAll('.lmp-fs-time')[0]?.attributes('aria-label')).toBe('Écoulé');
-        expect(wrapper.findAll('.lmp-fs-time')[1]?.attributes('aria-label')).toBe('Restant');
+        expect(wrapper.findAll('.lmp-fs-time')[1]?.attributes('aria-label')).toBe('Durée');
         expect(wrapper.get('.lmp-fs-exit').attributes('aria-label')).toBe('Quitter');
         expect(wrapper.get('.lmp-fs-audio').attributes('aria-label')).toBe('Audio FR');
         expect(wrapper.get('.lmp-fs-subtitles').attributes('aria-label')).toBe('Sous-titres');

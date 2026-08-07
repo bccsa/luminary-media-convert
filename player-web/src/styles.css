@@ -12,6 +12,9 @@
     --lmp-border: rgba(255, 255, 255, 0.16);
     --lmp-accent: #ffffff;
     --lmp-track: rgba(255, 255, 255, 0.3);
+    /* Buffered-ahead: between the played white and the unloaded track, and
+       nearer the track — it marks what is ready, not what has been watched. */
+    --lmp-buffer: rgba(255, 255, 255, 0.55);
     --lmp-radius: 10px;
     --lmp-radius-sm: 6px;
     --lmp-font: inherit;
@@ -201,7 +204,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
-    padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+    padding: 2rem 1rem calc(2.75rem + env(safe-area-inset-bottom, 0px));
     background: linear-gradient(to top, var(--lmp-surface-strong), transparent);
 }
 
@@ -211,48 +214,167 @@
     gap: 0.6rem;
 }
 
+/*
+ * Full white and larger than a caption: these are the one thing on the bar a
+ * viewer reads rather than operates, and dimming them made them furniture.
+ * Tabular figures and a fixed minimum stop the row twitching as digits change.
+ */
 .lmp-fs-time {
     font-family: var(--lmp-font-mono);
-    font-size: 0.75rem;
-    color: var(--lmp-text-dim);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--lmp-text);
     font-variant-numeric: tabular-nums;
-    min-width: 3.5em;
+    letter-spacing: -0.01em;
+    min-width: 4.5em;
 }
 
-.lmp-fs-time-remaining {
+.lmp-fs-time-duration {
     text-align: right;
 }
 
-.lmp-fs-scrubber {
+/*
+ * Three stacked bands — the rest, buffered-ahead, played — each a pill with
+ * rounded caps, drawn largest to smallest so every cap stays visible.
+ *
+ * Not the input's own pseudo-elements: WebKit offers nothing for the value
+ * region, neither engine offers anything for buffered, and none of them can be
+ * given a cap independent of the track. So the bands are plain elements and the
+ * input lies over them at full size.
+ *
+ * Each band's width is the position of the *handle centre* at that ratio, not a
+ * raw percentage: an input insets its thumb by half its width at each end, so
+ * the handle travels `100% - thumb`. Measuring against the full width leaves
+ * the handle ahead of the fill through the first half of the video and behind
+ * it through the second, meeting only at the midpoint.
+ */
+.lmp-fs-scrub {
+    --lmp-thumb: 15px;
+    --lmp-bar: 5px;
+    --lmp-played-x: calc(
+        var(--lmp-thumb) / 2 + (100% - var(--lmp-thumb)) * var(--lmp-progress, 0)
+    );
+    --lmp-buffered-x: calc(
+        var(--lmp-thumb) / 2 + (100% - var(--lmp-thumb)) * var(--lmp-buffered, 0)
+    );
+
+    position: relative;
     flex: 1;
-    appearance: none;
-    height: 4px;
-    border-radius: 2px;
+    /* Taller than the bar: the rest is thumb room and grab area. A 5px-tall
+       pointer target is not one. */
+    height: 18px;
+    display: flex;
+    align-items: center;
+}
+
+.lmp-fs-scrub-track,
+.lmp-fs-scrub-buffered,
+.lmp-fs-scrub-played {
+    position: absolute;
+    left: 0;
+    height: var(--lmp-bar);
+    border-radius: calc(var(--lmp-bar) / 2);
+    /* Decoration only — every pointer event belongs to the input above. */
+    pointer-events: none;
+}
+
+.lmp-fs-scrub-track {
+    right: 0;
     background: var(--lmp-track);
+}
+
+.lmp-fs-scrub-buffered {
+    width: var(--lmp-buffered-x);
+    background: var(--lmp-buffer);
+}
+
+.lmp-fs-scrub-played {
+    width: var(--lmp-played-x);
+    background: var(--lmp-accent);
+}
+
+/*
+ * The input keeps every behaviour and paints none of it: transparent track, the
+ * bands below showing through, and only its thumb drawn.
+ */
+.lmp-fs-scrubber {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    margin: 0;
+    appearance: none;
+    background: transparent;
     cursor: pointer;
 }
 
-.lmp-fs-scrubber::-webkit-slider-thumb {
-    appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--lmp-accent);
+.lmp-fs-scrubber::-webkit-slider-runnable-track {
+    height: var(--lmp-bar);
+    background: transparent;
 }
 
-.lmp-fs-scrubber::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
+.lmp-fs-scrubber::-moz-range-track,
+.lmp-fs-scrubber::-moz-range-progress {
+    height: var(--lmp-bar);
+    background: transparent;
+}
+
+/*
+ * The handle appears on approach, not at rest.
+ *
+ * At rest the bar is a readout — a progress line across the picture — and a dot
+ * riding it is one more thing drawn over the video for no purpose. It is needed
+ * the moment the bar becomes a control, which is when a pointer arrives or the
+ * keyboard focuses it.
+ */
+.lmp-fs-scrubber::-webkit-slider-thumb {
+    appearance: none;
+    width: var(--lmp-thumb);
+    height: var(--lmp-thumb);
     border: none;
     border-radius: 50%;
     background: var(--lmp-accent);
+    /* Straddles the bar rather than sitting on it. */
+    margin-top: calc((var(--lmp-bar) - var(--lmp-thumb)) / 2);
+    transform: scale(0);
+    transition: transform var(--lmp-transition);
 }
 
-.lmp-fs-menu-row {
-    display: flex;
+.lmp-fs-scrubber::-moz-range-thumb {
+    width: var(--lmp-thumb);
+    height: var(--lmp-thumb);
+    border: none;
+    border-radius: 50%;
+    background: var(--lmp-accent);
+    transform: scale(0);
+    transition: transform var(--lmp-transition);
+}
+
+.lmp-fs-scrubber:hover::-webkit-slider-thumb,
+.lmp-fs-scrubber:focus-visible::-webkit-slider-thumb,
+.lmp-fs-scrubber:active::-webkit-slider-thumb {
+    transform: scale(1);
+}
+
+.lmp-fs-scrubber:hover::-moz-range-thumb,
+.lmp-fs-scrubber:focus-visible::-moz-range-thumb,
+.lmp-fs-scrubber:active::-moz-range-thumb {
+    transform: scale(1);
+}
+
+/* A handle that never appears is worse than one that appears instantly. */
+@media (prefers-reduced-motion: reduce) {
+    .lmp-fs-scrubber::-webkit-slider-thumb,
+    .lmp-fs-scrubber::-moz-range-thumb {
+        transition: none;
+    }
+}
+
+/* Track menus, inline at the trailing end of the scrubber row. */
+.lmp-fs-menus {
+    display: inline-flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 0.5rem;
+    gap: 0.4rem;
+    flex-shrink: 0;
 }
 
 /*

@@ -190,6 +190,16 @@ export interface PlayerState {
     currentTime: number;
     /** 0 until known. */
     duration: number;
+    /**
+     * End of the buffered range currently being played, in seconds; 0 when
+     * nothing is buffered ahead or the engine does not report it.
+     *
+     * The range *containing* the playhead, not the furthest one the engine
+     * holds — after a seek, media either side of a gap is buffered but not
+     * continuous with here, and presenting it as one run would promise a viewer
+     * smooth playback straight into a stall.
+     */
+    bufferedEnd: number;
     playbackRate: number;
 
     angles: Angle[];
@@ -304,6 +314,14 @@ export interface AdapterErrorPayload {
 export interface AdapterEventMap {
     timeupdate: { currentTime: number };
     durationchange: { duration: number };
+    /**
+     * Buffered-ahead position moved. Separate from `timeupdate` because
+     * buffering continues while paused, when no time is passing to report.
+     *
+     * Optional in practice: an adapter that cannot report it simply never
+     * emits, and the wrapper leaves `bufferedEnd` at 0.
+     */
+    progress: { bufferedEnd: number };
     playing: void;
     pause: void;
     ended: void;

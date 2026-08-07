@@ -29,8 +29,11 @@ export interface PlayerMessages {
     scrubberLabel: string;
     /** aria-label of the elapsed-time readout. */
     elapsedLabel: string;
-    /** aria-label of the remaining-time readout. */
-    remainingLabel: string;
+    /**
+     * aria-label of the readout at the far end of the scrubber, which shows the
+     * whole length of the video rather than what is left of it.
+     */
+    durationLabel: string;
     /**
      * Skip-back button label. `{seconds}` is replaced with the configured
      * interval — the number must not be written into the string, or it reads
@@ -70,7 +73,7 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     pause: 'Pause',
     scrubberLabel: 'Seek',
     elapsedLabel: 'Elapsed time',
-    remainingLabel: 'Remaining time',
+    durationLabel: 'Total time',
     skipBack: 'Skip back {seconds} seconds',
     skipForward: 'Skip forward {seconds} seconds',
 
