@@ -204,9 +204,12 @@ Two arrivals are covered, because they differ in whether a renderer exists yet: 
 
 **Done since.** The security and privacy reviews were re-run against the local-only architecture: `docs/security-review.md` and `docs/privacy-review.md`. The security review found the origin allowlist bypassable by an opaque (`null`) origin — any website could open a session on a user's encoder through a sandboxed iframe, bypassing the approval dialog and the memory of every origin they had refused. Fixed, with the two specs that asserted the old behaviour now asserting the opposite. A second, narrower finding (a read token leaking between two approved sites via `documentId` reuse) was also fixed.
 
-**Still open, from those reviews.**
+**From those reviews — one settled, one open.**
 
-- **`encryptionKeyHex` and `readToken` sit in plaintext in `session.json`**, while S3 credentials in the same file are redacted. Consistent — anything that can read the file is the logged-in user — but it means the AES key for a finished encode is on disk without keychain protection, so an unencrypted backup or a cloned drive yields the media key. Encrypt those two fields with the same cipher, or decide the gap is acceptable and say so. **Untouched by #162**, which moved the key out of the _status payload_ and behind a masked endpoint — a transport concern, not this one. The at-rest gap is now the widest remaining exposure of that key.
+- **`encryptionKeyHex` and `readToken` sit in plaintext in `session.json`** — **accepted, deliberately.** The file lives in `<userData>/work/<sessionId>/` on the operator's own machine, mode `0o600`, and exists so a session survives a restart. It is never sent to the CMS, never served to a consumer, and never leaves that machine; the only thing that crosses a boundary is the masked key, over loopback, to the app or the CMS that opened the session. So the reader it protects against is the operator themselves — who already holds the source media, the app, and the S3 credentials in their own keychain. Encrypting these two fields would move the key from a file that user can read to a file that user can decrypt.
+
+    The exposure that would matter is the key being easy to lift where a **consumer** meets it, and that is a different system: delivery from the consumer app's own API is that app's concern, and this repo's part — not handing the player something trivially extractable — is done, since the engine adapter serves the key from memory rather than from a blob URL. What is left there is the honest floor of client-side encryption: a viewer who can play the media can recover the key. Only DRM changes that (see the note in #162).
+
 - **`settings.json` accumulates origins forever.** Prunable by hand in the trusted sites panel; nothing prunes it automatically. A small record of which CMS instances a user has touched, kept for the life of the install.
 
 ---
