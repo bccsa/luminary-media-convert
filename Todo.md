@@ -10,14 +10,16 @@ Ordered roughly by value, not by effort.
 
 **Branch.** All migration work (issue #154) is on `154-migrate-luminary-media-convert-to-a-local-only-electron-app-remove-saas-features`, open as PR #161. The original seven logical commits (SaaS removal → hls lib → api → app → cms-mock → electron → docs) have since been joined by the manual-verification fixes, the app icon, a merge of `main`, and the restored test suites.
 
-**Build state.** All workspaces build, and all test suites pass: api 741, app 178, segment-editor 217, hls 26 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
+**Build state.** All workspaces build, and all test suites pass: api 795, app 192, segment-editor 217, hls 121, player-core 168, player-web 58 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
+
+**Player extraction (issue #153, PR #162) has since landed on top of this branch.** Playback logic left the app for two packages — `player-core` (headless: munging, controller, recovery, polling) and `player-web` (hls.js reference implementation) — Video.js is gone, and encryption now covers playlists, chapters and subtitles rather than segments alone. Items below are marked where that work closed or changed them.
 
 **Manual verification — mostly done.** A full pass was run through the Electron app and `cms-mock` against a local MinIO: CMS handshake and idempotency, TOFU origin gating, local-file ingest by reference, probe, trim, encode, SSE with `hlsUrl` + `encryptionKeyHex`, encrypted playback via the `luminary://key` swap, chapters, session delete, and credential recovery across a restart. Several defects were found and fixed in the process (storyboard cue clipping at a trim in-point, trim semantics, timeline duration during an encode, playhead clipping at the ends, waveform contrast on an audio source, storyboard polling on a source with no video track).
 
 Still outstanding:
 
-- [ ] Multi-angle source: single `master.m3u8` with `#EXT-X-MEDIA:TYPE=VIDEO` groups in S3; angle switching + audio-only in the app player (client-side extraction).
-- [ ] **Stock-player check (flagged risk, never tested):** confirm plain video.js/hls.js plays the *default angle* of a raw multi-angle master without the extraction helpers — Luminary clients that have not adopted `hls/` helpers depend on this.
+- [x] Multi-angle source: single `master.m3u8` with `#EXT-X-MEDIA:TYPE=VIDEO` groups in S3; angle switching + audio-only in the app player (client-side extraction). **Verified** against S3 output with #162 — angle, audio-track and quality selection all confirmed working.
+- [ ] **Stock-player check (flagged risk, never tested):** confirm plain video.js/hls.js plays the _default angle_ of a raw multi-angle master without the extraction helpers — Luminary clients that have not adopted `hls/` helpers depend on this. **Now has a second half:** with #162 an encrypted session also encrypts its playlists (LMCENC), which no stock player can read at all — such a client needs `encryption.encryptPlaylists: false` until it moves to `player-core`. Worth testing both, since the answer decides whether that opt-out is a transitional courtesy or a permanent mode.
 - [ ] Queue: three CMS sessions encoding FIFO with SSE `queuePosition` updates.
 - [ ] Protocol handler from a packaged install: `open luminary-convert://` launches/focuses the app.
 - [ ] Packaged mac build encodes with `encoder: 'apple'` (VideoToolbox) — blocked on item 5a; the packaged app currently falls back to PATH, so it cannot encode on a machine without a system ffmpeg.
@@ -29,8 +31,8 @@ Still outstanding:
 The encoder's half of the contract is done and documented (CLAUDE.md "CMS contract"; `cms-mock/` is the executable reference). The Luminary side still needs, on branch `1878-api-cms-hls-media-data-model` or successor:
 
 - The "upload / edit media" button: health-check `GET /api/cms/health` on `http://127.0.0.1:31711`, `luminary-convert://` launch fallback, then `POST /api/cms/sessions` (Chrome LNA; Chrome-only at time of writing).
-- SSE consumer on `eventsUrl`: on the first `encoding` event, save `MediaDto { hlsUrl, hlsKey: encryptionKeyHex }` — the post can be saved before encoding completes.
-- Player-side: "not available yet" notice while `hlsUrl` 404s; adopt the `@luminary-media-converter/hls` extraction helpers (`listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist`) and the `luminary://key` → crypto-object key swap for encrypted playback.
+- SSE consumer on `eventsUrl`: on the first `encoding` event, save `MediaDto { hlsUrl, hlsKey }` — the post can be saved before encoding completes. **Changed by #162:** the key no longer rides on the event. Fetch it from `GET /api/sessions/:id/key?token=read_…` and unmask it (XOR with `SHA-256(sessionId)[0..16]`, self-inverse); `cms-mock/src/store.ts` (`captureHlsKey`) is the reference. A CMS still reading `encryptionKeyHex` off the frame will silently get `undefined`.
+- Player-side: **adopt `@luminary-media-converter/player-web`** (or `player-core` with an adapter) rather than wiring the `hls/` helpers by hand — it already does angle extraction, the `luminary://key` swap from memory, quality capping, chapters, subtitles, recovery, and the "not available yet" state as a `coming-soon` slot that polls until the playlist appears. Since #162 an encrypted session also encrypts its playlists and VTTs, which only these packages can read.
 - Passing `existingMedia { hlsUrl, hlsKey }` for edit mode once item 1 lands (the DTO already accepts it).
 
 ---
@@ -58,13 +60,13 @@ Removed: `.github/workflows/api-deploy-{prod,staging}.yml`, `api/Dockerfile`, `a
 **Wanted.** When the CMS sends `existingMedia`, the app should open the collection instead of starting from a blank session:
 
 - **Import** — resolve `hlsUrl` back to a bucket/prefix and use `POST /api/hls/discover` + `POST /api/hls/read` to enumerate what is there: video angles, audio renditions, subtitle tracks, chapters, thumbnails, waveform sidecar. `deriveAngleName` and `normalizeS3Key` in `hls/src/keys.ts` already exist for this.
-- **Playback with the supplied key** — `HlsPlayer` already does client-side `#EXT-X-KEY` substitution; it needs to take `hlsKey` from the CMS rather than only `encryptionKeyHex` from a session it ran itself.
+- **Playback with the supplied key** — **done by #162.** `PlayerSource.keyHex` is an input to the player, with no opinion about where it came from, so a key handed over by the CMS works exactly like one from a session the app ran itself.
 - **Chapter editing on an imported collection** — the session-scoped chapter routes resolve the prefix from the session's own S3 config; an imported collection needs the same against a discovered prefix (the stateless `/api/hls/chapters/{read,write}` routes already do exactly this).
 - **Track management** — add / remove / replace an individual audio track or video angle without touching the rest:
-  - new `hls-edit` operations alongside `upsertSubtitle` / `removeSubtitle` / `upsertChapters` / `removeChapters` in `api/src/hls-edit/operations/index.ts` (e.g. `upsertAudioRendition`, `removeAudioRendition`, `upsertVideoAngle`, `removeVideoAngle`)
-  - single-track encodes that write into an existing prefix and are encrypted with the **existing collection key**, not a freshly generated one — `EncodeService` currently always calls `encryptionService.generateKey()`, so it needs a path that takes a supplied key
-  - `If-Match` ETag concurrency on `master.m3u8` via `s3-etag.service.ts` — already wired for mutate, so the new ops inherit it
-  - a track-manager UI in `SessionView` (list tracks, mark for removal, add a source file per new track)
+    - new `hls-edit` operations alongside `upsertSubtitle` / `removeSubtitle` / `upsertChapters` / `removeChapters` in `api/src/hls-edit/operations/index.ts` (e.g. `upsertAudioRendition`, `removeAudioRendition`, `upsertVideoAngle`, `removeVideoAngle`)
+    - single-track encodes that write into an existing prefix and are encrypted with the **existing collection key**, not a freshly generated one — `EncodeService` currently always calls `encryptionService.generateKey()`, so it needs a path that takes a supplied key. Since #162 that key also has to decrypt the collection's existing playlists before they can be edited and re-encrypt them after, which `hls-edit` already does when given a `keyHex`
+    - `If-Match` ETag concurrency on `master.m3u8` via `s3-etag.service.ts` — already wired for mutate, so the new ops inherit it
+    - a track-manager UI in `SessionView` (list tracks, mark for removal, add a source file per new track)
 
 **Watch out for.** Segment format and segment duration have to match the existing collection or the new track will not line up; byte-range packing means a "single track" is not a single file; and removing the last rendition of a group leaves a master that no player will accept.
 
@@ -138,12 +140,14 @@ Two things checked along the way and recorded in `bin/README.md`: evermeet.cx pu
 
 **Done.** Every workspace is green, and `vue-tsc` typechecks the specs again.
 
-| Workspace | Result |
-|---|---|
-| `api/` | 22 files, 741 tests |
-| `app/` | 10 files, 178 tests |
-| `segment-editor/` | 5 files, 217 tests |
-| `hls/` | 4 files, 26 tests |
+| Workspace         | Result              |
+| ----------------- | ------------------- |
+| `api/`            | 23 files, 795 tests |
+| `app/`            | 12 files, 192 tests |
+| `segment-editor/` | 5 files, 217 tests  |
+| `hls/`            | 9 files, 121 tests  |
+| `player-core/`    | 12 files, 168 tests |
+| `player-web/`     | 4 files, 58 tests   |
 
 Rewritten against what the code does now rather than patched into passing. Two suites were deleted rather than repaired, because their subject moved: the angle and audio-only playlist generation in `ffmpeg.service` (the encoder writes one spec-correct master and the player narrows it), and everything about webhook delivery in `encode.service` (the CMS watches over SSE).
 
@@ -154,7 +158,9 @@ New coverage for what the migration added and nothing tested: `OriginRegistry` (
 - `createCorsOptions` promised in its own comment to refuse by withholding the header and never by raising, but called `registry.isAllowed(origin)` before building the promise, so only an async rejection was caught. `isAllowed` has a synchronous return path and calls the host's approver directly — a native dialog throwing synchronously would have become a 500 on a request the API meant to quietly turn away.
 - `encode.service.spec` constructed `EncodeService` with eight services when it takes seven, so every assertion in that suite was made against the wrong object. `encode.controller.spec` had the same fault with nine.
 
-**Still worth adding.** `hls/src/angles.ts` extraction against real multi-angle masters — the natural home for the coverage deleted from `ffmpeg.service`. And `cms-mock/` has no tests at all, deliberately: it is a dev-only bench, nothing depends on it, and its bugs surface immediately in use.
+**Since done by #162.** `hls/src/angles.ts` extraction against real multi-angle masters — the coverage deleted from `ffmpeg.service` has its home back, and then some: `angles.spec.ts`, a parity suite pinning the rewritten extraction to the behaviour of the line-based original, and byte-for-byte round-trip fixtures for multi-angle, audio-only and byte-range playlists. `player-core` and `player-web` arrived with their own suites (see the table).
+
+**Still worth adding.** `cms-mock/` has no tests at all, deliberately: it is a dev-only bench, nothing depends on it, and its bugs surface immediately in use.
 
 Also removed with this work: the dead `node-tusd` alias in `api/vitest.config.ts`, and the `src/**/*.spec.ts` exclusion in `app/tsconfig.app.json`.
 
@@ -200,7 +206,19 @@ Two arrivals are covered, because they differ in whether a renderer exists yet: 
 
 **Still open, from those reviews.**
 
-- **`encryptionKeyHex` and `readToken` sit in plaintext in `session.json`**, while S3 credentials in the same file are redacted. Consistent — anything that can read the file is the logged-in user — but it means the AES key for a finished encode is on disk without keychain protection, so an unencrypted backup or a cloned drive yields the media key. Encrypt those two fields with the same cipher, or decide the gap is acceptable and say so.
+- **`encryptionKeyHex` and `readToken` sit in plaintext in `session.json`**, while S3 credentials in the same file are redacted. Consistent — anything that can read the file is the logged-in user — but it means the AES key for a finished encode is on disk without keychain protection, so an unencrypted backup or a cloned drive yields the media key. Encrypt those two fields with the same cipher, or decide the gap is acceptable and say so. **Untouched by #162**, which moved the key out of the _status payload_ and behind a masked endpoint — a transport concern, not this one. The at-rest gap is now the widest remaining exposure of that key.
 - **`settings.json` accumulates origins forever.** Prunable by hand in the trusted sites panel; nothing prunes it automatically. A small record of which CMS instances a user has touched, kept for the life of the install.
 
 ---
+
+## 10. Player follow-ups (opened by #162)
+
+**Fullscreen on a real device — untested.** The landscape lock on entering, the auto-exit on rotating back to portrait, and the iPhone path that hands over to Apple's own player UI have only ever run in jsdom against mocked `screen.orientation`. `orientation.lock` is reliable on Chromium/Android and a guarded no-op elsewhere, so Android is where the behaviour actually has to be seen. iOS 17.1+ playback (hls.js over `ManagedMediaSource`) needs the same treatment — below that, munged content is refused with a stated reason rather than failing obscurely, which is also worth seeing once.
+
+**No scrub preview in the fullscreen scrubber.** `thumbnails.vtt` and its sprite sheets are generated and sit beside the master, and the encoder's trim filmstrip already reads them — the player does not. Wiring the existing sprites into `player-web`'s scrubber would give previews on web and Android with no encoder change, and the VTT parser exists.
+
+That is worth settling before reaching for **I-frame playlists** (`#EXT-X-I-FRAME-STREAM-INF`), which are tempting because they are the HLS-native answer and turn out not to be portable: AVPlayer uses them, ExoPlayer ignores them, hls.js gives no preview UI either way. They earn their keep in exactly one case — deferring to Apple's built-in player chrome in a Capacitor app — and cost an extra extraction pass at encode time, since FFmpeg's HLS muxer cannot emit them. Wherever we draw the controls ourselves, a sprite sheet is one image and one crop. The lossless parser already round-trips the tag, so adding them later disturbs nothing.
+
+**`waveform.json` is not encrypted** on a session that encrypts everything else. It is neither `.m3u8` nor `.vtt`, so it fell outside the LMCENC scope by definition rather than by decision. It leaks the shape of the audio and nothing else — but a listener who cares about the loud parts can find them. Either widen the scope or record that this is deliberate.
+
+**`encryptPlaylists` has no UI.** It follows `encryption.enabled` and can only be overridden through a direct `POST /api/sessions` — neither the CMS handshake nor the app offers the opt-out. That is the right default; the question is whether anything needs to reach the escape hatch, which the stock-player check in item 0 decides.
