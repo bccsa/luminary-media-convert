@@ -145,6 +145,7 @@ const chapters = useChapters({
 });
 const chapterSegments = chapters.segments;
 const chaptersSaveError = ref<string | null>(null);
+const cancelError = ref<string | null>(null);
 
 // Playback duration as reported by the player — the only correct source for
 // the chapter timeline since it reflects trim cuts on encoded output.
@@ -1394,13 +1395,60 @@ async function onStartEncodingFromTrim() {
 // Cancel actions
 // ---------------------------------------------------------------------------
 
+/**
+ * Statuses in which this session can be discarded, matching what
+ * `DELETE /api/sessions/:id` actually accepts.
+ *
+ * `encrypting` and `uploading_to_s3` are absent because the API refuses them —
+ * the pipeline is mid-write. Offering the button there and swallowing the
+ * refusal told the user their session was cancelled while it carried on
+ * encrypting and uploading.
+ */
+const DISCARDABLE_STATUSES = [
+    'created',
+    'uploading',
+    'uploaded',
+    'queued',
+    'encoding',
+] as const;
+
+const canDiscardSession = computed(() =>
+    DISCARDABLE_STATUSES.includes(
+        currentStatus.value as (typeof DISCARDABLE_STATUSES)[number]
+    )
+);
+
+/**
+ * "Cancel encoding" is only true once there is an encode to cancel. Before that
+ * the same action discards a session the user has been setting up, and saying
+ * so is the difference between a button they trust and one they avoid.
+ */
+const discardLabel = computed(() =>
+    currentStatus.value === 'queued' || currentStatus.value === 'encoding'
+        ? 'Cancel encoding'
+        : 'Discard session'
+);
+
+/**
+ * Stop, delete, leave — and say so when it does not work.
+ *
+ * The failure was previously swallowed as "best-effort cleanup" and the route
+ * change happened regardless, so a refusal looked identical to a success. The
+ * poller restarts if the delete fails, because the session is still running and
+ * the view has to keep telling the truth about it.
+ */
 async function onCancelEncode() {
+    cancelError.value = null;
     poller.stop();
 
     try {
         await removeSession();
-    } catch {
-        // Best-effort cleanup
+    } catch (e) {
+        cancelError.value = errorMessage(e);
+        if (sessionId.value && sessionToken.value) {
+            poller.start(sessionId.value, sessionToken.value);
+        }
+        return;
     }
 
     router.push('/sessions');
@@ -1856,6 +1904,30 @@ onUnmounted(() => {
                         <div class="min-w-0 flex-1" />
 
                         <!--
+                            Discarding the session. On the topline rather than
+                            beside the player, because the player does not exist
+                            until a file has been picked — and `created` through
+                            `uploaded`, the stretch with no player, is exactly
+                            where there was previously no way out at all.
+                        -->
+                        <span
+                            v-if="cancelError"
+                            data-testid="discard-error"
+                            class="min-w-0 max-w-[18rem] truncate text-xs text-red-600 dark:text-red-400"
+                            :title="cancelError"
+                            >{{ cancelError }}</span
+                        >
+                        <button
+                            v-if="canDiscardSession"
+                            type="button"
+                            data-testid="discard-session"
+                            class="shrink-0 cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/40"
+                            @click="onCancelEncode"
+                        >
+                            {{ discardLabel }}
+                        </button>
+
+                        <!--
                             The encode action, previously teleported into the app
                             header. It acts on this session, so it belongs on the
                             session's own row.
@@ -2117,22 +2189,6 @@ onUnmounted(() => {
                                                     .uploading
                                             "
                                         />
-                                    </div>
-                                    <div
-                                        v-if="
-                                            poller.status.value === 'queued' ||
-                                            poller.status.value ===
-                                                'encoding' ||
-                                            poller.status.value === 'encrypting'
-                                        "
-                                    >
-                                        <button
-                                            type="button"
-                                            class="cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/40"
-                                            @click="onCancelEncode"
-                                        >
-                                            Cancel encoding
-                                        </button>
                                     </div>
                                 </div>
 

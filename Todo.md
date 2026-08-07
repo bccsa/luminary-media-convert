@@ -10,7 +10,7 @@ Ordered roughly by value, not by effort.
 
 **Branch.** All migration work (issue #154) is on `154-migrate-luminary-media-convert-to-a-local-only-electron-app-remove-saas-features`, open as PR #161. The original seven logical commits (SaaS removal → hls lib → api → app → cms-mock → electron → docs) have since been joined by the manual-verification fixes, the app icon, a merge of `main`, and the restored test suites.
 
-**Build state.** All workspaces build, and all test suites pass: api 799, app 194, segment-editor 217, hls 121, player-core 168, player-web 79 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
+**Build state.** All workspaces build, and all test suites pass: api 799, app 204, segment-editor 217, hls 121, player-core 168, player-web 79 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
 
 **Player extraction (issue #153, PR #162) has since landed on top of this branch.** Playback logic left the app for two packages — `player-core` (headless: munging, controller, recovery, polling) and `player-web` (hls.js reference implementation) — Video.js is gone, and encryption now covers playlists, chapters and subtitles rather than segments alone. Items below are marked where that work closed or changed them.
 
@@ -460,17 +460,24 @@ Three things could make it feel absent:
 
 ---
 
-## 26. No way to cancel a session before the encode starts — and "Cancel encoding" lies during `encrypting`
+## 26. No way to cancel a session before the encode starts — and "Cancel encoding" lied during `encrypting` — done
 
-**Reported.** A session that has not started encoding cannot be cancelled from the session view.
+All three parts fixed. The API was always right; every fault was in the UI.
 
-**Confirmed, and it is the UI, not the API.** `deleteSession` in `api/src/encode/encode.controller.ts` (line 612) accepts `created`, `uploading`, `uploaded`, `queued`, `encoding`, `failed` and `completed`. The session view only renders its "Cancel encoding" button for `queued`, `encoding` and `encrypting` (`app/src/views/SessionView.vue`, line 2085), so in `created` and `uploaded` — the whole file-picked, probing, configuring stretch — there is no affordance at all. The sessions *list* can delete one (`ActiveSessionsView.vue`, line 108), so the capability exists; it is just unreachable from the screen the user is on.
+**A way out before the encode.** The discard now appears for `created`, `uploading`, `uploaded`, `queued` and `encoding` — exactly the set `DELETE /api/sessions/:id` accepts, listed as `DISCARDABLE_STATUSES` in `SessionView.vue` with the reason next to it. The label reads "Discard session" until there is an encode to cancel, then "Cancel encoding": the same action, named for what it actually does at that moment.
 
-**Cancelling during `encoding` does work** — the handler dequeues or calls `ffmpegService.killActiveProcess()` before removing the work directory. That half of the question is answered.
+**It no longer lies in `encrypting`.** The button is gone from the one status the API refuses, and `onCancelEncode` surfaces a refusal instead of swallowing it as "best-effort cleanup" and routing to `/sessions` regardless. The poller restarts when the delete fails, because the session is still running and the view has to keep saying so.
 
-**A second defect found while checking.** The UI offers the button in `encrypting`, which is exactly one of the two statuses the API refuses. `onCancelEncode` (line 1360) swallows the failure — "Best-effort cleanup" — and routes to `/sessions` regardless, so the user is told nothing and believes the session was cancelled while it carries on encrypting and uploading. Either the button should not appear in that state, or the failure has to be surfaced.
+**The stale Swagger** on `deleteSession` now names the set it accepts — the terminal two included, since that is the only way their disk is reclaimed — and the two it refuses, `encrypting` and `uploading_to_s3`, with why.
 
-**Also stale.** The Swagger description on the same endpoint (line 582) still says `uploading_to_s3`, `completed` and `failed` cannot be deleted. Two of those three are deletable, and `encrypting` — which genuinely is refused — is not mentioned.
+**Two things the item did not know.**
+
+- **The `encrypting` condition existed in two places.** `SessionWorkflowPanel.vue` carried its own copy of the same three-status test, so fixing only the line the item named would have left the lie intact on the other panel.
+- **Placement mattered more than the condition.** The first attempt put the button where the old one lived, in `SessionPlayerStrip`'s `#aside` slot — but that slot only exists once there is a player, and there is no player until a file has been picked. It would have satisfied the status list while leaving `created`, the state the item actually complains about, with no affordance at all. It sits on `session-topline` now, which renders for every status, beside Start Encoding.
+
+10 tests in `SessionView.spec.ts` (app 194 → 204), covering the accepted set, the refused set, the label, the surfaced refusal and the successful path. Confirmed against the original faults re-introduced: six fail, including both halves of the lie.
+
+**Not yet seen in the running app** — the tests assert the wiring, not how the topline looks with another button on it.
 
 ---
 

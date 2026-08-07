@@ -14,15 +14,19 @@ import { shallowMount, flushPromises } from '@vue/test-utils';
  * about this view's own wiring.
  */
 
-const { detail, status, waveform } = vi.hoisted(() => ({
+const { detail, status, waveform, push, deleteSessionMock } = vi.hoisted(() => ({
     detail: vi.fn(),
     status: vi.fn(),
     waveform: vi.fn(),
+    // Shared rather than minted per useRouter() call, so a test can assert that
+    // the view did *not* navigate.
+    push: vi.fn(),
+    deleteSessionMock: vi.fn(),
 }));
 
 vi.mock('vue-router', () => ({
     useRoute: () => ({ params: { id: 'sess-1' } }),
-    useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+    useRouter: () => ({ push, replace: vi.fn() }),
 }));
 
 vi.mock('../api', () => ({
@@ -34,7 +38,7 @@ vi.mock('../api', () => ({
         .mockResolvedValue([{ sessionId: 'sess-1', sessionToken: 'sess_token' }]),
     ingestLocalFile: vi.fn().mockResolvedValue({}),
     startEncode: vi.fn().mockResolvedValue({}),
-    deleteSession: vi.fn().mockResolvedValue({}),
+    deleteSession: deleteSessionMock,
     subscribeSessionEvents: vi.fn(),
     getChapters: vi.fn().mockResolvedValue(null),
     putChapters: vi.fn().mockResolvedValue(undefined),
@@ -77,6 +81,7 @@ describe('SessionView', () => {
             probeResult: uploadedSession().probeResult,
         });
         waveform.mockResolvedValue({ peaks: [0.1, 0.9, 0.4] });
+        deleteSessionMock.mockResolvedValue(undefined);
         // Routed by URL: a single blanket shape made previewAudioTracks a
         // non-array and the resulting render error took the whole mount down,
         // which then looked like "the view never loaded the session".
@@ -294,6 +299,74 @@ describe('SessionView', () => {
             expect(playerSource(wrapper)?.sidecars?.chapters?.[0]?.url).toBe(
                 'https://cdn.example.com/media/shows/ep12/sess-1/chapters/en.vtt'
             );
+        });
+    });
+
+    /**
+     * The API accepts a delete from `created` through `encoding` and refuses it
+     * in `encrypting` / `uploading_to_s3`. The view offered the button for
+     * exactly the wrong set: absent through the whole configuring stretch, and
+     * present in `encrypting`, where it could only fail — silently, because the
+     * refusal was swallowed and the route change happened anyway.
+     */
+    describe('discarding a session', () => {
+        const button = (w: Awaited<ReturnType<typeof mountView>>) =>
+            w.find('[data-testid="discard-session"]');
+
+        async function viewAt(state: string) {
+            detail.mockResolvedValue(uploadedSession({ status: state }));
+            // The probe result travels with every status from `uploaded` on; the
+            // view reads it as the signal that the session is past ingest, and
+            // without one an `uploaded` session renders as though it were not.
+            status.mockResolvedValue({
+                status: state,
+                probeResult: uploadedSession().probeResult,
+            });
+            return mountView();
+        }
+
+        it.each(['created', 'uploading', 'uploaded', 'queued', 'encoding'])(
+            'offers the discard in %s, which the API accepts',
+            async (state) => {
+                expect(button(await viewAt(state)).exists()).toBe(true);
+            }
+        );
+
+        it.each(['encrypting', 'uploading_to_s3'])(
+            'does not offer it in %s, which the API refuses',
+            async (state) => {
+                expect(button(await viewAt(state)).exists()).toBe(false);
+            }
+        );
+
+        it('calls it cancelling only once there is an encode to cancel', async () => {
+            expect(button(await viewAt('uploaded')).text()).toBe('Discard session');
+            expect(button(await viewAt('encoding')).text()).toBe('Cancel encoding');
+        });
+
+        it('surfaces a refusal instead of navigating away as though it worked', async () => {
+            const wrapper = await viewAt('encoding');
+            deleteSessionMock.mockRejectedValueOnce(
+                new Error('Cannot delete session in "encrypting" status')
+            );
+
+            await button(wrapper).trigger('click');
+            await flushPromises();
+
+            expect(wrapper.find('[data-testid="discard-error"]').text()).toContain(
+                'Cannot delete session'
+            );
+            expect(push).not.toHaveBeenCalledWith('/sessions');
+        });
+
+        it('leaves for the list when the delete succeeds', async () => {
+            const wrapper = await viewAt('encoding');
+            deleteSessionMock.mockResolvedValueOnce(undefined);
+
+            await button(wrapper).trigger('click');
+            await flushPromises();
+
+            expect(push).toHaveBeenCalledWith('/sessions');
         });
     });
 

@@ -576,10 +576,14 @@ export class EncodeController {
     @ApiOperation({
         summary: 'Cancel and delete an encoding session',
         description:
-            'Deletes a session and cleans up associated resources. ' +
-            'Allowed in "created", "uploading", "uploaded", "queued", or "encoding" status. ' +
-            'Queued sessions are removed from the queue. Encoding sessions have their FFmpeg process terminated. ' +
-            'Sessions in "uploading_to_s3", "completed", or "failed" status cannot be deleted.',
+            'Deletes a session and cleans up associated resources. Allowed in ' +
+            '"created", "uploading", "uploaded", "queued", "encoding", "failed" ' +
+            'and "completed" — the terminal two included, which is the only way ' +
+            'their disk is ever reclaimed. Queued sessions are removed from the ' +
+            'queue; encoding sessions have their FFmpeg process terminated. ' +
+            'Refused in "encrypting" and "uploading_to_s3": the pipeline is ' +
+            'mid-write, and pulling its files out from under it leaves half an ' +
+            'output in the bucket.',
     })
     @ApiParam({
         name: 'sessionId',
