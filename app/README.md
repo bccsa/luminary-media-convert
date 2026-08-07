@@ -35,7 +35,7 @@ Per-session routes (preview, waveform, storyboard) use the session's own `sess_*
 ## Key components
 
 - **`SessionView`** — orchestrates the lifecycle; composed of `SessionWorkflowPanel` (probe → config → start), `SessionTrimWorkspace` (trim timeline), `SessionPlayerStrip` (player + track/quality selectors), `SessionPostProcessPanel` (chapters), `SessionOutputPanel` (output summary)
-- **`HlsPlayer`** — Video.js 8, client-side decryption of encrypted HLS, chapter cue injection. Player-reported duration is treated as authoritative over the source probe duration, so cue positions match the actual stream
+- **`SessionPlayerStrip`** — hosts `LuminaryPlayer` from `@luminary-media-converter/player-web` and drives angle / quality / audio selection through its controller. Player-reported duration is treated as authoritative over the source probe duration, so cue positions match the actual stream
 - **`FileDropZone`** — drop / browse, resolving real paths through the preload bridge
 - **`AccountMenu`** — no account any more; it keeps its place and carries the theme setting
 
@@ -49,7 +49,9 @@ Per-session routes (preview, waveform, storyboard) use the session's own `sess_*
 
 ## Encrypted HLS playback
 
-Handled entirely client-side. The app fetches the playlists, replaces the `#EXT-X-KEY` URI — `luminary://key` for locally generated keys — with a blob URL containing the raw key bytes decoded from `encryptionKeyHex`, and feeds the rewritten playlist to the player. Multi-angle masters are narrowed with `listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist` from `@luminary-media-converter/hls`.
+Handled entirely client-side, inside the player wrapper: it fetches and munges the playlists (angle extraction, quality capping, key handling) and hands the engine the key in memory, so no key URL is ever minted.
+
+The key itself is not published on status reads or the event stream. The app asks for it at `GET /api/sessions/:id/key`, which serves it XOR-masked with `SHA-256(sessionId)[0..15]`; `utils/keyMask.ts` unmasks it in memory on the way to `PlayerSource.keyHex`. That is obscurity, not DRM — anyone able to play the media can still recover the key.
 
 ## Environment Variables
 
@@ -85,6 +87,6 @@ Some specs were intentionally left broken during the local-only migration (`api.
 - Vue 3 (Composition API, `<script setup>`)
 - Vite 6, Tailwind CSS v4, TypeScript
 - Vue Router 4 (history mode)
-- Video.js 8 with custom HLS quality selector and thumbnail preview plugins (`resolve.dedupe: ['video.js']` keeps a single instance)
-- `@luminary-media-converter/{encode-config,segment-editor,hls}`
+- `@luminary-media-converter/player-web` (hls.js on a plain `<video>`) — Video.js is gone
+- `@luminary-media-converter/{player-core,encode-config,segment-editor,hls}`
 - Vitest + `@vue/test-utils` + jsdom

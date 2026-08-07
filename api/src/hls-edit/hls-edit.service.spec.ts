@@ -5,6 +5,7 @@ import {
     NotImplementedException,
     PayloadTooLargeException,
 } from '@nestjs/common';
+import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import { HlsEditService } from './hls-edit.service.js';
 import type { S3ConfigDto } from '../encode/dto/s3-config.dto.js';
 
@@ -367,6 +368,228 @@ describe('HlsEditService', () => {
             await expect(
                 service.writeChapters(s3, 'output/', 'en', big)
             ).rejects.toBeInstanceOf(PayloadTooLargeException);
+        });
+    });
+});
+
+describe('HlsEditService — encrypted sessions (LMCENC01)', () => {
+    const KEY_HEX = '000102030405060708090a0b0c0d0e0f';
+    const KEY = Buffer.from(KEY_HEX, 'hex');
+
+    let etag: ReturnType<typeof makeEtagMock>;
+    let service: HlsEditService;
+
+    /** The format by hand, so the service is checked against the spec. */
+    function encrypt(plaintext: string): Buffer {
+        const iv = randomBytes(16);
+        const cipher = createCipheriv('aes-128-cbc', KEY, iv);
+        return Buffer.concat([
+            Buffer.from('LMCENC01', 'ascii'),
+            iv,
+            cipher.update(Buffer.from(plaintext, 'utf-8')),
+            cipher.final(),
+        ]);
+    }
+
+    function decrypt(payload: Buffer): string {
+        expect(payload.subarray(0, 8).toString('ascii')).toBe('LMCENC01');
+        const decipher = createDecipheriv(
+            'aes-128-cbc',
+            KEY,
+            payload.subarray(8, 24)
+        );
+        return Buffer.concat([
+            decipher.update(payload.subarray(24)),
+            decipher.final(),
+        ]).toString('utf-8');
+    }
+
+    beforeEach(() => {
+        etag = makeEtagMock();
+        service = new HlsEditService(etag as any);
+    });
+
+    describe('read', () => {
+        it('decrypts before parsing', async () => {
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: encrypt(MASTER),
+                etag: 'abc',
+            });
+
+            const result = await service.read({
+                s3,
+                masterPlaylistKey: 'output/master.m3u8',
+                keyHex: KEY_HEX,
+            });
+
+            expect(result.master.variants).toHaveLength(1);
+        });
+
+        it('reads a plaintext master even when a key is supplied', async () => {
+            // A session can encrypt its segments without encrypting its
+            // playlists; detection is by content, never by request.
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from(MASTER),
+                etag: 'abc',
+            });
+
+            const result = await service.read({
+                s3,
+                masterPlaylistKey: 'output/master.m3u8',
+                keyHex: KEY_HEX,
+            });
+
+            expect(result.master.variants).toHaveLength(1);
+        });
+
+        it('refuses an encrypted master with no key rather than guessing', async () => {
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: encrypt(MASTER),
+                etag: 'abc',
+            });
+
+            await expect(
+                service.read({ s3, masterPlaylistKey: 'output/master.m3u8' })
+            ).rejects.toBeInstanceOf(BadRequestException);
+        });
+    });
+
+    describe('mutate', () => {
+        it('writes the rebuilt master back encrypted, with a fresh IV', async () => {
+            const stored = encrypt(MASTER);
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: stored,
+                etag: 'old',
+            });
+            etag.putObjectIfMatch.mockResolvedValue({ etag: 'new' });
+
+            const result = await service.mutate({
+                s3,
+                masterPlaylistKey: 'output/master.m3u8',
+                ifMatch: 'old',
+                operations: [],
+                keyHex: KEY_HEX,
+            });
+
+            const [, , body, , contentType] =
+                etag.putObjectIfMatch.mock.calls[0];
+            expect(Buffer.isBuffer(body)).toBe(true);
+            expect(contentType).toBe('application/octet-stream');
+            // Plaintext never reaches S3 — not even for the instant between
+            // this write and a follow-up one.
+            expect(decrypt(body as Buffer)).toContain('#EXT-X-STREAM-INF');
+            expect(
+                (body as Buffer).subarray(8, 24).equals(stored.subarray(8, 24))
+            ).toBe(false);
+            expect(result.etag).toBe('new');
+        });
+
+        it('keeps a plaintext session plaintext', async () => {
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: Buffer.from(MASTER),
+                etag: 'old',
+            });
+            etag.putObjectIfMatch.mockResolvedValue({ etag: 'new' });
+
+            await service.mutate({
+                s3,
+                masterPlaylistKey: 'output/master.m3u8',
+                ifMatch: 'old',
+                operations: [],
+            });
+
+            const [, , body, , contentType] =
+                etag.putObjectIfMatch.mock.calls[0];
+            expect(typeof body).toBe('string');
+            expect(contentType).toBe('application/vnd.apple.mpegurl');
+        });
+    });
+
+    describe('chapters', () => {
+        it('decrypts a chapter sidecar on read', async () => {
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: encrypt('WEBVTT\n\n00:00.000 --> 00:10.000\nOne\n'),
+                etag: 'e',
+            });
+
+            const result = await service.readChapters(
+                s3,
+                'output/',
+                'en',
+                KEY_HEX
+            );
+
+            expect(result?.vtt).toContain('WEBVTT');
+            expect(result?.vtt).toContain('One');
+        });
+
+        it('encrypts a chapter sidecar on write', async () => {
+            etag.putObject.mockResolvedValue({ etag: 'e' });
+
+            await service.writeChapters(
+                s3,
+                'output/',
+                'en',
+                'WEBVTT\n\n00:00.000 --> 00:10.000\nOne\n',
+                KEY_HEX
+            );
+
+            const [, key, body, contentType] = etag.putObject.mock.calls[0];
+            expect(key).toBe('output/chapters/en.vtt');
+            expect(contentType).toBe('application/octet-stream');
+            expect(decrypt(body as Buffer)).toContain('One');
+        });
+
+        it('gives each write its own IV', async () => {
+            etag.putObject.mockResolvedValue({ etag: 'e' });
+            const vtt = 'WEBVTT\n';
+
+            await service.writeChapters(s3, 'output/', 'en', vtt, KEY_HEX);
+            await service.writeChapters(s3, 'output/', 'en', vtt, KEY_HEX);
+
+            const first = etag.putObject.mock.calls[0][2] as Buffer;
+            const second = etag.putObject.mock.calls[1][2] as Buffer;
+            expect(first.equals(second)).toBe(false);
+        });
+
+        it('stores plaintext when the session has no key', async () => {
+            etag.putObject.mockResolvedValue({ etag: 'e' });
+
+            await service.writeChapters(s3, 'output/', 'en', 'WEBVTT\n');
+
+            const [, , body, contentType] = etag.putObject.mock.calls[0];
+            expect(body).toBe('WEBVTT\n');
+            expect(contentType).toBe('text/vtt');
+        });
+
+        it('rejects a malformed key rather than writing something unreadable', async () => {
+            await expect(
+                service.writeChapters(s3, 'output/', 'en', 'WEBVTT\n', 'nothex')
+            ).rejects.toThrow(/32 hex/);
+            expect(etag.putObject).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('discover', () => {
+        it('sees masters through the ciphertext', async () => {
+            etag.createClient.mockReturnValue({
+                send: vi.fn().mockResolvedValue({
+                    Contents: [{ Key: 'output/master.m3u8' }],
+                    IsTruncated: false,
+                }),
+            });
+            etag.getObjectWithEtag.mockResolvedValue({
+                body: encrypt(MASTER),
+                etag: 'e',
+            });
+
+            const result = await service.discover({
+                s3,
+                folderPrefix: 'output/',
+                keyHex: KEY_HEX,
+            });
+
+            expect(result.masterPlaylistKey).toBe('output/master.m3u8');
         });
     });
 });

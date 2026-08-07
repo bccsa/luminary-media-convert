@@ -454,7 +454,6 @@ export class SessionService implements OnModuleInit {
             files: session.files,
             masterPlaylist: session.masterPlaylist,
             thumbnailsVtt: session.thumbnailsVtt,
-            encryptionKeyHex: session.encryptionKeyHex,
             segmentFormat: session.segmentFormat,
             ingestTotalBytes: session.ingestTotalBytes,
             hlsUrl: session.hlsUrl,
@@ -637,10 +636,11 @@ export class SessionService implements OnModuleInit {
      * Record the key the output will be encrypted with, at the moment it is
      * generated rather than at the moment the encode finishes.
      *
-     * The CMS has to store the key alongside the URL, and it learns both when
-     * encoding starts — waiting for completion would mean a player could reach
-     * the playlist before anything could decrypt it. Persisted without an event
-     * of its own; the status flip that follows carries it.
+     * The CMS has to store the key alongside the URL, and it must be able to
+     * learn both when encoding starts — waiting for completion would mean a
+     * player could reach the playlist before anything could decrypt it. The key
+     * is not emitted with the session's events; it is served, masked, from
+     * GET /api/sessions/:sessionId/key once this has recorded it.
      */
     setEncryptionKey(id: string, encryptionKeyHex: string): void {
         const session = this.sessions.get(id);

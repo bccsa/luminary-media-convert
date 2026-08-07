@@ -58,9 +58,11 @@ import { ThumbnailService } from './services/thumbnail.service.js';
 import {
     SessionResponseDto,
     EncodeStartResponseDto,
+    SessionKeyResponseDto,
     SessionStatusDto,
     SessionSummaryDto,
 } from './dto/session-response.dto.js';
+import { maskKeyHex } from './services/key-mask.js';
 
 interface MessageEvent {
     data: string | object;
@@ -434,13 +436,11 @@ export class EncodeController {
             documentId: session.documentId,
         };
 
-        // Both are known from the moment encoding starts, not from completion:
-        // the CMS stores the URL and the key together, and a caller that
-        // reconnects mid-encode has to be able to ask for them again.
+        // Known from the moment encoding starts, not from completion: a caller
+        // that reconnects mid-encode has to be able to ask for it again. The
+        // decryption key is no longer part of this payload — it is fetched
+        // separately from GET /api/sessions/:sessionId/key.
         if (session.hlsUrl) result.hlsUrl = session.hlsUrl;
-        if (session.encryptionKeyHex) {
-            result.encryptionKeyHex = session.encryptionKeyHex;
-        }
 
         if (
             session.probeResult &&
@@ -514,6 +514,58 @@ export class EncodeController {
         }
 
         return result;
+    }
+
+    @Get(':sessionId/key')
+    @UseGuards(AuthResolverGuard)
+    // 'read' matches the SSE events endpoint: a viewer holding a read token can
+    // already stream the session's status, and it needs the key to play back
+    // encrypted output (cms-mock's playback check does exactly this).
+    @AuthTypes('instance', 'session', 'read')
+    @ApiSecurity('apikey')
+    @ApiOperation({
+        summary: 'Get the masked AES-128 key for this session',
+        description:
+            'Returns the session key XOR-masked with the first 16 bytes of ' +
+            'SHA-256(sessionId). Unmask by repeating the XOR — the operation is ' +
+            'its own inverse, and the formula is published deliberately.\n\n' +
+            'This is an obscurity measure, not DRM. The key used to ride along ' +
+            'on every status read and SSE frame, which put it in logs, proxies ' +
+            'and screenshots; behind its own endpoint and behind the mask, a ' +
+            'raw key never appears in a payload that gets copied around. ' +
+            'Anyone able to play the media can still recover it — the player ' +
+            'needs the key in the clear to decrypt segments.',
+    })
+    @ApiParam({ name: 'sessionId', description: 'Session ID' })
+    @ApiResponse({
+        status: 200,
+        description: 'Masked session key.',
+        type: SessionKeyResponseDto,
+    })
+    @ApiResponse({
+        status: 401,
+        description: 'Unauthorized — invalid or missing credentials.',
+    })
+    @ApiResponse({
+        status: 404,
+        description: 'Session not found, or the session has no encryption key.',
+    })
+    getSessionKey(
+        @Param('sessionId') sessionId: string
+    ): SessionKeyResponseDto {
+        const session = this.sessionService.get(sessionId);
+        if (!session) {
+            throw new NotFoundException(`Session ${sessionId} not found`);
+        }
+        // A session encoding without encryption has no key at all — that is a
+        // missing resource, not an empty one, so the client can tell the two
+        // apart without inspecting the body.
+        if (!session.encryptionKeyHex) {
+            throw new NotFoundException('Session has no encryption key');
+        }
+        return {
+            maskedKeyHex: maskKeyHex(sessionId, session.encryptionKeyHex),
+        };
     }
 
     @Delete(':sessionId')
@@ -620,11 +672,12 @@ export class EncodeController {
         @Param('sessionId') sessionId: string,
         @Query('lang') lang = 'en'
     ): Promise<{ vtt: string }> {
-        const { s3, folderPrefix } = this.sessionStorage(sessionId);
+        const { s3, folderPrefix, keyHex } = this.sessionStorage(sessionId);
         const result = await this.hlsEditService.readChapters(
             s3,
             folderPrefix,
-            lang
+            lang,
+            keyHex
         );
         if (!result) {
             throw new NotFoundException('No chapter file for this language');
@@ -656,19 +709,29 @@ export class EncodeController {
         @Body() dto: ChaptersWriteDto,
         @Query('lang') lang = 'en'
     ): Promise<void> {
-        const { s3, folderPrefix } = this.sessionStorage(sessionId);
+        const { s3, folderPrefix, keyHex } = this.sessionStorage(sessionId);
         await this.hlsEditService.writeChapters(
             s3,
             folderPrefix,
             lang,
-            dto.vtt
+            dto.vtt,
+            keyHex
         );
     }
 
-    /** Where this session's output lives, in the form the HLS-edit service takes. */
+    /**
+     * Where this session's output lives, in the form the HLS-edit service takes.
+     *
+     * Includes the session key only when the session encrypts its text assets:
+     * that is what tells the service to expect LMCENC01 in the bucket, and to
+     * put it back the same way. A session with encrypted segments but plaintext
+     * playlists must not be handed a key here, or its sidecars would start
+     * coming back encrypted halfway through its life.
+     */
     private sessionStorage(sessionId: string): {
         s3: CreateSessionDto['s3'];
         folderPrefix: string;
+        keyHex?: string;
     } {
         const session = this.sessionService.get(sessionId);
         if (!session) {
@@ -682,11 +745,21 @@ export class EncodeController {
                     'create the session again from the CMS'
             );
         }
+        // Mirrors the encode: text assets follow `enabled` unless explicitly
+        // opted out of. Sidecars written after the encode have to be encrypted
+        // exactly when the encode's own were, or the chapter the user just
+        // saved becomes the one file in the output nothing can read.
+        const encryptsText =
+            session.config.encryption != null &&
+            session.config.encryption.enabled !== false &&
+            session.config.encryption.encryptPlaylists !== false;
+
         return {
             s3: session.config.s3,
             folderPrefix: S3Service.canonicalPrefix(
                 session.config.s3.pathPrefix
             ),
+            keyHex: encryptsText ? session.encryptionKeyHex : undefined,
         };
     }
 

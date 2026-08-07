@@ -182,6 +182,11 @@ export class CmsController {
         config.thumbnails = dto.thumbnails;
         // A CMS states a requirement; key delivery is not its business. Leaving
         // this undefined is what the encoder reads as "no encryption".
+        //
+        // Requiring encryption covers the whole output — segments, playlists,
+        // chapters and subtitles — under one key, because a CMS asking for an
+        // encrypted stream is not asking for one whose chapter titles and
+        // stream layout are published beside it.
         config.encryption = dto.encryption?.required
             ? { enabled: true }
             : undefined;

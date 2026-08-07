@@ -45,7 +45,6 @@ export interface SessionEvent {
     status?: string;
     progress?: number;
     hlsUrl?: string;
-    encryptionKeyHex?: string;
     queuePosition?: number;
     error?: string;
     probeResult?: unknown;

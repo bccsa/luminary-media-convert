@@ -15,6 +15,13 @@ export interface OperationContext {
     master: HlsParsedMaster;
     s3EtagService: S3EtagService;
     writtenKeys: string[];
+    /**
+     * AES-128 session key hex, when the session's text assets are LMCENC01
+     * encrypted. Handlers that write sidecars of their own (subtitle VTTs)
+     * must encrypt them with it — the master they are being referenced from
+     * is already encrypted, and a plaintext sidecar beside it undoes the point.
+     */
+    keyHex?: string;
 }
 
 export type OperationHandler = (

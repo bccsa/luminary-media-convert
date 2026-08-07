@@ -5,7 +5,7 @@
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "build:libs": "(cd .. && npm -w hls run build && npm -w encode-config run build && npm -w segment-editor run build)",
+        "build:libs": "(cd .. && npm -w hls run build && npm -w encode-config run build && npm -w segment-editor run build && npm -w player-core run build && npm -w player-web run build)",
         "build": "npm run build:libs && vue-tsc -b && vite build",
         "preview": "npm run build && vite preview",
         "test": "vitest run"
@@ -13,14 +13,14 @@
     "dependencies": {
         "@luminary-media-converter/encode-config": "file:../encode-config",
         "@luminary-media-converter/hls": "file:../hls",
+        "@luminary-media-converter/player-core": "file:../player-core",
+        "@luminary-media-converter/player-web": "file:../player-web",
         "@luminary-media-converter/segment-editor": "file:../segment-editor",
-        "video.js": "^8.23.7",
         "vue": "^3.5.0",
         "vue-router": "^4.6.4"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",
-        "@types/video.js": "^7.3.58",
         "@vitejs/plugin-vue": "^5.2.0",
         "@vue/test-utils": "^2.4.6",
         "jsdom": "^29.0.2",

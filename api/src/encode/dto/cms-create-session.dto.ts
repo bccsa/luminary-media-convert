@@ -19,13 +19,14 @@ import { S3ConfigDto } from './s3-config.dto.js';
  *
  * Deliberately not {@link EncryptionConfigDto}: a CMS states a requirement, it
  * does not configure key delivery. The key URI is always the local placeholder
- * and the key itself reaches the CMS over SSE, so there is nothing else to say.
+ * and the key itself is fetched from GET /api/sessions/:sessionId/key, so there
+ * is nothing else to say.
  */
 export class CmsEncryptionRequirementDto {
     @ApiProperty({
         description:
-            'Encrypt the HLS output with AES-128. The key hex is delivered to the ' +
-            'CMS over SSE when encoding starts.',
+            'Encrypt the HLS output with AES-128. Fetch the key (masked) from ' +
+            'GET /api/sessions/:sessionId/key once encoding has started.',
         example: true,
     })
     @IsBoolean()

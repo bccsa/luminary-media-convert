@@ -8,9 +8,6 @@ export default defineConfig({
         port: 5173,
         strictPort: true,
     },
-    resolve: {
-        dedupe: ['video.js'],
-    },
     test: {
         environment: 'jsdom',
         setupFiles: ['./vitest.setup.ts'],
