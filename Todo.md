@@ -452,3 +452,64 @@ Only then does the status become `uploading_to_s3` and progress reset to 0. So f
 **Then measure before optimising.** Thumbnail generation is the obvious suspect and could plausibly overlap with the upload rather than block it — but confirm that with a timing on a real long source first, because the waveform path and text-asset encryption are also candidates and the ordering constraints between these steps are real and documented in the comments there.
 
 **Separately, the player reload.** Whether the switch from preview to S3 playback has to wait for `completed` at all is worth asking — `hlsUrl` is published at encode *start*, and the "coming soon" polling in `player-core` exists precisely for a playlist that is not there yet.
+
+---
+
+## 28. Fullscreen crops the video instead of letterboxing it
+
+**Cause found.** `player-web`'s own `.lmp-video` rule (`player-web/src/styles.css`, line 38) sets no `object-fit`, so it letterboxes as the UA stylesheet intends. The crop comes from the app: `app/src/components/session-view/SessionPlayerStrip.vue` line 510 sets `object-fit: cover` on `.lmp-video` through a `:deep()` selector.
+
+That is defensible where it was written — `.session-trim-player-shell` forces a `16 / 9` box, and `cover` keeps a non-16:9 source from letterboxing inside the strip. But entering fullscreen does not move the element out of that shell, so the `:deep()` rule still matches, and now `cover` is filling a screen-shaped box with a differently-shaped video. Everything outside the overlap is cropped away.
+
+**Wanted.** Fullscreen must letterbox — `object-fit: contain`, which is the whole point of a fullscreen view. Confining the `cover` to the non-fullscreen case is enough: `.lmp-root` gains `.lmp-is-fullscreen` and matches `:fullscreen`, so either can carry the override.
+
+**Worth deciding at the same time** whether `cover` is right even in the strip. It silently crops a 4:3 or vertical source in the one view a user checks their framing in, which is a poor thing to discover after the encode. `contain` on a 16/9 shell would pillarbox instead — visibly honest, and arguably what that view should show.
+
+---
+
+## 29. Remove the language menu from the fullscreen player
+
+**Today.** `player-web/src/components/FullscreenControls.vue` renders an audio-track `<select>` (line 192, `showAudioMenu` — shown when there is more than one track) alongside a subtitles menu. The encoder's own audio selector already sits beside the player outside fullscreen, so in this app the fullscreen one is a duplicate.
+
+**The catch: `player-web` is a published library, not this app's private UI.** A Luminary consumer app has no selectors of its own beside the player — the fullscreen controls *are* its whole surface, and a viewer of a multi-language video needs to choose a language there. Deleting the menu outright would take that away from every consumer to tidy one screen in the encoder.
+
+**So make it configurable rather than removing it.** `LuminaryPlayer` currently takes only `source`, `messages` and an internal test seam, so this means a new prop — something like `hideFullscreenAudioMenu`, or a more general "which fullscreen controls to show" option, defaulting to today's behaviour so consumers are unaffected. The encoder then opts out.
+
+**Worth checking first**, though: in fullscreen the encoder's own selectors are not reachable either, so removing the menu leaves a user mid-video with no way to switch language until they exit. If that is acceptable it is a deliberate trade, not a detail — and if it is not, the answer may be to keep the menu and drop the duplicate outside instead.
+
+---
+
+## 30. Redesign the fullscreen controls, and add skip buttons
+
+**Today.** `player-web/src/components/FullscreenControls.vue` has an exit button top-left, a single play/pause in the centre, and a bottom bar of elapsed time, scrubber, remaining time and two bare `<select>` menus. There is no way to jump a few seconds — the only seek is dragging the scrubber, which is the least precise gesture available and the hardest one on a phone.
+
+**Wanted.**
+
+- Skip back / skip forward buttons flanking play/pause, default 15 s, with the interval configurable.
+- A visual pass over the whole surface. The native `<select>` elements are the weakest part — they are the one place the controls stop looking like a player.
+
+**Notes on the skip interval.** `PlayerController.seek(seconds)` is absolute, so the buttons compute `currentTime ± n` and clamp at both ends — past `duration` is what causes an accidental "video ended". Back and forward are worth allowing separate values: 15 back / 30 forward is a common pairing. The number belongs in the same configuration route item 29 opens (`LuminaryPlayer` takes only `source`, `messages` and a test seam today), so do the two together rather than adding two prop mechanisms a week apart. The button labels need entries in `PlayerMessages`, and they have to interpolate the interval — a hardcoded "15" in a string is wrong the moment someone configures 10.
+
+**Scope note.** This is `player-web`'s surface, which every consumer inherits — so it is a redesign of the library's default player, not of the encoder's. That is the right place for it, but it means the bar is "good enough for Luminary's viewers", not just "looks better in the encoder". Item 10's untested-on-a-real-device caveat applies here too: these controls have only ever run in jsdom and on a desktop, and skip buttons are a touch-target question before they are a visual one.
+
+---
+
+## 31. Scrub thumbnails in the player
+
+Makes actionable the "no scrub preview" note recorded under item 10.
+
+**Today.** The encoder generates `thumbnails.vtt` and its sprite sheets and writes them beside `master.m3u8`, and the trim filmstrip already reads them. The player reads neither: `player-core`'s `PlayerSource` has no thumbnail input at all, so there is nothing for `player-web` to draw.
+
+**Wanted.**
+
+- **Fullscreen** — a preview following the scrubber while dragging, which is the point of having sprites at all.
+- **Windowed** — the same preview as an *optional* overlay, bottom-centre of the video frame. Optional matters here: outside fullscreen the player deliberately draws no chrome over the picture, so this has to be off by default and asked for, or it breaks that rule for every consumer.
+
+**Most of the parsing already exists.** `segment-editor/src/thumbnailVtt.ts` exports `parseThumbnailVtt`, `findThumbnailCue` and a `ThumbnailSpriteCue` type, and handles the `#xywh=` crop fragment. The cleanest route is moving that into a shared place both can use rather than a second copy in `player-web` — `hls/` is the library both sides already depend on.
+
+**Two things that will bite.**
+
+- **Encrypted sessions encrypt the VTT.** Since #162 an encrypted session LMCENC-wraps every `.m3u8` and `.vtt`, `thumbnails.vtt` included, so the player has to decrypt it with the session key exactly as the app's `useStoryboardVttUrl` does. The sprite *images* are not encrypted (they are `.jpg`), which is worth confirming rather than assuming.
+- **Discovery.** Nothing tells a player where `thumbnails.vtt` is; it is a sidecar convention, not a playlist reference. Either `PlayerSource` gains an explicit URL (simplest, and consistent with how `keyHex` is supplied) or the player derives it from the master's prefix — in which case a missing file must be a silent no-op, since `thumbnails: false` sessions and audio-only encodes never have one.
+
+**Do this after item 30**, which reworks the same scrubber.
