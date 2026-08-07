@@ -370,6 +370,63 @@ describe('SessionView', () => {
         });
     });
 
+    /**
+     * Draining at 100% is not the encode finishing: playlist key tags, a fresh
+     * FFmpeg pass for sprites, the waveform sidecar and text-asset encryption
+     * all still run before the status leaves `encoding`. Reporting none of it
+     * left a full bar sitting over unfinished work, which reads as stalled.
+     */
+    describe('post-drain phase caption', () => {
+        async function captionFor(phase?: string) {
+            detail.mockResolvedValue(uploadedSession({ status: 'encoding' }));
+            status.mockResolvedValue({
+                status: 'encoding',
+                probeResult: uploadedSession().probeResult,
+                pipelineProgress: { encoding: 100, ...(phase ? { phase } : {}) },
+            });
+            // The pipeline bars live in SessionPlayerStrip's #aside slot, and
+            // shallowMount does not render a stub's slots — so this one stub
+            // has to pass them through or the caption is invisible to the test
+            // while being perfectly visible on screen.
+            const wrapper = shallowMount(SessionView, {
+                global: {
+                    stubs: {
+                        Teleport: true,
+                        Transition: true,
+                        SessionPlayerStrip: {
+                            template: '<div><slot /><slot name="aside" /></div>',
+                        },
+                    },
+                },
+            });
+            await flushPromises();
+            const el = wrapper.find('[data-testid="pipeline-phase"]');
+            return el.exists() ? el.text() : null;
+        }
+
+        it('names the expensive step instead of leaving a full bar unexplained', async () => {
+            expect(await captionFor('thumbnails')).toContain('Generating thumbnails');
+        });
+
+        it('names the other post-drain steps too', async () => {
+            expect(await captionFor('waveform')).toContain('Generating waveform');
+            expect(await captionFor('encrypting-playlists')).toContain(
+                'Encrypting playlists'
+            );
+        });
+
+        it('says nothing while the segment pipeline is still the whole story', async () => {
+            // The bar already reads "Encoding"; a caption there would be noise.
+            expect(await captionFor()).toBeNull();
+        });
+
+        it('says nothing for a phase it does not recognise', async () => {
+            // A newer API naming a step this build has never heard of must not
+            // render a blank line or the raw identifier.
+            expect(await captionFor('some-future-step')).toBeNull();
+        });
+    });
+
     describe('storyboard on a trimmed timeline', () => {
         const TRIMS = [{ inSec: 10, outSec: 20 }];
 

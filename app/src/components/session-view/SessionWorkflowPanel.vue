@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import ProgressBar from '../ProgressBar.vue';
+import type { PipelinePhase } from '../../types';
 
 const props = withDefaults(
     defineProps<{
@@ -24,6 +25,7 @@ const props = withDefaults(
         pollerStatus: string | null | undefined;
         pollerQueuePosition: number | null | undefined;
         pipelineEncoding: number | null | undefined;
+        pipelinePhase: PipelinePhase | null | undefined;
         pipelineEncrypting: number | null | undefined;
         pipelineUploading: number | null | undefined;
         pollerProgress: number | undefined;
@@ -39,6 +41,27 @@ const showLivePipeline = computed(
         props.pollerStatus === 'encoding'
         || props.pollerStatus === 'encrypting'
         || props.pollerStatus === 'uploading_to_s3',
+);
+
+/**
+ * What the post-drain steps are called on screen.
+ *
+ * `encoding` is deliberately absent: while the segment pipeline is running the
+ * bar already says so, and captioning it would be noise. These names describe
+ * the work rather than the function that does it — "Generating thumbnails"
+ * rather than "thumbnailService", because the person reading it is waiting, not
+ * debugging.
+ */
+const PHASE_LABELS: Record<PipelinePhase, string | null> = {
+    encoding: null,
+    'finalising-playlists': 'Finalising playlists…',
+    thumbnails: 'Generating thumbnails…',
+    waveform: 'Generating waveform…',
+    'encrypting-playlists': 'Encrypting playlists…',
+};
+
+const phaseLabel = computed(() =>
+    props.pipelinePhase ? PHASE_LABELS[props.pipelinePhase] : null,
 );
 
 /** After a real encode job, keep pipeline steps visible at 100% (step encoding was here during the run). */
@@ -138,6 +161,25 @@ const emit = defineEmits<{
                         label="Encoding"
                         :progress="showCompletedPipelineSummary ? 100 : (pipelineEncoding ?? pollerProgress)"
                     />
+                    <!--
+                        What is happening after the bar reaches 100%. Draining
+                        is not finishing: sprites, the waveform sidecar and
+                        text-asset encryption still run, and on a long source
+                        the sprites alone take minutes. Without this the screen
+                        showed a full bar over work still in progress, which
+                        reads as stalled rather than busy.
+                    -->
+                    <p
+                        v-if="showLivePipeline && phaseLabel"
+                        data-testid="pipeline-phase"
+                        class="-mt-1 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"
+                    >
+                        <span
+                            class="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-sky-500"
+                            aria-hidden="true"
+                        />
+                        {{ phaseLabel }}
+                    </p>
                     <ProgressBar
                         v-if="(showLivePipeline && pipelineEncrypting != null) || (showCompletedPipelineSummary && isEncrypted)"
                         label="Encrypting"

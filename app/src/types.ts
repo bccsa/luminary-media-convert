@@ -40,10 +40,23 @@ export type SessionStatus =
 export type AccelMode = 'cpu' | 'nvidia' | 'apple';
 export type SegmentFormat = 'fmp4' | 'mpegts';
 
+/** Mirrors `PipelinePhase` in the API's segment pipeline. */
+export type PipelinePhase =
+    | 'encoding'
+    | 'finalising-playlists'
+    | 'thumbnails'
+    | 'waveform'
+    | 'encrypting-playlists';
+
 export interface PipelineProgress {
     encoding: number;
     encrypting?: number;
     uploading?: number;
+    /**
+     * The post-drain step now running. Present only while those steps are, and
+     * absent for everything before and after them.
+     */
+    phase?: PipelinePhase;
 }
 
 /**

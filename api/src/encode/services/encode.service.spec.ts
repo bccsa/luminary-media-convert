@@ -814,6 +814,58 @@ describe('EncodeService', () => {
         });
     });
 
+    /**
+     * The bar reaches 100% when the pipeline drains, but the status stays
+     * `encoding` through several more steps — and on a long source the sprite
+     * pass alone takes minutes. Unreported, that looks stalled rather than busy.
+     */
+    describe('post-drain phase reporting', () => {
+        async function phasesFor(probeResult?: Record<string, unknown>) {
+            const updateSpy = vi.spyOn(sessionService, 'updatePipelineProgress');
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+            if (probeResult) {
+                (sessionService.get(session.id) as any).probeResult = probeResult;
+            }
+
+            await service.processSession(session.id);
+
+            return updateSpy.mock.calls
+                .map(([, progress]) => (progress as { phase?: string }).phase)
+                .filter((phase, i, all) => phase && phase !== all[i - 1]);
+        }
+
+        it('names the sprite pass, the expensive step that reported nothing', async () => {
+            expect(await phasesFor()).toEqual(['thumbnails']);
+        });
+
+        it('names the waveform too, when the source has audio to draw', async () => {
+            // The step is gated on the source carrying audio, so a silent
+            // sequence here would mean the gate, not the reporting.
+            const phases = await phasesFor({
+                format: { duration: 10 },
+                videoTracks: [{ width: 1920, height: 1080 }],
+                audioTracks: [{ index: 0, language: 'eng' }],
+            });
+
+            expect(phases).toEqual(['thumbnails', 'waveform']);
+        });
+
+        it('clears the phase before the status leaves encoding', async () => {
+            // Otherwise the last post-drain step captions the S3 upload after it.
+            const updateSpy = vi.spyOn(sessionService, 'updatePipelineProgress');
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+            await service.processSession(session.id);
+
+            const last = updateSpy.mock.calls.at(-1)?.[1] as { phase?: string };
+            expect(last.phase).toBeUndefined();
+        });
+    });
+
     it('should invoke pipeline onProgress and update session pipeline progress', async () => {
         let capturedOnProgress: ((update: any) => void) | undefined;
         (

@@ -8,10 +8,32 @@ import type { S3ConfigDto } from '../dto/s3-config.dto.js';
 import { EncryptionService } from './encryption.service.js';
 import { S3Service } from './s3.service.js';
 
+/**
+ * Work that happens after the segment pipeline has drained, before the status
+ * leaves `encoding`.
+ *
+ * Draining at 100% is not the encode finishing. Playlist key tags, a fresh
+ * FFmpeg pass for thumbnail sprites, the waveform sidecar and text-asset
+ * encryption all still have to run, and on a long source the sprites alone take
+ * minutes. Reporting none of it left a finished-looking bar sitting over
+ * unfinished work, which reads as stalled rather than busy.
+ */
+export type PipelinePhase =
+    | 'encoding'
+    | 'finalising-playlists'
+    | 'thumbnails'
+    | 'waveform'
+    | 'encrypting-playlists';
+
 export interface PipelineProgress {
     encoding: number;
     encrypting?: number;
     uploading?: number;
+    /**
+     * What is happening now. Absent means the segment pipeline is still the
+     * whole story, which is what every caller assumed before this existed.
+     */
+    phase?: PipelinePhase;
 }
 
 export interface SegmentPipelineConfig {

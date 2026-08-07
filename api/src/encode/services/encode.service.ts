@@ -17,6 +17,7 @@ import { WaveformService } from './waveform.service.js';
 import { S3Service } from './s3.service.js';
 import {
     SegmentPipelineService,
+    type PipelinePhase,
     type PipelineProgress,
 } from './segment-pipeline.service.js';
 
@@ -170,6 +171,23 @@ export class EncodeService {
                 },
             });
 
+            /**
+             * Name the post-drain step the session is on.
+             *
+             * These run after the bar has reached 100% and before the status
+             * leaves `encoding`, so without this the UI shows a finished
+             * pipeline over work that is still going. Carried on the existing
+             * `pipelineProgress` rather than as a new status, because they are
+             * not states a session can be resumed or cancelled in — they are
+             * commentary on the one it is already in.
+             */
+            const reportPhase = (phase: PipelinePhase): void => {
+                currentProgress.phase = phase;
+                this.sessionService.updatePipelineProgress(sessionId, {
+                    ...currentProgress,
+                });
+            };
+
             pipeline.start();
 
             // Run FFmpeg — pipeline polls for segments in the background
@@ -199,6 +217,7 @@ export class EncodeService {
 
             // Playlist post-processing (must happen after drain rewrites byte-range playlists)
             if (encryptionEnabled) {
+                reportPhase('finalising-playlists');
                 await this.encryptionService.injectKeyTagsIntoPlaylists(
                     outputDir,
                     session.config.encryption?.keyUrl ??
@@ -213,6 +232,9 @@ export class EncodeService {
                 session.encodeConfig.type === 'video' &&
                 session.config.thumbnails !== false
             ) {
+                // The expensive one: a fresh FFmpeg pass over the finished
+                // output, minutes on a long source, and previously silent.
+                reportPhase('thumbnails');
                 try {
                     const concatFilePath = join(outputDir, 'concat.txt');
                     const hasConcatFile = existsSync(concatFilePath);
@@ -259,6 +281,7 @@ export class EncodeService {
             // Works for both video and audio-only encodes; respects trim concat.
             // Non-fatal: a missing waveform just means the client won't render it.
             if ((session.probeResult?.audioTracks?.length ?? 0) > 0) {
+                reportPhase('waveform');
                 try {
                     const concatFilePath = join(outputDir, 'concat.txt');
                     const hasConcatFile = existsSync(concatFilePath);
@@ -322,13 +345,20 @@ export class EncodeService {
                 encryptionEnabled &&
                 session.config.encryption?.encryptPlaylists !== false
             ) {
+                reportPhase('encrypting-playlists');
                 await this.encryptionService.encryptTextAssets(
                     outputDir,
                     encryptionKey!
                 );
             }
 
-            // Upload remaining files (playlists, thumbnails, master.m3u8)
+            // Upload remaining files (playlists, thumbnails, master.m3u8).
+            // The phase belongs to `encoding`; leaving the last one set would
+            // caption the upload with whatever ran before it.
+            currentProgress.phase = undefined;
+            this.sessionService.updatePipelineProgress(sessionId, {
+                ...currentProgress,
+            });
             this.sessionService.updateStatus(sessionId, 'uploading_to_s3');
             this.sessionService.updateProgress(sessionId, 0);
 

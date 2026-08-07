@@ -10,7 +10,7 @@ Ordered roughly by value, not by effort.
 
 **Branch.** All migration work (issue #154) is on `154-migrate-luminary-media-convert-to-a-local-only-electron-app-remove-saas-features`, open as PR #161. The original seven logical commits (SaaS removal → hls lib → api → app → cms-mock → electron → docs) have since been joined by the manual-verification fixes, the app icon, a merge of `main`, and the restored test suites.
 
-**Build state.** All workspaces build, and all test suites pass: api 812, app 211, encode-config 34, segment-editor 217, hls 121, player-core 168, player-web 79 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
+**Build state.** All workspaces build, and all test suites pass: api 815, app 215, encode-config 34, segment-editor 217, hls 121, player-core 168, player-web 79 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
 
 **Player extraction (issue #153, PR #162) has since landed on top of this branch.** Playback logic left the app for two packages — `player-core` (headless: munging, controller, recovery, polling) and `player-web` (hls.js reference implementation) — Video.js is gone, and encryption now covers playlists, chapters and subtitles rather than segments alone. Items below are marked where that work closed or changed them.
 
@@ -493,24 +493,19 @@ All three parts fixed. The API was always right; every fault was in the UI.
 
 ---
 
-## 27. Long unexplained gap between "100%" and the session finishing
+## 27. Long unexplained gap between "100%" and the session finishing — the silence is fixed; the duration is not
 
-**Reported.** Once the S3 upload reports 100%, there is a long wait before the chapter editor appears and the player reloads to play from S3.
+**Done: it says what it is doing.** `PipelineProgress` gains a `phase`, and `EncodeService` reports each post-drain step as it starts — `finalising-playlists`, `thumbnails`, `waveform`, `encrypting-playlists` — clearing it again before the status flips to `uploading_to_s3`, so the last step does not end up captioning the upload that follows it. The client renders it as a line under the Encoding bar: "Generating thumbnails…", and so on. An unrecognised phase renders nothing rather than a blank line or a raw identifier, so an older client against a newer API degrades quietly.
 
-**Why.** 100% is the segment pipeline draining, not the encode finishing. Four things then run in `api/src/encode/services/encode.service.ts` before the status changes at all:
+Carried on `pipelineProgress` rather than as new statuses, as this item suggested: these are not states a session can be resumed or cancelled in, they are commentary on the one it is already in.
 
-1. `injectKeyTagsIntoPlaylists` (line 202) — cheap.
-2. **Thumbnail sprites** (line 228) — a fresh FFmpeg pass over the finished output. On a long source this is the expensive one, and it reports nothing.
-3. Waveform sidecar (line 265) — usually served from the cache primed at ingest, but regenerated when it is not.
-4. `encryptTextAssets` (line 326) — every playlist and VTT, deliberately last.
+**Not done, deliberately: the wait itself.** This item says to measure before optimising, and nothing here was measured. The sprite pass is still a fresh FFmpeg run over the finished output, and whether it could overlap the upload is unanswered — as are the waveform path and text-asset encryption, whose ordering constraints are real and documented where they live.
 
-Only then does the status become `uploading_to_s3` and progress reset to 0. So for that entire stretch the session still reads `encoding` at 100%, which is why it looks stalled rather than busy.
+**Also untouched: the player reload.** Whether the switch from preview to S3 playback has to wait for `completed` at all is still worth asking, and `hlsUrl` is published at encode start.
 
-**Wanted.** Say what is happening. The cheapest honest fix is a status or phase label for the post-drain work ("Generating thumbnails", "Encrypting playlists") carried on the existing `pipelineProgress` shape, so the UI stops showing a finished bar over unfinished work.
+7 tests: 3 on the API (the sprite pass reported, the waveform reported only when the source carries audio, the phase cleared before the status changes) and 4 on the client (each label, silence during the pipeline itself, and silence for an unknown phase).
 
-**Then measure before optimising.** Thumbnail generation is the obvious suspect and could plausibly overlap with the upload rather than block it — but confirm that with a timing on a real long source first, because the waveform path and text-asset encryption are also candidates and the ordering constraints between these steps are real and documented in the comments there.
-
-**Separately, the player reload.** Whether the switch from preview to S3 playback has to wait for `completed` at all is worth asking — `hlsUrl` is published at encode *start*, and the "coming soon" polling in `player-core` exists precisely for a playlist that is not there yet.
+**Found while doing it.** The pipeline bars a user actually sees during an encode are an inline copy in `SessionView.vue`, not `SessionWorkflowPanel` — the panel's own copy cannot render while encoding, because `showSessionDetailCard` requires `!showEncoding`. So the panel carries a second set of progress bars that no encode ever displays. Both were given the caption; the panel's is unreachable today and the duplication is worth resolving on its own, most likely as part of item 13 or 15, which already move this furniture around.
 
 ---
 
@@ -615,3 +610,25 @@ Beyond items 29 and 30, and worth recording as its own item because of that: thi
 7 new tests in `player-web` (72 → 79): three on the adapter's gap handling, four on the readouts and band sizing including the behind-the-playhead and unknown-duration cases.
 
 **Unseen on a device**, like the rest of this surface — see item 10.
+
+---
+
+## 33. Packaging ships whatever is in `app/dist`, including a developer's `.env`
+
+**Found while checking that item 24's dev defaults could not reach a build.** They cannot — but something else can.
+
+**Today.** `dist:mac` is `npm run fetch-binaries && npm run build && electron-builder`. That middle step is `tsc -p tsconfig.json`, which compiles *Electron's own* TypeScript; nothing in the packaging chain builds the web client. `electron-builder.yml` then copies `../app/dist` into the installer as-is. So a release ships whatever happens to be sitting in that directory — the last build anyone ran, with whatever `.env` they had at the time.
+
+Vite bakes `VITE_*` values into the bundle, so right now `app/dist` carries `VITE_API_TOKEN=dev-token` and `VITE_API_URL=http://127.0.0.1:31711` from a developer machine.
+
+**Not a security hole.** The packaged renderer takes its token from the preload bridge before it ever reads the baked value, and the host mints a fresh one per launch that would not match `dev-token` regardless. The shipped string is dead.
+
+**But two real failures follow from it.**
+
+- `VITE_API_URL` is baked as an *absolute* URL, while the packaged app is meant to be same-origin — the API serves the client. `31711` happens to be the Electron default, so today it works by luck. Ship while a developer's `.env` says `:3000`, as it did during item 24's work, and the packaged app points at nothing.
+- `app/dist` is gitignored, so on a clean machine it does not exist. Packaging there produces an installer with no web client at all, and `bundledWebClient()` has nothing to serve.
+
+**Wanted.** `dist:mac` / `dist:win` / `pack` should build the client themselves, with an environment that cannot inherit a developer's `.env` — the packaged app wants `VITE_API_URL` empty, which is what same-origin means. Worth proving by running `pack` afterwards and confirming the result contains a client and no absolute API URL.
+
+**Interacts with item 5** (Windows build verification) and with item 24, whose `.env.example` should say plainly that `VITE_API_URL` must be empty for anything that will be packaged.
+

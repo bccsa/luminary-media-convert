@@ -1002,6 +1002,29 @@ const storyboardPending = computed(
     () => storyboard.pending.value && !storyboard.complete.value
 );
 
+/**
+ * What the encoder is doing after the segment pipeline has drained.
+ *
+ * The bar reaches 100% when the last segment is packed, but the status stays
+ * `encoding` through playlist key tags, a fresh FFmpeg pass for thumbnail
+ * sprites, the waveform sidecar and text-asset encryption. Naming the step is
+ * the difference between a session that looks stalled and one that looks busy.
+ *
+ * `encoding` maps to nothing on purpose: while the pipeline is running the bar
+ * already says so, and captioning it would be noise.
+ */
+const PIPELINE_PHASE_LABELS: Record<string, string> = {
+    'finalising-playlists': 'Finalising playlists…',
+    thumbnails: 'Generating thumbnails…',
+    waveform: 'Generating waveform…',
+    'encrypting-playlists': 'Encrypting playlists…',
+};
+
+const pipelinePhaseLabel = computed(() => {
+    const phase = poller.pipelineProgress.value?.phase;
+    return phase ? (PIPELINE_PHASE_LABELS[phase] ?? null) : null;
+});
+
 const shouldCollapseFiles = computed(
     () => (displayFiles.value?.length ?? 0) > 10
 );
@@ -2167,6 +2190,24 @@ onUnmounted(() => {
                                                 poller.progress.value
                                             "
                                         />
+                                        <!--
+                                            Draining at 100% is not the encode finishing: sprites, the
+                                            waveform sidecar and text-asset encryption still run before
+                                            the status leaves `encoding`, and on a long source the
+                                            sprites alone take minutes. Unnamed, a full bar over
+                                            unfinished work reads as stalled rather than busy.
+                                        -->
+                                        <p
+                                            v-if="pipelinePhaseLabel"
+                                            data-testid="pipeline-phase"
+                                            class="-mt-1 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"
+                                        >
+                                            <span
+                                                class="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-sky-500"
+                                                aria-hidden="true"
+                                            />
+                                            {{ pipelinePhaseLabel }}
+                                        </p>
                                         <ProgressBar
                                             v-if="
                                                 poller.pipelineProgress.value
@@ -2694,6 +2735,9 @@ onUnmounted(() => {
                                     :pipeline-encoding="
                                         poller.pipelineProgress.value
                                             ?.encoding ?? poller.progress.value
+                                    "
+                                    :pipeline-phase="
+                                        poller.pipelineProgress.value?.phase
                                     "
                                     :pipeline-encrypting="
                                         poller.pipelineProgress.value
