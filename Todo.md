@@ -481,7 +481,13 @@ Only then does the status become `uploading_to_s3` and progress reset to 0. So f
 
 ---
 
-## 28. Fullscreen crops the video instead of letterboxing it
+## 28. Fullscreen crops the video instead of letterboxing it — done
+
+Fixed where the rule was, in `SessionPlayerStrip.vue`, not in the library: `cover` still applies in the 16/9 strip, and `:fullscreen` / `.lmp-is-fullscreen` now override it to `contain`. No consumer of `player-web` is affected, because the crop was never the player's.
+
+**Not yet seen.** The selector is the one this item diagnosed, but nobody has watched a 4:3 source letterbox in an actual fullscreen since the change.
+
+**Left open deliberately:** whether `cover` belongs in the strip at all. It still silently crops a 4:3 or vertical source in the one view a user checks framing in. Changing that alters how every existing session looks in the editor, which is a call to make on its own rather than inside a fullscreen fix.
 
 **Cause found.** `player-web`'s own `.lmp-video` rule (`player-web/src/styles.css`, line 38) sets no `object-fit`, so it letterboxes as the UA stylesheet intends. The crop comes from the app: `app/src/components/session-view/SessionPlayerStrip.vue` line 510 sets `object-fit: cover` on `.lmp-video` through a `:deep()` selector.
 

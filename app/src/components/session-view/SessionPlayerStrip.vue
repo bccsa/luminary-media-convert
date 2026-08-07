@@ -507,9 +507,20 @@ defineExpose({
 .session-trim-player-shell :deep(.lmp-root) {
     height: 100%;
 }
+/*
+ * `cover` fills the 16/9 strip with a source that is not 16:9, which is what
+ * this shell wants — but entering fullscreen does not move the element out of
+ * the shell, so the rule kept matching and filled a screen-shaped box instead,
+ * cropping everything outside the overlap. Fullscreen has to letterbox; that is
+ * the point of it. The player marks itself either way, so exclude both forms.
+ */
 .session-trim-player-shell :deep(.lmp-video) {
     height: 100%;
     object-fit: cover;
+}
+.session-trim-player-shell :deep(.lmp-root:fullscreen .lmp-video),
+.session-trim-player-shell :deep(.lmp-root.lmp-is-fullscreen .lmp-video) {
+    object-fit: contain;
 }
 
 /* Force split-list SegmentEditor to fill the full aside height. */
