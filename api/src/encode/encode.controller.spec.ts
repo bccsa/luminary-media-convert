@@ -161,6 +161,38 @@ describe('EncodeController', () => {
         delete process.env.MAX_UPLOAD_SIZE;
     });
 
+    describe('getChapters', () => {
+        it('answers an empty document when this language has no sidecar yet', async () => {
+            // A session nobody has authored chapters for is the normal case, not
+            // an error. Answering 404 put a red line in the browser console on
+            // every session open — and got read as "chapters are not saved".
+            const session = sessionService.create(makeConfig());
+            hlsEditService.readChapters.mockResolvedValue(null);
+
+            await expect(controller.getChapters(session.id)).resolves.toEqual({
+                vtt: '',
+            });
+        });
+
+        it('returns the sidecar when there is one', async () => {
+            const session = sessionService.create(makeConfig());
+            hlsEditService.readChapters.mockResolvedValue({
+                vtt: 'WEBVTT\n\n00:00.000 --> 00:10.000\nOne\n',
+            });
+
+            const result = await controller.getChapters(session.id);
+
+            expect(result.vtt).toContain('WEBVTT');
+        });
+
+        it('still 404s for a session that does not exist', async () => {
+            // The only genuine absence this route has left to report.
+            await expect(controller.getChapters('nope')).rejects.toThrow(
+                NotFoundException
+            );
+        });
+    });
+
     describe('createSession', () => {
         it('returns the session and the token that drives it', async () => {
             // No tus endpoint and no upload size: the browser never uploads.

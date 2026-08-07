@@ -662,12 +662,13 @@ export class EncodeController {
             'nothing but a language. Same storage and layout as /api/hls/chapters/read.',
     })
     @ApiParam({ name: 'sessionId', description: 'Session ID' })
-    @ApiResponse({ status: 200, description: 'Chapter VTT body.' })
-    @ApiResponse({ status: 400, description: 'Malformed language code.' })
     @ApiResponse({
-        status: 404,
-        description: 'Session or chapter file not found.',
+        status: 200,
+        description:
+            'Chapter VTT body, empty when this language has no sidecar yet.',
     })
+    @ApiResponse({ status: 400, description: 'Malformed language code.' })
+    @ApiResponse({ status: 404, description: 'Session not found.' })
     async getChapters(
         @Param('sessionId') sessionId: string,
         @Query('lang') lang = 'en'
@@ -679,10 +680,17 @@ export class EncodeController {
             lang,
             keyHex
         );
-        if (!result) {
-            throw new NotFoundException('No chapter file for this language');
-        }
-        return result;
+        // No sidecar yet is the normal state of a session nobody has authored
+        // chapters for, so it answers with an empty document rather than 404.
+        //
+        // The editor opens by asking this on every session, and a 404 is
+        // written to the browser console whatever the caller then does with it.
+        // That put a permanent red line under a screen working correctly, and
+        // it cost a bug report: "chapters are not saved" was this read failing
+        // to find a file that had never been written. 404 on this route now
+        // means the session does not exist, which is the only genuine absence
+        // left to report.
+        return result ?? { vtt: '' };
     }
 
     @Put(':sessionId/chapters')

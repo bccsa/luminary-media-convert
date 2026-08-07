@@ -10,7 +10,7 @@ Ordered roughly by value, not by effort.
 
 **Branch.** All migration work (issue #154) is on `154-migrate-luminary-media-convert-to-a-local-only-electron-app-remove-saas-features`, open as PR #161. The original seven logical commits (SaaS removal → hls lib → api → app → cms-mock → electron → docs) have since been joined by the manual-verification fixes, the app icon, a merge of `main`, and the restored test suites.
 
-**Build state.** All workspaces build, and all test suites pass: api 796, app 192, segment-editor 217, hls 121, player-core 168, player-web 79 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
+**Build state.** All workspaces build, and all test suites pass: api 799, app 192, segment-editor 217, hls 121, player-core 168, player-web 79 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
 
 **Player extraction (issue #153, PR #162) has since landed on top of this branch.** Playback logic left the app for two packages — `player-core` (headless: munging, controller, recovery, polling) and `player-web` (hls.js reference implementation) — Video.js is gone, and encryption now covers playlists, chapters and subtitles rather than segments alone. Items below are marked where that work closed or changed them.
 
@@ -290,11 +290,21 @@ The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` throu
 
 ---
 
-## 12. Chapters are not saved to S3 from the chapters editor
+## 12. Chapters are not saved to S3 from the chapters editor — not reproducible; the 404 that looked like it has been removed
 
 **Reported.** Authoring chapters in the session chapters editor does not result in a `chapters/en.vtt` object in the bucket — fetching `<prefix>/chapters/en.vtt` from the browser returns 404.
 
-**Where to look.** `PUT /api/sessions/:id/chapters?lang=en` in `api/src/encode/encode.controller.ts` and the write path behind it, plus `app/src/composables/useChapters.ts`, which holds a `localStorage` draft and debounces the write — a draft that never reaches the API looks identical to a save that succeeded. Worth establishing first whether the request is issued at all, whether it returns `204`, and whether the object lands under the session's own `<pathPrefix>/<sessionId>/` prefix rather than somewhere else. Note also that on an encrypted session the sidecar is LMCENC-encrypted on write, so a direct browser fetch of a *present* object would not be readable text — but that is a different symptom from a 404.
+**Reproduced live, and the write works.** With the app running against the local MinIO: the bucket held three `chapters/en.vtt` objects; a chapter titled "Johan Bell" was authored and saved; the bucket then held four. The new one, at `media/<sessionId>/chapters/en.vtt`, was 88 bytes beginning `LMCENC01`, and decrypted with that session's key to exactly the authored cue. Action, object, content — the reported effect does not happen.
+
+**Three things made it look as though it did**, and all three are worth knowing before this is re-opened:
+
+- **The read answered 404 for "none yet".** The editor asks `GET /api/sessions/:id/chapters` on every session open, and the client treats 404 as "no sidecar" (`requestJsonOrNull`, `app/src/api.ts`). The browser logs the failed request regardless of what the caller does with it, so a screen working correctly carried a permanent console error — and that error is what "chapters are not saved" was. **Fixed:** the route now answers `200` with `{ vtt: '' }` when the language has no sidecar. A 404 on it now means the session does not exist, which is the only genuine absence it has left to report. Three controller tests cover it.
+- **The prefix.** Output lives at `<pathPrefix>/<sessionId>/…` — the CMS handshake bakes the session id into `pathPrefix` at creation (`cms.controller.ts`). Fetching `<pathPrefix>/chapters/en.vtt`, without the session segment, is a real 404 while the object sits one level down.
+- **The encryption.** An encrypted session LMCENC-wraps the sidecar on write, so even at the right URL a browser gets 88 bytes of ciphertext rather than readable WebVTT. That is a 200, not a 404, but it reads as a broken file. `docs/encrypted-sidecar-format.md` has the layout; the key is the session's `encryptionKeyHex`.
+
+**One genuine failure path remains, and it is not this one.** `sessionStorage()` refuses with `400 — storage credentials no longer available` for a session whose S3 keys did not survive an app restart, so a save on such a session really does fail. `onSaveChapters` surfaces it into `chaptersSaveError` rather than swallowing it, so it should be visible — but it is the one route by which authored chapters are genuinely lost, and worth remembering before assuming the write is broken.
+
+**Not established:** only one session was checked end to end, and it was an encrypted one. The two plaintext sidecars already in the bucket are supporting evidence that an unencrypted session writes correctly too, but that was not re-run.
 
 ---
 
