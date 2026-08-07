@@ -3,7 +3,10 @@ import { SessionService } from './session.service.js';
 import { ProbeService } from './probe.service.js';
 import { PreviewService } from './preview.service.js';
 import { WaveformService } from './waveform.service.js';
-import { ThumbnailService } from './thumbnail.service.js';
+import {
+    selectStoryboardTrack,
+    ThumbnailService,
+} from './thumbnail.service.js';
 
 /**
  * The post-ingest pipeline, shared by every way a source file arrives.
@@ -64,13 +67,17 @@ export class IngestService {
 
         // Same for the storyboard: the trim timeline wants frames as soon as it
         // opens, and generating them takes an ffmpeg pass over the whole file.
-        const video = probeResult.videoTracks[0];
+        // The track is chosen rather than taken first: on a multi-angle file the
+        // first track is as likely to be a 144p proxy as the camera the user
+        // means to look at.
+        const video = selectStoryboardTrack(probeResult.videoTracks);
         const duration = probeResult.format?.duration ?? 0;
-        if (video?.width && video?.height && duration > 0) {
+        if (video && duration > 0) {
             void this.thumbnailService
                 .getOrGeneratePreview(sessionId, {
                     inputPath: destPath,
                     duration,
+                    trackIndex: video.index,
                     sourceWidth: video.width,
                     sourceHeight: video.height,
                 })

@@ -54,7 +54,10 @@ import { IngestService } from './services/ingest.service.js';
 import { S3Service } from './services/s3.service.js';
 import { HlsEditService } from '../hls-edit/hls-edit.service.js';
 import { WaveformService } from './services/waveform.service.js';
-import { ThumbnailService } from './services/thumbnail.service.js';
+import {
+    selectStoryboardTrack,
+    ThumbnailService,
+} from './services/thumbnail.service.js';
 import {
     SessionResponseDto,
     EncodeStartResponseDto,
@@ -981,9 +984,12 @@ export class EncodeController {
             throw new NotFoundException('Source file not yet uploaded');
         }
 
-        const video = session.probeResult?.videoTracks?.[0];
+        // The same helper the ingest prime uses — the two have to agree, or a
+        // request landing after the prime asks for a storyboard of a different
+        // track and the cached cue geometry no longer matches the images.
+        const video = selectStoryboardTrack(session.probeResult?.videoTracks);
         const duration = session.probeResult?.format?.duration ?? 0;
-        if (!video?.width || !video?.height || duration <= 0) {
+        if (!video || duration <= 0) {
             throw new NotFoundException('Source has no usable video track');
         }
 
@@ -992,6 +998,7 @@ export class EncodeController {
             {
                 inputPath: session.filePath,
                 duration,
+                trackIndex: video.index,
                 sourceWidth: video.width,
                 sourceHeight: video.height,
             }
@@ -1019,10 +1026,11 @@ export class EncodeController {
 
         // Cues carry bare filenames; a client resolving them against the VTT URL
         // would drop the token and be turned away. Point them at the sprite route
-        // outright instead.
+        // outright instead. `thumb_` is the source storyboard's individual
+        // frames, `sprite_` a packed sheet — this route can serve either.
         const base = `${req.protocol}://${req.get('host')}/api/sessions/${sessionId}/thumbnails`;
         const vtt = result.vtt.replace(
-            /^(sprite_\d+\.\w+)(#.*)?$/gm,
+            /^((?:sprite|thumb)_\d+\.\w+)(#.*)?$/gm,
             (_m, file: string, frag = '') =>
                 `${base}/${file}?token=${encodeURIComponent(token)}${frag}`
         );
@@ -1059,7 +1067,9 @@ export class EncodeController {
 
         // Only ever the files this service produces: the name is part of a path,
         // so anything else could walk out of the directory.
-        const match = filename.match(/^sprite_\d+\.(webp|jpg|jpeg|png)$/);
+        const match = filename.match(
+            /^(?:sprite|thumb)_\d+\.(webp|jpg|jpeg|png)$/
+        );
         if (!match) throw new NotFoundException('Invalid sprite filename');
 
         const path = join(
