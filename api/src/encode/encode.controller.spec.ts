@@ -1234,7 +1234,7 @@ describe('EncodeController', () => {
             expect(result.probeResult).toBeUndefined();
         });
 
-        it('should include encryptionKeyHex when completed with encryption', () => {
+        it('never puts the encryption key in the status payload', () => {
             const session = sessionService.create(makeConfig());
             // (id, files, masterPlaylist, thumbnailsVtt, segmentFormat,
             // encryptionKeyHex) — the angle-playlist argument that used to sit
@@ -1248,9 +1248,14 @@ describe('EncodeController', () => {
                 'abcd1234abcd1234abcd1234abcd1234'
             );
 
+            // The key is served masked from its own endpoint. Riding along on
+            // every status read is what put it in logs and proxies.
             const result = controller.getStatus(session.id, makeRequest());
-            expect(result.encryptionKeyHex).toBe(
-                'abcd1234abcd1234abcd1234abcd1234'
+            expect(
+                (result as Record<string, unknown>).encryptionKeyHex
+            ).toBeUndefined();
+            expect(controller.getSessionKey(session.id).maskedKeyHex).toEqual(
+                expect.any(String)
             );
         });
 
@@ -1587,7 +1592,7 @@ describe('EncodeController — masked session key', () => {
             {} as any,
             {} as any,
             {} as any,
-            {} as any,
+            {} as any
         );
     }
 
@@ -1620,13 +1625,13 @@ describe('EncodeController — masked session key', () => {
         const session = sessionService.create(makeConfig());
 
         expect(() => controller.getSessionKey(session.id)).toThrow(
-            NotFoundException,
+            NotFoundException
         );
     });
 
     it('404s for an unknown session', () => {
         expect(() => controller.getSessionKey('nope')).toThrow(
-            NotFoundException,
+            NotFoundException
         );
     });
 
@@ -1634,7 +1639,10 @@ describe('EncodeController — masked session key', () => {
         // The key used to ride along on every poll and SSE frame, which put it
         // in logs and screenshots for the life of the session.
         const session = sessionService.create(makeConfig());
-        sessionService.setEncryptionKey(session.id, '000102030405060708090a0b0c0d0e0f');
+        sessionService.setEncryptionKey(
+            session.id,
+            '000102030405060708090a0b0c0d0e0f'
+        );
 
         const status = controller.getStatus(session.id, makeRequest());
 
@@ -1646,7 +1654,7 @@ describe('EncodeController — masked session key', () => {
         const guard = new AuthResolverGuard(
             new Reflector(),
             sessionService,
-            'local-token' as any,
+            'local-token' as any
         );
 
         await expect(
@@ -1655,8 +1663,8 @@ describe('EncodeController — masked session key', () => {
                     headers: {},
                     params: { sessionId: session.id },
                     query: {},
-                }),
-            ),
+                })
+            )
         ).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
@@ -1665,17 +1673,19 @@ describe('EncodeController — masked session key', () => {
         const guard = new AuthResolverGuard(
             new Reflector(),
             sessionService,
-            'local-token' as any,
+            'local-token' as any
         );
 
         await expect(
             guard.canActivate(
                 contextFor(EncodeController.prototype.getSessionKey, {
-                    headers: { authorization: `Bearer ${session.sessionToken}` },
+                    headers: {
+                        authorization: `Bearer ${session.sessionToken}`,
+                    },
                     params: { sessionId: session.id },
                     query: {},
-                }),
-            ),
+                })
+            )
         ).resolves.toBe(true);
 
         await expect(
@@ -1684,18 +1694,18 @@ describe('EncodeController — masked session key', () => {
                     headers: { 'x-api-key': 'local-token' },
                     params: { sessionId: session.id },
                     query: {},
-                }),
-            ),
+                })
+            )
         ).resolves.toBe(true);
     });
 
-    it('turns away another session\'s token', async () => {
+    it("turns away another session's token", async () => {
         const mine = sessionService.create(makeConfig());
         const theirs = sessionService.create(makeConfig());
         const guard = new AuthResolverGuard(
             new Reflector(),
             sessionService,
-            'local-token' as any,
+            'local-token' as any
         );
 
         await expect(
@@ -1704,8 +1714,8 @@ describe('EncodeController — masked session key', () => {
                     headers: { authorization: `Bearer ${theirs.sessionToken}` },
                     params: { sessionId: mine.id },
                     query: {},
-                }),
-            ),
+                })
+            )
         ).rejects.toBeInstanceOf(UnauthorizedException);
     });
 });

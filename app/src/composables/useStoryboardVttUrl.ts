@@ -1,11 +1,23 @@
 import { ref, watch, onScopeDispose, type Ref } from 'vue';
 import { isEncryptedPayload } from '@luminary-media-converter/hls';
 import { decryptLmcenc } from '@luminary-media-converter/player-core';
+
 import {
     absolutizeStoryboardVtt,
     retimeStoryboardVtt,
 } from '../utils/storyboardVtt';
 import type { TrimSegment } from '../types';
+
+/** Plaintext of `bytes`, decrypting first when they carry the LMCENC magic. */
+async function decodeMaybeEncrypted(
+    bytes: Uint8Array,
+    keyHex: string
+): Promise<string> {
+    const plain = isEncryptedPayload(bytes)
+        ? await decryptLmcenc(bytes, keyHex)
+        : bytes;
+    return new TextDecoder().decode(plain);
+}
 
 /**
  * The storyboard URL to give the timeline: decrypted where it has to be, and
@@ -71,15 +83,17 @@ export function useStoryboardVttUrl(opts: {
                 const res = await fetch(source);
                 if (!res.ok || cancelled) return;
 
-                const bytes = new Uint8Array(await res.arrayBuffer());
+                // Bytes are only worth reading when there is a key to try them
+                // against; without one, ciphertext is unreadable either way.
                 // A key does not mean this particular file is encrypted — the
                 // source storyboard is served by the local encoder in the
                 // clear, and playlist encryption is opt-outable.
-                const text = new TextDecoder().decode(
-                    keyHex && isEncryptedPayload(bytes)
-                        ? await decryptLmcenc(bytes, keyHex)
-                        : bytes
-                );
+                const text = keyHex
+                    ? await decodeMaybeEncrypted(
+                          new Uint8Array(await res.arrayBuffer()),
+                          keyHex
+                      )
+                    : await res.text();
                 if (cancelled) return;
 
                 const prepared = ranges.length

@@ -521,7 +521,7 @@ export class EncodeController {
     // 'read' matches the SSE events endpoint: a viewer holding a read token can
     // already stream the session's status, and it needs the key to play back
     // encrypted output (cms-mock's playback check does exactly this).
-    @AuthTypes('master', 'session', 'read')
+    @AuthTypes('instance', 'session', 'read')
     @ApiSecurity('apikey')
     @ApiOperation({
         summary: 'Get the masked AES-128 key for this session',
