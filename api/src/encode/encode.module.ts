@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
 import { CmsModule } from '../cms/cms.module.js';
+import { OriginsController } from '../cms/origins.controller.js';
 import { HlsEditModule } from '../hls-edit/hls-edit.module.js';
 import { CmsController } from './cms.controller.js';
 import { EncodeController } from './encode.controller.js';
@@ -27,7 +28,7 @@ import { WaveformService } from './services/waveform.service.js';
         forwardRef(() => HlsEditModule),
         CmsModule,
     ],
-    controllers: [EncodeController, CmsController],
+    controllers: [EncodeController, CmsController, OriginsController],
     providers: [
         SessionEventsService,
         SessionService,
