@@ -60,6 +60,8 @@ export function useStoryboard(opts: {
     let disposed = false;
     /** A fetch is in flight — a push and the safety timer can land together. */
     let polling = false;
+    /** A push arrived mid-fetch; follow up as soon as the current one lands. */
+    let pushQueued = false;
 
     const doFetch = () => (opts.fetcher ?? fetch)(opts.url.value as string, {
         cache: 'no-store',
@@ -99,15 +101,17 @@ export function useStoryboard(opts: {
 
     async function poll(): Promise<void> {
         if (disposed || !opts.url.value || !opts.active.value) return;
-        // A push and the safety timer can ask at the same moment. The cue-count
-        // dedupe makes the second fetch harmless, but harmless is not the same
-        // as worth making. Re-arm so the timer chain is not dropped on the way
-        // out — the in-flight poll's own schedule() then no-ops.
+        // A push landing while a fetch is in flight must not be dropped: the
+        // response being read may predate the frames the push announced.
+        // Remember it and let the in-flight poll follow up the moment it
+        // lands — handing the news to the parachute timer instead cost a
+        // 20-second wait for frames the encoder had already said exist.
         if (polling) {
-            schedule();
+            pushQueued = true;
             return;
         }
         polling = true;
+        let finished = false;
         try {
             const response = await doFetch();
             // 404 is the API saying this source, once probed, has no video to
@@ -121,10 +125,7 @@ export function useStoryboard(opts: {
             // first request beat the probe.
             if (response.status === 404) {
                 hasFrames.value = false;
-                schedule();
-                return;
-            }
-            if (response.ok) {
+            } else if (response.ok) {
                 const done =
                     response.headers.get('X-Storyboard-Complete') === 'true';
                 const cues = countCues(await response.text());
@@ -138,13 +139,19 @@ export function useStoryboard(opts: {
                 if (done) {
                     complete.value = true;
                     stop();
-                    return;
+                    finished = true;
                 }
             }
         } catch {
             // Storyboards are an enhancement; keep trying quietly.
         } finally {
             polling = false;
+        }
+        if (finished) return;
+        if (pushQueued) {
+            pushQueued = false;
+            void poll();
+            return;
         }
         schedule();
     }
