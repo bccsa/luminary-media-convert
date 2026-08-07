@@ -222,3 +222,29 @@ That is worth settling before reaching for **I-frame playlists** (`#EXT-X-I-FRAM
 **`waveform.json` is not encrypted** on a session that encrypts everything else. It is neither `.m3u8` nor `.vtt`, so it fell outside the LMCENC scope by definition rather than by decision. It leaks the shape of the audio and nothing else — but a listener who cares about the loud parts can find them. Either widen the scope or record that this is deliberate.
 
 **`encryptPlaylists` has no UI.** It follows `encryption.enabled` and can only be overridden through a direct `POST /api/sessions` — neither the CMS handshake nor the app offers the opt-out. That is the right default; the question is whether anything needs to reach the escape hatch, which the stock-player check in item 0 decides.
+
+## 11. Always fMP4, and one chunk instead of many
+
+Two related questions about what the encoder writes. Both are about the shape of the output rather than its content, so both are cheapest to answer before anyone depends on the current shape.
+
+### 11a. Align the streams, and stop falling back to MPEG-TS
+
+**Today.** `areStreamStartTimesAligned` probes the per-stream start times of the tracks an encode will actually use. Under 50 ms of spread, the output is fMP4 (`.m4s` + `init.mp4`); over it, the whole encode falls back to MPEG-TS, because hls.js's TS→fMP4 transmuxer resynchronises audio and video PTS during playback while fMP4 segments are appended directly and rely on `tfdt` being right. The choice is reported as `segmentFormat`. So the container is decided by a property of the source file, and a camera that starts its audio a tenth of a second late costs every viewer the TS overhead.
+
+**Wanted.** Trim every stream to the start of the latest-starting one before encoding, so the timestamps align by construction and fMP4 is always available. What is lost is the leading fraction of a second of whichever streams began early — usually inaudible, and it should be measured rather than assumed on a real multi-camera source.
+
+**Worth knowing before reaching for GStreamer.** FFmpeg can already do this: per-input `-ss`, or `-itsoffset`, or re-stamping with `setpts=PTS-STARTPTS` / `asetpts=PTS-STARTPTS`, which is the same machinery the trim feature already uses. GStreamer may still win on a source FFmpeg mis-probes, but the cheap experiment is to align in FFmpeg first and see whether the fallback ever fires again.
+
+**Why it is worth doing.** Lower overhead than TS's 188-byte packets, one code path instead of two, and fMP4 is CMAF — which is what any future DRM (Widevine, FairPlay) needs. It also removes a fallback that is invisible until someone wonders why one encode's segments look different from another's.
+
+### 11b. One chunk carrying every stream, instead of one per stream
+
+**Today.** Byte-range packing concatenates each stream's segments into `media_<n>.<ext>` files inside that stream's own directory, capped at `byteRangeMaxFileSizeMB` (500 by default), and rewrites the playlist as `#EXT-X-BYTERANGE:<length>@<offset>`. Every variant, angle and audio rendition therefore has its own chain of files.
+
+**The idea.** Pack across streams instead: one chunk file holding every video quality and angle and every audio track for the same stretch of time, up to the size cap, with each media playlist pointing into it at its own offsets. Fewer objects; a CDN edge that has the chunk has it for every quality, so a mid-stream quality switch may cost no origin fetch at all.
+
+**What decides it.** Whether the CDN fetches ranges or objects. An edge that satisfies a range request by pulling the whole object turns every request for one 480p segment into a fetch of every quality's bytes for that period — worse on a cold cache and much worse on metered mobile. Some CDNs do segmented range caching and would be fine; that behaviour, on the CDN Luminary actually uses, is the experiment worth running before any of this is built.
+
+**Three things it would collide with.** Audio-only mode is built on the promise that no video bytes are fetched at all — a merged chunk breaks that promise unless audio stays in its own file, which may be the right compromise anyway. Segments are encrypted before they are packed, so offsets are ciphertext offsets and interleaving changes nothing about that, but it does mean a shared chunk mixes several streams' ciphertext under one key. And the streaming pipeline currently packs each stream independently as its segments arrive; packing across streams means holding segments until every stream has produced that stretch, which is a different memory and latency profile.
+
+The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` through untouched, so neither change is blocked on the player.
