@@ -403,3 +403,52 @@ The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` throu
 **Wanted.** Defaults that make `npm run dev` and `npm -w cms-mock run dev` work out of the box, with `.env` reserved for overriding them.
 
 **Watch out for.** These defaults must not follow the code into a packaged build or a standalone run — a dev token that also works in production, or an allowlist that silently trusts `localhost` in a shipped app, would be worse than the current friction. Gate them on `import.meta.env.DEV` / `NODE_ENV`, and keep the port agreement in mind: the API's standalone default is `3000` while Electron's is `31711`, so whatever the client defaults to has to match the one it is actually paired with.
+
+---
+
+## 25. Keyboard shortcut for Cut in trim mode
+
+**There is one already**, which makes this a discoverability or a reachability problem rather than a missing feature — worth establishing which before building anything. `Delete` and `Backspace` both call `deleteSelected()` (`segment-editor/src/SegmentEditor.vue`, line 1044), the trim workspace mounts the editor with `keyboard-scope="global"` so the window listener is attached, and the Cut button's own tooltip advertises it: "Cut the selected range · Delete".
+
+Three things could make it feel absent:
+
+- **It needs a selection.** `deleteSelected` returns immediately when nothing is selected, so pressing Delete after marking in/out — without the range being *selected* — does nothing and gives no feedback. If the intent is "cut what I just marked", that is a different action from "cut what is selected".
+- **Focus in a text field swallows it.** `onKeyDown` bails when the target is an `input`/`textarea`/`select`, so Delete pressed after typing in a chapter title never reaches the editor. Correct for typing; surprising if focus is somewhere the user has forgotten about.
+- **Delete is not a conventional Cut binding.** `⌘/Ctrl + X` is what a user reaches for, and it is unbound.
+
+**Wanted.** Decide between adding `⌘/Ctrl + X` as an alias, making the shortcut act on the marked range when nothing is selected, or simply surfacing the existing binding better (the `?` help sheet is already there). Whatever is chosen, the help sheet and the button tooltip both have to say the same thing — they are the only places the binding is written down.
+
+---
+
+## 26. No way to cancel a session before the encode starts — and "Cancel encoding" lies during `encrypting`
+
+**Reported.** A session that has not started encoding cannot be cancelled from the session view.
+
+**Confirmed, and it is the UI, not the API.** `deleteSession` in `api/src/encode/encode.controller.ts` (line 612) accepts `created`, `uploading`, `uploaded`, `queued`, `encoding`, `failed` and `completed`. The session view only renders its "Cancel encoding" button for `queued`, `encoding` and `encrypting` (`app/src/views/SessionView.vue`, line 2085), so in `created` and `uploaded` — the whole file-picked, probing, configuring stretch — there is no affordance at all. The sessions *list* can delete one (`ActiveSessionsView.vue`, line 108), so the capability exists; it is just unreachable from the screen the user is on.
+
+**Cancelling during `encoding` does work** — the handler dequeues or calls `ffmpegService.killActiveProcess()` before removing the work directory. That half of the question is answered.
+
+**A second defect found while checking.** The UI offers the button in `encrypting`, which is exactly one of the two statuses the API refuses. `onCancelEncode` (line 1360) swallows the failure — "Best-effort cleanup" — and routes to `/sessions` regardless, so the user is told nothing and believes the session was cancelled while it carries on encrypting and uploading. Either the button should not appear in that state, or the failure has to be surfaced.
+
+**Also stale.** The Swagger description on the same endpoint (line 582) still says `uploading_to_s3`, `completed` and `failed` cannot be deleted. Two of those three are deletable, and `encrypting` — which genuinely is refused — is not mentioned.
+
+---
+
+## 27. Long unexplained gap between "100%" and the session finishing
+
+**Reported.** Once the S3 upload reports 100%, there is a long wait before the chapter editor appears and the player reloads to play from S3.
+
+**Why.** 100% is the segment pipeline draining, not the encode finishing. Four things then run in `api/src/encode/services/encode.service.ts` before the status changes at all:
+
+1. `injectKeyTagsIntoPlaylists` (line 202) — cheap.
+2. **Thumbnail sprites** (line 228) — a fresh FFmpeg pass over the finished output. On a long source this is the expensive one, and it reports nothing.
+3. Waveform sidecar (line 265) — usually served from the cache primed at ingest, but regenerated when it is not.
+4. `encryptTextAssets` (line 326) — every playlist and VTT, deliberately last.
+
+Only then does the status become `uploading_to_s3` and progress reset to 0. So for that entire stretch the session still reads `encoding` at 100%, which is why it looks stalled rather than busy.
+
+**Wanted.** Say what is happening. The cheapest honest fix is a status or phase label for the post-drain work ("Generating thumbnails", "Encrypting playlists") carried on the existing `pipelineProgress` shape, so the UI stops showing a finished bar over unfinished work.
+
+**Then measure before optimising.** Thumbnail generation is the obvious suspect and could plausibly overlap with the upload rather than block it — but confirm that with a timing on a real long source first, because the waveform path and text-asset encryption are also candidates and the ordering constraints between these steps are real and documented in the comments there.
+
+**Separately, the player reload.** Whether the switch from preview to S3 playback has to wait for `completed` at all is worth asking — `hlsUrl` is published at encode *start*, and the "coming soon" polling in `player-core` exists precisely for a playlist that is not there yet.
