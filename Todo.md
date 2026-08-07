@@ -228,6 +228,8 @@ Under all three is the floor of client-side encryption: a viewer who can play th
 
 **Fullscreen on a real device — untested.** The landscape lock on entering, the auto-exit on rotating back to portrait, and the iPhone path that hands over to Apple's own player UI have only ever run in jsdom against mocked `screen.orientation`. `orientation.lock` is reliable on Chromium/Android and a guarded no-op elsewhere, so Android is where the behaviour actually has to be seen. iOS 17.1+ playback (hls.js over `ManagedMediaSource`) needs the same treatment — below that, munged content is refused with a stated reason rather than failing obscurely, which is also worth seeing once.
 
+The transport belongs to the same trip, now that item 30 has put three buttons in the middle of the picture where there was one. They hold the 44 px minimum and separate on a fluid gap as the viewport narrows, but that is a claim about the stylesheet: whether skip-back, play and skip-forward can be told apart and hit with a thumb, on a phone held in landscape, is not something jsdom or a desktop pointer can answer.
+
 **No scrub preview in the fullscreen scrubber.** `thumbnails.vtt` and its sprite sheets are generated and sit beside the master, and the encoder's trim filmstrip already reads them — the player does not. Wiring the existing sprites into `player-web`'s scrubber would give previews on web and Android with no encoder change, and the VTT parser exists.
 
 That is worth settling before reaching for **I-frame playlists** (`#EXT-X-I-FRAME-STREAM-INF`), which are tempting because they are the HLS-native answer and turn out not to be portable: AVPlayer uses them, ExoPlayer ignores them, hls.js gives no preview UI either way. They earn their keep in exactly one case — deferring to Apple's built-in player chrome in a Capacitor app — and cost an extra extraction pass at encode time, since FFmpeg's HLS muxer cannot emit them. Wherever we draw the controls ourselves, a sprite sheet is one image and one crop. The lossless parser already round-trips the tag, so adding them later disturbs nothing.
@@ -517,7 +519,7 @@ Built as this item asks: `PlayerControlsOptions.audioMenu`, reaching the compone
 
 ---
 
-## 30. Redesign the fullscreen controls, and add skip buttons — done, except the device pass
+## 30. Redesign the fullscreen controls, and add skip buttons — done
 
 - **Skip buttons** flank play/pause, 15 s by default, each interval configurable through the `controls` prop item 29 opened. An interval of `0` removes that button rather than leaving one that moves nowhere. The glyph is a ring with the interval inside it, so the control says how far it goes and not only which way.
 - **Clamped at both ends.** `seek()` is absolute, so a skip is a computed position. The forward end stops `END_GUARD_S` (0.25 s) short of `duration`: landing exactly on it fires `ended`, so a viewer skipping near the close got "finished" when they asked for "a bit further on". An unknown duration leaves the far end open.
@@ -526,7 +528,7 @@ Built as this item asks: `PlayerControlsOptions.audioMenu`, reaching the compone
 
 12 new tests in `player-web` (60 → 72), covering both intervals, both clamps, the unknown-duration case, removal at `0`, label interpolation, and the audio-menu option.
 
-**Still outstanding: the device pass.** This item's own scope note says skip buttons are a touch-target question before they are a visual one, and item 10's caveat is unchanged — these controls have still only run in jsdom and on a desktop. The three transport targets hold the 44 px minimum and separate on a fluid gap as the viewport narrows, but that is a claim about CSS, not about a thumb. Worth seeing on a phone before this is called finished.
+Seeing the new transport on a phone belongs to item 10, which already carries the untested-on-a-real-device caveat for this surface; it is recorded there rather than holding this item open.
 
 **Today.** `player-web/src/components/FullscreenControls.vue` has an exit button top-left, a single play/pause in the centre, and a bottom bar of elapsed time, scrubber, remaining time and two bare `<select>` menus. There is no way to jump a few seconds — the only seek is dragging the scrubber, which is the least precise gesture available and the hardest one on a phone.
 
