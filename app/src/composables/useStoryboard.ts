@@ -74,15 +74,18 @@ export function useStoryboard(opts: {
         if (disposed || !opts.url.value || !opts.active.value) return;
         try {
             const response = await doFetch();
-            // 404 is the API saying this source has no storyboard and never
-            // will — no video track, or nothing to sample. Every other failure
-            // may still be transient, so only this one ends the watch. Without
-            // it the poll ran for the life of the session and the timeline kept
-            // claiming frames were on their way.
+            // 404 is the API saying this source, once probed, has no video to
+            // sample. This composable is only ever activated for sources the
+            // caller already knows have a video track (`sourceStoryboardActive`
+            // gates audio files off before a URL exists), so a 404 reaching
+            // here is a race — the request landed before ingest finished, or
+            // against an encoder that restarted — and is retried like any
+            // other transient failure. Latching it as permanent left the
+            // timeline frameless for the whole configure phase whenever the
+            // first request beat the probe.
             if (response.status === 404) {
-                complete.value = true;
                 hasFrames.value = false;
-                stop();
+                schedule();
                 return;
             }
             if (response.ok) {

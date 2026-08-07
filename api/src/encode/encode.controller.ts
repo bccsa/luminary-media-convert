@@ -980,16 +980,26 @@ export class EncodeController {
         this.validatePreviewToken(sessionId, token);
 
         const session = this.sessionService.get(sessionId);
-        if (!session?.filePath) {
-            throw new NotFoundException('Source file not yet uploaded');
+
+        // Ingest still running — the file is being attached or probed, so
+        // whether this source has frames is not yet knowable. That is "ask
+        // again", not "never": ingest of a large multi-track file holds this
+        // state for tens of seconds, and a 404 here is read by the client as
+        // permanent, which left the timeline frameless for the whole configure
+        // phase. The genuinely permanent refusal comes after the probe, below.
+        if (!session?.filePath || !session.probeResult) {
+            this.sendEmptyStoryboard(res);
+            return;
         }
 
         // The same helper the ingest prime uses — the two have to agree, or a
         // request landing after the prime asks for a storyboard of a different
         // track and the cached cue geometry no longer matches the images.
-        const video = selectStoryboardTrack(session.probeResult?.videoTracks);
-        const duration = session.probeResult?.format?.duration ?? 0;
+        const video = selectStoryboardTrack(session.probeResult.videoTracks);
+        const duration = session.probeResult.format?.duration ?? 0;
         if (!video || duration <= 0) {
+            // Probed and found wanting: no video track, or no duration. This
+            // one is permanent, and 404 is what tells the client to stop asking.
             throw new NotFoundException('Source has no usable video track');
         }
 
@@ -1004,23 +1014,17 @@ export class EncodeController {
             }
         );
 
-        // No sprite written yet. Generation was just started by the call above,
-        // so this is "ask again", not "never" — and the difference has to reach
-        // the client as something other than 404, which it reads as permanent.
-        // The two genuinely permanent cases (no source file, no usable video
-        // track) are already 404 above, before any sampling is attempted.
+        // No thumbnail written yet. Generation was just started by the call
+        // above, so this is "ask again", not "never" — and the difference has
+        // to reach the client as something other than 404, which it reads as
+        // permanent. The one genuinely permanent case (probed, no usable video
+        // track) is already 404 above, before any sampling is attempted.
         //
         // Answering with an empty but explicitly incomplete storyboard is what
         // the polling contract already expects: nought cues means nothing to
         // draw, and `X-Storyboard-Complete: false` means keep asking.
         if (!result) {
-            res.set({
-                'Content-Type': 'text/vtt',
-                'Cache-Control': 'no-store',
-                'X-Storyboard-Complete': 'false',
-                'Cross-Origin-Resource-Policy': 'cross-origin',
-            });
-            res.send('WEBVTT\n');
+            this.sendEmptyStoryboard(res);
             return;
         }
 
@@ -1050,6 +1054,21 @@ export class EncodeController {
             'Cross-Origin-Resource-Policy': 'cross-origin',
         });
         res.send(vtt);
+    }
+
+    /**
+     * The storyboard's "not yet" answer: no cues to draw, and an explicit
+     * signal to keep polling. Used both while ingest is still probing the
+     * source and while sampling has started but produced nothing.
+     */
+    private sendEmptyStoryboard(res: Response): void {
+        res.set({
+            'Content-Type': 'text/vtt',
+            'Cache-Control': 'no-store',
+            'X-Storyboard-Complete': 'false',
+            'Cross-Origin-Resource-Policy': 'cross-origin',
+        });
+        res.send('WEBVTT\n');
     }
 
     @Get(':sessionId/thumbnails/:filename')
