@@ -943,8 +943,19 @@ export class EncodeController {
             'to keep. Generated on first request and cached for the session; sprite ' +
             'references are absolute so they carry the session token.',
     })
-    @ApiResponse({ status: 200, description: 'WebVTT storyboard.' })
-    @ApiResponse({ status: 404, description: 'No storyboard available.' })
+    @ApiResponse({
+        status: 200,
+        description:
+            'WebVTT storyboard, possibly partial — `X-Storyboard-Complete` ' +
+            'says whether sampling has finished. An empty body means sampling ' +
+            'is underway and has produced nothing yet.',
+    })
+    @ApiResponse({
+        status: 404,
+        description:
+            'This source will never have a storyboard: no file attached, or no ' +
+            'usable video track.',
+    })
     async getPreviewThumbnailVtt(
         @Param('sessionId') sessionId: string,
         @Query('token') token: string,
@@ -973,7 +984,26 @@ export class EncodeController {
                 sourceHeight: video.height,
             }
         );
-        if (!result) throw new NotFoundException('Storyboard unavailable');
+
+        // No sprite written yet. Generation was just started by the call above,
+        // so this is "ask again", not "never" — and the difference has to reach
+        // the client as something other than 404, which it reads as permanent.
+        // The two genuinely permanent cases (no source file, no usable video
+        // track) are already 404 above, before any sampling is attempted.
+        //
+        // Answering with an empty but explicitly incomplete storyboard is what
+        // the polling contract already expects: nought cues means nothing to
+        // draw, and `X-Storyboard-Complete: false` means keep asking.
+        if (!result) {
+            res.set({
+                'Content-Type': 'text/vtt',
+                'Cache-Control': 'no-store',
+                'X-Storyboard-Complete': 'false',
+                'Cross-Origin-Resource-Policy': 'cross-origin',
+            });
+            res.send('WEBVTT\n');
+            return;
+        }
 
         // Cues carry bare filenames; a client resolving them against the VTT URL
         // would drop the token and be turned away. Point them at the sprite route

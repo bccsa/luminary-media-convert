@@ -1228,10 +1228,15 @@ function scheduleWaveformRetry() {
     waveformRetries++;
     waveformRetryTimer = setTimeout(() => {
         waveformRetryTimer = null;
-        // Only while the timeline can still use it.
-        if (!waveformPeaks.value?.length && canEditTrimTimeline.value) {
-            void fetchWaveform();
+        if (waveformPeaks.value?.length) return;
+        // The timeline cannot use peaks yet — but "not yet" is not "never", and
+        // dropping the chain here left the waveform flat until the page was
+        // reloaded. Keep the backoff alive and look again on the next tick.
+        if (!canEditTrimTimeline.value) {
+            scheduleWaveformRetry();
+            return;
         }
+        void fetchWaveform();
     }, delay);
 }
 

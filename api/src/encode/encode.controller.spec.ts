@@ -1425,6 +1425,34 @@ describe('EncodeController — source storyboard', () => {
         ).rejects.toThrow(NotFoundException);
     });
 
+    it('answers an empty incomplete storyboard while sampling has produced nothing', async () => {
+        // The client treats 404 as "no frames will ever exist" and stops asking.
+        // Sampling starts on this very request, so the first poll after an
+        // upload routinely arrives before the first sprite is written — and
+        // answering 404 there stopped the poll for good: no filmstrip, no
+        // "Generating thumbnails…" badge, and a waveform drawn in its
+        // no-filmstrip colour, until the page was reloaded.
+        const session = uploadedSession();
+        thumbnailService.getOrGeneratePreview.mockResolvedValue(null);
+        const res = makeRes();
+
+        await ctrl.getPreviewThumbnailVtt(
+            session.id,
+            session.sessionToken,
+            req,
+            res
+        );
+
+        expect(res.send).toHaveBeenCalledWith('WEBVTT\n');
+        expect(res.set).toHaveBeenCalledWith(
+            expect.objectContaining({
+                'Content-Type': 'text/vtt',
+                'X-Storyboard-Complete': 'false',
+                'Cache-Control': 'no-store',
+            })
+        );
+    });
+
     it('points sprite references at the sprite route, token included', async () => {
         const session = uploadedSession();
         const res = makeRes();
