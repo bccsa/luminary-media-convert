@@ -259,3 +259,61 @@ Two related questions about what the encoder writes. Both are about the shape of
 **Three things it would collide with.** Audio-only mode is built on the promise that no video bytes are fetched at all — a merged chunk breaks that promise unless audio stays in its own file, which may be the right compromise anyway. Segments are encrypted before they are packed, so offsets are ciphertext offsets and interleaving changes nothing about that, but it does mean a shared chunk mixes several streams' ciphertext under one key. And the streaming pipeline currently packs each stream independently as its segments arrive; packing across streams means holding segments until every stream has produced that stretch, which is a different memory and latency profile.
 
 The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` through untouched, so neither change is blocked on the player.
+
+---
+
+## 12. Chapters are not saved to S3 from the chapters editor
+
+**Reported.** Authoring chapters in the session chapters editor does not result in a `chapters/en.vtt` object in the bucket — fetching `<prefix>/chapters/en.vtt` from the browser returns 404.
+
+**Where to look.** `PUT /api/sessions/:id/chapters?lang=en` in `api/src/encode/encode.controller.ts` and the write path behind it, plus `app/src/composables/useChapters.ts`, which holds a `localStorage` draft and debounces the write — a draft that never reaches the API looks identical to a save that succeeded. Worth establishing first whether the request is issued at all, whether it returns `204`, and whether the object lands under the session's own `<pathPrefix>/<sessionId>/` prefix rather than somewhere else. Note also that on an encrypted session the sidecar is LMCENC-encrypted on write, so a direct browser fetch of a *present* object would not be readable text — but that is a different symptom from a 404.
+
+---
+
+## 13. Remove the Delivery tab
+
+**Today.** A completed session's aside offers two tabs, Chapters and Delivery (`app/src/views/SessionView.vue`, the completed-phase tab switcher around line 2132 and the delivery panel around line 2398), and `SessionWorkflowPanel.vue` points at it on completion ("Encoding finished. Delivery links are on the Delivery tab").
+
+**Wanted.** Drop it. Everything it surfaces — `hlsUrl` and the key — already reaches the Luminary CMS over SSE and the key endpoint at encode *start*, and the CMS is what owns delivery. Showing it again in the encoder invites someone to copy a URL out of the wrong place.
+
+**What that touches.** With Chapters the only remaining completed-phase panel, the tab switcher goes with it and the panel renders unconditionally; the `completedAsideTab` state and the `switchTab` emit from `SessionWorkflowPanel` lose their reason to exist, and that panel's completion message needs new wording. Check whether anything else still needs `SessionPostProcessPanel`'s delivery half — and, if the removal leaves the session view with no way to see the output URL at all, decide deliberately that this is fine rather than by omission.
+
+---
+
+## 14. Move "Clear All" out of the timeline controls and into the Chapters section
+
+**Today.** `SegmentEditor` renders the Clear All button itself, in its controls row, in every non-`trim` mode where at least one segment exists — twice over, since the row has two render sites (`segment-editor/src/SegmentEditor.vue`, the standalone toolbar around line 1641 and the combined controls bar around line 2070; in `trim` mode the same slot holds Cut instead). So a destructive "remove every chapter" action sits among playback, mark in/out, undo/redo and zoom, which are all timeline-local and mostly reversible-by-habit.
+
+**Wanted.** It belongs beside the chapter list, where the things it deletes are actually visible.
+
+**What that takes.** `clearAll` is already on the component's `defineExpose` surface, so the host can call it — what does not come with it is the confirmation dialog (`confirmClearOpen`, and the "Clear all {{ clearNoun }}?" sheet around line 2386), which either has to be reachable from outside or re-implemented in the chapters panel. Note that the button is generic to non-trim modes, so removing it unconditionally also takes it away from `subtitles` mode; if that mode is meant to keep an in-editor clear, this needs a prop rather than a deletion. `segment-editor` is a published library with its own suite — check for tests asserting the button's presence.
+
+---
+
+## 15. Session topline belongs in the left pane, not in a full-width top bar
+
+**Today.** The session topline — back arrow, title, status badge, "Created 17 hours ago", and the encode action — is a full-width row above both columns (`app/src/views/SessionView.vue`, `.session-topline` around line 1752, rendered above the `SessionTrimWorkspace` that draws the player and its `#aside` slot). The aside therefore starts one row down, and the chapters pane opens with a band of empty space above it.
+
+**Wanted.** Move the topline inside the left (player) column, so the aside runs to the top of the window and the chapters pane starts there. The title also reads better beside the thing it names than as a page-wide chrome bar.
+
+**Watch out for.** The topline carries the encode submit button, which is the primary action of the pre-encode phase — narrowing its row to the player column has to leave it somewhere it is still obvious. It also has an `order-first` special case for the `trim` tab, and the back arrow is the only route out of the session view.
+
+---
+
+## 16. Chapters pane: too much left and right padding
+
+**Today.** The chapters panel insets its content well away from the panel edge on both sides, which costs the chapter-title field width — the part of each row that actually needs it — while the timecode, duration and remove controls stay fixed.
+
+**Wanted.** Tighten the horizontal padding. Worth doing together with item 15, since both are about the same pane's use of space, and with item 13, which removes the tab row above it.
+
+---
+
+## 17. Timeline control buttons do not match the rest of the app
+
+**Today.** The controls bar under the timeline (mark in/out, undo/redo, step, play/pause, zoom) is styled entirely from `segment-editor/src/styles.css`, which carries its own theme tokens. In dark mode `--se-track: #172554` / `--se-track-hover: #1e3a5f` (line 69–70) give every `.se-btn` a deep navy fill, while the app's own buttons around it are slate. So the timeline reads as a component borrowed from somewhere else.
+
+**Wanted.** Bring the button surfaces onto the app's palette — for the dark theme that is the slate family, not blue-950.
+
+**Play/pause needs a separate decision.** `.se-btn--playback` (line 584) is the only button given the accent treatment: sky border, `--se-accent-soft` fill, sky icon. Against navy neighbours that reads as an outlined toggle rather than the primary control, and on a slate bar it will read differently again. Worth deciding what it should be — solid accent fill, or plain like its neighbours since the timeline already has a keyboard space bar and a playhead to say what is happening — rather than just recolouring what is there.
+
+**Note.** `segment-editor` is a published library with its own token block and a light theme alongside the dark one, so this is a change to the library's defaults (both themes) or a set of overrides the app supplies — decide which, because the library is meant to be host-agnostic.
