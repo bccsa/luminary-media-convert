@@ -86,7 +86,21 @@ function createMockProcess(): ChildProcess & {
 describe('FfmpegService', () => {
     let service: FfmpegService;
 
+    // These assertions expect the binaries to be resolved off PATH — a bare
+    // `ffmpeg`. `ffbin.ts` prefers FFMPEG_PATH / FFPROBE_PATH when they are set,
+    // and `bootstrap.ts` sets both into `process.env` for the process it is
+    // hosting. A spec that calls `createServer()` therefore leaves them behind
+    // for whatever shares its worker, and this file failed or passed depending
+    // on the order it was scheduled in. Pin the environment it asserts against,
+    // and put back what was there so this spec is not the next polluter.
+    const savedBinPaths: Record<string, string | undefined> = {};
+
     beforeEach(() => {
+        for (const key of ['FFMPEG_PATH', 'FFPROBE_PATH']) {
+            savedBinPaths[key] = process.env[key];
+            delete process.env[key];
+        }
+
         mockExecSync.mockReset();
         mockExecFile.mockReset();
 
@@ -104,6 +118,13 @@ describe('FfmpegService', () => {
         });
 
         service = new FfmpegService();
+    });
+
+    afterEach(() => {
+        for (const [key, value] of Object.entries(savedBinPaths)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
     });
 
     describe('GPU detection', () => {
