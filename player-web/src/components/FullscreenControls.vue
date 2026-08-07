@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { PlayerControllerApi, PlayerState } from '@luminary-media-converter/player-core';
-import type { PlayerMessages } from '../messages';
+import { formatSeconds, type PlayerMessages } from '../messages';
+import { mergeControls, type PlayerControlsOptions } from '../controls';
 import '../styles.css';
 
 /**
@@ -14,6 +15,8 @@ const props = defineProps<{
     state: PlayerState;
     messages: PlayerMessages;
     controller: PlayerControllerApi;
+    /** Which controls to offer. Omitted means the library's defaults. */
+    controls?: Partial<PlayerControlsOptions>;
 }>();
 
 const emit = defineEmits<{ (event: 'exit'): void }>();
@@ -100,10 +103,27 @@ const remainingText = computed(
 
 const playLabel = computed(() => (props.state.playing ? props.messages.pause : props.messages.play));
 
+const opts = computed(() => mergeControls(props.controls));
+
 // Menus appear only when there is an actual choice to make. Subtitles always
 // gain an extra "off" entry, so a single track is already a choice.
-const showAudioMenu = computed(() => props.state.audioTracks.length > 1);
+// A host with its own selectors may switch the audio menu off entirely.
+const showAudioMenu = computed(
+    () => opts.value.audioMenu && props.state.audioTracks.length > 1,
+);
 const showSubtitleMenu = computed(() => props.state.subtitleTracks.length > 0);
+
+// --- skip ------------------------------------------------------------------
+
+const showSkipBack = computed(() => opts.value.skipBackSeconds > 0);
+const showSkipForward = computed(() => opts.value.skipForwardSeconds > 0);
+
+const skipBackLabel = computed(() =>
+    formatSeconds(props.messages.skipBack, opts.value.skipBackSeconds),
+);
+const skipForwardLabel = computed(() =>
+    formatSeconds(props.messages.skipForward, opts.value.skipForwardSeconds),
+);
 
 const subtitleValue = computed(() => props.state.activeSubtitleTrackId ?? SUBTITLES_OFF);
 
@@ -112,6 +132,36 @@ const subtitleValue = computed(() => props.state.activeSubtitleTrackId ?? SUBTIT
 function togglePlay(): void {
     props.controller.togglePlay();
     reveal();
+}
+
+/**
+ * `PlayerController.seek` is absolute, so a skip is a computed position — which
+ * means both ends need clamping.
+ *
+ * The far end stops short of `duration` rather than landing on it: seeking to
+ * exactly the end fires `ended`, so a viewer skipping forward near the close
+ * gets "finished" when they asked for "a bit further on". That is the one
+ * outcome a skip button must not produce. An unknown duration leaves the far
+ * end open — there is nothing to clamp against, and the engine refuses an
+ * impossible position on its own.
+ */
+const END_GUARD_S = 0.25;
+
+function skip(deltaSeconds: number): void {
+    const { currentTime, duration: total } = props.state;
+    const furthest = total > 0 ? Math.max(0, total - END_GUARD_S) : Infinity;
+    props.controller.seek(
+        Math.min(Math.max(0, currentTime + deltaSeconds), furthest),
+    );
+    reveal();
+}
+
+function skipBack(): void {
+    skip(-opts.value.skipBackSeconds);
+}
+
+function skipForward(): void {
+    skip(opts.value.skipForwardSeconds);
 }
 
 function onScrub(event: Event): void {
@@ -152,6 +202,35 @@ function onSubtitleChange(event: Event): void {
 
         <div class="lmp-fs-center">
             <button
+                v-if="showSkipBack"
+                type="button"
+                class="lmp-icon-btn lmp-fs-skip lmp-fs-skip-back"
+                :aria-label="skipBackLabel"
+                :title="skipBackLabel"
+                @click="skipBack"
+            >
+                <!--
+                    A ring with the interval inside it, so the control says how
+                    far it goes rather than only which way. The number is SVG
+                    text, not an overlaid element: it scales with the glyph and
+                    centres on the ring rather than on the button box.
+                -->
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                        d="M9.88 4.08A8.2 8.2 0 1 0 14.12 4.08"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                    />
+                    <path d="M7.9 4.35 11.5 2.2v4.3z" />
+                    <text class="lmp-fs-skip-num" x="12" y="15.3">
+                        {{ opts.skipBackSeconds }}
+                    </text>
+                </svg>
+            </button>
+
+            <button
                 type="button"
                 class="lmp-icon-btn lmp-fs-play"
                 :aria-label="playLabel"
@@ -165,11 +244,35 @@ function onSubtitleChange(event: Event): void {
                     <path d="M8 5v14l11-7z" />
                 </svg>
             </button>
+
+            <button
+                v-if="showSkipForward"
+                type="button"
+                class="lmp-icon-btn lmp-fs-skip lmp-fs-skip-forward"
+                :aria-label="skipForwardLabel"
+                :title="skipForwardLabel"
+                @click="skipForward"
+            >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                        d="M14.12 4.08A8.2 8.2 0 1 1 9.88 4.08"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                    />
+                    <path d="M16.1 4.35 12.5 2.2v4.3z" />
+                    <text class="lmp-fs-skip-num" x="12" y="15.3">
+                        {{ opts.skipForwardSeconds }}
+                    </text>
+                </svg>
+            </button>
         </div>
 
         <div class="lmp-fs-bar">
             <div class="lmp-fs-scrub-row">
                 <span class="lmp-fs-time" :aria-label="messages.elapsedLabel">{{ elapsedText }}</span>
+
                 <input
                     class="lmp-fs-scrubber"
                     type="range"

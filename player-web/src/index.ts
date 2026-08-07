@@ -11,7 +11,18 @@ export {
     type HlsJsAdapterOptions,
 } from './adapter/HlsJsAdapter';
 
-export { DEFAULT_MESSAGES, mergeMessages, type PlayerMessages } from './messages';
+export {
+    DEFAULT_MESSAGES,
+    formatSeconds,
+    mergeMessages,
+    type PlayerMessages,
+} from './messages';
+
+export {
+    DEFAULT_CONTROLS,
+    mergeControls,
+    type PlayerControlsOptions,
+} from './controls';
 
 export { usePlayerState } from './composables/usePlayerState';
 export {

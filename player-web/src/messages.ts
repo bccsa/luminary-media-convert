@@ -31,6 +31,14 @@ export interface PlayerMessages {
     elapsedLabel: string;
     /** aria-label of the remaining-time readout. */
     remainingLabel: string;
+    /**
+     * Skip-back button label. `{seconds}` is replaced with the configured
+     * interval — the number must not be written into the string, or it reads
+     * "15" on a player configured to move 10.
+     */
+    skipBack: string;
+    /** Skip-forward button label. `{seconds}` is replaced as above. */
+    skipForward: string;
 
     // --- Fullscreen --------------------------------------------------------
     /**
@@ -63,6 +71,8 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     scrubberLabel: 'Seek',
     elapsedLabel: 'Elapsed time',
     remainingLabel: 'Remaining time',
+    skipBack: 'Skip back {seconds} seconds',
+    skipForward: 'Skip forward {seconds} seconds',
 
     exitFullscreen: 'Exit full screen',
 
@@ -70,6 +80,18 @@ export const DEFAULT_MESSAGES: PlayerMessages = {
     subtitlesMenuLabel: 'Subtitles',
     subtitlesOff: 'Off',
 };
+
+/**
+ * Fills `{seconds}` in a message that carries a number.
+ *
+ * Deliberately not a template engine: one named placeholder is the whole
+ * requirement, and a translator needs to know only that the token survives into
+ * their wording — including moving, which languages that put the number last
+ * require.
+ */
+export function formatSeconds(template: string, seconds: number): string {
+    return template.replace('{seconds}', String(seconds));
+}
 
 /**
  * Merges a partial override map over {@link DEFAULT_MESSAGES}. `undefined`

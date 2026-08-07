@@ -3,15 +3,17 @@ import { mount } from '@vue/test-utils';
 import FullscreenControls from '../src/components/FullscreenControls.vue';
 import type { PlayerState } from '@luminary-media-converter/player-core';
 import type { PlayerMessages } from '../src/messages';
+import type { PlayerControlsOptions } from '../src/controls';
 import { createFakeController, createState, messages, type FakeController } from './helpers';
 
 function mountControls(
     state: Partial<PlayerState> = {},
     overrides: Partial<PlayerMessages> = {},
+    controls?: Partial<PlayerControlsOptions>,
 ): { wrapper: ReturnType<typeof mount>; controller: FakeController } {
     const controller = createFakeController();
     const wrapper = mount(FullscreenControls, {
-        props: { state: createState(state), messages: messages(overrides), controller },
+        props: { state: createState(state), messages: messages(overrides), controller, controls },
     });
     return { wrapper, controller };
 }
@@ -115,6 +117,113 @@ describe('FullscreenControls — track menus', () => {
     it('hides the subtitles menu when there are no tracks', () => {
         const { wrapper } = mountControls();
         expect(wrapper.find('.lmp-fs-subtitles').exists()).toBe(false);
+    });
+
+    it('drops the audio menu when the host asks it to', () => {
+        // player-web is published: a consumer's viewers need this menu, so a
+        // host that has its own selectors opts out rather than the library
+        // losing it.
+        const state = {
+            audioTracks: [
+                { id: '0', label: 'English' },
+                { id: '1', label: 'Français' },
+            ],
+        };
+
+        expect(mountControls(state).wrapper.find('.lmp-fs-audio').exists()).toBe(true);
+        expect(
+            mountControls(state, {}, { audioMenu: false }).wrapper.find('.lmp-fs-audio').exists(),
+        ).toBe(false);
+    });
+
+    it('leaves the subtitles menu alone when the audio menu is dropped', () => {
+        const { wrapper } = mountControls(
+            {
+                audioTracks: [
+                    { id: '0', label: 'English' },
+                    { id: '1', label: 'Français' },
+                ],
+                subtitleTracks: [{ id: 'en', label: 'English', source: 'master' }],
+            },
+            {},
+            { audioMenu: false },
+        );
+
+        expect(wrapper.find('.lmp-fs-subtitles').exists()).toBe(true);
+    });
+});
+
+describe('FullscreenControls — skip buttons', () => {
+    const MIDWAY = { currentTime: 60, duration: 600 };
+
+    it('skips by the default interval in both directions', async () => {
+        const { wrapper, controller } = mountControls(MIDWAY);
+
+        await wrapper.get('.lmp-fs-skip-back').trigger('click');
+        expect(controller.seek).toHaveBeenCalledWith(45);
+
+        await wrapper.get('.lmp-fs-skip-forward').trigger('click');
+        expect(controller.seek).toHaveBeenCalledWith(75);
+    });
+
+    it('honours separate back and forward intervals', async () => {
+        const { wrapper, controller } = mountControls(MIDWAY, {}, {
+            skipBackSeconds: 10,
+            skipForwardSeconds: 30,
+        });
+
+        await wrapper.get('.lmp-fs-skip-back').trigger('click');
+        expect(controller.seek).toHaveBeenCalledWith(50);
+
+        await wrapper.get('.lmp-fs-skip-forward').trigger('click');
+        expect(controller.seek).toHaveBeenCalledWith(90);
+    });
+
+    it('clamps at the start rather than seeking negative', async () => {
+        const { wrapper, controller } = mountControls({ currentTime: 4, duration: 600 });
+
+        await wrapper.get('.lmp-fs-skip-back').trigger('click');
+        expect(controller.seek).toHaveBeenCalledWith(0);
+    });
+
+    it('stops short of the end, so skipping forward never finishes the video', async () => {
+        // Landing exactly on `duration` fires `ended` — "a bit further on" must
+        // not mean "over".
+        const { wrapper, controller } = mountControls({ currentTime: 595, duration: 600 });
+
+        await wrapper.get('.lmp-fs-skip-forward').trigger('click');
+
+        const target = controller.seek.mock.calls[0]?.[0] as number;
+        expect(target).toBeLessThan(600);
+        expect(target).toBeGreaterThan(599);
+    });
+
+    it('leaves the far end open while the duration is still unknown', async () => {
+        const { wrapper, controller } = mountControls({ currentTime: 10, duration: 0 });
+
+        await wrapper.get('.lmp-fs-skip-forward').trigger('click');
+
+        expect(controller.seek).toHaveBeenCalledWith(25);
+    });
+
+    it('drops a button whose interval is zero', () => {
+        const { wrapper } = mountControls(MIDWAY, {}, { skipBackSeconds: 0 });
+
+        expect(wrapper.find('.lmp-fs-skip-back').exists()).toBe(false);
+        expect(wrapper.find('.lmp-fs-skip-forward').exists()).toBe(true);
+    });
+
+    it('interpolates the configured interval into the label', () => {
+        const { wrapper } = mountControls(
+            MIDWAY,
+            { skipForward: 'Avancer de {seconds} s' },
+            { skipForwardSeconds: 30 },
+        );
+
+        // A hardcoded number in the string would still read "15" here.
+        expect(wrapper.get('.lmp-fs-skip-forward').attributes('aria-label')).toBe(
+            'Avancer de 30 s',
+        );
     });
 });
 

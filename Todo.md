@@ -10,7 +10,7 @@ Ordered roughly by value, not by effort.
 
 **Branch.** All migration work (issue #154) is on `154-migrate-luminary-media-convert-to-a-local-only-electron-app-remove-saas-features`, open as PR #161. The original seven logical commits (SaaS removal → hls lib → api → app → cms-mock → electron → docs) have since been joined by the manual-verification fixes, the app icon, a merge of `main`, and the restored test suites.
 
-**Build state.** All workspaces build, and all test suites pass: api 796, app 192, segment-editor 217, hls 121, player-core 168, player-web 58 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
+**Build state.** All workspaces build, and all test suites pass: api 796, app 192, segment-editor 217, hls 121, player-core 168, player-web 72 (item 6). `vue-tsc` typechecks the specs again. A packaged macOS `.app` and `.dmg` were built and verified to boot the embedded API, serve the UI, and carry the app icon.
 
 **Player extraction (issue #153, PR #162) has since landed on top of this branch.** Playback logic left the app for two packages — `player-core` (headless: munging, controller, recovery, polling) and `player-web` (hls.js reference implementation) — Video.js is gone, and encryption now covers playlists, chapters and subtitles rather than segments alone. Items below are marked where that work closed or changed them.
 
@@ -487,7 +487,7 @@ Fixed where the rule was, in `SessionPlayerStrip.vue`, not in the library: `cove
 
 **Not yet seen.** The selector is the one this item diagnosed, but nobody has watched a 4:3 source letterbox in an actual fullscreen since the change.
 
-**Left open deliberately:** whether `cover` belongs in the strip at all. It still silently crops a 4:3 or vertical source in the one view a user checks framing in. Changing that alters how every existing session looks in the editor, which is a call to make on its own rather than inside a fullscreen fix.
+**Left open deliberately:** whether `cover` belongs in the strip at all. It still silently crops a 4:3 or vertical source in the one view a user checks framing in. Changing that alters what every existing session looks like in the editor, which is a call to make on its own rather than inside a fullscreen fix.
 
 **Cause found.** `player-web`'s own `.lmp-video` rule (`player-web/src/styles.css`, line 38) sets no `object-fit`, so it letterboxes as the UA stylesheet intends. The crop comes from the app: `app/src/components/session-view/SessionPlayerStrip.vue` line 510 sets `object-fit: cover` on `.lmp-video` through a `:deep()` selector.
 
@@ -499,7 +499,13 @@ That is defensible where it was written — `.session-trim-player-shell` forces 
 
 ---
 
-## 29. Remove the language menu from the fullscreen player
+## 29. Remove the language menu from the fullscreen player — done as configurable; the encoder does not opt out
+
+Built as this item asks: `PlayerControlsOptions.audioMenu`, reaching the component through a sparse `controls` prop on `LuminaryPlayer`, defaulting to today's behaviour so no consumer is affected.
+
+**The "worth checking first" check, run.** The two menus can never be on screen together. `FullscreenControls` mounts only when `isFullscreen && mode === 'element'`, so its audio menu exists *only* in fullscreen; the encoder's Angle / Audio / Quality selectors are a sibling `<div>` below the player shell, outside `<LuminaryPlayer>`, and are neither visible nor reachable there. They are complementary, not duplicated — so opting out would remove the only language switch a viewer can reach in fullscreen and tidy nothing visible. The encoder therefore stays on the default, which is the outcome this item's own last paragraph anticipated.
+
+`{ audioMenu: false }` remains available for a host that genuinely wants it.
 
 **Today.** `player-web/src/components/FullscreenControls.vue` renders an audio-track `<select>` (line 192, `showAudioMenu` — shown when there is more than one track) alongside a subtitles menu. The encoder's own audio selector already sits beside the player outside fullscreen, so in this app the fullscreen one is a duplicate.
 
@@ -511,7 +517,16 @@ That is defensible where it was written — `.session-trim-player-shell` forces 
 
 ---
 
-## 30. Redesign the fullscreen controls, and add skip buttons
+## 30. Redesign the fullscreen controls, and add skip buttons — done, except the device pass
+
+- **Skip buttons** flank play/pause, 15 s by default, each interval configurable through the `controls` prop item 29 opened. An interval of `0` removes that button rather than leaving one that moves nowhere. The glyph is a ring with the interval inside it, so the control says how far it goes and not only which way.
+- **Clamped at both ends.** `seek()` is absolute, so a skip is a computed position. The forward end stops `END_GUARD_S` (0.25 s) short of `duration`: landing exactly on it fires `ended`, so a viewer skipping near the close got "finished" when they asked for "a bit further on". An unknown duration leaves the far end open.
+- **Labels interpolate.** `skipBack` / `skipForward` carry a `{seconds}` token filled by `formatSeconds()`, so a configured 10 does not read "15", and a translator can move the number to where their language wants it.
+- **Visual pass on the `<select>`s**, which this item named as the weakest part: a pill matching the icon buttons, an inlined chevron (`::after` does not render on a select), a 32px hit area instead of 26, and explicit `option` colours, since the platform draws that dropdown and inherits none of the styling.
+
+12 new tests in `player-web` (60 → 72), covering both intervals, both clamps, the unknown-duration case, removal at `0`, label interpolation, and the audio-menu option.
+
+**Still outstanding: the device pass.** This item's own scope note says skip buttons are a touch-target question before they are a visual one, and item 10's caveat is unchanged — these controls have still only run in jsdom and on a desktop. The three transport targets hold the 44 px minimum and separate on a fluid gap as the viewport narrows, but that is a claim about CSS, not about a thumb. Worth seeing on a phone before this is called finished.
 
 **Today.** `player-web/src/components/FullscreenControls.vue` has an exit button top-left, a single play/pause in the centre, and a bottom bar of elapsed time, scrubber, remaining time and two bare `<select>` menus. There is no way to jump a few seconds — the only seek is dragging the scrubber, which is the least precise gesture available and the hardest one on a phone.
 

@@ -10,6 +10,7 @@ import { HlsJsAdapter } from '../adapter/HlsJsAdapter';
 import { usePlayerState } from '../composables/usePlayerState';
 import { useFullscreenOrientation } from '../composables/useFullscreenOrientation';
 import { mergeMessages, type PlayerMessages } from '../messages';
+import type { PlayerControlsOptions } from '../controls';
 import FullscreenControls from './FullscreenControls.vue';
 import '../styles.css';
 
@@ -22,6 +23,17 @@ interface Props {
      * scoped slots to render your own instead.
      */
     messages?: Partial<PlayerMessages>;
+    /**
+     * Which fullscreen controls to offer, and how far the skip buttons move.
+     * Sparse — anything omitted keeps the library default, which is what this
+     * player did before the option existed.
+     *
+     * A host with its own track selectors beside the player can drop the
+     * duplicate audio menu with `{ audioMenu: false }` — bearing in mind those
+     * selectors are unreachable in fullscreen, so doing it leaves a viewer no
+     * way to change language without leaving.
+     */
+    controls?: Partial<PlayerControlsOptions>;
     /**
      * @internal Test seam — substitutes controller construction. Not part of
      * the supported API; the default builds `PlayerController(HlsJsAdapter)`.
@@ -194,6 +206,7 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen });
             :state="state"
             :messages="msg"
             :controller="controller"
+            :controls="controls"
             @exit="exitFullscreen"
         />
     </div>

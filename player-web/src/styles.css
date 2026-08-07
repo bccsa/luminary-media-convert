@@ -154,6 +154,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    /* Wide enough to separate three targets on a phone, where they are hit with
+       a thumb rather than pointed at. */
+    gap: clamp(1.25rem, 6vw, 3rem);
 }
 
 .lmp-fs-center .lmp-icon-btn {
@@ -164,6 +167,34 @@
 .lmp-fs-center .lmp-icon-btn svg {
     width: 34px;
     height: 34px;
+}
+
+/*
+ * Skip buttons read as siblings of play/pause: same circle and same surface,
+ * a slightly smaller glyph, so the centre of the cluster is still the control a
+ * viewer reaches for first. They keep the full 44px minimum target regardless —
+ * `--lmp-control-size` is a floor, and going below it would trade a touch
+ * target for a visual nicety.
+ */
+.lmp-fs-center .lmp-fs-skip svg {
+    width: 30px;
+    height: 30px;
+}
+
+/*
+ * The interval sits inside the ring, which is what makes these read as "back
+ * fifteen" rather than as two anonymous arrows. Sized in user units against the
+ * 24-unit viewBox so it tracks the icon, not the root font size. The whole SVG
+ * is aria-hidden — the button already carries the interval as a sentence, and
+ * it must not be announced twice.
+ */
+.lmp-fs-skip-num {
+    font-size: 9.2px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.2px;
+    text-anchor: middle;
+    fill: currentColor;
 }
 
 .lmp-fs-bar {
@@ -224,14 +255,47 @@
     gap: 0.5rem;
 }
 
+/*
+ * A `<select>` is the one element here that otherwise announces itself as a
+ * form control sitting on a video. `appearance: none` had already removed the
+ * bevel; what was left was a bare box with no affordance and a 26px hit area.
+ *
+ * So: a pill to match the icon buttons, a drawn chevron — a background image,
+ * since `::after` does not render on a select — and room for it on the trailing
+ * edge. Not `--lmp-control-size` for the height: a menu is not a target of the
+ * same weight as the transport, and matching it would make this row heavier
+ * than the scrubber above it.
+ */
 .lmp-fs-select {
     appearance: none;
+    min-height: 32px;
     border: 1px solid var(--lmp-border);
-    border-radius: var(--lmp-radius-sm);
-    background: var(--lmp-surface);
+    border-radius: 9999px;
+    background-color: var(--lmp-surface);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffffff'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.4rem center;
+    background-size: 16px 16px;
     color: var(--lmp-text);
     font: inherit;
     font-size: 0.8125rem;
-    padding: 0.25rem 0.5rem;
+    line-height: 1;
+    padding: 0.3rem 1.6rem 0.3rem 0.75rem;
     cursor: pointer;
+    transition: background-color var(--lmp-transition);
+}
+
+.lmp-fs-select:hover,
+.lmp-fs-select:focus-visible {
+    background-color: var(--lmp-surface-strong);
+}
+
+/*
+ * The dropdown itself is drawn by the platform and inherits none of the above,
+ * so its options would be dark-on-dark wherever the OS renders a light menu.
+ * Naming the colours on the option is the only reach we have into it.
+ */
+.lmp-fs-select option {
+    background: #18181b;
+    color: #ffffff;
 }
