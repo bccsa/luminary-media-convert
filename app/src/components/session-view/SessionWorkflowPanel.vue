@@ -54,6 +54,7 @@ const showLivePipeline = computed(
  */
 const PHASE_LABELS: Record<PipelinePhase, string | null> = {
     encoding: null,
+    draining: 'Packing segments…',
     'finalising-playlists': 'Finalising playlists…',
     thumbnails: 'Generating thumbnails…',
     waveform: 'Generating waveform…',

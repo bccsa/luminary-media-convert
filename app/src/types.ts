@@ -43,6 +43,7 @@ export type SegmentFormat = 'fmp4' | 'mpegts';
 /** Mirrors `PipelinePhase` in the API's segment pipeline. */
 export type PipelinePhase =
     | 'encoding'
+    | 'draining'
     | 'finalising-playlists'
     | 'thumbnails'
     | 'waveform'

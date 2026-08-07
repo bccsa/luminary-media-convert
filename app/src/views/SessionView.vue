@@ -1014,6 +1014,7 @@ const storyboardPending = computed(
  * already says so, and captioning it would be noise.
  */
 const PIPELINE_PHASE_LABELS: Record<string, string> = {
+    draining: 'Packing segments…',
     'finalising-playlists': 'Finalising playlists…',
     thumbnails: 'Generating thumbnails…',
     waveform: 'Generating waveform…',

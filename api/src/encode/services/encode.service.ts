@@ -181,7 +181,32 @@ export class EncodeService {
              * not states a session can be resumed or cancelled in — they are
              * commentary on the one it is already in.
              */
+            /**
+             * Each post-drain step is timed as well as named.
+             *
+             * This item asked for a measurement before anyone optimised, and a
+             * measurement nobody can repeat is worth little — the answer
+             * depends on the source, the machine and whether the sprite pass
+             * had a concat file to work from. Logging it on every encode means
+             * the next person asking "why the wait" reads it off their own run
+             * instead of guessing from someone else's.
+             */
+            let phaseStartedAt = 0;
+            let phaseInProgress: PipelinePhase | null = null;
+
+            const finishPhase = (): void => {
+                if (!phaseInProgress) return;
+                const seconds = ((Date.now() - phaseStartedAt) / 1000).toFixed(1);
+                this.logger.log(
+                    `Session ${sessionId}: ${phaseInProgress} took ${seconds}s`
+                );
+                phaseInProgress = null;
+            };
+
             const reportPhase = (phase: PipelinePhase): void => {
+                finishPhase();
+                phaseInProgress = phase;
+                phaseStartedAt = Date.now();
                 currentProgress.phase = phase;
                 this.sessionService.updatePipelineProgress(sessionId, {
                     ...currentProgress,
@@ -212,7 +237,14 @@ export class EncodeService {
                 throw pipeline.error;
             }
 
-            // Drain remaining segments + finalize byte-range chunks
+            // Drain remaining segments + finalize byte-range chunks.
+            //
+            // Reported, because this is the first thing that happens after the
+            // bar reaches 100% and it is not instant: byte-range consolidation
+            // rewrites playlists and can still be uploading. Measuring the
+            // post-drain steps without it left the earliest part of the wait
+            // unaccounted for.
+            reportPhase('draining');
             await pipeline.drain();
 
             // Playlist post-processing (must happen after drain rewrites byte-range playlists)
@@ -355,6 +387,7 @@ export class EncodeService {
             // Upload remaining files (playlists, thumbnails, master.m3u8).
             // The phase belongs to `encoding`; leaving the last one set would
             // caption the upload with whatever ran before it.
+            finishPhase();
             currentProgress.phase = undefined;
             this.sessionService.updatePipelineProgress(sessionId, {
                 ...currentProgress,

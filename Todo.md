@@ -493,19 +493,32 @@ All three parts fixed. The API was always right; every fault was in the UI.
 
 ---
 
-## 27. Long unexplained gap between "100%" and the session finishing — the silence is fixed; the duration is not
+## 27. Long unexplained gap between "100%" and the session finishing — done
 
-**Done: it says what it is doing.** `PipelineProgress` gains a `phase`, and `EncodeService` reports each post-drain step as it starts — `finalising-playlists`, `thumbnails`, `waveform`, `encrypting-playlists` — clearing it again before the status flips to `uploading_to_s3`, so the last step does not end up captioning the upload that follows it. The client renders it as a line under the Encoding bar: "Generating thumbnails…", and so on. An unrecognised phase renders nothing rather than a blank line or a raw identifier, so an older client against a newer API degrades quietly.
+All three parts answered: the silence is fixed, the duration is measured, and the player-reload question turns out to have been settled already.
 
-Carried on `pipelineProgress` rather than as new statuses, as this item suggested: these are not states a session can be resumed or cancelled in, they are commentary on the one it is already in.
+**It says what it is doing.** `PipelineProgress` gains a `phase`, reported as each post-drain step begins and cleared before the status flips to `uploading_to_s3` — otherwise the last step captions the upload that follows it. The client renders it under the Encoding bar: "Packing segments…", "Generating thumbnails…", and so on. An unrecognised phase renders nothing, so an older client against a newer API degrades quietly rather than printing a raw identifier. Carried on `pipelineProgress` rather than as new statuses, as this item suggested: these are not states a session can be resumed or cancelled in, they are commentary on the one it is already in.
 
-**Not done, deliberately: the wait itself.** This item says to measure before optimising, and nothing here was measured. The sprite pass is still a fresh FFmpeg run over the finished output, and whether it could overlap the upload is unanswered — as are the waveform path and text-asset encryption, whose ordering constraints are real and documented where they live.
+Each phase is also timed into the log, because a measurement nobody can repeat is worth little — the answer depends on the source, the machine, and whether the sprite pass had a concat file to work from.
 
-**Also untouched: the player reload.** Whether the switch from preview to S3 playback has to wait for `completed` at all is still worth asking, and `hlsUrl` is published at encode start.
+**Measured, on a 20-minute 1080p source, Apple Silicon with VideoToolbox:**
 
-7 tests: 3 on the API (the sprite pass reported, the waveform reported only when the source carries audio, the phase cleared before the status changes) and 4 on the client (each label, silence during the pipeline itself, and silence for an unknown phase).
+| Phase | Time |
+|---|---|
+| draining | 1.7 s |
+| **thumbnails** | **114.7 s** |
+| waveform | 0.0 s (served from the cache primed at ingest) |
+| encrypting-playlists | not run — session unencrypted |
 
-**Found while doing it.** The pipeline bars a user actually sees during an encode are an inline copy in `SessionView.vue`, not `SessionWorkflowPanel` — the panel's own copy cannot render while encoding, because `showSessionDetailCard` requires `!showEncoding`. So the panel carries a second set of progress bars that no encode ever displays. Both were given the caption; the panel's is unreachable today and the duplication is worth resolving on its own, most likely as part of item 13 or 15, which already move this furniture around.
+The encode itself took 125 s, from 19:29:43 to 19:31:48; the silent stretch ran to 19:33:43. **So the wait is as long as the encode, and it is entirely the sprite pass.** Roughly six minutes on an hour-long source. The waveform and the drain are free, and this item's guess that thumbnails were the suspect was right.
+
+**The player reload needs no change, and the reason is already written down.** `activePlaybackUrl` deliberately holds at "delivered output or nothing" once completed, and the comment there explains why reaching earlier is wrong: before completion the key may not be settled, so switching at encode start would either play a stream the client cannot decrypt or fall back to the preview indefinitely — "the wrong renditions, transcoding on this machine for as long as anyone watches". The reload was never the wait; the 115 seconds in front of it were.
+
+**Measuring found the instrumentation's own gap.** `pipeline.drain()` runs before the first phase was reported, so the earliest part of the stretch was unaccounted for. It is now reported as `draining` — 1.7 s here, but it is the step that rewrites byte-range playlists and can still be uploading, so it is not free by construction.
+
+10 tests: 3 on the API (the sprite pass reported, the waveform reported only when the source carries audio, the phase cleared before the status changes) and 4 on the client (each label, silence during the pipeline itself, silence for an unknown phase), plus the earlier 3.
+
+**The optimisation this measurement unlocked is item 34**, which the numbers now justify specifying properly rather than guessing at.
 
 ---
 
@@ -631,4 +644,21 @@ Vite bakes `VITE_*` values into the bundle, so right now `app/dist` carries `VIT
 **Wanted.** `dist:mac` / `dist:win` / `pack` should build the client themselves, with an environment that cannot inherit a developer's `.env` — the packaged app wants `VITE_API_URL` empty, which is what same-origin means. Worth proving by running `pack` afterwards and confirming the result contains a client and no absolute API URL.
 
 **Interacts with item 5** (Windows build verification) and with item 24, whose `.env.example` should say plainly that `VITE_API_URL` must be empty for anything that will be packaged.
+
+---
+
+## 34. Thumbnail sprites could run alongside the encode, not after it
+
+**Measured in item 27**, which is why this is worth doing rather than worth wondering about: on a 20-minute 1080p source the sprite pass took **114.7 s** against an encode of 125 s. The session takes almost twice as long as it appears to, and every second of the difference is this one step.
+
+**And it has no data dependency on the encode.** `generateThumbnails` is handed `session.filePath` — the **source** file — not the encoded output. It is sequenced after the encode purely by code order in `EncodeService`, not because it needs anything the encode produces. The item 27 note guessed it might overlap the upload; it could overlap the whole encode.
+
+**The one wrinkle.** For a trimmed session the pass needs `concat.txt`, and that file is written by `FfmpegService` *during* the encode (`buildConcatFile`, called from `encode()`). So overlapping needs either the concat produced before the encode starts — which means lifting that out of `FfmpegService` or having `EncodeService` build it — or the concurrency limited to untrimmed sessions, which is a partial fix with a branch in it.
+
+**Watch out for.**
+
+- Sprites must exist before `pipeline.uploadRemainingFiles(outputDir)` sweeps the directory, so the promise has to be awaited where the call sits today. If it finished during the encode, that await is free; the ordering is unchanged, only the waiting is.
+- The pass writes into `outputDir`, which is cleared at the start of an encode — so it cannot begin before that clear.
+- CPU contention is the real unknown. Video encoding runs on VideoToolbox, but audio, scaling and the sprite pass are all CPU. The win is large enough (115 s serial today) that it is very likely still a win, but it should be measured the same way rather than assumed — the timing logs added in item 27 make that a repeat of the same run.
+- Failure stays non-fatal, as it is now: a session without sprites is a session without a scrub filmstrip, not a failed encode.
 

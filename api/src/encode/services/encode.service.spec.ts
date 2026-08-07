@@ -836,8 +836,12 @@ describe('EncodeService', () => {
                 .filter((phase, i, all) => phase && phase !== all[i - 1]);
         }
 
-        it('names the sprite pass, the expensive step that reported nothing', async () => {
-            expect(await phasesFor()).toEqual(['thumbnails']);
+        it('names the drain and the sprite pass, which reported nothing before', async () => {
+            // `draining` matters as much as the rest: it runs first, after the
+            // bar already reads 100%, and it is where byte-range playlists are
+            // rewritten — so leaving it out left the earliest part of the wait
+            // unaccounted for.
+            expect(await phasesFor()).toEqual(['draining', 'thumbnails']);
         });
 
         it('names the waveform too, when the source has audio to draw', async () => {
@@ -849,7 +853,7 @@ describe('EncodeService', () => {
                 audioTracks: [{ index: 0, language: 'eng' }],
             });
 
-            expect(phases).toEqual(['thumbnails', 'waveform']);
+            expect(phases).toEqual(['draining', 'thumbnails', 'waveform']);
         });
 
         it('clears the phase before the status leaves encoding', async () => {

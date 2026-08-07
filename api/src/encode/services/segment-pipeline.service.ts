@@ -20,6 +20,7 @@ import { S3Service } from './s3.service.js';
  */
 export type PipelinePhase =
     | 'encoding'
+    | 'draining'
     | 'finalising-playlists'
     | 'thumbnails'
     | 'waveform'
