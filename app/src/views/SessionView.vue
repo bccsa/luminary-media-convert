@@ -921,8 +921,20 @@ const storyboard = useStoryboard({
 });
 
 /**
- * Post-encode the storyboard lives beside the master playlist in the bucket, so
- * its address is the delivered URL with the object key swapped in.
+ * Where object *keys* resolve from — the bucket root, not the session's folder.
+ *
+ * Everything the API records is a full key including the session folder:
+ * `masterPlaylist` is `<sessionId>/master.m3u8`, `thumbnailsVtt` is
+ * `<sessionId>/thumbnails/thumbnails.vtt`, and `files[]` likewise. So this is
+ * the delivered URL with the key stripped off the end, and a key appended to it
+ * resolves correctly.
+ *
+ * It is **not** the folder the master sits in. Anything addressed relative to
+ * the master — the sidecar conventions, which are all `<masterFolder>/…` — has
+ * to use `masterFolderUrl` below instead. Appending `chapters/en.vtt` to this
+ * dropped the session folder and asked the bucket root for it, which is a 404
+ * on every session; the player treats a missing sidecar as nothing to report,
+ * so saved chapters simply never appeared.
  */
 const deliveryBaseUrl = computed<string | null>(() => {
     const master = displayMasterPlaylist.value;
@@ -930,6 +942,24 @@ const deliveryBaseUrl = computed<string | null>(() => {
     if (!master || !url) return null;
     if (!url.endsWith(master)) return null;
     return url.slice(0, url.length - master.length).replace(/\/+$/, '');
+});
+
+/**
+ * The folder the master playlist sits in, which is what every sidecar is
+ * addressed relative to — `<masterFolder>/chapters/<lang>.vtt`,
+ * `<masterFolder>/subtitles/…`, `<masterFolder>/waveform.json`. The same
+ * convention `sidecarPath()` in `@luminary-media-converter/hls` encodes.
+ *
+ * Derived from the delivered URL rather than from the base plus the session id,
+ * because the URL is the one thing that is certainly right: the encoder built
+ * it, and it is what the CMS was handed.
+ */
+const masterFolderUrl = computed<string | null>(() => {
+    const url = s3Url.value;
+    if (!url) return null;
+    const lastSlash = url.lastIndexOf('/');
+    if (lastSlash < 0) return null;
+    return url.slice(0, lastSlash);
 });
 
 const rawThumbnailVttUrl = computed(() => {
@@ -984,9 +1014,11 @@ const shouldCollapseFiles = computed(
  */
 const playerChapterSidecars = computed(() => {
     if (!isCompleted.value) return undefined;
-    const base = deliveryBaseUrl.value;
-    if (!base) return undefined;
-    return [{ lang: 'en', label: 'Chapters', url: `${base}/chapters/en.vtt` }];
+    // Relative to the master's folder, not the bucket root — see the two
+    // computed URLs above.
+    const folder = masterFolderUrl.value;
+    if (!folder) return undefined;
+    return [{ lang: 'en', label: 'Chapters', url: `${folder}/chapters/en.vtt` }];
 });
 
 /**

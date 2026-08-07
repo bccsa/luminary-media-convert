@@ -225,6 +225,78 @@ describe('SessionView', () => {
      * which reads as the encode ignoring the trim — it was queried twice on
      * exactly that basis.
      */
+    /**
+     * The sidecar conventions are all relative to the folder the master sits in,
+     * while everything the API records is a full object key from the bucket
+     * root. Mixing the two dropped the session folder out of the chapters URL,
+     * and because the player treats a missing sidecar as nothing worth
+     * reporting, saved chapters silently never appeared.
+     */
+    describe('sidecar URLs on a completed session', () => {
+        const MASTER_KEY = 'sess-1/master.m3u8';
+        const HLS_URL = `http://127.0.0.1:9000/media/${MASTER_KEY}`;
+
+        function playerSource(wrapper: Awaited<ReturnType<typeof mountView>>) {
+            const strip = wrapper.findComponent({ name: 'SessionPlayerStrip' });
+            return strip.exists()
+                ? (strip.props('source') as { sidecars?: { chapters?: { url: string }[] } } | null)
+                : null;
+        }
+
+        async function completedView() {
+            detail.mockResolvedValue(
+                uploadedSession({
+                    status: 'completed',
+                    masterPlaylist: MASTER_KEY,
+                    thumbnailsVtt: 'sess-1/thumbnails/thumbnails.vtt',
+                    hlsUrl: HLS_URL,
+                })
+            );
+            status.mockResolvedValue({
+                status: 'completed',
+                masterPlaylist: MASTER_KEY,
+                thumbnailsVtt: 'sess-1/thumbnails/thumbnails.vtt',
+                hlsUrl: HLS_URL,
+            });
+            const wrapper = await mountView();
+            await flushPromises();
+            return wrapper;
+        }
+
+        it('points the chapters sidecar beside the master, not at the bucket root', async () => {
+            const source = playerSource(await completedView());
+            const url = source?.sidecars?.chapters?.[0]?.url;
+
+            expect(url).toBe('http://127.0.0.1:9000/media/sess-1/chapters/en.vtt');
+            // The bug: the session folder missing, so every session 404s.
+            expect(url).not.toBe('http://127.0.0.1:9000/media/chapters/en.vtt');
+        });
+
+        it('keeps the session folder even when the prefix is nested', async () => {
+            const master = 'shows/ep12/sess-1/master.m3u8';
+            const hlsUrl = `https://cdn.example.com/media/${master}`;
+            detail.mockResolvedValue(
+                uploadedSession({
+                    status: 'completed',
+                    masterPlaylist: master,
+                    hlsUrl,
+                })
+            );
+            status.mockResolvedValue({
+                status: 'completed',
+                masterPlaylist: master,
+                hlsUrl,
+            });
+
+            const wrapper = await mountView();
+            await flushPromises();
+
+            expect(playerSource(wrapper)?.sidecars?.chapters?.[0]?.url).toBe(
+                'https://cdn.example.com/media/shows/ep12/sess-1/chapters/en.vtt'
+            );
+        });
+    });
+
     describe('storyboard on a trimmed timeline', () => {
         const TRIMS = [{ inSec: 10, outSec: 20 }];
 
