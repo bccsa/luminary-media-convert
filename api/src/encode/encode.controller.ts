@@ -458,6 +458,15 @@ export class EncodeController {
         // API default, which is right until a CMS asks for anything else.
         result.byteRange = session.config?.byteRange !== false;
 
+        // Not gated on status: the storyboard is sampled from 'uploaded'
+        // onwards and the SSE-fallback poller is the only thing that sees this
+        // when the event stream has dropped — which is precisely when it is
+        // needed.
+        if (session.storyboardThumbCount != null) {
+            result.storyboardThumbCount = session.storyboardThumbCount;
+            result.storyboardComplete = session.storyboardComplete;
+        }
+
         // Trim ranges are part of the submitted encode config, so they outlive the
         // client that sent them. Reporting them lets the UI keep showing the output
         // timeline (duration, waveform) after a reload mid-encode.
@@ -1011,6 +1020,16 @@ export class EncodeController {
                 trackIndex: video.index,
                 sourceWidth: video.width,
                 sourceHeight: video.height,
+                // A generation this request kicks off — a restored session, or
+                // an ingest prime that failed — has to report the same way the
+                // prime does, or the client is left polling blind for the one
+                // case where it started the pass itself.
+                onProgress: (count, complete) =>
+                    this.sessionService.updateStoryboardProgress(
+                        sessionId,
+                        count,
+                        complete
+                    ),
             }
         );
 

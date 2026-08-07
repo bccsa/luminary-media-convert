@@ -80,6 +80,15 @@ export class IngestService {
                     trackIndex: video.index,
                     sourceWidth: video.width,
                     sourceHeight: video.height,
+                    // Pushed over the session's event stream, so the trim
+                    // timeline refetches when there is genuinely more to draw
+                    // rather than on a blind timer.
+                    onProgress: (count, complete) =>
+                        this.sessionService.updateStoryboardProgress(
+                            sessionId,
+                            count,
+                            complete
+                        ),
                 })
                 .catch((err) => {
                     this.logger.warn(

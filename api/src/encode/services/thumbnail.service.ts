@@ -143,6 +143,14 @@ export class ThumbnailService {
             trackIndex: number;
             sourceWidth: number;
             sourceHeight: number;
+            /**
+             * Called as thumbnails land, so a watching client can be told there
+             * is more to fetch instead of guessing on a timer; `complete` is
+             * true on the one report made after the final VTT is written. Only
+             * invoked for a generation this call actually starts — a cache hit
+             * has nothing to report.
+             */
+            onProgress?: (thumbCount: number, complete?: boolean) => void;
         }
     ): Promise<PreviewThumbnails | null> {
         const dir = this.previewDir(sessionId);
@@ -175,6 +183,7 @@ export class ThumbnailService {
                 trackIndex: opts.trackIndex,
                 sourceWidth: opts.sourceWidth,
                 sourceHeight: opts.sourceHeight,
+                onProgress: opts.onProgress,
             })
                 .catch((err: Error) => {
                     this.logger.warn(
@@ -307,6 +316,19 @@ export class ThumbnailService {
         trackIndex: number;
         sourceWidth: number;
         sourceHeight: number;
+        /**
+         * Reports how many thumbnails exist on disk, whenever that number
+         * changes. ffmpeg says nothing useful about its own progress here, so
+         * the directory listing is the measurement: it is what the partial VTT
+         * is built from, which makes it exactly the signal a client needs to
+         * decide there is something new to fetch.
+         *
+         * `complete` is true exactly once, after the final VTT is on disk. It
+         * has to be its own flag: the last watcher tick usually reports the
+         * full count already, and a completion report carrying the same number
+         * would not read as a change on the other end.
+         */
+        onProgress?: (thumbCount: number, complete?: boolean) => void;
     }): Promise<ThumbnailResult | null> {
         const format = await this.detectSpriteFormat();
         if (!format) return null;
@@ -338,6 +360,29 @@ export class ThumbnailService {
             thumbPattern,
         ];
 
+        // Watch the directory fill while ffmpeg runs. `stopped` exists because
+        // the listing is async: a tick can be mid-readdir when the interval is
+        // cleared, and reporting a count after the final one below would walk
+        // the client's progress backwards.
+        let stopped = false;
+        // Zero is the state before the pass wrote anything, so it is the one
+        // count worth staying quiet about — reporting it would wake a client up
+        // to fetch a storyboard that is still empty.
+        let reported = 0;
+        const watcher = opts.onProgress
+            ? setInterval(() => {
+                  void this.listThumbFiles(thumbnailDir)
+                      .then((files) => {
+                          if (stopped || files.length === reported) return;
+                          reported = files.length;
+                          opts.onProgress!(reported);
+                      })
+                      // A caller's callback throwing is its problem, not a
+                      // reason to abandon a generation pass that is working.
+                      .catch(() => {});
+              }, 1000)
+            : null;
+
         try {
             await execFileAsync(ffmpegBin(), args, {
                 timeout: this.timeoutFor(opts.duration),
@@ -347,6 +392,9 @@ export class ThumbnailService {
                 `FFmpeg thumbnail generation failed: ${(err as Error).message}`
             );
             return null;
+        } finally {
+            stopped = true;
+            if (watcher) clearInterval(watcher);
         }
 
         const thumbFiles = await this.listThumbFiles(thumbnailDir);
@@ -369,6 +417,15 @@ export class ThumbnailService {
             vttContent,
             'utf-8'
         );
+
+        // The last word on the count, emitted after the VTT is on disk so a
+        // client acting on it finds the complete storyboard rather than the
+        // partial one the watcher was describing a moment ago.
+        try {
+            opts.onProgress?.(thumbFiles.length, true);
+        } catch {
+            // As above: a broken callback does not fail the generation.
+        }
 
         this.logger.log(
             `Generated ${thumbFiles.length} thumbnail(s) from video track ${opts.trackIndex} ` +

@@ -99,6 +99,10 @@ export interface SessionStatusResponse {
     encoder?: AccelMode;
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
+    /** Source-storyboard thumbnails sampled so far; grows during ingest-time generation. */
+    storyboardThumbCount?: number;
+    /** True once the source storyboard is fully sampled and its VTT is final. */
+    storyboardComplete?: boolean;
     /** Trim ranges submitted with the encode config, in source-timeline seconds. */
     trimSegments?: TrimSegment[];
 }

@@ -293,6 +293,26 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
+            'Thumbnails sampled so far for the source storyboard. Grows while the ' +
+            'ingest-time sampling pass runs; the client refetches the storyboard VTT ' +
+            'when this grows, rather than polling blindly for more frames.',
+        example: 120,
+    })
+    @Expose()
+    storyboardThumbCount?: number;
+
+    @ApiPropertyOptional({
+        description:
+            'True once the source storyboard is fully sampled and its VTT is final. ' +
+            'A separate flag because the last in-progress report usually already ' +
+            'carries the full thumbnail count.',
+        example: true,
+    })
+    @Expose()
+    storyboardComplete?: boolean;
+
+    @ApiPropertyOptional({
+        description:
             'Trim ranges submitted with the encode config, in source-timeline seconds. ' +
             'Present once encoding has been requested and the config specified trimming. ' +
             'Clients use these to render the output timeline (duration, waveform) rather ' +

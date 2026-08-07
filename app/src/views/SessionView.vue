@@ -916,9 +916,23 @@ const sourceStoryboardUrl = computed(() => {
 
 // Sampling an hour of video takes minutes and the API serves whatever sprites
 // exist so far, so the storyboard grows after the first request. Follow it.
+//
+// The refresh signal folds the completion flag into the count: the encoder's
+// final report — made after the finished VTT is on disk — usually repeats the
+// last count it already announced, and without the suffix that repeat would
+// not read as a change, leaving completion to be discovered by the slow
+// safety-net poll.
+const storyboardRefreshSignal = computed(() => {
+    const count = poller.storyboardThumbCount.value;
+    if (count == null) return undefined;
+    return poller.storyboardComplete.value ? `${count}-done` : `${count}`;
+});
 const storyboard = useStoryboard({
     url: sourceStoryboardUrl,
     active: sourceStoryboardActive,
+    // The encoder pushes its thumbnail count over the session event stream, so
+    // the filmstrip refetches when there is more to draw rather than on a timer.
+    refresh: storyboardRefreshSignal,
 });
 
 /**
