@@ -385,7 +385,7 @@ The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` throu
 
 ---
 
-## 14. Move "Clear All" out of the timeline controls and into the Chapters section
+## 14. Move "Clear All" out of the timeline controls and into the Chapters section — done
 
 **Today.** `SegmentEditor` renders the Clear All button itself, in its controls row, in every non-`trim` mode where at least one segment exists — twice over, since the row has two render sites (`segment-editor/src/SegmentEditor.vue`, the standalone toolbar around line 1641 and the combined controls bar around line 2070; in `trim` mode the same slot holds Cut instead). So a destructive "remove every chapter" action sits among playback, mark in/out, undo/redo and zoom, which are all timeline-local and mostly reversible-by-habit.
 
@@ -393,6 +393,8 @@ The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` throu
 
 **What that takes.** `clearAll` is already on the component's `defineExpose` surface, so the host can call it — what does not come with it is the confirmation dialog (`confirmClearOpen`, and the "Clear all {{ clearNoun }}?" sheet around line 2386), which either has to be reachable from outside or re-implemented in the chapters panel. Note that the button is generic to non-trim modes, so removing it unconditionally also takes it away from `subtitles` mode; if that mode is meant to keep an in-editor clear, this needs a prop rather than a deletion. `segment-editor` is a published library with its own suite — check for tests asserting the button's presence.
 
+
+**Done.** Moved to the chapter list's own `list-actions` header, beside the chapters it deletes. The two traps the item named were handled rather than stepped in: the button is now behind a `showClearAll` prop (default true) so `subtitles` mode — where the editor is the only place the cues live — keeps its clear; and the confirmation did not have to be rebuilt, because the component exposes `requestClearAll()` which opens the sheet it already has. Ungating the `list-actions` template moved the `canSaveChapters` condition onto the save controls themselves: a session that cannot save chapters can still empty the list locally, which is what undo is for.
 ---
 
 ## 15. Session topline belongs in the left pane, not in a full-width top bar
@@ -405,15 +407,17 @@ The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` throu
 
 ---
 
-## 16. Chapters pane: too much left and right padding
+## 16. Chapters pane: too much left and right padding — done
 
 **Today.** The chapters panel insets its content well away from the panel edge on both sides, which costs the chapter-title field width — the part of each row that actually needs it — while the timecode, duration and remove controls stay fixed.
 
 **Wanted.** Tighten the horizontal padding. Worth doing together with item 15, since both are about the same pane's use of space, and with item 13, which removes the tab row above it.
 
+
+**Done, and the padding was the symptom.** The title field was losing ~40px a side to three nested insets, and the middle one came with a border, a background and a shadow — the editor was drawing a second card inside the bordered panel that already held it. Passing `embedded`, the variant the library has for exactly this, removes the card and the 20px with it. Row spacing untouched; the vertical rhythm was not the complaint.
 ---
 
-## 17. Timeline control buttons do not match the rest of the app
+## 17. Timeline control buttons do not match the rest of the app — done
 
 **Today.** The controls bar under the timeline (mark in/out, undo/redo, step, play/pause, zoom) is styled entirely from `segment-editor/src/styles.css`, which carries its own theme tokens. In dark mode `--se-track: #172554` / `--se-track-hover: #1e3a5f` (line 69–70) give every `.se-btn` a deep navy fill, while the app's own buttons around it are slate. So the timeline reads as a component borrowed from somewhere else.
 
@@ -423,9 +427,11 @@ The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` throu
 
 **Note.** `segment-editor` is a published library with its own token block and a light theme alongside the dark one, so this is a change to the library's defaults (both themes) or a set of overrides the app supplies — decide which, because the library is meant to be host-agnostic.
 
+
+**Done.** Button surfaces split out of `--se-track` into `--se-btn-bg` / `--se-btn-bg-hover`, so the timeline and scrollbar keep the track fill and the things you click get the host's palette — slate-800/700 in dark, which is what the app paints its own buttons with. Play/pause, the separate decision this item asked for: it was an accent border over an accent wash, which is this library's vocabulary for a *toggled-on* state, and play/pause is not a toggle. Filled now, with its own foreground token because white on the dark theme's sky-400 is barely legible, and its own hover rule so the generic `.se-btn:hover` cannot drop it back to a plain surface mid-press.
 ---
 
-## 18. Theme popup: smaller, icons instead of tick-boxes, close on select
+## 18. Theme popup: smaller, icons instead of tick-boxes, close on select — done
 
 **Today.** `app/src/components/AccountMenu.vue` opens an 18rem panel with an "APPEARANCE" heading and three rows, each a bordered square that holds a checkmark when selected, a bold label and a second line of description ("Always light" / "Match system" / "Always dark"). `pickTheme` (line 86) sets the preference and leaves the panel open.
 
@@ -437,6 +443,8 @@ The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` throu
 
 **Watch out for.** The rows are `role="menuitemradio"` with `aria-checked`, which is the part that must survive losing the visible checkbox; and the same component renders in two places via the `variant` prop (`editor` uses the `se-btn` trigger inside the timeline controls bar, the default is the round nav button), so both placements need looking at. Dropping the description line may make the labels alone ambiguous — "Auto" is the one that carries its meaning least well on its own.
 
+
+**Done.** 18rem and four rows down to 11rem and three: sun, half-lit circle, moon. Heading dropped (the menu already carries `aria-label="Appearance"`), descriptions dropped from the panel but kept as each row's `title` and accessible name — "Auto" is the one label that does not carry its own meaning. Selection moved from the checkbox column to the row fill and icon colour; `role="menuitemradio"` + `aria-checked` stayed, which is the invisible part a redesign drops without noticing, and is now covered by tests. `pickTheme` closes the panel.
 ---
 
 ## 19. Split divider between the player and the side pane is too bright in dark mode
@@ -447,7 +455,7 @@ The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` throu
 
 ---
 
-## 20. Timeline timecode is over-emphasised
+## 20. Timeline timecode is over-emphasised — done
 
 **Today.** `.se-controls-bar__time` (`segment-editor/src/styles.css`, line 799) is `1rem` monospace at `weight: 600` in full `--se-text`, while the buttons beside it are `0.75rem` at `weight: 500`. It is the loudest thing in the controls bar, and it is a readout rather than a control.
 
@@ -455,6 +463,8 @@ The lossless playlist model and `player-core` both pass `#EXT-X-BYTERANGE` throu
 
 **Note.** There is a second readout with the same treatment — `.se-time-above` (line 929), `0.9375rem` at `weight: 600`, used when the controls are not in the combined bar. Both should move together, or the two layouts will disagree.
 
+
+**Done.** 1rem/600 to 0.8125rem/500 — the buttons' own weight — with the colour left at full `--se-text` because it is still read at a glance; size and weight were what was shouting. Monospace kept. `.se-time-above` moved with it, as the item required.
 ---
 
 ## 21. Move "Start encoding" below the video player
@@ -523,7 +533,7 @@ A fresh clone plus `npm install` plus `npm run dev` now gives a working browser 
 
 ---
 
-## 25. Keyboard shortcut for Cut in trim mode
+## 25. Keyboard shortcut for Cut in trim mode — done
 
 **There is one already**, which makes this a discoverability or a reachability problem rather than a missing feature — worth establishing which before building anything. `Delete` and `Backspace` both call `deleteSelected()` (`segment-editor/src/SegmentEditor.vue`, line 1044), the trim workspace mounts the editor with `keyboard-scope="global"` so the window listener is attached, and the Cut button's own tooltip advertises it: "Cut the selected range · Delete".
 
@@ -535,6 +545,8 @@ Three things could make it feel absent:
 
 **Wanted.** Decide between adding `⌘/Ctrl + X` as an alias, making the shortcut act on the marked range when nothing is selected, or simply surfacing the existing binding better (the `?` help sheet is already there). Whatever is chosen, the help sheet and the button tooltip both have to say the same thing — they are the only places the binding is written down.
 
+
+**Done, and it was the third of the three possibilities.** Not "it needs a selection": marking a range calls `setSelection` on the new segment, so Delete works immediately after, and the button already says "Select a range on the timeline to cut it" when nothing is selected. Not the typing guard either — Delete inside a chapter title should edit the title. It was that `⌘/Ctrl + X`, the binding anyone reaches for, was unbound, so a shortcut that exists felt like one that does not. Bound to the same `deleteSelected` the button calls, below the typing guard so ⌘X in a field still cuts the word. Both places the binding is written down — the Cut tooltip in each of its two render sites, and the `?` help sheet — say so.
 ---
 
 ## 26. No way to cancel a session before the encode starts — and "Cancel encoding" lied during `encrypting` — done
