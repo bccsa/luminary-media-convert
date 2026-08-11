@@ -633,4 +633,116 @@ describe('SessionService — events', () => {
         );
         expect(raw.progress).toBeFalsy();
     });
+
+    /**
+     * What makes the trim filmstrip fill in as the frames are sampled: the
+     * client refetches the storyboard VTT when the count grows, instead of
+     * guessing on a backoff timer at how far an ffmpeg pass over the whole file
+     * has got.
+     */
+    describe('storyboard progress', () => {
+        it('emits the count sampled so far', () => {
+            const service = build();
+            const session = service.create(makeConfig());
+            emit.mockClear();
+
+            service.updateStoryboardProgress(session.id, 12);
+
+            expect(service.get(session.id)?.storyboardThumbCount).toBe(12);
+            expect(emit).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    sessionId: session.id,
+                    storyboardThumbCount: 12,
+                })
+            );
+        });
+
+        it('marks the one report made after the final VTT is written', () => {
+            // It cannot ride on the count: the last mid-pass report usually
+            // already carries the full number, and a repeat of the same value is
+            // not a change the client's watcher can see.
+            const service = build();
+            const session = service.create(makeConfig());
+            emit.mockClear();
+
+            service.updateStoryboardProgress(session.id, 40, true);
+
+            expect(service.get(session.id)?.storyboardComplete).toBe(true);
+            expect(emit).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    storyboardThumbCount: 40,
+                    storyboardComplete: true,
+                })
+            );
+        });
+
+        it('leaves the flag off an in-progress report rather than sending false', () => {
+            const service = build();
+            const session = service.create(makeConfig());
+
+            service.updateStoryboardProgress(session.id, 12, false);
+
+            expect(
+                service.get(session.id)?.storyboardComplete
+            ).toBeUndefined();
+        });
+
+        it('clears the flag again when a later pass re-primes the storyboard', () => {
+            // A restored session samples its frames afresh, and the filmstrip
+            // must not go on believing the previous pass's VTT is the final one.
+            const service = build();
+            const session = service.create(makeConfig());
+            service.updateStoryboardProgress(session.id, 40, true);
+            emit.mockClear();
+
+            service.updateStoryboardProgress(session.id, 3);
+
+            expect(
+                service.get(session.id)?.storyboardComplete
+            ).toBeUndefined();
+            expect(emit).toHaveBeenCalledWith(
+                expect.objectContaining({ storyboardComplete: undefined })
+            );
+        });
+
+        it('does not persist the count — the pass starts over after a restart', () => {
+            const service = build();
+            const session = service.create(makeConfig());
+            service.updateStoryboardProgress(session.id, 40, true);
+
+            const raw = JSON.parse(
+                readFileSync(join(workDir, session.id, 'session.json'), 'utf-8')
+            );
+            expect(raw.storyboardThumbCount).toBeFalsy();
+            expect(raw.storyboardComplete).toBeFalsy();
+        });
+
+        it('ignores an id it does not hold', () => {
+            const service = build();
+            emit.mockClear();
+
+            expect(() =>
+                service.updateStoryboardProgress('nope', 5)
+            ).not.toThrow();
+            expect(emit).not.toHaveBeenCalled();
+        });
+
+        it('carries the count on every later event, not just its own', () => {
+            // The client learns of new frames from whatever event arrives next,
+            // so the count belongs on all of them.
+            const service = build();
+            const session = service.create(makeConfig());
+            service.updateStoryboardProgress(session.id, 12);
+            emit.mockClear();
+
+            service.updateStatus(session.id, 'uploaded');
+
+            expect(emit).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    status: 'uploaded',
+                    storyboardThumbCount: 12,
+                })
+            );
+        });
+    });
 });

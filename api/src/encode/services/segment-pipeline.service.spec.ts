@@ -52,10 +52,20 @@ describe('SegmentPipeline', () => {
             rmSync(tmpDir, { recursive: true, force: true });
         });
 
+        /** The mocked S3 client the pipeline was built with. */
+        const s3Of = (pipeline: SegmentPipeline) => (pipeline as any).s3Service;
+
+        /** Every object key `uploadFile` was actually asked to send. */
+        const sentKeys = (pipeline: SegmentPipeline): string[] =>
+            s3Of(pipeline).uploadFile.mock.calls.map((c: unknown[]) => c[3]);
+
         it('should skip concat.txt from uploads', async () => {
-            // Create files including concat.txt
+            // Both are the encoder's own scratch files. The packer removes its
+            // list in a finally, so `pack-list.txt` is belt-and-braces — a
+            // crashed pack must not put its scratch file in the delivered output.
             writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n');
             writeFileSync(join(tmpDir, 'concat.txt'), 'ffconcat version 1.0\n');
+            writeFileSync(join(tmpDir, 'pack-list.txt'), 'thumb_0001.jpg\n');
             mkdirSync(join(tmpDir, 'stream_0'));
             writeFileSync(
                 join(tmpDir, 'stream_0', 'playlist.m3u8'),
@@ -68,6 +78,8 @@ describe('SegmentPipeline', () => {
             expect(keys).toContain('prefix/master.m3u8');
             expect(keys).toContain('prefix/stream_0/playlist.m3u8');
             expect(keys).not.toContain('prefix/concat.txt');
+            expect(keys).not.toContain('prefix/pack-list.txt');
+            expect(sentKeys(pipeline)).not.toContain('prefix/pack-list.txt');
         });
 
         it('should upload all files when no concat.txt present', async () => {
@@ -85,19 +97,179 @@ describe('SegmentPipeline', () => {
             expect(keys).toContain('prefix/thumbnails/thumbnails.vtt');
         });
 
-        it('should respect exclude set', async () => {
-            const excludedPath = join(tmpDir, 'master.m3u8');
-            writeFileSync(excludedPath, '#EXTM3U\n');
-            writeFileSync(join(tmpDir, 'other.m3u8'), '#EXTM3U\n');
+        it('leaves alone what the streaming phase already sent', async () => {
+            // Every `init.mp4` is uploaded during encoding with
+            // `deleteAfterUpload: false`, because playlist rewriting still needs
+            // it — so it is still on disk when this walks the directory. Without
+            // the check it was sent to S3 a second time and appeared twice in the
+            // completion `files` list.
+            mkdirSync(join(tmpDir, 'stream_0'));
+            const initPath = join(tmpDir, 'stream_0', 'init.mp4');
+            writeFileSync(initPath, 'ftyp');
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n');
 
             const pipeline = makePipeline(tmpDir);
-            const keys = await pipeline.uploadRemainingFiles(
-                tmpDir,
-                new Set([excludedPath])
-            );
+            // The streaming phase, as `processStream` runs it.
+            (pipeline as any).enqueueUpload({
+                filePath: initPath,
+                objectKey: 'prefix/stream_0/init.mp4',
+                deleteAfterUpload: false,
+            });
+            await (pipeline as any).waitForUploads();
 
-            expect(keys).not.toContain('prefix/master.m3u8');
-            expect(keys).toContain('prefix/other.m3u8');
+            const keys = await pipeline.uploadRemainingFiles(tmpDir);
+
+            expect(keys).not.toContain('prefix/stream_0/init.mp4');
+            expect(keys).toContain('prefix/master.m3u8');
+            expect(
+                pipeline.keys.filter((k) => k === 'prefix/stream_0/init.mp4')
+            ).toHaveLength(1);
+            expect(
+                sentKeys(pipeline).filter(
+                    (k) => k === 'prefix/stream_0/init.mp4'
+                )
+            ).toHaveLength(1);
+        });
+
+        it('holds the uploads to the configured concurrency', async () => {
+            for (let i = 0; i < 6; i++) {
+                writeFileSync(join(tmpDir, `file_${i}.m3u8`), '#EXTM3U\n');
+            }
+
+            const pipeline = makePipeline(tmpDir, { uploadConcurrency: 2 });
+            let inFlight = 0;
+            let peak = 0;
+            s3Of(pipeline).uploadFile = vi.fn(async () => {
+                inFlight++;
+                peak = Math.max(peak, inFlight);
+                await new Promise((r) => setTimeout(r, 5));
+                inFlight--;
+            });
+
+            const keys = await pipeline.uploadRemainingFiles(tmpDir);
+
+            expect(keys).toHaveLength(6);
+            expect(peak).toBe(2);
+        });
+
+        it('reports each file as it lands, against a total that does not move', async () => {
+            for (let i = 0; i < 4; i++) {
+                writeFileSync(join(tmpDir, `file_${i}.m3u8`), '#EXTM3U\n');
+            }
+
+            const pipeline = makePipeline(tmpDir);
+            const reports: [number, number][] = [];
+
+            await pipeline.uploadRemainingFiles(tmpDir, {
+                onFileProgress: (done, total) => reports.push([done, total]),
+            });
+
+            expect(reports).toEqual([
+                [1, 4],
+                [2, 4],
+                [3, 4],
+                [4, 4],
+            ]);
+        });
+
+        it('stays silent on the segment progress emitter while it runs', async () => {
+            // `executeUpload` emits after every file, and what it emits is the
+            // segment-based figure — `uploading: 100`, since the segments are
+            // long done. Interleaved with the per-file percentage the bar jitters
+            // between the two, so the emitter is suppressed for the duration.
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n');
+            writeFileSync(join(tmpDir, 'other.m3u8'), '#EXTM3U\n');
+
+            const onProgress = vi.fn();
+            const pipeline = makePipeline(tmpDir, {
+                estimatedTotalSegments: 10,
+                onProgress,
+            });
+
+            await pipeline.uploadRemainingFiles(tmpDir);
+
+            expect(onProgress).not.toHaveBeenCalled();
+
+            // And it is only suppressed for the duration — a later upload still
+            // reports, so nothing is left permanently mute.
+            (pipeline as any).enqueueUpload({
+                filePath: join(tmpDir, 'master.m3u8'),
+                objectKey: 'prefix/late.m3u8',
+                deleteAfterUpload: false,
+            });
+            await (pipeline as any).waitForUploads();
+
+            expect(onProgress).toHaveBeenCalled();
+        });
+
+        /**
+         * `executeUpload` backs off 1s then 2s between its three attempts.
+         * Faking only `setTimeout` collapses that wait while leaving the real
+         * file I/O this path depends on to complete on its own.
+         */
+        async function settle<T>(work: Promise<T>): Promise<T> {
+            let done = false;
+            const tracked = work.then(
+                (value) => {
+                    done = true;
+                    return value;
+                },
+                (err) => {
+                    done = true;
+                    throw err;
+                }
+            );
+            tracked.catch(() => {}); // The caller re-awaits and gets the rejection.
+            for (let i = 0; i < 100 && !done; i++) {
+                await new Promise((r) => setImmediate(r));
+                await vi.advanceTimersByTimeAsync(2000);
+            }
+            return tracked;
+        }
+
+        it('retries a file that fails, and still counts it once', async () => {
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n');
+
+            const pipeline = makePipeline(tmpDir);
+            let attempts = 0;
+            s3Of(pipeline).uploadFile = vi.fn(async () => {
+                if (++attempts < 3) throw new Error('connection reset');
+            });
+            const reports: number[] = [];
+
+            vi.useFakeTimers({ toFake: ['setTimeout'] });
+            try {
+                const keys = await settle(
+                    pipeline.uploadRemainingFiles(tmpDir, {
+                        onFileProgress: (done) => reports.push(done),
+                    })
+                );
+                expect(keys).toEqual(['prefix/master.m3u8']);
+            } finally {
+                vi.useRealTimers();
+            }
+
+            expect(attempts).toBe(3);
+            expect(reports).toEqual([1]);
+            expect(pipeline.keys).toEqual(['prefix/master.m3u8']);
+        });
+
+        it('rejects when a file cannot be uploaded at all', async () => {
+            writeFileSync(join(tmpDir, 'master.m3u8'), '#EXTM3U\n');
+
+            const pipeline = makePipeline(tmpDir);
+            s3Of(pipeline).uploadFile = vi
+                .fn()
+                .mockRejectedValue(new Error('bucket does not exist'));
+
+            vi.useFakeTimers({ toFake: ['setTimeout'] });
+            try {
+                await expect(
+                    settle(pipeline.uploadRemainingFiles(tmpDir))
+                ).rejects.toThrow(/after 3 attempts/);
+            } finally {
+                vi.useRealTimers();
+            }
         });
     });
 

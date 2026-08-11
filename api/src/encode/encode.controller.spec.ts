@@ -1331,6 +1331,43 @@ describe('EncodeController', () => {
         });
     });
 
+    describe('getStatus - storyboard progress', () => {
+        it('should report how far the storyboard has been sampled', () => {
+            // The status response is the only place this reaches a client whose
+            // event stream has dropped — which is exactly when the filmstrip
+            // would otherwise be waiting on news that never comes.
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+            sessionService.updateStoryboardProgress(session.id, 42);
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.storyboardThumbCount).toBe(42);
+            expect(result.storyboardComplete).toBeUndefined();
+        });
+
+        it('should say when sampling has finished', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+            sessionService.updateStoryboardProgress(session.id, 96, true);
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.storyboardThumbCount).toBe(96);
+            expect(result.storyboardComplete).toBe(true);
+        });
+
+        it('should not include storyboard progress before any has been reported', () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            const result = controller.getStatus(session.id, makeRequest());
+
+            expect(result.storyboardThumbCount).toBeUndefined();
+            expect(result.storyboardComplete).toBeUndefined();
+        });
+    });
+
     describe('deleteSession - cleanup resilience', () => {
         it('should still remove session even when work directory does not exist', async () => {
             process.env.WORK_DIR = '/tmp/nonexistent-luminary-test-dir';
@@ -1393,14 +1430,14 @@ describe('EncodeController — source storyboard', () => {
         (session as any).filePath = '/tmp/source.mp4';
         (session as any).probeResult = {
             format: { duration: 120 },
-            videoTracks: [{ width: 1920, height: 1080 }],
+            videoTracks: [{ index: 0, width: 1920, height: 1080 }],
             audioTracks: [],
         };
         return session;
     }
 
     beforeEach(() => {
-        sessionService = new SessionService();
+        sessionService = new SessionService({ emit: vi.fn() } as any);
         thumbnailService = {
             getOrGeneratePreview: vi
                 .fn()
@@ -1432,8 +1469,37 @@ describe('EncodeController — source storyboard', () => {
         ).rejects.toThrow(UnauthorizedException);
     });
 
-    it('has no storyboard before the source is uploaded', async () => {
+    it('says "not yet" while the source is still being ingested', async () => {
+        // Whether this source has frames is not knowable until the probe lands,
+        // and ingest of a large file holds that state for tens of seconds. The
+        // client reads 404 as "never" and stops asking, so answering it here
+        // left the trim timeline frameless for the entire configure phase.
         const session = sessionService.create(makeConfig());
+        const res = makeRes();
+
+        await ctrl.getPreviewThumbnailVtt(
+            session.id,
+            session.sessionToken,
+            req,
+            res
+        );
+
+        expect(res.send).toHaveBeenCalledWith('WEBVTT\n');
+        expect(res.set).toHaveBeenCalledWith(
+            expect.objectContaining({
+                'Content-Type': 'text/vtt',
+                'Cache-Control': 'no-store',
+                'X-Storyboard-Complete': 'false',
+                'Cross-Origin-Resource-Policy': 'cross-origin',
+            })
+        );
+    });
+
+    it('has no storyboard for a source without video', async () => {
+        // Probed and found wanting: the one refusal that will never resolve
+        // itself, and the only one still worth a 404.
+        const session = uploadedSession();
+        (session as any).probeResult.videoTracks = [];
         await expect(
             ctrl.getPreviewThumbnailVtt(
                 session.id,
@@ -1444,9 +1510,10 @@ describe('EncodeController — source storyboard', () => {
         ).rejects.toThrow(NotFoundException);
     });
 
-    it('has no storyboard for a source without video', async () => {
+    it('has no storyboard for a source of no length', async () => {
+        // Nothing to sample across, so no cue could be placed anywhere.
         const session = uploadedSession();
-        (session as any).probeResult.videoTracks = [];
+        (session as any).probeResult.format.duration = 0;
         await expect(
             ctrl.getPreviewThumbnailVtt(
                 session.id,
@@ -1519,16 +1586,127 @@ describe('EncodeController — source storyboard', () => {
             expect.objectContaining({
                 inputPath: '/tmp/source.mp4',
                 duration: 120,
+                trackIndex: 0,
                 sourceWidth: 1920,
                 sourceHeight: 1080,
             })
         );
     });
 
+    it('samples the angle the storyboard was chosen for, not whichever comes first', async () => {
+        // Left to ffmpeg's "best stream" pick, a multi-angle file landed on the
+        // 256x144 proxy and the filmstrip was an unreadable postage stamp. The
+        // deliberate choice is the smallest angle still wide enough to downscale
+        // from — and it has to match what the ingest prime picked, or the cached
+        // cue geometry describes different images than the ones on disk.
+        const session = uploadedSession();
+        (session as any).probeResult.videoTracks = [
+            { index: 0, width: 256, height: 144 },
+            { index: 1, width: 3840, height: 2160 },
+            { index: 2, width: 640, height: 360 },
+        ];
+
+        await ctrl.getPreviewThumbnailVtt(
+            session.id,
+            session.sessionToken,
+            req,
+            makeRes()
+        );
+
+        expect(thumbnailService.getOrGeneratePreview).toHaveBeenCalledWith(
+            session.id,
+            expect.objectContaining({
+                trackIndex: 2,
+                sourceWidth: 640,
+                sourceHeight: 360,
+            })
+        );
+    });
+
+    it('reports sampling progress the same way the ingest prime does', async () => {
+        // A generation this request starts — a restored session, or an ingest
+        // prime that failed — is the one case nothing else is reporting on, so
+        // without this the client polls blind for it.
+        const session = uploadedSession();
+        const recorded = vi.spyOn(sessionService, 'updateStoryboardProgress');
+
+        await ctrl.getPreviewThumbnailVtt(
+            session.id,
+            session.sessionToken,
+            req,
+            makeRes()
+        );
+
+        const opts = thumbnailService.getOrGeneratePreview.mock.calls[0][1];
+        opts.onProgress(17, false);
+        opts.onProgress(96, true);
+
+        expect(recorded).toHaveBeenCalledWith(session.id, 17, false);
+        expect(recorded).toHaveBeenCalledWith(session.id, 96, true);
+    });
+
+    it('rewrites individual source frames too, fragment intact', async () => {
+        // The source storyboard writes one image per frame (`thumb_`), the
+        // encoded one a packed sheet (`sprite_`); both come back through this
+        // route, and the fragment has to survive — it is the crop rectangle.
+        const session = uploadedSession();
+        thumbnailService.getOrGeneratePreview.mockResolvedValue({
+            vtt: [
+                'WEBVTT',
+                '',
+                '00:00:00.000 --> 00:00:05.000',
+                'thumb_000042.jpg#xywh=0,0,160,90',
+                '',
+                '00:00:05.000 --> 00:00:10.000',
+                'sprite_001.jpg',
+                '',
+            ].join('\n'),
+            dir: '/tmp/x',
+        });
+        const res = makeRes();
+
+        await ctrl.getPreviewThumbnailVtt(
+            session.id,
+            session.sessionToken,
+            req,
+            res
+        );
+
+        const sent: string = res.send.mock.calls[0][0];
+        const base = `http://api.test:3000/api/sessions/${session.id}/thumbnails`;
+        // Fragment after the query string, or the token becomes part of it and
+        // the request is turned away.
+        expect(sent).toContain(
+            `${base}/thumb_000042.jpg?token=${session.sessionToken}#xywh=0,0,160,90`
+        );
+        expect(sent).toContain(
+            `${base}/sprite_001.jpg?token=${session.sessionToken}`
+        );
+    });
+
+    it('serves the individual frames it names in its own cues', async () => {
+        // Rejected for being missing, not for being unacceptable — a name the
+        // VTT points at that this route refuses is a filmstrip of broken images.
+        const session = uploadedSession();
+        await expect(
+            ctrl.getPreviewThumbnailSprite(
+                session.id,
+                'thumb_000042.jpg',
+                session.sessionToken,
+                makeRes()
+            )
+        ).rejects.toThrow(/Sprite not found/);
+    });
+
     it('refuses a sprite name that is not one it produces', async () => {
         const session = uploadedSession();
+        // The name becomes part of a path, and widening the pattern to admit
+        // `thumb_` must not have widened it to admit anything else.
         for (const name of [
             '../../../etc/passwd',
+            '../thumb_000.jpg',
+            'thumb_000.svg',
+            'thumbnails.vtt',
             'sprite_000.svg',
             'evil.webp',
         ]) {
