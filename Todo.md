@@ -21,21 +21,30 @@ Ordered roughly by value, not by effort.
 Still outstanding:
 
 - [x] Multi-angle source: single `master.m3u8` with `#EXT-X-MEDIA:TYPE=VIDEO` groups in S3; angle switching + audio-only in the app player (client-side extraction). **Verified** against S3 output with #162 — angle, audio-track and quality selection all confirmed working.
-- [x] **Stock-player check (flagged risk, never tested):** confirm plain video.js/hls.js plays the _default angle_ of a raw multi-angle master without the extraction helpers — Luminary clients that have not adopted `hls/` helpers depend on this. **Now has a second half:** with #162 an encrypted session also encrypts its playlists (LMCENC), which no stock player can read at all — such a client needs `encryption.encryptPlaylists: false` until it moves to `player-core`. Worth testing both, since the answer decides whether that opt-out is a transitional courtesy or a permanent mode. **Answered — §0a.** Both halves came back worse than the item assumed: the opt-out is not sufficient on its own, and a stock player does not stay on one angle. Safari's native HLS remains untested.
+- [x] **Stock-player check (flagged risk, never tested):** confirm plain video.js/hls.js plays the _default angle_ of a raw multi-angle master without the extraction helpers — Luminary clients that have not adopted `hls/` helpers depend on this. **Now has a second half:** with #162 an encrypted session also encrypts its playlists (LMCENC), which no stock player can read at all — such a client needs `encryption.encryptPlaylists: false` until it moves to `player-core`. Worth testing both, since the answer decides whether that opt-out is a transitional courtesy or a permanent mode. **Answered — §0a**, across ffmpeg, hls.js and Safari's native HLS. Both halves came back worse than the item assumed: the opt-out is not sufficient on its own, and a stock player does not stay on one angle.
 
 ### 0a. Stock-player check — results
 
-Five outputs were encoded into a local MinIO and opened by two independent stock clients: **ffmpeg's HLS demuxer** (CLI) and **hls.js 1.6.17 at default config** in Chrome 150 — no custom loader, no munging, no key injection, i.e. what a Luminary client that has not adopted `player-core` sees. The harness is [`docs/stock-player-check/`](docs/stock-player-check/README.md).
+Five outputs were encoded into a local MinIO and opened by three independent stock clients — no custom loader, no munging, no key injection, i.e. what a Luminary client that has not adopted `player-core` sees:
 
-| # | Output | ffmpeg | hls.js (Chrome) | Prefix in `media/` |
-|---|---|---|---|---|
-| 1 | Plaintext, 2 quality rungs, one angle | **plays** (300/300 frames over 10 s) | **plays** — 2 levels, picked level 1 | `measure27b` |
-| 2 | Plaintext, 2 angles, both 1280×720 | **plays**, fetching both angles | **plays** — *also 2 levels*, picked level 1 | `sp-multiangle` |
-| 3 | Encrypted, playlists encrypted (the default) | **fails at the master** — not a playlist | **fails** — `manifestParsingError`, "no EXTM3U delimiter" on a 200 | `772e6978-…` |
-| 4 | Encrypted, `encryptPlaylists: false`, no `keyUrl` | **fails at key load** — "Unable to open key file luminary://key" | **fails** — `keyLoadError`, retried 9× then fatal | `sp-enc-sentinel` |
-| 5 | Encrypted, `encryptPlaylists: false` + a fetchable `keyUrl` | **plays** | **plays** — but re-requests the key per fragment | `sp-enc-keyurl` |
+- **ffmpeg's HLS demuxer** (CLI)
+- **hls.js 1.6.17 at default config**, Chrome 150
+- **Safari 26.5.2's native HLS** — a plain `<video src>`, which is the only path an iOS web client has, since iOS does not give JavaScript players MediaSource for HLS
 
-Both clients agree on every row, which is the useful part: these are properties of the output, not quirks of one player.
+The harness is [`docs/stock-player-check/`](docs/stock-player-check/README.md); raw verdicts in `results-2026-08-11.md` beside it.
+
+| # | Output | ffmpeg | hls.js (Chrome) | Safari native | Prefix in `media/` |
+|---|---|---|---|---|---|
+| 1 | Plaintext, 2 quality rungs, one angle | **plays** (300/300 frames over 10 s) | **plays** — 2 levels, picked level 1 | **plays** | `measure27b` |
+| 2 | Plaintext, 2 angles, both 1280×720 | **plays**, fetching both angles | **plays** — *also 2 levels*, picked level 1 | **plays** | `sp-multiangle` |
+| 3 | Encrypted, playlists encrypted (the default) | **fails at the master** — not a playlist | **fails** — `manifestParsingError`, "no EXTM3U delimiter" on a 200 | **fails silently** — no error event within 15 s | `772e6978-…` |
+| 4 | Encrypted, `encryptPlaylists: false`, no `keyUrl` | **fails at key load** — "Unable to open key file luminary://key" | **fails** — `keyLoadError`, retried 9× then fatal | **fails** — `MEDIA_ERR_DECODE`, "Media failed to decode" | `sp-enc-sentinel` |
+| 5 | Encrypted, `encryptPlaylists: false` + a fetchable `keyUrl` | **plays** | **plays** — but re-requests the key per fragment | **plays** | `sp-enc-keyurl` |
+
+All three clients agree on which rows play and which do not, which is the useful part: these are properties of the output, not quirks of one player. **They disagree on how the failures present, and that matters to whoever has to debug one:**
+
+- **Case 3 in Safari fails with no error at all** — the element neither played nor raised an `error` event inside 15 s, where hls.js reported a fatal `manifestParsingError` immediately. A client that shows a spinner until `error` fires would spin indefinitely. (Not observed past 15 s; the claim is only that nothing surfaced in that window.) Anything relying on an error event to detect "this player cannot read our playlists" will not get one on iOS.
+- **Case 4 in Safari reports `MEDIA_ERR_DECODE`, "Media failed to decode"** — which points at the video, when the actual cause is a key URI the player cannot resolve. hls.js named it correctly (`keyLoadError` on `luminary://key`). Expect this misconfiguration to be reported as corrupt output.
 
 **The opt-out alone is not enough, and that answers the question the item posed.** `encryptPlaylists: false` gets a stock client as far as parsing the playlist and no further: `#EXT-X-KEY` still names `luminary://key`, a scheme no player can resolve (case 4). Playing encrypted output on a stock client needs *both* the opt-out *and* an `encryption.keyUrl` serving the raw 16 key bytes over HTTP — and this encoder has no key server and should not grow one: the key is generated locally precisely so that it never leaves the machine. Case 5 only passes because a key file was placed in the bucket by hand, which publishes the key next to the content it protects and is therefore a test fixture, not a pattern to offer anyone.
 
@@ -54,7 +63,9 @@ Two things observed and dismissed:
 - Cases 1 and 2 emit `Invalid NAL unit size` / `missing picture in access unit` under ffmpeg when opened **through the master**, never through the media playlist directly, and decode 300/300 frames over 10 s regardless. That is ffmpeg probing a byte-range fMP4 fragment without first reading its `#EXT-X-MAP` init segment — an artefact of the probe, not a defect in the output. Absent on case 5 because an encrypted fragment cannot be probed that way at all.
 - Chrome's native `<video src>` path fails all five with `MEDIA_ERR_SRC_NOT_SUPPORTED`. That is Chrome having no built-in HLS, not a finding about the output.
 
-**Still untested: Safari's native HLS**, which is the one engine that matters here and that neither client above stands in for — it is also the only path an iOS web client has. The harness has a native button per case for it; it needs running in Safari. Expect cases 3 and 4 to fail there too (an unreadable manifest and an unresolvable key URI are not player-specific), but case 5 is genuinely unknown: Safari is stricter about fMP4 and about key delivery than hls.js is.
+**Settled by the Safari run:** the byte-range fMP4 output is playable by Apple's own stack (cases 1, 2 and 5 all played), so nothing about the segment format or the byte-range packing needs revisiting for iOS web. Case 5 was the genuine unknown — Safari is stricter than hls.js about both fMP4 and key delivery — and it played, which means the "readable playlists + real `keyUrl`" configuration does work everywhere. It is still not one to recommend, for the key-delivery reasons above, but it is not a web-only trick.
+
+**Still untested, and out of scope here:** the native players a Capacitor shell would use — AVPlayer and ExoPlayer — which is item 6's problem, not this one. Safari's native HLS is AVFoundation underneath, so case 5 playing is weak evidence in AVPlayer's favour; ExoPlayer has been given none. Video.js, named in the original item, was not tested separately: on desktop it wraps hls.js, so it inherits that column.
 
 **Outstanding: the browser half.** ffmpeg settles the structure but is not hls.js and is not Safari. A harness is committed for that — [`docs/stock-player-check/`](docs/stock-player-check/README.md), which loads hls.js with **default config** (no custom loader, no munging, no key injection) and offers a native-`<video>` button per case for Safari's built-in HLS. Its README has the two commands. Expected per the table above; the interesting rows are 2 (does hls.js's ABR actually cross angles?) and 4 (does it report a key error or a manifest error?). Note the whole exercise settles the *web* only — AVPlayer and ExoPlayer remain untested, which matters when the Capacitor adapters land (item 6).
 - [ ] Queue: three CMS sessions encoding FIFO with SSE `queuePosition` updates.
