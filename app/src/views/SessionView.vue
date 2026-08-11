@@ -2457,6 +2457,7 @@ onUnmounted(() => {
                                         v-model="asidePanelSegments"
                                         class="min-h-0 flex-1 overflow-hidden"
                                         mode="chapters"
+                                        embedded
                                         split-list-panel
                                         :duration="chaptersSidePanelDuration"
                                         :get-current-time="
