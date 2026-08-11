@@ -26,7 +26,6 @@ import StatusBadge from '../components/StatusBadge.vue';
 import AccountMenu from '../components/AccountMenu.vue';
 import DeleteSessionModal from '../components/DeleteSessionModal.vue';
 import SessionOutputPanel from '../components/session-view/SessionOutputPanel.vue';
-import SessionPostProcessPanel from '../components/session-view/SessionPostProcessPanel.vue';
 import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vue';
 import SessionTrimWorkspace from '../components/session-view/SessionTrimWorkspace.vue';
 import SessionWorkflowPanel from '../components/session-view/SessionWorkflowPanel.vue';
@@ -795,17 +794,8 @@ useTrimPlayback({
     seek: (t: number) => playerRef.value?.seek(t),
 });
 
-const copied = ref(false);
-const copiedKey = ref(false);
-const showFiles = ref(false);
-let copyTimeout: ReturnType<typeof setTimeout> | null = null;
-let copyKeyTimeout: ReturnType<typeof setTimeout> | null = null;
-
 const displayMasterPlaylist = computed(
     () => poller.masterPlaylist.value ?? session.value?.masterPlaylist
-);
-const displayFiles = computed<string[] | undefined>(
-    () => (poller.files.value ?? session.value?.files) as string[] | undefined
 );
 const displayThumbnailsVtt = computed(
     () => poller.thumbnailsVtt.value ?? session.value?.thumbnailsVtt
@@ -1051,10 +1041,6 @@ const pipelinePhaseLabel = computed(() => {
     return phase ? (PIPELINE_PHASE_LABELS[phase] ?? null) : null;
 });
 
-const shouldCollapseFiles = computed(
-    () => (displayFiles.value?.length ?? 0) > 10
-);
-
 /**
  * Chapter cues for the player, once the output is published.
  *
@@ -1117,26 +1103,6 @@ const playerSource = computed<PlayerSource | null>(() => {
         ...(Object.keys(sidecars).length > 0 ? { sidecars } : {}),
     };
 });
-
-async function copyPlaybackUrl() {
-    if (!s3Url.value) return;
-    await navigator.clipboard.writeText(s3Url.value);
-    copied.value = true;
-    if (copyTimeout) clearTimeout(copyTimeout);
-    copyTimeout = setTimeout(() => {
-        copied.value = false;
-    }, 2000);
-}
-
-async function copyEncryptionKey() {
-    if (!encryptionKeyHex.value) return;
-    await navigator.clipboard.writeText(encryptionKeyHex.value);
-    copiedKey.value = true;
-    if (copyKeyTimeout) clearTimeout(copyKeyTimeout);
-    copyKeyTimeout = setTimeout(() => {
-        copiedKey.value = false;
-    }, 2000);
-}
 
 // ---------------------------------------------------------------------------
 // Delete session
@@ -1497,6 +1463,23 @@ const canDiscardSession = computed(() =>
 );
 
 /**
+ * A finished session can still be deleted from here — through the confirmation,
+ * not the discard button.
+ *
+ * The Delivery tab used to carry this, and removing that tab would otherwise have
+ * taken the capability with it: the sessions list can still delete, but a user
+ * looking at a finished session would have had to leave the page to reclaim its
+ * disk. The two paths differ on purpose. Discarding something mid-setup is a
+ * shrug and happens immediately; deleting a finished encode asks first, because
+ * the record, its chapter draft and its work directory go with it.
+ */
+const canDeleteFinishedSession = computed(() => isTerminal.value);
+// `isTerminal`, not a fresh `status === 'completed' || 'failed'`: it reads the
+// poller *and* the session document, so a stale poller cannot hide the button on
+// a session that has plainly finished. `canDiscardSession` is checked first in
+// the template, so anything still running keeps its cancel.
+
+/**
  * "Cancel encoding" is only true once there is an encode to cancel. Before that
  * the same action discards a session the user has been setting up, and saying
  * so is the difference between a button they trust and one they avoid.
@@ -1749,7 +1732,6 @@ const sessionDetailCardSurfaceClass = computed(
 );
 
 /** Sub-tab within the aside panel after encoding completes. */
-const completedAsideTab = ref<'chapters' | 'delivery'>('chapters');
 
 // Reset aside sub-tab back to encode settings when probe config becomes available again.
 watch(showProbeConfig, (ready) => {
@@ -1759,12 +1741,6 @@ watch(showProbeConfig, (ready) => {
 function relativeCreatedLabel(createdAt: number | null | undefined): string {
     if (!createdAt) return '';
     return `Created ${formatRelative(new Date(createdAt).toISOString())}`;
-}
-
-async function copyOutputObjectKey(key: string) {
-    const base = deliveryBaseUrl.value;
-    const text = base ? `${base}/${key}` : key;
-    await navigator.clipboard.writeText(text);
 }
 
 // Lock page scroll and fix header max-width to the trim layout (single view now).
@@ -2003,6 +1979,15 @@ onUnmounted(() => {
                             @click="onCancelEncode"
                         >
                             {{ discardLabel }}
+                        </button>
+                        <button
+                            v-else-if="canDeleteFinishedSession"
+                            type="button"
+                            data-testid="delete-session"
+                            class="shrink-0 cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/40"
+                            @click="deleteModalOpen = true"
+                        >
+                            Delete session
                         </button>
 
                         <!--
@@ -2319,39 +2304,6 @@ onUnmounted(() => {
                                     />
                                 </div>
 
-                                <!-- Tab switcher: completed phase (Chapters / Delivery) -->
-                                <div
-                                    v-if="
-                                        isCompleted && showChaptersBesidePlayer
-                                    "
-                                    class="shrink-0 flex gap-0.5 rounded-lg border border-slate-200/90 bg-slate-100/80 p-0.5 dark:border-slate-700 dark:bg-slate-800/50"
-                                >
-                                    <button
-                                        type="button"
-                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                        :class="
-                                            completedAsideTab === 'chapters'
-                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                                        "
-                                        @click="completedAsideTab = 'chapters'"
-                                    >
-                                        Chapters
-                                    </button>
-                                    <button
-                                        type="button"
-                                        class="flex-1 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
-                                        :class="
-                                            completedAsideTab === 'delivery'
-                                                ? 'bg-white text-slate-900 shadow-sm dark:bg-slate-700 dark:text-slate-100'
-                                                : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                                        "
-                                        @click="completedAsideTab = 'delivery'"
-                                    >
-                                        Delivery
-                                    </button>
-                                </div>
-
                                 <!-- Chapter list panel -->
                                 <div
                                     v-if="
@@ -2360,9 +2312,7 @@ onUnmounted(() => {
                                             encodeSidePanelTab ===
                                                 'chapters') &&
                                         (!showEncoding ||
-                                            encodingAsideTab === 'chapters') &&
-                                        (!isCompleted ||
-                                            completedAsideTab === 'chapters')
+                                            encodingAsideTab === 'chapters')
                                     "
                                     class="min-h-0 flex-1 flex flex-col overflow-hidden"
                                 >
@@ -2610,40 +2560,6 @@ onUnmounted(() => {
                                     </p>
                                 </div>
 
-                                <!-- Delivery panel (post-encode, in aside) -->
-                                <div
-                                    v-if="
-                                        isCompleted &&
-                                        completedAsideTab === 'delivery'
-                                    "
-                                    class="min-h-0 flex-1 overflow-y-auto"
-                                >
-                                    <SessionPostProcessPanel
-                                        v-model:show-files="showFiles"
-                                        :is-completed="isCompleted"
-                                        :is-terminal="isTerminal"
-                                        :current-status="currentStatus"
-                                        :display-master-playlist="
-                                            displayMasterPlaylist
-                                        "
-                                        :s3-url="s3Url"
-                                        :copied="copied"
-                                        :is-encrypted="isEncrypted"
-                                        :encryption-key-hex="encryptionKeyHex"
-                                        :copied-key="copiedKey"
-                                        :display-files="displayFiles"
-                                        :should-collapse-files="
-                                            shouldCollapseFiles
-                                        "
-                                        :created-at="summary?.createdAt"
-                                        @copy-playback-url="copyPlaybackUrl"
-                                        @copy-encryption-key="copyEncryptionKey"
-                                        @copy-output-object-key="
-                                            copyOutputObjectKey
-                                        "
-                                        @delete-session="deleteModalOpen = true"
-                                    />
-                                </div>
                             </template>
                         </SessionPlayerStrip>
 
@@ -2830,7 +2746,6 @@ onUnmounted(() => {
                                     :poller-progress="poller.progress.value"
                                     :poller-error="poller.error.value"
                                     :is-encrypted="isEncrypted"
-                                    @switch-tab="completedAsideTab = 'delivery'"
                                     @cancel-encode="onCancelEncode"
                                 />
                             </div>

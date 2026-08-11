@@ -69,10 +69,7 @@ const phaseLabel = computed(() =>
 /** After a real encode job, keep pipeline steps visible at 100% (step encoding was here during the run). */
 const showCompletedPipelineSummary = computed(() => props.isCompleted);
 
-const emit = defineEmits<{
-    switchTab: [tab: 'output' | 'trim' | 'post'];
-    cancelEncode: [];
-}>();
+const emit = defineEmits<{ cancelEncode: [] }>();
 </script>
 
 <template>
@@ -195,9 +192,15 @@ const emit = defineEmits<{
                 </div>
 
                 <!-- Completed -->
+                <!--
+                    No link onwards any more: the Delivery tab is gone, because
+                    the CMS already has the URL and the key — they reach it over
+                    SSE at encode *start* — and offering them here a second time
+                    invited copying delivery details out of the wrong place.
+                -->
                 <div v-if="isCompleted" class="rounded-lg border border-emerald-200/80 bg-emerald-50/80 px-3 py-2.5 text-xs leading-snug text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
-                    Encoding finished. Delivery links are on the
-                    <button type="button" class="font-semibold underline-offset-2 hover:underline" @click="emit('switchTab', 'post')">Delivery</button> tab.
+                    Encoding finished. The package is in the bucket, and Luminary
+                    has its playback URL.
                 </div>
 
                 <!--
