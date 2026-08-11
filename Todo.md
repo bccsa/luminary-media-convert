@@ -684,7 +684,7 @@ Seeing the new transport on a phone belongs to item 10, which already carries th
 
 ---
 
-## 31. Scrub thumbnails in the player
+## 31. Scrub thumbnails in the player — done
 
 Makes actionable the "no scrub preview" note recorded under item 10.
 
@@ -704,6 +704,22 @@ Makes actionable the "no scrub preview" note recorded under item 10.
 
 **Do this after item 30**, which reworks the same scrubber.
 
+
+**Done.** The parse moved to `hls/src/thumbnail-vtt.ts`, which is where the item pointed: two unrelated consumers needed exactly it — the encoder's trim filmstrip and now the player — and `thumbnails.vtt` is a format neither library defines. `segment-editor` keeps its published surface by re-exporting, so nothing downstream changed, and it gained a dependency on `hls` (pure TS, no runtime deps) to do so. The lookup became a binary search on the way: a scrub asks per pointer move, and a two-hour source has thousands of cues.
+
+**Discovery is explicit.** `PlayerSource.sidecars.thumbnails` takes a URL, the way `keyHex` does, rather than the player deriving it from the master's prefix — an audio-only encode and a `thumbnails: false` session have none, and a player that guessed would be requesting a 404 on every load to find that out. The app passes the key the API already reports (`thumbnailsVtt`), resolved against the bucket root, which is the distinction item 12 turned on.
+
+**Encryption came free.** `loadThumbnails` goes through the same `fetchMaybeEncrypted` as chapters, so an LMCENC-wrapped VTT is decrypted with the session key. Confirmed by test rather than assumed. The sprite *images* are ordinary JPEGs and stay that way — the browser fetches them as image sources.
+
+**Every way there can be no preview collapses to one answer.** No sidecar, a 404, an audio-only encode, a VTT that will not parse: all of them are an empty cue list and `thumbnailsReady: false`, because none is something a viewer can act on and all mean the same thing on screen. Nothing is reported as an error.
+
+**Fullscreen** follows the pointer over the scrub area rather than the playhead — while dragging, what a viewer wants is where they are about to land; the video is already showing where they are. Driven from `pointermove` on the wrapper, which covers a hovering mouse and a dragging finger alike.
+
+**Windowed is opt-in and host-driven**, which the item was right to insist on: outside fullscreen this player draws no chrome over the picture, and that is the rule the encoder relies on to put its controls beside the frame. There is also no windowed scrubber to hover. So `LuminaryPlayer` takes `previewTime` — a host with its own timeline says where the pointer is and the player draws the frame bottom-centre. Unset draws nothing. Not wired in the encoder: the trim timeline already has its own filmstrip, so a second preview over the video would be redundant there.
+
+**Two edges worth knowing.** Cue ranges are end-exclusive, so a drag to the far right of the bar matched nothing and the preview blinked out at the position a viewer is most likely to hold — both surfaces now nudge the *lookup* 1 ms back while the label keeps the true time. And a load that fails before its sidecars used to leave the previous video's frames available to `thumbnailAt`, so the cue list is cleared when a load starts rather than only when the next set arrives.
+
+Not done: the frame sizes are fixed (168 px in fullscreen, 176 px windowed) rather than scaling with the viewport, and there is no preloading of the *next* sheet — dragging across a sheet boundary fetches mid-drag. Both are worth measuring on a real device before tuning, which belongs with item 10's device pass.
 ---
 
 ## 32. The scrubber shows what has played and what has loaded, and carries the track menus — done

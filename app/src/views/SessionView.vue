@@ -1072,6 +1072,27 @@ const playerChapterSidecars = computed(() => {
 });
 
 /**
+ * The scrub-preview sidecar, when the encode produced one.
+ *
+ * Taken from the key the API reports rather than assembled from a convention:
+ * an audio-only encode and a session created with `thumbnails: false` have no
+ * VTT at all, and this is how we know that without asking S3 for a 404.
+ *
+ * `thumbnailsVtt` is a full object key (`<sessionId>/thumbnails/thumbnails.vtt`),
+ * so it resolves against the bucket root — not the master's folder. That is the
+ * distinction item 12 turned on: appending a master-relative path to the bucket
+ * root, or the reverse, 404s on every session, and a missing sidecar is silent
+ * by design.
+ */
+const playerThumbnailSidecar = computed(() => {
+    if (!isCompleted.value) return undefined;
+    const key = displayThumbnailsVtt.value;
+    const base = deliveryBaseUrl.value;
+    if (!key || !base) return undefined;
+    return { url: `${base}/${key}` };
+});
+
+/**
  * What the player is asked to present.
  *
  * A new object here is a reload, so this is deliberately thin: the URL, the
@@ -1084,11 +1105,16 @@ const playerSource = computed<PlayerSource | null>(() => {
     const url = activePlaybackUrl.value;
     if (!url) return null;
     const chapters = playerChapterSidecars.value;
+    const thumbnails = playerThumbnailSidecar.value;
+    const sidecars = {
+        ...(chapters ? { chapters } : {}),
+        ...(thumbnails ? { thumbnails } : {}),
+    };
     return {
         masterUrl: url,
         preservePosition: true,
         ...(encryptionKeyHex.value ? { keyHex: encryptionKeyHex.value } : {}),
-        ...(chapters ? { sidecars: { chapters } } : {}),
+        ...(Object.keys(sidecars).length > 0 ? { sidecars } : {}),
     };
 });
 

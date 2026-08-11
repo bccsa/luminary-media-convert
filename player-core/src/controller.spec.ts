@@ -720,3 +720,78 @@ describe('PlayerController — default angle', () => {
         expect(controller.getState().activeAngleId).toBe(DEFAULT_ANGLE_ID);
     });
 });
+
+describe('PlayerController — scrub thumbnails', () => {
+    const THUMBS_URL = `${BASE}/thumbnails.vtt`;
+    const THUMBS_VTT = [
+        'WEBVTT',
+        '',
+        '00:00:00.000 --> 00:00:10.000',
+        'sprite_0.jpg#xywh=0,0,160,90',
+        '',
+        '00:00:10.000 --> 00:00:20.000',
+        'sprite_0.jpg#xywh=160,0,160,90',
+        '',
+    ].join('\n');
+
+    const routes = { ...simpleRoutes, [THUMBS_URL]: THUMBS_VTT };
+
+    it('reports readiness and answers lookups once loaded', async () => {
+        const { controller } = setup(routes);
+
+        await controller.load({
+            masterUrl: MASTER_URL,
+            sidecars: { thumbnails: { url: THUMBS_URL } },
+        });
+
+        expect(controller.state.thumbnailsReady).toBe(true);
+        expect(controller.thumbnailAt(3)).toMatchObject({ x: 0 });
+        expect(controller.thumbnailAt(15)).toMatchObject({ x: 160 });
+        // Past the last cue there is no frame to show, and guessing one would
+        // show a viewer the wrong moment with full confidence.
+        expect(controller.thumbnailAt(9999)).toBeNull();
+    });
+
+    it('stays quiet and unready when no sidecar is passed', async () => {
+        // The common case: audio-only encodes and sessions made with
+        // `thumbnails: false` have no VTT, and neither is an error.
+        const { controller, errors } = setup(routes);
+
+        await controller.load({ masterUrl: MASTER_URL });
+
+        expect(controller.state.thumbnailsReady).toBe(false);
+        expect(controller.thumbnailAt(3)).toBeNull();
+        expect(errors).toEqual([]);
+    });
+
+    it('does not surface a missing sidecar as an error', async () => {
+        const { controller, errors } = setup(routes);
+
+        await controller.load({
+            masterUrl: MASTER_URL,
+            sidecars: { thumbnails: { url: `${BASE}/absent.vtt` } },
+        });
+
+        expect(controller.state.thumbnailsReady).toBe(false);
+        expect(errors).toEqual([]);
+    });
+
+    it('does not carry one source\'s frames into the next', async () => {
+        /*
+         * The failure this prevents: load a video with sprites, then load one
+         * without, and the scrubber previews frames from the first video —
+         * confidently, and at the wrong moments.
+         */
+        const { controller } = setup(routes);
+        await controller.load({
+            masterUrl: MASTER_URL,
+            sidecars: { thumbnails: { url: THUMBS_URL } },
+        });
+        expect(controller.thumbnailAt(3)).not.toBeNull();
+
+        await controller.load({ masterUrl: MASTER_URL });
+
+        expect(controller.state.thumbnailsReady).toBe(false);
+        expect(controller.thumbnailAt(3)).toBeNull();
+    });
+});

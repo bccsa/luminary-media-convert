@@ -56,6 +56,19 @@ export interface RecoveryPolicy {
 }
 
 /** Everything the wrapper needs to present one piece of content. */
+/**
+ * A `thumbnails.vtt` and, through it, the sprite sheets it references.
+ *
+ * LMCENC-wrapped on an encrypted session, like every other `.vtt` the encoder
+ * writes, so it goes through the same decrypt path as chapters. The sprite
+ * *images* are not encrypted — they are ordinary JPEGs, fetched by the browser
+ * as image sources.
+ */
+export interface ThumbnailSidecar {
+    /** Absolute URL of the VTT. Sprite paths inside it resolve against its directory. */
+    url: string;
+}
+
 export interface PlayerSource {
     /** URL of the (possibly multi-angle, possibly LMCENC-encrypted) master playlist. */
     masterUrl: string;
@@ -84,6 +97,19 @@ export interface PlayerSource {
          */
         chapters?: ChapterSidecar[];
         subtitles?: SubtitleSidecar[];
+        /**
+         * Sprite sheets for the scrub preview, as `thumbnails.vtt` beside the
+         * master.
+         *
+         * Passed explicitly rather than derived from the master's prefix,
+         * because a sidecar is a convention and not something the playlist
+         * points at: an audio-only encode and a session created with
+         * `thumbnails: false` have none, and a player that guessed the URL would
+         * be requesting a 404 on every load to find that out. Supplied the same
+         * way {@link PlayerSource.keyHex} is — the host knows, the player does
+         * not.
+         */
+        thumbnails?: ThumbnailSidecar;
     };
     poll?: PollPolicy;
     recovery?: Partial<RecoveryPolicy>;
@@ -92,6 +118,12 @@ export interface PlayerSource {
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
+
+// Imported for use below and re-exported, so a consumer can type a preview
+// without also depending on `hls/` — `player-web` draws these and has no other
+// reason to know that package exists.
+import type { ThumbnailSpriteCue } from '@luminary-media-converter/hls';
+export type { ThumbnailSpriteCue };
 
 export type Lifecycle =
     /** No source loaded. */
@@ -226,6 +258,17 @@ export interface PlayerState {
 
     /** True when the active rendering carries no video (audio-only master or pseudo-angle). */
     isAudioOnly: boolean;
+
+    /**
+     * True once a thumbnail sidecar has been fetched and parsed into at least
+     * one cue.
+     *
+     * A UI reads this to decide whether to offer a scrub preview at all. False
+     * covers every reason there might not be one — none passed, the file is
+     * absent, it failed to parse — because none of them is a state a viewer can
+     * act on, and all of them mean the same thing on screen.
+     */
+    thumbnailsReady: boolean;
 
     error: PlayerError | null;
 }
@@ -421,6 +464,17 @@ export interface PlayerControllerApi {
     setSubtitleTrack(id: string | null): void;
     /** Lazy-loads (fetch + decrypt + parse) and caches the language's cues. */
     setChapterTrack(id: string | null): void;
+
+    /**
+     * The sprite frame covering `seconds`, or null when there is none.
+     *
+     * A call rather than state: a scrub asks per pointer move, and nothing else
+     * in a UI reacts to the answer — publishing it through the store would wake
+     * every subscriber on every mouse move. Check
+     * {@link PlayerState.thumbnailsReady} to decide whether to offer a preview
+     * at all.
+     */
+    thumbnailAt(seconds: number): ThumbnailSpriteCue | null;
 
     getState(): Readonly<PlayerState>;
     /** Store subscription: called with every state snapshot change. */

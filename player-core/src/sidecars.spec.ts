@@ -183,3 +183,85 @@ describe('SidecarLoader — subtitles', () => {
         });
     });
 });
+
+describe('SidecarLoader — scrub thumbnails', () => {
+    const VTT_URL = 'https://cdn.example.com/out/thumbnails.vtt';
+
+    const THUMBS_VTT = [
+        'WEBVTT',
+        '',
+        '00:00:00.000 --> 00:00:10.000',
+        'sprite_0.jpg#xywh=0,0,160,90',
+        '',
+        '00:00:10.000 --> 00:00:20.000',
+        'sprite_0.jpg#xywh=160,0,160,90',
+        '',
+    ].join('\n');
+
+    function loader(
+        routes: Record<string, string | Uint8Array>,
+        keyHex?: string,
+    ) {
+        const { fetchImpl, calls } = makeFetch(routes);
+        return {
+            calls,
+            loader: new SidecarLoader({
+                fetchImpl,
+                serveStrategy: new FakeServeStrategy(),
+                keyHex,
+            }),
+        };
+    }
+
+    it('parses cues and resolves sprites against the VTT directory', async () => {
+        // The sprite reference is relative in every file the encoder writes, so
+        // getting the base wrong is the difference between a preview and a
+        // silent 404 per frame.
+        const h = loader({ [VTT_URL]: THUMBS_VTT });
+
+        const cues = await h.loader.loadThumbnails({ url: VTT_URL });
+
+        expect(cues).toHaveLength(2);
+        expect(cues[0]?.spriteUrl).toBe(
+            'https://cdn.example.com/out/sprite_0.jpg',
+        );
+        expect(cues[1]).toMatchObject({ x: 160, y: 0, w: 160, h: 90 });
+    });
+
+    it('decrypts an LMCENC sidecar, as an encrypted session writes it', async () => {
+        // Since #162 an encrypted session wraps every .vtt it writes, this one
+        // included. The sprite images stay plain JPEGs.
+        const h = loader({ [VTT_URL]: encryptLmcenc(THUMBS_VTT) }, TEST_KEY_HEX);
+
+        expect(await h.loader.loadThumbnails({ url: VTT_URL })).toHaveLength(2);
+    });
+
+    it('reads a plaintext sidecar even when a key is configured', async () => {
+        const h = loader({ [VTT_URL]: THUMBS_VTT }, TEST_KEY_HEX);
+
+        expect(await h.loader.loadThumbnails({ url: VTT_URL })).toHaveLength(2);
+    });
+
+    it('yields nothing, quietly, for every way there can be no preview', async () => {
+        /*
+         * No sidecar passed, and a sidecar that is not there — a session encoded
+         * with `thumbnails: false`, or an audio-only encode. Neither is something
+         * a viewer can act on, so both are an empty list rather than an error
+         * the host has to catch and ignore.
+         */
+        const h = loader({ [VTT_URL]: THUMBS_VTT });
+
+        expect(await h.loader.loadThumbnails(undefined)).toEqual([]);
+        expect(
+            await h.loader.loadThumbnails({ url: 'https://cdn.example.com/nope.vtt' }),
+        ).toEqual([]);
+    });
+
+    it('does not fetch when there is no sidecar to fetch', async () => {
+        const h = loader({ [VTT_URL]: THUMBS_VTT });
+
+        await h.loader.loadThumbnails(undefined);
+
+        expect(h.calls).toEqual([]);
+    });
+});

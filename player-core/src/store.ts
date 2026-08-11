@@ -37,6 +37,7 @@ export function createInitialState(): PlayerState {
         chapters: [],
 
         isAudioOnly: false,
+        thumbnailsReady: false,
         error: null,
     };
 }

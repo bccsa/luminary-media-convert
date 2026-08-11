@@ -1,6 +1,10 @@
 import { vi } from 'vitest';
 import { createInitialState } from '@luminary-media-converter/player-core';
-import type { PlayerControllerApi, PlayerState } from '@luminary-media-converter/player-core';
+import type {
+    PlayerControllerApi,
+    PlayerState,
+    ThumbnailSpriteCue,
+} from '@luminary-media-converter/player-core';
 import { DEFAULT_MESSAGES, type PlayerMessages } from '../src/messages';
 
 /** A complete, boring {@link PlayerState} with overrides applied on top. */
@@ -11,6 +15,8 @@ export function createState(partial: Partial<PlayerState> = {}): PlayerState {
 export interface FakeController extends PlayerControllerApi {
     /** Publishes a state patch to every subscriber. */
     setState(patch: Partial<PlayerState>): void;
+    /** The cues `thumbnailAt` will answer from. */
+    setThumbnails(cues: ThumbnailSpriteCue[]): void;
 }
 
 /**
@@ -20,6 +26,7 @@ export interface FakeController extends PlayerControllerApi {
  */
 export function createFakeController(initial: Partial<PlayerState> = {}): FakeController {
     let state = createState(initial);
+    let thumbnails: ThumbnailSpriteCue[] = [];
     const listeners = new Set<(next: Readonly<PlayerState>) => void>();
 
     return {
@@ -35,6 +42,10 @@ export function createFakeController(initial: Partial<PlayerState> = {}): FakeCo
         setAudioTrack: vi.fn(),
         setSubtitleTrack: vi.fn(),
         setChapterTrack: vi.fn(),
+        thumbnailAt: (seconds) =>
+            thumbnails.find(
+                (cue) => seconds >= cue.startTime && seconds < cue.endTime,
+            ) ?? null,
         getState: () => state,
         subscribe: (listener) => {
             listeners.add(listener);
@@ -46,6 +57,9 @@ export function createFakeController(initial: Partial<PlayerState> = {}): FakeCo
         setState(patch) {
             state = { ...state, ...patch };
             for (const listener of [...listeners]) listener(state);
+        },
+        setThumbnails(cues) {
+            thumbnails = cues;
         },
     };
 }

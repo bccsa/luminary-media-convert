@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { PlayerControllerApi, PlayerState } from '@luminary-media-converter/player-core';
 import { formatSeconds, type PlayerMessages } from '../messages';
 import { mergeControls, type PlayerControlsOptions } from '../controls';
+import ScrubThumbnail from './ScrubThumbnail.vue';
 import '../styles.css';
 
 /**
@@ -205,6 +206,59 @@ function onScrub(event: Event): void {
     reveal();
 }
 
+/* -----------------------------------------------------------------------
+ * Scrub preview
+ *
+ * Follows the pointer over the scrub area rather than the playhead: while
+ * dragging, what a viewer wants to see is where they are about to land, and
+ * the video itself is already showing where they are.
+ *
+ * Driven from `pointermove` on the wrapper because that covers both a mouse
+ * hovering and a finger dragging — a range input reports neither position in
+ * a way that survives the thumb inset.
+ * -------------------------------------------------------------------- */
+
+/** Pointer position over the scrub area, 0–1, or null when it is elsewhere. */
+const previewRatio = ref<number | null>(null);
+
+const previewTime = computed(() =>
+    previewRatio.value === null ? null : previewRatio.value * duration.value,
+);
+
+const previewCue = computed(() => {
+    const at = previewTime.value;
+    if (at === null || !props.state.thumbnailsReady) return null;
+    /*
+     * Nudged back off the very end before looking up: cue ranges are
+     * end-exclusive, so a drag to the far right of the bar lands exactly on the
+     * last cue's end and matches nothing — the preview would blink out at the
+     * one position a viewer is most likely to hold. The *label* keeps the true
+     * time; only the frame lookup is nudged.
+     */
+    const lookupAt =
+        duration.value > 0 ? Math.min(at, duration.value - 0.001) : at;
+    return props.controller.thumbnailAt(lookupAt);
+});
+
+const previewLabel = computed(() =>
+    previewTime.value === null
+        ? ''
+        : formatClock(previewTime.value, showHours.value),
+);
+
+function onScrubHover(event: PointerEvent): void {
+    const el = event.currentTarget as HTMLElement | null;
+    if (!el || duration.value <= 0) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const ratio = (event.clientX - rect.left) / rect.width;
+    previewRatio.value = Math.min(1, Math.max(0, ratio));
+}
+
+function onScrubLeave(): void {
+    previewRatio.value = null;
+}
+
 function onAudioChange(event: Event): void {
     props.controller.setAudioTrack((event.target as HTMLSelectElement).value);
     reveal();
@@ -321,7 +375,28 @@ function onSubtitleChange(event: Event): void {
                         '--lmp-progress': progressRatio,
                         '--lmp-buffered': bufferedRatio,
                     }"
+                    @pointermove="onScrubHover"
+                    @pointerleave="onScrubLeave"
+                    @pointercancel="onScrubLeave"
                 >
+                    <!--
+                        Positioned along the bar in percent and pulled back by
+                        half its own width, then clamped so it cannot hang off
+                        either end of the screen at the extremes.
+                    -->
+                    <div
+                        v-if="previewCue"
+                        class="lmp-fs-scrub-preview"
+                        :style="{
+                            left: `clamp(0px, ${(previewRatio ?? 0) * 100}%, 100%)`,
+                        }"
+                    >
+                        <ScrubThumbnail
+                            :cue="previewCue"
+                            :label="previewLabel"
+                            :width="168"
+                        />
+                    </div>
                     <div class="lmp-fs-scrub-track" aria-hidden="true"></div>
                     <div class="lmp-fs-scrub-buffered" aria-hidden="true"></div>
                     <div class="lmp-fs-scrub-played" aria-hidden="true"></div>

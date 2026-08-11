@@ -15,7 +15,7 @@ export default defineConfig({
             fileName: 'index',
         },
         rollupOptions: {
-            external: ['vue'],
+            external: ['vue', '@luminary-media-converter/hls'],
             output: {
                 globals: { vue: 'Vue' },
             },

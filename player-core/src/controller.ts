@@ -27,6 +27,10 @@ import {
     resolveRecoveryPolicy,
 } from './recovery.js';
 import { SidecarLoader, pickDefaultChapterTrack } from './sidecars.js';
+import {
+    findThumbnailCue,
+    type ThumbnailSpriteCue,
+} from '@luminary-media-converter/hls';
 import { StateStore, createInitialState } from './store.js';
 import {
     AUDIO_ONLY_ANGLE_ID,
@@ -66,6 +70,8 @@ export class PlayerController implements PlayerControllerApi {
     private watchdog: StallWatchdog;
     private poller: Poller | null = null;
     private sidecarLoader: SidecarLoader | null = null;
+    /** Parsed scrub-preview cues for the current source; empty when there are none. */
+    private thumbnailCues: ThumbnailSpriteCue[] = [];
 
     /** Bumped by every load(); stale async work checks it and bails. */
     private generation = 0;
@@ -118,6 +124,10 @@ export class PlayerController implements PlayerControllerApi {
         this.lastProgress = 0;
         this.cache = new Map();
         this.qualityToVariant = new Map();
+        // Cleared here, not only when the next set arrives: a load that fails
+        // before its sidecars would otherwise leave the previous video's frames
+        // available to `thumbnailAt`.
+        this.thumbnailCues = [];
 
         this.store.reset({
             ...createInitialState(),
@@ -299,6 +309,40 @@ export class PlayerController implements PlayerControllerApi {
 
         if (generation !== this.generation) return;
         this.selectDefaultChapterTrack(generation);
+
+        if (generation !== this.generation) return;
+        await this.attachThumbnails(generation);
+    }
+
+    /**
+     * Fetch and parse the scrub-preview sidecar, if there is one.
+     *
+     * Deliberately last of the sidecars and deliberately silent: a preview is
+     * the least of what a viewer came for, and every way it can be absent — no
+     * sidecar, an audio-only encode, `thumbnails: false`, a 404 — is normal
+     * rather than an error worth surfacing. `loadThumbnails` already collapses
+     * those to an empty list.
+     */
+    private async attachThumbnails(generation: number): Promise<void> {
+        const cues =
+            (await this.sidecarLoader?.loadThumbnails(
+                this.source?.sidecars?.thumbnails,
+            )) ?? [];
+        if (generation !== this.generation) return;
+        this.thumbnailCues = cues;
+        this.store.setState({ thumbnailsReady: cues.length > 0 });
+    }
+
+    /**
+     * The sprite frame to show for `timeSec`, or null when there is none.
+     *
+     * A lookup rather than state, because a scrub asks per pointer move and the
+     * answer is not something the rest of the UI reacts to — putting it in the
+     * store would publish a change to every subscriber on every mouse move.
+     */
+    thumbnailAt(timeSec: number): ThumbnailSpriteCue | null {
+        if (this.thumbnailCues.length === 0) return null;
+        return findThumbnailCue(this.thumbnailCues, timeSec) ?? null;
     }
 
     // -----------------------------------------------------------------------

@@ -1,5 +1,5 @@
 /**
- * Sidecar loading — chapters and out-of-band subtitles.
+ * Sidecar loading — chapters, out-of-band subtitles, and scrub thumbnails.
  *
  * Both go through {@link fetchMaybeEncrypted}, so an LMCENC sidecar is
  * decrypted with the session key and a plaintext one passes straight through.
@@ -17,7 +17,12 @@ import type {
     ServeStrategy,
     SubtitleSidecar,
     SubtitleTrack,
+    ThumbnailSidecar,
 } from './types.js';
+import {
+    parseThumbnailVtt,
+    type ThumbnailSpriteCue,
+} from '@luminary-media-converter/hls';
 import { VTT_CONTENT_TYPE } from './pipeline/blob-registry.js';
 import { fetchMaybeEncrypted } from './pipeline/fetch.js';
 import type { SubtleLike } from './pipeline/decrypt.js';
@@ -86,6 +91,38 @@ export class SidecarLoader {
      * Cues of one chapter track, fetched + decrypted + parsed on first use and
      * cached afterwards. Unknown ids yield `[]`.
      */
+    /**
+     * The scrub-preview cues, or an empty list when there are none to have.
+     *
+     * Every failure is an empty list rather than a throw: no sidecar passed, a
+     * 404 because the session was encoded with `thumbnails: false`, an
+     * audio-only encode, a VTT that will not parse. None of those is something a
+     * viewer can act on, and all of them mean the same thing on screen — no
+     * preview — so the caller gets one answer to handle instead of four.
+     *
+     * Cues come back in start order, which {@link findThumbnailCue} relies on
+     * for its binary search.
+     */
+    async loadThumbnails(
+        sidecar: ThumbnailSidecar | undefined,
+    ): Promise<ThumbnailSpriteCue[]> {
+        if (!sidecar?.url) return [];
+        try {
+            const asset = await fetchMaybeEncrypted(sidecar.url, {
+                fetchImpl: this.options.fetchImpl,
+                keyHex: this.options.keyHex,
+                expect: 'vtt',
+                signal: this.options.signal,
+                subtle: this.options.subtle,
+            });
+            // Sprite paths in the VTT are relative to the VTT's own directory.
+            const baseUrl = sidecar.url.slice(0, sidecar.url.lastIndexOf('/'));
+            return parseThumbnailVtt(asset.text, baseUrl);
+        } catch {
+            return [];
+        }
+    }
+
     async loadChapters(trackId: string): Promise<Chapter[]> {
         const cached = this.chapterCache.get(trackId);
         if (cached) return cached;

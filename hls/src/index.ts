@@ -5,3 +5,4 @@ export * from './build';
 export * from './media-playlist';
 export * from './keys';
 export * from './sidecar';
+export * from './thumbnail-vtt';

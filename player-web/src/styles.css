@@ -267,6 +267,24 @@
     align-items: center;
 }
 
+/*
+ * Scrub preview: above the bar, out of the flow.
+ *
+ * Absolute so that showing it cannot move the bar by a pixel — the bar's
+ * geometry is what the drag arithmetic is calibrated against, and a preview
+ * that reflowed its own reference would make the frame lag the pointer.
+ *
+ * `left` is set inline as a percentage of the bar; the translate centres it on
+ * that point, and the margins keep it on screen at either extreme.
+ */
+.lmp-fs-scrub-preview {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    transform: translateX(-50%);
+    z-index: 2;
+    pointer-events: none;
+}
+
 .lmp-fs-scrub-track,
 .lmp-fs-scrub-buffered,
 .lmp-fs-scrub-played {
@@ -420,4 +438,20 @@
 .lmp-fs-select option {
     background: #18181b;
     color: #ffffff;
+}
+
+/*
+ * Windowed scrub preview.
+ *
+ * The one thing this player draws over the picture outside fullscreen, and only
+ * when a host explicitly asks by binding `previewTime` — see the prop's own
+ * note for why that rule matters. Bottom-centre, clear of the video's own edges.
+ */
+.lmp-windowed-preview {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 3;
+    pointer-events: none;
 }
