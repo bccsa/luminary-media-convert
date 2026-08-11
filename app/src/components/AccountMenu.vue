@@ -45,10 +45,48 @@ const triggerClass = computed(() =>
         : 'flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-slate-700 shadow-sm ring-slate-900/5 transition-colors hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:ring-white/10',
 );
 
-const themeOptions: { value: ThemePreference; label: string; description: string }[] = [
-    { value: 'light', label: 'Light', description: 'Always light' },
-    { value: 'system', label: 'Auto', description: 'Match system' },
-    { value: 'dark', label: 'Dark', description: 'Always dark' },
+/**
+ * The three appearance choices, each with the icon that stands for it.
+ *
+ * `description` no longer prints as a second line — three mutually exclusive
+ * options did not need one, and it was most of the panel's height — but it is
+ * kept as the row's `title` and as its accessible name. "Auto" is the one label
+ * that does not carry its own meaning, and losing the explanation entirely
+ * would have made it a guess.
+ */
+const themeOptions: {
+    value: ThemePreference;
+    label: string;
+    description: string;
+    /** SVG path(s), drawn at 24×24 with a 1.75 stroke. */
+    icon: string[];
+}[] = [
+    {
+        value: 'light',
+        label: 'Light',
+        description: 'Always light',
+        icon: [
+            'M12 3v1.5m0 15V21m9-9h-1.5m-15 0H3m15.36-6.36-1.06 1.06M6.7 17.3l-1.06 1.06m12.72 0-1.06-1.06M6.7 6.7 5.64 5.64',
+            'M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
+        ],
+    },
+    {
+        value: 'system',
+        label: 'Auto',
+        description: 'Match system',
+        // Half-lit circle: the same glyph the Luminary app uses for "follow the
+        // system", and the only one of the three that has to say "either".
+        icon: [
+            'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z',
+            'M12 3v18a9 9 0 0 0 0-18Z',
+        ],
+    },
+    {
+        value: 'dark',
+        label: 'Dark',
+        description: 'Always dark',
+        icon: ['M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z'],
+    },
 ];
 
 function toggle() {
@@ -85,6 +123,10 @@ watch(open, (v) => {
 
 function pickTheme(p: ThemePreference) {
     setPreference(p);
+    // Three mutually exclusive options: the choice is made, so the panel has
+    // nothing left to offer. It used to stay open until dismissed, which read
+    // as though the click had not registered.
+    close();
 }
 </script>
 
@@ -123,54 +165,66 @@ function pickTheme(p: ThemePreference) {
             leave-from-class="scale-100 opacity-100"
             leave-to-class="scale-95 opacity-0"
         >
+            <!--
+                Three rows, an icon each, no heading and no descriptions: the
+                panel was 18rem wide and four rows tall for a choice between
+                three words, and it opens from a sun icon that has already said
+                what it is about.
+
+                The checkmark column went with the descriptions, so selection is
+                carried by the row's fill and an accent icon instead. What must
+                not go with it is `role="menuitemradio"` + `aria-checked`, which
+                is what tells a screen reader that these are three states of one
+                setting rather than three buttons.
+            -->
             <div
                 v-if="open"
-                class="absolute right-0 z-50 w-[min(18rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white py-1 shadow-xl ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10"
+                class="absolute right-0 z-50 w-[min(11rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-1 shadow-xl ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10"
                 :class="panelPositionClass"
                 role="menu"
                 aria-label="Appearance"
                 @click.stop
             >
-                <div class="px-2 py-2" role="none">
-                    <p
-                        id="account-appearance-label"
-                        class="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500"
+                <div class="space-y-0.5" role="group" aria-label="Appearance">
+                    <button
+                        v-for="opt in themeOptions"
+                        :key="opt.value"
+                        type="button"
+                        role="menuitemradio"
+                        :aria-checked="preference === opt.value"
+                        :aria-label="`${opt.label} — ${opt.description}`"
+                        :title="opt.description"
+                        class="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors"
+                        :class="
+                            preference === opt.value
+                                ? 'bg-sky-50 font-medium text-sky-900 dark:bg-sky-500/15 dark:text-sky-100'
+                                : 'font-normal text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700'
+                        "
+                        @click="pickTheme(opt.value)"
                     >
-                        Appearance
-                    </p>
-                    <div class="space-y-0.5" role="group" aria-labelledby="account-appearance-label">
-                        <button
-                            v-for="opt in themeOptions"
-                            :key="opt.value"
-                            type="button"
-                            role="menuitemradio"
-                            :aria-checked="preference === opt.value"
-                            class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-slate-800 transition-colors hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700"
-                            @click="pickTheme(opt.value)"
+                        <svg
+                            class="h-4 w-4 shrink-0"
+                            :class="
+                                preference === opt.value
+                                    ? 'text-sky-600 dark:text-sky-400'
+                                    : 'text-slate-400 dark:text-slate-500'
+                            "
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            stroke-width="1.75"
+                            aria-hidden="true"
                         >
-                            <span
-                                class="flex h-4 w-4 shrink-0 items-center justify-center rounded border border-slate-300 dark:border-slate-600"
-                                aria-hidden="true"
-                            >
-                                <svg
-                                    v-if="preference === opt.value"
-                                    class="h-3 w-3 text-slate-600 dark:text-slate-400"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                    stroke-width="2.5"
-                                >
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                            </span>
-                            <span class="min-w-0 flex-1">
-                                <span class="block font-medium">{{ opt.label }}</span>
-                                <span class="block text-xs font-normal text-slate-500 dark:text-slate-400">{{
-                                    opt.description
-                                }}</span>
-                            </span>
-                        </button>
-                    </div>
+                            <path
+                                v-for="(d, i) in opt.icon"
+                                :key="i"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                :d="d"
+                            />
+                        </svg>
+                        {{ opt.label }}
+                    </button>
                 </div>
             </div>
         </Transition>
