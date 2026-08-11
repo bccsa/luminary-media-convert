@@ -915,3 +915,24 @@ A probe that cannot run reports `indeterminate` and blocks nothing. A failed pro
 **Why it matters even though it is not a regression.** It cost time here precisely because it looked like one — and it will do that again to whoever next changes anything near `FfmpegService`. A test that fails only in company is a test nobody can use to answer "did I break this?".
 
 **Likely cause.** The test spawns a *real* worker thread against `/non/existent/dir` and expects a rejection within the default 5 s. Under a parallel suite the worker's own startup is slow enough to lose that race. Worth either giving the assertion a longer timeout, or removing the real-worker dependency the way the sibling tests do (`useRealWorker.value = false` plus an emitted `error`), which is what the rest of that describe block already does.
+
+---
+
+## 39. Sprite packing failed whenever `WORK_DIR` was relative — fixed
+
+**Found immediately after merging #163 and #167**, by encoding a session on the merged branch and noticing it reported no `thumbnailsVtt` at all — the same flow had reported one an hour earlier.
+
+**What happened.** `packForDelivery` writes an ffconcat list naming the ingest-time thumbnails, and the concat demuxer resolves relative entries against **the list file's own directory**, not the process's working directory. `WORK_DIR` defaults to `./work` when the API runs standalone, so the list at `work/<id>/output/thumbnails/pack-list.txt` held entries like `work/<id>/preview-thumbnails/thumbnails/thumb_000001.jpg`, and ffmpeg looked for the two concatenated:
+
+```
+Impossible to open 'work/<id>/output/thumbnails/work/<id>/preview-thumbnails/thumbnails/thumb_000001.jpg'
+```
+
+**Why nobody saw it.** It fails as a `WARN` and a session with no sprites — the pass is deliberately non-fatal, which is right. And it cannot happen under Electron, which passes an absolute `workDir`; only the standalone API defaults to a relative one, so it hit exactly `npm run dev` and nothing else. Every existing test in `thumbnail.service.spec.ts` sets an absolute `WORK_DIR` for its temp directory, which is why 77 of them passed over it.
+
+**Fixed** by resolving each entry to an absolute path. Covered by a test that runs with a *relative* `WORK_DIR` from a temporary cwd — confirmed to fail against the unfixed code and pass with it, since a test for this is only meaningful from the configuration that broke.
+
+Verified end to end afterwards: the same encode now logs `Packed 12 thumbnail(s) into 1 sprite sheet(s)`, reports `thumbnailsVtt`, and the sheet answers 200 from S3.
+
+**Worth noting for the future:** `writeConcatFile` in `concat-file.ts` has the same shape for trim segments, and is safe only because a session's source path is validated absolute at ingest. If that ever loosens, it fails the same way.
+

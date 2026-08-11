@@ -7,7 +7,7 @@ import {
     rmSync,
     writeFileSync,
 } from 'fs';
-import { basename, dirname, join } from 'path';
+import { basename, dirname, isAbsolute, join } from 'path';
 import { tmpdir } from 'os';
 
 const { mockExecFile } = vi.hoisted(() => ({
@@ -1405,6 +1405,59 @@ describe('ThumbnailService', () => {
             // It joined the pass already running rather than starting another.
             expect(passCalls(THUMBS)).toHaveLength(1);
             expect(packed()).toHaveLength(12);
+        });
+
+        it('names the thumbs by absolute path, whatever WORK_DIR is', async () => {
+            /*
+             * The concat demuxer resolves relative entries against the *list
+             * file's own directory*, not the process's working directory. WORK_DIR
+             * defaults to `./work` when the API runs standalone, so a browser-dev
+             * session wrote entries like `work/<id>/preview-thumbnails/…` into a
+             * list living at `work/<id>/output/thumbnails/` — ffmpeg looked for
+             * the two concatenated and could not open them. It failed as a warning
+             * and a session with no sprites, and was invisible under Electron,
+             * which passes an absolute workDir.
+             *
+             * Every other test here sets an absolute WORK_DIR, which is why this
+             * survived: the fix is only observable from a relative one.
+             */
+            const cwd = process.cwd();
+            const relRoot = mkdtempSync(join(tmpdir(), 'thumb-relcwd-'));
+            process.chdir(relRoot);
+            try {
+                process.env.WORK_DIR = 'relwork';
+                svc = new ThumbnailService();
+                packList = [];
+                mockExecFile.mockReset();
+                mockFfmpeg({ thumbs: 12, sprites: 1, onPass: capturePackList });
+                mkdirSync(join(relRoot, 'relwork', SID, 'preview-thumbnails', 'thumbnails'), {
+                    recursive: true,
+                });
+                for (let i = 1; i <= 12; i++) {
+                    writeFileSync(
+                        join(
+                            relRoot,
+                            'relwork',
+                            SID,
+                            'preview-thumbnails',
+                            'thumbnails',
+                            `thumb_${String(i).padStart(6, '0')}.jpg`,
+                        ),
+                        'x',
+                    );
+                }
+
+                await pack();
+
+                expect(packList.length).toBeGreaterThan(0);
+                const paths = packList.map((line) =>
+                    line.replace(/^file '(.*)'$/, '$1'),
+                );
+                expect(paths.every((path) => isAbsolute(path))).toBe(true);
+            } finally {
+                process.chdir(cwd);
+                rmSync(relRoot, { recursive: true, force: true });
+            }
         });
     });
 });

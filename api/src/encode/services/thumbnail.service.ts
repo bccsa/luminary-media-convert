@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { execFile } from 'child_process';
 import { existsSync } from 'fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { promisify } from 'util';
 import { ffmpegBin } from './ffbin.js';
 
@@ -535,11 +535,24 @@ export class ThumbnailService {
         // kept range shorter than the sampling interval reuses a frame), neither
         // of which a numbered-sequence input can express. It also names every
         // file outright, so there is no shell glob to be unavailable on Windows.
+        /*
+         * Absolute paths, because the concat demuxer resolves relative entries
+         * against the *list file's own directory* rather than the process's
+         * working directory.
+         *
+         * `WORK_DIR` defaults to `./work` when the API runs standalone, so every
+         * browser-dev session produced entries like
+         * `work/<id>/preview-thumbnails/...` inside a list living at
+         * `work/<id>/output/thumbnails/`, which ffmpeg dutifully looked for at
+         * the two paths concatenated and could not open. It surfaced only as a
+         * warning and a session with no sprites — invisible under Electron,
+         * which passes an absolute workDir.
+         */
         const listPath = join(thumbnailDir, 'pack-list.txt');
         await writeFile(
             listPath,
             selected
-                .map((f) => `file '${concatEscape(join(sourceDir, f))}'`)
+                .map((f) => `file '${concatEscape(resolve(sourceDir, f))}'`)
                 .join('\n') + '\n',
             'utf-8'
         );
