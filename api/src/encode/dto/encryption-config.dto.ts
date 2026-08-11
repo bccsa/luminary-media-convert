@@ -38,10 +38,15 @@ export class EncryptionConfigDto {
             'objects upload as application/octet-stream under their existing ' +
             'keys and extensions.\n\n' +
             'Set false only for output that has to stay readable by players ' +
-            'which cannot decrypt playlists — a stock hls.js or Video.js that ' +
-            'fetches the key by URI can play AES-128 segments, but cannot read ' +
-            'an LMCENC playlist. Players built on ' +
-            '@luminary-media-converter/player-core handle both.',
+            'which cannot decrypt playlists — a stock hls.js or Video.js can ' +
+            'play AES-128 segments, but cannot read an LMCENC playlist. ' +
+            'Players built on @luminary-media-converter/player-core handle both.\n\n' +
+            'This alone does not make output playable by a stock player: it ' +
+            'gets one as far as parsing the playlist, where #EXT-X-KEY still ' +
+            `names "${LUMINARY_KEY_PLACEHOLDER_URI}", a scheme no player can ` +
+            'resolve. That needs keyUrl as well, pointing at something that ' +
+            'serves the raw 16 key bytes — which this encoder is not, by ' +
+            'design. Verified against a stock client; see Todo.md section 0a.',
         default: true,
     })
     @IsBoolean()

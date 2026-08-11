@@ -21,7 +21,29 @@ Ordered roughly by value, not by effort.
 Still outstanding:
 
 - [x] Multi-angle source: single `master.m3u8` with `#EXT-X-MEDIA:TYPE=VIDEO` groups in S3; angle switching + audio-only in the app player (client-side extraction). **Verified** against S3 output with #162 — angle, audio-track and quality selection all confirmed working.
-- [ ] **Stock-player check (flagged risk, never tested):** confirm plain video.js/hls.js plays the _default angle_ of a raw multi-angle master without the extraction helpers — Luminary clients that have not adopted `hls/` helpers depend on this. **Now has a second half:** with #162 an encrypted session also encrypts its playlists (LMCENC), which no stock player can read at all — such a client needs `encryption.encryptPlaylists: false` until it moves to `player-core`. Worth testing both, since the answer decides whether that opt-out is a transitional courtesy or a permanent mode.
+- [ ] **Stock-player check (flagged risk, never tested):** confirm plain video.js/hls.js plays the _default angle_ of a raw multi-angle master without the extraction helpers — Luminary clients that have not adopted `hls/` helpers depend on this. **Now has a second half:** with #162 an encrypted session also encrypts its playlists (LMCENC), which no stock player can read at all — such a client needs `encryption.encryptPlaylists: false` until it moves to `player-core`. Worth testing both, since the answer decides whether that opt-out is a transitional courtesy or a permanent mode. **Mostly answered below (§0a) — one browser run outstanding.**
+
+### 0a. Stock-player check — results
+
+Five outputs were encoded into a local MinIO and opened with **ffmpeg's HLS demuxer**, which is a genuinely third-party stock client: it reads master playlists, picks a variant, and fetches AES-128 keys by URI, with no knowledge of anything in this repo.
+
+| # | Output | Stock client does | Prefix in `media/` |
+|---|---|---|---|
+| 1 | Plaintext, single angle | **plays** (300/300 frames over 10 s) | `measure27b` |
+| 2 | Plaintext, multi-angle | **plays** — but see below | `sp-multiangle` |
+| 3 | Encrypted, playlists encrypted (the default) | **fails at the master** — LMCENC01 ciphertext is not a playlist | `772e6978-…` |
+| 4 | Encrypted, `encryptPlaylists: false`, no `keyUrl` | **fails at key load** — "Unable to open key file luminary://key" | `sp-enc-sentinel` |
+| 5 | Encrypted, `encryptPlaylists: false` + a fetchable `keyUrl` | **plays** | `sp-enc-keyurl` |
+
+**The opt-out alone is not enough, and that answers the question the item posed.** `encryptPlaylists: false` gets a stock client as far as parsing the playlist and no further: `#EXT-X-KEY` still names `luminary://key`, a scheme no player can resolve (case 4). Playing encrypted output on a stock client needs *both* the opt-out *and* an `encryption.keyUrl` serving the raw 16 key bytes over HTTP — and this encoder has no key server and should not grow one: the key is generated locally precisely so that it never leaves the machine. Case 5 only passes because a key file was placed in the bucket by hand, which publishes the key next to the content it protects and is therefore a test fixture, not a pattern to offer anyone.
+
+So the honest guidance for a Luminary client that has not adopted `player-core`: **use unencrypted output.** The opt-out is for a client that has its own key delivery, not a way to make encrypted output generally playable. It is a permanent mode in the sense that it will keep working, but not a migration path on its own.
+
+**Multi-angle is worse than "plays the default angle" — and the flagged risk is real.** A stock client played case 2, but it fetched segments from *both* angle playlists. Nothing in a spec-correct multi-angle master marks a variant as an alternate camera rather than a bitrate rung: two variants at the same resolution with different `BANDWIDTH` are exactly the shape of an ABR ladder, and `DEFAULT=YES` on the `TYPE=VIDEO` group does not constrain variant selection — it is advice about a rendition group most players ignore entirely. An ABR algorithm is therefore free to move between angles as the network changes, so a stock client can silently cut from Wide to Close mid-playback. It plays; it does not play *one angle*. Narrowing with `extractAnglePlaylist` is not a nicety for these clients, and a Luminary client that will not adopt the helpers should be sent single-angle output.
+
+Also observed and dismissed: cases 1 and 2 emit `Invalid NAL unit size` / `missing picture in access unit` warnings when opened **through the master**, never through the media playlist directly, and decode 300/300 frames over 10 s regardless. That is ffmpeg probing a byte-range fMP4 fragment without first reading its `#EXT-X-MAP` init segment — an artefact of the probe, not a defect in the output. It is absent on case 5 because an encrypted fragment cannot be probed that way at all.
+
+**Outstanding: the browser half.** ffmpeg settles the structure but is not hls.js and is not Safari. A harness is committed for that — [`docs/stock-player-check/`](docs/stock-player-check/README.md), which loads hls.js with **default config** (no custom loader, no munging, no key injection) and offers a native-`<video>` button per case for Safari's built-in HLS. Its README has the two commands. Expected per the table above; the interesting rows are 2 (does hls.js's ABR actually cross angles?) and 4 (does it report a key error or a manifest error?). Note the whole exercise settles the *web* only — AVPlayer and ExoPlayer remain untested, which matters when the Capacitor adapters land (item 6).
 - [ ] Queue: three CMS sessions encoding FIFO with SSE `queuePosition` updates.
 - [ ] Protocol handler from a packaged install: `open luminary-convert://` launches/focuses the app.
 - [ ] Packaged mac build encodes with `encoder: 'apple'` (VideoToolbox) — blocked on item 5a; the packaged app currently falls back to PATH, so it cannot encode on a machine without a system ffmpeg.

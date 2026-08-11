@@ -1,0 +1,148 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Stock player compatibility check</title>
+<style>
+  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 24px; max-width: 900px; }
+  h1 { font-size: 18px; }
+  .case { border: 1px solid #ccc; border-radius: 8px; padding: 12px; margin: 12px 0; }
+  .case h2 { font-size: 14px; margin: 0 0 4px; }
+  .desc { color: #555; font-size: 12px; margin: 0 0 8px; }
+  .row { display: flex; gap: 12px; align-items: flex-start; }
+  video { width: 320px; background: #000; }
+  pre { flex: 1; background: #f6f6f6; padding: 8px; font-size: 11px; margin: 0;
+        max-height: 180px; overflow: auto; white-space: pre-wrap; }
+  .verdict { font-weight: 600; margin-top: 6px; font-size: 12px; }
+  .ok { color: #0a7a3d; } .bad { color: #b00020; } .pending { color: #777; }
+  button { font: inherit; padding: 4px 10px; }
+</style>
+</head>
+<body>
+<h1>Stock player compatibility check</h1>
+<p style="font-size:12px;color:#555">
+  Plain <b>hls.js <span id="ver"></span> with default config</b> — no custom loader, no playlist
+  munging, no key injection. This is what a third-party player sees. Use the native buttons to
+  check Safari's built-in HLS the same way.
+</p>
+<p><button id="runall">Run all with hls.js</button></p>
+<div id="cases"></div>
+
+<script src="./hls.min.js"></script>
+<script>
+const BASE = 'http://127.0.0.1:9000/media';
+const CASES = [
+  { id: 1, prefix: 'measure27b', name: 'Plaintext, single angle',
+    desc: 'No encryption. Baseline — must play.', expect: 'plays' },
+  { id: 2, prefix: 'sp-multiangle', name: 'Plaintext, multi-angle',
+    desc: 'Two TYPE=VIDEO rendition groups. A stock player ignores the groups and plays whichever variant its ABR picks.', expect: 'plays one angle' },
+  { id: 3, prefix: '772e6978-f002-42c5-9ca6-c23e3fde13d9', name: 'Encrypted + LMCENC playlists',
+    desc: 'Default encrypted output. The master itself is LMCENC01 ciphertext.', expect: 'fails at the manifest' },
+  { id: 4, prefix: 'sp-enc-sentinel', name: 'Encrypted, readable playlists, luminary://key',
+    desc: 'encryptPlaylists:false, no keyUrl. Playlists parse; the key URI is our sentinel.', expect: 'fails at key load' },
+  { id: 5, prefix: 'sp-enc-keyurl', name: 'Encrypted, readable playlists, real keyUrl',
+    desc: 'encryptPlaylists:false + a fetchable AES-128 key URL. TEST ONLY — see the write-up.', expect: 'plays' },
+];
+
+document.getElementById('ver').textContent = window.Hls ? Hls.version : '(missing)';
+
+const el = document.getElementById('cases');
+for (const c of CASES) {
+  const d = document.createElement('div');
+  d.className = 'case';
+  d.innerHTML = `
+    <h2>Case ${c.id} — ${c.name}</h2>
+    <p class="desc">${c.desc} <i>Expected: ${c.expect}.</i></p>
+    <div class="row">
+      <div>
+        <video id="v${c.id}" controls muted playsinline></video>
+        <div>
+          <button data-hls="${c.id}">hls.js</button>
+          <button data-native="${c.id}">native</button>
+        </div>
+      </div>
+      <pre id="log${c.id}"></pre>
+    </div>
+    <div class="verdict pending" id="verdict${c.id}">not run</div>`;
+  el.appendChild(d);
+}
+
+function logger(id) {
+  const pre = document.getElementById('log' + id);
+  return (msg) => { pre.textContent += msg + '\n'; pre.scrollTop = pre.scrollHeight; };
+}
+function verdict(id, ok, text) {
+  const v = document.getElementById('verdict' + id);
+  v.className = 'verdict ' + (ok ? 'ok' : 'bad');
+  v.textContent = (ok ? 'PLAYED — ' : 'FAILED — ') + text;
+}
+
+const players = {};
+function teardown(id) {
+  if (players[id]) { players[id].destroy(); delete players[id]; }
+  const v = document.getElementById('v' + id);
+  v.removeAttribute('src'); v.load();
+  document.getElementById('log' + id).textContent = '';
+  const vd = document.getElementById('verdict' + id);
+  vd.className = 'verdict pending'; vd.textContent = 'running…';
+}
+
+function runHls(c) {
+  teardown(c.id);
+  const log = logger(c.id);
+  const video = document.getElementById('v' + c.id);
+  const url = `${BASE}/${c.prefix}/master.m3u8`;
+  log('load ' + url);
+  if (!window.Hls || !Hls.isSupported()) { log('hls.js unsupported here'); return; }
+  const hls = new Hls();            // default config, deliberately
+  players[c.id] = hls;
+  let played = false;
+  hls.on(Hls.Events.MANIFEST_PARSED, (_, d) =>
+    log(`MANIFEST_PARSED — ${d.levels.length} level(s), ${(d.audioTracks||[]).length} audio track(s)`));
+  hls.on(Hls.Events.LEVEL_LOADED, (_, d) =>
+    log(`LEVEL_LOADED ${d.level} — ${d.details.fragments.length} fragment(s)`));
+  hls.on(Hls.Events.KEY_LOADING, (_, d) =>
+    log('KEY_LOADING ' + (d.frag && d.frag.decryptdata && d.frag.decryptdata.uri)));
+  hls.on(Hls.Events.ERROR, (_, d) => {
+    log(`ERROR ${d.type} / ${d.details}${d.fatal ? ' (FATAL)' : ''}` +
+        (d.reason ? ' — ' + d.reason : '') +
+        (d.response ? ' — http ' + d.response.code : '') +
+        (d.error ? ' — ' + d.error.message : ''));
+    if (d.fatal && !played) verdict(c.id, false, `${d.details}`);
+  });
+  video.addEventListener('playing', () => {
+    played = true; verdict(c.id, true, 'video is decoding frames');
+  }, { once: true });
+  hls.loadSource(url);
+  hls.attachMedia(video);
+  video.play().catch((e) => log('play() rejected: ' + e.message));
+}
+
+function runNative(c) {
+  teardown(c.id);
+  const log = logger(c.id);
+  const video = document.getElementById('v' + c.id);
+  const url = `${BASE}/${c.prefix}/master.m3u8`;
+  log('native src = ' + url);
+  video.addEventListener('playing', () => verdict(c.id, true, 'native HLS is decoding frames'), { once: true });
+  video.addEventListener('error', () => {
+    const e = video.error;
+    log('media error code=' + (e && e.code) + ' ' + (e && e.message));
+    verdict(c.id, false, 'native HLS error code ' + (e && e.code));
+  }, { once: true });
+  video.src = url;
+  video.play().catch((e) => log('play() rejected: ' + e.message));
+}
+
+document.addEventListener('click', (e) => {
+  const h = e.target.dataset && e.target.dataset.hls;
+  const n = e.target.dataset && e.target.dataset.native;
+  if (h) runHls(CASES.find((c) => String(c.id) === h));
+  if (n) runNative(CASES.find((c) => String(c.id) === n));
+});
+document.getElementById('runall').addEventListener('click', () => {
+  CASES.forEach((c, i) => setTimeout(() => runHls(c), i * 1500));
+});
+</script>
+</body>
+</html>
