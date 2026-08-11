@@ -27,6 +27,18 @@ export interface SessionEvent {
     encoder?: string;
     probeResult?: unknown;
     ingestTotalBytes?: number;
+    /**
+     * Count of source-storyboard thumbnails sampled so far. Grows while the
+     * ingest-time generation pass runs, and is what tells a client watching the
+     * trim timeline that there is more storyboard to fetch.
+     */
+    storyboardThumbCount?: number;
+    /**
+     * True once the storyboard's final VTT is written. Its own flag because the
+     * last in-progress report usually already carries the full count, and a
+     * repeated number is not a change a client watcher can react to.
+     */
+    storyboardComplete?: boolean;
 }
 
 @Injectable()

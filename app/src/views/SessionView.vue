@@ -65,6 +65,7 @@ import {
 } from '../utils/trimTimeline';
 import type {
     AccelMode,
+    PipelinePhase,
     SegmentFormat,
     SessionStatusResponse,
     SessionSummary,
@@ -919,9 +920,23 @@ const sourceStoryboardUrl = computed(() => {
 
 // Sampling an hour of video takes minutes and the API serves whatever sprites
 // exist so far, so the storyboard grows after the first request. Follow it.
+//
+// The refresh signal folds the completion flag into the count: the encoder's
+// final report — made after the finished VTT is on disk — usually repeats the
+// last count it already announced, and without the suffix that repeat would
+// not read as a change, leaving completion to be discovered by the slow
+// safety-net poll.
+const storyboardRefreshSignal = computed(() => {
+    const count = poller.storyboardThumbCount.value;
+    if (count == null) return undefined;
+    return poller.storyboardComplete.value ? `${count}-done` : `${count}`;
+});
 const storyboard = useStoryboard({
     url: sourceStoryboardUrl,
     active: sourceStoryboardActive,
+    // The encoder pushes its thumbnail count over the session event stream, so
+    // the filmstrip refetches when there is more to draw rather than on a timer.
+    refresh: storyboardRefreshSignal,
 });
 
 /**
@@ -1016,12 +1031,19 @@ const storyboardPending = computed(
  * `encoding` maps to nothing on purpose: while the pipeline is running the bar
  * already says so, and captioning it would be noise.
  */
-const PIPELINE_PHASE_LABELS: Record<string, string> = {
+// Keyed exhaustively on purpose: a phase added to the union without a label
+// here is a compile error rather than a caption that silently stops appearing.
+const PIPELINE_PHASE_LABELS: Record<PipelinePhase, string | null> = {
+    encoding: null,
     draining: 'Packing segments…',
     'finalising-playlists': 'Finalising playlists…',
     thumbnails: 'Generating thumbnails…',
     waveform: 'Generating waveform…',
     'encrypting-playlists': 'Encrypting playlists…',
+    // The one phase that outlives `encoding`: it captions the S3 bar as that
+    // bar restarts from 0 for the playlists and sprites, which are a different
+    // set of files from the segments it was counting until then.
+    'uploading-playlists': 'Uploading playlists & thumbnails…',
 };
 
 const pipelinePhaseLabel = computed(() => {
@@ -1185,8 +1207,11 @@ async function handleStatusAfterLoad(status: string) {
     if (!isActiveSession.value) return;
 
     if (status === 'uploaded') {
+        // No early return: the configure phase is live now. The storyboard
+        // fills over pushed thumbnail counts on the event stream, so a page
+        // (re)loaded at 'uploaded' without a running poller sat frameless
+        // until the slow safety-net poll found everything at once.
         await fetchProbeResults();
-        return;
     }
 
     if (status === 'failed') {
@@ -2195,11 +2220,12 @@ onUnmounted(() => {
                                             "
                                         />
                                         <!--
-                                            Draining at 100% is not the encode finishing: sprites, the
-                                            waveform sidecar and text-asset encryption still run before
-                                            the status leaves `encoding`, and on a long source the
-                                            sprites alone take minutes. Unnamed, a full bar over
-                                            unfinished work reads as stalled rather than busy.
+                                            Draining at 100% is not the encode finishing: segment
+                                            packing, the sprite sheets, the waveform sidecar and
+                                            text-asset encryption all still run before the status
+                                            leaves `encoding`, and the playlists and sprites are
+                                            uploaded after it. Unnamed, a full bar over unfinished
+                                            work reads as stalled rather than busy.
                                         -->
                                         <p
                                             v-if="pipelinePhaseLabel"

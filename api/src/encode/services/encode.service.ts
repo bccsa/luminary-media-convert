@@ -237,6 +237,13 @@ export class EncodeService {
                 throw pipeline.error;
             }
 
+            // FFmpeg's own progress reporting stops a hair short often enough
+            // that the bar sits at 98% for the whole finalize stretch. FFmpeg
+            // has returned, so encoding is provably over — pinned before the
+            // first phase is reported, or the drain gets captioned under a bar
+            // still claiming to be mid-encode.
+            currentProgress.encoding = 100;
+
             // Drain remaining segments + finalize byte-range chunks.
             //
             // Reported, because this is the first thing that happens after the
@@ -258,43 +265,36 @@ export class EncodeService {
                 );
             }
 
-            // Generate thumbnails
+            // Pack the ingest-time thumbs into delivered sprite sheets.
+            //
+            // Nothing is decoded from the source here — the frames were sampled
+            // once at ingest, and packing lays out whichever of them the output
+            // timeline keeps. Which is why `session.config.thumbnails !== false`
+            // now gates only the pack and its S3 delivery: the individual thumbs
+            // are generated at ingest regardless, because the trim UI's
+            // filmstrip needs them whether or not the output ships a storyboard.
+            // The flag's meaning — "no thumbnails in the output" — is unchanged.
             let thumbnailsVttRelPath: string | undefined;
             if (
                 session.encodeConfig.type === 'video' &&
                 session.config.thumbnails !== false
             ) {
-                // The expensive one: a fresh FFmpeg pass over the finished
-                // output, minutes on a long source, and previously silent.
+                // This used to be the expensive one — a fresh FFmpeg pass over
+                // the finished output, measured at 114.7s of a 125s encode. It
+                // now lays out frames sampled once at ingest and decodes
+                // nothing, so it is reported for completeness rather than
+                // because anyone will be left waiting on it.
                 reportPhase('thumbnails');
                 try {
-                    const concatFilePath = join(outputDir, 'concat.txt');
-                    const hasConcatFile = existsSync(concatFilePath);
-                    const trimmedDuration = session.encodeConfig.trimSegments
-                        ?.length
-                        ? session.encodeConfig.trimSegments.reduce(
-                              (sum, s) => sum + (s.outSec - s.inSec),
-                              0
-                          )
-                        : undefined;
-
                     const thumbResult =
-                        await this.thumbnailService.generateThumbnails({
+                        await this.thumbnailService.packForDelivery({
+                            sessionId,
                             inputPath: session.filePath!,
                             outputDir,
-                            duration:
-                                trimmedDuration ??
-                                session.probeResult?.format?.duration ??
-                                0,
-                            sourceWidth:
-                                session.probeResult?.videoTracks?.[0]?.width ??
-                                1920,
-                            sourceHeight:
-                                session.probeResult?.videoTracks?.[0]?.height ??
-                                1080,
-                            concatFilePath: hasConcatFile
-                                ? concatFilePath
-                                : undefined,
+                            sourceDuration:
+                                session.probeResult?.format?.duration ?? 0,
+                            trimSegments: session.encodeConfig.trimSegments,
+                            videoTracks: session.probeResult?.videoTracks,
                         });
                     if (thumbResult) {
                         thumbnailsVttRelPath = thumbResult.vttRelativePath;
@@ -385,17 +385,34 @@ export class EncodeService {
             }
 
             // Upload remaining files (playlists, thumbnails, master.m3u8).
-            // The phase belongs to `encoding`; leaving the last one set would
-            // caption the upload with whatever ran before it.
+            //
+            // The upload has a phase of its own — it reports real per-file
+            // progress below, and the S3 bar restarts from 0 for it, because
+            // what that bar counted until now was segments and this is a
+            // different set of files. The caption is what stops the reset
+            // reading as work being lost.
+            //
+            // Set before the status flips, not after: leaving the previous
+            // step's phase in place for even one event would caption the
+            // upload with whatever ran before it, which is the thing this
+            // caption exists to prevent.
             finishPhase();
-            currentProgress.phase = undefined;
+            currentProgress.phase = 'uploading-playlists';
+            currentProgress.uploading = 0;
             this.sessionService.updatePipelineProgress(sessionId, {
                 ...currentProgress,
             });
             this.sessionService.updateStatus(sessionId, 'uploading_to_s3');
-            this.sessionService.updateProgress(sessionId, 0);
 
-            await pipeline.uploadRemainingFiles(outputDir);
+            await pipeline.uploadRemainingFiles(outputDir, {
+                onFileProgress: (done, total) => {
+                    currentProgress.uploading =
+                        total > 0 ? Math.round((done / total) * 100) : 100;
+                    this.sessionService.updatePipelineProgress(sessionId, {
+                        ...currentProgress,
+                    });
+                },
+            });
 
             // Collect all uploaded keys
             const allKeys = pipeline.keys;

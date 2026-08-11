@@ -106,6 +106,14 @@ export interface Session {
     error?: string;
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
+    /**
+     * Thumbnails sampled so far for the source storyboard. Transient, like
+     * `progress`: it ticks throughout the ingest pass and describes work that
+     * has to start over after a restart anyway, so it is never persisted.
+     */
+    storyboardThumbCount?: number;
+    /** True once the storyboard's final VTT is on disk. Transient, as above. */
+    storyboardComplete?: boolean;
     createdAt: number;
     /**
      * When this session last did anything.
@@ -456,6 +464,8 @@ export class SessionService implements OnModuleInit {
             thumbnailsVtt: session.thumbnailsVtt,
             segmentFormat: session.segmentFormat,
             ingestTotalBytes: session.ingestTotalBytes,
+            storyboardThumbCount: session.storyboardThumbCount,
+            storyboardComplete: session.storyboardComplete,
             hlsUrl: session.hlsUrl,
             ...extra,
         });
@@ -570,6 +580,34 @@ export class SessionService implements OnModuleInit {
         if (session) {
             session.progress = progress;
             session.lastActivityAt = Date.now();
+            this.emitEvent(session);
+        }
+    }
+
+    /**
+     * How many source-storyboard thumbnails exist so far.
+     *
+     * This is what makes the trim filmstrip fill in near-real-time: the client
+     * refetches the storyboard VTT when the count grows, rather than guessing
+     * on a backoff timer at how far an ffmpeg pass over the whole file has got.
+     * Not persisted, for the same reason `updateProgress` is not — it changes
+     * constantly and means nothing after a restart.
+     *
+     * `complete` marks the one report made after the final VTT is written. It
+     * cannot ride on the count alone: the last mid-pass report usually already
+     * carries the full count, and a repeat of the same number is not a change
+     * the client's watcher can see. A later generation pass (a restored
+     * session re-priming) clears it again through its own in-progress reports.
+     */
+    updateStoryboardProgress(
+        id: string,
+        thumbCount: number,
+        complete = false
+    ): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.storyboardThumbCount = thumbCount;
+            session.storyboardComplete = complete || undefined;
             this.emitEvent(session);
         }
     }

@@ -32,6 +32,8 @@ export function useSessionPoller() {
     const segmentFormat = ref<SegmentFormat | undefined>();
     const thumbnailsVtt = ref<string | undefined>();
     const ingestTotalBytes = ref<number | undefined>();
+    const storyboardThumbCount = ref<number | undefined>();
+    const storyboardComplete = ref<boolean | undefined>();
     const trimSegments = ref<TrimSegment[] | undefined>();
     const hlsUrl = ref<string | undefined>();
     const polling = ref(false);
@@ -64,6 +66,15 @@ export function useSessionPoller() {
         // clear it on subsequent events that omit the field.
         if (data.ingestTotalBytes != null) {
             ingestTotalBytes.value = data.ingestTotalBytes;
+        }
+        // Same carry-through for the storyboard count: it only ever grows while
+        // the source is sampled, and an encode-progress event that omits it is
+        // not saying the frames went away. The completion flag travels with it —
+        // it exists because the final report usually repeats the last count,
+        // which a watcher on the count alone cannot see.
+        if (data.storyboardThumbCount != null) {
+            storyboardThumbCount.value = data.storyboardThumbCount;
+            storyboardComplete.value = data.storyboardComplete;
         }
         // Submitted trim ranges are config, not progress: once reported they hold
         // for the rest of the session, so don't clear them on events that omit them.
@@ -102,6 +113,8 @@ export function useSessionPoller() {
         segmentFormat.value = undefined;
         thumbnailsVtt.value = undefined;
         ingestTotalBytes.value = undefined;
+        storyboardThumbCount.value = undefined;
+        storyboardComplete.value = undefined;
         trimSegments.value = undefined;
         hlsUrl.value = undefined;
 
@@ -171,6 +184,8 @@ export function useSessionPoller() {
         segmentFormat: readonly(segmentFormat),
         thumbnailsVtt: readonly(thumbnailsVtt),
         ingestTotalBytes: readonly(ingestTotalBytes),
+        storyboardThumbCount: readonly(storyboardThumbCount),
+        storyboardComplete: readonly(storyboardComplete),
         trimSegments: readonly(trimSegments),
         hlsUrl: readonly(hlsUrl),
         polling: readonly(polling),

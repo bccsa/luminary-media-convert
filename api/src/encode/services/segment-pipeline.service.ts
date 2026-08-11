@@ -10,13 +10,17 @@ import { S3Service } from './s3.service.js';
 
 /**
  * Work that happens after the segment pipeline has drained, before the status
- * leaves `encoding`.
+ * leaves `encoding` — and the remaining-files upload that follows it.
  *
- * Draining at 100% is not the encode finishing. Playlist key tags, a fresh
- * FFmpeg pass for thumbnail sprites, the waveform sidecar and text-asset
- * encryption all still have to run, and on a long source the sprites alone take
- * minutes. Reporting none of it left a finished-looking bar sitting over
- * unfinished work, which reads as stalled rather than busy.
+ * Draining at 100% is not the encode finishing. Playlist key tags, the
+ * thumbnail sprites, the waveform sidecar and text-asset encryption all still
+ * have to run, and then the playlists and sprites still have to be uploaded.
+ * Reporting none of it left a finished-looking bar sitting over unfinished
+ * work, which reads as stalled rather than busy.
+ *
+ * Identifiers rather than sentences: the client owns the wording, and one it
+ * does not recognise renders nothing, so an older client against a newer API
+ * degrades quietly instead of printing a raw key at the user.
  */
 export type PipelinePhase =
     | 'encoding'
@@ -24,7 +28,8 @@ export type PipelinePhase =
     | 'finalising-playlists'
     | 'thumbnails'
     | 'waveform'
-    | 'encrypting-playlists';
+    | 'encrypting-playlists'
+    | 'uploading-playlists';
 
 export interface PipelineProgress {
     encoding: number;
@@ -124,6 +129,13 @@ export class SegmentPipeline {
     // Upload queue
     private readonly uploadQueue: UploadTask[] = [];
     private activeUploads = 0;
+    /**
+     * Silences the segment-oriented progress emitter while `uploadRemainingFiles`
+     * runs. That method reports its own per-file figure; leaving `emitProgress()`
+     * live would have `executeUpload` interleave the segment-based `uploading:
+     * 100` with it after every file and the bar would jitter between the two.
+     */
+    private suppressProgressEvents = false;
 
     constructor(
         private readonly config: SegmentPipelineConfig,
@@ -696,18 +708,31 @@ export class SegmentPipeline {
     /**
      * Upload remaining files from the output directory (playlists, thumbnails, etc.)
      * that were not handled by the segment pipeline.
+     *
+     * `onFileProgress` is the only progress this phase has: the segment counters
+     * stopped meaning anything once drain finished, so the caller drives its own
+     * bar from the file count and `emitProgress()` is suppressed throughout.
      */
     async uploadRemainingFiles(
         outputDir: string,
-        exclude?: Set<string>
+        opts?: {
+            onFileProgress?: (uploadedCount: number, totalCount: number) => void;
+        }
     ): Promise<string[]> {
-        const additionalKeys: string[] = [];
         const files = await this.walkDir(outputDir);
 
+        const tasks: UploadTask[] = [];
         for (const filePath of files) {
-            if (exclude?.has(filePath)) continue;
-            // Skip internal build artifacts
-            if (filePath.endsWith('/concat.txt')) continue;
+            // Internal build artifacts. The packer removes its own list in a
+            // finally, so `pack-list.txt` is belt-and-braces — a crashed pack
+            // must not put its scratch file in the delivered output.
+            if (
+                filePath.endsWith('/concat.txt') ||
+                filePath.endsWith('/pack-list.txt')
+            ) {
+                continue;
+            }
+
             const relativePath = relative(outputDir, filePath)
                 .split(/[\\/]/)
                 .join('/');
@@ -715,22 +740,45 @@ export class SegmentPipeline {
                 ? posix.join(this.config.s3PathPrefix, relativePath)
                 : relativePath;
 
-            try {
-                await this.s3Service.uploadFile(
-                    this.s3Client,
-                    this.config.s3Config.bucket,
-                    filePath,
-                    objectKey
-                );
-                additionalKeys.push(objectKey);
-            } catch (err) {
-                throw new Error(
-                    `S3 upload failed for ${objectKey}: ${(err as Error).message}`
-                );
-            }
+            // Already sent during the streaming phase — every `init.mp4` is
+            // uploaded with `deleteAfterUpload: false`, so it is still on disk
+            // and would otherwise be uploaded a second time and land in `files`
+            // twice.
+            if (this.uploadedKeys.includes(objectKey)) continue;
+
+            tasks.push({ filePath, objectKey, deleteAfterUpload: false });
         }
 
-        this.uploadedKeys.push(...additionalKeys);
+        const total = tasks.length;
+        const additionalKeys: string[] = [];
+        let done = 0;
+
+        this.suppressProgressEvents = true;
+        try {
+            const worker = async (): Promise<void> => {
+                for (;;) {
+                    const task = tasks.shift();
+                    if (!task) return;
+                    // Reuses the 3-attempt retry and the `uploadedKeys` push.
+                    await this.executeUpload(task);
+                    additionalKeys.push(task.objectKey);
+                    opts?.onFileProgress?.(++done, total);
+                }
+            };
+
+            const workers = Array.from(
+                { length: Math.max(1, Math.min(this.uploadConcurrency, total)) },
+                () => worker()
+            );
+            // A failing worker rejects here and the method rejects with it, as
+            // before. The other workers finish whatever they had in flight —
+            // acceptable: the session is failing either way.
+            await Promise.all(workers);
+        } finally {
+            this.suppressProgressEvents = false;
+        }
+
+        // No `uploadedKeys.push` here: `executeUpload` already pushed each key.
         return additionalKeys;
     }
 
@@ -749,6 +797,7 @@ export class SegmentPipeline {
     }
 
     private emitProgress(): void {
+        if (this.suppressProgressEvents) return;
         if (!this.config.onProgress) return;
 
         // The estimate is preferred because it does not grow mid-encode, which

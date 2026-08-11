@@ -55,7 +55,10 @@ import { IngestService } from './services/ingest.service.js';
 import { S3Service } from './services/s3.service.js';
 import { HlsEditService } from '../hls-edit/hls-edit.service.js';
 import { WaveformService } from './services/waveform.service.js';
-import { ThumbnailService } from './services/thumbnail.service.js';
+import {
+    selectStoryboardTrack,
+    ThumbnailService,
+} from './services/thumbnail.service.js';
 import {
     SessionResponseDto,
     EncodeStartResponseDto,
@@ -480,6 +483,15 @@ export class EncodeController {
         // has no other way to learn it. The encode config form was assuming the
         // API default, which is right until a CMS asks for anything else.
         result.byteRange = session.config?.byteRange !== false;
+
+        // Not gated on status: the storyboard is sampled from 'uploaded'
+        // onwards and the SSE-fallback poller is the only thing that sees this
+        // when the event stream has dropped — which is precisely when it is
+        // needed.
+        if (session.storyboardThumbCount != null) {
+            result.storyboardThumbCount = session.storyboardThumbCount;
+            result.storyboardComplete = session.storyboardComplete;
+        }
 
         // Trim ranges are part of the submitted encode config, so they outlive the
         // client that sent them. Reporting them lets the UI keep showing the output
@@ -1003,13 +1015,26 @@ export class EncodeController {
         this.validatePreviewToken(sessionId, token);
 
         const session = this.sessionService.get(sessionId);
-        if (!session?.filePath) {
-            throw new NotFoundException('Source file not yet uploaded');
+
+        // Ingest still running — the file is being attached or probed, so
+        // whether this source has frames is not yet knowable. That is "ask
+        // again", not "never": ingest of a large multi-track file holds this
+        // state for tens of seconds, and a 404 here is read by the client as
+        // permanent, which left the timeline frameless for the whole configure
+        // phase. The genuinely permanent refusal comes after the probe, below.
+        if (!session?.filePath || !session.probeResult) {
+            this.sendEmptyStoryboard(res);
+            return;
         }
 
-        const video = session.probeResult?.videoTracks?.[0];
-        const duration = session.probeResult?.format?.duration ?? 0;
-        if (!video?.width || !video?.height || duration <= 0) {
+        // The same helper the ingest prime uses — the two have to agree, or a
+        // request landing after the prime asks for a storyboard of a different
+        // track and the cached cue geometry no longer matches the images.
+        const video = selectStoryboardTrack(session.probeResult.videoTracks);
+        const duration = session.probeResult.format?.duration ?? 0;
+        if (!video || duration <= 0) {
+            // Probed and found wanting: no video track, or no duration. This
+            // one is permanent, and 404 is what tells the client to stop asking.
             throw new NotFoundException('Source has no usable video track');
         }
 
@@ -1018,37 +1043,43 @@ export class EncodeController {
             {
                 inputPath: session.filePath,
                 duration,
+                trackIndex: video.index,
                 sourceWidth: video.width,
                 sourceHeight: video.height,
+                // A generation this request kicks off — a restored session, or
+                // an ingest prime that failed — has to report the same way the
+                // prime does, or the client is left polling blind for the one
+                // case where it started the pass itself.
+                onProgress: (count, complete) =>
+                    this.sessionService.updateStoryboardProgress(
+                        sessionId,
+                        count,
+                        complete
+                    ),
             }
         );
 
-        // No sprite written yet. Generation was just started by the call above,
-        // so this is "ask again", not "never" — and the difference has to reach
-        // the client as something other than 404, which it reads as permanent.
-        // The two genuinely permanent cases (no source file, no usable video
-        // track) are already 404 above, before any sampling is attempted.
+        // No thumbnail written yet. Generation was just started by the call
+        // above, so this is "ask again", not "never" — and the difference has
+        // to reach the client as something other than 404, which it reads as
+        // permanent. The one genuinely permanent case (probed, no usable video
+        // track) is already 404 above, before any sampling is attempted.
         //
         // Answering with an empty but explicitly incomplete storyboard is what
         // the polling contract already expects: nought cues means nothing to
         // draw, and `X-Storyboard-Complete: false` means keep asking.
         if (!result) {
-            res.set({
-                'Content-Type': 'text/vtt',
-                'Cache-Control': 'no-store',
-                'X-Storyboard-Complete': 'false',
-                'Cross-Origin-Resource-Policy': 'cross-origin',
-            });
-            res.send('WEBVTT\n');
+            this.sendEmptyStoryboard(res);
             return;
         }
 
         // Cues carry bare filenames; a client resolving them against the VTT URL
         // would drop the token and be turned away. Point them at the sprite route
-        // outright instead.
+        // outright instead. `thumb_` is the source storyboard's individual
+        // frames, `sprite_` a packed sheet — this route can serve either.
         const base = `${req.protocol}://${req.get('host')}/api/sessions/${sessionId}/thumbnails`;
         const vtt = result.vtt.replace(
-            /^(sprite_\d+\.\w+)(#.*)?$/gm,
+            /^((?:sprite|thumb)_\d+\.\w+)(#.*)?$/gm,
             (_m, file: string, frag = '') =>
                 `${base}/${file}?token=${encodeURIComponent(token)}${frag}`
         );
@@ -1070,6 +1101,21 @@ export class EncodeController {
         res.send(vtt);
     }
 
+    /**
+     * The storyboard's "not yet" answer: no cues to draw, and an explicit
+     * signal to keep polling. Used both while ingest is still probing the
+     * source and while sampling has started but produced nothing.
+     */
+    private sendEmptyStoryboard(res: Response): void {
+        res.set({
+            'Content-Type': 'text/vtt',
+            'Cache-Control': 'no-store',
+            'X-Storyboard-Complete': 'false',
+            'Cross-Origin-Resource-Policy': 'cross-origin',
+        });
+        res.send('WEBVTT\n');
+    }
+
     @Get(':sessionId/thumbnails/:filename')
     @SkipThrottle()
     @ApiOperation({ summary: 'Get a storyboard sprite sheet for the source' })
@@ -1085,7 +1131,9 @@ export class EncodeController {
 
         // Only ever the files this service produces: the name is part of a path,
         // so anything else could walk out of the directory.
-        const match = filename.match(/^sprite_\d+\.(webp|jpg|jpeg|png)$/);
+        const match = filename.match(
+            /^(?:sprite|thumb)_\d+\.(webp|jpg|jpeg|png)$/
+        );
         if (!match) throw new NotFoundException('Invalid sprite filename');
 
         const path = join(

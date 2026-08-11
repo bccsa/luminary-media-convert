@@ -21,6 +21,7 @@ import { WaveformService } from './waveform.service.js';
 import { S3Service } from './s3.service.js';
 import {
     SegmentPipelineService,
+    type PipelineProgress,
     type SegmentPipeline,
 } from './segment-pipeline.service.js';
 import type { CreateSessionDto } from '../dto/create-session.dto.js';
@@ -115,7 +116,7 @@ describe('EncodeService', () => {
         } as any;
 
         thumbnailService = {
-            generateThumbnails: vi.fn().mockResolvedValue({
+            packForDelivery: vi.fn().mockResolvedValue({
                 vttRelativePath: 'thumbnails/thumbnails.vtt',
             }),
             removePreview: vi.fn().mockResolvedValue(undefined),
@@ -123,6 +124,9 @@ describe('EncodeService', () => {
 
         waveformService = {
             generateWaveform: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+            cachePath: vi.fn((id: string) =>
+                join(testWorkDir, id, 'waveform.json')
+            ),
         } as any;
 
         // Uploads run through SegmentPipelineService, mocked below; this stands
@@ -610,42 +614,55 @@ describe('EncodeService', () => {
         );
     });
 
-    it('should call thumbnailService for video encodes by default', async () => {
+    it('hands the packer the source timeline and the tracks to lay out', async () => {
+        // Nothing is decoded here: the frames were sampled once at ingest, so
+        // what the packer needs is which of them the output timeline keeps —
+        // the source duration, the trim ranges and the video tracks. The
+        // trimmed-duration arithmetic and the concat file moved into the
+        // service with it.
+        const trimSegments = [{ inSec: 10, outSec: 40 }];
+        const videoTracks = [
+            {
+                index: 0,
+                codec: 'h264',
+                width: 1920,
+                height: 1080,
+                bitrateKbps: 5000,
+                frameRate: 24,
+            },
+        ];
         const session = sessionService.create(makeConfig());
         sessionService.setFilePath(session.id, '/tmp/input.mp4');
-        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+        sessionService.setEncodeConfig(session.id, {
+            ...makeEncodeConfig(),
+            trimSegments,
+        });
         sessionService.setProbeResult(session.id, {
             format: {
                 duration: 120,
                 bitrateKbps: 5000,
                 formatName: 'matroska',
             },
-            videoTracks: [
-                {
-                    index: 0,
-                    codec: 'h264',
-                    width: 1920,
-                    height: 1080,
-                    bitrateKbps: 5000,
-                    frameRate: 24,
-                },
-            ],
+            videoTracks,
             audioTracks: [],
         });
 
         await service.processSession(session.id);
 
-        expect(thumbnailService.generateThumbnails).toHaveBeenCalledWith(
-            expect.objectContaining({
-                inputPath: '/tmp/input.mp4',
-                duration: 120,
-                sourceWidth: 1920,
-                sourceHeight: 1080,
-            })
-        );
+        expect(thumbnailService.packForDelivery).toHaveBeenCalledWith({
+            sessionId: session.id,
+            inputPath: '/tmp/input.mp4',
+            outputDir: expect.stringContaining('output'),
+            sourceDuration: 120,
+            trimSegments,
+            videoTracks,
+        });
     });
 
-    it('should not call thumbnailService when thumbnails is false', async () => {
+    it('does not pack a storyboard when the session asked for no thumbnails', async () => {
+        // The flag now gates only the pack and its S3 delivery — the individual
+        // thumbs are sampled at ingest either way, because the trim filmstrip
+        // needs them. "No thumbnails in the output" is unchanged.
         const config = makeConfig();
         (config as any).thumbnails = false;
         const session = sessionService.create(config);
@@ -654,7 +671,7 @@ describe('EncodeService', () => {
 
         await service.processSession(session.id);
 
-        expect(thumbnailService.generateThumbnails).not.toHaveBeenCalled();
+        expect(thumbnailService.packForDelivery).not.toHaveBeenCalled();
     });
 
     it('should not call thumbnailService for audio-only encodes', async () => {
@@ -676,11 +693,13 @@ describe('EncodeService', () => {
 
         await service.processSession(session.id);
 
-        expect(thumbnailService.generateThumbnails).not.toHaveBeenCalled();
+        expect(thumbnailService.packForDelivery).not.toHaveBeenCalled();
     });
 
     it('should complete session even when thumbnail generation fails', async () => {
-        thumbnailService.generateThumbnails.mockRejectedValue(
+        // A storyboard is a nicety; the output is already in the bucket. Failing
+        // the session over it would report a good encode as a broken one.
+        thumbnailService.packForDelivery.mockRejectedValue(
             new Error('FFmpeg thumbnail error')
         );
 
@@ -841,7 +860,11 @@ describe('EncodeService', () => {
             // bar already reads 100%, and it is where byte-range playlists are
             // rewritten — so leaving it out left the earliest part of the wait
             // unaccounted for.
-            expect(await phasesFor()).toEqual(['draining', 'thumbnails']);
+            expect(await phasesFor()).toEqual([
+                'draining',
+                'thumbnails',
+                'uploading-playlists',
+            ]);
         });
 
         it('names the waveform too, when the source has audio to draw', async () => {
@@ -853,20 +876,42 @@ describe('EncodeService', () => {
                 audioTracks: [{ index: 0, language: 'eng' }],
             });
 
-            expect(phases).toEqual(['draining', 'thumbnails', 'waveform']);
+            expect(phases).toEqual([
+                'draining',
+                'thumbnails',
+                'waveform',
+                'uploading-playlists',
+            ]);
         });
 
-        it('clears the phase before the status leaves encoding', async () => {
-            // Otherwise the last post-drain step captions the S3 upload after it.
+        it('never lets a finished step caption the upload after it', async () => {
+            // The upload has a caption of its own, and it has to be in place
+            // before the status changes: one event carrying the previous step's
+            // phase would attribute the upload to whatever ran before it, which
+            // is the thing this caption exists to prevent.
             const updateSpy = vi.spyOn(sessionService, 'updatePipelineProgress');
+            const statusSpy = vi.spyOn(sessionService, 'updateStatus');
             const session = sessionService.create(makeConfig());
             sessionService.setFilePath(session.id, '/tmp/input.mp4');
             sessionService.setEncodeConfig(session.id, makeEncodeConfig());
 
             await service.processSession(session.id);
 
+            const flipOrder = statusSpy.mock.invocationCallOrder[
+                statusSpy.mock.calls.findIndex(
+                    ([, status]) => status === 'uploading_to_s3'
+                )
+            ];
+            // The last caption emitted before the status flipped.
+            const captionAtFlip = updateSpy.mock.calls
+                .filter((_, i) => updateSpy.mock.invocationCallOrder[i] < flipOrder)
+                .map(([, progress]) => (progress as { phase?: string }).phase)
+                .at(-1);
+
+            expect(captionAtFlip).toBe('uploading-playlists');
+
             const last = updateSpy.mock.calls.at(-1)?.[1] as { phase?: string };
-            expect(last.phase).toBeUndefined();
+            expect(last.phase).toBe('uploading-playlists');
         });
     });
 
@@ -1048,7 +1093,7 @@ describe('EncodeService — encrypting the text assets last', () => {
         } as any;
 
         thumbnailService = {
-            generateThumbnails: vi.fn(async () => {
+            packForDelivery: vi.fn(async () => {
                 calls.push('thumbnails');
                 return { vttRelativePath: 'thumbnails/thumbnails.vtt' };
             }),
@@ -1138,5 +1183,264 @@ describe('EncodeService — encrypting the text assets last', () => {
         await run(makeConfig());
 
         expect(encryptionService.encryptTextAssets).not.toHaveBeenCalled();
+    });
+});
+
+/**
+ * Everything between the last segment and the completion event — packing the
+ * storyboard, writing the waveform, encrypting the playlists, uploading them —
+ * used to happen in silence. On a long encode that is several minutes with
+ * every bar frozen at 100% and no way to tell a working session from a hung
+ * one. Each step now names itself, and the bars keep their values while it does.
+ */
+describe('EncodeService — naming the finalize phases', () => {
+    let service: EncodeService;
+    let sessionService: SessionService;
+    let thumbnailService: Mocked<ThumbnailService>;
+    let waveformService: Mocked<WaveformService>;
+    let mockPipeline: SegmentPipeline;
+    let emissions: PipelineProgress[];
+    /** Whatever `uploadRemainingFiles` was handed to report per-file progress. */
+    let onFileProgress:
+        | ((done: number, total: number) => void)
+        | undefined;
+    let testWorkDir: string;
+
+    /** An encode with every finalize step in play: video, audio, encryption. */
+    function makeFullConfig(): CreateSessionDto {
+        return { ...makeConfig(), encryption: { enabled: true } };
+    }
+
+    const probeWithAudio = {
+        format: { duration: 120, bitrateKbps: 5000, formatName: 'matroska' },
+        videoTracks: [
+            {
+                index: 0,
+                codec: 'h264',
+                width: 1920,
+                height: 1080,
+                bitrateKbps: 5000,
+                frameRate: 24,
+            },
+        ],
+        audioTracks: [
+            { index: 1, codec: 'aac', channels: 2, bitrateKbps: 192 },
+        ],
+    } as any;
+
+    beforeEach(() => {
+        testWorkDir = mkdtempSync(join(tmpdir(), 'luminary-phase-'));
+        process.env.WORK_DIR = testWorkDir;
+        emissions = [];
+        onFileProgress = undefined;
+
+        sessionService = new SessionService({ emit: () => {} } as any);
+        vi.spyOn(sessionService, 'updatePipelineProgress').mockImplementation(
+            (_id, progress) => {
+                emissions.push(progress);
+            }
+        );
+
+        const ffmpegService = {
+            // Real FFmpeg creates the output directory it writes into, and the
+            // waveform sidecar is written there — without it that step fails
+            // for a reason no user would ever hit.
+            encode: vi.fn(async (opts: any) => {
+                mkdirSync(opts.outputDir, { recursive: true });
+                return {
+                    outputDir: opts.outputDir,
+                    masterPlaylist: 'master.m3u8',
+                    segmentFormat: 'fmp4',
+                };
+            }),
+        } as any;
+
+        const encryptionService = {
+            generateKey: vi.fn().mockReturnValue(Buffer.alloc(16, 0xcd)),
+            generateIV: vi.fn().mockReturnValue(Buffer.alloc(16, 0xab)),
+            injectKeyTagsIntoPlaylists: vi.fn().mockResolvedValue(undefined),
+            encryptTextAssets: vi.fn().mockResolvedValue([]),
+        } as any;
+
+        thumbnailService = {
+            packForDelivery: vi.fn().mockResolvedValue({
+                vttRelativePath: 'thumbnails/thumbnails.vtt',
+            }),
+            removePreview: vi.fn().mockResolvedValue(undefined),
+        } as any;
+
+        waveformService = {
+            generateWaveform: vi.fn().mockResolvedValue([0.1, 0.2]),
+            cachePath: vi.fn((id: string) =>
+                join(testWorkDir, id, 'waveform-cache.json')
+            ),
+        } as any;
+
+        mockPipeline = {
+            start: vi.fn(),
+            drain: vi.fn().mockResolvedValue([]),
+            abort: vi.fn(),
+            uploadRemainingFiles: vi.fn(async (_dir: string, opts?: any) => {
+                onFileProgress = opts?.onFileProgress;
+                return [];
+            }),
+            get error() {
+                return null;
+            },
+            get keys() {
+                return ['master.m3u8'];
+            },
+        } as any;
+
+        service = new EncodeService(
+            sessionService,
+            ffmpegService,
+            encryptionService,
+            thumbnailService,
+            waveformService,
+            {} as any,
+            { createPipeline: vi.fn().mockReturnValue(mockPipeline) } as any
+        );
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+        rmSync(testWorkDir, { recursive: true, force: true });
+        delete process.env.WORK_DIR;
+    });
+
+    async function run(
+        config: CreateSessionDto,
+        encodeConfig: EncodeConfigDto = makeEncodeConfig(),
+        probeResult: any = probeWithAudio
+    ): Promise<string> {
+        const session = sessionService.create(config);
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, encodeConfig);
+        if (probeResult) sessionService.setProbeResult(session.id, probeResult);
+        await service.processSession(session.id);
+        return session.id;
+    }
+
+    /** The labels in the order they first appeared, ignoring repeats. */
+    const phaseSequence = (): (string | undefined)[] =>
+        emissions
+            .map((p) => p.phase)
+            .filter((phase, i, all) => phase && phase !== all[i - 1]);
+
+    it('names every finalize step, in the order they run', async () => {
+        await run(makeFullConfig());
+
+        expect(phaseSequence()).toEqual([
+            'draining',
+            'finalising-playlists',
+            'thumbnails',
+            'waveform',
+            'encrypting-playlists',
+            'uploading-playlists',
+        ]);
+    });
+
+    it('keeps the bars alongside the label rather than replacing them', async () => {
+        // The label rides on the same progress object the bars do, so a
+        // phase-bearing emission that dropped `encoding` would blank the bar it
+        // is meant to explain. FFmpeg's own reporting stops a hair short, so
+        // encoding is pinned to 100 once the drain is provably over.
+        await run(makeFullConfig());
+
+        const labelled = emissions.filter((p) => p.phase);
+        expect(labelled.length).toBeGreaterThan(0);
+        for (const progress of labelled) {
+            expect(progress.encoding).toBe(100);
+            expect(progress.uploading).toBeDefined();
+        }
+    });
+
+    it('does not zero the overall progress before the final upload', async () => {
+        // That reset dropped the session's own percentage back to 0 just as the
+        // last phase started, so the UI showed a finished encode restarting.
+        const updateProgress = vi.spyOn(sessionService, 'updateProgress');
+
+        await run(makeFullConfig());
+
+        expect(updateProgress).not.toHaveBeenCalled();
+    });
+
+    it('says nothing about thumbnails for an audio-only encode', async () => {
+        await run(makeFullConfig(), {
+            type: 'audio',
+            audioGroups: makeEncodeConfig().audioGroups,
+        });
+
+        expect(phaseSequence()).not.toContain('Generating thumbnails');
+    });
+
+    it('says nothing about thumbnails when the session asked for none', async () => {
+        await run({ ...makeFullConfig(), thumbnails: false } as any);
+
+        expect(phaseSequence()).not.toContain('Generating thumbnails');
+        expect(thumbnailService.packForDelivery).not.toHaveBeenCalled();
+    });
+
+    it('says nothing about encryption for an unencrypted session', async () => {
+        await run(makeConfig());
+
+        expect(phaseSequence()).not.toContain('encrypting-playlists');
+    });
+
+    it('says nothing about a waveform when the source has no audio', async () => {
+        await run(makeFullConfig(), makeEncodeConfig(), {
+            ...probeWithAudio,
+            audioTracks: [],
+        });
+
+        expect(phaseSequence()).not.toContain('waveform');
+        expect(waveformService.generateWaveform).not.toHaveBeenCalled();
+    });
+
+    describe('the remaining-files upload bar', () => {
+        it('is driven by the file count the pipeline reports', async () => {
+            await run(makeFullConfig());
+
+            expect(mockPipeline.uploadRemainingFiles).toHaveBeenCalledWith(
+                expect.stringContaining('output'),
+                expect.objectContaining({
+                    onFileProgress: expect.any(Function),
+                })
+            );
+            expect(onFileProgress).toBeDefined();
+
+            emissions.length = 0;
+            onFileProgress!(1, 4);
+            onFileProgress!(3, 4);
+            onFileProgress!(4, 4);
+
+            expect(emissions.map((p) => p.uploading)).toEqual([25, 75, 100]);
+            expect(
+                emissions.every(
+                    (p) => p.phase === 'uploading-playlists'
+                )
+            ).toBe(true);
+        });
+
+        it('reads 100 rather than NaN when there is nothing left to upload', async () => {
+            await run(makeFullConfig());
+
+            emissions.length = 0;
+            onFileProgress!(0, 0);
+
+            expect(emissions.at(-1)?.uploading).toBe(100);
+        });
+
+        it('starts the bar from zero, because it is counting different files', async () => {
+            // Until now it counted segments; these are playlists and sprites.
+            // The phase text is what explains the reset to the user.
+            await run(makeFullConfig());
+
+            const uploadPhase = emissions.filter(
+                (p) => p.phase === 'uploading-playlists'
+            );
+            expect(uploadPhase[0].uploading).toBe(0);
+        });
     });
 });

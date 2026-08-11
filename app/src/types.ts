@@ -47,15 +47,16 @@ export type PipelinePhase =
     | 'finalising-playlists'
     | 'thumbnails'
     | 'waveform'
-    | 'encrypting-playlists';
+    | 'encrypting-playlists'
+    | 'uploading-playlists';
 
 export interface PipelineProgress {
     encoding: number;
     encrypting?: number;
     uploading?: number;
     /**
-     * The post-drain step now running. Present only while those steps are, and
-     * absent for everything before and after them.
+     * The step now running, from the drain onwards. Present only while those
+     * steps are, and absent for everything before and after them.
      */
     phase?: PipelinePhase;
 }
@@ -98,6 +99,10 @@ export interface SessionStatusResponse {
     encoder?: AccelMode;
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
+    /** Source-storyboard thumbnails sampled so far; grows during ingest-time generation. */
+    storyboardThumbCount?: number;
+    /** True once the source storyboard is fully sampled and its VTT is final. */
+    storyboardComplete?: boolean;
     /** Trim ranges submitted with the encode config, in source-timeline seconds. */
     trimSegments?: TrimSegment[];
 }

@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Expose, Type } from 'class-transformer';
 import { ProbeResultDto } from './probe-result.dto.js';
+import type { PipelinePhase } from '../services/segment-pipeline.service.js';
 
 export class SessionResponseDto {
     @ApiProperty({
@@ -136,14 +137,25 @@ export class SessionStatusDto {
     @ApiPropertyOptional({
         description:
             'Detailed pipeline progress with separate encoding, encrypting, and uploading indicators. ' +
-            'Present when status is "encoding" or "uploading_to_s3".',
-        example: { encoding: 45.5, encrypting: 30, uploading: 10 },
+            'Present when status is "encoding" or "uploading_to_s3". ' +
+            '"phase" identifies the step running after the segment pipeline drains — ' +
+            'draining, finalising-playlists, thumbnails, waveform, encrypting-playlists, ' +
+            'uploading-playlists — most of which report no percentage of their own. ' +
+            'It is an identifier, not a sentence: the client owns the wording, and one it ' +
+            'does not recognise renders nothing.',
+        example: {
+            encoding: 100,
+            encrypting: 100,
+            uploading: 40,
+            phase: 'uploading-playlists',
+        },
     })
     @Expose()
     pipelineProgress?: {
         encoding: number;
         encrypting?: number;
         uploading?: number;
+        phase?: PipelinePhase;
     };
 
     @ApiPropertyOptional({
@@ -278,6 +290,26 @@ export class SessionStatusDto {
     })
     @Expose()
     ingestTotalBytes?: number;
+
+    @ApiPropertyOptional({
+        description:
+            'Thumbnails sampled so far for the source storyboard. Grows while the ' +
+            'ingest-time sampling pass runs; the client refetches the storyboard VTT ' +
+            'when this grows, rather than polling blindly for more frames.',
+        example: 120,
+    })
+    @Expose()
+    storyboardThumbCount?: number;
+
+    @ApiPropertyOptional({
+        description:
+            'True once the source storyboard is fully sampled and its VTT is final. ' +
+            'A separate flag because the last in-progress report usually already ' +
+            'carries the full thumbnail count.',
+        example: true,
+    })
+    @Expose()
+    storyboardComplete?: boolean;
 
     @ApiPropertyOptional({
         description:
