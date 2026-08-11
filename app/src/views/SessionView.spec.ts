@@ -14,15 +14,19 @@ import { shallowMount, flushPromises } from '@vue/test-utils';
  * about this view's own wiring.
  */
 
-const { detail, status, waveform, push, deleteSessionMock } = vi.hoisted(() => ({
-    detail: vi.fn(),
-    status: vi.fn(),
-    waveform: vi.fn(),
-    // Shared rather than minted per useRouter() call, so a test can assert that
-    // the view did *not* navigate.
-    push: vi.fn(),
-    deleteSessionMock: vi.fn(),
-}));
+const { detail, status, waveform, subscribe, push, deleteSessionMock } =
+    vi.hoisted(() => ({
+        detail: vi.fn(),
+        status: vi.fn(),
+        waveform: vi.fn(),
+        // Handled rather than ignored, so a test can assert which statuses open
+        // an event stream — and drive the events the view reacts to.
+        subscribe: vi.fn(),
+        // Shared rather than minted per useRouter() call, so a test can assert
+        // that the view did *not* navigate.
+        push: vi.fn(),
+        deleteSessionMock: vi.fn(),
+    }));
 
 vi.mock('vue-router', () => ({
     useRoute: () => ({ params: { id: 'sess-1' } }),
@@ -39,7 +43,7 @@ vi.mock('../api', () => ({
     ingestLocalFile: vi.fn().mockResolvedValue({}),
     startEncode: vi.fn().mockResolvedValue({}),
     deleteSession: deleteSessionMock,
-    subscribeSessionEvents: vi.fn(),
+    subscribeSessionEvents: subscribe,
     getChapters: vi.fn().mockResolvedValue(null),
     putChapters: vi.fn().mockResolvedValue(undefined),
 }));
@@ -415,6 +419,15 @@ describe('SessionView', () => {
             );
         });
 
+        it('captions the upload that follows, whose bar restarts from zero', async () => {
+            // The one phase that outlives `encoding`. Without it the S3 bar
+            // dropping back to 0 for the playlists and sprites reads as work
+            // being lost rather than as a different set of files being counted.
+            expect(await captionFor('uploading-playlists')).toContain(
+                'Uploading playlists'
+            );
+        });
+
         it('says nothing while the segment pipeline is still the whole story', async () => {
             // The bar already reads "Encoding"; a caption there would be noise.
             expect(await captionFor()).toBeNull();
@@ -564,6 +577,110 @@ describe('SessionView', () => {
             await flushPromises();
 
             expect(status).toHaveBeenCalled();
+        });
+    });
+
+    /**
+     * The event stream is what tells this page that thumbnails, ingest bytes and
+     * pipeline phases have moved. A page that never opens one is not merely a
+     * little behind: everything it shows falls back to whatever slow safety net
+     * each consumer happens to have.
+     */
+    describe('the event stream after a load', () => {
+        const streamOpened = () =>
+            subscribe.mock.calls.some((c) => c[0] === 'sess-1');
+
+        it('opens one for a session loaded in the configure phase', async () => {
+            // The bug this pins: 'uploaded' returned early and started nothing,
+            // so a page loaded or reloaded while the user was choosing cuts had
+            // no stream at all and the filmstrip waited out the storyboard's
+            // 20-second parachute before showing a single frame.
+            await mountView();
+
+            expect(streamOpened()).toBe(true);
+        });
+
+        it('opens one for a session whose file has not arrived yet', async () => {
+            // The file may be attached from another window; this page should
+            // see that happen rather than sit on a stale picker.
+            detail.mockResolvedValue(uploadedSession({ status: 'created' }));
+            status.mockResolvedValue({ status: 'created' });
+
+            await mountView();
+
+            expect(streamOpened()).toBe(true);
+        });
+
+        it('opens one for a session that is already encoding', async () => {
+            detail.mockResolvedValue(uploadedSession({ status: 'encoding' }));
+            status.mockResolvedValue({ status: 'encoding' });
+
+            await mountView();
+
+            expect(streamOpened()).toBe(true);
+        });
+
+        it('opens none for a completed session, which has nothing left to say', async () => {
+            detail.mockResolvedValue(
+                uploadedSession({
+                    status: 'completed',
+                    masterPlaylist: 'out/master.m3u8',
+                })
+            );
+            status.mockResolvedValue({ status: 'completed' });
+
+            await mountView();
+
+            expect(streamOpened()).toBe(false);
+        });
+    });
+
+    /**
+     * The filmstrip refetches when the encoder says it has sampled more frames.
+     * That signal folds the completion flag into the count, because the final
+     * report is made after the finished VTT is written and usually repeats the
+     * last count it already announced — a repeat the watcher cannot see.
+     */
+    describe('storyboard refresh signal', () => {
+        const storyboardFetches = () =>
+            (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+                (c) => String(c[0]).includes('thumbnails.vtt')
+            ).length;
+
+        /** Push an event the way the session's SSE stream would. */
+        async function push(fields: Record<string, unknown>) {
+            const onEvent = subscribe.mock.calls[0][2];
+            onEvent({ status: 'uploaded', ...fields });
+            await flushPromises();
+        }
+
+        it('refetches when the encoder reports more frames', async () => {
+            await mountView();
+            const before = storyboardFetches();
+
+            await push({ storyboardThumbCount: 123 });
+
+            expect(storyboardFetches()).toBe(before + 1);
+        });
+
+        it('spends nothing on a report that repeats the count', async () => {
+            await mountView();
+            await push({ storyboardThumbCount: 123 });
+            const before = storyboardFetches();
+
+            await push({ storyboardThumbCount: 123 });
+
+            expect(storyboardFetches()).toBe(before);
+        });
+
+        it('reads the finished report as news even at an unchanged count', async () => {
+            await mountView();
+            await push({ storyboardThumbCount: 123 });
+            const before = storyboardFetches();
+
+            await push({ storyboardThumbCount: 123, storyboardComplete: true });
+
+            expect(storyboardFetches()).toBe(before + 1);
         });
     });
 
