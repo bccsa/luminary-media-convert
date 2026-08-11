@@ -191,6 +191,8 @@ Whatever is chosen must cope with the case where the CMS document was deleted en
 
 `npm -w electron run fetch-binaries` downloads the pair, checks a pinned SHA-256, verifies the architecture and the encoders the app actually asks for, and writes the GPL licence text beside them. `dist:mac` and `dist:win` depend on it, so a build can no longer quietly produce an app with no encoder in it.
 
+**`pack` is the exception, and it does exactly what the sentence above says it cannot.** `pack` deliberately skips `fetch-binaries` — a `--dir` smoke-test build should not pull 100 MB — and electron-builder treats a missing `extraResources` source as a **warning**, not an error: `file source doesn't exist  from=…/electron/bin/darwin-arm64`, then it packages happily. Confirmed by parking the binaries and packing: an `.app` was produced with the web client present and `Resources/ffmpeg` / `Resources/ffprobe` absent. Nothing downstream notices, because the app starts fine without them — see item 35. Either `pack` should fetch too, or it should fail loudly when the source is missing; the current middle ground is the one that misleads.
+
 **Verified rather than assumed:** the packaged `.app` was launched with `PATH=/usr/bin:/bin` — no Homebrew, no system ffmpeg — and reported `Apple Silicon detected, using VideoToolbox acceleration`, which it can only do by running the bundled binary. The `.dmg` is 146 MB.
 
 Two things checked along the way and recorded in `bin/README.md`: evermeet.cx publishes x86_64 only, which would run under Rosetta on the machines this app targets; and Homebrew's ffmpeg links against eighteen dylibs under `/opt/homebrew`, so it cannot start anywhere those are absent.
@@ -749,3 +751,43 @@ Proven end to end: `app/dist`, `api/dist` and `electron/dist` were all deleted t
 - CPU contention is the real unknown. Video encoding runs on VideoToolbox, but audio, scaling and the sprite pass are all CPU. The win is large enough (115 s serial today) that it is very likely still a win, but it should be measured the same way rather than assumed — the timing logs added in item 27 make that a repeat of the same run.
 - Failure stays non-fatal, as it is now: a session without sprites is a session without a scrub filmstrip, not a failed encode.
 
+
+---
+
+## 35. A missing ffmpeg is reported as a working CPU-only install
+
+**Found while proving out item 33's packaging changes**, by packing with the bundled binaries parked and launching the result with `PATH=/usr/bin:/bin` — no ffmpeg bundled, none on the system.
+
+**Today.** The app starts cleanly, serves the UI, answers `/api/cms/health`, and logs:
+
+```
+[FfmpegService] No GPU found, using CPU encoding
+[FfmpegService] FFmpeg threads: 8
+```
+
+Which reads as *this will work, just slowly*. Nothing will work. `detectAcceleration()` calls `detectNvidiaGpu()` then `detectAppleGpu()`, and each wraps its probes in `try { execSync(...) } catch { return false }` — so `ENOENT` from a binary that is not there is indistinguishable from an ffmpeg that simply has no NVENC. Both fall through to `'cpu'`, and `'cpu'` is reported as a capability rather than as a guess. The user finds out when they pick a file and start an encode, by which point they have chosen a destination in the CMS and waited for a probe.
+
+**Wanted.** A presence check separate from the capability check — run `ffmpeg -version` and `ffprobe -version` once at startup and distinguish three states, not two: *missing*, *present without hardware acceleration*, *present with*. Missing should be surfaced to the renderer as a first-class condition, not left for the first encode to discover. `bootstrap.ts` already reports `encoder` on every status response, so the shape for carrying it exists.
+
+**Worth noting the failure is silent at both ends.** Packaging does not complain when the binaries are absent (item 5a), and the app does not complain when they are missing at runtime. Either check on its own would have caught the pair.
+
+**Blocks nothing today** — every shipped path bundles the binaries, and `dist:mac` / `dist:win` fetch them. It matters the moment either changes, which is item 36.
+
+---
+
+## 36. Decision: keep bundling ffmpeg, or ask the user to install it?
+
+**Raised by Ivan (11 Aug 2026):** if a user does not have ffmpeg, we could ask them to install it rather than embedding it in the Electron app.
+
+**The case for it is real.** The `.dmg` is 146 MB, almost all of it ffmpeg. Shipping a GPL build also carries obligations that `electron/bin/README.md` sets out, and which someone at BCC has to own before a public release. Not bundling makes both of those go away.
+
+**What it would cost, measured rather than guessed** (see item 35 for the runs):
+
+- **There is no "ffmpeg not found" path at all.** Today a machine without it is told "No GPU found, using CPU encoding" and fails later, mid-session. Item 35 is the prerequisite, not an optional polish.
+- **A user's own build is a lottery.** Hardware encoding is a compile-time decision. macOS has Homebrew, but its ffmpeg links eighteen dylibs under `/opt/homebrew` (5a) and is Intel-only from evermeet.cx; on Windows most published builds lack NVENC. The difference is not cosmetic: a 20-minute 1080p source encoded in 125 s on VideoToolbox (item 27), and CPU is several times that on the same hardware.
+- **Version skew becomes ours to support.** The pipeline passes `scale_vt`, `-hls_fmp4_init_filename`, `-movflags +negative_cts_offsets+default_base_moof`, `-var_stream_map`. An older distro ffmpeg fails on these in ways no one here can reproduce, from a machine we cannot inspect.
+- **The audience is CMS editors, not developers.** "Install ffmpeg and put it on your PATH" is a support ticket per user on Windows, and the person answering it is us.
+
+**A third option worth putting to Ivan:** keep controlling *which* build is used, but stop shipping it inside the installer — fetch the same pinned, digest-checked binary on first run, which `fetch-binaries` already does at build time. That drops the installer to a few megabytes and puts the ffmpeg download outside our distribution, while leaving no room for a user's own build to vary. It needs a first-run UI, a failure path for no network, and a decision about where the binaries live on disk.
+
+**Not a decision for this repo.** Installer size, licensing exposure and support load are the trade, and the people carrying each should pick. What this repo can say is that the "ask the user" option is not free today: item 35 has to land first, or the first thing a user without ffmpeg sees is an encode that fails after they have committed to a destination.
