@@ -83,6 +83,23 @@ The encoder's half of the contract is done and documented (CLAUDE.md "CMS contra
 - Player-side: **adopt `@luminary-media-converter/player-web`** (or `player-core` with an adapter) rather than wiring the `hls/` helpers by hand — it already does angle extraction, the `luminary://key` swap from memory, quality capping, chapters, subtitles, recovery, and the "not available yet" state as a `coming-soon` slot that polls until the playlist appears. Since #162 an encrypted session also encrypts its playlists and VTTs, which only these packages can read.
 - Passing `existingMedia { hlsUrl, hlsKey }` for edit mode once item 1 lands (the DTO already accepts it).
 
+**If any Luminary surface will play this output with something other than `player-core`** — plain hls.js, Video.js, an iOS `<video>` — then two rules are not optional, per the measurements in §0a:
+
+1. **Send it unencrypted.** `encryption.encryptPlaylists: false` alone is not enough: the playlist parses and then `#EXT-X-KEY` still names `luminary://key`, which no player can resolve. Making it work needs a `keyUrl` serving the raw key over HTTP, which this encoder deliberately is not.
+2. **Send it single-angle.** A stock player cannot tell a camera angle from a bitrate rung — both are just `#EXT-X-STREAM-INF` variants — so it opens on whichever bitrate its ABR picks and may cross between angles mid-playback. Either encode one angle, or narrow the master client-side with `extractAnglePlaylist`.
+
+**Failure signatures, for whoever fields the bug report.** Both of the above fail in ways that point away from the cause:
+
+| Symptom | Actual cause |
+|---|---|
+| iOS/Safari: spinner that never resolves, **no `error` event at all** | Encrypted playlists (LMCENC) reaching a player that cannot decrypt them. Nothing to catch — do not build a spinner that waits for `error` |
+| Safari: `MEDIA_ERR_DECODE`, "Media failed to decode" | Not the video. An `#EXT-X-KEY` URI the player cannot resolve — usually `luminary://key` |
+| hls.js: `keyLoadError` retried 9× then fatal | Same cause, named correctly. Presents as a long hang before the failure |
+| hls.js: `manifestParsingError`, "no EXTM3U delimiter" on an HTTP 200 | Same as the first row. The 200 is real; the body is ciphertext |
+| The wrong camera angle, or the angle changing by itself | Rule 2 above |
+
+**One assumption to confirm rather than inherit:** `encryptPlaylists` defaults to `true`, which is right if every consumer is `player-core`. If any surface might not be, that default silently produces output which fails invisibly on iPhone. The default probably should not change — encrypting segments while publishing the layout and chapter titles beside them protects little — but the roadmap answer should come from Luminary, not from this repo.
+
 ---
 
 ## 0c. Deployment workflows — decided and removed
