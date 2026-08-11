@@ -32,11 +32,16 @@ export { ALLOWED_EXTENSIONS } from './encode/services/media-extensions.js';
  * `FFPROBE_PATH`: the paths are read per call, so probing earlier asks about
  * whatever is on PATH instead of the binaries the host is about to supply.
  */
+/** The version to tell a user to install; see the constant for how it was established. */
+export { MIN_FFMPEG_VERSION } from './encode/services/ffmpeg-capabilities.js';
+
 export {
+    checkFfmpeg,
     probeFfmpegBinaries,
     missingBinariesMessage,
     FFMPEG_DOWNLOAD_URL,
     type FfmpegAvailability,
+    type FfmpegCheck,
 } from './encode/services/ffmpeg-availability.js';
 
 /** Where the app listens when nobody says otherwise. */

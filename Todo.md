@@ -818,7 +818,7 @@ What this decision does *not* settle is whether the binaries keep shipping insid
 
 ---
 
-## 37. No minimum FFmpeg version is enforced
+## 37. No minimum FFmpeg version is enforced — fixed
 
 **Raised by Johan, 11 Aug 2026**, while item 35 landed: is there a minimum version, and do we check it?
 
@@ -839,3 +839,34 @@ What this decision does *not* settle is whether the binaries keep shipping insid
 **Recommended shape.** A documented floor constant with the reason for the number written beside it, compared only when the version parses; unparseable versions pass with a log line. Below the floor, refuse at startup the way a missing binary now does — a too-old FFmpeg is not a degraded encoder, it is an encoder that will fail somewhere less legible. The capability probes stay as they are: they cover the hardware paths, which no version number can.
 
 **What is missing to do it properly: evidence for the number.** Picking a floor from memory is how a working install gets refused. It wants either a real check of when each flag landed, or — better and cheaper to keep honest — a *capability* probe per unconditional flag, the way the GPU paths are already probed, with the version reported only as context in the message. That way the check tests what the code actually needs rather than a proxy for it.
+
+### Done — the requirement is 4.4, enforced by asking the binary rather than by comparing versions
+
+**The number: FFmpeg 4.4** (April 2021). Established by reading FFmpeg's own source at release tags rather than from memory, which is what the item asked for:
+
+| Option | Evidence |
+|---|---|
+| `-stats_period` | **absent in `n4.3`, present in `n4.4`** (`fftools/ffmpeg_opt.c`) — the binding constraint |
+| `-var_stream_map`, `master_pl_name` | present from `n4.0` (`libavformat/hlsenc.c`); absent in `n3.4` |
+| `-hls_segment_type`, `-hls_fmp4_init_filename` | present from `n3.4` |
+| `negative_cts_offsets` | present from `n4.0` (`libavformat/movenc.c`) |
+
+**Enforcement does not use that number.** `ffmpeg-capabilities.ts` asks the binary what it supports — `-h muxer=hls`, `-h muxer=mp4`, and for the global option, whether `ffmpeg -stats_period 1` answers `Unrecognized option` (argument parsing happens before the missing-output complaint, so nothing has to be encoded to find out). Three cheap calls, and none of them can be wrong about which release added what. The version is used only to tell the user what to install, which avoids the two traps the item named: distro and Homebrew suffixes, and nightlies with no version number at all that are newer than any floor.
+
+A probe that cannot run reports `indeterminate` and blocks nothing. A failed probe is not evidence of an old build, and refusing on it would turn an unanswerable question into a broken app — the same rule `disk-space.ts` follows for an unreadable free-space figure.
+
+**The message was rewritten after review.** The first version listed every unsupported option in the dialog. Johan's point: the person reading it wants to know that they need a newer FFmpeg and which one, not which muxer option is missing. So the dialog now says *"Luminary Media Convert needs FFmpeg 4.4 or newer — the installed FFmpeg is too old (version 3.4.8)"* with the download link, and the option list goes to the log via `capabilityDetail()`, where the reader is us and "too old" alone would not be diagnosable. Same split for the absent case: the user gets "FFmpeg is not installed", the log gets which of the two binaries could not be run.
+
+**Verified on a packaged build** with `PATH` controlled, in three states — nothing installed, a stub reporting 3.4.8 with 4.4-era options missing, and the real bundled 8.1. The first two produce the dialog and no window; the third starts normally. The too-old case could not have been tested on this machine without a fixture, so the unit tests build fake ffmpeg scripts that answer the probes the way real builds do, including a 4.0-era one that has the HLS options but not `-stats_period` — partial support being the likely real-world case rather than all-or-nothing.
+
+---
+
+## 38. `convertToByteRange` real-worker test is flaky in the full suite
+
+**Found while verifying item 37**, when the full API suite failed once and the natural suspicion was the new startup probes.
+
+**It is not new.** `ffmpeg.service.spec.ts > convertToByteRange > should reject when worker emits an error (real worker)` times out at ~5 s in a full-suite run and passes every time the file is run alone. Confirmed against the branch point with the item-37 work stashed: 824 passed, the same one failed. Excluding the two new spec files does not help either, so it is neither their load nor the source change.
+
+**Why it matters even though it is not a regression.** It cost time here precisely because it looked like one — and it will do that again to whoever next changes anything near `FfmpegService`. A test that fails only in company is a test nobody can use to answer "did I break this?".
+
+**Likely cause.** The test spawns a *real* worker thread against `/non/existent/dir` and expects a rejection within the default 5 s. Under a parallel suite the worker's own startup is slow enough to lose that race. Worth either giving the assertion a longer timeout, or removing the real-worker dependency the way the sibling tests do (`useRealWorker.value = false` plus an emitted `error`), which is what the rest of that describe block already does.

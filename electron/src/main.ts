@@ -12,11 +12,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
     ALLOWED_EXTENSIONS,
+    checkFfmpeg,
     createServer,
     DEFAULT_PORT,
     FFMPEG_DOWNLOAD_URL,
-    missingBinariesMessage,
-    probeFfmpegBinaries,
+    MIN_FFMPEG_VERSION,
     type RunningServer,
 } from '@luminary-media-converter/api';
 
@@ -420,18 +420,24 @@ async function start(): Promise<void> {
 async function encoderPresent(): Promise<boolean> {
     // After createServer, which is what puts the bundled paths into the
     // environment these read.
-    const reason = missingBinariesMessage(await probeFfmpegBinaries());
+    const { reason, detail } = await checkFfmpeg();
     if (!reason) return true;
 
     console.error(reason);
+    // Which options the build lacked, for the log rather than the dialog.
+    if (detail) console.error(detail);
+
     const { response } = await dialog.showMessageBox({
         type: 'error',
         title: 'FFmpeg is required',
-        message: 'Luminary Media Convert cannot run without FFmpeg',
-        detail:
-            `${reason}\n\n` +
-            'Everything this app does — encoding, previews, thumbnails, even ' +
-            'reading a file’s details — needs it.',
+        // The heading states the requirement, because it holds for both cases
+        // this dialog reports: not installed, and installed but too old. A
+        // heading that contradicts its own detail is worse than a general one.
+        message: `Luminary Media Convert needs FFmpeg ${MIN_FFMPEG_VERSION} or newer`,
+        // `reason` says which of the two it is and what to do about it. The
+        // option names behind that verdict stay in the log: whoever is reading
+        // this wants to convert a video, not debug a muxer.
+        detail: `${reason}\n\nDownload it from ${FFMPEG_DOWNLOAD_URL}`,
         buttons: ['Get FFmpeg', 'Quit'],
         defaultId: 0,
         cancelId: 1,

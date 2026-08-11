@@ -1,6 +1,12 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { ffmpegBin, ffprobeBin } from './ffbin.js';
+import {
+    capabilityDetail,
+    MIN_FFMPEG_VERSION,
+    probeFfmpegCapabilities,
+    unsupportedCapabilitiesMessage,
+} from './ffmpeg-capabilities.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -85,16 +91,91 @@ export function missingBinariesMessage(
         !availability.ffprobe.present ? availability.ffprobe.bin : null,
     ].filter((name): name is string => name !== null);
 
-    const names = missing.join(' and ');
-    const isPath = missing.some((name) => name.includes('/') || name.includes('\\'));
+    // A configured path that does not work is a different problem with a
+    // different fix, and telling that reader to install what they already have
+    // sends them the wrong way. They are also the only reader who needs a path.
+    const badPath = missing.find(
+        (name) => name.includes('/') || name.includes('\\')
+    );
+    if (badPath) {
+        return (
+            `FFmpeg could not be run: ${badPath} is not a working executable. ` +
+            `Luminary Media Convert needs FFmpeg ${MIN_FFMPEG_VERSION} or newer.`
+        );
+    }
 
     return (
-        `FFmpeg is required and could not be run: ${names} ` +
-        `${missing.length > 1 ? 'were' : 'was'} not found. ` +
-        (isPath
-            ? 'The configured path does not point at a working executable. '
-            : 'Install FFmpeg — which provides both ffmpeg and ffprobe — and make ' +
-              'sure it is on your PATH. ') +
-        `Then restart the app. Downloads: ${FFMPEG_DOWNLOAD_URL}`
+        `FFmpeg is not installed. Luminary Media Convert needs FFmpeg ` +
+        `${MIN_FFMPEG_VERSION} or newer to read, preview and encode video. ` +
+        `Install it, then start the app again.`
     );
+}
+
+/**
+ * Which of the two binaries could not be run, for the log.
+ *
+ * The user-facing message deliberately says only "FFmpeg is not installed",
+ * because one package provides both and the fix is the same either way. Half
+ * installed is a real state though — a partial package, or a PATH with one of
+ * them — and it should not take a debugger to find out which half.
+ */
+export function missingBinariesDetail(
+    availability: FfmpegAvailability
+): string | null {
+    if (availability.ok) return null;
+    const missing = [
+        !availability.ffmpeg.present ? availability.ffmpeg.bin : null,
+        !availability.ffprobe.present ? availability.ffprobe.bin : null,
+    ].filter((name): name is string => name !== null);
+    return `Could not run: ${missing.join(', ')}`;
+}
+
+export interface FfmpegCheck {
+    availability: FfmpegAvailability;
+    /**
+     * Why this machine cannot encode, or null when it can. Written for whoever
+     * is sitting there: what is wrong and what to install, no option names.
+     */
+    reason: string | null;
+    /**
+     * The same finding for the log — which options were missing. Null when the
+     * problem is an absent binary, where there is nothing more to say.
+     */
+    detail: string | null;
+}
+
+/**
+ * The one question both the API and its host need answered: is the FFmpeg on
+ * this machine usable?
+ *
+ * Two checks in order, because the answers are not interchangeable. Absent comes
+ * first — telling someone their FFmpeg is too old when they have none would send
+ * them looking for an upgrade they cannot perform. Only then, whether the one
+ * they have supports what the pipeline uses unconditionally.
+ *
+ * Exists so the orchestration lives in one place. The host shows the verdict and
+ * the API enforces it, and two copies of "presence, then capability" would
+ * eventually disagree about which came first or what counted.
+ */
+export async function checkFfmpeg(): Promise<FfmpegCheck> {
+    const availability = await probeFfmpegBinaries();
+
+    const absent = missingBinariesMessage(availability);
+    if (absent) {
+        return {
+            availability,
+            reason: absent,
+            detail: missingBinariesDetail(availability),
+        };
+    }
+
+    const report = await probeFfmpegCapabilities();
+    return {
+        availability,
+        reason: unsupportedCapabilitiesMessage(
+            report,
+            availability.ffmpeg.version
+        ),
+        detail: capabilityDetail(report),
+    };
 }

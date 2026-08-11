@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-    FFMPEG_DOWNLOAD_URL,
+    missingBinariesDetail,
     missingBinariesMessage,
     probeFfmpegBinaries,
     type FfmpegAvailability,
 } from './ffmpeg-availability.js';
+import { MIN_FFMPEG_VERSION } from './ffmpeg-capabilities.js';
 
 /**
  * These probes spawn real processes, which is the point: the bug being fixed was
@@ -100,29 +101,35 @@ describe('missingBinariesMessage', () => {
         expect(missingBinariesMessage(ok)).toBeNull();
     });
 
-    it('names what is missing and where to get it', () => {
+    it('says it is not installed and which version to install', () => {
+        /*
+         * Deliberately no option names and no binary names: one package
+         * provides both, so the reader's next action is the same either way.
+         * An earlier version of this message listed the missing executables and
+         * told the reader to check their PATH, which is a sentence for us, not
+         * for someone trying to convert a video.
+         */
         const message = missingBinariesMessage({
             ffmpeg: { bin: 'ffmpeg', present: false },
             ffprobe: { bin: 'ffprobe', present: false },
             ok: false,
         });
 
-        expect(message).toContain('ffmpeg and ffprobe');
-        expect(message).toContain('PATH');
-        expect(message).toContain(FFMPEG_DOWNLOAD_URL);
+        expect(message).toContain('not installed');
+        expect(message).toContain(MIN_FFMPEG_VERSION);
+        expect(message).toContain('start the app again');
     });
 
-    it('names only the one that is missing', () => {
-        const message = missingBinariesMessage({
-            ...ok,
-            ffprobe: { bin: 'ffprobe', present: false },
-            ok: false,
-        });
-
-        // The clause naming what is missing, specifically — "ffmpeg and ffprobe"
-        // also occurs in the advice ("Install FFmpeg — which provides both …"),
-        // so a bare substring check here would pass on the wrong sentence.
-        expect(message).toContain('could not be run: ffprobe was not found');
+    it('says the same thing when only one of the pair is missing', () => {
+        // Half installed has the same fix, so it gets the same message. Which
+        // half it was goes to the log — see missingBinariesDetail.
+        expect(
+            missingBinariesMessage({
+                ...ok,
+                ffprobe: { bin: 'ffprobe', present: false },
+                ok: false,
+            })
+        ).toContain('not installed');
     });
 
     it('blames the configuration, not the install, when a path was given', () => {
@@ -135,7 +142,30 @@ describe('missingBinariesMessage', () => {
         });
 
         expect(message).toContain('/opt/luminary/ffmpeg');
-        expect(message).toContain('does not point at a working executable');
-        expect(message).not.toContain('on your PATH');
+        expect(message).toContain('not a working executable');
+        expect(message).not.toContain('not installed');
+    });
+});
+
+describe('missingBinariesDetail', () => {
+    it('names which binary could not be run, for the log', () => {
+        const detail = missingBinariesDetail({
+            ffmpeg: { bin: 'ffmpeg', present: true, version: '7.1' },
+            ffprobe: { bin: 'ffprobe', present: false },
+            ok: false,
+        });
+
+        expect(detail).toContain('ffprobe');
+        expect(detail).not.toContain('ffmpeg,');
+    });
+
+    it('says nothing when both ran', () => {
+        expect(
+            missingBinariesDetail({
+                ffmpeg: { bin: 'ffmpeg', present: true },
+                ffprobe: { bin: 'ffprobe', present: true },
+                ok: true,
+            })
+        ).toBeNull();
     });
 });

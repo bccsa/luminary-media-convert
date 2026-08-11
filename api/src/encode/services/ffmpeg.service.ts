@@ -18,11 +18,7 @@ import type {
 } from '../dto/encode-config.dto.js';
 import dotenv from 'dotenv';
 import { ffmpegBin, ffmpegShellBin, ffprobeBin } from './ffbin.js';
-import {
-    missingBinariesMessage,
-    probeFfmpegBinaries,
-    type FfmpegAvailability,
-} from './ffmpeg-availability.js';
+import { checkFfmpeg } from './ffmpeg-availability.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -53,8 +49,12 @@ export type AccelMode = 'cpu' | 'nvidia' | 'apple';
 export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(FfmpegService.name);
     private accelMode: AccelMode = 'cpu';
-    /** Set once by {@link onModuleInit}; undefined only before Nest has started. */
-    private availability?: FfmpegAvailability;
+    /**
+     * Why FFmpeg cannot be used here, or null when it can. Set once by
+     * {@link onModuleInit}; null before it runs, which is before Nest serves
+     * anything.
+     */
+    private unusableReason: string | null = null;
     private activeProcess: ChildProcess | null = null;
     private readonly timeoutMs = process.env.FFMPEG_TIMEOUT_MS
         ? parseInt(process.env.FFMPEG_TIMEOUT_MS, 10)
@@ -65,25 +65,30 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
     async onModuleInit(): Promise<void> {
         /*
-         * Presence before capability. Asking only about capability reported a
-         * machine with no ffmpeg at all as "No GPU found, using CPU encoding":
-         * every probe below fails identically whether the binary is absent or
-         * merely lacks NVENC, and both answers are 'cpu'. Nothing then said
-         * otherwise until the first encode, several user decisions later.
+         * Is there a usable FFmpeg at all — is it installed, and is it new
+         * enough? Asked before the acceleration probes below, which answer a
+         * different question and used to be the only question asked: each wraps
+         * `execSync` in `try/catch` and falls through to 'cpu', so a machine with
+         * no ffmpeg whatsoever reported "No GPU found, using CPU encoding" and
+         * said nothing more until the first encode, several user decisions later.
          */
-        this.availability = await probeFfmpegBinaries();
-        const missing = missingBinariesMessage(this.availability);
-        if (missing) {
-            this.logger.error(missing);
-            // Capability detection would only spawn the same absent binary
-            // three more times to reach the same conclusion.
+        const { availability, reason, detail } = await checkFfmpeg();
+        this.unusableReason = reason;
+        if (reason) {
+            this.logger.error(reason);
+            // Which options were missing, for us rather than for the user —
+            // "too old" alone is not diagnosable when a build fails this
+            // check unexpectedly.
+            if (detail) this.logger.error(detail);
+            // The probes below would only spawn an absent or too-old binary
+            // several more times to reach the same conclusion.
             this.accelMode = 'cpu';
             return;
         }
 
         this.logger.log(
-            `FFmpeg ${this.availability.ffmpeg.version ?? '(unknown version)'}, ` +
-                `ffprobe ${this.availability.ffprobe.version ?? '(unknown version)'}`
+            `FFmpeg ${availability.ffmpeg.version ?? '(unknown version)'}, ` +
+                `ffprobe ${availability.ffprobe.version ?? '(unknown version)'}`
         );
 
         this.accelMode = this.detectAcceleration();
@@ -108,15 +113,16 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      * Why this machine cannot encode, or null when it can.
      *
      * Read by the endpoints that would otherwise spawn ffmpeg or ffprobe, so a
-     * missing install is refused with something actionable instead of surfacing
-     * as an `ENOENT` from a child process partway through a session.
+     * missing or too-old install is refused with something actionable instead of
+     * surfacing as an `ENOENT`, or as a mid-encode failure on an unrecognised
+     * option, partway through a session.
+     *
+     * Decided once at startup rather than per request: the probes spawn several
+     * processes, and an install does not change under a running app often enough
+     * to pay that on every call.
      */
     unavailableReason(): string | null {
-        // Before onModuleInit has run there is nothing to report; Nest does not
-        // serve requests until it has.
-        return this.availability
-            ? missingBinariesMessage(this.availability)
-            : null;
+        return this.unusableReason;
     }
 
     async onModuleDestroy(): Promise<void> {
