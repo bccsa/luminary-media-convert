@@ -47,6 +47,16 @@ interface Props {
     showList?: boolean;
     /** Show the keyboard help button. */
     showHelp?: boolean;
+    /**
+     * Show the built-in "Clear All" button in the controls row.
+     *
+     * Default true, so hosts that have always had it keep it — `subtitles` mode
+     * in particular, where the editor is the only place the cues live. Set false
+     * when the host puts a clear of its own somewhere the things it deletes are
+     * visible; pair it with the exposed `requestClearAll()` so the confirmation
+     * is still this component's.
+     */
+    showClearAll?: boolean;
     /** Max/min zoom (1 = fit to duration, 2 = 2× zoom, ...). */
     maxZoom?: number;
     /** Compact NLE-style hint row below playback controls (In/Out keys, jog, zoom). */
@@ -105,6 +115,7 @@ const props = withDefaults(defineProps<Props>(), {
     showPlaybackControls: true,
     showList: true,
     showHelp: true,
+    showClearAll: true,
     showTimeline: true,
     maxZoom: 40,
     isPlaying: false,
@@ -1576,6 +1587,17 @@ defineExpose({
     addSegment: addSegmentAtPlayhead,
     removeSegment,
     clearAll,
+    /**
+     * Ask to clear everything, showing this component's own confirmation.
+     *
+     * `clearAll` deletes outright, which is right for a host that has already
+     * asked. A host that has merely moved the *button* somewhere better should
+     * not have to rebuild the sheet that goes with it — and two confirmations
+     * for one destructive action is how they end up wording it differently.
+     */
+    requestClearAll: () => {
+        if (segments.value.length > 0) confirmClearOpen.value = true;
+    },
     undo,
     redo,
     zoomTo,
@@ -1652,7 +1674,7 @@ defineExpose({
                     Cut
                 </button>
                 <button
-                    v-else-if="segments.length > 0"
+                    v-else-if="showClearAll && segments.length > 0"
                     type="button"
                     class="se-btn se-btn--danger"
                     @click="confirmClearOpen = true"
@@ -2082,7 +2104,7 @@ defineExpose({
                     Cut
                 </button>
                 <button
-                    v-else-if="segments.length > 0"
+                    v-else-if="showClearAll && segments.length > 0"
                     type="button"
                     class="se-btn se-btn--danger"
                     @click="confirmClearOpen = true"

@@ -709,7 +709,10 @@ const { etaDisplay: ingestEtaDisplay } = useEncodeEta(() =>
 const sessionPlayerStripRef = ref<InstanceType<
     typeof SessionPlayerStrip
 > | null>(null);
-const chapterSegmentEditorRef = ref<{ focus?: () => void } | null>(null);
+const chapterSegmentEditorRef = ref<{
+    focus?: () => void;
+    requestClearAll?: () => void;
+} | null>(null);
 /**
  * The playback surface the strip exposes over the player's controller. Angle,
  * quality and audio selection are the strip's own business; what the view still
@@ -2483,19 +2486,42 @@ onUnmounted(() => {
                                             saves, not in a toolbar further
                                             down the page.
                                         -->
-                                        <template
-                                            v-if="canSaveChapters"
-                                            #list-actions
-                                        >
+                                        <template #list-actions>
+                                            <!--
+                                                Clear All lives here rather than
+                                                in the timeline's controls,
+                                                where it sat among playback,
+                                                mark in/out, undo/redo and zoom
+                                                — every one of them local to the
+                                                timeline and reversible by
+                                                habit. It deletes the list, so
+                                                it belongs beside the list.
+
+                                                The confirmation is still the
+                                                editor's own: `requestClearAll`
+                                                opens the sheet the component
+                                                already has, rather than this
+                                                view growing a second one that
+                                                words it differently.
+                                            -->
+                                            <button
+                                                v-if="asidePanelSegments.length > 0"
+                                                type="button"
+                                                class="chapter-toolbar-muted"
+                                                title="Remove every chapter · undo with ⌘/Ctrl + Z"
+                                                @click="chapterSegmentEditorRef?.requestClearAll?.()"
+                                            >
+                                                Clear all
+                                            </button>
                                             <span
-                                                v-if="chapters.isDirty.value"
+                                                v-if="canSaveChapters && chapters.isDirty.value"
                                                 class="chapter-unsaved-pill"
                                                 title="Unsaved changes are stored locally; click Save to commit to S3."
                                             >
                                                 Unsaved
                                             </span>
                                             <button
-                                                v-if="chapters.isDirty.value"
+                                                v-if="canSaveChapters && chapters.isDirty.value"
                                                 type="button"
                                                 class="chapter-toolbar-muted"
                                                 :disabled="
@@ -2506,6 +2532,7 @@ onUnmounted(() => {
                                                 Discard
                                             </button>
                                             <button
+                                                v-if="canSaveChapters"
                                                 type="button"
                                                 class="chapter-save-btn"
                                                 :disabled="

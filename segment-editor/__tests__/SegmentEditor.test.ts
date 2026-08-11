@@ -2526,3 +2526,69 @@ describe('SegmentEditor — marking between existing segments', () => {
         expect(latestSegments(w)[0].outSec).toBe(60);
     });
 });
+
+describe('SegmentEditor — Clear All placement', () => {
+    /** The library's own Clear All, wherever it renders in the controls row. */
+    function clearButton(w: ReturnType<typeof mountEditor>) {
+        return w
+            .findAll('button')
+            .find((b) => b.text().trim() === 'Clear All');
+    }
+
+    it('shows Clear All by default, so hosts that had it keep it', async () => {
+        // subtitles mode especially: the editor is the only place the cues live,
+        // so removing the button unconditionally would strand that mode.
+        const w = mountEditor({
+            segments: [seg(1, 0, 5, 'A')],
+            props: { mode: 'subtitles' },
+        });
+        await flush();
+
+        expect(clearButton(w)).toBeDefined();
+    });
+
+    it('hides it when the host puts its own clear beside the list', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 0, 5, 'A')],
+            props: { mode: 'chapters', showClearAll: false },
+        });
+        await flush();
+
+        expect(clearButton(w)).toBeUndefined();
+    });
+
+    it('still confirms when the host asks, using this component\'s own sheet', async () => {
+        /*
+         * The point of exposing `requestClearAll` rather than only `clearAll`:
+         * a host that has merely moved the button should not rebuild the
+         * confirmation, or the same destructive action ends up worded two ways.
+         */
+        const w = mountEditor({
+            segments: [seg(1, 0, 5, 'A')],
+            props: { mode: 'chapters', showClearAll: false },
+        });
+        await flush();
+
+        (w.vm as unknown as { requestClearAll: () => void }).requestClearAll();
+        await flush();
+
+        expect(document.body.textContent).toContain('Clear all');
+        expect(latestSegments(w)).toHaveLength(1);
+        // The sheet is teleported to <body>, so it outlives this wrapper unless
+        // the wrapper goes with it — and the next test asserts on its absence.
+        w.unmount();
+    });
+
+    it('does not confirm when there is nothing to clear', async () => {
+        // Teleported sheets from earlier tests live on in <body>; clear them so
+        // this asserts on what *this* mount did.
+        document.querySelectorAll('.se-confirm').forEach((n) => n.remove());
+        const w = mountEditor({ props: { mode: 'chapters', showClearAll: false } });
+        await flush();
+
+        (w.vm as unknown as { requestClearAll: () => void }).requestClearAll();
+        await flush();
+
+        expect(document.querySelector('.se-confirm')).toBeNull();
+    });
+});

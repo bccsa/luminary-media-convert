@@ -144,6 +144,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             :on-play-pause="onPlayPause"
             :is-playing="isPreviewPlaying"
             :show-list="false"
+            :show-clear-all="false"
             keyboard-scope="global"
             :fps="segmentEditorProbeFps"
             :thumbnail-vtt-url="thumbnailVttUrl"
