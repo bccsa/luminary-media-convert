@@ -497,7 +497,7 @@ Nothing downstream needed changing: `audioGroups.ts`'s `|| 'und'` fallback makes
 
 ---
 
-## 23. Validate language codes
+## 23. Validate language codes — done
 
 **Today.** Language is a free-text input in two places in `encode-config/src/EncodeConfigForm.vue` — per audio track (line 680, placeholder `und`) and per audio group (line 1085, placeholder `eng`). Nothing validates or normalises what is typed, so a typo, a two-letter code or a stray capital travels straight into `#EXT-X-MEDIA:LANGUAGE=` and out to every player.
 
@@ -511,6 +511,19 @@ Nothing downstream needed changing: `audioGroups.ts`'s `|| 'und'` fallback makes
 
 **Note.** ISO 639-2 has B/T variants for some languages (`ger`/`deu`, `fre`/`fra`), so the accepted set has to include both or reject codes that are perfectly valid. Interacts with item 22: if `und` is going to be treated as "absent" for label restoration, it still has to remain a *valid* thing to type.
 
+
+**Done, from the register rather than from memory.** `encode-config/src/language-codes.ts` is generated from the Library of Congress file at `https://www.loc.gov/standards/iso639-2/ISO-639-2_utf-8.txt` — the maintenance agency's own list — because a hand-written subset is a list of the codes whoever wrote it happened to think of, and every omission refuses a language someone speaks. 506 codes with their English names, both the bibliographic and terminology forms (`ger` and `deu` are both German, and refusing either refuses a correct answer).
+
+Both inputs lower-case and strip to letters as you type, capped at three, and mark themselves when what they hold is not a code — marked rather than cleared, since `en` is a reasonable thing to type on the way to `eng`. The `title` says which language a valid code is, or that an invalid one is not one. A shared `<datalist>` makes the names searchable, because nobody remembers whether German is `ger` or `deu` and both are right.
+
+`mul` and `und` pass, as the item required — they are codes, not escape hatches, and this app already emits `und`. Empty passes too: an unstated language is a normal state and the encoder writes no `LANGUAGE` attribute rather than guessing one.
+
+**Two things the register taught us**, both found by tests rather than by reading:
+
+- It contains `qaa-qtz`, which is a *range* reserved for local use, not a code — the generator swallowed it as a literal until a test asserting every code was three letters caught it. The range is now matched by pattern (`/^q[a-t][a-z]$/`) and kept out of the picker, since only the person using one knows what it means. Accepted rather than refused: an unregistered language is the case the range exists for.
+- ISO 639-2 has only `que` for Quechua. `quz` is 639-3, which this field is not — and 639-3 has thousands of codes that do not belong in a `LANGUAGE` attribute.
+
+Validation lives in `encode-config` and is exported from the package, so a host collecting a language elsewhere uses the same register and the same rules rather than forming a second opinion. It pairs with the API-side fix that stopped writing `und` as a *language* when a stream simply had no tag: that closed the reading side, this closes the writing side.
 ---
 
 ## 24. `npm run dev` should work with no `.env` files — done

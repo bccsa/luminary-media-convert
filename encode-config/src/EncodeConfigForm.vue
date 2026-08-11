@@ -15,6 +15,41 @@ import {
     getAudioTierForHeight,
 } from './audioGroups';
 import { applySavedTrackLabels } from './trackLabels';
+import {
+    isValidLanguageCode,
+    LANGUAGE_OPTIONS,
+    languageName,
+    normalizeLanguageInput,
+} from './language-codes';
+
+/**
+ * Keep a language field to something a player can act on.
+ *
+ * Lower-cased and letters-only as it is typed, capped at three, because these
+ * strings travel verbatim into `#EXT-X-MEDIA:LANGUAGE=`: `ENG` and `eng` reach a
+ * player as two different languages, and `en` reaches it as none it recognises.
+ * Writing the element's value back as well as the model's keeps the two in step
+ * when this changed what was typed.
+ */
+function onLanguageInput(event: Event, apply: (value: string) => void): void {
+    const el = event.target as HTMLInputElement;
+    const next = normalizeLanguageInput(el.value)
+        .replace(/[^a-z]/g, '')
+        .slice(0, 3);
+    if (el.value !== next) el.value = next;
+    apply(next);
+}
+
+/** What the field says about itself on hover, valid or not. */
+function languageTitle(code: string | undefined | null): string {
+    const normalized = normalizeLanguageInput(code);
+    if (normalized === '') return 'ISO 639-2 three-letter code, e.g. eng';
+    const name = languageName(normalized);
+    return name
+        ? `${normalized} — ${name}`
+        : `${normalized} is not an ISO 639-2 code`;
+}
+
 
 const props = withDefaults(
     defineProps<{
@@ -677,10 +712,21 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                     </td>
                                     <td class="ecf-td">
                                         <input
-                                            v-model="t.language"
+                                            :value="t.language"
                                             type="text"
                                             class="ecf-input ecf-input-xs ecf-input-center"
+                                            :class="{
+                                                'ecf-input-invalid':
+                                                    !isValidLanguageCode(
+                                                        t.language,
+                                                    ),
+                                            }"
                                             placeholder="und"
+                                            list="ecf-language-codes"
+                                            maxlength="3"
+                                            autocapitalize="off"
+                                            spellcheck="false"
+                                            :title="languageTitle(t.language)"
                                             data-track-field="audio-language"
                                             :data-track-index="t.index"
                                             :data-row="
@@ -688,6 +734,12 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                                 audioIdx
                                             "
                                             data-col="0"
+                                            @input="
+                                                onLanguageInput(
+                                                    $event,
+                                                    (v) => (t.language = v),
+                                                )
+                                            "
                                             @keydown="onTrackInputKeydown"
                                         />
                                     </td>
@@ -1082,10 +1134,30 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                         </td>
                                         <td class="ecf-lt-td">
                                             <input
-                                                v-model="g.language"
+                                                :value="g.language"
                                                 type="text"
                                                 class="ecf-input ecf-input-lang"
+                                                :class="{
+                                                    'ecf-input-invalid':
+                                                        !isValidLanguageCode(
+                                                            g.language,
+                                                        ),
+                                                }"
                                                 placeholder="eng"
+                                                list="ecf-language-codes"
+                                                maxlength="3"
+                                                autocapitalize="off"
+                                                spellcheck="false"
+                                                :title="
+                                                    languageTitle(g.language)
+                                                "
+                                                @input="
+                                                    onLanguageInput(
+                                                        $event,
+                                                        (v) =>
+                                                            (g.language = v),
+                                                    )
+                                                "
                                             />
                                         </td>
                                         <td class="ecf-lt-td ecf-lt-td--opts">
@@ -1230,5 +1302,20 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                 }}
             </button>
         </div>
-    </div>
+    
+        <!--
+            One list for both language fields. Typing is the fast path — three
+            letters — but nobody remembers whether German is `ger` or `deu`, and
+            both are correct, so the names are here to be searched.
+        -->
+        <datalist id="ecf-language-codes">
+            <option
+                v-for="[code, name] in LANGUAGE_OPTIONS"
+                :key="code"
+                :value="code"
+            >
+                {{ name }}
+            </option>
+        </datalist>
+</div>
 </template>
