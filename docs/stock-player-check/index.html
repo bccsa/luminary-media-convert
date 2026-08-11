@@ -71,20 +71,55 @@ function logger(id) {
   const pre = document.getElementById('log' + id);
   return (msg) => { pre.textContent += msg + '\n'; pre.scrollTop = pre.scrollHeight; };
 }
-function verdict(id, ok, text) {
+/**
+ * Report a verdict to serve.py, which appends it to results.jsonl.
+ * Ignored when the page is served by a plain static server — the on-screen
+ * verdict is still the primary output, this only saves reading it back by hand.
+ */
+function report(id, engine, ok, text) {
+  const c = CASES.find((x) => x.id === id);
+  fetch('./report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      case: id, name: c.name, prefix: c.prefix, expected: c.expect,
+      engine, played: ok, detail: text,
+      log: document.getElementById('log' + id).textContent,
+      ua: navigator.userAgent,
+    }),
+  }).catch(() => {});
+}
+
+const reported = new Set();
+function verdict(id, ok, text, engine) {
   const v = document.getElementById('verdict' + id);
   v.className = 'verdict ' + (ok ? 'ok' : 'bad');
   v.textContent = (ok ? 'PLAYED — ' : 'FAILED — ') + text;
+  // First verdict per run wins: a fatal error after playback started is a
+  // different finding from one that stopped it ever starting.
+  const k = id + ':' + engine;
+  if (!reported.has(k)) { reported.add(k); report(id, engine, ok, text); }
 }
 
 const players = {};
 function teardown(id) {
   if (players[id]) { players[id].destroy(); delete players[id]; }
-  const v = document.getElementById('v' + id);
-  v.removeAttribute('src'); v.load();
+  /*
+   * Replace the element rather than resetting it. Clearing `src` and calling
+   * load() leaves the previous run's listeners and its MediaSource attached,
+   * and a stale `playing` event from the hls.js buffer then reported the native
+   * path as having played a stream Chrome cannot decode at all. A fresh element
+   * has neither.
+   */
+  const old = document.getElementById('v' + id);
+  const fresh = document.createElement('video');
+  fresh.id = old.id;
+  fresh.controls = true; fresh.muted = true; fresh.playsInline = true;
+  old.replaceWith(fresh);
   document.getElementById('log' + id).textContent = '';
   const vd = document.getElementById('verdict' + id);
   vd.className = 'verdict pending'; vd.textContent = 'running…';
+  reported.delete(id + ':hls.js'); reported.delete(id + ':native');
 }
 
 function runHls(c) {
@@ -108,11 +143,15 @@ function runHls(c) {
         (d.reason ? ' — ' + d.reason : '') +
         (d.response ? ' — http ' + d.response.code : '') +
         (d.error ? ' — ' + d.error.message : ''));
-    if (d.fatal && !played) verdict(c.id, false, `${d.details}`);
+    if (d.fatal && !played) verdict(c.id, false, `${d.details}`, 'hls.js');
   });
   video.addEventListener('playing', () => {
-    played = true; verdict(c.id, true, 'video is decoding frames');
+    played = true; verdict(c.id, true, 'video is decoding frames', 'hls.js');
   }, { once: true });
+  setTimeout(() => {
+    if (!played && !reported.has(c.id + ':hls.js'))
+      verdict(c.id, false, 'no verdict after 15s — stalled without a fatal error', 'hls.js');
+  }, 15000);
   hls.loadSource(url);
   hls.attachMedia(video);
   video.play().catch((e) => log('play() rejected: ' + e.message));
@@ -124,12 +163,16 @@ function runNative(c) {
   const video = document.getElementById('v' + c.id);
   const url = `${BASE}/${c.prefix}/master.m3u8`;
   log('native src = ' + url);
-  video.addEventListener('playing', () => verdict(c.id, true, 'native HLS is decoding frames'), { once: true });
+  video.addEventListener('playing', () => verdict(c.id, true, 'native HLS is decoding frames', 'native'), { once: true });
   video.addEventListener('error', () => {
     const e = video.error;
     log('media error code=' + (e && e.code) + ' ' + (e && e.message));
-    verdict(c.id, false, 'native HLS error code ' + (e && e.code));
+    verdict(c.id, false, 'native HLS error code ' + (e && e.code), 'native');
   }, { once: true });
+  setTimeout(() => {
+    if (!reported.has(c.id + ':native'))
+      verdict(c.id, false, 'no verdict after 15s — stalled without an error', 'native');
+  }, 15000);
   video.src = url;
   video.play().catch((e) => log('play() rejected: ' + e.message));
 }
