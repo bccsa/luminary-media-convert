@@ -237,6 +237,13 @@ export class EncodeService {
                 throw pipeline.error;
             }
 
+            // FFmpeg's own progress reporting stops a hair short often enough
+            // that the bar sits at 98% for the whole finalize stretch. FFmpeg
+            // has returned, so encoding is provably over — pinned before the
+            // first phase is reported, or the drain gets captioned under a bar
+            // still claiming to be mid-encode.
+            currentProgress.encoding = 100;
+
             // Drain remaining segments + finalize byte-range chunks.
             //
             // Reported, because this is the first thing that happens after the
@@ -246,11 +253,6 @@ export class EncodeService {
             // unaccounted for.
             reportPhase('draining');
             await pipeline.drain();
-
-            // FFmpeg's own progress reporting stops a hair short often enough
-            // that the bar sits at 98% for the whole finalize phase. Encoding
-            // is provably over here.
-            currentProgress.encoding = 100;
 
             // Playlist post-processing (must happen after drain rewrites byte-range playlists)
             if (encryptionEnabled) {
@@ -384,20 +386,23 @@ export class EncodeService {
 
             // Upload remaining files (playlists, thumbnails, master.m3u8).
             //
-            // The step that ran before this one is over, so its timing is
-            // closed out here rather than left to be attributed to the upload.
-            // The upload does get a phase of its own: it reports real per-file
-            // progress below, and the S3 bar restarts from 0 for it — what the
-            // bar counted until now was segments, and this is a different set
-            // of files. The caption is what explains the reset to the user.
+            // The upload has a phase of its own — it reports real per-file
+            // progress below, and the S3 bar restarts from 0 for it, because
+            // what that bar counted until now was segments and this is a
+            // different set of files. The caption is what stops the reset
+            // reading as work being lost.
+            //
+            // Set before the status flips, not after: leaving the previous
+            // step's phase in place for even one event would caption the
+            // upload with whatever ran before it, which is the thing this
+            // caption exists to prevent.
             finishPhase();
-            this.sessionService.updateStatus(sessionId, 'uploading_to_s3');
-
             currentProgress.phase = 'uploading-playlists';
             currentProgress.uploading = 0;
             this.sessionService.updatePipelineProgress(sessionId, {
                 ...currentProgress,
             });
+            this.sessionService.updateStatus(sessionId, 'uploading_to_s3');
 
             await pipeline.uploadRemainingFiles(outputDir, {
                 onFileProgress: (done, total) => {

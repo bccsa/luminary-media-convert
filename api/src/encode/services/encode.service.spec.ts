@@ -860,7 +860,11 @@ describe('EncodeService', () => {
             // bar already reads 100%, and it is where byte-range playlists are
             // rewritten — so leaving it out left the earliest part of the wait
             // unaccounted for.
-            expect(await phasesFor()).toEqual(['draining', 'thumbnails']);
+            expect(await phasesFor()).toEqual([
+                'draining',
+                'thumbnails',
+                'uploading-playlists',
+            ]);
         });
 
         it('names the waveform too, when the source has audio to draw', async () => {
@@ -872,20 +876,42 @@ describe('EncodeService', () => {
                 audioTracks: [{ index: 0, language: 'eng' }],
             });
 
-            expect(phases).toEqual(['draining', 'thumbnails', 'waveform']);
+            expect(phases).toEqual([
+                'draining',
+                'thumbnails',
+                'waveform',
+                'uploading-playlists',
+            ]);
         });
 
-        it('clears the phase before the status leaves encoding', async () => {
-            // Otherwise the last post-drain step captions the S3 upload after it.
+        it('never lets a finished step caption the upload after it', async () => {
+            // The upload has a caption of its own, and it has to be in place
+            // before the status changes: one event carrying the previous step's
+            // phase would attribute the upload to whatever ran before it, which
+            // is the thing this caption exists to prevent.
             const updateSpy = vi.spyOn(sessionService, 'updatePipelineProgress');
+            const statusSpy = vi.spyOn(sessionService, 'updateStatus');
             const session = sessionService.create(makeConfig());
             sessionService.setFilePath(session.id, '/tmp/input.mp4');
             sessionService.setEncodeConfig(session.id, makeEncodeConfig());
 
             await service.processSession(session.id);
 
+            const flipOrder = statusSpy.mock.invocationCallOrder[
+                statusSpy.mock.calls.findIndex(
+                    ([, status]) => status === 'uploading_to_s3'
+                )
+            ];
+            // The last caption emitted before the status flipped.
+            const captionAtFlip = updateSpy.mock.calls
+                .filter((_, i) => updateSpy.mock.invocationCallOrder[i] < flipOrder)
+                .map(([, progress]) => (progress as { phase?: string }).phase)
+                .at(-1);
+
+            expect(captionAtFlip).toBe('uploading-playlists');
+
             const last = updateSpy.mock.calls.at(-1)?.[1] as { phase?: string };
-            expect(last.phase).toBeUndefined();
+            expect(last.phase).toBe('uploading-playlists');
         });
     });
 
@@ -1306,10 +1332,12 @@ describe('EncodeService — naming the finalize phases', () => {
         await run(makeFullConfig());
 
         expect(phaseSequence()).toEqual([
-            'Generating thumbnails',
-            'Writing waveform',
-            'Encrypting playlists',
-            'Uploading playlists & thumbnails',
+            'draining',
+            'finalising-playlists',
+            'thumbnails',
+            'waveform',
+            'encrypting-playlists',
+            'uploading-playlists',
         ]);
     });
 
@@ -1357,7 +1385,7 @@ describe('EncodeService — naming the finalize phases', () => {
     it('says nothing about encryption for an unencrypted session', async () => {
         await run(makeConfig());
 
-        expect(phaseSequence()).not.toContain('Encrypting playlists');
+        expect(phaseSequence()).not.toContain('encrypting-playlists');
     });
 
     it('says nothing about a waveform when the source has no audio', async () => {
@@ -1366,7 +1394,7 @@ describe('EncodeService — naming the finalize phases', () => {
             audioTracks: [],
         });
 
-        expect(phaseSequence()).not.toContain('Writing waveform');
+        expect(phaseSequence()).not.toContain('waveform');
         expect(waveformService.generateWaveform).not.toHaveBeenCalled();
     });
 
@@ -1390,7 +1418,7 @@ describe('EncodeService — naming the finalize phases', () => {
             expect(emissions.map((p) => p.uploading)).toEqual([25, 75, 100]);
             expect(
                 emissions.every(
-                    (p) => p.phase === 'Uploading playlists & thumbnails'
+                    (p) => p.phase === 'uploading-playlists'
                 )
             ).toBe(true);
         });
@@ -1410,7 +1438,7 @@ describe('EncodeService — naming the finalize phases', () => {
             await run(makeFullConfig());
 
             const uploadPhase = emissions.filter(
-                (p) => p.phase === 'Uploading playlists & thumbnails'
+                (p) => p.phase === 'uploading-playlists'
             );
             expect(uploadPhase[0].uploading).toBe(0);
         });

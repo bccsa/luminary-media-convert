@@ -133,16 +133,18 @@ describe('useSessionPoller', () => {
         });
     });
 
-    it('passes the finalize phase label through untouched', async () => {
-        // Display-only English from the API — shown as-is, never matched on.
+    it('passes the finalize phase through untouched', async () => {
+        // An identifier, not a sentence: the poller carries it verbatim and the
+        // view owns the wording, so an unrecognised one can render nothing
+        // rather than printing a raw key at the user.
         const poller = await started();
 
         emit({
             status: 'encoding',
-            pipelineProgress: { encoding: 100, phase: 'Writing waveform' },
+            pipelineProgress: { encoding: 100, phase: 'waveform' },
         });
 
-        expect(poller.pipelineProgress.value?.phase).toBe('Writing waveform');
+        expect(poller.pipelineProgress.value?.phase).toBe('waveform');
     });
 
     it('drops an event describing an earlier stage than the one already reached', async () => {

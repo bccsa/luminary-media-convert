@@ -65,6 +65,7 @@ import {
 } from '../utils/trimTimeline';
 import type {
     AccelMode,
+    PipelinePhase,
     SegmentFormat,
     SessionStatusResponse,
     SessionSummary,
@@ -1027,7 +1028,10 @@ const storyboardPending = computed(
  * `encoding` maps to nothing on purpose: while the pipeline is running the bar
  * already says so, and captioning it would be noise.
  */
-const PIPELINE_PHASE_LABELS: Record<string, string> = {
+// Keyed exhaustively on purpose: a phase added to the union without a label
+// here is a compile error rather than a caption that silently stops appearing.
+const PIPELINE_PHASE_LABELS: Record<PipelinePhase, string | null> = {
+    encoding: null,
     draining: 'Packing segments…',
     'finalising-playlists': 'Finalising playlists…',
     thumbnails: 'Generating thumbnails…',
