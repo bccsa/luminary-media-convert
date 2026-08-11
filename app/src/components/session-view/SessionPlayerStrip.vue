@@ -307,6 +307,18 @@ defineExpose({
                 ]"
                 :style="playerColStyle"
             >
+                <!--
+                    Above the player, inside its column — where the session's
+                    topline goes. Not a full-width bar above both columns any
+                    more: that pushed the aside one row down and opened the
+                    chapters pane with a band of empty space over it, and put the
+                    session's name further from the thing it names than the app's
+                    own name was.
+                -->
+                <div v-if="$slots['player-top']" class="shrink-0">
+                    <slot name="player-top" />
+                </div>
+
                 <div
                     ref="playerShellRef"
                     :class="activeTab === 'trim'

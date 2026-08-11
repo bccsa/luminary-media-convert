@@ -49,6 +49,7 @@ vi.mock('../api', () => ({
 }));
 
 import SessionView from './SessionView.vue';
+import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vue';
 
 /** A probed session sitting in the pre-encode state, which is where trimming happens. */
 function uploadedSession(overrides: Record<string, unknown> = {}) {
@@ -66,9 +67,41 @@ function uploadedSession(overrides: Record<string, unknown> = {}) {
     };
 }
 
+/**
+ * `shallowMount` does not render a stub's slots, and a good deal of this view
+ * now lives in `SessionPlayerStrip`'s — the session topline in `#player-top`,
+ * the encode action in `#below-player`, the pipeline bars and chapter panel in
+ * `#aside`. Stubbed blind, all of it is invisible to a test while being
+ * perfectly visible on screen, which is the wrong way round for a suite whose
+ * job is to notice things disappearing.
+ */
+const PLAYER_STRIP_STUB = {
+    // Named, so `findComponent({ name: 'SessionPlayerStrip' })` still finds it —
+    // an anonymous stub object is matched by nothing.
+    name: 'SessionPlayerStrip',
+    // The real component's props, so tests that read them off the stub — the
+    // player source, the sidecar URLs — keep working. A bare template stub
+    // declares none and silently reports every prop as undefined.
+    props: (SessionPlayerStrip as unknown as { props: unknown }).props,
+    template:
+        '<div><slot name="player-top" /><slot /><slot name="below-player" /><slot name="aside" /></div>',
+};
+
 async function mountView() {
     const wrapper = shallowMount(SessionView, {
-        global: { stubs: { Teleport: true, Transition: true } },
+        global: {
+            stubs: {
+                Teleport: true,
+                Transition: true,
+                // The real topline renders a <router-link> back to the list, and
+                // no router is installed here.
+                RouterLink: true,
+                SessionPlayerStrip: PLAYER_STRIP_STUB,
+                // Rendered rather than stubbed: it carries the back arrow and
+                // the discard/delete buttons these tests assert on.
+                SessionTopline: false,
+            },
+        },
     });
     await flushPromises();
     return wrapper;
@@ -397,9 +430,7 @@ describe('SessionView', () => {
                     stubs: {
                         Teleport: true,
                         Transition: true,
-                        SessionPlayerStrip: {
-                            template: '<div><slot /><slot name="aside" /></div>',
-                        },
+                        SessionPlayerStrip: PLAYER_STRIP_STUB,
                     },
                 },
             });

@@ -27,6 +27,7 @@ import AccountMenu from '../components/AccountMenu.vue';
 import DeleteSessionModal from '../components/DeleteSessionModal.vue';
 import SessionOutputPanel from '../components/session-view/SessionOutputPanel.vue';
 import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vue';
+import SessionTopline from '../components/session-view/SessionTopline.vue';
 import SessionTrimWorkspace from '../components/session-view/SessionTrimWorkspace.vue';
 import SessionWorkflowPanel from '../components/session-view/SessionWorkflowPanel.vue';
 import {
@@ -1880,136 +1881,31 @@ onUnmounted(() => {
                     ]"
                 >
                     <!--
-                        Session topline, above the player: where you are, what it
-                        is, and the one action that applies to it. This replaces
-                        the app header — the back arrow and the session's identity
-                        were split across a global bar and the row under the
-                        player, which put the name of the thing further from it
-                        than the app's own name was.
+                        The topline used to be here — a full-width row above both
+                        columns. It now renders inside the player's own column
+                        (see the `#player-top` slot below), so the aside runs to
+                        the top of the window instead of starting a row down with
+                        a band of empty space over the chapters pane.
+
+                        It still renders on its own for the stretch with no
+                        player: `created` through `uploaded` has no video to sit
+                        above, and that is exactly where the back arrow and the
+                        discard button are the only way out of the session.
                     -->
-                    <div
-                        class="session-topline flex min-w-0 shrink-0 items-center gap-2 px-4 pt-3"
-                        :class="activeTab === 'trim' ? 'order-first' : ''"
-                    >
-                        <router-link
-                            to="/sessions"
-                            class="inline-flex shrink-0 items-center justify-center rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                            title="Back to sessions"
-                        >
-                            <svg
-                                class="h-5 w-5"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                stroke-width="2.25"
-                                aria-hidden="true"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    d="M15 19l-7-7 7-7"
-                                />
-                            </svg>
-                            <span class="sr-only">Back to sessions</span>
-                        </router-link>
-
-                        <span
-                            class="shrink-0 select-none text-base font-light text-slate-300 dark:text-slate-600"
-                            aria-hidden="true"
-                            >|</span
-                        >
-
-                        <span
-                            class="min-w-0 truncate text-base font-semibold text-slate-800 dark:text-slate-100"
-                            :title="sessionName || sessionId"
-                        >
-                            {{ sessionName || 'Untitled session' }}
-                        </span>
-
-                        <template v-if="currentStatus">
-                            <span
-                                class="shrink-0 text-slate-300 dark:text-slate-600"
-                                aria-hidden="true"
-                                >·</span
-                            >
-                            <StatusBadge
-                                class="shrink-0"
-                                :label="statusLabel(currentStatus)"
-                                :color="statusColors[currentStatus]?.color"
-                                :border-color="
-                                    statusColors[currentStatus]?.borderColor
-                                "
-                            />
-                        </template>
-
-                        <template v-if="summary?.createdAt">
-                            <span
-                                class="shrink-0 text-slate-300 dark:text-slate-600"
-                                aria-hidden="true"
-                                >·</span
-                            >
-                            <span
-                                class="shrink-0 text-xs text-slate-500 dark:text-slate-400"
-                            >
-                                {{ relativeCreatedLabel(summary.createdAt) }}
-                            </span>
-                        </template>
-
-                        <div class="min-w-0 flex-1" />
-
-                        <!--
-                            Discarding the session. On the topline rather than
-                            beside the player, because the player does not exist
-                            until a file has been picked — and `created` through
-                            `uploaded`, the stretch with no player, is exactly
-                            where there was previously no way out at all.
-                        -->
-                        <span
-                            v-if="cancelError"
-                            data-testid="discard-error"
-                            class="min-w-0 max-w-[18rem] truncate text-xs text-red-600 dark:text-red-400"
-                            :title="cancelError"
-                            >{{ cancelError }}</span
-                        >
-                        <button
-                            v-if="canDiscardSession"
-                            type="button"
-                            data-testid="discard-session"
-                            class="shrink-0 cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/40"
-                            @click="onCancelEncode"
-                        >
-                            {{ discardLabel }}
-                        </button>
-                        <button
-                            v-else-if="canDeleteFinishedSession"
-                            type="button"
-                            data-testid="delete-session"
-                            class="shrink-0 cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/40"
-                            @click="deleteModalOpen = true"
-                        >
-                            Delete session
-                        </button>
-
-                        <!--
-                            The encode action, previously teleported into the app
-                            header. It acts on this session, so it belongs on the
-                            session's own row.
-                        -->
-                        <button
-                            v-if="showProbeConfig"
-                            type="button"
-                            class="shrink-0 cursor-pointer rounded-lg bg-sky-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600 sm:px-5 sm:py-2.5 sm:text-sm"
-                            :disabled="!encodeConfigCanSubmit || submitting"
-                            :title="
-                                !encodeConfigCanSubmit && !submitting
-                                    ? 'Open Encode settings and complete the ladder (all required options) first.'
-                                    : undefined
-                            "
-                            @click="onStartEncodingFromTrim"
-                        >
-                            {{ submitting ? 'Starting…' : 'Start encoding' }}
-                        </button>
-                    </div>
+                    <SessionTopline
+                        v-if="showSessionDetailCard"
+                        class="px-4 pt-3"
+                        :session-name="sessionName"
+                        :session-id="sessionId"
+                        :status="currentStatus"
+                        :created-at="summary?.createdAt"
+                        :can-discard="canDiscardSession"
+                        :discard-label="discardLabel"
+                        :can-delete="canDeleteFinishedSession"
+                        :cancel-error="cancelError"
+                        @discard="onCancelEncode"
+                        @delete="deleteModalOpen = true"
+                    />
 
                     <!-- On trim: flex order shows progress card above player; player fills remaining height.
                          Hidden during pure upload/probe-loading state so the centered upload card can use the full viewport. -->
@@ -2073,6 +1969,46 @@ onUnmounted(() => {
                             @playing-change="isPreviewPlaying = $event"
                             @duration-change="playerDuration = $event"
                         >
+                            <template #player-top>
+                                <SessionTopline
+                                    :session-name="sessionName"
+                                    :session-id="sessionId"
+                                    :status="currentStatus"
+                                    :created-at="summary?.createdAt"
+                                    :can-discard="canDiscardSession"
+                                    :discard-label="discardLabel"
+                                    :can-delete="canDeleteFinishedSession"
+                                    :cancel-error="cancelError"
+                                    @discard="onCancelEncode"
+                                    @delete="deleteModalOpen = true"
+                                />
+                            </template>
+
+                            <!--
+                                The encode action, under the player rather than at
+                                the far end of a page-wide bar. It acts on the
+                                settings in the aside beside it, and it was
+                                previously as far from them as the layout allowed.
+                                The title is the only thing that explains a
+                                disabled state, so it travels with the button.
+                            -->
+                            <template v-if="showProbeConfig" #below-player>
+                                <button
+                                    type="button"
+                                    data-testid="start-encoding"
+                                    class="cursor-pointer rounded-lg bg-sky-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600 sm:px-5 sm:py-2.5 sm:text-sm"
+                                    :disabled="!encodeConfigCanSubmit || submitting"
+                                    :title="
+                                        !encodeConfigCanSubmit && !submitting
+                                            ? 'Open Encode settings and complete the ladder (all required options) first.'
+                                            : undefined
+                                    "
+                                    @click="onStartEncodingFromTrim"
+                                >
+                                    {{ submitting ? 'Starting…' : 'Start encoding' }}
+                                </button>
+                            </template>
+
                             <!--
                                 Title, status and created label used to sit here,
                                 under the player, leaving the row's left side to
