@@ -7,7 +7,7 @@ import {
 import { spawn, execFile, execSync, type ChildProcess } from 'child_process';
 import { mkdirSync, existsSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { promisify } from 'util';
 import { Worker } from 'worker_threads';
 import type {
@@ -414,9 +414,21 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         outputDir: string
     ): Promise<string> {
         const lines = ['ffconcat version 1.0'];
+        /*
+         * Absolute, because the concat demuxer resolves relative entries against
+         * the *list file's own directory* — not this process's working directory.
+         * A relative source would be looked for inside `outputDir` and the trim
+         * would fail on a file that is plainly there.
+         *
+         * The controller already rejects a non-absolute source at ingest, so this
+         * is belt and braces — but the sprite packer had exactly this bug (item
+         * 39) and was safe by the same kind of distant guarantee right up until
+         * it wasn't.
+         */
+        const absoluteInput = resolve(inputPath);
         for (const seg of segments) {
             // Escape single quotes in path for ffconcat format
-            const escapedPath = inputPath.replace(/'/g, "'\\''");
+            const escapedPath = absoluteInput.replace(/'/g, "'\\''");
             lines.push(`file '${escapedPath}'`);
             lines.push(`inpoint ${seg.inSec}`);
             lines.push(`outpoint ${seg.outSec}`);

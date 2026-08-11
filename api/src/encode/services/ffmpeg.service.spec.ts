@@ -7,7 +7,7 @@ import {
     readFileSync,
     existsSync,
 } from 'fs';
-import { join } from 'path';
+import { isAbsolute, join } from 'path';
 import { tmpdir } from 'os';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
@@ -1056,6 +1056,47 @@ describe('FfmpegService', () => {
             expect(content).toContain('outpoint 30');
             expect(content).toContain('inpoint 60');
             expect(content).toContain('outpoint 90');
+        });
+
+        it('names the source by absolute path, whatever it was given', async () => {
+            /*
+             * The concat demuxer resolves relative entries against the list
+             * file's own directory, so a relative source would be looked for
+             * inside outputDir and the trim would fail on a file plainly there.
+             *
+             * The controller rejects a non-absolute source at ingest, so this
+             * cannot happen today — but the sprite packer had exactly this bug
+             * (item 39) and was also safe by a guarantee made in another file,
+             * right up until it was not.
+             */
+            const args = await buildVideoArgs({
+                inputPath: 'relative/input.mp4',
+                outputDir: tmpDir,
+                encodeConfig: {
+                    type: 'video',
+                    videoRenditions: [
+                        {
+                            width: 1280,
+                            height: 720,
+                            videoBitrateKbps: 2500,
+                            audioGroupId: 'hd',
+                        },
+                    ],
+                    audioGroups: [
+                        { id: 'hd', audioBitrateKbps: 192, channels: 2 },
+                    ],
+                    trimSegments: [{ inSec: 10, outSec: 30 }],
+                },
+            });
+
+            expect(args).toContain('concat');
+            const content = readFileSync(join(tmpDir, 'concat.txt'), 'utf-8');
+            const fileLine = content
+                .split('\n')
+                .find((line) => line.startsWith("file '"))!;
+            const named = fileLine.replace(/^file '(.*)'$/, '$1');
+            expect(isAbsolute(named)).toBe(true);
+            expect(named.endsWith('relative/input.mp4')).toBe(true);
         });
 
         it('should use direct input when no trimSegments', async () => {

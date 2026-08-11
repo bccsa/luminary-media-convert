@@ -934,5 +934,5 @@ Impossible to open 'work/<id>/output/thumbnails/work/<id>/preview-thumbnails/thu
 
 Verified end to end afterwards: the same encode now logs `Packed 12 thumbnail(s) into 1 sprite sheet(s)`, reports `thumbnailsVtt`, and the sheet answers 200 from S3.
 
-**Worth noting for the future:** `writeConcatFile` in `concat-file.ts` has the same shape for trim segments, and is safe only because a session's source path is validated absolute at ingest. If that ever loosens, it fails the same way.
+**The same shape exists for trim segments** — `buildConcatFile` in `ffmpeg.service.ts` writes the source path into an ffconcat list the same way. It was safe, but only because `encode.controller.ts` rejects a non-absolute path at ingest: a guarantee made three files away, which is exactly the kind this bug was safe by until it wasn't. Now resolved at the point of use, with a test that hands it a relative path. (An earlier draft of this note named `concat-file.ts`; that file only ever existed in the abandoned item-34 work and is not in the tree.)
 
