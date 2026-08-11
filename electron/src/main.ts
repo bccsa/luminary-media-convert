@@ -14,6 +14,9 @@ import {
     ALLOWED_EXTENSIONS,
     createServer,
     DEFAULT_PORT,
+    FFMPEG_DOWNLOAD_URL,
+    missingBinariesMessage,
+    probeFfmpegBinaries,
     type RunningServer,
 } from '@luminary-media-converter/api';
 
@@ -383,12 +386,65 @@ async function start(): Promise<void> {
         return;
     }
 
+    // Before the window: FFmpeg is not optional, and an app window is a promise
+    // that something can be done with it.
+    if (!(await encoderPresent())) return;
+
     createWindow();
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
         else focusWindow();
     });
+}
+
+/**
+ * Whether this machine can encode — and if it cannot, say why and stop.
+ *
+ * FFmpeg is a hard requirement: encoding, previews, thumbnails, waveforms and
+ * even reading a source's metadata all spawn it, so an app that opens without it
+ * offers a window in which nothing can be done. Better to say so once, plainly,
+ * with the download in reach, than to let the user reach a failed probe after
+ * choosing a destination in the CMS and picking a file.
+ *
+ * Until this existed nothing said so at all: the acceleration probe reported "No
+ * GPU found, using CPU encoding" on a machine with no ffmpeg whatsoever, because
+ * its checks cannot tell an absent binary from one without NVENC.
+ *
+ * A packaged build ships its own pair, so in practice this fires for a run from
+ * source with nothing installed, or a package built without them — `pack` skips
+ * the fetch, and electron-builder only warns about the missing source.
+ *
+ * Called before `createWindow()` and returns false when the app is quitting.
+ */
+async function encoderPresent(): Promise<boolean> {
+    // After createServer, which is what puts the bundled paths into the
+    // environment these read.
+    const reason = missingBinariesMessage(await probeFfmpegBinaries());
+    if (!reason) return true;
+
+    console.error(reason);
+    const { response } = await dialog.showMessageBox({
+        type: 'error',
+        title: 'FFmpeg is required',
+        message: 'Luminary Media Convert cannot run without FFmpeg',
+        detail:
+            `${reason}\n\n` +
+            'Everything this app does — encoding, previews, thumbnails, even ' +
+            'reading a file’s details — needs it.',
+        buttons: ['Get FFmpeg', 'Quit'],
+        defaultId: 0,
+        cancelId: 1,
+    });
+    if (response === 0) await shell.openExternal(FFMPEG_DOWNLOAD_URL);
+
+    // Either way the answer is the same: there is nothing to do here until
+    // FFmpeg is installed and the app is started again. Close the server first
+    // rather than exiting out from under Nest.
+    await server?.close();
+    server = undefined;
+    app.exit(1);
+    return false;
 }
 
 app.on('window-all-closed', () => {

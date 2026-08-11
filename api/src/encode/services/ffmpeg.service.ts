@@ -18,6 +18,11 @@ import type {
 } from '../dto/encode-config.dto.js';
 import dotenv from 'dotenv';
 import { ffmpegBin, ffmpegShellBin, ffprobeBin } from './ffbin.js';
+import {
+    missingBinariesMessage,
+    probeFfmpegBinaries,
+    type FfmpegAvailability,
+} from './ffmpeg-availability.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -48,6 +53,8 @@ export type AccelMode = 'cpu' | 'nvidia' | 'apple';
 export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(FfmpegService.name);
     private accelMode: AccelMode = 'cpu';
+    /** Set once by {@link onModuleInit}; undefined only before Nest has started. */
+    private availability?: FfmpegAvailability;
     private activeProcess: ChildProcess | null = null;
     private readonly timeoutMs = process.env.FFMPEG_TIMEOUT_MS
         ? parseInt(process.env.FFMPEG_TIMEOUT_MS, 10)
@@ -57,6 +64,28 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         : 8;
 
     async onModuleInit(): Promise<void> {
+        /*
+         * Presence before capability. Asking only about capability reported a
+         * machine with no ffmpeg at all as "No GPU found, using CPU encoding":
+         * every probe below fails identically whether the binary is absent or
+         * merely lacks NVENC, and both answers are 'cpu'. Nothing then said
+         * otherwise until the first encode, several user decisions later.
+         */
+        this.availability = await probeFfmpegBinaries();
+        const missing = missingBinariesMessage(this.availability);
+        if (missing) {
+            this.logger.error(missing);
+            // Capability detection would only spawn the same absent binary
+            // three more times to reach the same conclusion.
+            this.accelMode = 'cpu';
+            return;
+        }
+
+        this.logger.log(
+            `FFmpeg ${this.availability.ffmpeg.version ?? '(unknown version)'}, ` +
+                `ffprobe ${this.availability.ffprobe.version ?? '(unknown version)'}`
+        );
+
         this.accelMode = this.detectAcceleration();
         switch (this.accelMode) {
             case 'nvidia':
@@ -73,6 +102,21 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 this.logger.log('No GPU found, using CPU encoding');
         }
         this.logger.log(`FFmpeg threads: ${this.threads}`);
+    }
+
+    /**
+     * Why this machine cannot encode, or null when it can.
+     *
+     * Read by the endpoints that would otherwise spawn ffmpeg or ffprobe, so a
+     * missing install is refused with something actionable instead of surfacing
+     * as an `ENOENT` from a child process partway through a session.
+     */
+    unavailableReason(): string | null {
+        // Before onModuleInit has run there is nothing to report; Nest does not
+        // serve requests until it has.
+        return this.availability
+            ? missingBinariesMessage(this.availability)
+            : null;
     }
 
     async onModuleDestroy(): Promise<void> {

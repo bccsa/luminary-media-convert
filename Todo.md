@@ -754,7 +754,7 @@ Proven end to end: `app/dist`, `api/dist` and `electron/dist` were all deleted t
 
 ---
 
-## 35. A missing ffmpeg is reported as a working CPU-only install
+## 35. A missing ffmpeg is reported as a working CPU-only install — fixed
 
 **Found while proving out item 33's packaging changes**, by packing with the bundled binaries parked and launching the result with `PATH=/usr/bin:/bin` — no ffmpeg bundled, none on the system.
 
@@ -772,6 +772,22 @@ Which reads as *this will work, just slowly*. Nothing will work. `detectAccelera
 **Worth noting the failure is silent at both ends.** Packaging does not complain when the binaries are absent (item 5a), and the app does not complain when they are missing at runtime. Either check on its own would have caught the pair.
 
 **Blocks nothing today** — every shipped path bundles the binaries, and `dist:mac` / `dist:win` fetch them. It matters the moment either changes, which is item 36.
+
+### Done — presence is now its own question, and FFmpeg is a hard requirement
+
+`ffmpeg-availability.ts` runs `ffmpeg -version` and `ffprobe -version` and reports three states rather than two: missing, present, present-with-a-version. It is separate from `detectAcceleration()` on purpose — that answers capability, and answering only capability was the bug. Re-exported from `bootstrap.ts` so the Electron host reaches the verdict the way the API does; two independent checks would eventually disagree, and the one the user sees is the host's while the one refusing their encode is the API's.
+
+Three behaviours came out of it:
+
+- **The startup log tells the truth.** `FFmpeg 8.1, ffprobe 8.1` when present; an `ERROR` naming what is missing, where it was looked for and where to get it when not. The version is logged because version skew is a support cost and the first question will be "which ffmpeg".
+- **The host refuses to open a window without it** (`encoderPresent()` in `electron/src/main.ts`). Per Johan, FFmpeg is mandatory, so the dialog offers **Get FFmpeg** / **Quit** — an earlier draft offered "Continue without it", which he rightly rejected as an option that only defers the same failure. The server is closed before exiting rather than quitting out from under Nest.
+- **The API refuses work needing it** with `503` and the same text, at both ingest and encode start. Ingest matters most: attaching a source probes it immediately, so a missing install used to surface as a failed probe — which reads as a problem with the user's file. Checked at encode too, since a session can sit in `uploaded` across an uninstall.
+
+Verified by packing with the binaries parked and launching with `PATH=/usr/bin:/bin`: the dialog appears with the reason and the download link, and the process waits on it rather than opening a window. Then re-verified the other direction — binaries restored, same scrubbed PATH — and the app logs `FFmpeg 8.1`, detects VideoToolbox, serves the client and shuts down cleanly.
+
+One flaw found in this work and worth remembering: the first draft called the check as `void warnIfEncoderMissing()`. The reason was logged and no dialog ever appeared, which is indistinguishable from a dialog the user dismissed — a floating promise had swallowed the rejection. Confirmed by screenshot both before and after, because "it should show a dialog" is not evidence that one did.
+
+**Open, and raised by Johan while this landed: there is no minimum version check.** See item 37.
 
 ---
 
@@ -791,3 +807,35 @@ Which reads as *this will work, just slowly*. Nothing will work. `detectAccelera
 **A third option worth putting to Ivan:** keep controlling *which* build is used, but stop shipping it inside the installer — fetch the same pinned, digest-checked binary on first run, which `fetch-binaries` already does at build time. That drops the installer to a few megabytes and puts the ffmpeg download outside our distribution, while leaving no room for a user's own build to vary. It needs a first-run UI, a failure path for no network, and a decision about where the binaries live on disk.
 
 **Not a decision for this repo.** Installer size, licensing exposure and support load are the trade, and the people carrying each should pick. What this repo can say is that the "ask the user" option is not free today: item 35 has to land first, or the first thing a user without ffmpeg sees is an encode that fails after they have committed to a destination.
+
+### Decided for now (Johan, 11 Aug 2026): FFmpeg is mandatory, and a machine without it is told to install it
+
+Item 35 has since landed, so the prerequisite above is met: a machine without FFmpeg gets a dialog naming what is missing, a **Get FFmpeg** button, and **Quit** — the app does not open a window it cannot do anything in.
+
+What this decision does *not* settle is whether the binaries keep shipping inside the installer. Both remain true at once today: a packaged build carries its own pair, and a machine without them is told to install. That is a reasonable place to sit, but it leaves the 146 MB and the licensing question exactly where they were.
+
+**What the decision does change is the exposure.** A user-supplied FFmpeg is now a supported source rather than a developer convenience, which promotes the "lottery" and "version skew" bullets above from hypothetical to live — and neither is currently guarded. Item 37.
+
+---
+
+## 37. No minimum FFmpeg version is enforced
+
+**Raised by Johan, 11 Aug 2026**, while item 35 landed: is there a minimum version, and do we check it?
+
+**Today: no.** The startup probe records the version (`FFmpeg 8.1, ffprobe 8.1`) and nothing compares it to anything. That was defensible while every shipped path carried a known-good binary fetched by `fetch-binaries` against a pinned digest. It is not defensible now that item 36 makes a user-supplied install a supported source: the encoder will happily start on an FFmpeg too old for the flags it is about to use, and fail inside a child process partway through an encode — the same class of confusion item 35 just removed from the missing-binary case.
+
+**What the pipeline actually depends on**, which is what a floor has to be derived from rather than guessed:
+
+- `-stats_period` (progress reporting) — the newest of the *unconditional* flags, and therefore probably the binding constraint
+- `-var_stream_map`, `-hls_segment_type fmp4`, `-hls_fmp4_init_filename`, `-master_pl_name`
+- `-movflags +negative_cts_offsets+default_base_moof`
+- `scale_vt` and `h264_videotoolbox`, `scale_cuda` and `h264_nvenc` — these are already capability-probed, so an FFmpeg without them degrades to CPU rather than failing. They do not belong in a version floor; they are the reason a version floor is not sufficient on its own
+
+**Two traps to avoid**, both of which would refuse working installs:
+
+- **Version strings are not semver.** Real builds report `4.4.2-0ubuntu0.22.04.1`, `7.1.1_2` (Homebrew), and `N-113140-gd12b0e6f4b` (nightly, no version number at all). A naive parse-and-compare refuses the nightly, which is newer than any floor we would set.
+- **An unparseable version is not an old one.** It should be allowed with a note, not blocked.
+
+**Recommended shape.** A documented floor constant with the reason for the number written beside it, compared only when the version parses; unparseable versions pass with a log line. Below the floor, refuse at startup the way a missing binary now does — a too-old FFmpeg is not a degraded encoder, it is an encoder that will fail somewhere less legible. The capability probes stay as they are: they cover the hardware paths, which no version number can.
+
+**What is missing to do it properly: evidence for the number.** Picking a floor from memory is how a working install gets refused. It wants either a real check of when each flag landed, or — better and cheaper to keep honest — a *capability* probe per unconditional flag, the way the GPU paths are already probed, with the version reported only as context in the message. That way the check tests what the code actually needs rather than a proxy for it.

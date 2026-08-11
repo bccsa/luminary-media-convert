@@ -22,6 +22,23 @@ import { API_VERSION } from './version.js';
  */
 export { ALLOWED_EXTENSIONS } from './encode/services/media-extensions.js';
 
+/**
+ * Re-exported for the same reason, one step further: the host has to be able to
+ * tell the user that ffmpeg is missing, and it must reach that verdict the way
+ * the API does. Two separate checks would eventually disagree — and the one the
+ * user sees is the host's, while the one that refuses their encode is the API's.
+ *
+ * Call it *after* `createServer`, or at least after setting `FFMPEG_PATH` /
+ * `FFPROBE_PATH`: the paths are read per call, so probing earlier asks about
+ * whatever is on PATH instead of the binaries the host is about to supply.
+ */
+export {
+    probeFfmpegBinaries,
+    missingBinariesMessage,
+    FFMPEG_DOWNLOAD_URL,
+    type FfmpegAvailability,
+} from './encode/services/ffmpeg-availability.js';
+
 /** Where the app listens when nobody says otherwise. */
 export const DEFAULT_PORT = 31711;
 

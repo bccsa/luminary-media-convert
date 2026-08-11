@@ -458,6 +458,15 @@ created -> uploading -> uploaded -> queued -> encoding -> encrypting -> uploadin
 | `LUMINARY_PORT` | Override the API port |
 | `ELECTRON_RENDERER_URL` | Dev renderer URL (default `http://localhost:5173`) |
 
+## FFmpeg is a hard requirement
+
+`ffmpeg-availability.ts` probes `ffmpeg -version` / `ffprobe -version` at startup and answers **presence**, which is a different question from the acceleration detection below and must not be confused with it: every capability probe fails identically whether a binary is absent or merely lacks NVENC, so asking only about capability reported a machine with no FFmpeg at all as "No GPU found, using CPU encoding" (Todo.md item 35).
+
+- The **Electron host** refuses to open a window without it, offering *Get FFmpeg* / *Quit* — there is nothing useful to do in a window that cannot probe, preview, thumbnail or encode. It closes the server before exiting rather than quitting out from under Nest
+- The **API** refuses ingest and encode start with `503` and the same user-facing text. Ingest is the one that matters: attaching a source probes it immediately, so a missing install used to present as a failed probe, which reads as a bad file
+- `probeFfmpegBinaries` / `missingBinariesMessage` / `FFMPEG_DOWNLOAD_URL` are re-exported from `bootstrap.ts` so the host reaches the same verdict the API does. Call them *after* `createServer` (or after setting `FFMPEG_PATH` / `FFPROBE_PATH`) — the paths are read per call, so probing earlier asks about PATH instead of the bundled binaries
+- **No minimum version is enforced** (Todo.md item 37). The version is logged, not checked
+
 ## GPU Detection
 
 At startup `FfmpegService.onModuleInit()` detects the acceleration mode (`AccelMode`: `'cpu' | 'nvidia' | 'apple'`):

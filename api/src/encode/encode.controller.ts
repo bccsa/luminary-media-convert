@@ -13,6 +13,7 @@ import {
     Query,
     Req,
     Res,
+    ServiceUnavailableException,
     Sse,
     StreamableFile,
     UnauthorizedException,
@@ -88,6 +89,20 @@ export class EncodeController {
         private readonly waveformService: WaveformService,
         private readonly thumbnailService: ThumbnailService
     ) {}
+
+    /**
+     * Refuse work that needs ffmpeg when ffmpeg is not there.
+     *
+     * `503`, not `400`: the request is well formed and the session is fine — the
+     * machine cannot do the job. The message is the one meant for the person
+     * sitting there, naming what is missing and where to get it, because the
+     * alternative was an `ENOENT` from a child process surfacing as a failed
+     * probe, which reads as a problem with their file.
+     */
+    private assertEncoderAvailable(): void {
+        const reason = this.ffmpegService.unavailableReason();
+        if (reason) throw new ServiceUnavailableException(reason);
+    }
 
     @Post()
     @UseGuards(AuthResolverGuard)
@@ -199,6 +214,12 @@ export class EncodeController {
             );
         }
 
+        // Refused here rather than at the encode, because attaching a file
+        // immediately probes it with ffprobe. Without the binaries that surfaced
+        // as an ENOENT from a child process, reported as a failed probe — which
+        // reads as a problem with the user's file.
+        this.assertEncoderAvailable();
+
         // A relative path would resolve against the encoder's working directory,
         // which is not where the user was standing when they picked the file.
         if (!isAbsolute(dto.path)) {
@@ -287,6 +308,11 @@ export class EncodeController {
                     'create the session again from the CMS'
             );
         }
+
+        // Checked again here, not only at ingest: the binaries are probed once
+        // at startup, but a session can sit in `uploaded` across an uninstall
+        // that took them with it.
+        this.assertEncoderAvailable();
 
         // A failed encode is worth retrying when its source survived. Every
         // failure seen in practice — a full disk, a stalled upload, a restart —

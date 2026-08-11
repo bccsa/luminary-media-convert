@@ -2,6 +2,7 @@ import { type Mocked } from 'vitest';
 import {
     BadRequestException,
     NotFoundException,
+    ServiceUnavailableException,
     UnauthorizedException,
 } from '@nestjs/common';
 import { rmSync, mkdtempSync, writeFileSync } from 'fs';
@@ -102,6 +103,9 @@ describe('EncodeController', () => {
             getAccelMode: vi.fn().mockReturnValue('cpu'),
             isGpuAvailable: vi.fn().mockReturnValue(false),
             killActiveProcess: vi.fn(),
+            // Null means "the encoder is usable", which is the state every test
+            // below assumes. The refusal path has its own cases.
+            unavailableReason: vi.fn().mockReturnValue(null),
         } as any;
 
         previewService = {
@@ -354,6 +358,54 @@ describe('EncodeController', () => {
                     makeRequest()
                 )
             ).rejects.toThrow(BadRequestException);
+        });
+
+        it('refuses with 503 and the install advice when ffmpeg is missing', async () => {
+            /*
+             * A 400 would blame the request, which is fine — it is the machine
+             * that cannot do the job. Before this, the encode was accepted and
+             * failed later inside ffmpeg with an ENOENT nobody could read as
+             * "install ffmpeg".
+             */
+            const advice = 'FFmpeg is required and could not be run: …';
+            ffmpegService.unavailableReason.mockReturnValue(advice);
+
+            const session = sessionService.create(makeConfig());
+            sessionService.updateStatus(session.id, 'uploaded');
+
+            await expect(
+                controller.startEncode(
+                    session.id,
+                    makeEncodeConfig(),
+                    makeRequest()
+                )
+            ).rejects.toThrow(ServiceUnavailableException);
+            // The user-facing text travels with it — a bare 503 would leave the
+            // renderer nothing to show.
+            await expect(
+                controller.startEncode(
+                    session.id,
+                    makeEncodeConfig(),
+                    makeRequest()
+                )
+            ).rejects.toThrow(advice);
+            expect(queueService.enqueue).not.toHaveBeenCalled();
+        });
+
+        it('refuses attaching a source when ffmpeg is missing', async () => {
+            // Attaching probes the file immediately, so this is where a missing
+            // install first bites — and it presented as a bad source file.
+            ffmpegService.unavailableReason.mockReturnValue('no ffmpeg here');
+
+            const session = sessionService.create(makeConfig());
+
+            await expect(
+                controller.attachLocalFile(
+                    session.id,
+                    { path: '/tmp/whatever.mp4' },
+                    makeRequest()
+                )
+            ).rejects.toThrow(ServiceUnavailableException);
         });
 
         it('should reject when session not found', async () => {
