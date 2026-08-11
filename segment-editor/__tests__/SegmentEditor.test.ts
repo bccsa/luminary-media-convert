@@ -457,6 +457,69 @@ describe('SegmentEditor — selection', () => {
         await flush();
         expect(latestSegments(w)).toHaveLength(0);
     });
+
+    it('Cmd/Ctrl + X cuts the selection, which is what a user reaches for', async () => {
+        // Delete and Backspace were the only bindings, so the shortcut that
+        // exists felt like one that does not.
+        for (const modifier of ['metaKey', 'ctrlKey'] as const) {
+            const w = mountEditor({ segments: [seg(1, 0, 5), seg(2, 10, 15)] });
+            await flush();
+            const segEl = w.find('.se-segment').element as HTMLElement;
+            mouseAt(segEl, 'mousedown', 2);
+            mouseAt(document.body, 'mouseup', 2);
+            await flush();
+
+            keyDown(getTimeline(w), 'x', { [modifier]: true });
+            await flush();
+
+            expect(latestSegments(w)).toHaveLength(1);
+            expect(latestSegments(w)[0].inSec).toBe(10);
+        }
+    });
+
+    it('bare X does not cut — it is the modifier that means cut', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5)] });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+
+        keyDown(getTimeline(w), 'x');
+        await flush();
+
+        expect(latestSegments(w)).toHaveLength(1);
+    });
+
+    it('leaves Cmd/Ctrl + X to the input when a field has focus', async () => {
+        /*
+         * Typing a chapter title and cutting a word must cut the word, not the
+         * chapter. The typing guard already did this for Delete; the new binding
+         * sits below it so it inherits the same rule.
+         */
+        // `keyboardScope: 'global'` on purpose: the default 'focus' scope never
+        // attaches a window listener, so a keypress in a detached input could
+        // not reach the editor whatever the guard did — the test would pass
+        // while proving nothing. Global is also the scope the trim workspace
+        // mounts with, which is where this actually matters.
+        const w = mountEditor({
+            segments: [seg(1, 0, 5)],
+            props: { keyboardScope: 'global' },
+        });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+
+        const input = document.createElement('input');
+        document.body.appendChild(input);
+        keyDown(input, 'x', { metaKey: true });
+        await flush();
+
+        expect(latestSegments(w)).toHaveLength(1);
+        input.remove();
+    });
 });
 
 describe('SegmentEditor — keyboard navigation', () => {

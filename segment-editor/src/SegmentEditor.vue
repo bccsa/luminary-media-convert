@@ -1048,6 +1048,21 @@ function onKeyDown(e: KeyboardEvent) {
             }
             return;
         }
+        // ⌘/Ctrl + X, the binding a user actually reaches for to cut. Delete
+        // and Backspace were the only ones bound, which made a shortcut that
+        // exists feel like one that does not. Same action as the Cut button, so
+        // it is subject to the same rule: nothing selected, nothing happens.
+        //
+        // Below the typing guard on purpose — in a chapter title, ⌘X is the
+        // input's own cut and stays that way.
+        case 'x': case 'X': {
+            if (!(e.metaKey || e.ctrlKey)) return;
+            if (selectedIds.value.size > 0) {
+                e.preventDefault();
+                deleteSelected();
+            }
+            return;
+        }
         case 'Escape': {
             clearSelection();
             pendingInSec.value = null;
@@ -1630,7 +1645,7 @@ defineExpose({
                     type="button"
                     class="se-btn se-btn--danger"
                     :disabled="!hasSelection"
-                    :title="hasSelection ? 'Cut the selected range · Delete — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
+                    :title="hasSelection ? 'Cut the selected range · Delete or ⌘/Ctrl + X — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
                     @click="deleteSelected"
                 >
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
@@ -2060,7 +2075,7 @@ defineExpose({
                     type="button"
                     class="se-btn se-btn--danger"
                     :disabled="!hasSelection"
-                    :title="hasSelection ? 'Cut the selected range · Delete — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
+                    :title="hasSelection ? 'Cut the selected range · Delete or ⌘/Ctrl + X — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
                     @click="deleteSelected"
                 >
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
@@ -2354,7 +2369,7 @@ defineExpose({
                         <dt>O</dt><dd>Mark Out at playhead</dd>
                         <dt>[ / ]</dt><dd>Mark In / Mark Out (alternate)</dd>
                         <dt>Alt + ← / →</dt><dd>Nudge nearest edge of selected segment</dd>
-                        <dt>Delete</dt><dd>Remove selected segment(s)</dd>
+                        <dt>Delete / ⌘ / Ctrl + X</dt><dd>Remove selected segment(s)</dd>
                         <dt>⌘ / Ctrl + Z</dt><dd>Undo</dd>
                         <dt>⌘ / Ctrl + Shift + Z</dt><dd>Redo</dd>
                         <dt>+ / −</dt><dd>Zoom in / out (0 resets)</dd>
