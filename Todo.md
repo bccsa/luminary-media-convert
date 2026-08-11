@@ -708,6 +708,30 @@ Vite bakes `VITE_*` values into the bundle, so right now `app/dist` carries `VIT
 
 **Interacts with item 5** (Windows build verification) and with item 24, whose `.env.example` should say plainly that `VITE_API_URL` must be empty for anything that will be packaged.
 
+### Done — and the leak was in the app, not the build script
+
+**The `.env` no longer reaches a build at all, whoever runs it.** The write-up above assumed the fix belonged in the packaging chain — scrub the environment before building the client. It belonged in the client. `API_BASE` read
+
+```ts
+import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://127.0.0.1:3000' : '')
+```
+
+and the comment above it claimed `DEV` kept this out of a build. It did not: `??` only falls through when the variable is *undefined*, and Vite bakes every `VITE_*` value into every bundle. So the dev branch was guarded and the shipped branch was not. Reading the variable **inside** the `DEV` branch instead means no `.env` on any machine can reach a build however it is invoked — including a colleague running `npm -w app run build` by hand, which no packaging script could have protected. `VITE_API_TOKEN` had the same shape in `auth-token.ts` and got the same treatment; it was never exploitable (the bridge answers first, and the host's per-launch token would not match a baked one) but a credential in a release artifact should not depend on being unreachable to be harmless.
+
+Verified by building with a deliberately hostile `app/.env` (`VITE_API_URL=http://127.0.0.1:9999`, `VITE_API_TOKEN=leakme-poison-token`) and grepping the output: absent, along with `31711`, `dev-token` and `3000`. `API_BASE` compiles to `""` and the dev branch is tree-shaken away entirely. The prior `app/dist` on this machine did contain `127.0.0.1:31711` and `dev-token`, so the leak was real and not theoretical.
+
+**Regression tests, and why the old ones missed it.** `api-base.spec.ts` already asserted "stays same-origin in a build" — but only with nothing configured, which passed either way. The case that mattered, `DEV: false` *with* `VITE_API_URL` set, was never written. That case and its token equivalent are now covered, and both were confirmed to fail against the old code before the fix went back in.
+
+**Packaging now builds what it ships.** `dist:mac` / `dist:win` / `pack` run `build:workspaces` first, which calls the root's new `build:bundled` — the five shared libraries, then the API, then the web client. Root also gained `build:libs`, which `predev` and `predev:electron` now share instead of repeating the list.
+
+**A third staleness bug the item did not name:** `api/dist` was never built by the packaging chain either. `npm run build` in `electron/` is `tsc -p tsconfig.json`, which compiles only Electron's own TypeScript, so packaging on a clean machine would have produced an installer whose *bundled API* was missing or stale — not merely its client. Covered by the same fix.
+
+Proven end to end: `app/dist`, `api/dist` and `electron/dist` were all deleted to simulate a clean clone, then `npm -w electron run pack` rebuilt all three and produced a package containing `index.html` plus four JS assets, `ffmpeg`/`ffprobe`, and `@luminary-media-converter/api/dist/{bootstrap,main,app.module}.js` inside `app.asar` — with none of `31711`, `dev-token` or `3000` anywhere in the packaged client, despite the real `.env` on this machine setting the first two.
+
+`app/.env.example` now states that both variables are development-only and that nothing in the file can reach a build, rather than asking the reader to remember to blank one before packaging.
+
+**Not done:** the packaged app was not launched afterwards. `pack` output was inspected, not run — booting it is item 5a's territory (bundled-ffmpeg verification), and unrelated to what changed here.
+
 ---
 
 ## 34. Thumbnail sprites could run alongside the encode, not after it

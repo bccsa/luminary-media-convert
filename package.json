@@ -14,9 +14,11 @@
         "electron"
     ],
     "scripts": {
-        "predev": "npm -w encode-config run build && npm -w segment-editor run build && npm -w hls run build && npm -w player-core run build && npm -w player-web run build",
+        "build:libs": "npm -w encode-config run build && npm -w segment-editor run build && npm -w hls run build && npm -w player-core run build && npm -w player-web run build",
+        "build:bundled": "npm run build:libs && npm -w api run build && npm -w app run build",
+        "predev": "npm run build:libs",
         "dev": "npm run predev && concurrently -k -n ecfg,segd,hls,pcor,plyw,api,app -c green,gray,white,cyan,red,blue,magenta \"npm -w encode-config run dev\" \"npm -w segment-editor run dev\" \"npm -w hls run dev\" \"npm -w player-core run dev\" \"npm -w player-web run dev\" \"npm -w api run dev\" \"npm -w app run dev\"",
-        "predev:electron": "npm run predev && npm -w api run build",
+        "predev:electron": "npm run build:libs && npm -w api run build",
         "dev:electron": "concurrently -k -n ecfg,segd,hls,pcor,plyw,app,elec -c green,gray,white,cyan,red,magenta,yellow \"npm -w encode-config run dev\" \"npm -w segment-editor run dev\" \"npm -w hls run dev\" \"npm -w player-core run dev\" \"npm -w player-web run dev\" \"npm -w app run dev\" \"npm -w electron run dev\""
     },
     "devDependencies": {

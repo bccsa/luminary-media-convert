@@ -31,6 +31,24 @@ describe('API_BASE', () => {
         expect(await apiBaseWith({ DEV: false })).toBe('');
     });
 
+    it('ignores VITE_API_URL in a build, whatever a developer has in .env', async () => {
+        /*
+         * The case that was missing, and the reason the defect survived a spec
+         * file named after this constant: "same-origin in a build" was only
+         * asserted with nothing configured, which passed either way.
+         *
+         * Vite bakes every VITE_* value it finds into every build, so reading
+         * the variable ahead of the DEV check let a developer's .env decide
+         * where the packaged app looked for its API. It worked by luck — that
+         * .env said 31711, the port Electron uses — and would have shipped a
+         * release pointing at nothing the first time someone packaged while
+         * paired with the standalone API on :3000.
+         */
+        expect(
+            await apiBaseWith({ DEV: false, VITE_API_URL: 'http://127.0.0.1:9999' })
+        ).toBe('');
+    });
+
     it('lets VITE_API_URL win, which is how the Electron pairing is set', async () => {
         // Desktop dev runs the API on 31711, not the standalone default.
         expect(

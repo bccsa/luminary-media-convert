@@ -53,4 +53,18 @@ describe('getApiToken', () => {
 
         await expect(getApiToken()).rejects.toThrow('No API token available');
     });
+
+    it('ignores VITE_API_TOKEN in a build, so no .env token ships in the bundle', async () => {
+        /*
+         * Vite bakes every VITE_* value into every build, so reading this one
+         * outside the DEV check embedded a developer's token in the release —
+         * `dev-token` was sitting in app/dist. Never exploitable: the bridge
+         * answers first in the packaged app, and the host mints a fresh token
+         * per launch that would not match. But a credential in a shipped
+         * artifact should not depend on being unreachable to be harmless.
+         */
+        withEnv({ DEV: false, VITE_API_TOKEN: 'leakme-poison-token' });
+
+        await expect(getApiToken()).rejects.toThrow('No API token available');
+    });
 });

@@ -7,28 +7,28 @@ import type {
 } from './types';
 
 /**
- * Base URL of the local Encoding API.
- *
- * The packaged app serves the renderer from the API's own origin, so the empty
- * default produces same-origin requests. `VITE_API_URL` covers browser dev,
- * where the UI is on Vite's port and the API on its own.
- */
-/**
  * Where the local Encoding API is.
  *
- * Empty means same-origin, which is right for the packaged app: the API serves
- * the client. In browser development the client is on Vite's port and the API is
- * not, so same-origin would send every request to `:5173` — hence the dev
- * default, which points at the standalone API's own default port. `31711` is the
- * Electron host's port and deliberately not this one; browser dev is paired with
- * `npm -w api run dev`.
+ * Empty means same-origin, which is the only correct answer for a built
+ * bundle: the API serves the client, and running the client against a remote
+ * API is not a supported mode. In browser development the client is on Vite's
+ * port and the API is not, so same-origin would send every request to `:5173` —
+ * hence the dev default, which points at the standalone API's own default port.
+ * `31711` is the Electron host's port and deliberately not this one; browser dev
+ * is paired with `npm -w api run dev`.
  *
- * `import.meta.env.DEV` is false for every `vite build`, so this cannot follow
- * the code into a packaged build.
+ * **`VITE_API_URL` is read only in development, and the nesting is the point.**
+ * Vite bakes every `VITE_*` value it finds into every build, dev flag or not, so
+ * consulting the variable first — `VITE_API_URL ?? (DEV ? … : '')` — let a
+ * developer's `.env` decide where the *packaged* app looks for its API. It
+ * worked by luck, because the value in that `.env` happened to be the port
+ * Electron uses; with `:3000` in there, a release pointed at nothing. Reading it
+ * inside the `DEV` branch means no `.env` on any machine can reach a build,
+ * however the build was invoked.
  */
-export const API_BASE =
-    import.meta.env.VITE_API_URL ??
-    (import.meta.env.DEV ? 'http://127.0.0.1:3000' : '');
+export const API_BASE = import.meta.env.DEV
+    ? (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:3000')
+    : '';
 
 // ---------------------------------------------------------------------------
 // Fetch helpers
