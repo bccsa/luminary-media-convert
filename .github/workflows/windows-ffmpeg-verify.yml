@@ -117,6 +117,28 @@ jobs:
         if: inputs.package || startsWith(github.ref_name, 'ci/windows-pack')
         run: npm -w electron run dist:win
 
+      # What actually ends up inside the app, asserted rather than assumed. An
+      # installer that omits ffmpeg.exe installs perfectly and then cannot encode,
+      # and electron-builder treats a missing extraResources source as a *warning*
+      # (see Todo 5a), so nothing else here would notice.
+      - name: Assert the packaged app carries ffmpeg
+        if: inputs.package || startsWith(github.ref_name, 'ci/windows-pack')
+        shell: bash
+        run: |
+          RES="electron/release/win-unpacked/resources"
+          echo "--- $RES ---"
+          ls -la "$RES"
+          for f in ffmpeg.exe ffprobe.exe LICENSE-ffmpeg.txt; do
+            test -f "$RES/$f" || { echo "MISSING from the packaged app: $f"; exit 1; }
+            echo "  ✓ $f ($(stat -c%s "$RES/$f") bytes)"
+          done
+          # The GPL text has to travel with a GPL binary; which file depends on the
+          # build, so assert that at least one is there rather than a fixed name.
+          ls "$RES"/GPL-*.txt >/dev/null 2>&1 || { echo "MISSING: no GPL licence text"; exit 1; }
+          echo "  ✓ $(ls "$RES"/GPL-*.txt | xargs -n1 basename | tr '\n' ' ')"
+          # And it is the real thing, not a stub: run the copy that shipped.
+          "$RES/ffmpeg.exe" -hide_banner -version | head -1
+
       - name: Upload the installer
         # Also on a push to `ci/windows-pack-*`, because `inputs.package` only
         # exists for workflow_dispatch, and workflow_dispatch needs the workflow on
