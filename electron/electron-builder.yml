@@ -70,13 +70,21 @@ mac:
     # a rename in build/ fails the packaging run instead of silently shipping
     # the stock Electron icon. Source vector is build/icon.svg.
     icon: build/icon.icns
+    # Per-architecture builds rather than one universal binary. A universal app
+    # would carry both Electron slices *and* both ffmpeg builds — roughly 200 MB
+    # of binaries where each machine needs 100 — and the two macOS ffmpeg builds
+    # are separate downloads at different versions, not a lipo'd pair. Two dmgs
+    # keep each user's download to what their Mac can run. extraResources picks
+    # the matching electron/bin/${platform}-${arch} directory per build.
     target:
         - target: dmg
           arch:
               - arm64
+              - x64
         - target: zip
           arch:
               - arm64
+              - x64
     # Unsigned for now: there is no Developer ID certificate in this project, and
     # electron-builder would otherwise try to sign with whatever is in the
     # keychain. Gatekeeper will require a right-click → Open on first launch.

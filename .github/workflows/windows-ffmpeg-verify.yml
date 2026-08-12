@@ -94,6 +94,12 @@ jobs:
           FF=electron/bin/win32-x64/ffmpeg.exe
           echo "--- version ---"
           "$FF" -hide_banner -version | head -2
+          # The licence, from the binary itself. It decides which GPL text has to
+          # ship beside it, and the only way to read it off a .exe from a Mac is
+          # to extract embedded strings — which is weaker evidence than running it.
+          echo "--- licence ---"
+          "$FF" -hide_banner -L | sed -n '2,4p'
+          "$FF" -hide_banner -buildconf | grep -iE 'enable-(gpl|version3|nonfree)' | tr -d ' '
           echo "--- hwaccels ---"
           "$FF" -hide_banner -hwaccels
           echo "--- nvenc / cuda encoders and filters ---"

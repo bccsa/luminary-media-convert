@@ -30,10 +30,15 @@ const binRoot = join(here, '..', 'bin');
 /**
  * One entry per platform the app is built for.
  *
- * macOS arm64 comes from osxexperts.net: the better-known evermeet.cx publishes
- * x86_64 only, which would run under Rosetta on the machines this app targets.
- * Homebrew's build is not a candidate at all — it links against eighteen
- * dylibs under /opt/homebrew and cannot start anywhere else.
+ * Both macOS builds come from osxexperts.net, which publishes arm64 and Intel
+ * from the same hand — so the two Macs differ only in architecture, not in
+ * provenance. evermeet.cx would also serve Intel, and Homebrew's build is not a
+ * candidate at all: it links against eighteen dylibs under /opt/homebrew and
+ * cannot start anywhere else.
+ *
+ * There is no 32-bit Windows entry, because no maintained FFmpeg build exists
+ * for it — BtbN publishes win64 only, gyan.dev is 64-bit only, and Zeranoe (the
+ * last 32-bit publisher) shut down in 2020. See docs/ffmpeg-licensing.md.
  *
  * These are GPL builds, and deliberately. The LGPL ones omit libx264, which is
  * the CPU fallback in FfmpegService — without it the app cannot encode at all
@@ -41,11 +46,21 @@ const binRoot = join(here, '..', 'bin');
  * process, never linked, so the obligation travels with ffmpeg rather than
  * with this Apache-2.0 codebase; LICENSE-ffmpeg.txt is written beside the
  * binaries and shipped with them.
+ *
+ * `builder` and `licence` are per target and must be read off each binary, never
+ * assumed across platforms: `ffmpeg -L` reports the version and `-buildconf`
+ * shows whether `--enable-version3` was set. They genuinely differ here — the
+ * arm64 build is v2-or-later, while the Intel and Windows builds enable
+ * version3 and are v3-or-later. One shared string had been claiming v2 for all
+ * three, and crediting osxexperts.net for the Windows build BtbN produced.
  */
 const TARGETS = {
     'darwin-arm64': {
         version: '8.1',
         arch: 'arm64',
+        builder: 'osxexperts.net',
+        // `ffmpeg -L` says version 2, and `-buildconf` has no `--enable-version3`.
+        licence: 'GPL-2.0-or-later',
         /**
          * One entry per archive, each naming what it provides. macOS ships the
          * two binaries separately; Windows ships both in one 160 MB zip, so the
@@ -81,6 +96,49 @@ const TARGETS = {
     },
 
     /**
+     * macOS Intel. Same builder as arm64, a different FFmpeg version (8.0 is the
+     * newest Intel build published there), and a *different licence*: this one is
+     * configured `--enable-version3`, so it is v3-or-later.
+     *
+     * Needed because an Intel Mac cannot run the arm64 binary at all — with no
+     * entry here the resolver finds nothing, falls through to PATH and shows the
+     * install prompt that embedding exists to remove.
+     */
+    'darwin-x64': {
+        version: '8.0',
+        // What architectureOf() reports for a Mach-O x86_64 binary — the same
+        // spelling it uses for a 64-bit PE, so the two x64 targets agree.
+        arch: 'x86-64',
+        builder: 'osxexperts.net',
+        licence: 'GPL-3.0-or-later',
+        archives: [
+            {
+                url: 'https://www.osxexperts.net/ffmpeg80intel.zip',
+                sha256: '2d24d22db78c87f394a5822867acd5c5dc5e762cd261a44bd26923f3a5af3e07',
+                provides: [{ name: 'ffmpeg', from: 'ffmpeg' }],
+            },
+            {
+                url: 'https://www.osxexperts.net/ffprobe80intel.zip',
+                sha256: '0b6576104a95c1b39d4939e2df86f8f7cf1d55287ff57da48777d94605d12feb',
+                provides: [{ name: 'ffprobe', from: 'ffprobe' }],
+            },
+        ],
+        /*
+         * Same requirements as arm64: VideoToolbox is present on Intel Macs too
+         * (it is the T2/Quick Sync path there rather than the Apple Silicon
+         * media engine), and libx264 is the fallback when the encoder is absent
+         * or refuses the profile.
+         */
+        verify: {
+            ffmpeg: {
+                hwaccel: 'videotoolbox',
+                encoders: ['h264_videotoolbox', 'libx264'],
+                filters: ['scale_vt'],
+            },
+        },
+    },
+
+    /**
      * Windows, pinned to a dated BtbN release rather than their `latest` tag —
      * `latest` moves, and a moving URL cannot be pinned to a digest.
      *
@@ -92,6 +150,10 @@ const TARGETS = {
         version: '8.1.2',
         // What `file` reports for a 64-bit PE executable.
         arch: 'x86-64',
+        builder: 'BtbN (github.com/BtbN/FFmpeg-Builds)',
+        // Configured `--enable-version3`, and `-L` prints version 3 — confirmed
+        // on the Windows runner, since a .exe cannot be run to ask here.
+        licence: 'GPL-3.0-or-later',
         archives: [
             {
                 url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-11-13-11/ffmpeg-n8.1.2-34-g9b6c8969e0-win64-gpl-8.1.zip',
@@ -112,8 +174,40 @@ const TARGETS = {
     },
 };
 
-/** Whether this machine can execute the target's binaries. */
-const canRunTarget = (name) => name.split('-')[0] === process.platform;
+/**
+ * Whether this machine can execute the target's binaries — which decides whether
+ * the capability checks *run* or the target is merely fetched and pinned.
+ *
+ * Architecture counts, not just platform: an arm64 Mac building the Intel target
+ * can only run those binaries if Rosetta is installed, and without it every
+ * capability probe fails identically to a build that genuinely lacks the encoder.
+ * Calling that a bad build would be wrong — so probe for Rosetta and, absent it,
+ * report the target as fetched-but-unverified, the same as a cross-platform fetch.
+ */
+const rosettaAvailable = () => {
+    try {
+        execFileSync('/usr/bin/arch', ['-x86_64', '/usr/bin/true'], {
+            stdio: 'ignore',
+        });
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+const canRunTarget = (name) => {
+    const [platform, arch] = name.split('-');
+    if (platform !== process.platform) return false;
+    if (arch === process.arch) return true;
+    // The one cross-arch case worth supporting: x64 binaries on an Apple Silicon
+    // Mac. Nothing translates the other way, and Windows-on-arm is not a target.
+    return (
+        process.platform === 'darwin' &&
+        process.arch === 'arm64' &&
+        arch === 'x64' &&
+        rosettaAvailable()
+    );
+};
 
 const target = process.argv[2] ?? `${process.platform}-${process.arch}`;
 
@@ -327,17 +421,22 @@ async function main() {
         /*
          * The licence texts themselves, copied beside the binaries.
          *
-         * GPLv2 §1 requires giving recipients "a copy of this License along with
-         * the Program" — a link in a notice is not a copy. Both versions travel
-         * because the build is "v2 or later": v2 is what we convey under, and a
-         * recipient exercising the "or later" option should not have to go
-         * looking for v3.
+         * GPLv2 §1 and GPLv3 §4 both require giving recipients "a copy of this
+         * License along with the Program" — a link in a notice is not a copy.
+         *
+         * Which texts travel follows the build. A v2-or-later build conveys under
+         * v2 and lets the recipient take v3 instead, so both ship. A v3-or-later
+         * build does not offer v2 at all, and shipping that text beside it would
+         * suggest an option the recipient does not have.
          *
          * Vendored in `electron/bin/licenses/` rather than downloaded here: they
          * must ship whether or not anyone reruns this script, and they are 53 KB
          * of text that never changes.
          */
-        for (const licence of ['GPL-2.0.txt', 'GPL-3.0.txt']) {
+        const licences = spec.licence.startsWith('GPL-3.0')
+            ? ['GPL-3.0.txt']
+            : ['GPL-2.0.txt', 'GPL-3.0.txt'];
+        for (const licence of licences) {
             const from = join(binRoot, 'licenses', licence);
             if (!existsSync(from)) {
                 fail(
@@ -347,17 +446,18 @@ async function main() {
             }
             await copyFile(from, join(outDir, licence));
         }
-        console.log('  ✓ GPL-2.0.txt, GPL-3.0.txt');
+        console.log(`  ✓ ${licences.join(', ')} (${spec.licence})`);
 
         /*
          * Shipped beside the binaries: a GPL build obliges the licence to travel
          * with what is distributed.
          *
-         * The version is v2-or-later, taken from the binary itself rather than
-         * assumed — `ffmpeg -L` says so, and `-buildconf` shows `--enable-gpl`
-         * without `--enable-version3`. This file previously claimed v3-or-later,
-         * which understated our recipients' options and pointed at the wrong
-         * licence text.
+         * Builder and licence version come from the target rather than from one
+         * shared string, because they differ per build and a licence notice that
+         * misstates either is worse than none. This text used to credit
+         * osxexperts.net for BtbN's Windows build and claim v2-or-later for all
+         * three, when only the arm64 build is v2 — the other two are configured
+         * `--enable-version3`.
          *
          * The source line is honest about what it is: upstream's download page is
          * *not* the corresponding source for this build, which statically links
@@ -365,16 +465,21 @@ async function main() {
          * docs/ffmpeg-licensing.md — closing that gap is the mirroring work in
          * Todo item 40, and until it is done a public release is not compliant.
          */
+        const isV3 = spec.licence.startsWith('GPL-3.0');
         await writeFile(
             join(outDir, 'LICENSE-ffmpeg.txt'),
             [
-                `FFmpeg ${spec.version}, built by osxexperts.net, distributed under the GNU General`,
-                'Public License version 2 or later, with libx264 and libx265 statically linked.',
+                `FFmpeg ${spec.version} (${target}), built by ${spec.builder}, distributed under`,
+                `the GNU General Public License version ${isV3 ? '3' : '2'} or later, with libx264 and`,
+                'libx265 statically linked.',
                 '',
                 'This application invokes ffmpeg as a separate process; it is not linked against',
                 'the FFmpeg libraries. The application itself is licensed under Apache-2.0.',
                 '',
-                'Licence text:   GPL-2.0.txt beside this file (and GPL-3.0.txt, at your option)',
+                `Licence:        ${spec.licence}`,
+                isV3
+                    ? 'Licence text:   GPL-3.0.txt beside this file'
+                    : 'Licence text:   GPL-2.0.txt beside this file (and GPL-3.0.txt, at your option)',
                 'FFmpeg project: https://ffmpeg.org/download.html',
                 '',
                 'Corresponding source for this exact build is not yet published alongside it.',
