@@ -154,16 +154,44 @@ function buildCipher():
 }
 
 /**
- * A bundled binary if one was shipped, otherwise let the API look on PATH.
+ * The ffmpeg or ffprobe this app should use, in the order they are trusted.
  *
- * Packaging drops ffmpeg and ffprobe beside the app's resources; a developer
- * running from source has neither, and their own install is the right one.
+ * 1. **Packaged**: the copy beside the app's own resources, which packaging put
+ *    there. Always present in a release, because `dist:mac` / `dist:win` /
+ *    `pack` all fetch before building and the fetch fails hard rather than
+ *    quietly producing an app with no encoder.
+ * 2. **From source**: `electron/bin/<platform>-<arch>/`, the same binaries the
+ *    fetch script writes and packaging copies from. A developer who has run the
+ *    fetch once therefore gets the *shipped* build rather than whatever their
+ *    machine happens to have — which is what makes "works on my machine" mean
+ *    something, since hardware support is a compile-time decision.
+ * 3. **Neither**: undefined, and the API falls back to PATH. That is the only
+ *    route left to the install prompt, and it now means a developer who has
+ *    never run the fetch.
+ *
+ * The second case is why this no longer returns early on `!app.isPackaged`. It
+ * used to reason that "a developer running from source has neither, and their own
+ * install is the right one" — true when the repository carried no binaries, and
+ * wrong once it does: it left the one person able to notice a problem testing
+ * against a different ffmpeg from every user.
  */
 function bundledBinary(name: string): string | undefined {
-    if (!app.isPackaged) return undefined;
     const filename = process.platform === 'win32' ? `${name}.exe` : name;
-    const candidate = join(process.resourcesPath, filename);
-    return existsSync(candidate) ? candidate : undefined;
+
+    const candidates = app.isPackaged
+        ? [join(process.resourcesPath, filename)]
+        : [
+              // `__dirname` is electron/dist when running from source.
+              join(
+                  __dirname,
+                  '..',
+                  'bin',
+                  `${process.platform}-${process.arch}`,
+                  filename,
+              ),
+          ];
+
+    return candidates.find((candidate) => existsSync(candidate));
 }
 
 /** The built web client, present only in a packaged app. */

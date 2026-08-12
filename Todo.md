@@ -974,7 +974,18 @@ Verified end to end afterwards: the same encode now logs `Packed 12 thumbnail(s)
 
 **Where this stands today, because it is half-done rather than not started.** A packaged build already carries its own `ffmpeg` and `ffprobe`: `dist:mac` / `dist:win` run `fetch-binaries`, and `electron-builder.yml` copies them in through `extraResources`. `bundledBinary()` prefers them over anything on PATH whenever `app.isPackaged`. Verified: the packaged app was launched with `PATH=/usr/bin:/bin` — no system ffmpeg reachable — and still reported `Apple Silicon detected, using VideoToolbox acceleration`.
 
-So the install prompt (item 35) is a fallback, and an installed user on macOS should never see it. **Wanted: make that true of every user, on every platform, from every build path.** Four things stand between here and there.
+So the install prompt (item 35) is a fallback. **Wanted: make that true of every user, on every platform, from every build path** — and as of 12 Aug 2026 the macOS side is there, verified on each route:
+
+| How the app is run | Where FFmpeg comes from | Checked |
+|---|---|---|
+| Installed (packaged) | `Contents/Resources/` | launched with `PATH=/usr/bin:/bin`, found FFmpeg 8.1 + VideoToolbox |
+| From source (`dev:electron`) | `electron/bin/<platform>-<arch>/` | same, same result |
+| `pack` on a clean clone | fetched, then packaged | 0 missing-source warnings; app then ran with PATH scrubbed |
+| `dist:mac` / `dist:win` | fetched, then packaged | the fetch fails hard rather than shipping without |
+
+**The from-source case is new and was the interesting one.** `bundledBinary()` used to return early when `!app.isPackaged`, reasoning that "a developer running from source has neither, and their own install is the right one". That was true when the repository carried no binaries and wrong once it does — it left the one person able to notice a problem testing against a different FFmpeg from every user. It now resolves `electron/bin/<platform>-<arch>/` in development, so a developer who has run the fetch once gets the shipped build.
+
+What remains between here and "no user, anywhere, ever" is Windows, below.
 
 ### 1. `dist:win` cannot produce a bundled build at all
 
@@ -996,9 +1007,9 @@ Triggered manually, and automatically when the pinned URL, digest or packaging c
 
 **And item 36's NVENC claim is still open, because `strings` cannot settle it.** `h264_nvenc` and `scale_cuda` do appear in the fetched binary — but so does `videotoolbox`, which cannot work on Windows at all, so those strings come from name tables rather than proving compiled-in support. Only `-encoders` on Windows answers it.
 
-### 2. `pack` produces an app with no encoder, silently
+### 2. `pack` produced an app with no encoder, silently — fixed
 
-`pack` deliberately skips `fetch-binaries` — a `--dir` smoke test should not pull 100 MB — and electron-builder treats a missing `extraResources` source as a *warning*, then packages happily. The result starts, serves the UI, and shows the install prompt. Fine for a developer who knows; a trap for anyone who hands that directory to someone else. Either `pack` fetches too, or it fails loudly when the source is absent. The current middle is the one that misleads.
+`pack` skipped `fetch-binaries` on the reasoning that a `--dir` smoke test should not pull 100 MB, and electron-builder treats a missing `extraResources` source as a *warning* rather than an error. The result started, served the UI and showed the install prompt: fine for a developer who knew, a trap for anyone handed that directory. It fetches now, like `dist:mac` and `dist:win`, so no packaging path can produce an app without an encoder. Verified by deleting `electron/bin/darwin-arm64/` and packing: it fetched, packaged with zero missing-source warnings, and the resulting app found FFmpeg with `PATH` scrubbed to `/usr/bin:/bin`.
 
 ### 3. The binaries come from one third-party host
 
