@@ -1,20 +1,24 @@
 name: Tests and build
 
-# Why this exists alongside `api-unit-tests.yml`: that workflow runs the API suite
-# and nothing else. The app's 248 tests and every shared library's suite ran only
-# on whichever machine a developer happened to be sitting at, which is how a
-# clean-clone build break reached the first Windows packaging attempt — `build:libs`
-# compiled segment-editor before the `hls` package it imports, and every developer
-# machine had a stale `hls/dist` that hid it.
+# Every workspace's tests, and a build from a clean checkout.
+#
+# CI used to run the API suite alone, in a workflow of its own with path filters that
+# could skip it. Everything else — the app's 248 tests and every shared library's —
+# ran only on whichever machine a developer happened to be sitting at, which is how a
+# clean-clone build break survived to the first Windows packaging attempt:
+# `build:libs` compiled segment-editor before the `hls` package it imports, and every
+# developer machine had a stale `hls/dist` hiding it.
 #
 # So the build job here is not ceremony: building from a clean checkout is the
 # check that failure could not survive.
 
+# push on main, pull_request for everything else. Both together on a feature branch
+# ran this workflow *twice per commit* — same SHA, two seconds apart — for identical
+# information, because every branch here has a pull request open.
 on:
     push:
         branches:
             - main
-            - '154-**'
     pull_request:
         types: [opened, synchronize, reopened]
 
@@ -77,6 +81,7 @@ jobs:
             matrix:
                 workspace:
                     [
+                        api,
                         hls,
                         encode-config,
                         segment-editor,
@@ -98,5 +103,7 @@ jobs:
             - name: Build the shared libraries
               run: npm run build:libs
 
+            # `-- --run` is harmless for every suite here: they are all `vitest run`
+            # already, and repeating --run does not change vitest's behaviour.
             - name: Run the suite
               run: npm -w ${{ matrix.workspace }} run test -- --run
