@@ -63,6 +63,13 @@ protocols:
       schemes:
           - luminary-convert
 
+# Every artifact names its architecture, including x64. electron-builder's default
+# omits the arch for x64, which on a download page puts "…-0.0.1.dmg" beside
+# "…-0.0.1-arm64.dmg" and reads as though the unlabelled one were the normal
+# build — the wrong guess for most Macs sold since 2020, and unrecoverable for a
+# user who cannot run what they downloaded.
+artifactName: ${productName}-${version}-${arch}.${ext}
+
 mac:
     category: public.app-category.video
     # build/icon.icns, carrying every size from 16px to 1024px. Named
