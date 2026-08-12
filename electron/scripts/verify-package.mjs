@@ -46,7 +46,7 @@ const notes = [];
 function resourcesDir(appDir) {
     // macOS: <name>.app/Contents/Resources. Windows/Linux: <dir>/resources.
     const macApp = readdirSync(appDir, { withFileTypes: true }).find(
-        (e) => e.isDirectory() && e.name.endsWith('.app'),
+        (e) => e.isDirectory() && e.name.endsWith('.app')
     );
     if (macApp) {
         const r = join(appDir, macApp.name, 'Contents', 'Resources');
@@ -68,7 +68,9 @@ function canRun(appDirName) {
     if (!wantsX64) return process.arch === 'arm64';
     if (process.arch === 'x64') return true;
     try {
-        execFileSync('/usr/bin/arch', ['-x86_64', '/usr/bin/true'], { stdio: 'ignore' });
+        execFileSync('/usr/bin/arch', ['-x86_64', '/usr/bin/true'], {
+            stdio: 'ignore',
+        });
         return true;
     } catch {
         return false;
@@ -82,36 +84,47 @@ function verifyApp(appDir, appDirName) {
         return;
     }
 
-    const exe = process.platform === 'win32' || appDirName.includes('win') ? '.exe' : '';
+    const exe =
+        process.platform === 'win32' || appDirName.includes('win')
+            ? '.exe'
+            : '';
     const runnable = canRun(appDirName);
-    console.log(`\n  ${appDirName}${runnable ? '' : '  (present-only: cannot execute here)'}`);
+    console.log(
+        `\n  ${appDirName}${runnable ? '' : '  (present-only: cannot execute here)'}`
+    );
 
     for (const name of [`ffmpeg${exe}`, `ffprobe${exe}`]) {
         const p = join(res, name);
         if (!existsSync(p)) {
             problems.push(
                 `${appDirName}: ${name} is NOT in the packaged app — it cannot encode. ` +
-                    'electron-builder only warns when extraResources is missing.',
+                    'electron-builder only warns when extraResources is missing.'
             );
             continue;
         }
         const size = statSync(p).size;
         if (size < MIN_BINARY_BYTES) {
-            problems.push(`${appDirName}: ${name} is only ${size} bytes — not a real binary`);
+            problems.push(
+                `${appDirName}: ${name} is only ${size} bytes — not a real binary`
+            );
             continue;
         }
         console.log(`    ✓ ${name} (${(size / 1_048_576).toFixed(0)} MB)`);
 
         if (!runnable) continue;
         try {
-            const out = execFileSync(p, ['-hide_banner', '-version'], { encoding: 'utf8' });
+            const out = execFileSync(p, ['-hide_banner', '-version'], {
+                encoding: 'utf8',
+            });
             if (!out.includes(`${name.replace('.exe', '')} version`)) {
                 problems.push(`${appDirName}: ${name} did not identify itself`);
             } else {
                 console.log(`      ${out.split('\n')[0].slice(0, 72)}`);
             }
         } catch (e) {
-            problems.push(`${appDirName}: the shipped ${name} would not run — ${e.message}`);
+            problems.push(
+                `${appDirName}: the shipped ${name} would not run — ${e.message}`
+            );
         }
     }
 
@@ -119,13 +132,15 @@ function verifyApp(appDir, appDirName) {
     // build (v2-or-later ships both, v3-or-later ships v3 only), so require the
     // notice plus at least one GPL text rather than a fixed filename.
     if (!existsSync(join(res, 'LICENSE-ffmpeg.txt'))) {
-        problems.push(`${appDirName}: LICENSE-ffmpeg.txt is missing — a GPL build needs its notice`);
+        problems.push(
+            `${appDirName}: LICENSE-ffmpeg.txt is missing — a GPL build needs its notice`
+        );
     }
     const gpl = readdirSync(res).filter((f) => /^GPL-[\d.]+\.txt$/.test(f));
     if (gpl.length === 0) {
         problems.push(
             `${appDirName}: no GPL licence text shipped. GPLv2 §1 and GPLv3 §4 both ` +
-                'require a *copy* of the licence to travel with the binary; a link is not one.',
+                'require a *copy* of the licence to travel with the binary; a link is not one.'
         );
     } else {
         console.log(`    ✓ ${['LICENSE-ffmpeg.txt', ...gpl].join(', ')}`);
@@ -133,7 +148,9 @@ function verifyApp(appDir, appDirName) {
 
     // The API serves this at / in a packaged build; without it the window is blank.
     if (!existsSync(join(res, 'app', 'index.html'))) {
-        problems.push(`${appDirName}: the web client (app/index.html) is missing`);
+        problems.push(
+            `${appDirName}: the web client (app/index.html) is missing`
+        );
     } else {
         console.log('    ✓ web client');
     }
@@ -146,7 +163,9 @@ const releaseDir = process.argv[2]
     : join(electronRoot, 'release');
 
 if (!existsSync(releaseDir)) {
-    console.error(`\n  ✗ Nothing to verify: ${releaseDir} does not exist. Package first.\n`);
+    console.error(
+        `\n  ✗ Nothing to verify: ${releaseDir} does not exist. Package first.\n`
+    );
     process.exit(1);
 }
 
@@ -159,7 +178,8 @@ if (!existsSync(releaseDir)) {
  * CI, for instance — and reporting "no resources directory" for a directory that
  * was never an app is a false alarm that teaches people to ignore this script.
  */
-const APP_DIR = /^(mac(-(arm64|x64|universal))?|(win|linux)(-(ia32|x64|arm64|armv7l))?-unpacked)$/;
+const APP_DIR =
+    /^(mac(-(arm64|x64|universal))?|(win|linux)(-(ia32|x64|arm64|armv7l))?-unpacked)$/;
 const appDirs = readdirSync(releaseDir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && APP_DIR.test(e.name))
     .map((e) => e.name);
@@ -167,7 +187,7 @@ const appDirs = readdirSync(releaseDir, { withFileTypes: true })
 if (appDirs.length === 0) {
     console.error(
         `\n  ✗ No packaged app directories under ${releaseDir}. ` +
-            'Expected mac/, mac-arm64/, win-unpacked/ or similar.\n',
+            'Expected mac/, mac-arm64/, win-unpacked/ or similar.\n'
     );
     process.exit(1);
 }
@@ -184,4 +204,6 @@ if (problems.length > 0) {
     process.exit(1);
 }
 
-console.log(`\n  All ${appDirs.length} packaged app(s) carry their encoder and its licence.\n`);
+console.log(
+    `\n  All ${appDirs.length} packaged app(s) carry their encoder and its licence.\n`
+);

@@ -1,0 +1,50 @@
+name: Pinned FFmpeg URLs still resolve
+
+# The binaries are pinned by URL and digest, which protects against the download
+# *changing* underneath us. It does nothing about the download *disappearing*, and
+# that is not hypothetical:
+#
+#   - Our pinned macOS arm64 build (ffmpeg81arm.zip) is no longer linked from
+#     osxexperts.net at all — the site now offers ffmpeg9arm.zip. The file still
+#     downloads, but it is unlisted, so it can be removed without notice.
+#   - BtbN's Windows build is a *dated autobuild* release. Those rotate.
+#
+# The day one of them 404s, `npm ci && dist:mac` stops working for everyone, and
+# the corresponding-source obligation (Todo 40) gets harder to discharge because
+# the thing we would point at is gone. A weekly HEAD request turns that from a
+# surprise during a release into a ticket.
+#
+# Deliberately only checks reachability. Whether a *newer* build exists is a
+# judgement call — bumping the pin means re-verifying capabilities and re-testing
+# an encode, which is not something a cron job should start.
+
+on:
+    schedule:
+        # Mondays, 07:00 UTC. Weekly is right for a risk measured in months.
+        - cron: '0 7 * * 1'
+    workflow_dispatch:
+    # And whenever the pins themselves change, so a typo in a new URL is caught
+    # by the pull request that introduces it rather than by a build weeks later.
+    pull_request:
+        types: [opened, synchronize, reopened]
+        paths:
+            - electron/scripts/fetch-binaries.mjs
+            - .github/workflows/pinned-binaries-health.yml
+
+permissions:
+    contents: read
+
+jobs:
+    check:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v6
+              with:
+                  node-version-file: api/.node-version
+
+            # Read the URLs out of the pin table rather than repeating them here.
+            # A copy in this file would drift, and a health check that watches the
+            # wrong URLs is worse than none.
+            - name: Every pinned URL is still reachable
+              run: node electron/scripts/check-pinned-urls.mjs

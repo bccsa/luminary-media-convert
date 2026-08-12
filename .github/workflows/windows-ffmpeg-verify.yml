@@ -12,7 +12,7 @@ name: Verify Windows FFmpeg build
 # that still needs real NVIDIA hardware (Todo item 5).
 
 permissions:
-  contents: read
+    contents: read
 
 # One run per branch, and a new push cancels the one it supersedes. Without this,
 # three pushes to a pull request queue three Windows jobs that all verify the same
@@ -20,136 +20,136 @@ permissions:
 # is kept out of the group by including the event, so a deliberate manual run —
 # especially one building the installer — is never cancelled by an unrelated push.
 concurrency:
-  group: windows-ffmpeg-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+    group: windows-ffmpeg-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+    cancel-in-progress: true
 
 on:
-  # Manual, because this is a private repository and Windows minutes bill at a
-  # multiple of Linux ones. Run it when the pinned build changes, or before a
-  # Windows release.
-  workflow_dispatch:
-    inputs:
-      package:
-        description: 'Also build the NSIS installer and upload it as an artifact'
-        type: boolean
-        default: false
+    # Manual, because this is a private repository and Windows minutes bill at a
+    # multiple of Linux ones. Run it when the pinned build changes, or before a
+    # Windows release.
+    workflow_dispatch:
+        inputs:
+            package:
+                description: 'Also build the NSIS installer and upload it as an artifact'
+                type: boolean
+                default: false
 
-  # Push to a branch named `ci/windows-*` to run this without merging anything.
-  #
-  # `workflow_dispatch` cannot help before then: GitHub only offers the "Run
-  # workflow" button for workflows present on the *default* branch, so a workflow
-  # still on a feature branch is undispatchable. `push` has no such rule — it uses
-  # the definition on the branch being pushed — which makes this the way to
-  # exercise a new workflow, or to re-check a pinned build, without touching main.
-  #
-  # Opt-in by branch name rather than "every branch", because these are Windows
-  # minutes on a private repository.
-  push:
-    branches:
-      - 'ci/windows-*'
+    # Push to a branch named `ci/windows-*` to run this without merging anything.
+    #
+    # `workflow_dispatch` cannot help before then: GitHub only offers the "Run
+    # workflow" button for workflows present on the *default* branch, so a workflow
+    # still on a feature branch is undispatchable. `push` has no such rule — it uses
+    # the definition on the branch being pushed — which makes this the way to
+    # exercise a new workflow, or to re-check a pinned build, without touching main.
+    #
+    # Opt-in by branch name rather than "every branch", because these are Windows
+    # minutes on a private repository.
+    push:
+        branches:
+            - 'ci/windows-*'
 
-  # And automatically when the thing being verified changes, since a new pinned
-  # URL or digest is precisely when "does this build have NVENC" is unanswered.
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - electron/scripts/fetch-binaries.mjs
-      - electron/electron-builder.yml
-      - .github/workflows/windows-ffmpeg-verify.yml
+    # And automatically when the thing being verified changes, since a new pinned
+    # URL or digest is precisely when "does this build have NVENC" is unanswered.
+    pull_request:
+        types: [opened, synchronize, reopened]
+        paths:
+            - electron/scripts/fetch-binaries.mjs
+            - electron/electron-builder.yml
+            - .github/workflows/windows-ffmpeg-verify.yml
 
 env:
-  CI: true
+    CI: true
 
 jobs:
-  verify:
-    runs-on: windows-latest
+    verify:
+        runs-on: windows-latest
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: api/.node-version
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
+            - name: Setup Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version-file: api/.node-version
+                  cache: 'npm'
+                  cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
+            - name: Install dependencies
+              run: npm ci
 
-      # The real check. On Windows this runs the capability probes rather than
-      # skipping them, so a build without h264_nvenc, scale_cuda or libx264
-      # fails the job instead of reaching an installer.
-      - name: Fetch and verify the pinned Windows FFmpeg
-        run: npm -w electron run fetch-binaries win32-x64
+            # The real check. On Windows this runs the capability probes rather than
+            # skipping them, so a build without h264_nvenc, scale_cuda or libx264
+            # fails the job instead of reaching an installer.
+            - name: Fetch and verify the pinned Windows FFmpeg
+              run: npm -w electron run fetch-binaries win32-x64
 
-      # Belt and braces, and it puts the answer in the log where a human can
-      # read it rather than trusting the script's exit code alone. This is also
-      # what settles the "do published Windows builds carry NVENC" question
-      # recorded in Todo item 36.
-      - name: Report what the build actually supports
-        shell: bash
-        run: |
-          FF=electron/bin/win32-x64/ffmpeg.exe
-          echo "--- version ---"
-          "$FF" -hide_banner -version | head -2
-          # The licence, from the binary itself. It decides which GPL text has to
-          # ship beside it, and the only way to read it off a .exe from a Mac is
-          # to extract embedded strings — which is weaker evidence than running it.
-          echo "--- licence ---"
-          "$FF" -hide_banner -L | sed -n '2,4p'
-          "$FF" -hide_banner -buildconf | grep -iE 'enable-(gpl|version3|nonfree)' | tr -d ' '
-          echo "--- hwaccels ---"
-          "$FF" -hide_banner -hwaccels
-          echo "--- nvenc / cuda encoders and filters ---"
-          "$FF" -hide_banner -encoders | grep -iE 'nvenc|libx264' || true
-          "$FF" -hide_banner -filters  | grep -iE 'scale_cuda' || true
+            # Belt and braces, and it puts the answer in the log where a human can
+            # read it rather than trusting the script's exit code alone. This is also
+            # what settles the "do published Windows builds carry NVENC" question
+            # recorded in Todo item 36.
+            - name: Report what the build actually supports
+              shell: bash
+              run: |
+                  FF=electron/bin/win32-x64/ffmpeg.exe
+                  echo "--- version ---"
+                  "$FF" -hide_banner -version | head -2
+                  # The licence, from the binary itself. It decides which GPL text has to
+                  # ship beside it, and the only way to read it off a .exe from a Mac is
+                  # to extract embedded strings — which is weaker evidence than running it.
+                  echo "--- licence ---"
+                  "$FF" -hide_banner -L | sed -n '2,4p'
+                  "$FF" -hide_banner -buildconf | grep -iE 'enable-(gpl|version3|nonfree)' | tr -d ' '
+                  echo "--- hwaccels ---"
+                  "$FF" -hide_banner -hwaccels
+                  echo "--- nvenc / cuda encoders and filters ---"
+                  "$FF" -hide_banner -encoders | grep -iE 'nvenc|libx264' || true
+                  "$FF" -hide_banner -filters  | grep -iE 'scale_cuda' || true
 
-      # The real release command, not a bespoke invocation — it fetches, builds
-      # the workspaces, compiles the main process and runs electron-builder, so
-      # this exercises the path a human would actually use.
-      - name: Build the NSIS installer
-        # Also on a push to `ci/windows-pack-*`, because `inputs.package` only
-        # exists for workflow_dispatch, and workflow_dispatch needs the workflow on
-        # the default branch. Until this lands on main, a branch name is the only
-        # way to ask for a real installer.
-        if: inputs.package || startsWith(github.ref_name, 'ci/windows-pack')
-        run: npm -w electron run dist:win
+            # The real release command, not a bespoke invocation — it fetches, builds
+            # the workspaces, compiles the main process and runs electron-builder, so
+            # this exercises the path a human would actually use.
+            - name: Build the NSIS installer
+              # Also on a push to `ci/windows-pack-*`, because `inputs.package` only
+              # exists for workflow_dispatch, and workflow_dispatch needs the workflow on
+              # the default branch. Until this lands on main, a branch name is the only
+              # way to ask for a real installer.
+              if: inputs.package || startsWith(github.ref_name, 'ci/windows-pack')
+              run: npm -w electron run dist:win
 
-      # What actually ends up inside the app, asserted rather than assumed. An
-      # installer that omits ffmpeg.exe installs perfectly and then cannot encode,
-      # and electron-builder treats a missing extraResources source as a *warning*
-      # (see Todo 5a), so nothing else here would notice.
-      - name: Assert the packaged app carries ffmpeg
-        if: inputs.package || startsWith(github.ref_name, 'ci/windows-pack')
-        shell: bash
-        run: |
-          RES="electron/release/win-unpacked/resources"
-          echo "--- $RES ---"
-          ls -la "$RES"
-          for f in ffmpeg.exe ffprobe.exe LICENSE-ffmpeg.txt; do
-            test -f "$RES/$f" || { echo "MISSING from the packaged app: $f"; exit 1; }
-            echo "  ✓ $f ($(stat -c%s "$RES/$f") bytes)"
-          done
-          # The GPL text has to travel with a GPL binary; which file depends on the
-          # build, so assert that at least one is there rather than a fixed name.
-          ls "$RES"/GPL-*.txt >/dev/null 2>&1 || { echo "MISSING: no GPL licence text"; exit 1; }
-          echo "  ✓ $(ls "$RES"/GPL-*.txt | xargs -n1 basename | tr '\n' ' ')"
-          # And it is the real thing, not a stub: run the copy that shipped.
-          "$RES/ffmpeg.exe" -hide_banner -version | head -1
+            # What actually ends up inside the app, asserted rather than assumed. An
+            # installer that omits ffmpeg.exe installs perfectly and then cannot encode,
+            # and electron-builder treats a missing extraResources source as a *warning*
+            # (see Todo 5a), so nothing else here would notice.
+            - name: Assert the packaged app carries ffmpeg
+              if: inputs.package || startsWith(github.ref_name, 'ci/windows-pack')
+              shell: bash
+              run: |
+                  RES="electron/release/win-unpacked/resources"
+                  echo "--- $RES ---"
+                  ls -la "$RES"
+                  for f in ffmpeg.exe ffprobe.exe LICENSE-ffmpeg.txt; do
+                    test -f "$RES/$f" || { echo "MISSING from the packaged app: $f"; exit 1; }
+                    echo "  ✓ $f ($(stat -c%s "$RES/$f") bytes)"
+                  done
+                  # The GPL text has to travel with a GPL binary; which file depends on the
+                  # build, so assert that at least one is there rather than a fixed name.
+                  ls "$RES"/GPL-*.txt >/dev/null 2>&1 || { echo "MISSING: no GPL licence text"; exit 1; }
+                  echo "  ✓ $(ls "$RES"/GPL-*.txt | xargs -n1 basename | tr '\n' ' ')"
+                  # And it is the real thing, not a stub: run the copy that shipped.
+                  "$RES/ffmpeg.exe" -hide_banner -version | head -1
 
-      - name: Upload the installer
-        # Also on a push to `ci/windows-pack-*`, because `inputs.package` only
-        # exists for workflow_dispatch, and workflow_dispatch needs the workflow on
-        # the default branch. Until this lands on main, a branch name is the only
-        # way to ask for a real installer.
-        if: inputs.package || startsWith(github.ref_name, 'ci/windows-pack')
-        uses: actions/upload-artifact@v4
-        with:
-          name: luminary-media-convert-win-unsigned
-          # Unsigned: there is no Authenticode certificate in this project, so
-          # SmartScreen will warn. Fine for verification, not for release.
-          path: electron/release/*.exe
-          retention-days: 7
-          if-no-files-found: error
+            - name: Upload the installer
+              # Also on a push to `ci/windows-pack-*`, because `inputs.package` only
+              # exists for workflow_dispatch, and workflow_dispatch needs the workflow on
+              # the default branch. Until this lands on main, a branch name is the only
+              # way to ask for a real installer.
+              if: inputs.package || startsWith(github.ref_name, 'ci/windows-pack')
+              uses: actions/upload-artifact@v4
+              with:
+                  name: luminary-media-convert-win-unsigned
+                  # Unsigned: there is no Authenticode certificate in this project, so
+                  # SmartScreen will warn. Fine for verification, not for release.
+                  path: electron/release/*.exe
+                  retention-days: 7
+                  if-no-files-found: error
