@@ -24,7 +24,8 @@
         "build": "vite build && vue-tsc --declaration --emitDeclarationOnly --outDir dist",
         "dev": "concurrently -k -n js,dts -c blue,gray \"vite build --watch\" \"vue-tsc --declaration --emitDeclarationOnly --outDir dist --watch --preserveWatchOutput\"",
         "test": "vitest run",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "demo": "vite --config vite.demo.config.ts"
     },
     "dependencies": {
         "@luminary-media-converter/player-core": "*",
