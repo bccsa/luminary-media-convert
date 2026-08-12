@@ -25,7 +25,7 @@ const props = withDefaults(
          */
         variant?: 'default' | 'editor';
     }>(),
-    { drop: 'down', variant: 'default' },
+    { drop: 'down', variant: 'default' }
 );
 
 const { preference, setPreference } = useTheme();
@@ -36,13 +36,13 @@ const rootEl = ref<HTMLElement | null>(null);
 const panelPositionClass = computed(() =>
     props.drop === 'up'
         ? 'bottom-full mb-2 origin-bottom-right'
-        : 'top-full mt-2 origin-top-right',
+        : 'top-full mt-2 origin-top-right'
 );
 
 const triggerClass = computed(() =>
     props.variant === 'editor'
         ? 'se-btn se-btn--icon cursor-pointer'
-        : 'flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-slate-700 shadow-sm ring-slate-900/5 transition-colors hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:ring-white/10',
+        : 'flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-slate-700 shadow-sm ring-slate-900/5 transition-colors hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:ring-white/10'
 );
 
 /**
