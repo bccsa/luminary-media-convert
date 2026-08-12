@@ -107,21 +107,24 @@ echo "    ✓ sha256 matches the pin"
 # means a change to it shows up in a diff rather than silently taking effect. Its
 # authenticity is anchored by the fingerprint published on ffmpeg.org/download.html,
 # which is checked below, so the key file cannot be swapped for another.
-keyring="$work/keyring.gpg"
-rm -f "$keyring" "$keyring~"
-gpg --batch --no-default-keyring --keyring "$keyring" \
-    --import "$here/ffmpeg-signing-key.asc" >/dev/null 2>&1 ||
-    fail "Could not import ffmpeg-build/ffmpeg-signing-key.asc"
+# Verified with gpgv, not gpg. gpgv exists for exactly this job: check a
+# detached signature against a keyring file, with no GNUPGHOME, no trustdb and no
+# agent. Two attempts with gpg failed first — a CI runner has no usable gpg home,
+# and macOS caps the agent socket path at ~104 characters, which a keyring inside
+# the repository's .work directory exceeds. gpgv has neither problem.
+keyring="$work/ffmpeg-keys.gpg"
+gpg --dearmor < "$here/ffmpeg-signing-key.asc" > "$keyring" 2>/dev/null ||
+    fail "Could not read ffmpeg-build/ffmpeg-signing-key.asc"
 
-# The vendored key must be the one ffmpeg.org names. Anything else and the
-# signature check below would be verifying against whatever we happened to ship.
-gpg --batch --no-default-keyring --keyring "$keyring" --list-keys --with-colons 2>/dev/null |
-    awk -F: '/^fpr:/ {print $10}' | grep -qx "$FFMPEG_SIGNING_KEY" ||
-    fail "ffmpeg-signing-key.asc does not contain $FFMPEG_SIGNING_KEY"
-
-gpg --batch --no-default-keyring --keyring "$keyring" \
-    --verify "$tarball.asc" "$tarball" 2>&1 | grep -q 'Good signature' ||
+# --status-fd gives machine-readable output: GOODSIG says the signature is valid,
+# VALIDSIG carries the fingerprint that made it. Checking the fingerprint is what
+# makes the vendored key trustworthy — otherwise this would only prove the tarball
+# matches whatever key we happened to ship.
+status="$(gpgv --keyring "$keyring" --status-fd 1 "$tarball.asc" "$tarball" 2>/dev/null || true)"
+grep -q '^\[GNUPG:\] GOODSIG' <<<"$status" ||
     fail "GPG signature did NOT verify. Do not build this tarball."
+grep -q "^\[GNUPG:\] VALIDSIG $FFMPEG_SIGNING_KEY" <<<"$status" ||
+    fail "Signed by an unexpected key. Expected $FFMPEG_SIGNING_KEY, got:\n    $(grep VALIDSIG <<<"$status" || echo 'no VALIDSIG line')"
 echo "    ✓ GPG signature verified against $FFMPEG_SIGNING_KEY"
 
 src="$work/ffmpeg-$FFMPEG_VERSION"
