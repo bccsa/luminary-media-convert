@@ -22,8 +22,20 @@ readable by players which cannot decrypt playlists.
   (subtitles, chapters, thumbnails VTT). Sidecars written after the encode —
   chapters saved from the editor — are encrypted on write by the same rule,
   and decrypted on read, so the output stays internally consistent.
-- **Not covered** (accepted gap): thumbnail sprite images referenced by the
-  thumbnails VTT remain plaintext JPEGs.
+- **Not covered** (accepted gaps, decided rather than overlooked):
+  - Thumbnail sprite images referenced by the thumbnails VTT remain plaintext
+    JPEGs.
+  - `waveform.json` beside the master remains plaintext (Ivan, 12 Aug 2026). It
+    is a loudness curve: it shows where speech and silence fall and roughly how
+    long things run, and carries no words, images or identities. The sprites in
+    the line above leak far more — actual frames — so encrypting the quieter
+    artefact while the louder one stays readable would be theatre. Keeping it
+    plaintext also keeps `POST /api/hls/waveform/read` stateless, which is how it
+    is designed: inline S3 credentials, a prefix, and no session key.
+
+  Both are derived artefacts rather than playlists or text tracks, which is the
+  line this scope draws. If the sprites are ever encrypted, the waveform should
+  go with them — one answer for the class, not two.
 
 ## Detection rules (consumer side)
 
