@@ -99,15 +99,28 @@ actual="$(shasum -a 256 "$tarball" | cut -d' ' -f1)"
 echo "    ✓ sha256 matches the pin"
 
 # The signature is the point of building from source at all: it is FFmpeg's own
-# attestation of the bytes, which no third-party binary carries. Import by
-# fingerprint from a keyserver, so the key does not come from the same host as
-# the file it vouches for.
-gpg --list-keys "$FFMPEG_SIGNING_KEY" >/dev/null 2>&1 ||
-    gpg --batch --keyserver keyserver.ubuntu.com --recv-keys "$FFMPEG_SIGNING_KEY" >/dev/null 2>&1 ||
-    gpg --batch --keyserver keys.openpgp.org --recv-keys "$FFMPEG_SIGNING_KEY" >/dev/null 2>&1 ||
-    fail "Could not fetch FFmpeg's signing key $FFMPEG_SIGNING_KEY from any keyserver"
+# attestation of the bytes, which no third-party binary carries.
+#
+# The key is vendored rather than fetched. A keyserver at build time is a network
+# dependency on the least reliable kind of service — the first CI run failed on
+# exactly that, having verified the digest seconds earlier — and a committed key
+# means a change to it shows up in a diff rather than silently taking effect. Its
+# authenticity is anchored by the fingerprint published on ffmpeg.org/download.html,
+# which is checked below, so the key file cannot be swapped for another.
+keyring="$work/keyring.gpg"
+rm -f "$keyring" "$keyring~"
+gpg --batch --no-default-keyring --keyring "$keyring" \
+    --import "$here/ffmpeg-signing-key.asc" >/dev/null 2>&1 ||
+    fail "Could not import ffmpeg-build/ffmpeg-signing-key.asc"
 
-gpg --batch --verify "$tarball.asc" "$tarball" 2>&1 | grep -q 'Good signature' ||
+# The vendored key must be the one ffmpeg.org names. Anything else and the
+# signature check below would be verifying against whatever we happened to ship.
+gpg --batch --no-default-keyring --keyring "$keyring" --list-keys --with-colons 2>/dev/null |
+    awk -F: '/^fpr:/ {print $10}' | grep -qx "$FFMPEG_SIGNING_KEY" ||
+    fail "ffmpeg-signing-key.asc does not contain $FFMPEG_SIGNING_KEY"
+
+gpg --batch --no-default-keyring --keyring "$keyring" \
+    --verify "$tarball.asc" "$tarball" 2>&1 | grep -q 'Good signature' ||
     fail "GPG signature did NOT verify. Do not build this tarball."
 echo "    ✓ GPG signature verified against $FFMPEG_SIGNING_KEY"
 
