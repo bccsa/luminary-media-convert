@@ -412,7 +412,12 @@ describe('EncodeService', () => {
         expect(updated.masterPlaylist).toBe('master.m3u8');
     });
 
-    it('should always pass byteRange: false to ffmpeg (pipeline handles byte-range)', async () => {
+    it('should leave byte-range packing to the pipeline, never to ffmpeg', async () => {
+        // FFmpeg used to be able to do the packing itself, after the encode had
+        // finished, from a worker thread. Nothing has reached that path since
+        // the pipeline started streaming segments out as they were written, and
+        // the option is gone: the session's byteRange setting goes to the
+        // pipeline and nowhere else.
         const config = makeConfig();
         config.byteRange = true;
         const session = sessionService.create(config);
@@ -421,10 +426,17 @@ describe('EncodeService', () => {
 
         await service.processSession(session.id);
 
-        expect(ffmpegService.encode).toHaveBeenCalledWith(
-            expect.objectContaining({
-                byteRange: false,
-            })
+        const opts = (ffmpegService.encode as any).mock.calls[0][0];
+        expect(Object.keys(opts).sort()).toEqual([
+            'encodeConfig',
+            'inputPath',
+            'onProgress',
+            'outputDir',
+            'sessionId',
+        ]);
+
+        expect(segmentPipelineService.createPipeline).toHaveBeenCalledWith(
+            expect.objectContaining({ byteRange: true })
         );
     });
 
@@ -597,11 +609,14 @@ describe('EncodeService', () => {
 
         await service.processSession(session.id);
 
-        // FFmpeg always gets byteRange: false, no preByteRangeHook (pipeline handles both)
+        // Byte-range packing and encryption belong to the pipeline, which
+        // streams each segment out as FFmpeg writes it; FFmpeg is handed the
+        // config and a progress callback and nothing else.
         expect(ffmpegService.encode).toHaveBeenCalledWith(
             expect.objectContaining({
-                byteRange: false,
-                preByteRangeHook: undefined,
+                sessionId: session.id,
+                inputPath: '/tmp/input.mp4',
+                encodeConfig: expect.objectContaining({ type: 'video' }),
             })
         );
 

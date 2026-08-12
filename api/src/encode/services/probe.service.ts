@@ -15,6 +15,25 @@ export interface VideoTrackInfo {
     profile?: string;
     language?: string;
     name?: string;
+    /**
+     * Where this stream's first frame sits on the container timeline, seconds.
+     *
+     * Streams in the same file routinely do not start together, and the encode
+     * seeks past the head to make them. That decides whether a copy-mode
+     * rendition is safe, so the number has to reach the caller rather than
+     * staying inside the encoder.
+     */
+    startTime?: number;
+    /** Frames between consecutive keyframes, as sampled from the head. */
+    gopFrames?: number;
+    /** {@link gopFrames} in seconds, for saying out loud. */
+    gopSeconds?: number;
+    /**
+     * Every sampled keyframe interval was the same length. False means the
+     * source cuts keyframes where it likes, which no segment duration can be
+     * made to divide into.
+     */
+    gopRegular?: boolean;
 }
 
 export interface AudioTrackInfo {
@@ -25,6 +44,15 @@ export interface AudioTrackInfo {
     sampleRate: number;
     language?: string;
     name?: string;
+    /** See {@link VideoTrackInfo.startTime}. */
+    startTime?: number;
+}
+
+/** What {@link ProbeService.probeGopInfo} could work out about a track's GOP. */
+export interface GopInfo {
+    gopFrames: number;
+    gopSeconds: number;
+    regular: boolean;
 }
 
 export interface ProbeResult {
@@ -44,6 +72,7 @@ interface FfprobeStream {
     width?: number;
     height?: number;
     bit_rate?: string;
+    start_time?: string;
     r_frame_rate?: string;
     avg_frame_rate?: string;
     profile?: string;
@@ -91,6 +120,20 @@ function normalizeLanguage(tag?: string): string | undefined {
     return trimmed;
 }
 
+/**
+ * A stream's start time in seconds, with `N/A` and an absent tag both reading
+ * as the top of the timeline.
+ *
+ * Zero rather than undefined, deliberately: everything that reads this compares
+ * one stream's start against another's, and a missing third case would have to
+ * be answered somewhere. A container that does not say where a stream starts is
+ * saying it starts where the file does.
+ */
+function parseStartTime(raw?: string): number {
+    const parsed = parseFloat(raw ?? '');
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
 @Injectable()
 export class ProbeService {
     private readonly logger = new Logger(ProbeService.name);
@@ -119,6 +162,7 @@ export class ProbeService {
                     profile: s.profile,
                     language: normalizeLanguage(s.tags?.language),
                     name: s.tags?.title,
+                    startTime: parseStartTime(s.start_time),
                 });
             } else if (s.codec_type === 'audio') {
                 audioTracks.push({
@@ -131,6 +175,7 @@ export class ProbeService {
                         : 44100,
                     language: normalizeLanguage(s.tags?.language),
                     name: s.tags?.title,
+                    startTime: parseStartTime(s.start_time),
                 });
             }
         }
@@ -155,6 +200,25 @@ export class ProbeService {
             );
         }
 
+        // Keyframe cadence, per video track. It answers one question — may this
+        // track be copied rather than re-encoded — and the form asks it before
+        // the encode is submitted, so it is settled here alongside everything
+        // else the caller decides from. One extra ffprobe per video track, each
+        // reading two hundred frames off the head; sources have few.
+        await Promise.all(
+            videoTracks.map(async (track) => {
+                const gop = await this.probeGopInfo(
+                    filePath,
+                    track.index,
+                    track.frameRate
+                );
+                if (!gop) return;
+                track.gopFrames = gop.gopFrames;
+                track.gopSeconds = gop.gopSeconds;
+                track.gopRegular = gop.regular;
+            })
+        );
+
         const format = {
             duration: data.format.duration
                 ? parseFloat(data.format.duration)
@@ -169,6 +233,80 @@ export class ProbeService {
         );
 
         return { format, videoTracks, audioTracks };
+    }
+
+    /**
+     * A video track's keyframe cadence, or null when it cannot be established.
+     *
+     * Measures *every* interval in the sampled window rather than the first
+     * two. A source that opens with a keyframe pair and then cuts them wherever
+     * the picture changes would otherwise report a tidy GOP it does not keep,
+     * and copy mode would be allowed on the strength of it — which is precisely
+     * the case that produces segments of the wrong length.
+     *
+     * Two hundred frames is a window, not the file: at 30 fps and a two-second
+     * GOP that is three or four intervals, enough to catch an irregular source
+     * without decoding minutes of video at ingest. The frames trailing the last
+     * keyframe are a partial GOP and are not an interval, so they are ignored.
+     */
+    async probeGopInfo(
+        filePath: string,
+        videoTrackIndex: number,
+        frameRate: number
+    ): Promise<GopInfo | null> {
+        if (!(frameRate > 0)) return null;
+        try {
+            const { stdout } = await execFileAsync(
+                ffprobeBin(),
+                [
+                    '-v',
+                    'error',
+                    '-select_streams',
+                    `v:${videoTrackIndex}`,
+                    '-show_frames',
+                    '-show_entries',
+                    'frame=pict_type',
+                    '-of',
+                    'csv=p=0',
+                    '-read_intervals',
+                    '%+#200',
+                    filePath,
+                ],
+                { timeout: 60000 }
+            );
+
+            // The pict_type is the first CSV field, not the whole line:
+            // ffprobe appends any side data to the same row, so a keyframe
+            // carrying an SEI message arrives as
+            // "I,H.26[45] User Data Unregistered SEI message". Comparing the
+            // whole line missed those, which read as "one keyframe in the
+            // window" and refused copy mode on perfectly ordinary sources.
+            const keyframeIndices: number[] = [];
+            const frames = stdout.split('\n');
+            for (let i = 0; i < frames.length; i++) {
+                if (frames[i].split(',')[0].trim() === 'I')
+                    keyframeIndices.push(i);
+            }
+            if (keyframeIndices.length < 2) return null;
+
+            const intervals: number[] = [];
+            for (let i = 1; i < keyframeIndices.length; i++) {
+                intervals.push(keyframeIndices[i] - keyframeIndices[i - 1]);
+            }
+
+            const gopFrames = intervals[0];
+            if (gopFrames <= 0) return null;
+            return {
+                gopFrames,
+                gopSeconds: Math.round((gopFrames / frameRate) * 1000) / 1000,
+                regular: intervals.every((n) => n === gopFrames),
+            };
+        } catch {
+            this.logger.warn(
+                `Could not probe keyframe cadence for video track ${videoTrackIndex}`
+            );
+            return null;
+        }
     }
 
     private async runFfprobe(filePath: string): Promise<FfprobeOutput> {

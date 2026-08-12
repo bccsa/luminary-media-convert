@@ -221,9 +221,6 @@ export class EncodeService {
                 inputPath: session.filePath!,
                 outputDir,
                 encodeConfig: session.encodeConfig,
-                // Pipeline handles byte-range and encryption inline
-                byteRange: false,
-                preByteRangeHook: undefined,
                 onProgress: (percent) => {
                     currentProgress.encoding = percent;
                     this.sessionService.updatePipelineProgress(sessionId, {
