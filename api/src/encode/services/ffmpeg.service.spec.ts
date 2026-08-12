@@ -3181,7 +3181,7 @@ describe('FfmpegService', () => {
                     500 * 1024 * 1024
                 )
             ).rejects.toThrow();
-        });
+        }, 30_000);
 
         it('should resolve when worker sends success message', async () => {
             useRealWorker.value = false;

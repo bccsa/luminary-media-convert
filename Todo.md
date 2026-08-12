@@ -906,7 +906,7 @@ A probe that cannot run reports `indeterminate` and blocks nothing. A failed pro
 
 ---
 
-## 38. `convertToByteRange` real-worker test is flaky in the full suite
+## 38. `convertToByteRange` real-worker test is flaky in the full suite — fixed
 
 **Found while verifying item 37**, when the full API suite failed once and the natural suspicion was the new startup probes.
 
@@ -916,6 +916,12 @@ A probe that cannot run reports `indeterminate` and blocks nothing. A failed pro
 
 **Likely cause.** The test spawns a *real* worker thread against `/non/existent/dir` and expects a rejection within the default 5 s. Under a parallel suite the worker's own startup is slow enough to lose that race. Worth either giving the assertion a longer timeout, or removing the real-worker dependency the way the sibling tests do (`useRealWorker.value = false` plus an emitted `error`), which is what the rest of that describe block already does.
 
+
+**Fixed by giving it a timeout that fits what it waits on.** It spawns a real worker thread — the point of it, and the one thing its fake-worker sibling cannot cover — and worker startup routinely lost a race with vitest's 5 s default once a dozen other files were running in parallel, several spawning processes of their own. Nothing about the code under test is slow; the budget was simply too tight to survive a busy machine.
+
+Kept as a real-worker test rather than converted to a fake, because what it proves is that the actual `Worker` wiring reports a failure instead of hanging. Verified with three consecutive full-suite runs, where it had previously failed every time while passing when run alone.
+
+The reason this was worth fixing rather than tolerating: a test that fails only in company is a test nobody can use to answer "did I break this?". It cost an hour of suspecting an unrelated change on the day it was found, and would have cost the next person the same.
 ---
 
 ## 39. Sprite packing failed whenever `WORK_DIR` was relative — fixed
