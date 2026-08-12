@@ -986,7 +986,13 @@ So the install prompt (item 35) is a fallback, and an installed user on macOS sh
 
 **Done — a `win32-x64` entry exists**, pinned to a dated BtbN `autobuild-*` release (their `latest` tag moves, and a moving URL cannot carry a digest) with the SHA-256 GitHub publishes for the asset. Fetching it works: 297 MB for the pair, against 99 MB on macOS, so a Windows installer will be noticeably heavier.
 
-**What is still not done is verifying it.** The capability checks have to *run* the binary, which a Mac cannot do for a `.exe`. The script now says so rather than skipping quietly — architecture is confirmed from `file` on any platform, and the run finishes with "Fetched and pinned, but NOT verified… hardware support taken on trust". Someone has to run `npm run fetch-binaries win32-x64` on Windows before a release is trustworthy, which folds into item 5.
+**Verification now has somewhere to happen: a Windows runner.** The capability checks have to *run* the binary, which a Mac cannot do for a `.exe`, so `.github/workflows/windows-ffmpeg-verify.yml` runs the fetch on `windows-latest`, where the probes execute for real and a build missing `h264_nvenc`, `scale_cuda` or `libx264` fails the job instead of reaching an installer. It optionally builds the NSIS installer through the actual `dist:win` command and uploads it, which is the first time that path will have run at all.
+
+**No GPU is needed for that**, which is the point worth knowing: `-encoders`, `-hwaccels` and `-filters` report what was *compiled in*, not what the machine can do. A GPU-less runner can prove the build has NVENC. What it cannot prove is that NVENC *encodes* — that still wants real NVIDIA hardware, and stays in item 5.
+
+Making that possible meant making the fetch script cross-platform. It shelled out to `unzip`, `mv` and `file`, none of which exist on a Windows runner: extraction now goes through `tar` (Windows 10+ ships bsdtar, which reads zips, matches wildcards and strips path components), the move through `fs.rename`, and the architecture check reads the executable's own header — Mach-O magic and cputype, or the PE COFF machine field — which is both portable and more precise than pattern-matching `file`'s English output.
+
+Triggered manually, and automatically when the pinned URL, digest or packaging config changes — because a new pin is exactly when "does this build have NVENC" is unanswered again. Manual by default because this is a private repository and Windows minutes bill at a multiple of Linux ones.
 
 **And item 36's NVENC claim is still open, because `strings` cannot settle it.** `h264_nvenc` and `scale_cuda` do appear in the fetched binary — but so does `videotoolbox`, which cannot work on Windows at all, so those strings come from name tables rather than proving compiled-in support. Only `-encoders` on Windows answers it.
 

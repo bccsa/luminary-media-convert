@@ -18,8 +18,8 @@
  * event a pinned digest exists to catch.
  */
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { chmod, copyFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { closeSync, existsSync, openSync, readSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -138,14 +138,53 @@ const digest = (buffer) => createHash('sha256').update(buffer).digest('hex');
  * to choose its acceleration mode, so a build that passes here is one that will
  * report the mode we expect rather than silently falling back to CPU.
  */
+/**
+ * The architecture an executable was built for, read from its own header.
+ *
+ * Replaces shelling out to `file`, which does not exist on Windows — and this
+ * script has to run on the platform it fetches for, or the capability checks
+ * below can never execute. Reading eight bytes is also more precise than
+ * pattern-matching an English sentence.
+ */
+function architectureOf(binary) {
+    const fd = openSync(binary, 'r');
+    try {
+        const head = Buffer.alloc(64);
+        readSync(fd, head, 0, 64, 0);
+
+        // Mach-O, 64-bit little-endian: magic then cputype.
+        if (head.readUInt32LE(0) === 0xfeedfacf) {
+            const cpuType = head.readUInt32LE(4);
+            if (cpuType === 0x0100000c) return 'arm64';
+            if (cpuType === 0x01000007) return 'x86-64';
+            return `mach-o cputype 0x${cpuType.toString(16)}`;
+        }
+
+        // PE: 'MZ', then the COFF header's machine field at e_lfanew + 4.
+        if (head.readUInt16LE(0) === 0x5a4d) {
+            const peOffset = head.readUInt32LE(0x3c);
+            const coff = Buffer.alloc(6);
+            readSync(fd, coff, 0, 6, peOffset);
+            if (coff.readUInt32LE(0) !== 0x00004550) return 'pe (no PE signature)';
+            const machine = coff.readUInt16LE(4);
+            if (machine === 0x8664) return 'x86-64';
+            if (machine === 0xaa64) return 'arm64';
+            return `pe machine 0x${machine.toString(16)}`;
+        }
+
+        return 'unrecognised executable format';
+    } finally {
+        closeSync(fd);
+    }
+}
+
 function verifyCapabilities(binary, name, arch, spec, executable) {
     const run = (...args) =>
         execFileSync(binary, ['-hide_banner', ...args], { encoding: 'utf8' });
 
-    // Architecture is readable without running anything, so it is checked on
-    // every platform: `file` reports `arm64` for a Mach-O and `x86-64` for a PE.
-    const described = execFileSync('file', [binary], { encoding: 'utf8' });
-    if (!described.includes(arch)) fail(`${name} is not ${arch}: ${described.trim()}`);
+    // Readable without running anything, so it is checked on every platform.
+    const actualArch = architectureOf(binary);
+    if (actualArch !== arch) fail(`${name} is ${actualArch}, expected ${arch}`);
 
     /*
      * Everything below has to *run* the binary, which a machine of a different
@@ -240,14 +279,27 @@ async function main() {
             await writeFile(archivePath, bytes);
 
             for (const entry of wanted) {
-                // `-j` flattens: Windows builds keep their binaries in
-                // `<release>/bin/`, and the destination is a flat directory.
-                execFileSync('unzip', ['-joq', archivePath, entry.from, '-d', staging]);
+                /*
+                 * `tar` rather than `unzip`, and `rename` rather than `mv`: this
+                 * script has to run on Windows as well as macOS, where neither
+                 * of those exists. Windows 10 and later ship bsdtar, which reads
+                 * zips, matches wildcards and strips leading path components —
+                 * the same invocation works on both platforms.
+                 */
+                const depth = entry.from.split('/').length - 1;
+                execFileSync('tar', [
+                    '-xf',
+                    archivePath,
+                    '-C',
+                    staging,
+                    ...(depth > 0 ? [`--strip-components=${depth}`] : []),
+                    entry.from,
+                ]);
                 const unpacked = join(staging, basename(entry.from));
                 if (!existsSync(unpacked)) {
                     fail(`${entry.from} was not in ${archive.url}`);
                 }
-                execFileSync('mv', [unpacked, join(outDir, entry.name)]);
+                await rename(unpacked, join(outDir, entry.name));
                 await chmod(join(outDir, entry.name), 0o755);
                 console.log(`  ✓ ${entry.name}`);
             }

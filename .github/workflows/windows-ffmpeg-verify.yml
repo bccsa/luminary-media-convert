@@ -1,0 +1,96 @@
+name: Verify Windows FFmpeg build
+
+# Why a Windows runner: the capability checks in `fetch-binaries` have to *run*
+# the binary, and a `.exe` cannot run on the macOS machines this project is
+# developed on. Fetching from a Mac pins and unpacks it but takes its hardware
+# support on trust, which is exactly what should not be trusted — NVENC is a
+# compile-time decision that cannot be added later.
+#
+# A GPU is not needed for this. `-encoders`, `-hwaccels` and `-filters` report
+# what was compiled in, not what the machine can do, so a GPU-less runner can
+# prove the build *has* NVENC. What it cannot prove is that NVENC *encodes* —
+# that still needs real NVIDIA hardware (Todo item 5).
+
+permissions:
+  contents: read
+
+on:
+  # Manual, because this is a private repository and Windows minutes bill at a
+  # multiple of Linux ones. Run it when the pinned build changes, or before a
+  # Windows release.
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Also build the NSIS installer and upload it as an artifact'
+        type: boolean
+        default: false
+
+  # And automatically when the thing being verified changes, since a new pinned
+  # URL or digest is precisely when "does this build have NVENC" is unanswered.
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - electron/scripts/fetch-binaries.mjs
+      - electron/electron-builder.yml
+      - .github/workflows/windows-ffmpeg-verify.yml
+
+env:
+  CI: true
+
+jobs:
+  verify:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: api/.node-version
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The real check. On Windows this runs the capability probes rather than
+      # skipping them, so a build without h264_nvenc, scale_cuda or libx264
+      # fails the job instead of reaching an installer.
+      - name: Fetch and verify the pinned Windows FFmpeg
+        run: npm -w electron run fetch-binaries win32-x64
+
+      # Belt and braces, and it puts the answer in the log where a human can
+      # read it rather than trusting the script's exit code alone. This is also
+      # what settles the "do published Windows builds carry NVENC" question
+      # recorded in Todo item 36.
+      - name: Report what the build actually supports
+        shell: bash
+        run: |
+          FF=electron/bin/win32-x64/ffmpeg.exe
+          echo "--- version ---"
+          "$FF" -hide_banner -version | head -2
+          echo "--- hwaccels ---"
+          "$FF" -hide_banner -hwaccels
+          echo "--- nvenc / cuda encoders and filters ---"
+          "$FF" -hide_banner -encoders | grep -iE 'nvenc|libx264' || true
+          "$FF" -hide_banner -filters  | grep -iE 'scale_cuda' || true
+
+      # The real release command, not a bespoke invocation — it fetches, builds
+      # the workspaces, compiles the main process and runs electron-builder, so
+      # this exercises the path a human would actually use.
+      - name: Build the NSIS installer
+        if: inputs.package
+        run: npm -w electron run dist:win
+
+      - name: Upload the installer
+        if: inputs.package
+        uses: actions/upload-artifact@v4
+        with:
+          name: luminary-media-convert-win-unsigned
+          # Unsigned: there is no Authenticode certificate in this project, so
+          # SmartScreen will warn. Fine for verification, not for release.
+          path: electron/release/*.exe
+          retention-days: 7
+          if-no-files-found: error
