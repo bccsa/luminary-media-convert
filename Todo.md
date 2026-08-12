@@ -942,3 +942,37 @@ Verified end to end afterwards: the same encode now logs `Packed 12 thumbnail(s)
 
 **The same shape exists for trim segments** — `buildConcatFile` in `ffmpeg.service.ts` writes the source path into an ffconcat list the same way. It was safe, but only because `encode.controller.ts` rejects a non-absolute path at ingest: a guarantee made three files away, which is exactly the kind this bug was safe by until it wasn't. Now resolved at the point of use, with a test that hands it a relative path. (An earlier draft of this note named `concat-file.ts`; that file only ever existed in the abandoned item-34 work and is not in the tree.)
 
+
+---
+
+## 40. What stays plaintext in an encrypted output — one accepted, one open
+
+**Came out of Ivan's question about the thumbnails VTT (12 Aug 2026),** which is encrypted and always was. Checking that turned up the rest of the picture, and one item nobody had written down.
+
+Read off a real encrypted session in S3, by first bytes:
+
+| Object | State | What it gives away |
+|---|---|---|
+| `master.m3u8`, every media playlist | `LMCENC01` | — |
+| `chapters/*.vtt`, subtitle VTTs | `LMCENC01` | — |
+| `thumbnails/thumbnails.vtt` | `LMCENC01` | — |
+| `media_*.m4s` / `.ts` | AES-128 | — |
+| `init_0.mp4` | **plaintext** | fMP4 header: codec, resolution, timescale |
+| `thumbnails/sprite_*.jpg` | **plaintext** | **actual frames of the video** |
+| `waveform.json` | **plaintext** | loudness over time (settled, item 10) |
+
+### `init_0.mp4` — accepted, nothing to build
+
+Not previously on any list, which is the same failure the waveform had: the plaintext was fine, the silence was not. It is the fMP4 initialisation segment, and HLS AES-128 does not cover it — encrypting it would break every standard player to hide a codec string and a resolution. Recorded on the exclusions list in `docs/encrypted-sidecar-format.md`; no code change wanted.
+
+### The sprite sheets — open, and it has a price
+
+**This is the real gap.** The VTT saying *where* the frames are is encrypted; the frames themselves are a plain JPEG next to it. Of everything above it is by far the largest leak — a scrub strip of the video, readable by anyone who can list the bucket.
+
+**Worth putting to Ivan on its own**, rather than letting it ride on the waveform answer, because it is not free:
+
+- **The encoder side is small.** The sprites are written into `outputDir` before the text-asset pass; the pass matches by extension, so widening it is a filter change plus a decision about whether `.jpg` counts as a "text asset" or wants its own step.
+- **The player side is not.** `player-core`'s scrub preview (item 31) hands the sprite URL straight to CSS as a background image, which is what makes moving between adjacent frames free — the same sheet, already cached by the browser. Encrypted, each sheet has to be fetched, decrypted and turned into a blob URL before anything can be drawn, and the blob has to be revoked when the source changes. That is the pattern the key deliberately avoids (`player-web` serves key bytes from memory precisely so no blob URL exists), so it wants care rather than a quick edit.
+- **A partial answer is worse than either.** Encrypting the sheets while the init segment and the waveform stay readable is defensible; encrypting them while the *VTT* pointing at them is also encrypted but the app's own filmstrip reads them unencrypted is not — `useStoryboardVttUrl` and the trim timeline would both need the same treatment.
+
+**If the answer is yes**, the condition already recorded in item 10 applies in reverse: the waveform goes with them, so the class of derived artefacts keeps one answer rather than three.
