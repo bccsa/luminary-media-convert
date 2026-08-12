@@ -2,15 +2,10 @@ name: Pinned FFmpeg URLs still resolve
 
 # Checks that every source `ffmpeg-build/build.sh` fetches is reachable: FFmpeg's
 # release tarball and its signature, libwebp's tarball, x264's git repository and the
-# nv-codec-headers tag.
+# nv-codec-headers tag. It catches a pin that names something unpublished — a wrong
+# version, a mistyped digest, a tag that does not exist.
 #
-# There is no schedule, because these hosts are archival rather than rolling —
-# ffmpeg.org still serves releases back to 0.6, and libwebp's host keeps old versions
-# — so a pinned source vanishing on its own is close to impossible. What does happen
-# is a wrong pin: a version that was never published, a mistyped digest, a tag that
-# does not exist. That arrives in a pull request, which is what this runs on.
-#
-# `workflow_dispatch` is there to check on demand before cutting a release.
+# Runs on pull requests that touch the pins, and on demand before cutting a release.
 #
 # Reachability only. Whether a *newer* version exists is a judgement call: moving a
 # pin means re-verifying capabilities, re-checking the nv-codec-headers ceiling and

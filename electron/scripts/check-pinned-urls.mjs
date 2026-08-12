@@ -8,9 +8,7 @@
  *
  * A source that cannot be fetched means `dist:mac` and `dist:win` stop working for
  * everybody at once, and the corresponding-source offer in the shipped licence notice
- * points at something a recipient cannot fetch. In practice the cause is a wrong pin
- * rather than a vanished file — these hosts keep old versions indefinitely — which is
- * why this runs on pull requests that touch the pins, and on demand before a release.
+ * points at something a recipient cannot fetch.
  *
  * Reachability only. Whether a newer FFmpeg exists is a judgement call: moving a
  * pin means re-verifying capabilities, re-checking the nv-codec-headers ceiling and

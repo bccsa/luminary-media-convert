@@ -6,9 +6,7 @@ name: Tests and build
 # `dist` directories from earlier builds, which hide dependency-order mistakes in
 # `build:libs`. Only a checkout with nothing built yet exercises that order.
 
-# push on main, pull_request for everything else. Every branch here has a pull
-# request, so adding feature branches to the push trigger would only run each commit
-# twice for the same answer.
+# Every commit is covered once: pushes to main, and pull requests for everything else.
 on:
     push:
         branches:
@@ -19,9 +17,8 @@ on:
 permissions:
     contents: read
 
-# Electron's postinstall downloads a ~100 MB binary and fails intermittently with
-# "RequestError: socket hang up", which has nothing to do with the code under test.
-# No job here launches Electron, so the download is skipped rather than retried.
+# No job here launches Electron, so its ~100 MB postinstall download is skipped —
+# it fails intermittently and would only add a failure mode unrelated to the tests.
 env:
     ELECTRON_SKIP_BINARY_DOWNLOAD: 1
 
