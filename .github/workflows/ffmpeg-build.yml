@@ -1,0 +1,181 @@
+name: Build FFmpeg from source
+
+# Builds the binaries the app ships, from FFmpeg's own signed source, for all three
+# targets. See ffmpeg-build/README.md for why we build rather than download.
+#
+# The split of runners is deliberate:
+#   - macOS arm64 and Intel build on their own architectures, so the capability
+#     probes test the real thing rather than Rosetta.
+#   - Windows cross-compiles on Linux with mingw-w64 — the same choice BtbN made,
+#     because MSYS2 is a second world to maintain — and is then *verified on a
+#     Windows runner*, since a cross-build cannot be run where it was made.
+#
+# Not on every push: these are long jobs and the pins change a few times a year.
+
+on:
+    workflow_dispatch:
+    push:
+        paths:
+            # The build definition itself. A change to a pin or a configure flag is
+            # exactly when "does this still produce a working encoder" is unanswered.
+            - ffmpeg-build/**
+            - .github/workflows/ffmpeg-build.yml
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ffmpeg-build-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    mac:
+        name: ${{ matrix.target }}
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    # macos-14 is arm64; macos-13 is the last Intel image.
+                    - { target: darwin-arm64, runner: macos-14 }
+                    - { target: darwin-x64, runner: macos-13 }
+        runs-on: ${{ matrix.runner }}
+        steps:
+            - uses: actions/checkout@v5
+            - name: Install build tools
+              run: brew install nasm pkg-config gnupg
+            - name: Build
+              run: ./ffmpeg-build/build.sh ${{ matrix.target }}
+
+            # Native on both runners, so the binary can be asked what it supports
+            # rather than trusted. These are the same questions FfmpegService asks
+            # at start-up to choose its acceleration mode.
+            - name: What the build supports
+              run: |
+                  FF=electron/bin/${{ matrix.target }}/ffmpeg
+                  "$FF" -hide_banner -version | head -1
+                  "$FF" -hide_banner -L | sed -n '2,4p'
+                  "$FF" -hide_banner -hwaccels
+                  for e in libx264 h264_videotoolbox aac libwebp mjpeg pcm_s16le; do
+                    "$FF" -hide_banner -encoders | grep -qw "$e" || { echo "MISSING encoder $e"; exit 1; }
+                  done
+                  for f in scale scale_vt tile trim concat fps format crop aresample; do
+                    "$FF" -hide_banner -filters | grep -qE " $f +" || { echo "MISSING filter $f"; exit 1; }
+                  done
+                  echo "all required encoders and filters present"
+
+            # Features, not flags. The muxer-name fault that broke the waveform passed
+            # every flag check and only surfaced when something actually wrote a file.
+            #
+            # The source is built from /dev/zero rather than `lavfi`, because
+            # --disable-indevs removes lavfi (it lives in libavdevice) — so there is
+            # no testsrc in these builds, and this pattern works in Git Bash too.
+            - name: Encode something
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  FF="electron/bin/${{ matrix.target }}/ffmpeg"
+                  head -c 5760000 /dev/zero > raw.yuv     # 320x240 yuv420p, 50 frames
+                  head -c 64000 /dev/zero > raw.pcm       # 2s of 16-bit mono @ 16 kHz
+                  "$FF" -hide_banner -loglevel error \
+                    -f rawvideo -pix_fmt yuv420p -s 320x240 -r 25 -i raw.yuv \
+                    -f s16le -ar 16000 -ac 1 -i raw.pcm \
+                    -c:v libx264 -c:a aac -shortest src.mp4 -y
+                  # HLS with fMP4 segments — what the encoder actually emits.
+                  "$FF" -hide_banner -loglevel error -i src.mp4 -c:v libx264 -c:a aac \
+                    -hls_time 1 -hls_segment_type fmp4 -hls_playlist_type vod \
+                    -hls_segment_filename "s_%d.m4s" o.m3u8 -y
+                  test -s o.m3u8
+                  echo "  HLS fMP4 written with libx264 + aac"
+                  # Sprite sheet: the tile filter through libwebp.
+                  "$FF" -hide_banner -loglevel error -i src.mp4 \
+                    -vf "fps=1,scale=160:-1,tile=2x1" -c:v libwebp sp.webp -y
+                  test -s sp.webp
+                  echo "  libwebp sprite written"
+                  # WaveformService's path: raw PCM on stdout.
+                  bytes=$("$FF" -hide_banner -loglevel error -i src.mp4 -ac 1 -ar 8000 -f s16le - | wc -c)
+                  test "$bytes" -gt 1000
+                  echo "  raw PCM out: $bytes bytes"
+
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: ffmpeg-${{ matrix.target }}
+                  path: electron/bin/${{ matrix.target }}/
+                  retention-days: 7
+                  if-no-files-found: error
+
+    windows-cross:
+        name: win32-x64 (cross-compiled on Linux)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - name: Install mingw-w64 and build tools
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y mingw-w64 nasm pkg-config gnupg clang
+            - name: Build
+              run: ./ffmpeg-build/build.sh win32-x64
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: ffmpeg-win32-x64
+                  path: electron/bin/win32-x64/
+                  retention-days: 7
+                  if-no-files-found: error
+
+    windows-verify:
+        # The cross-build cannot be run where it was made, so a Windows runner asks
+        # it what it supports. This is the step that would catch a build that
+        # compiles cleanly and has no NVENC — a compile-time decision that cannot be
+        # added later, and the reason this workflow exists at all.
+        name: win32-x64 verified on Windows
+        needs: windows-cross
+        runs-on: windows-latest
+        steps:
+            - uses: actions/download-artifact@v4
+              with:
+                  name: ffmpeg-win32-x64
+                  path: bin
+            - name: What the build supports
+              shell: bash
+              run: |
+                  FF=bin/ffmpeg.exe
+                  chmod +x bin/*.exe
+                  "$FF" -hide_banner -version | head -1
+                  "$FF" -hide_banner -L | sed -n '2,4p'
+                  "$FF" -hide_banner -hwaccels
+                  for e in libx264 h264_nvenc aac libwebp mjpeg pcm_s16le; do
+                    "$FF" -hide_banner -encoders | grep -qw "$e" || { echo "MISSING encoder $e"; exit 1; }
+                  done
+                  "$FF" -hide_banner -filters | grep -q scale_cuda || { echo "MISSING scale_cuda"; exit 1; }
+                  echo "NVENC, scale_cuda and the CPU fallback are all present"
+            # Features, not flags. The muxer-name fault that broke the waveform passed
+            # every flag check and only surfaced when something actually wrote a file.
+            #
+            # The source is built from /dev/zero rather than `lavfi`, because
+            # --disable-indevs removes lavfi (it lives in libavdevice) — so there is
+            # no testsrc in these builds, and this pattern works in Git Bash too.
+            - name: Encode something
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  FF="bin/ffmpeg.exe"
+                  head -c 5760000 /dev/zero > raw.yuv     # 320x240 yuv420p, 50 frames
+                  head -c 64000 /dev/zero > raw.pcm       # 2s of 16-bit mono @ 16 kHz
+                  "$FF" -hide_banner -loglevel error \
+                    -f rawvideo -pix_fmt yuv420p -s 320x240 -r 25 -i raw.yuv \
+                    -f s16le -ar 16000 -ac 1 -i raw.pcm \
+                    -c:v libx264 -c:a aac -shortest src.mp4 -y
+                  # HLS with fMP4 segments — what the encoder actually emits.
+                  "$FF" -hide_banner -loglevel error -i src.mp4 -c:v libx264 -c:a aac \
+                    -hls_time 1 -hls_segment_type fmp4 -hls_playlist_type vod \
+                    -hls_segment_filename "s_%d.m4s" o.m3u8 -y
+                  test -s o.m3u8
+                  echo "  HLS fMP4 written with libx264 + aac"
+                  # Sprite sheet: the tile filter through libwebp.
+                  "$FF" -hide_banner -loglevel error -i src.mp4 \
+                    -vf "fps=1,scale=160:-1,tile=2x1" -c:v libwebp sp.webp -y
+                  test -s sp.webp
+                  echo "  libwebp sprite written"
+                  # WaveformService's path: raw PCM on stdout.
+                  bytes=$("$FF" -hide_banner -loglevel error -i src.mp4 -ac 1 -ar 8000 -f s16le - | wc -c)
+                  test "$bytes" -gt 1000
+                  echo "  raw PCM out: $bytes bytes"

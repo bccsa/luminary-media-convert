@@ -15,16 +15,41 @@ repo="$(cd "$here/.." && pwd)"
 source "$here/versions.sh"
 
 target="${1:-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)}"
+# `os` decides which toolchain and which post-build audit runs; `exe` is the
+# suffix the output carries.
 case "$target" in
-    darwin-arm64 | darwin-aarch64) target=darwin-arm64; arch=arm64 ;;
-    darwin-x64 | darwin-x86_64) target=darwin-x64; arch=x86_64 ;;
+    darwin-arm64 | darwin-aarch64) target=darwin-arm64; os=darwin; arch=arm64; exe= ;;
+    darwin-x64 | darwin-x86_64) target=darwin-x64; os=darwin; arch=x86_64; exe= ;;
+    win32-x64 | windows-x64) target=win32-x64; os=mingw32; arch=x86_64; exe=.exe ;;
     *)
         echo "  ✗ Unsupported target: $target" >&2
-        echo "    darwin-arm64 and darwin-x64 build here. Windows needs mingw-w64" >&2
-        echo "    cross-compilation on Linux and is not wired up yet — see README.md." >&2
+        echo "    Known: darwin-arm64, darwin-x64, win32-x64" >&2
         exit 1
         ;;
 esac
+
+# Windows is cross-compiled with mingw-w64, never built natively — the same choice
+# BtbN made, and for the same reason: MSYS2 is a second world to maintain, while a
+# cross-compiler is one apt/brew package. It runs on Linux in CI; a Mac needs
+# `brew install mingw-w64` (~1 GB) to do it locally.
+cross_prefix=""
+if [ "$os" = "mingw32" ]; then
+    cross_prefix="x86_64-w64-mingw32-"
+    command -v "${cross_prefix}gcc" >/dev/null 2>&1 || {
+        echo "  ✗ ${cross_prefix}gcc not found." >&2
+        echo "    Linux: apt-get install mingw-w64    macOS: brew install mingw-w64" >&2
+        exit 1
+    }
+fi
+
+# macOS-only tools are used for the sizes, cpu count and dependency audit below.
+if [ "$(uname -s)" = "Darwin" ]; then
+    nproc_cmd() { sysctl -n hw.ncpu; }
+    filesize() { stat -f%z "$1"; }
+else
+    nproc_cmd() { nproc; }
+    filesize() { stat -c%s "$1"; }
+fi
 
 work="$here/.work/$target"
 prefix="$work/deps"     # x264 installs here; ffmpeg links against it
@@ -38,7 +63,9 @@ fail() {
 
 # ── Prerequisites ────────────────────────────────────────────────────────────
 # Checked up front rather than failing halfway through a 20-minute build.
-for tool in gpg nasm pkg-config make clang git curl; do
+tools=(gpg nasm pkg-config make git curl)
+[ "$os" = "darwin" ] && tools+=(clang)
+for tool in "${tools[@]}"; do
     command -v "$tool" >/dev/null 2>&1 ||
         fail "$tool is missing. On macOS: brew install nasm pkg-config gnupg"
 done
@@ -47,9 +74,14 @@ done
 # can only run under Rosetta, and the capability probes would be testing Rosetta
 # rather than the target. CI has a native x64 runner; prefer it.
 host_arch="$(uname -m)"
-if [ "$arch" != "$host_arch" ]; then
-    log "Cross-building $arch on $host_arch — the result cannot be capability-tested here"
+native=true
+# "Native" means the output can be run and probed here. A mingw build never
+# can be; a mac x64 build can, under Rosetta, which is why that one is still
+# capability-tested locally.
+if [ "$os" = "mingw32" ] || { [ "$os" = "darwin" ] && [ "$arch" != "$host_arch" ] && [ "$host_arch" != "arm64" ]; }; then
+    native=false
 fi
+[ "$os" = "mingw32" ] && log "Cross-building Windows with ${cross_prefix}gcc — the result cannot run here"
 
 mkdir -p "$work" "$prefix" "$out"
 
@@ -97,10 +129,14 @@ if [ ! -f "$prefix/lib/libx264.a" ]; then
         # Static, PIC, no CLI: ffmpeg links the library and nothing wants the
         # x264 command-line tool in the bundle.
         x264_flags=(--prefix="$prefix" --enable-static --enable-pic --disable-cli)
-        [ "$arch" != "$host_arch" ] && x264_flags+=(--host="$arch-apple-darwin")
+        if [ "$os" = "mingw32" ]; then
+            x264_flags+=(--host=x86_64-w64-mingw32 --cross-prefix="$cross_prefix")
+        elif [ "$arch" != "$host_arch" ]; then
+            x264_flags+=(--host="$arch-apple-darwin")
+        fi
         ./configure "${x264_flags[@]}" >"$work/x264-configure.log" 2>&1 ||
             { tail -20 "$work/x264-configure.log"; fail "x264 configure failed"; }
-        make -j"$(sysctl -n hw.ncpu)" >"$work/x264-make.log" 2>&1 ||
+        make -j"$(nproc_cmd)" >"$work/x264-make.log" 2>&1 ||
             { tail -20 "$work/x264-make.log"; fail "x264 build failed"; }
         make install >>"$work/x264-make.log" 2>&1
     )
@@ -135,17 +171,34 @@ if [ ! -f "$prefix/lib/libwebp.a" ]; then
             --disable-libwebpextras --disable-sdl --disable-png --disable-jpeg
             --disable-tiff --disable-gif
         )
-        [ "$arch" != "$host_arch" ] && webp_flags+=(
-            --host="$arch-apple-darwin" CFLAGS="-arch $arch" LDFLAGS="-arch $arch"
-        )
+        if [ "$os" = "mingw32" ]; then
+            webp_flags+=(--host=x86_64-w64-mingw32)
+        elif [ "$arch" != "$host_arch" ]; then
+            webp_flags+=(--host="$arch-apple-darwin" CFLAGS="-arch $arch" LDFLAGS="-arch $arch")
+        fi
         ./configure "${webp_flags[@]}" >"$work/webp-configure.log" 2>&1 ||
             { tail -20 "$work/webp-configure.log"; fail "libwebp configure failed"; }
-        make -j"$(sysctl -n hw.ncpu)" >"$work/webp-make.log" 2>&1 ||
+        make -j"$(nproc_cmd)" >"$work/webp-make.log" 2>&1 ||
             { tail -20 "$work/webp-make.log"; fail "libwebp build failed"; }
         make install >>"$work/webp-make.log" 2>&1
     )
 fi
 echo "    ✓ libwebp.a"
+
+# ── NVENC headers (Windows only) ─────────────────────────────────────────────
+# Headers, not a library. ffmpeg compiles against these and loads the encoder from
+# the user's NVIDIA driver at runtime, so this machine needs no GPU and no CUDA
+# SDK — which is what lets a GPU-less runner produce a binary with working NVENC.
+if [ "$os" = "mingw32" ]; then
+    log "nv-codec-headers $NV_CODEC_HEADERS_TAG"
+    nvsrc="$work/nv-codec-headers"
+    [ -d "$nvsrc/.git" ] || git clone -q "$NV_CODEC_HEADERS_REPO" "$nvsrc"
+    git -C "$nvsrc" fetch -q --tags origin
+    git -C "$nvsrc" checkout -q "$NV_CODEC_HEADERS_TAG"
+    make -C "$nvsrc" PREFIX="$prefix" install >"$work/nv-headers.log" 2>&1 ||
+        { tail -20 "$work/nv-headers.log"; fail "nv-codec-headers install failed"; }
+    echo "    ✓ ffnvcodec.pc"
+fi
 
 # ── FFmpeg ───────────────────────────────────────────────────────────────────
 # Narrow on the way out, wide on the way in: we control what is written, not what
@@ -161,6 +214,7 @@ demuxers=""   # empty = leave every demuxer enabled
 
 case "$target" in
     darwin-*) encoders="$encoders,h264_videotoolbox" ;;
+    win32-*) encoders="$encoders,h264_nvenc" ;;
 esac
 
 configure_flags=(
@@ -208,7 +262,26 @@ configure_flags=(
 # "nothing except". Same for muxers. Decoders and demuxers are untouched.
 configure_flags=(--disable-encoders --disable-muxers "${configure_flags[@]}")
 
-if [ "$arch" != "$host_arch" ]; then
+if [ "$os" = "mingw32" ]; then
+    configure_flags+=(
+        --enable-cross-compile
+        --cross-prefix="$cross_prefix"
+        --arch="$arch"
+        --target-os=mingw32
+
+        # NVENC for the GPU path, and cuda-llvm so `scale_cuda` can be built
+        # without NVIDIA's proprietary nvcc — FfmpegService needs that filter on
+        # the NVIDIA path, not just the encoder.
+        --enable-nvenc
+        --enable-cuda-llvm
+        --enable-ffnvcodec
+
+        # -static so the .exe carries libgcc and libwinpthread rather than
+        # expecting DLLs beside it. Same requirement as the macOS dependency
+        # audit: one file that runs on a machine we have never seen.
+        --extra-ldflags="-static"
+    )
+elif [ "$arch" != "$host_arch" ]; then
     configure_flags+=(
         --enable-cross-compile
         --arch="$arch"
@@ -224,14 +297,14 @@ log "FFmpeg configure + build (this is the slow part)"
     export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
     ./configure "${configure_flags[@]}" >"$work/ffmpeg-configure.log" 2>&1 ||
         { tail -30 "$work/ffmpeg-configure.log"; fail "FFmpeg configure failed"; }
-    make -j"$(sysctl -n hw.ncpu)" >"$work/ffmpeg-make.log" 2>&1 ||
+    make -j"$(nproc_cmd)" >"$work/ffmpeg-make.log" 2>&1 ||
         { tail -30 "$work/ffmpeg-make.log"; fail "FFmpeg build failed"; }
 )
 
 # ── Install and report ───────────────────────────────────────────────────────
-cp "$src/ffmpeg" "$out/ffmpeg"
-cp "$src/ffprobe" "$out/ffprobe"
-chmod 755 "$out/ffmpeg" "$out/ffprobe"
+cp "$src/ffmpeg$exe" "$out/ffmpeg$exe"
+cp "$src/ffprobe$exe" "$out/ffprobe$exe"
+chmod 755 "$out/ffmpeg$exe" "$out/ffprobe$exe"
 
 # ── The guard that should have existed from the first build ──────────────────
 # A binary that links anything outside /usr/lib and /System is not shippable: it
@@ -240,25 +313,34 @@ chmod 755 "$out/ffmpeg" "$out/ffprobe"
 # every functional test passed anyway, because the build machine had them all.
 # Nothing but an explicit check catches that class of fault.
 log "Dependency audit"
-foreign="$(otool -L "$out/ffmpeg" "$out/ffprobe" |
-    grep -oE '^\s+/[^ ]+' | tr -d '\t ' |
-    grep -vE '^/usr/lib/|^/System/' | sort -u || true)"
+if [ "$os" = "mingw32" ]; then
+    # On Windows the equivalent question is which DLLs the .exe imports. Anything
+    # beyond the OS set means a file that has to travel beside it, which is the
+    # same shipping failure as a Homebrew dylib on macOS.
+    allowed='KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|OLE32|OLEAUT32|PSAPI|BCRYPT|SECUR32|WS2_32|MSVCRT|api-ms-win|IMM32|SETUPAPI|CFGMGR32|STRMIIDS|UUID|VERSION|DWMAPI|WINMM|SHLWAPI|MFPLAT|MF\\.|MFUUID|D3D11|DXGI|USP10|RPCRT4|CRYPT32|NORMALIZ|NETAPI32'
+    foreign="$("${cross_prefix}objdump" -p "$out/ffmpeg$exe" "$out/ffprobe$exe" 2>/dev/null |
+        grep -i 'DLL Name:' | sed 's/.*DLL Name: *//' | sort -u |
+        grep -viE "$allowed" || true)"
+else
+    foreign="$(otool -L "$out/ffmpeg" "$out/ffprobe" |
+        grep -oE '^\s+/[^ ]+' | tr -d '\t ' |
+        grep -vE '^/usr/lib/|^/System/' | sort -u || true)"
+fi
 if [ -n "$foreign" ]; then
     printf '    %s\n' $foreign >&2
-    fail "The binaries link libraries outside /usr/lib and /System. They would not
-    start on a machine without those paths. Build the dependency statically
-    instead of letting configure find the system copy."
+    fail "The binaries depend on libraries that will not be on the user's machine.
+    Build the dependency statically instead of letting configure find a system copy."
 fi
-echo "    ✓ only system libraries — relocatable"
+echo "    ✓ no foreign dependencies — relocatable"
 
 log "Built $target"
-for b in ffmpeg ffprobe; do
+for b in "ffmpeg$exe" "ffprobe$exe"; do
     printf '    %s  %s MB  %s\n' "$b" \
-        "$(( $(stat -f%z "$out/$b") / 1048576 ))" \
+        "$(( $(filesize "$out/$b") / 1048576 ))" \
         "$(file -b "$out/$b")"
 done
 
-if [ "$arch" = "$host_arch" ]; then
+if [ "$native" = true ]; then
     "$out/ffmpeg" -hide_banner -version | head -1 | sed 's/^/    /'
     "$out/ffmpeg" -hide_banner -L 2>&1 | sed -n '3p' | sed 's/^/    licence: /'
 fi

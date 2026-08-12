@@ -30,6 +30,16 @@ X264_COMMIT="b35605ace3ddf7c1a5d67a2eb553f034aef41d55"  # stable @ 2025-06-08
 LIBWEBP_VERSION="1.6.0"
 LIBWEBP_SHA256="e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564"
 
+# NVENC headers, for the Windows target only.
+#
+# Worth knowing why this is just headers: NVENC is not a library we link against.
+# ffmpeg compiles against these stubs and loads the actual encoder out of the
+# user's NVIDIA driver at runtime, so a build machine needs no GPU, no CUDA SDK
+# and no NVIDIA hardware at all — which is why a GPU-less CI runner can produce a
+# binary with working NVENC.
+NV_CODEC_HEADERS_REPO="https://github.com/FFmpeg/nv-codec-headers.git"
+NV_CODEC_HEADERS_TAG="n9.1.23.3"
+
 # No x265. The encoder only ever writes H.264 — every variant in the master
 # playlist is avc1 — so HEVC support is weight we would carry and never use, plus
 # a second GPL dependency to account for in the corresponding source.
