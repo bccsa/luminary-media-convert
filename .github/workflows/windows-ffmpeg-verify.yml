@@ -25,6 +25,20 @@ on:
         type: boolean
         default: false
 
+  # Push to a branch named `ci/windows-*` to run this without merging anything.
+  #
+  # `workflow_dispatch` cannot help before then: GitHub only offers the "Run
+  # workflow" button for workflows present on the *default* branch, so a workflow
+  # still on a feature branch is undispatchable. `push` has no such rule — it uses
+  # the definition on the branch being pushed — which makes this the way to
+  # exercise a new workflow, or to re-check a pinned build, without touching main.
+  #
+  # Opt-in by branch name rather than "every branch", because these are Windows
+  # minutes on a private repository.
+  push:
+    branches:
+      - 'ci/windows-*'
+
   # And automatically when the thing being verified changes, since a new pinned
   # URL or digest is precisely when "does this build have NVENC" is unanswered.
   pull_request:
