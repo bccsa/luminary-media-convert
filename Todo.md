@@ -949,7 +949,7 @@ Verified end to end afterwards: the same encode now logs `Packed 12 thumbnail(s)
 
 **Came out of Ivan's question about the thumbnails VTT (12 Aug 2026),** which is encrypted and always was. Checking that turned up the rest of the picture, and one item nobody had written down.
 
-Read off a real encrypted session in S3, by first bytes:
+Read off a real encrypted session in S3, by first bytes — and re-checked on a session encoded *after* #163 reworked how sprites are produced, since the producer changing is exactly when a property like this can quietly flip:
 
 | Object | State | What it gives away |
 |---|---|---|
@@ -957,11 +957,11 @@ Read off a real encrypted session in S3, by first bytes:
 | `chapters/*.vtt`, subtitle VTTs | `LMCENC01` | — |
 | `thumbnails/thumbnails.vtt` | `LMCENC01` | — |
 | `media_*.m4s` / `.ts` | AES-128 | — |
-| `init_0.mp4` | **plaintext** | fMP4 header: codec, resolution, timescale |
+| `init_*.mp4` (one per stream) | **plaintext** | fMP4 header: codec, resolution, timescale |
 | `thumbnails/sprite_*.jpg` | **plaintext** | **actual frames of the video** |
 | `waveform.json` | **plaintext** | loudness over time (settled, item 10) |
 
-### `init_0.mp4` — accepted, nothing to build
+### `init_*.mp4` — accepted, nothing to build
 
 Not previously on any list, which is the same failure the waveform had: the plaintext was fine, the silence was not. It is the fMP4 initialisation segment, and HLS AES-128 does not cover it — encrypting it would break every standard player to hide a codec string and a resolution. Recorded on the exclusions list in `docs/encrypted-sidecar-format.md`; no code change wanted.
 

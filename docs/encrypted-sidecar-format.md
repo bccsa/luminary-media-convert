@@ -25,7 +25,8 @@ readable by players which cannot decrypt playlists.
 - **Not covered** (accepted gaps, decided rather than overlooked):
   - Thumbnail sprite images referenced by the thumbnails VTT remain plaintext
     JPEGs.
-  - `init_0.mp4`, the fMP4 initialisation segment, remains plaintext. HLS
+  - `init_*.mp4`, the fMP4 initialisation segment of each stream, remains
+    plaintext. HLS
     AES-128 does not cover it, and encrypting it would break every standard
     player in order to hide a codec string, a resolution and a timescale.
   - `waveform.json` beside the master remains plaintext (Ivan, 12 Aug 2026). It
