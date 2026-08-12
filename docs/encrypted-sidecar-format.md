@@ -24,7 +24,7 @@ readable by players which cannot decrypt playlists.
   and decrypted on read, so the output stays internally consistent.
 - **Not covered** (accepted gaps, decided rather than overlooked):
   - Thumbnail sprite images referenced by the thumbnails VTT remain plaintext
-    JPEGs.
+    WebP files.
   - `init_*.mp4`, the fMP4 initialisation segment of each stream, remains
     plaintext. HLS
     AES-128 does not cover it, and encrypting it would break every standard
