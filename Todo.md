@@ -295,11 +295,9 @@ Under all three is the floor of client-side encryption: a viewer who can play th
 
 The transport belongs to the same trip, now that item 30 has put three buttons in the middle of the picture where there was one. They hold the 44 px minimum and separate on a fluid gap as the viewport narrows, but that is a claim about the stylesheet: whether skip-back, play and skip-forward can be told apart and hit with a thumb, on a phone held in landscape, is not something jsdom or a desktop pointer can answer.
 
-**No scrub preview in the fullscreen scrubber.** `thumbnails.vtt` and its sprite sheets are generated and sit beside the master, and the encoder's trim filmstrip already reads them — the player does not. Wiring the existing sprites into `player-web`'s scrubber would give previews on web and Android with no encoder change, and the VTT parser exists.
+**Scrub preview in the fullscreen scrubber — done** (item 31). The existing sprites are wired into `player-web`'s scrubber, so previews work on web and Android with no encoder change. What remains untested is the same thing as everything else in this item: how it behaves under a thumb, on a real device.
 
 That is worth settling before reaching for **I-frame playlists** (`#EXT-X-I-FRAME-STREAM-INF`), which are tempting because they are the HLS-native answer and turn out not to be portable: AVPlayer uses them, ExoPlayer ignores them, hls.js gives no preview UI either way. They earn their keep in exactly one case — deferring to Apple's built-in player chrome in a Capacitor app — and cost an extra extraction pass at encode time, since FFmpeg's HLS muxer cannot emit them. Wherever we draw the controls ourselves, a sprite sheet is one image and one crop. The lossless parser already round-trips the tag, so adding them later disturbs nothing.
-
-**`waveform.json` is not encrypted — settled, and it stays that way** (Ivan, 12 Aug 2026). This item used to say it "fell outside the LMCENC scope by definition rather than by decision", which reading the spec makes too harsh: `docs/encrypted-sidecar-format.md` states the scope positively *and* carries an exclusions list, which is what a decision looks like. The waveform now sits on that list beside the sprite JPEGs, with the reasoning — a loudness curve leaks where speech and silence fall and nothing more, the sprites leak actual frames and are plaintext by the same decision, and keeping the sidecar readable keeps `POST /api/hls/waveform/read` stateless as designed. Nothing consumes the sidecar yet, so this was the cheapest moment to choose either way. If the sprites are ever encrypted, the waveform goes with them.
 
 **`encryptPlaylists` has no UI.** It follows `encryption.enabled` and can only be overridden through a direct `POST /api/sessions` — neither the CMS handshake nor the app offers the opt-out. That is the right default; the question is whether anything needs to reach the escape hatch, which the stock-player check in item 0 decides.
 
@@ -943,36 +941,3 @@ Verified end to end afterwards: the same encode now logs `Packed 12 thumbnail(s)
 **The same shape exists for trim segments** — `buildConcatFile` in `ffmpeg.service.ts` writes the source path into an ffconcat list the same way. It was safe, but only because `encode.controller.ts` rejects a non-absolute path at ingest: a guarantee made three files away, which is exactly the kind this bug was safe by until it wasn't. Now resolved at the point of use, with a test that hands it a relative path. (An earlier draft of this note named `concat-file.ts`; that file only ever existed in the abandoned item-34 work and is not in the tree.)
 
 
----
-
-## 40. What stays plaintext in an encrypted output — one accepted, one open
-
-**Came out of Ivan's question about the thumbnails VTT (12 Aug 2026),** which is encrypted and always was. Checking that turned up the rest of the picture, and one item nobody had written down.
-
-Read off a real encrypted session in S3, by first bytes — and re-checked on a session encoded *after* #163 reworked how sprites are produced, since the producer changing is exactly when a property like this can quietly flip:
-
-| Object | State | What it gives away |
-|---|---|---|
-| `master.m3u8`, every media playlist | `LMCENC01` | — |
-| `chapters/*.vtt`, subtitle VTTs | `LMCENC01` | — |
-| `thumbnails/thumbnails.vtt` | `LMCENC01` | — |
-| `media_*.m4s` / `.ts` | AES-128 | — |
-| `init_*.mp4` (one per stream) | **plaintext** | fMP4 header: codec, resolution, timescale |
-| `thumbnails/sprite_*.jpg` | **plaintext** | **actual frames of the video** |
-| `waveform.json` | **plaintext** | loudness over time (settled, item 10) |
-
-### `init_*.mp4` — accepted, nothing to build
-
-Not previously on any list, which is the same failure the waveform had: the plaintext was fine, the silence was not. It is the fMP4 initialisation segment, and HLS AES-128 does not cover it — encrypting it would break every standard player to hide a codec string and a resolution. Recorded on the exclusions list in `docs/encrypted-sidecar-format.md`; no code change wanted.
-
-### The sprite sheets — open, and it has a price
-
-**This is the real gap.** The VTT saying *where* the frames are is encrypted; the frames themselves are a plain JPEG next to it. Of everything above it is by far the largest leak — a scrub strip of the video, readable by anyone who can list the bucket.
-
-**Worth putting to Ivan on its own**, rather than letting it ride on the waveform answer, because it is not free:
-
-- **The encoder side is small.** The sprites are written into `outputDir` before the text-asset pass; the pass matches by extension, so widening it is a filter change plus a decision about whether `.jpg` counts as a "text asset" or wants its own step.
-- **The player side is not.** `player-core`'s scrub preview (item 31) hands the sprite URL straight to CSS as a background image, which is what makes moving between adjacent frames free — the same sheet, already cached by the browser. Encrypted, each sheet has to be fetched, decrypted and turned into a blob URL before anything can be drawn, and the blob has to be revoked when the source changes. That is the pattern the key deliberately avoids (`player-web` serves key bytes from memory precisely so no blob URL exists), so it wants care rather than a quick edit.
-- **A partial answer is worse than either.** Encrypting the sheets while the init segment and the waveform stay readable is defensible; encrypting them while the *VTT* pointing at them is also encrypted but the app's own filmstrip reads them unencrypted is not — `useStoryboardVttUrl` and the trim timeline would both need the same treatment.
-
-**If the answer is yes**, the condition already recorded in item 10 applies in reverse: the waveform goes with them, so the class of derived artefacts keeps one answer rather than three.
