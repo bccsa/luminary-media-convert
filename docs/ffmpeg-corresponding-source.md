@@ -44,8 +44,11 @@ GPL component in the corresponding source.
 
 **The repository has to be reachable by whoever receives a binary.** Naming
 `ffmpeg-build/` discharges the obligation only if a recipient can actually get it —
-so if this repository stays private, a release must carry the source another way: a
-tarball of `ffmpeg-build/` attached beside the installer would do, since the FFmpeg,
-x264 and libwebp sources themselves are all public and pinned by digest.
+so if this repository stays private, a release must carry the source another way.
+Note that scripts and pins are not themselves the source: a strict reading of GPLv2 §3
+puts the obligation on the distributor to supply the complete corresponding source,
+not to point at where it can be found. The safe form is a tarball attached beside the
+installer containing `ffmpeg-build/` **and** the FFmpeg, x264 and libwebp sources it
+pins. Worth confirming with whoever signs off the licence position.
 
 That is a decision about where releases are published, not a gap in the build.

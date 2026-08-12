@@ -15,12 +15,12 @@ places where a decision was made rather than defaulted.
 
 ## 1. Who holds what
 
-| Party | What they hold |
-|---|---|
-| The user's machine | Everything: source media, session records, encrypted S3 credentials, encryption keys, trust decisions |
-| The CMS | `hlsUrl` and `hlsKey`, which it asked for |
-| The S3 bucket | The encoded output — a destination the CMS chose and holds the credentials for |
-| The project / any operator | **Nothing.** There is no server, no account, no telemetry |
+| Party                      | What they hold                                                                                        |
+| -------------------------- | ----------------------------------------------------------------------------------------------------- |
+| The user's machine         | Everything: source media, session records, encrypted S3 credentials, encryption keys, trust decisions |
+| The CMS                    | `hlsUrl` and `hlsKey`, which it asked for                                                             |
+| The S3 bucket              | The encoded output — a destination the CMS chose and holds the credentials for                        |
+| The project / any operator | **Nothing.** There is no server, no account, no telemetry                                             |
 
 That last row is the whole change. Previously an operator held S3 credentials,
 session history and user identities for every customer.
@@ -59,12 +59,12 @@ removed when the session is deleted, which removes the directory whole.
 All under the OS's per-user application directory
 (`~/Library/Application Support/Luminary Media Convert` on macOS):
 
-| Path | Contents | Protection | Removed |
-|---|---|---|---|
-| `work/<id>/session.json` | Session record. S3 keys are `<redacted>`; **holds `readToken` and `encryptionKeyHex` in plaintext** | `0600` | On delete, and at boot for finished sessions |
-| `work/<id>/credentials.enc` | S3 access and secret key | `0600`, encrypted with an OS-keychain key | With the session |
-| `work/<id>/preview/`, `preview-thumbnails/`, `waveform.json` | Derived media | `0600` dir | With the session |
-| `settings.json` | Allowed and blocked origins | Default | Never; editable in-product |
+| Path                                                         | Contents                                                                                            | Protection                                | Removed                                      |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ----------------------------------------- | -------------------------------------------- |
+| `work/<id>/session.json`                                     | Session record. S3 keys are `<redacted>`; **holds `readToken` and `encryptionKeyHex` in plaintext** | `0600`                                    | On delete, and at boot for finished sessions |
+| `work/<id>/credentials.enc`                                  | S3 access and secret key                                                                            | `0600`, encrypted with an OS-keychain key | With the session                             |
+| `work/<id>/preview/`, `preview-thumbnails/`, `waveform.json` | Derived media                                                                                       | `0600` dir                                | With the session                             |
+| `settings.json`                                              | Allowed and blocked origins                                                                         | Default                                   | Never; editable in-product                   |
 
 **The one thing worth flagging.** `session.json` deliberately redacts S3
 credentials but does **not** redact `encryptionKeyHex` or `readToken`. That is
@@ -98,7 +98,9 @@ Three flows, all initiated by the user or their own CMS:
 1. **To the S3 bucket** — the encoded output, to a destination the CMS supplied
    and holds credentials for. The encoder is a conduit, not a party.
 2. **To the CMS** — `sessionId`, `readToken`, `eventsUrl`, `apiVersion` on
-   creation; then status, progress, `hlsUrl` and `encryptionKeyHex` over SSE. The
+   creation; then status, progress and `hlsUrl` over SSE — the key is deliberately not
+   in that payload; a holder of the read token fetches it masked from
+   `GET /api/sessions/:id/key`. The
    API never echoes back the S3 credentials or the title it was given, and never
    sends the session token.
 3. **At build time only** — `ffmpeg-build/build.sh` fetches FFmpeg's source from
@@ -112,8 +114,10 @@ There is no fourth. No update check, no crash reporting, no usage statistics.
 **One was found and removed, 12 Aug 2026.** `app/index.html` linked Google Fonts —
 `preconnect` to `fonts.googleapis.com` and `fonts.gstatic.com`, plus a stylesheet —
 so every launch of a local-only app reached out to Google. It had not been working:
-the CSP is `styleSrc 'self'` with no `fontSrc`, so the packaged app blocked the
-stylesheet and fell back to the system font. But `preconnect` is a resource hint and
+the CSP sets `style-src 'self' 'unsafe-inline'`, so the packaged app refused the
+stylesheet and fell back to the system font. (`font-src` was not the blocker: helmet's
+defaults emit `font-src 'self' https: data:`, which would have permitted the font
+files themselves.) But `preconnect` is a resource hint and
 is not governed by CSP, so what survived was a connection to Google on every launch
 for a font that never loaded. Removed; `--font-sans` still names Inter first, so a
 machine that has it installed uses it.

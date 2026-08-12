@@ -20,16 +20,16 @@ much.
 The old reviews assumed a hosted service holding many customers' data. Almost
 none of their conclusions transfer.
 
-| | Before | Now |
-|---|---|---|
-| Deployment | Shared service, public ingress | One process on one user's machine |
-| Bind address | Public interface | `127.0.0.1`, unconditionally |
-| Accounts | Auth0 identities, user database | None |
-| Tenant isolation | The central concern | No tenants |
-| S3 credentials | Held by the service for many users | Supplied per session, encrypted with an OS-keychain key |
-| Media transfer | Uploaded through the service | Never uploaded; read where it lies |
-| Remote surface | The whole REST API | `GET /api/cms/health` and `POST /api/cms/sessions` |
-| Perimeter for a remote caller | API key | Browser `Origin` allowlist |
+|                               | Before                             | Now                                                     |
+| ----------------------------- | ---------------------------------- | ------------------------------------------------------- |
+| Deployment                    | Shared service, public ingress     | One process on one user's machine                       |
+| Bind address                  | Public interface                   | `127.0.0.1`, unconditionally                            |
+| Accounts                      | Auth0 identities, user database    | None                                                    |
+| Tenant isolation              | The central concern                | No tenants                                              |
+| S3 credentials                | Held by the service for many users | Supplied per session, encrypted with an OS-keychain key |
+| Media transfer                | Uploaded through the service       | Never uploaded; read where it lies                      |
+| Remote surface                | The whole REST API                 | `GET /api/cms/health` and `POST /api/cms/sessions`      |
+| Perimeter for a remote caller | API key                            | Browser `Origin` allowlist                              |
 
 **The one genuinely new surface** is the CMS handshake. A web page on another
 origin asks a program on someone's laptop to do work. Both findings below are in
@@ -46,12 +46,14 @@ that surface, which is where the attention belonged.
 Both halves of the perimeter exempted the literal string `"null"`:
 
 ```ts
-if (!origin || origin === 'null') { /* trusted */ }
+if (!origin || origin === 'null') {
+    /* trusted */
+}
 ```
 
 A **missing** `Origin` header and `Origin: null` are not the same thing. The
 first is not a browser page — curl, a local tool — and there is nothing for CORS
-to protect. The second is what a browser sends for an *opaque* origin: a
+to protect. The second is what a browser sends for an _opaque_ origin: a
 sandboxed iframe, a `data:` document, some cross-origin redirects. That is
 precisely the caller the allowlist exists to stop. The comment's premise, "a
 request with no Origin is not a browser", was correct for the first and wrong
@@ -166,9 +168,12 @@ swapping the signing key for a different real one also fails.
 
 Two supply-chain properties this replaced: the binaries used to come from
 third-party build hosts (osxexperts.net, unlisted and unsigned, for both Macs), and
-nothing verified that the *result* was relocatable — a build linked six Homebrew
-dylibs and would not have started on a user's machine. `verify-package.mjs` and the
-build's own `otool`/`objdump` audit now fail on that.
+nothing verified that the _result_ was relocatable. `build.sh` now audits its own
+output with `otool` (Mach-O) or `objdump` (PE) and fails on any dependency outside the
+OS set, requiring a known-present library in the listing first so an unreadable table
+cannot pass as "nothing foreign". `verify-package.mjs` covers a different axis: that
+the packaged app contains both binaries, of the right architecture, with their licence
+texts.
 
 **Transport.** The API binds `127.0.0.1` unconditionally. CSP keeps
 `script-src 'self'`; the widening for media sources applies only when the API also

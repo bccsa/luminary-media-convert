@@ -103,27 +103,34 @@ async function reachable(url) {
     return { ...last, status: `${last.status} after ${ATTEMPTS} attempts` };
 }
 
-/** A git commit or tag, which no HTTP request can confirm. */
-function gitRefExists(repo, ref) {
+/**
+ * A git ref, which no HTTP request can confirm.
+ *
+ * `kind` matters. A tag is advertised by `ls-remote`, so silence means it does not
+ * exist and the pin is wrong. A commit is not advertised, so silence says nothing —
+ * for those the check can only establish that the repository answers at all.
+ */
+function gitRefExists(repo, ref, kind) {
+    const lsRemote = (...args) =>
+        execFileSync('git', ['ls-remote', repo, ...args], {
+            encoding: 'utf8',
+            timeout: 60_000,
+        });
+
     try {
-        // `ls-remote <repo> <ref>` prints a line when the ref exists. A commit that
-        // is not a ref prints nothing, so fall back to asking for everything and
-        // grepping — enough to tell "the repository is gone" from "the pin moved".
-        const out = execFileSync('git', ['ls-remote', repo, ref], {
-            encoding: 'utf8',
-            timeout: 60_000,
-        });
-        if (out.trim()) return { ok: true, note: 'ref present' };
-        const all = execFileSync('git', ['ls-remote', repo], {
-            encoding: 'utf8',
-            timeout: 60_000,
-        });
-        return all.includes(ref)
-            ? { ok: true, note: 'commit present' }
-            : {
-                  ok: true,
-                  note: 'repository reachable; commit not advertised as a ref (normal)',
-              };
+        if (kind === 'tag') {
+            const out = lsRemote(`refs/tags/${ref}`);
+            return out.trim()
+                ? { ok: true, note: 'tag present' }
+                : { ok: false, note: 'tag does not exist in the repository' };
+        }
+        // A commit: confirm the repository responds, and report the commit as
+        // unverifiable rather than implying it was found.
+        lsRemote('HEAD');
+        return {
+            ok: true,
+            note: 'repository reachable (a commit pin cannot be checked remotely)',
+        };
     } catch (e) {
         return { ok: false, note: e.message.split('\n')[0] };
     }
@@ -143,14 +150,16 @@ for (const t of [
         what: `x264 ${x264Commit.slice(0, 12)}`,
         repo: x264Repo,
         ref: x264Commit,
+        kind: 'commit',
     },
     {
         what: `nv-codec-headers ${nvTag}`,
-        repo: 'https://github.com/FFmpeg/nv-codec-headers.git',
+        repo: pin('NV_CODEC_HEADERS_REPO'),
         ref: nvTag,
+        kind: 'tag',
     },
 ]) {
-    const { ok, note } = gitRefExists(t.repo, t.ref);
+    const { ok, note } = gitRefExists(t.repo, t.ref, t.kind);
     console.log(`  ${ok ? '✓' : '✗'} ${t.what} — ${note}`);
     if (!ok) failures.push({ what: t.what, url: t.repo, status: note });
 }

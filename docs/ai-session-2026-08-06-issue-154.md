@@ -50,25 +50,25 @@ Key findings that shaped the plan:
 
 Via structured Q&A during planning, then a `/grill-me` interrogation:
 
-| Decision | Choice |
-|---|---|
-| CMS status reporting | SSE to the CMS browser (webhooks removed entirely) |
-| S3 credential handling | Encrypted at rest via Electron safeStorage; never sent to renderer; redacted in `session.json`; memory-only (no disk) when safeStorage unavailable — sessions then don't survive restart |
-| saas/ admin/ tusd/ | Deleted |
-| Encrypted playback key URI | Fixed placeholder `luminary://key`, swapped client-side |
-| Session creation | CMS-only (manual EncodeView removed) |
-| "From URL" mode | Reframed: CMS passes an existing collection URL for **edit mode** (chapters + playback + add/remove/replace audio tracks / video angles) — deferred to a follow-up issue |
-| Discovery | Fixed port `31711` + `luminary-convert://` protocol handler + `GET /api/cms/health` |
-| Correlation | `documentId` in the DTO; idempotent create returns the active session (`reused: true`) — doubles as the CMS reconnect story |
-| Output placement | Per-session subfolder `<cms-prefix>/<sessionId>/`; re-encodes never disturb the live collection |
-| Origin trust | Trust-on-first-use native dialog, persisted in app settings |
-| Retention | Active sessions only: terminal sessions until dismiss/quit, never restored on boot |
-| Window UX | Dock app; focus window on CMS activity |
-| Platforms | macOS arm64 + Windows x64 |
-| Updates | Manual installs; minimal signing; auto-update deferred |
-| Multi-angle output | Single multi-angle `master.m3u8`; angle/audio-only extraction moves client-side into `hls/` helpers (server-side split + audio-only playlist deleted) |
-| Testing contract | A `cms-mock/` workspace mocks the Luminary CMS so the flow is testable before the contract is implemented in luminary itself |
-| Follow-ups | Recorded in root `Todo.md` |
+| Decision                   | Choice                                                                                                                                                                                   |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CMS status reporting       | SSE to the CMS browser (webhooks removed entirely)                                                                                                                                       |
+| S3 credential handling     | Encrypted at rest via Electron safeStorage; never sent to renderer; redacted in `session.json`; memory-only (no disk) when safeStorage unavailable — sessions then don't survive restart |
+| saas/ admin/ tusd/         | Deleted                                                                                                                                                                                  |
+| Encrypted playback key URI | Fixed placeholder `luminary://key`, swapped client-side                                                                                                                                  |
+| Session creation           | CMS-only (manual EncodeView removed)                                                                                                                                                     |
+| "From URL" mode            | Reframed: CMS passes an existing collection URL for **edit mode** (chapters + playback + add/remove/replace audio tracks / video angles) — deferred to a follow-up issue                 |
+| Discovery                  | Fixed port `31711` + `luminary-convert://` protocol handler + `GET /api/cms/health`                                                                                                      |
+| Correlation                | `documentId` in the DTO; idempotent create returns the active session (`reused: true`) — doubles as the CMS reconnect story                                                              |
+| Output placement           | Per-session subfolder `<cms-prefix>/<sessionId>/`; re-encodes never disturb the live collection                                                                                          |
+| Origin trust               | Trust-on-first-use native dialog, persisted in app settings                                                                                                                              |
+| Retention                  | Active sessions only: terminal sessions until dismiss/quit, never restored on boot                                                                                                       |
+| Window UX                  | Dock app; focus window on CMS activity                                                                                                                                                   |
+| Platforms                  | macOS arm64 + Windows x64                                                                                                                                                                |
+| Updates                    | Manual installs; minimal signing; auto-update deferred                                                                                                                                   |
+| Multi-angle output         | Single multi-angle `master.m3u8`; angle/audio-only extraction moves client-side into `hls/` helpers (server-side split + audio-only playlist deleted)                                    |
+| Testing contract           | A `cms-mock/` workspace mocks the Luminary CMS so the flow is testable before the contract is implemented in luminary itself                                                             |
+| Follow-ups                 | Recorded in root `Todo.md`                                                                                                                                                               |
 
 Execution strategy (also owner-approved): Opus 5 subagents implement phase by
 phase; Fable 5 reviews each diff, runs builds, and steers corrections; the

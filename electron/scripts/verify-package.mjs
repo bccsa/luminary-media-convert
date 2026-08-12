@@ -26,7 +26,14 @@
  * test; it does not pass this.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import {
+    closeSync,
+    existsSync,
+    openSync,
+    readSync,
+    readdirSync,
+    statSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -41,6 +48,61 @@ const MIN_BINARY_BYTES = 1_000_000;
 
 const problems = [];
 const notes = [];
+
+/**
+ * The architecture a binary was compiled for, read from its own header.
+ *
+ * Running a binary does not establish this: macOS runs x86_64 under Rosetta on an
+ * arm64 machine, so an arm64 ffmpeg placed in the x64 app would execute here and ship
+ * an Intel dmg that cannot start on Intel.
+ */
+function architectureOf(path) {
+    const fd = openSync(path, 'r');
+    try {
+        const head = Buffer.alloc(64);
+        readSync(fd, head, 0, 64, 0);
+
+        // Mach-O: magic then cputype. 0xfeedfacf little-endian is 64-bit.
+        const machO =
+            head.readUInt32LE(0) === 0xfeedfacf ||
+            head.readUInt32BE(0) === 0xfeedfacf;
+        if (machO) {
+            const cpu =
+                head.readUInt32LE(0) === 0xfeedfacf
+                    ? head.readUInt32LE(4)
+                    : head.readUInt32BE(4);
+            if (cpu === 0x0100000c) return 'arm64';
+            if (cpu === 0x01000007) return 'x64';
+            return `mach-o cputype ${cpu}`;
+        }
+
+        // PE: 'MZ', then the COFF machine field at the offset e_lfanew points to.
+        if (head.readUInt16LE(0) === 0x5a4d) {
+            const off = head.readUInt32LE(0x3c);
+            const coff = Buffer.alloc(6);
+            readSync(fd, coff, 0, 6, off);
+            if (coff.toString('ascii', 0, 4) !== 'PE\0\0')
+                return 'pe (unrecognised)';
+            const machine = coff.readUInt16LE(4);
+            if (machine === 0x8664) return 'x64';
+            if (machine === 0xaa64) return 'arm64';
+            if (machine === 0x014c) return 'ia32';
+            return `pe machine 0x${machine.toString(16)}`;
+        }
+        return 'unknown';
+    } finally {
+        closeSync(fd);
+    }
+}
+
+/** The architecture an electron-builder output directory is supposed to hold. */
+function expectedArch(appDirName) {
+    if (appDirName.includes('arm64')) return 'arm64';
+    if (appDirName.includes('ia32')) return 'ia32';
+    if (appDirName.includes('universal')) return null; // both slices; not checked here
+    // `mac` and `win-unpacked` with no arch in the name are electron-builder's x64.
+    return 'x64';
+}
 
 /** Where the app's resources live, per platform layout. */
 function resourcesDir(appDir) {
@@ -109,7 +171,18 @@ function verifyApp(appDir, appDirName) {
             );
             continue;
         }
-        console.log(`    ✓ ${name} (${(size / 1_048_576).toFixed(0)} MB)`);
+        const arch = architectureOf(p);
+        const want = expectedArch(appDirName);
+        if (want && arch !== want) {
+            problems.push(
+                `${appDirName}: ${name} is ${arch}, but this app is ${want}. It would not ` +
+                    'start on the machine this build is for.'
+            );
+            continue;
+        }
+        console.log(
+            `    ✓ ${name} (${(size / 1_048_576).toFixed(0)} MB, ${arch})`
+        );
 
         if (!runnable) continue;
         try {

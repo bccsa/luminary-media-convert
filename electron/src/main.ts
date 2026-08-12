@@ -167,12 +167,11 @@ function buildCipher():
  * The ffmpeg or ffprobe this app should use, in the order they are trusted.
  *
  * 1. **Packaged**: the copy beside the app's own resources, which packaging put
- *    there. Always present in a release, because `dist:mac` / `dist:win` /
- *    `pack` all fetch before building and the fetch fails hard rather than
- *    quietly producing an app with no encoder.
- * 2. **From source**: `electron/bin/<platform>-<arch>/`, the same binaries the
- *    fetch script writes and packaging copies from. A developer who has run the
- *    fetch once therefore gets the *shipped* build rather than whatever their
+ *    there. Always present in a release, because `dist:mac` / `dist:win` / `pack`
+ *    build the encoder first and `verify-package` refuses an app without one.
+ * 2. **From source**: `electron/bin/<platform>-<arch>/`, written by
+ *    `ffmpeg-build/build.sh` and copied from there by packaging. A developer who has
+ *    run the build therefore uses the *shipped* binary rather than whatever their
  *    machine happens to have — which is what makes "works on my machine" mean
  *    something, since hardware support is a compile-time decision.
  * 3. **Neither**: undefined, and the API falls back to PATH. That is the only

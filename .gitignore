@@ -15,12 +15,12 @@ work
 dispatchQueue.json
 jobQueue.json
 tusd/bin/
-# Desktop build output, and the ffmpeg binaries that are fetched rather than
+# Desktop build output, and the ffmpeg binaries that are built rather than
 # committed (see electron/bin/README.md).
 electron/release/
 electron/bin/*/
 # …except the licence texts, which are a few KB of text and must ship whether or
-# not anyone reruns the fetch. The GPL obliges a *copy* of the licence to travel
+# not anyone reruns a build. The GPL obliges a *copy* of the licence to travel
 # with the binary; a URL in a notice is not a copy.
 !electron/bin/licenses/
 !electron/bin/licenses/*

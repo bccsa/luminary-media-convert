@@ -5,8 +5,8 @@
 #
 #     ffmpeg-build/build.sh darwin-arm64
 #
-# Output lands in electron/bin/<target>/ — the same place fetch-binaries would put
-# a downloaded build, so nothing downstream needs to know the difference.
+# Output lands in electron/bin/<target>/, where electron-builder's extraResources
+# picks it up, together with the licence texts a GPL binary must carry.
 #
 set -euo pipefail
 
@@ -63,8 +63,11 @@ fail() {
 
 # ── Prerequisites ────────────────────────────────────────────────────────────
 # Checked up front rather than failing halfway through a 20-minute build.
-tools=(gpg nasm pkg-config make git curl)
-[ "$os" = "darwin" ] && tools+=(clang)
+tools=(gpg gpgv shasum nasm pkg-config make git curl)
+# clang compiles the CUDA kernels scale_cuda needs (--enable-cuda-llvm), so the
+# Windows cross-build wants it as much as a native macOS build.
+tools+=(clang)
+[ "$os" = "mingw32" ] && tools+=("${cross_prefix}objdump")
 for tool in "${tools[@]}"; do
     command -v "$tool" >/dev/null 2>&1 ||
         fail "$tool is missing. On macOS: brew install nasm pkg-config gnupg"
@@ -138,7 +141,12 @@ fi
 git -C "$x264src" fetch -q origin
 git -C "$x264src" checkout -q "$X264_COMMIT"
 
-if [ ! -f "$prefix/lib/libx264.a" ]; then
+# Keyed to the pin, not merely to the file's existence: a bumped X264_COMMIT with a
+# leftover .a in $prefix would otherwise link the previous revision while the licence
+# notice attests the new one.
+x264_stamp="$prefix/.x264-$X264_COMMIT"
+if [ ! -f "$x264_stamp" ]; then
+    rm -f "$prefix/lib/libx264.a"
     (
         cd "$x264src"
         # Static, PIC, no CLI: ffmpeg links the library and nothing wants the
@@ -155,6 +163,8 @@ if [ ! -f "$prefix/lib/libx264.a" ]; then
             { tail -20 "$work/x264-make.log"; fail "x264 build failed"; }
         make install >>"$work/x264-make.log" 2>&1
     )
+    rm -f "$prefix"/.x264-*
+    touch "$x264_stamp"
 fi
 echo "    ✓ libx264.a"
 
@@ -175,7 +185,9 @@ actual="$(shasum -a 256 "$webptar" | cut -d' ' -f1)"
 webpsrc="$work/libwebp-$LIBWEBP_VERSION"
 [ -d "$webpsrc" ] || tar -xzf "$webptar" -C "$work"
 
-if [ ! -f "$prefix/lib/libwebp.a" ]; then
+webp_stamp="$prefix/.libwebp-$LIBWEBP_VERSION"
+if [ ! -f "$webp_stamp" ]; then
+    rm -f "$prefix/lib/libwebp.a"
     (
         cd "$webpsrc"
         webp_flags=(
@@ -196,6 +208,8 @@ if [ ! -f "$prefix/lib/libwebp.a" ]; then
             { tail -20 "$work/webp-make.log"; fail "libwebp build failed"; }
         make install >>"$work/webp-make.log" 2>&1
     )
+    rm -f "$prefix"/.libwebp-*
+    touch "$webp_stamp"
 fi
 echo "    ✓ libwebp.a"
 
@@ -207,8 +221,13 @@ if [ "$os" = "mingw32" ]; then
     log "nv-codec-headers $NV_CODEC_HEADERS_TAG"
     nvsrc="$work/nv-codec-headers"
     [ -d "$nvsrc/.git" ] || git clone -q "$NV_CODEC_HEADERS_REPO" "$nvsrc"
-    git -C "$nvsrc" fetch -q --tags origin
-    git -C "$nvsrc" checkout -q "$NV_CODEC_HEADERS_TAG"
+    git -C "$nvsrc" fetch -q --tags --force origin
+    # The commit is what gets checked out; the tag is confirmed to point at it, so a
+    # moved tag fails here rather than silently changing what is compiled in.
+    tagged="$(git -C "$nvsrc" rev-list -n1 "$NV_CODEC_HEADERS_TAG" 2>/dev/null || true)"
+    [ "$tagged" = "$NV_CODEC_HEADERS_COMMIT" ] ||
+        fail "nv-codec-headers $NV_CODEC_HEADERS_TAG points at ${tagged:-nothing},\n    expected $NV_CODEC_HEADERS_COMMIT"
+    git -C "$nvsrc" checkout -q "$NV_CODEC_HEADERS_COMMIT"
     make -C "$nvsrc" PREFIX="$prefix" install >"$work/nv-headers.log" 2>&1 ||
         { tail -20 "$work/nv-headers.log"; fail "nv-codec-headers install failed"; }
     echo "    ✓ ffnvcodec.pc"
@@ -345,18 +364,31 @@ chmod 755 "$out/ffmpeg$exe" "$out/ffprobe$exe"
 # here and fails on the user's machine. No functional test catches that, because the
 # libraries are present wherever the testing happens — only an explicit check does.
 log "Dependency audit"
+# A binary that depends on libraries outside the OS set is not shippable: it runs
+# here and fails on the user's machine. No functional test catches that, because the
+# libraries are present wherever the testing happens — only an explicit check does.
+#
+# The check must not pass by producing no output: a missing objdump, an otool error or
+# a changed output format would otherwise read as "nothing foreign". Each branch first
+# requires a dependency that is always present, so an empty or unparsable listing
+# fails instead of being trusted.
 if [ "$os" = "mingw32" ]; then
-    # On Windows the equivalent question is which DLLs the .exe imports. Anything
-    # beyond the OS set means a file that has to travel beside it, which is the
-    # same shipping failure as a Homebrew dylib on macOS.
-    allowed='KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|OLE32|OLEAUT32|PSAPI|BCRYPT|SECUR32|WS2_32|MSVCRT|api-ms-win|IMM32|SETUPAPI|CFGMGR32|STRMIIDS|UUID|VERSION|DWMAPI|WINMM|SHLWAPI|MFPLAT|MF\\.|MFUUID|D3D11|DXGI|USP10|RPCRT4|CRYPT32|NORMALIZ|NETAPI32'
-    foreign="$("${cross_prefix}objdump" -p "$out/ffmpeg$exe" "$out/ffprobe$exe" 2>/dev/null |
-        grep -i 'DLL Name:' | sed 's/.*DLL Name: *//' | sort -u |
-        grep -viE "$allowed" || true)"
+    # Anchored to whole DLL names so a substring cannot wave through, say,
+    # libfoo-uuid.dll on the strength of UUID.
+    allowed='^(KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|OLE32|OLEAUT32|PSAPI|BCRYPT|SECUR32|WS2_32|MSVCRT|IMM32|SETUPAPI|CFGMGR32|STRMIIDS|UUID|VERSION|DWMAPI|WINMM|SHLWAPI|MFPLAT|MF|MFUUID|D3D11|DXGI|USP10|RPCRT4|CRYPT32|NORMALIZ|NETAPI32|api-ms-win[-a-z0-9]*)\.dll$'
+    imports="$("${cross_prefix}objdump" -p "$out/ffmpeg$exe" "$out/ffprobe$exe" 2>&1 |
+        grep -i 'DLL Name:' | sed 's/.*DLL Name: *//' | sort -u)"
+    grep -qiE '^KERNEL32\.dll$' <<<"$imports" ||
+        fail "Could not read the import tables of $out/ffmpeg$exe and ffprobe$exe.\n    Without them nothing here has been checked. Is ${cross_prefix}objdump installed?"
+    foreign="$(grep -viE "$allowed" <<<"$imports" || true)"
 else
-    foreign="$(otool -L "$out/ffmpeg" "$out/ffprobe" |
-        grep -oE '^\s+/[^ ]+' | tr -d '\t ' |
-        grep -vE '^/usr/lib/|^/System/' | sort -u || true)"
+    # @rpath/@loader_path/@executable_path count as foreign: they resolve to
+    # something that has to travel beside the binary.
+    links="$(otool -L "$out/ffmpeg$exe" "$out/ffprobe$exe" 2>&1 |
+        grep -oE '^\s+[@/][^ ]+' | tr -d '\t ' | sort -u)"
+    grep -qE '^/usr/lib/libSystem' <<<"$links" ||
+        fail "Could not read the link tables of $out/ffmpeg$exe and ffprobe$exe.\n    Without them nothing here has been checked."
+    foreign="$(grep -vE '^/usr/lib/|^/System/' <<<"$links" || true)"
 fi
 if [ -n "$foreign" ]; then
     printf '    %s\n' $foreign >&2
@@ -381,11 +413,28 @@ if [ "$native" = true ]; then
         licence_version="3"
 fi
 
-for licence in GPL-2.0.txt GPL-3.0.txt; do
+# A v2-or-later work offers v3 as well, so both texts travel; a v3-or-later one
+# offers only v3.
+if [ "$licence_version" = "3" ]; then
+    gpl_texts=(GPL-3.0.txt)
+    licence_texts="GPL-3.0.txt"
+else
+    gpl_texts=(GPL-2.0.txt GPL-3.0.txt)
+    licence_texts="GPL-2.0.txt (and GPL-3.0.txt, at your option)"
+fi
+
+nv_pin_line=""
+if [ "$os" = "mingw32" ]; then
+    nv_pin_line="
+  nv-codec-headers $NV_CODEC_HEADERS_TAG ($NV_CODEC_HEADERS_COMMIT)
+    $NV_CODEC_HEADERS_REPO"
+fi
+
+for licence in "${gpl_texts[@]}"; do
     from="$repo/electron/bin/licenses/$licence"
     [ -f "$from" ] || fail "$licence is missing from electron/bin/licenses/"
     # A v2-or-later work offers v3 as well, so both travel. (A v3-only build would
-    # ship v3 alone — see fetch-binaries.mjs for that reasoning.)
+    # ship v3 alone.)
     cp "$from" "$out/$licence"
 done
 
@@ -398,8 +447,12 @@ This application invokes ffmpeg as a separate process; it is not linked against
 the FFmpeg libraries. The application itself is licensed under Apache-2.0.
 
 Licence:        GPL-$licence_version.0-or-later
-Licence text:   GPL-2.0.txt beside this file (and GPL-3.0.txt, at your option)
+Licence text:   $licence_texts beside this file
 FFmpeg project: https://ffmpeg.org/
+
+Statically linked, under their own terms:
+  libx264   GPL-2.0-or-later, covered by the GPL text above
+  libwebp   BSD-3-Clause — see LICENSE-libwebp.txt beside this file
 
 Corresponding source: this binary was built by ffmpeg-build/build.sh in the
 Luminary Media Convert repository, from the sources pinned in
@@ -410,12 +463,13 @@ ffmpeg-build/versions.sh:
   x264      $X264_COMMIT
     $X264_REPO
   libwebp $LIBWEBP_VERSION
-    sha256 $LIBWEBP_SHA256
+    sha256 $LIBWEBP_SHA256$nv_pin_line
 
 That script and versions file are the complete instructions for rebuilding this
 binary. No x265: this build writes H.264 only.
 EOF
-echo "    ✓ LICENSE-ffmpeg.txt (GPL-$licence_version.0-or-later), GPL-2.0.txt, GPL-3.0.txt"
+cp "$webpsrc/COPYING" "$out/LICENSE-libwebp.txt"
+echo "    ✓ LICENSE-ffmpeg.txt (GPL-$licence_version.0-or-later), ${gpl_texts[*]}, LICENSE-libwebp.txt"
 
 log "Built $target"
 for b in "ffmpeg$exe" "ffprobe$exe"; do
@@ -433,11 +487,3 @@ if [ "$native" = true ]; then
 else
     echo "    (not run here: a $target binary cannot execute on $(uname -s)/$host_arch)"
 fi
-
-cat <<EOF
-
-  Next: the licence notice and GPL text still have to travel with these.
-  \`npm -w electron run fetch-binaries $target\` writes them — it will skip the
-  binaries, since they are already here.
-
-EOF

@@ -10,11 +10,11 @@ readable by players which cannot decrypt playlists.
 
 ## Layout
 
-| Bytes  | Content                                                        |
-|--------|----------------------------------------------------------------|
-| 0–7    | ASCII `LMCENC01` — magic (`LMCENC`) + format version (`01`)    |
-| 8–23   | 16-byte random IV, freshly generated **per file**              |
-| 24–…   | AES-128-CBC ciphertext (PKCS#7 padding) of the UTF-8 plaintext |
+| Bytes | Content                                                        |
+| ----- | -------------------------------------------------------------- |
+| 0–7   | ASCII `LMCENC01` — magic (`LMCENC`) + format version (`01`)    |
+| 8–23  | 16-byte random IV, freshly generated **per file**              |
+| 24–…  | AES-128-CBC ciphertext (PKCS#7 padding) of the UTF-8 plaintext |
 
 - **Key**: the session's AES-128 segment key (16 bytes). The same key
   decrypts segments, playlists, and VTTs.
@@ -23,23 +23,23 @@ readable by players which cannot decrypt playlists.
   chapters saved from the editor — are encrypted on write by the same rule,
   and decrypted on read, so the output stays internally consistent.
 - **Not covered** (accepted gaps, decided rather than overlooked):
-  - Thumbnail sprite images referenced by the thumbnails VTT remain plaintext
-    WebP files.
-  - `init_*.mp4`, the fMP4 initialisation segment of each stream, remains
-    plaintext. HLS
-    AES-128 does not cover it, and encrypting it would break every standard
-    player in order to hide a codec string, a resolution and a timescale.
-  - `waveform.json` beside the master remains plaintext (Ivan, 12 Aug 2026). It
-    is a loudness curve: it shows where speech and silence fall and roughly how
-    long things run, and carries no words, images or identities. The sprites in
-    the line above leak far more — actual frames — so encrypting the quieter
-    artefact while the louder one stays readable would be theatre. Keeping it
-    plaintext also keeps `POST /api/hls/waveform/read` stateless, which is how it
-    is designed: inline S3 credentials, a prefix, and no session key.
+    - Thumbnail sprite images referenced by the thumbnails VTT remain plaintext
+      WebP files.
+    - `init_*.mp4`, the fMP4 initialisation segment of each stream, remains
+      plaintext. HLS
+      AES-128 does not cover it, and encrypting it would break every standard
+      player in order to hide a codec string, a resolution and a timescale.
+    - `waveform.json` beside the master remains plaintext (Ivan, 12 Aug 2026). It
+      is a loudness curve: it shows where speech and silence fall and roughly how
+      long things run, and carries no words, images or identities. The sprites in
+      the line above leak far more — actual frames — so encrypting the quieter
+      artefact while the louder one stays readable would be theatre. Keeping it
+      plaintext also keeps `POST /api/hls/waveform/read` stateless, which is how it
+      is designed: inline S3 credentials, a prefix, and no session key.
 
-  Both are derived artefacts rather than playlists or text tracks, which is the
-  line this scope draws. If the sprites are ever encrypted, the waveform should
-  go with them — one answer for the class, not two.
+    Both are derived artefacts rather than playlists or text tracks, which is the
+    line this scope draws. If the sprites are ever encrypted, the waveform should
+    go with them — one answer for the class, not two.
 
 ## Detection rules (consumer side)
 
