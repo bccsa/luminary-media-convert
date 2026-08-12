@@ -276,6 +276,12 @@ if [ "$os" = "mingw32" ]; then
         --enable-cuda-llvm
         --enable-ffnvcodec
 
+        # FFmpeg prefixes pkg-config with --cross-prefix, looking for
+        # x86_64-w64-mingw32-pkg-config, which mingw-w64 does not ship. Left alone
+        # it silently finds no libraries and reports them as absent — which is how
+        # this failed the first time, on libwebp that had just been built.
+        --pkg-config=pkg-config
+
         # -static so the .exe carries libgcc and libwinpthread rather than
         # expecting DLLs beside it. Same requirement as the macOS dependency
         # audit: one file that runs on a machine we have never seen.
@@ -294,7 +300,11 @@ fi
 log "FFmpeg configure + build (this is the slow part)"
 (
     cd "$src"
-    export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
+    # PKG_CONFIG_LIBDIR, not PKG_CONFIG_PATH: LIBDIR *replaces* the default search
+    # directories instead of adding to them, so the only libraries configure can
+    # find are the ones we built. PATH was the reason the first macOS build picked
+    # up Homebrew's libwebp — pkg-config searched /opt/homebrew regardless.
+    export PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig"
     ./configure "${configure_flags[@]}" >"$work/ffmpeg-configure.log" 2>&1 ||
         { tail -30 "$work/ffmpeg-configure.log"; fail "FFmpeg configure failed"; }
     make -j"$(nproc_cmd)" >"$work/ffmpeg-make.log" 2>&1 ||
