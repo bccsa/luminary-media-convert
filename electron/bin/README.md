@@ -84,10 +84,15 @@ ffmpeg -encoders | findstr nvenc
 
 ## Licensing
 
-**A GPL build is shipped, and the choice is not free.** LGPL builds omit
-`libx264`, which is the CPU fallback in `FfmpegService` — without it the app
+**A GPL v2-or-later build is shipped, and the choice is not free.** LGPL builds
+omit `libx264`, which is the CPU fallback in `FfmpegService` — without it the app
 cannot encode at all on a machine with no VideoToolbox or NVENC, which is the
 one case bundling exists to serve.
+
+The version matters and was previously stated wrongly here and in the shipped
+notice: `ffmpeg -L` reports **v2 or later**, and `-buildconf` shows
+`--enable-gpl` without `--enable-version3`. Full investigation, including the
+obligation we do not yet meet, is in [`docs/ffmpeg-licensing.md`](../../docs/ffmpeg-licensing.md).
 
 The API invokes ffmpeg as a **separate process** via `child_process` and is
 never linked against the FFmpeg libraries, so this is aggregation: the GPL
@@ -98,3 +103,10 @@ the fetch script and copied into the app by `extraResources`.
 That is a technical reading, not legal advice. A change of licence position
 would mean either moving to `libopenh264` and adapting the encoder detection, or
 accepting that machines without hardware acceleration cannot encode.
+
+**Not compliant yet.** `x264` and `x265` are statically linked into the binary we
+ship (`otool -L` shows no dynamic reference to either), so the corresponding
+source obliges FFmpeg *and* both libraries at the versions built — and pointing
+at ffmpeg.org's current source is not that. Publishing binary and matching source
+together is the fix, and it is the same action as mirroring them off a single
+third-party host (Todo item 40).

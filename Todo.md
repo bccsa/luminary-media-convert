@@ -1004,9 +1004,19 @@ So every Windows user meets the prompt today, whatever the installer says. Needs
 
 `LICENSE-ffmpeg.txt` ships beside the binaries and states the position: the osxexperts build is **GPL v3 or later**; this app invokes ffmpeg as a separate process and never links its libraries, so the obligation travels with ffmpeg rather than with this Apache-2.0 codebase. `README.md` calls that "a technical reading, not legal advice", which is the honest description of it.
 
+**Investigated — see [`docs/ffmpeg-licensing.md`](docs/ffmpeg-licensing.md).** Three findings changed the picture:
+
+- **The build is GPL v2-or-later, not v3.** `ffmpeg -L` says so and `-buildconf` shows `--enable-gpl` without `--enable-version3`. `LICENSE-ffmpeg.txt` claimed v3, which understated our recipients' options and linked the wrong licence text. Corrected.
+- **It is distributable at all**, which was the thing genuinely worth checking: no `--enable-nonfree`. A nonfree build cannot be redistributed on any terms, and that is the trap here — it usually arrives via `libfdk-aac`.
+- **We are not compliant today, and it is the source obligation rather than the notice.** `x264` and `x265` are *statically linked* into the shipped binary (`otool -L` shows no dynamic reference to either), so the corresponding source covers FFmpeg **and** both libraries at the versions built. The FSF is explicit that redistributing someone else's unmodified binary still obliges the matching source, and that "corresponding" means what the binary can be rebuilt from — so pointing at ffmpeg.org's current download page does not discharge it.
+
+The fix is the same action as §3 above: publish the binary and its corresponding source together somewhere we control, and point the notice there. One change closes the availability risk and the compliance gap at once, and GPL v3 §6(d) explicitly allows source and binary to live at different URLs provided the instructions are clear and the source stays up for as long as the binary is distributed.
+
 **What still has to happen before anything is distributed publicly:**
 
-- Someone at BCC confirms that shipping a GPL v3 binary alongside an Apache-2.0 application is acceptable, and that a licence file plus a source URL discharges the obligation for a binary we redistribute unmodified.
+- **Publish the corresponding source** beside the binary (FFmpeg 8.1 + x264 + x265 at the built versions + the configure line). This is ours to do, not a decision to wait for.
+- Someone at BCC confirms the GPL v2-or-later position is acceptable for an Apache-2.0 application shipping the binary as an aggregate. The aggregate itself is on firm ground — the FSF's own FAQ puts arm's-length `fork`/`exec` with command-line arguments on the "separate programs" side — with one condition to keep: if the installer ever gains an EULA, it must not forbid what the GPL grants for the FFmpeg part.
+- **A separate question the GPL does not touch: H.264 patents.** FFmpeg's legal page notes that implementations may be subject to patent rights and that distributors of H.264 encoders have had demands from pools such as MPEG LA. Complying with the GPL says nothing about this. `libx264` is the exposed piece; the VideoToolbox and NVENC paths use encoders supplied by the OS or driver, which is a different position.
 - If it is not acceptable, the alternative is an LGPL build — which **omits `libx264`**, the CPU fallback in `FfmpegService`. A machine with no VideoToolbox and no NVENC would then be unable to encode at all, which is the one case bundling exists to serve. The other route is `libopenh264`, which needs the encoder detection adapting.
 
 That decision is a prerequisite for a public release, not for internal use, and it belongs with whoever owns licensing rather than in this repository.

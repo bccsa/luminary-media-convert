@@ -183,19 +183,37 @@ async function main() {
             console.log(`  ✓ ${file.name} verified`);
         }
 
-        // Shipped beside the binaries: a GPL build obliges the licence to travel
-        // with what is distributed.
+        /*
+         * Shipped beside the binaries: a GPL build obliges the licence to travel
+         * with what is distributed.
+         *
+         * The version is v2-or-later, taken from the binary itself rather than
+         * assumed — `ffmpeg -L` says so, and `-buildconf` shows `--enable-gpl`
+         * without `--enable-version3`. This file previously claimed v3-or-later,
+         * which understated our recipients' options and pointed at the wrong
+         * licence text.
+         *
+         * The source line is honest about what it is: upstream's download page is
+         * *not* the corresponding source for this build, which statically links
+         * x264 and x265 and so obliges their source at these versions too. See
+         * docs/ffmpeg-licensing.md — closing that gap is the mirroring work in
+         * Todo item 40, and until it is done a public release is not compliant.
+         */
         await writeFile(
             join(outDir, 'LICENSE-ffmpeg.txt'),
             [
                 `FFmpeg ${spec.version}, built by osxexperts.net, distributed under the GNU General`,
-                'Public License version 3 or later.',
+                'Public License version 2 or later, with libx264 and libx265 statically linked.',
                 '',
                 'This application invokes ffmpeg as a separate process; it is not linked against',
                 'the FFmpeg libraries. The application itself is licensed under Apache-2.0.',
                 '',
-                'FFmpeg source: https://ffmpeg.org/download.html',
-                'Licence text:  https://www.gnu.org/licenses/gpl-3.0.txt',
+                'Licence text:   https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt',
+                '                https://www.gnu.org/licenses/gpl-3.0.txt  (at your option)',
+                'FFmpeg project: https://ffmpeg.org/download.html',
+                '',
+                'Corresponding source for this exact build is not yet published alongside it.',
+                'Request it from the distributor; see docs/ffmpeg-licensing.md.',
                 '',
             ].join('\n'),
         );
