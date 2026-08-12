@@ -1,18 +1,14 @@
 name: Pinned FFmpeg URLs still resolve
 
-# The binaries are pinned by URL and digest, which protects against the download
-# *changing* underneath us. It does nothing about the download *disappearing*, and
-# that is not hypothetical:
+# We build our own FFmpeg now, so this no longer watches a third-party build host.
+# It watches what the build itself fetches: FFmpeg's release tarball and its
+# signature, libwebp's tarball, x264's git repository and the nv-codec-headers tag.
+# Building from source shortens the supply chain; it does not remove it.
 #
-#   - Our pinned macOS arm64 build (ffmpeg81arm.zip) is no longer linked from
-#     osxexperts.net at all — the site now offers ffmpeg9arm.zip. The file still
-#     downloads, but it is unlisted, so it can be removed without notice.
-#   - BtbN's Windows build is a *dated autobuild* release. Those rotate.
-#
-# The day one of them 404s, `npm ci && dist:mac` stops working for everyone, and
-# the corresponding-source obligation (Todo 40) gets harder to discharge because
-# the thing we would point at is gone. A weekly HEAD request turns that from a
-# surprise during a release into a ticket.
+# The day one of those 404s, `dist:mac` and `dist:win` stop working for everybody at
+# once, and the corresponding-source offer in the shipped licence notice points at
+# something a recipient can no longer fetch. A weekly check turns that from a
+# discovery during a release into a ticket with weeks of warning.
 #
 # Deliberately only checks reachability. Whether a *newer* build exists is a
 # judgement call — bumping the pin means re-verifying capabilities and re-testing
@@ -28,7 +24,8 @@ on:
     pull_request:
         types: [opened, synchronize, reopened]
         paths:
-            - electron/scripts/fetch-binaries.mjs
+            - ffmpeg-build/versions.sh
+            - electron/scripts/check-pinned-urls.mjs
             - .github/workflows/pinned-binaries-health.yml
 
 permissions:

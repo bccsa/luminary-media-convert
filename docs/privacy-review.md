@@ -101,8 +101,11 @@ Three flows, all initiated by the user or their own CMS:
    creation; then status, progress, `hlsUrl` and `encryptionKeyHex` over SSE. The
    API never echoes back the S3 credentials or the title it was given, and never
    sends the session token.
-3. **At build time only** — `fetch-binaries.mjs` downloads ffmpeg from
-   `osxexperts.net`. Not at runtime, and not on a user's machine.
+3. **At build time only** — `ffmpeg-build/build.sh` fetches FFmpeg's source from
+   `ffmpeg.org`, x264 from `code.videolan.org`, libwebp from Google's release host,
+   and the NVENC headers from GitHub. Not at runtime, and not on a user's machine.
+   (Until 12 Aug 2026 this was a prebuilt binary from `osxexperts.net`; we build our
+   own now.)
 
 There is no fourth. No update check, no crash reporting, no usage statistics.
 

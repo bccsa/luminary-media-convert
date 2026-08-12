@@ -155,8 +155,20 @@ sink an attacker-controlled string could drive.
 **Client-side playback.** Playlists are fetched without credentials; blob URLs are
 minted as media types, never `text/html`.
 
-**Build supply chain.** `fetch-binaries.mjs` pins SHA-256 digests and fails hard
-on mismatch. This was tested by deliberately corrupting a digest.
+**Build supply chain.** Updated 12 Aug 2026: the encoder is **built from source**
+rather than downloaded. `ffmpeg-build/build.sh` fetches FFmpeg's own release tarball,
+checks a pinned SHA-256, and verifies the project's **GPG signature** with `gpgv`
+against the fingerprint published on ffmpeg.org — the key is vendored and asserted to
+match that fingerprint, so a substituted key fails rather than silently vouching for
+a substituted tarball. x264 is pinned to a commit, libwebp to a digest. Tested in
+both directions: a tampered tarball is rejected before anything compiles, and
+swapping the signing key for a different real one also fails.
+
+Two supply-chain properties this replaced: the binaries used to come from
+third-party build hosts (osxexperts.net, unlisted and unsigned, for both Macs), and
+nothing verified that the *result* was relocatable — a build linked six Homebrew
+dylibs and would not have started on a user's machine. `verify-package.mjs` and the
+build's own `otool`/`objdump` audit now fail on that.
 
 **Transport.** The API binds `127.0.0.1` unconditionally. CSP keeps
 `script-src 'self'`; the widening for media sources applies only when the API also

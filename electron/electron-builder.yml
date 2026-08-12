@@ -44,8 +44,8 @@ extraResources:
     - from: ../app/dist
       to: app
     # ffmpeg/ffprobe for this platform, dropped beside the app's resources where
-    # bundledBinary() looks for them. Fetched by `npm run fetch-binaries`, which
-    # dist:mac / dist:win depend on — they are not in the repository. The GPL
+    # bundledBinary() looks for them. Built by ffmpeg-build/build.sh, which
+    # dist:mac / dist:win run first — they are not in the repository. The GPL
     # licence text travels with them, which is the condition of shipping a GPL
     # build at all.
     - from: bin/${platform}-${arch}

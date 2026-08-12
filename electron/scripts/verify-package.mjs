@@ -9,10 +9,10 @@
  * then fails at the one thing it exists to do. Nothing downstream notices,
  * because the app starts fine without them.
  *
- * That is not hypothetical. `dist:mac` builds arm64 *and* x64 while a bare
- * `fetch-binaries` resolves to the host architecture alone, so the Intel dmg came
- * within one commit of shipping with no encoder — invisible on a machine where
- * `bin/darwin-x64` happened to already exist.
+ * That is not hypothetical. `dist:mac` builds arm64 *and* x64, and when the binaries
+ * were still downloaded a bare fetch resolved to the host architecture alone — so the
+ * Intel dmg came within one commit of shipping with no encoder, invisible on a machine
+ * where `bin/darwin-x64` happened to already exist.
  *
  * Run after packaging, over every app electron-builder produced:
  *

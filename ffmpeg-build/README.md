@@ -60,7 +60,7 @@ guess about what an encoder needs:
 | `aac`                                                                                            | `-c:a aac` — native encoder, no external library                                        |
 | `libwebp` + `mjpeg`                                                                              | sprite sheets. `ThumbnailService` prefers libwebp and falls back to mjpeg, so both ship |
 | `pcm_s16le`                                                                                      | `WaveformService` pipes raw audio with `-f s16le`                                       |
-| muxers `hls`, `mp4`, `mpegts`, `image2`, `pcm_s16le`, `null`                                         | HLS output, fMP4/TS segments, sprites, waveform, capability probes                      |
+| muxers `hls`, `mp4`, `mpegts`, `image2`, `pcm_s16le`, `null`                                     | HLS output, fMP4/TS segments, sprites, waveform, capability probes                      |
 | demuxer `concat`                                                                                 | `-f concat` for trim segments and storyboard assembly                                   |
 | filters `scale` `scale_cuda` `scale_vt` `fps` `format` `trim` `concat` `tile` `crop` `aresample` | the filter graphs the services compose                                                  |
 | **all** decoders, demuxers, parsers                                                              | arbitrary user input — deliberately not narrowed                                        |
@@ -75,9 +75,9 @@ one less thing to worry about.
 ffmpeg-build/build.sh darwin-arm64      # or darwin-x64
 ```
 
-Needs `nasm` and `pkg-config` (`brew install nasm pkg-config`). Output goes to
-`electron/bin/<target>/`, exactly where `fetch-binaries` would have put a
-downloaded build, so nothing downstream changes.
+Needs `nasm`, `pkg-config` and `gnupg` (`brew install nasm pkg-config gnupg`).
+Output goes to `electron/bin/<target>/`, where `extraResources` picks it up, so
+packaging needs to know nothing about how it got there.
 
 The script verifies FFmpeg's GPG signature before it builds anything. The release
 signing key fingerprint is published on ffmpeg.org:
@@ -90,11 +90,34 @@ A signature that does not verify is a hard stop, not a warning.
 
 ## Windows
 
-Not here yet. Native Windows builds mean MSYS2/mingw and are unpleasant; the
-practical route is what BtbN does — **cross-compile from Linux with mingw-w64** —
-which is a second toolchain rather than a variation on this one. Windows continues
-to use the pinned BtbN build until then, which is the best-provenance third party
-we have: ffmpeg.org lists it and its entire build system is public.
+**Cross-compiled on Linux with mingw-w64**, never built natively — the same choice
+BtbN made, and for the same reason: MSYS2 is a second world to maintain while a
+cross-compiler is one `apt` package.
+
+```bash
+sudo apt-get install -y mingw-w64 nasm pkg-config gnupg clang
+./ffmpeg-build/build.sh win32-x64
+```
+
+**NVENC needs only headers.** ffmpeg compiles against `nv-codec-headers` and loads
+the encoder from the user's NVIDIA driver at runtime, so the build machine needs no
+GPU, no CUDA SDK and no NVIDIA hardware — which is why a GPU-less runner produces a
+binary with working NVENC. `scale_cuda` comes via `--enable-cuda-llvm`, so no
+proprietary `nvcc` is involved either.
+
+**That header pin has a ceiling as well as a floor**, and only the floor is enforced
+by configure. FFmpeg 8.1 needs `ffnvcodec >= 12.1.14.0`, but `n13.1.15.0` renames
+`NV_ENC_CLOCK_TIMESTAMP_SET.countingType` to `countingTypeLSB`, which FFmpeg 8.1's
+`nvenc.c` still uses — so a too-new header passes configure and then fails to
+compile, twelve minutes in. Re-check the pin against `nvenc.c` whenever FFmpeg moves.
+
+The `.exe` links statically, so it carries libgcc and libwinpthread rather than
+expecting DLLs beside it, and the build audits its own import table to prove it.
+
+**Verified on Windows, not inferred.** `ffmpeg-build.yml` cross-compiles on Linux and
+then runs the result on a `windows-latest` runner, which reported `cuda` among the
+hwaccels, `h264_nvenc` and `libx264` among the encoders, `scale_cuda` among the
+filters, and wrote an HLS ladder, a libwebp sprite and 32,768 bytes of raw PCM.
 
 ## Measured, not estimated
 
