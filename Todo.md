@@ -834,7 +834,7 @@ One flaw found in this work and worth remembering: the first draft called the ch
 
 ---
 
-## 36. Decision: keep bundling ffmpeg, or ask the user to install it?
+## 36. Decision: keep bundling ffmpeg, or ask the user to install it? — decided
 
 **Raised by Ivan (11 Aug 2026):** if a user does not have ffmpeg, we could ask them to install it rather than embedding it in the Electron app.
 
@@ -848,6 +848,19 @@ One flaw found in this work and worth remembering: the first draft called the ch
 - **The audience is CMS editors, not developers.** "Install ffmpeg and put it on your PATH" is a support ticket per user on Windows, and the person answering it is us.
 
 **A third option worth putting to Ivan:** keep controlling *which* build is used, but stop shipping it inside the installer — fetch the same pinned, digest-checked binary on first run, which `fetch-binaries` already does at build time. That drops the installer to a few megabytes and puts the ffmpeg download outside our distribution, while leaving no room for a user's own build to vary. It needs a first-run UI, a failure path for no network, and a decision about where the binaries live on disk.
+
+### Decided (Johan, 12 Aug 2026): FFmpeg is mandatory, and the app checks for it
+
+Two rules, both built:
+
+- **Absent** → the app says so and offers the download, rather than opening a window in which nothing can be done (item 35).
+- **Present but too old** → refused with the version to install, decided by asking the binary what it supports rather than by comparing version strings (item 37, floor 4.4).
+
+So the "ask the user" half of this question is answered and shipped. What that leaves is narrower than the item's title suggests, and worth stating plainly because it is the half with the money in it: **the packaged build still carries its own binaries** — `dist:mac` and `dist:win` run `fetch-binaries`, and `electron-builder.yml` copies them into the app. The prompt is a fallback for a machine that somehow has none (a run from source, or a `pack` build, which skips the fetch), not a replacement for shipping them.
+
+That is a coherent place to stand: a user who installs the app gets a known-good build with the right hardware encoders, and a developer running from source gets told what to install. It also means the two costs the item opened with are unchanged — a 146 MB `.dmg`, and the GPL obligations `electron/bin/README.md` sets out.
+
+**Still open, therefore:** whether to stop shipping the binaries now that the prompt exists. Dropping them makes the installer a few megabytes and moves the ffmpeg download outside our distribution; it also hands every user the lottery this item already documents — a build without NVENC on Windows encodes several times slower, and "install FFmpeg and put it on your PATH" is a support ticket per user. The third option from below stands too: keep controlling *which* build is used and fetch the pinned one on first run.
 
 **Not a decision for this repo.** Installer size, licensing exposure and support load are the trade, and the people carrying each should pick. What this repo can say is that the "ask the user" option is not free today: item 35 has to land first, or the first thing a user without ffmpeg sees is an encode that fails after they have committed to a destination.
 
