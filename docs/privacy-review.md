@@ -1,7 +1,7 @@
 # Privacy review — local-only desktop architecture
 
 **Scope:** the encoder as it exists after the local-only migration (issue #154).
-**Date:** 6 August 2026.
+**Date:** 6 August 2026, updated 12 August 2026.
 **Supersedes:** `docs/archive-saas/privacy-review.md`, which reviewed a hosted
 multi-tenant service.
 

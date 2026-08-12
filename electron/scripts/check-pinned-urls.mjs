@@ -110,19 +110,54 @@ async function reachable(url) {
  * exist and the pin is wrong. A commit is not advertised, so silence says nothing —
  * for those the check can only establish that the repository answers at all.
  */
-function gitRefExists(repo, ref, kind) {
-    const lsRemote = (...args) =>
-        execFileSync('git', ['ls-remote', repo, ...args], {
-            encoding: 'utf8',
-            timeout: 60_000,
-        });
+function gitRefExists(repo, ref, kind, expectCommit) {
+    // Retried like the HTTP checks: a dropped connection to a git host is not a
+    // missing ref.
+    const lsRemote = (...args) => {
+        let lastError;
+        for (let i = 1; i <= ATTEMPTS; i++) {
+            try {
+                return execFileSync('git', ['ls-remote', repo, ...args], {
+                    encoding: 'utf8',
+                    timeout: 60_000,
+                });
+            } catch (e) {
+                lastError = e;
+            }
+        }
+        throw lastError;
+    };
 
     try {
         if (kind === 'tag') {
-            const out = lsRemote(`refs/tags/${ref}`);
-            return out.trim()
-                ? { ok: true, note: 'tag present' }
-                : { ok: false, note: 'tag does not exist in the repository' };
+            // Both lines of an annotated tag: the tag object and the peeled commit
+            // (the `^{}` suffix). The peeled SHA is what a checkout resolves to, so
+            // that is what the commit pin must equal — an annotated tag has two
+            // hashes, and pinning the wrong one fails every build.
+            const out = lsRemote(`refs/tags/${ref}`, `refs/tags/${ref}^{}`);
+            if (!out.trim())
+                return {
+                    ok: false,
+                    note: 'tag does not exist in the repository',
+                };
+            if (expectCommit) {
+                const peeled = out
+                    .split('\n')
+                    .find((l) => l.includes('^{}'))
+                    ?.split('\t')[0];
+                const resolved = peeled ?? out.split('\t')[0]; // lightweight tag: one line
+                if (resolved !== expectCommit) {
+                    return {
+                        ok: false,
+                        note: `tag resolves to ${resolved?.slice(0, 12)}, but the commit pin says ${expectCommit.slice(0, 12)}`,
+                    };
+                }
+                return {
+                    ok: true,
+                    note: 'tag present and resolves to the pinned commit',
+                };
+            }
+            return { ok: true, note: 'tag present' };
         }
         // A commit: confirm the repository responds, and report the commit as
         // unverifiable rather than implying it was found.
@@ -157,9 +192,10 @@ for (const t of [
         repo: pin('NV_CODEC_HEADERS_REPO'),
         ref: nvTag,
         kind: 'tag',
+        expectCommit: pin('NV_CODEC_HEADERS_COMMIT'),
     },
 ]) {
-    const { ok, note } = gitRefExists(t.repo, t.ref, t.kind);
+    const { ok, note } = gitRefExists(t.repo, t.ref, t.kind, t.expectCommit);
     console.log(`  ${ok ? '✓' : '✗'} ${t.what} — ${note}`);
     if (!ok) failures.push({ what: t.what, url: t.repo, status: note });
 }

@@ -47,7 +47,6 @@ const electronRoot = join(here, '..');
 const MIN_BINARY_BYTES = 1_000_000;
 
 const problems = [];
-const notes = [];
 
 /**
  * The architecture a binary was compiled for, read from its own header.
@@ -61,6 +60,12 @@ function architectureOf(path) {
     try {
         const head = Buffer.alloc(64);
         readSync(fd, head, 0, 64, 0);
+
+        // Universal (fat) Mach-O: both slices in one file. Recognised so it is
+        // reported as what it is, rather than failing an arch comparison it would
+        // actually satisfy.
+        const be0 = head.readUInt32BE(0);
+        if (be0 === 0xcafebabe || be0 === 0xcafebabf) return 'universal';
 
         // Mach-O: magic then cputype. 0xfeedfacf little-endian is 64-bit.
         const machO =
@@ -95,11 +100,17 @@ function architectureOf(path) {
     }
 }
 
-/** The architecture an electron-builder output directory is supposed to hold. */
+/**
+ * The architecture an electron-builder output directory is supposed to hold, or
+ * null where the comparison does not apply: universal apps carry both slices, and
+ * ELF parsing is not implemented, so Linux directories are reported rather than
+ * failed against a guess.
+ */
 function expectedArch(appDirName) {
+    if (appDirName.includes('universal')) return null;
+    if (appDirName.startsWith('linux')) return null;
     if (appDirName.includes('arm64')) return 'arm64';
     if (appDirName.includes('ia32')) return 'ia32';
-    if (appDirName.includes('universal')) return null; // both slices; not checked here
     // `mac` and `win-unpacked` with no arch in the name are electron-builder's x64.
     return 'x64';
 }
@@ -173,7 +184,8 @@ function verifyApp(appDir, appDirName) {
         }
         const arch = architectureOf(p);
         const want = expectedArch(appDirName);
-        if (want && arch !== want) {
+        // A universal binary satisfies either specific architecture.
+        if (want && arch !== want && arch !== 'universal') {
             problems.push(
                 `${appDirName}: ${name} is ${arch}, but this app is ${want}. It would not ` +
                     'start on the machine this build is for.'
@@ -207,6 +219,14 @@ function verifyApp(appDir, appDirName) {
     if (!existsSync(join(res, 'LICENSE-ffmpeg.txt'))) {
         problems.push(
             `${appDirName}: LICENSE-ffmpeg.txt is missing — a GPL build needs its notice`
+        );
+    }
+    // libwebp is statically linked and BSD-3-Clause: reproducing its notice with the
+    // distribution is a condition of shipping the binary, and LICENSE-ffmpeg.txt
+    // refers the reader to this file by name.
+    if (!existsSync(join(res, 'LICENSE-libwebp.txt'))) {
+        problems.push(
+            `${appDirName}: LICENSE-libwebp.txt is missing — libwebp is statically linked (BSD-3-Clause)`
         );
     }
     const gpl = readdirSync(res).filter((f) => /^GPL-[\d.]+\.txt$/.test(f));
@@ -267,8 +287,6 @@ if (appDirs.length === 0) {
 
 console.log(`\n  Verifying ${appDirs.length} packaged app(s) in ${releaseDir}`);
 for (const name of appDirs) verifyApp(join(releaseDir, name), name);
-
-for (const note of notes) console.log(`\n  · ${note}`);
 
 if (problems.length > 0) {
     console.error(`\n  ✗ ${problems.length} problem(s):\n`);

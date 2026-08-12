@@ -1,7 +1,7 @@
 # Security review — local-only desktop architecture
 
 **Scope:** the encoder as it exists after the local-only migration (issue #154).
-**Date:** 6 August 2026.
+**Date:** 6 August 2026, updated 12 August 2026.
 **Supersedes:** `docs/archive-saas/security-review.md` and `security-audit-v1.md`, which
 reviewed a multi-tenant hosted service that no longer exists.
 

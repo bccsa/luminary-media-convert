@@ -55,7 +55,7 @@ under licences that are mutually incompatible with the GPL; the resulting binary
 is undistributable regardless of what notices accompany it. That is the trap in
 this area, and typically arrives via `libfdk-aac`.
 
-This build does not have it. Nothing in the 32 configure flags enables nonfree
+This build does not have it. Nothing in the configure flags enables nonfree
 components. So the question is not _whether_ we may distribute, but _on what
 conditions_.
 
@@ -108,49 +108,42 @@ have to go looking for the text. libwebp is statically linked and BSD-3-Clause, 
 notice ships as `LICENSE-libwebp.txt` beside them.
 
 They are committed rather than downloaded at build time — 53 KB of text that
-never changes, which has to ship whether or not anyone reruns the fetch. The
+never changes, which has to ship whether or not anyone reruns a build. The
 `electron/bin/*/` ignore rule needed a negation for exactly that reason.
 
-## 5. The obligation we still do **not** meet: corresponding source
+## 5. Corresponding source: what the obligation is, and how it is met
 
-This is the finding that needs action. The FSF FAQ is direct about the case we
-are in — an unmodified binary someone else built:
+The general rule, from the FSF FAQ:
 
-> **I downloaded just the binary from the net. If I distribute copies, do I have
-> to get the source and distribute that too?** Yes. The general rule is, if you
-> distribute binaries, you must distribute the complete corresponding source code
-> too.
-
-FFmpeg's legal page says the same in its own words: provide "the source code of
-FFmpeg, no matter if you modified it or not", matching the distributed binaries.
-
-**What "corresponding" means here is wider than FFmpeg alone.** `otool -L` shows
-this binary links only system frameworks — VideoToolbox, CoreMedia, libSystem and
-friends — and carries **no dynamic reference to x264 or x265**. Both GPL libraries
-are therefore **statically linked into the binary we ship**, so they are part of
-the work being conveyed, and the corresponding source covers:
-
-- the FFmpeg source **at each shipped version** — 8.1 (mac arm64), 8.0 (mac Intel),
-  8.1.2 (Windows). Three binaries means three sets, not one
-- the x264 source at the revision used
-- the x265 source at the version used
-- the configure line for each, so the binary can actually be rebuilt
-
-Nothing in the repository currently records the x264/x265 versions per build, so
-assembling this means going back to each builder — which is a reason to do it while
-the pinned URLs still resolve.
-
-**What the shipped notice must therefore name** is this repository's
-`ffmpeg-build/` — the recipe and the pins that produced the binary — not upstream's
-download page, which offers current source rather than the source for this build:
+> If you distribute binaries, you must distribute the complete corresponding source
+> code too.
 
 > Corresponding source means the source from which users can rebuild the same
 > binary.
 
-### How to discharge it
+**What "corresponding" covers here is wider than FFmpeg alone.** x264 and libwebp
+are statically linked into the binaries, so they are part of the work conveyed, and
+the corresponding source is:
 
-Because the work is "v2 or later", the recipient may take it under v3, whose
-delivery options are the practical ones:
+- the FFmpeg source — one version, 8.1, for all three targets
+- the x264 source at the pinned commit
+- the libwebp source at the pinned version
+- the nv-codec-headers at the pinned commit (Windows)
+- the recipe itself, since the configure line decides what the binary is
+
+All of that is `ffmpeg-build/versions.sh` plus `ffmpeg-build/build.sh`, and the
+shipped `LICENSE-ffmpeg.txt` names them together with the pins — a recipient holding
+only the app can identify the exact sources.
+
+### What still stands between "named" and "met"
+
+Naming the source is not the same as the recipient being able to _get_ it. While
+this repository is private, `ffmpeg-build/` is unreachable from outside, and a
+strict reading of GPLv2 §3 puts the duty on the distributor to supply the complete
+source, not to point at where upstream keeps it.
+
+Because the work is "v2 or later", the recipient may take it under v3, whose §6(d)
+allows the source at a network location:
 
 > **Can I put the binaries on my Internet server and put the source on a
 > different Internet site?** Yes. Section 6(d) allows this. However, you must
@@ -158,16 +151,16 @@ delivery options are the practical ones:
 > take care to make sure that the source remains available for as long as you
 > distribute the object code.
 
-So the workable shape, and it **pairs exactly with the mirroring question already
-open in item 40**: host the binary and its corresponding source together in a
-place we control — a GitHub release asset on this repository, or BCC storage —
-and have `LICENSE-ffmpeg.txt` point at that, not at ffmpeg.org. One action solves
-both the availability problem (a single third-party host today) and the source
-obligation, and keeps the two in step for as long as we ship that binary.
+So the workable shapes, in order of simplicity:
 
-Under v2 the options are narrower (§3: accompany with source, or a written offer
-valid three years, and a physical-media request must be honourable), which is a
-second reason the v2/v3 distinction in §1 was worth getting right.
+1. **Make this repository public** (the stated plan) — `ffmpeg-build/` then _is_ the
+   offer, at a stable location, for as long as the repository exists.
+2. Until then, **each release carries a source bundle beside the installer**:
+   `ffmpeg-build/` plus the FFmpeg, x264 and libwebp sources it pins.
+
+Under v2 alone the options are narrower (§3: accompany with source, or a written
+offer valid three years), which is a second reason the v2-or-later position in §1
+matters.
 
 ## 6. A separate axis: patents, which the GPL does not address
 
@@ -188,7 +181,7 @@ Worth a separate answer from BCC, and not something this repository can settle.
 
 The alternative is an LGPL build — `--enable-gpl` dropped, which means **dropping
 `libx264` and `libx265`**. The consequence is concrete and is already recorded in
-`electron/bin/README.md`: `libx264` is the CPU fallback in `FfmpegService`, so a
+`ffmpeg-build/README.md`: `libx264` is the CPU fallback in `FfmpegService`, so a
 machine with neither VideoToolbox nor NVENC could not encode at all. That is the
 exact case bundling exists to serve.
 

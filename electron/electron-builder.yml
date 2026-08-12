@@ -56,6 +56,9 @@ extraResources:
           # The notice, and the licence texts it refers to. GPLv2 §1 obliges a
           # *copy* of the licence to travel with the binary — a URL is not one.
           - LICENSE-ffmpeg.txt
+          # libwebp is statically linked and BSD-3-Clause, whose binary-redistribution
+          # condition is reproducing its notice with the distribution.
+          - LICENSE-libwebp.txt
           - GPL-*.txt
 
 protocols:

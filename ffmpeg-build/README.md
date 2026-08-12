@@ -15,8 +15,8 @@ Building from FFmpeg's own signed source fixes three things at once:
 1. **Provenance.** The chain becomes _FFmpeg's signed tarball → our script → our
    binary_, with no third-party website in it. Nothing to trust on reputation.
 2. **The GPL obligation.** The corresponding source stops being something we
-   cannot identify — x264's revision is not recoverable from any third-party build
-   we ship today (see [`../docs/ffmpeg-corresponding-source.md`](../docs/ffmpeg-corresponding-source.md)).
+   cannot identify — x264's revision is not recoverable from a prebuilt third-party
+   binary (see [`../docs/ffmpeg-corresponding-source.md`](../docs/ffmpeg-corresponding-source.md)).
    Here it is a pinned line in `versions.sh`.
 3. **URL rot.** Our pinned macOS build is already unlisted upstream and could
    vanish without notice.
@@ -75,7 +75,8 @@ one less thing to worry about.
 ffmpeg-build/build.sh darwin-arm64      # or darwin-x64
 ```
 
-Needs `nasm`, `pkg-config` and `gnupg` (`brew install nasm pkg-config gnupg`).
+Needs `nasm`, `pkg-config` and `gnupg` (`brew install nasm pkg-config gnupg`);
+the rest — `make`, `git`, `curl`, `clang`, `shasum` — come with the Xcode CLT.
 Output goes to `electron/bin/<target>/`, where `extraResources` picks it up, so
 packaging needs to know nothing about how it got there.
 

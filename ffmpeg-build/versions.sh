@@ -49,9 +49,11 @@ NV_CODEC_HEADERS_REPO="https://github.com/FFmpeg/nv-codec-headers.git"
 # Note also that tags do not sort lexicographically: n9.x sorts after n13.x. When
 # bumping FFmpeg, choose the tag by reading nvenc.c, not by taking the newest.
 NV_CODEC_HEADERS_TAG="n13.0.19.1"
-# The commit the tag points at. A tag is mutable; every other source here is pinned
-# by digest or commit, and these headers are compiled into the shipped Windows binary.
-NV_CODEC_HEADERS_COMMIT="ee1c8a8cdb05f733ca661c30fd50c74f94ad6937"
+# The commit the tag points at — the *peeled* SHA (`ls-remote`'s `^{}` line), because
+# an annotated tag has two hashes and `git rev-list -n1 <tag>` resolves to the commit,
+# not the tag object. A tag is mutable; every other source here is pinned by digest or
+# commit, and these headers are compiled into the shipped Windows binary.
+NV_CODEC_HEADERS_COMMIT="88fee5c37318c991a8762d423530f91681e32e3a"
 
 # No x265. The encoder only ever writes H.264 — every variant in the master
 # playlist is avc1 — so HEVC support is weight we would carry and never use, plus

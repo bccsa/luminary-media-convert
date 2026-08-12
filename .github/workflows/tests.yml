@@ -40,15 +40,18 @@ jobs:
                   cache-dependency-path: package-lock.json
             - run: npm ci
 
-            # The shared libraries, in dependency order, with no leftover dist to
-            # lean on. This is the step that catches an ordering regression.
-            - name: Build the shared libraries
-              run: npm run build:libs
-
-            # Then everything the packaged app is made of. `build:bundled` is what
-            # dist:mac / dist:win call, so a break here breaks a release.
-            - name: Build the API and web client
+            # Everything the packaged app is made of, from nothing: build:bundled
+            # runs the shared libraries in dependency order first, then the API and
+            # web client. A leftover dist can mask an ordering mistake, which is why
+            # this only means something on a clean checkout.
+            - name: Build the libraries, API and web client
               run: npm run build:bundled
+
+            # The Electron main process is in no test matrix (it has no tests), so
+            # this is the only place its TypeScript is compiled on an ordinary pull
+            # request.
+            - name: Compile the Electron main process
+              run: npm -w electron run build
 
             # Declarations are what consumers type-check against; a library that
             # emits JS but no .d.ts breaks its consumers rather than itself.

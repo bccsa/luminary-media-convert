@@ -94,7 +94,8 @@ tarball="$work/ffmpeg-$FFMPEG_VERSION.tar.xz"
 if [ ! -f "$tarball" ]; then
     curl -fsSL --retry 3 -o "$tarball" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz"
 fi
-curl -fsSL --retry 3 -o "$tarball.asc" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz.asc"
+[ -f "$tarball.asc" ] ||
+    curl -fsSL --retry 3 -o "$tarball.asc" "https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz.asc"
 
 actual="$(shasum -a 256 "$tarball" | cut -d' ' -f1)"
 [ "$actual" = "$FFMPEG_SHA256" ] ||
@@ -146,7 +147,10 @@ git -C "$x264src" checkout -q "$X264_COMMIT"
 # notice attests the new one.
 x264_stamp="$prefix/.x264-$X264_COMMIT"
 if [ ! -f "$x264_stamp" ]; then
-    rm -f "$prefix/lib/libx264.a"
+    # Invalidate first, stamp only after success: a failed build must leave neither
+    # the old library nor any stamp, or a later revert of the pin would skip a
+    # rebuild it needs.
+    rm -f "$prefix"/.x264-* "$prefix/lib/libx264.a"
     (
         cd "$x264src"
         # Static, PIC, no CLI: ffmpeg links the library and nothing wants the
@@ -163,7 +167,6 @@ if [ ! -f "$x264_stamp" ]; then
             { tail -20 "$work/x264-make.log"; fail "x264 build failed"; }
         make install >>"$work/x264-make.log" 2>&1
     )
-    rm -f "$prefix"/.x264-*
     touch "$x264_stamp"
 fi
 echo "    ✓ libx264.a"
@@ -187,7 +190,7 @@ webpsrc="$work/libwebp-$LIBWEBP_VERSION"
 
 webp_stamp="$prefix/.libwebp-$LIBWEBP_VERSION"
 if [ ! -f "$webp_stamp" ]; then
-    rm -f "$prefix/lib/libwebp.a"
+    rm -f "$prefix"/.libwebp-* "$prefix/lib/libwebp.a"
     (
         cd "$webpsrc"
         webp_flags=(
@@ -208,7 +211,6 @@ if [ ! -f "$webp_stamp" ]; then
             { tail -20 "$work/webp-make.log"; fail "libwebp build failed"; }
         make install >>"$work/webp-make.log" 2>&1
     )
-    rm -f "$prefix"/.libwebp-*
     touch "$webp_stamp"
 fi
 echo "    ✓ libwebp.a"
@@ -360,41 +362,40 @@ cp "$src/ffprobe$exe" "$out/ffprobe$exe"
 chmod 755 "$out/ffmpeg$exe" "$out/ffprobe$exe"
 
 # ── Dependency audit ────────────────────────────────────────────────────────
-# A binary that depends on libraries outside the OS set is not shippable: it runs
-# here and fails on the user's machine. No functional test catches that, because the
-# libraries are present wherever the testing happens — only an explicit check does.
 log "Dependency audit"
 # A binary that depends on libraries outside the OS set is not shippable: it runs
 # here and fails on the user's machine. No functional test catches that, because the
 # libraries are present wherever the testing happens — only an explicit check does.
 #
-# The check must not pass by producing no output: a missing objdump, an otool error or
-# a changed output format would otherwise read as "nothing foreign". Each branch first
-# requires a dependency that is always present, so an empty or unparsable listing
-# fails instead of being trusted.
-if [ "$os" = "mingw32" ]; then
-    # Anchored to whole DLL names so a substring cannot wave through, say,
-    # libfoo-uuid.dll on the strength of UUID.
-    allowed='^(KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|OLE32|OLEAUT32|PSAPI|BCRYPT|SECUR32|WS2_32|MSVCRT|IMM32|SETUPAPI|CFGMGR32|STRMIIDS|UUID|VERSION|DWMAPI|WINMM|SHLWAPI|MFPLAT|MF|MFUUID|D3D11|DXGI|USP10|RPCRT4|CRYPT32|NORMALIZ|NETAPI32|api-ms-win[-a-z0-9]*)\.dll$'
-    imports="$("${cross_prefix}objdump" -p "$out/ffmpeg$exe" "$out/ffprobe$exe" 2>&1 |
-        grep -i 'DLL Name:' | sed 's/.*DLL Name: *//' | sort -u)"
-    grep -qiE '^KERNEL32\.dll$' <<<"$imports" ||
-        fail "Could not read the import tables of $out/ffmpeg$exe and ffprobe$exe.\n    Without them nothing here has been checked. Is ${cross_prefix}objdump installed?"
-    foreign="$(grep -viE "$allowed" <<<"$imports" || true)"
-else
-    # @rpath/@loader_path/@executable_path count as foreign: they resolve to
-    # something that has to travel beside the binary.
-    links="$(otool -L "$out/ffmpeg$exe" "$out/ffprobe$exe" 2>&1 |
-        grep -oE '^\s+[@/][^ ]+' | tr -d '\t ' | sort -u)"
-    grep -qE '^/usr/lib/libSystem' <<<"$links" ||
-        fail "Could not read the link tables of $out/ffmpeg$exe and ffprobe$exe.\n    Without them nothing here has been checked."
-    foreign="$(grep -vE '^/usr/lib/|^/System/' <<<"$links" || true)"
-fi
-if [ -n "$foreign" ]; then
-    printf '    %s\n' $foreign >&2
-    fail "The binaries depend on libraries that will not be on the user's machine.
+# Audited one binary at a time, and never trusted on silence: each listing must
+# contain a dependency that every real binary has (KERNEL32.dll / libSystem) before
+# its emptiness means anything. `|| true` inside the substitutions keeps set -e from
+# killing the assignment on a no-match grep, so the diagnostics below are reachable.
+for audit_bin in "ffmpeg$exe" "ffprobe$exe"; do
+    if [ "$os" = "mingw32" ]; then
+        # Anchored to whole DLL names so a substring cannot wave through, say,
+        # libfoo-uuid.dll on the strength of UUID.
+        allowed='^(KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|OLE32|OLEAUT32|PSAPI|BCRYPT|SECUR32|WS2_32|MSVCRT|IMM32|SETUPAPI|CFGMGR32|STRMIIDS|UUID|VERSION|DWMAPI|WINMM|SHLWAPI|MFPLAT|MF|MFUUID|D3D11|DXGI|USP10|RPCRT4|CRYPT32|NORMALIZ|NETAPI32|api-ms-win[-a-z0-9]*)\.dll$'
+        imports="$("${cross_prefix}objdump" -p "$out/$audit_bin" 2>/dev/null |
+            grep -i 'DLL Name:' | sed 's/.*DLL Name: *//' | sort -u || true)"
+        grep -qiE '^KERNEL32\.dll$' <<<"$imports" ||
+            fail "Could not read the import table of $out/$audit_bin.\n    Nothing about it has been checked. Is ${cross_prefix}objdump installed?"
+        foreign="$(grep -viE "$allowed" <<<"$imports" || true)"
+    else
+        # @rpath/@loader_path/@executable_path count as foreign: they resolve to
+        # something that has to travel beside the binary.
+        links="$(otool -L "$out/$audit_bin" 2>/dev/null |
+            grep -oE '^\s+[@/][^ ]+' | tr -d '\t ' | sort -u || true)"
+        grep -qE '^/usr/lib/libSystem' <<<"$links" ||
+            fail "Could not read the link table of $out/$audit_bin.\n    Nothing about it has been checked."
+        foreign="$(grep -vE '^/usr/lib/|^/System/' <<<"$links" || true)"
+    fi
+    if [ -n "$foreign" ]; then
+        printf '    %s\n' "$foreign" >&2
+        fail "$audit_bin depends on libraries that will not be on the user's machine.
     Build the dependency statically instead of letting configure find a system copy."
-fi
+    fi
+done
 echo "    ✓ no foreign dependencies — relocatable"
 
 # ── Licence notice, written by the thing that did the building ───────────────

@@ -48,7 +48,7 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 - **Package**: `@luminary-media-converter/electron` (private), main `dist/main.js`, Electron 33, electron-builder 26
 - **Main process** (`src/main.ts`): single-instance lock, `luminary-convert://` protocol client, settings persisted in `app.getPath('userData')/settings.json`, TOFU origin dialogs (serialized through a queue), `safeStorage`-backed credential cipher, bundled ffmpeg/ffprobe resolution, static web client resolution, graceful shutdown that waits for Nest's hooks before quitting
 - **Renderer**: `BrowserWindow` with `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`; external links are pushed to the system browser
-- **Preload** (`src/preload.ts`): exactly three calls on `window.luminary` — `getApiToken()`, `getPathForFile(file)` (Electron 32 removed `File.path`; `webUtils` is only reachable in the preload), `showOpenDialog()`
+- **Preload** (`src/preload.ts`): exactly five calls on `window.luminary` — `getApiToken()`, `getPathForFile(file)` (Electron 32 removed `File.path`; `webUtils` is only reachable in the preload), `showOpenDialog()`, and the CMS-session pair `onShowSession(cb)` / `takePendingSession()`
 - **Work directory**: `userData/work`
 
 ### Web Client (`app/`)
@@ -221,50 +221,53 @@ The CMS is an ordinary web app on another origin; the encoder listens on loopbac
 
 1. **`GET /api/cms/health`** — unauthenticated liveness probe returning `{ status: 'ok', apiVersion }`. The CMS calls this before showing the "upload media" affordance at all; when it fails it offers a `luminary-convert://` launch link instead.
 2. **`POST /api/cms/sessions`** — authorised by the caller's `Origin`, not by a key (there is no credential a page could hold that the pages around it could not also read). Body:
-   ```jsonc
-   {
-     "documentId": "post_01HTZ8Y0J4",      // idempotency key
-     "title": "Episode 12",                 // shown in the local app
-     "s3": { /* endPoint, port?, useSSL?, bucket, region?, accessKey, secretKey, pathPrefix? */ },
-     "publicBaseUrl": "https://cdn.example.com/media",
-     "encryption": { "required": true },    // optional; a CMS states a requirement, not a key policy
-     "segmentDuration": 6,                  // optional
-     "byteRange": true,                     // optional
-     "byteRangeMaxFileSizeMB": 500,         // optional
-     "thumbnails": true,                    // optional
-     "existingMedia": { "hlsUrl": "…", "hlsKey": "…" }  // validated + accepted, NOT acted on yet
-   }
-   ```
-   Response `201`:
-   ```json
-   {
-     "sessionId": "…",
-     "readToken": "read_…",
-     "eventsUrl": "http://127.0.0.1:31711/api/sessions/<id>/events?token=read_…",
-     "apiVersion": "0.0.1",
-     "reused": false
-   }
-   ```
-   - **Idempotency**: a repeat click on the same `documentId` returns the session already in flight (`reused: true`) rather than starting a second one. Only *active* sessions match — a finished one means "replace what is there".
-   - **Per-session subfolder**: the destination becomes `<canonicalPrefix(pathPrefix)>/<sessionId>`, so a re-encode of the same post cannot half-overwrite the live output.
-   - **Window focus**: creating (or reusing) a session fires `CMS_SESSION_HOOK`, which the Electron host uses to bring its window forward — the user has to pick a file, and the app may be behind the browser.
-   - **`eventsUrl`** is built from the request's own `Host`, because the port is assigned by the host app and this process has no better idea of it than the caller does.
+    ```jsonc
+    {
+        "documentId": "post_01HTZ8Y0J4", // idempotency key
+        "title": "Episode 12", // shown in the local app
+        "s3": {
+            /* endPoint, port?, useSSL?, bucket, region?, accessKey, secretKey, pathPrefix? */
+        },
+        "publicBaseUrl": "https://cdn.example.com/media",
+        "encryption": { "required": true }, // optional; a CMS states a requirement, not a key policy
+        "segmentDuration": 6, // optional
+        "byteRange": true, // optional
+        "byteRangeMaxFileSizeMB": 500, // optional
+        "thumbnails": true, // optional
+        "existingMedia": { "hlsUrl": "…", "hlsKey": "…" }, // validated + accepted, NOT acted on yet
+    }
+    ```
+    Response `201`:
+    ```json
+    {
+        "sessionId": "…",
+        "readToken": "read_…",
+        "eventsUrl": "http://127.0.0.1:31711/api/sessions/<id>/events?token=read_…",
+        "apiVersion": "0.0.1",
+        "reused": false
+    }
+    ```
+
+    - **Idempotency**: a repeat click on the same `documentId` returns the session already in flight (`reused: true`) rather than starting a second one. Only _active_ sessions match — a finished one means "replace what is there".
+    - **Per-session subfolder**: the destination becomes `<canonicalPrefix(pathPrefix)>/<sessionId>`, so a re-encode of the same post cannot half-overwrite the live output.
+    - **Window focus**: creating (or reusing) a session fires `CMS_SESSION_HOOK`, which the Electron host uses to bring its window forward — the user has to pick a file, and the app may be behind the browser.
+    - **`eventsUrl`** is built from the request's own `Host`, because the port is assigned by the host app and this process has no better idea of it than the caller does.
 3. **SSE** — the CMS subscribes to `eventsUrl` with `EventSource`. Events are the `SessionEvent` shape:
-   ```ts
-   { sessionId, status, progress?, pipelineProgress?, queuePosition?, error?, files?,
-     masterPlaylist?, thumbnailsVtt?, hlsUrl?, segmentFormat?,
-     encoder?, probeResult?, ingestTotalBytes? }
-   ```
-   **The event that matters** is the first `status: "encoding"`: it carries `hlsUrl`, published at encode *start*, not at completion — the destination key is settled long before the first segment exists. The decryption key is **no longer part of any status/SSE payload**: the CMS fetches it from `GET /api/sessions/:id/key?token=read_…` → `{ maskedKeyHex }` and unmasks it (XOR with the first 16 bytes of `SHA-256(sessionId)` — self-inverse, formula published; an obscurity measure keeping raw keys out of logs/proxies, not DRM). `hlsUrl` + the unmasked key are what Luminary saves as `MediaDto { hlsUrl, hlsKey }`. `cms-mock/src/store.ts` (`captureHlsKey`) is the reference implementation.
+    ```ts
+    { sessionId, status, progress?, pipelineProgress?, queuePosition?, error?, files?,
+      masterPlaylist?, thumbnailsVtt?, hlsUrl?, segmentFormat?,
+      encoder?, probeResult?, ingestTotalBytes? }
+    ```
+    **The event that matters** is the first `status: "encoding"`: it carries `hlsUrl`, published at encode _start_, not at completion — the destination key is settled long before the first segment exists. The decryption key is **no longer part of any status/SSE payload**: the CMS fetches it from `GET /api/sessions/:id/key?token=read_…` → `{ maskedKeyHex }` and unmasks it (XOR with the first 16 bytes of `SHA-256(sessionId)` — self-inverse, formula published; an obscurity measure keeping raw keys out of logs/proxies, not DRM). `hlsUrl` + the unmasked key are what Luminary saves as `MediaDto { hlsUrl, hlsKey }`. `cms-mock/src/store.ts` (`captureHlsKey`) is the reference implementation.
 4. **Polling fallback** — `GET /api/sessions/:id?token=read_…` returns the same `hlsUrl`, so a CMS that reconnects mid-encode can ask again; the key comes from the key endpoint as above.
 
 ### Trust model: three token tiers plus an origin allowlist
 
-| Tier | Form | Who holds it | What it can do |
-|---|---|---|---|
-| Instance API token | `X-API-Key: <token>` | The app's own UI only | Everything. Minted per launch by the Electron main process (`randomBytes(32)`), handed to the renderer over the preload bridge, never written to disk. Standalone it falls back to `LOCAL_API_TOKEN` (or the deprecated `MASTER_API_KEY`) |
-| Session token | `Authorization: Bearer sess_*` (also accepted as `?token=` on preview / waveform / storyboard routes) | The UI, per session | Drive one session: attach a file, start the encode, poll, delete, read/write its chapters, stream its preview |
-| Read token | `?token=read_*` | The CMS that opened the session | Watch only: the SSE stream and the status endpoint. Cannot start, cancel, or reach the source file. Minted only for `origin: 'cms'` sessions |
+| Tier               | Form                                                                                                  | Who holds it                    | What it can do                                                                                                                                                                                                                            |
+| ------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Instance API token | `X-API-Key: <token>`                                                                                  | The app's own UI only           | Everything. Minted per launch by the Electron main process (`randomBytes(32)`), handed to the renderer over the preload bridge, never written to disk. Standalone it falls back to `LOCAL_API_TOKEN` (or the deprecated `MASTER_API_KEY`) |
+| Session token      | `Authorization: Bearer sess_*` (also accepted as `?token=` on preview / waveform / storyboard routes) | The UI, per session             | Drive one session: attach a file, start the encode, poll, delete, read/write its chapters, stream its preview                                                                                                                             |
+| Read token         | `?token=read_*`                                                                                       | The CMS that opened the session | Watch only: the SSE stream and the status endpoint. Cannot start, cancel, or reach the source file. Minted only for `origin: 'cms'` sessions                                                                                              |
 
 `AuthResolverGuard` tries them in that order. A present-but-wrong `X-API-Key` is rejected immediately rather than falling through. The instance token is a superkey: it is accepted regardless of `@AuthTypes(...)`.
 
@@ -272,7 +275,7 @@ The CMS is an ordinary web app on another origin; the encoder listens on loopbac
 
 ### Local Network Access, PNA and trust on first use
 
-A public web app reaching `127.0.0.1` is a private-network request. Chrome sends `Access-Control-Request-Private-Network: true` on the preflight and drops the real request unless the response grants it — `privateNetworkAccessMiddleware` sets `Access-Control-Allow-Private-Network: true` on those preflights, and is registered *before* the CORS middleware, which is what ends the preflight response. That is only a grant of reachability; *who* may talk to the API is still the origin allowlist's decision, applied by the CORS layer on the same response.
+A public web app reaching `127.0.0.1` is a private-network request. Chrome sends `Access-Control-Request-Private-Network: true` on the preflight and drops the real request unless the response grants it — `privateNetworkAccessMiddleware` sets `Access-Control-Allow-Private-Network: true` on those preflights, and is registered _before_ the CORS middleware, which is what ends the preflight response. That is only a grant of reachability; _who_ may talk to the API is still the origin allowlist's decision, applied by the CORS layer on the same response.
 
 `OriginRegistry` holds the allowlist:
 
@@ -333,7 +336,7 @@ Disk is guarded on both ends: `disk-space.ts` refuses an ingest or an encode tha
 - **Audio groups** mapped to renditions via HLS `#EXT-X-MEDIA` `GROUP-ID`; multi-track audio with language/name attributes; mono/stereo/5.1/7.1 via `-ac`
 - **Multi-angle video**: multiple source video tracks become `TYPE=VIDEO` rendition groups in the single master (see the player contract above)
 - **HLS encryption**: AES-128 via worker threads; key hex published at encode start
-- **Thumbnails**: sprite sheets + WebVTT for the encoded output, plus a separate pre-encode *source storyboard* served from `/api/sessions/:id/thumbnails/*` so the trim timeline can show frames before anything is encoded (`X-Storyboard-Complete` tells the client when sampling has finished)
+- **Thumbnails**: sprite sheets + WebVTT for the encoded output, plus a separate pre-encode _source storyboard_ served from `/api/sessions/:id/thumbnails/*` so the trim timeline can show frames before anything is encoded (`X-Storyboard-Complete` tells the client when sampling has finished)
 - **Waveform**: peaks computed once per source, cached on disk, served over HTTP for the trim UI and written to S3 as `waveform.json`
 
 ### Server-side on-demand HLS preview
@@ -351,7 +354,7 @@ Disk is guarded on both ends: `disk-space.ts` refuses an ingest or an encode tha
 
 - Sessions live in memory and are mirrored to `<workDir>/<sessionId>/session.json` after anything worth keeping changes. Progress is deliberately not persisted — it ticks several times a second and is worthless after a restart
 - `lastActivityAt` (not `createdAt`) decides abandonment, so a slow multi-gigabyte ingest is not mistaken for a closed tab; `touch()` records liveness during long transfers
-- `SessionCleanupService` sweeps hourly (`SESSION_CLEANUP_CRON`) and removes only *idle* sessions — `created`, `uploading`, `uploaded` — idle longer than `SESSION_ABANDONED_MAX_AGE_HOURS` (default 6). Queued and encoding sessions are never swept
+- `SessionCleanupService` sweeps hourly (`SESSION_CLEANUP_CRON`) and removes only _idle_ sessions — `created`, `uploading`, `uploaded` — idle longer than `SESSION_ABANDONED_MAX_AGE_HOURS` (default 6). Queued and encoding sessions are never swept
 - Finished sessions are not swept on a clock; they are discarded at boot, so no age threshold has to stand in for "the user is done looking at this"
 - Deleting a session removes its work directory whole (session record, preview cache, sidecars, credentials sidecar). `encrypting` and `uploading_to_s3` are the statuses that cannot be deleted — the pipeline is mid-write, and pulling its files out from under it leaves half an output in the bucket
 
@@ -361,43 +364,43 @@ Auth column: **instance** = the instance `X-API-Key` token; **session** = `Beare
 
 ### Encoding sessions (`/api/sessions`)
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| POST | `/api/sessions` | token | Create a session (S3 + encryption + segment/byte-range/thumbnail options). Returns `{ sessionId, sessionToken }` |
-| GET | `/api/sessions` | token | List every session on this instance, newest first, including session tokens (the UI is the only holder of the instance token) |
-| POST | `/api/sessions/:id/local-file` | token, session | Attach an absolute path to a file already on this machine. Returns once probed |
-| POST | `/api/sessions/:id/encode` | token, session | Submit the encode config and enqueue. `202` |
-| GET | `/api/sessions/:id` | token, session, read | Poll status: probe results, progress, `hlsUrl`, `canRetry`, `queuePosition`, trim segments, files on completion (no key — see `/key`) |
-| GET | `/api/sessions/:id/events` | query token (session **or** read) | SSE event stream |
-| GET | `/api/sessions/:id/key` | token, session, read | Masked AES-128 session key `{ maskedKeyHex }` (XOR `SHA-256(sessionId)[0..16]`, self-inverse). 404 when the session has no encryption |
-| DELETE | `/api/sessions/:id` | token, session | Cancel and delete. Allowed from `created`, `uploading`, `uploaded`, `queued`, `encoding`, `failed`, `completed` — the terminal two included, which is the only way their disk is reclaimed. `encrypting` and `uploading_to_s3` are refused: the pipeline is mid-write |
-| GET | `/api/sessions/:id/chapters?lang=en` | token, session | Read `chapters/<lang>.vtt` from the session's own prefix |
-| PUT | `/api/sessions/:id/chapters?lang=en` | token, session | Write `chapters/<lang>.vtt` (≤ 1 MiB, `text/vtt`). `204` |
-| GET | `/api/sessions/:id/waveform` | query token | Waveform peaks for the source (`{ peaks, numPeaks }`) |
-| GET | `/api/sessions/:id/preview/audio-tracks` | query token | Preview audio tracks |
-| GET | `/api/sessions/:id/preview/playlist.m3u8` | query token | Preview master playlist (`?audio=<index>`) |
-| GET | `/api/sessions/:id/preview/r:rendition/playlist.m3u8` | query token | Preview rendition playlist |
-| GET | `/api/sessions/:id/preview/r:rendition/:filename` | query token | Preview MPEG-TS segment |
-| GET | `/api/sessions/:id/thumbnails/thumbnails.vtt` | query token | Source storyboard WebVTT (cues rewritten to absolute, token-carrying sprite URLs; `X-Storyboard-Complete`) |
-| GET | `/api/sessions/:id/thumbnails/:filename` | query token | Source storyboard sprite sheet |
+| Method | Path                                                  | Auth                              | Description                                                                                                                                                                                                                                                           |
+| ------ | ----------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/sessions`                                       | token                             | Create a session (S3 + encryption + segment/byte-range/thumbnail options). Returns `{ sessionId, sessionToken }`                                                                                                                                                      |
+| GET    | `/api/sessions`                                       | token                             | List every session on this instance, newest first, including session tokens (the UI is the only holder of the instance token)                                                                                                                                         |
+| POST   | `/api/sessions/:id/local-file`                        | token, session                    | Attach an absolute path to a file already on this machine. Returns once probed                                                                                                                                                                                        |
+| POST   | `/api/sessions/:id/encode`                            | token, session                    | Submit the encode config and enqueue. `202`                                                                                                                                                                                                                           |
+| GET    | `/api/sessions/:id`                                   | token, session, read              | Poll status: probe results, progress, `hlsUrl`, `canRetry`, `queuePosition`, trim segments, files on completion (no key — see `/key`)                                                                                                                                 |
+| GET    | `/api/sessions/:id/events`                            | query token (session **or** read) | SSE event stream                                                                                                                                                                                                                                                      |
+| GET    | `/api/sessions/:id/key`                               | token, session, read              | Masked AES-128 session key `{ maskedKeyHex }` (XOR `SHA-256(sessionId)[0..16]`, self-inverse). 404 when the session has no encryption                                                                                                                                 |
+| DELETE | `/api/sessions/:id`                                   | token, session                    | Cancel and delete. Allowed from `created`, `uploading`, `uploaded`, `queued`, `encoding`, `failed`, `completed` — the terminal two included, which is the only way their disk is reclaimed. `encrypting` and `uploading_to_s3` are refused: the pipeline is mid-write |
+| GET    | `/api/sessions/:id/chapters?lang=en`                  | token, session                    | Read `chapters/<lang>.vtt` from the session's own prefix                                                                                                                                                                                                              |
+| PUT    | `/api/sessions/:id/chapters?lang=en`                  | token, session                    | Write `chapters/<lang>.vtt` (≤ 1 MiB, `text/vtt`). `204`                                                                                                                                                                                                              |
+| GET    | `/api/sessions/:id/waveform`                          | query token                       | Waveform peaks for the source (`{ peaks, numPeaks }`)                                                                                                                                                                                                                 |
+| GET    | `/api/sessions/:id/preview/audio-tracks`              | query token                       | Preview audio tracks                                                                                                                                                                                                                                                  |
+| GET    | `/api/sessions/:id/preview/playlist.m3u8`             | query token                       | Preview master playlist (`?audio=<index>`)                                                                                                                                                                                                                            |
+| GET    | `/api/sessions/:id/preview/r:rendition/playlist.m3u8` | query token                       | Preview rendition playlist                                                                                                                                                                                                                                            |
+| GET    | `/api/sessions/:id/preview/r:rendition/:filename`     | query token                       | Preview MPEG-TS segment                                                                                                                                                                                                                                               |
+| GET    | `/api/sessions/:id/thumbnails/thumbnails.vtt`         | query token                       | Source storyboard WebVTT (cues rewritten to absolute, token-carrying sprite URLs; `X-Storyboard-Complete`)                                                                                                                                                            |
+| GET    | `/api/sessions/:id/thumbnails/:filename`              | query token                       | Source storyboard sprite sheet                                                                                                                                                                                                                                        |
 
 ### CMS handshake (`/api/cms`)
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/api/cms/health` | none | `{ status: 'ok', apiVersion }` — is the local encoder installed and running |
-| POST | `/api/cms/sessions` | origin | Open (or reuse) a session for a CMS document; returns `readToken` + `eventsUrl` |
+| Method | Path                | Auth   | Description                                                                     |
+| ------ | ------------------- | ------ | ------------------------------------------------------------------------------- |
+| GET    | `/api/cms/health`   | none   | `{ status: 'ok', apiVersion }` — is the local encoder installed and running     |
+| POST   | `/api/cms/sessions` | origin | Open (or reuse) a session for a CMS document; returns `readToken` + `eventsUrl` |
 
 ### HLS edit (`/api/hls`, stateless, inline S3 credentials)
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| POST | `/api/hls/read` | token | Fetch and parse a master playlist; returns the parsed master + current ETag |
-| POST | `/api/hls/mutate` | token | Apply ordered ops (upsert/remove subtitle, upsert/remove chapters) with `If-Match`; returns the new ETag. `409` on mismatch |
-| POST | `/api/hls/discover` | token | Scan a folder prefix for HLS masters / angles |
-| POST | `/api/hls/chapters/read` | token | Read `chapters/<lang>.vtt` under a prefix; `404` when absent |
-| POST | `/api/hls/chapters/write` | token | Write `chapters/<lang>.vtt` under a prefix |
-| POST | `/api/hls/waveform/read` | token | Read `waveform.json` under a prefix; `404` when absent |
+| Method | Path                      | Auth  | Description                                                                                                                 |
+| ------ | ------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/hls/read`           | token | Fetch and parse a master playlist; returns the parsed master + current ETag                                                 |
+| POST   | `/api/hls/mutate`         | token | Apply ordered ops (upsert/remove subtitle, upsert/remove chapters) with `If-Match`; returns the new ETag. `409` on mismatch |
+| POST   | `/api/hls/discover`       | token | Scan a folder prefix for HLS masters / angles                                                                               |
+| POST   | `/api/hls/chapters/read`  | token | Read `chapters/<lang>.vtt` under a prefix; `404` when absent                                                                |
+| POST   | `/api/hls/chapters/write` | token | Write `chapters/<lang>.vtt` under a prefix                                                                                  |
+| POST   | `/api/hls/waveform/read`  | token | Read `waveform.json` under a prefix; `404` when absent                                                                      |
 
 ## Session Lifecycle
 
@@ -429,43 +432,43 @@ created -> uploading -> uploaded -> queued -> encoding -> encrypting -> uploadin
 
 ### API (`api/.env`, standalone only — the Electron host passes these in code)
 
-| Variable | Default | Description |
-|---|---|---|
-| `LOCAL_API_TOKEN` | — | The instance API token accepted on `X-API-Key`. Unset disables key auth entirely. `MASTER_API_KEY` is still read, with a deprecation warning |
-| `PORT` | `3000` (standalone `main.ts`) | HTTP port. The embedded default is `31711` (`DEFAULT_PORT`) |
-| `HOST` | `127.0.0.1` | Bind address |
-| `WORK_DIR` | `./work` | Scratch directory for sessions, previews, sidecars |
-| `CMS_ALLOWED_ORIGINS` | — | Comma-separated origins trusted without asking (there is no approver standalone) |
-| `FFMPEG_PATH` / `FFPROBE_PATH` | PATH lookup | Absolute paths to the binaries |
-| `FFMPEG_TIMEOUT_MS` | none | Max FFmpeg runtime before a forced kill |
-| `FFMPEG_THREADS` | — | Thread count passed to FFmpeg |
-| `DISK_RESERVE_BYTES` | `2147483648` | Free space to keep in hand on the work volume |
-| `SESSION_ABANDONED_MAX_AGE_HOURS` | `6` | How long an idle session may sit before it is swept |
-| `SESSION_CLEANUP_CRON` | `0 * * * *` | Sweep schedule |
-| `S3_UPLOAD_STALL_TIMEOUT_MS` | `300000` | Stall detector for S3 uploads (measured in bytes sent, not files completed) |
+| Variable                          | Default                       | Description                                                                                                                                  |
+| --------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LOCAL_API_TOKEN`                 | —                             | The instance API token accepted on `X-API-Key`. Unset disables key auth entirely. `MASTER_API_KEY` is still read, with a deprecation warning |
+| `PORT`                            | `3000` (standalone `main.ts`) | HTTP port. The embedded default is `31711` (`DEFAULT_PORT`)                                                                                  |
+| `HOST`                            | `127.0.0.1`                   | Bind address                                                                                                                                 |
+| `WORK_DIR`                        | `./work`                      | Scratch directory for sessions, previews, sidecars                                                                                           |
+| `CMS_ALLOWED_ORIGINS`             | —                             | Comma-separated origins trusted without asking (there is no approver standalone)                                                             |
+| `FFMPEG_PATH` / `FFPROBE_PATH`    | PATH lookup                   | Absolute paths to the binaries                                                                                                               |
+| `FFMPEG_TIMEOUT_MS`               | none                          | Max FFmpeg runtime before a forced kill                                                                                                      |
+| `FFMPEG_THREADS`                  | —                             | Thread count passed to FFmpeg                                                                                                                |
+| `DISK_RESERVE_BYTES`              | `2147483648`                  | Free space to keep in hand on the work volume                                                                                                |
+| `SESSION_ABANDONED_MAX_AGE_HOURS` | `6`                           | How long an idle session may sit before it is swept                                                                                          |
+| `SESSION_CLEANUP_CRON`            | `0 * * * *`                   | Sweep schedule                                                                                                                               |
+| `S3_UPLOAD_STALL_TIMEOUT_MS`      | `300000`                      | Stall detector for S3 uploads (measured in bytes sent, not files completed)                                                                  |
 
 ### Web client (`app/.env`, browser development only)
 
-| Variable | Description |
-|---|---|
-| `VITE_API_URL` | Base URL of the local API. Empty in the packaged app (same origin) |
+| Variable         | Description                                                            |
+| ---------------- | ---------------------------------------------------------------------- |
+| `VITE_API_URL`   | Base URL of the local API. Empty in the packaged app (same origin)     |
 | `VITE_API_TOKEN` | Stands in for the preload bridge token when running in a plain browser |
 
 ### Electron
 
-| Variable | Description |
-|---|---|
-| `LUMINARY_PORT` | Override the API port |
+| Variable                | Description                                        |
+| ----------------------- | -------------------------------------------------- |
+| `LUMINARY_PORT`         | Override the API port                              |
 | `ELECTRON_RENDERER_URL` | Dev renderer URL (default `http://localhost:5173`) |
 
 ## FFmpeg is a hard requirement
 
 `ffmpeg-availability.ts` probes `ffmpeg -version` / `ffprobe -version` at startup and answers **presence**, which is a different question from the acceleration detection below and must not be confused with it: every capability probe fails identically whether a binary is absent or merely lacks NVENC, so asking only about capability reported a machine with no FFmpeg at all as "No GPU found, using CPU encoding" (Todo.md item 35).
 
-- The **Electron host** refuses to open a window without it, offering *Get FFmpeg* / *Quit* — there is nothing useful to do in a window that cannot probe, preview, thumbnail or encode. It closes the server before exiting rather than quitting out from under Nest
+- The **Electron host** refuses to open a window without it, offering _Get FFmpeg_ / _Quit_ — there is nothing useful to do in a window that cannot probe, preview, thumbnail or encode. It closes the server before exiting rather than quitting out from under Nest
 - The **API** refuses ingest and encode start with `503` and the same user-facing text. Ingest is the one that matters: attaching a source probes it immediately, so a missing install used to present as a failed probe, which reads as a bad file
-- `probeFfmpegBinaries` / `missingBinariesMessage` / `FFMPEG_DOWNLOAD_URL` are re-exported from `bootstrap.ts` so the host reaches the same verdict the API does. Call them *after* `createServer` (or after setting `FFMPEG_PATH` / `FFPROBE_PATH`) — the paths are read per call, so probing earlier asks about PATH instead of the bundled binaries
-- **FFmpeg 4.4 or newer is required**, and that is what the user is told. The requirement is *enforced* by probing the binary for the options the pipeline uses unconditionally (`ffmpeg-capabilities.ts`), never by comparing version strings — real builds report `4.4.2-0ubuntu0.22.04.1`, `7.1.1_2` and `N-113140-gd12b0e6f4b`, and the nightly has no version to compare. `MIN_FFMPEG_VERSION` exists to tell people what to install; it was established by reading FFmpeg's own source at release tags (`-stats_period` is absent in `n4.3`, present in `n4.4`, and is the newest option required)
+- `probeFfmpegBinaries` / `missingBinariesMessage` / `FFMPEG_DOWNLOAD_URL` are re-exported from `bootstrap.ts` so the host reaches the same verdict the API does. Call them _after_ `createServer` (or after setting `FFMPEG_PATH` / `FFPROBE_PATH`) — the paths are read per call, so probing earlier asks about PATH instead of the bundled binaries
+- **FFmpeg 4.4 or newer is required**, and that is what the user is told. The requirement is _enforced_ by probing the binary for the options the pipeline uses unconditionally (`ffmpeg-capabilities.ts`), never by comparing version strings — real builds report `4.4.2-0ubuntu0.22.04.1`, `7.1.1_2` and `N-113140-gd12b0e6f4b`, and the nightly has no version to compare. `MIN_FFMPEG_VERSION` exists to tell people what to install; it was established by reading FFmpeg's own source at release tags (`-stats_period` is absent in `n4.3`, present in `n4.4`, and is the newest option required)
 - **User-facing text says the version; the log says the options.** "The installed FFmpeg is too old (version 3.4.8). Luminary Media Convert needs FFmpeg 4.4 or newer" goes to the dialog; the list of unsupported flags goes to the log, where the reader is us
 
 ## GPU Detection
@@ -537,7 +540,7 @@ Run it against a running API (default `http://127.0.0.1:31711`, editable in the 
 
 - **Targets**: macOS `dmg` + `zip` (arm64), Windows `nsis` (x64). Run `npm -w electron run dist:mac` / `dist:win`, or `pack` for an unpacked directory
 - **All three build what they ship.** Each runs `build:workspaces` → the root's `build:bundled` (the five shared libraries, then the API, then the web client) before `electron-builder`. They used to compile only Electron's own TypeScript and package whatever `app/dist` and `api/dist` happened to contain — the last build anyone ran, or nothing at all on a clean clone, since both are gitignored. `npm -w` does not work from inside a workspace directory, hence the `cd ..` hop
-- **A `VITE_*` value cannot follow a developer's `.env` into a build.** Vite bakes every one it finds into every bundle, so `app/src/api.ts` and `auth-token.ts` read theirs strictly inside `import.meta.env.DEV`, which no `vite build` sets. `API_BASE` compiles to `""` — same-origin, which is the only correct answer once the API is serving the client. Pinned by tests that assert `DEV: false` *with* the variables set, not merely absent (Todo.md item 33)
+- **A `VITE_*` value cannot follow a developer's `.env` into a build.** Vite bakes every one it finds into every bundle, so `app/src/api.ts` and `auth-token.ts` read theirs strictly inside `import.meta.env.DEV`, which no `vite build` sets. `API_BASE` compiles to `""` — same-origin, which is the only correct answer once the API is serving the client. Pinned by tests that assert `DEV: false` _with_ the variables set, not merely absent (Todo.md item 33)
 - **`asar: true`** — verified rather than assumed: the packaged app was launched from outside the repository (so nothing could resolve upwards into the development `node_modules`) and the API started, served the client and answered requests from inside the archive
 - **electron-builder 26 is required.** Version 25 collected the hoisted workspace dependencies incompletely — `call-bind-apply-helpers` ended up only nested under `call-bind`, express failed to load, and Nest reported it as "No driver (HTTP) has been selected", which points nowhere near the real cause. Symptom if this regresses: the packaged app exits or logs a missing-driver error while the same code runs fine unpackaged
 - **`npmRebuild: false`** — electron-builder would otherwise run its own production `npm install` inside the workspace, which in a hoisted monorepo prunes the root `node_modules` out from under the running build. Nothing here is a native module
