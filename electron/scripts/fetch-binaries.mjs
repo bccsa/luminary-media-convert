@@ -18,7 +18,7 @@
  * event a pinned digest exists to catch.
  */
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, join } from 'node:path';
@@ -265,6 +265,31 @@ async function main() {
         }
 
         /*
+         * The licence texts themselves, copied beside the binaries.
+         *
+         * GPLv2 §1 requires giving recipients "a copy of this License along with
+         * the Program" — a link in a notice is not a copy. Both versions travel
+         * because the build is "v2 or later": v2 is what we convey under, and a
+         * recipient exercising the "or later" option should not have to go
+         * looking for v3.
+         *
+         * Vendored in `electron/bin/licenses/` rather than downloaded here: they
+         * must ship whether or not anyone reruns this script, and they are 53 KB
+         * of text that never changes.
+         */
+        for (const licence of ['GPL-2.0.txt', 'GPL-3.0.txt']) {
+            const from = join(binRoot, 'licenses', licence);
+            if (!existsSync(from)) {
+                fail(
+                    `${licence} is missing from electron/bin/licenses/. It has to ship ` +
+                        'with the binaries — see docs/ffmpeg-licensing.md.',
+                );
+            }
+            await copyFile(from, join(outDir, licence));
+        }
+        console.log('  ✓ GPL-2.0.txt, GPL-3.0.txt');
+
+        /*
          * Shipped beside the binaries: a GPL build obliges the licence to travel
          * with what is distributed.
          *
@@ -289,8 +314,7 @@ async function main() {
                 'This application invokes ffmpeg as a separate process; it is not linked against',
                 'the FFmpeg libraries. The application itself is licensed under Apache-2.0.',
                 '',
-                'Licence text:   https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt',
-                '                https://www.gnu.org/licenses/gpl-3.0.txt  (at your option)',
+                'Licence text:   GPL-2.0.txt beside this file (and GPL-3.0.txt, at your option)',
                 'FFmpeg project: https://ffmpeg.org/download.html',
                 '',
                 'Corresponding source for this exact build is not yet published alongside it.',

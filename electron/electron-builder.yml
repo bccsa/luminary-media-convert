@@ -53,7 +53,10 @@ extraResources:
       filter:
           - ffmpeg*
           - ffprobe*
+          # The notice, and the licence texts it refers to. GPLv2 §1 obliges a
+          # *copy* of the licence to travel with the binary — a URL is not one.
           - LICENSE-ffmpeg.txt
+          - GPL-*.txt
 
 protocols:
     - name: Luminary Media Convert

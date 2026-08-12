@@ -78,7 +78,24 @@ two together is an "aggregate", which the GPL explicitly permits:
 In practice: if the installer ever grows an EULA, it must not forbid what the GPL
 grants for the FFmpeg part — copying, redistributing, reverse engineering it.
 
-## 4. The obligation we do **not** currently meet: corresponding source
+## 4. The licence text itself — now shipped
+
+GPLv2 §1 requires that a distributor "give any other recipients of the Program a
+copy of this License along with the Program". A link in a notice is not a copy,
+and until 12 Aug 2026 a link was all we shipped: a 642-byte `LICENSE-ffmpeg.txt`
+pointing at gnu.org.
+
+The full texts of **GPL-2.0** and **GPL-3.0** are now vendored in
+`electron/bin/licenses/`, copied beside the binaries by the fetch script, and
+carried into the app by `extraResources`. Both versions travel because the build
+is "v2 or later": v2 is the licence we convey under, and a recipient exercising
+the "or later" option should not have to go looking for v3.
+
+They are committed rather than downloaded at build time — 53 KB of text that
+never changes, which has to ship whether or not anyone reruns the fetch. The
+`electron/bin/*/` ignore rule needed a negation for exactly that reason.
+
+## 5. The obligation we still do **not** meet: corresponding source
 
 This is the finding that needs action. The FSF FAQ is direct about the case we
 are in — an unmodified binary someone else built:
@@ -132,7 +149,7 @@ Under v2 the options are narrower (§3: accompany with source, or a written offe
 valid three years, and a physical-media request must be honourable), which is a
 second reason the v2/v3 distinction in §1 was worth getting right.
 
-## 5. A separate axis: patents, which the GPL does not address
+## 6. A separate axis: patents, which the GPL does not address
 
 FFmpeg's legal page notes that the standards it implements
 
@@ -147,7 +164,7 @@ encoders provided by the OS or driver, which is a materially different position.
 
 Worth a separate answer from BCC, and not something this repository can settle.
 
-## 6. If GPL turns out to be unacceptable
+## 7. If GPL turns out to be unacceptable
 
 The alternative is an LGPL build — `--enable-gpl` dropped, which means **dropping
 `libx264` and `libx265`**. The consequence is concrete and is already recorded in
@@ -172,6 +189,7 @@ capability loss, and does not remove the patent question.
 | May we distribute this binary? | Yes — no `--enable-nonfree` |
 | Under which licence? | GPL **v2 or later** (not v3, as previously stated) |
 | Does it affect our Apache-2.0 licence? | No — separate process, arm's-length communication, an aggregate |
-| Are we compliant today? | **No** — the corresponding source is not offered; we point at upstream's current source |
+| Licence text shipped? | **Yes** — GPL-2.0 and GPL-3.0 travel with the binaries (fixed 12 Aug 2026) |
+| Are we compliant today? | **Not yet** — the *corresponding source* is still not offered; we point at upstream's current source |
 | Cheapest fix | Mirror binary + corresponding source together, and point the notice at it (folds into item 40) |
 | Still needs a human decision | BCC sign-off on the GPL position, and the separate H.264 patent question |
