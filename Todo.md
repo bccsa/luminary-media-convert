@@ -967,3 +967,46 @@ Verified end to end afterwards: the same encode now logs `Packed 12 thumbnail(s)
 **The same shape exists for trim segments** — `buildConcatFile` in `ffmpeg.service.ts` writes the source path into an ffconcat list the same way. It was safe, but only because `encode.controller.ts` rejects a non-absolute path at ingest: a guarantee made three files away, which is exactly the kind this bug was safe by until it wasn't. Now resolved at the point of use, with a test that hands it a relative path. (An earlier draft of this note named `concat-file.ts`; that file only ever existed in the abandoned item-34 work and is not in the tree.)
 
 
+
+---
+
+## 40. Embed FFmpeg so no user ever meets the install prompt — and settle the licence that lets us
+
+**Where this stands today, because it is half-done rather than not started.** A packaged build already carries its own `ffmpeg` and `ffprobe`: `dist:mac` / `dist:win` run `fetch-binaries`, and `electron-builder.yml` copies them in through `extraResources`. `bundledBinary()` prefers them over anything on PATH whenever `app.isPackaged`. Verified: the packaged app was launched with `PATH=/usr/bin:/bin` — no system ffmpeg reachable — and still reported `Apple Silicon detected, using VideoToolbox acceleration`.
+
+So the install prompt (item 35) is a fallback, and an installed user on macOS should never see it. **Wanted: make that true of every user, on every platform, from every build path.** Four things stand between here and there.
+
+### 1. `dist:win` cannot produce a bundled build at all
+
+`TARGETS` in `fetch-binaries.mjs` has one entry, `darwin-arm64`. Asked for Windows, the script stops:
+
+```
+✗ No binaries defined for win32-x64. Known: darwin-arm64.
+```
+
+So every Windows user meets the prompt today, whatever the installer says. Needs a `TARGETS` entry — URL, SHA-256, and the capabilities to verify (`h264_nvenc`, `scale_cuda`, plus `libx264` for the CPU fallback). `electron/bin/README.md` names gyan.dev and BtbN as sources. This is also where item 36's unverified claim gets settled: whoever adds it will see immediately whether NVENC is present, since the fetch script checks.
+
+### 2. `pack` produces an app with no encoder, silently
+
+`pack` deliberately skips `fetch-binaries` — a `--dir` smoke test should not pull 100 MB — and electron-builder treats a missing `extraResources` source as a *warning*, then packages happily. The result starts, serves the UI, and shows the install prompt. Fine for a developer who knows; a trap for anyone who hands that directory to someone else. Either `pack` fetches too, or it fails loudly when the source is absent. The current middle is the one that misleads.
+
+### 3. The binaries come from one third-party host
+
+`osxexperts.net` — one person's site, whose URLs change with every FFmpeg version. The pinned digest covers **integrity**; nothing covers **availability**, so `dist:mac` breaks the day that host moves or disappears.
+
+**Asked of Ivan (12 Aug 2026): how should we source them?** The options, with what each costs:
+
+- **Mirror to somewhere we control** (a GitHub release asset on this repo, or BCC S3), keep the pinned digest, keep `osxexperts.net` in the README as provenance. Availability under our control, integrity unchanged, no repository growth. Roughly an hour.
+- **Commit them to the repo.** Fixes availability, but git history is permanent: ~98 MB per platform per FFmpeg bump, forever. GitHub warns above 50 MB per file and refuses above 100 MB, and these are 49 MB each — shipping at the warning line. It also puts a GPL binary inside an Apache-2.0 source tree, which muddies the repository's own licensing story more than fetching one at build time does.
+- **Leave it.** Cheapest until the day it isn't.
+
+### 4. The licence has to permit distribution — and this is the release blocker
+
+`LICENSE-ffmpeg.txt` ships beside the binaries and states the position: the osxexperts build is **GPL v3 or later**; this app invokes ffmpeg as a separate process and never links its libraries, so the obligation travels with ffmpeg rather than with this Apache-2.0 codebase. `README.md` calls that "a technical reading, not legal advice", which is the honest description of it.
+
+**What still has to happen before anything is distributed publicly:**
+
+- Someone at BCC confirms that shipping a GPL v3 binary alongside an Apache-2.0 application is acceptable, and that a licence file plus a source URL discharges the obligation for a binary we redistribute unmodified.
+- If it is not acceptable, the alternative is an LGPL build — which **omits `libx264`**, the CPU fallback in `FfmpegService`. A machine with no VideoToolbox and no NVENC would then be unable to encode at all, which is the one case bundling exists to serve. The other route is `libopenh264`, which needs the encoder detection adapting.
+
+That decision is a prerequisite for a public release, not for internal use, and it belongs with whoever owns licensing rather than in this repository.
