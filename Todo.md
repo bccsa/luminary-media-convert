@@ -967,3 +967,32 @@ Verified end to end afterwards: the same encode now logs `Packed 12 thumbnail(s)
 **The same shape exists for trim segments** — `buildConcatFile` in `ffmpeg.service.ts` writes the source path into an ffconcat list the same way. It was safe, but only because `encode.controller.ts` rejects a non-absolute path at ingest: a guarantee made three files away, which is exactly the kind this bug was safe by until it wasn't. Now resolved at the point of use, with a test that hands it a relative path. (An earlier draft of this note named `concat-file.ts`; that file only ever existed in the abandoned item-34 work and is not in the tree.)
 
 
+
+---
+
+## 41. Use Tailwind as far as it reaches, and know where it stops
+
+**Asked for as a side note.** Written with the numbers, because "use Tailwind more" reads differently once you see where the CSS actually is.
+
+**The app is already Tailwind-first.** `app/src/style.css` imports Tailwind v4, defines its palette in `@theme`, and puts shared surfaces in `@layer components` with `@apply` — the input field, the page container. What is left as hand-written CSS in app components is 215 lines across four files, and it is nearly all keyframes and gradients (`ProgressBar`'s shimmer, `SessionPlayerStrip`'s split handle). Those are the cases Tailwind does not express cheaply, so they are not the opportunity.
+
+**The mass is in the shared libraries, and it is 3,315 lines:**
+
+| Package | CSS | Custom properties | Tailwind? |
+|---|---|---|---|
+| `segment-editor` | 1,677 lines | 101 | no |
+| `encode-config` | 1,181 lines | 0 | no |
+| `player-web` | 457 lines | 19 | no |
+
+**Why they are like that, and why the answer is not simply "convert them".** A component library that ships Tailwind classes puts a build requirement on its host: the consumer must run Tailwind *and* have the library in its content globs, or every class silently does nothing. Self-contained CSS is what makes these drop-in. That reasoning still holds for `player-web`, which exists to be embedded in the Luminary app and later a Capacitor shell — it should stay self-contained, and this item should not be read as licence to change it.
+
+It holds less well for `segment-editor` and `encode-config`. Both are `private: true`, both are consumed by exactly one host, and that host has Tailwind v4. So the argument for their 2,858 lines is weaker than it looks — but converting them is a large diff over a timeline with real pointer arithmetic and 224 tests, for a maintainability gain rather than a user-visible one. Not obviously worth it, and worth nobody's afternoon by accident.
+
+**What is practicable, in order of value for effort:**
+
+1. **Keep the palettes from drifting.** The libraries carry their own tokens, and the app carries Tailwind's. Item 17 found the consequence: the timeline's buttons were blue-950 while the app's were slate, so the timeline read as borrowed from another application. The fix was to set the library's token to the Tailwind value the app uses. Doing that deliberately across the remaining tokens — surfaces, borders, text, danger — is cheap and removes a whole class of "looks like two apps" bugs.
+2. **New app-side UI uses Tailwind.** No retrofit, no risk; it is already the default and only needs stating so nobody adds a `<style scoped>` block out of habit.
+3. **Only then consider `encode-config`.** It is the better candidate of the two — 1,181 lines and *zero* custom properties, so it has no token system to preserve, and it is a form rather than an interactive canvas. If any conversion happens, it starts there and stays there until it has proven itself.
+4. **Leave `segment-editor`'s and `player-web`'s CSS alone** unless something else forces it. The first is a canvas whose layout maths the tests do not cover; the second has hosts beyond this repository.
+
+**What would change the calculus:** if `player-web` or `segment-editor` are ever published for real, self-contained CSS stops being a choice and becomes a requirement — and item 41 is then closed by decision rather than by work.
