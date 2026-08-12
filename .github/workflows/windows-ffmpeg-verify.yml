@@ -14,6 +14,15 @@ name: Verify Windows FFmpeg build
 permissions:
   contents: read
 
+# One run per branch, and a new push cancels the one it supersedes. Without this,
+# three pushes to a pull request queue three Windows jobs that all verify the same
+# pinned URL, and Windows minutes bill at a multiple of Linux ones. `workflow_dispatch`
+# is kept out of the group by including the event, so a deliberate manual run —
+# especially one building the installer — is never cancelled by an unrelated push.
+concurrency:
+  group: windows-ffmpeg-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   # Manual, because this is a private repository and Windows minutes bill at a
   # multiple of Linux ones. Run it when the pinned build changes, or before a
