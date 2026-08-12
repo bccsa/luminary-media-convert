@@ -365,6 +365,7 @@ describe('CmsController — the session it builds', () => {
                 segmentDuration: 4,
                 byteRange: false,
                 byteRangeMaxFileSizeMB: 250,
+                audioByteRangeMaxFileSizeMB: 80,
                 thumbnails: false,
             } as never)
         );
@@ -372,6 +373,10 @@ describe('CmsController — the session it builds', () => {
         expect(session.config.segmentDuration).toBe(4);
         expect(session.config.byteRange).toBe(false);
         expect(session.config.byteRangeMaxFileSizeMB).toBe(250);
+        // The audio chain is capped separately from the video chains: it holds
+        // every audio rendition and is fetched by every viewer, audio-only ones
+        // included, so its chunks are meant to stay small.
+        expect(session.config.audioByteRangeMaxFileSizeMB).toBe(80);
         expect(session.config.thumbnails).toBe(false);
     });
 });

@@ -3,8 +3,8 @@
  *
  * These are the shapes the encoder actually produces (see the master-playlist
  * assertions in `api/src/encode/services/ffmpeg.service.spec.ts` and the
- * byte-range rewrite in `api/src/encode/services/byte-range.worker.ts`), not
- * invented minimal examples — round-trip fidelity is only worth anything
+ * byte-range rewrite in `api/src/encode/services/segment-pipeline.service.ts`),
+ * not invented minimal examples — round-trip fidelity is only worth anything
  * against real output.
  *
  * Excluded from the package build in `tsconfig.json`.
@@ -79,7 +79,12 @@ export const MULTI_TIER_AUDIO_MASTER = [
     '',
 ].join('\n');
 
-/** fMP4 media playlist after the byte-range worker has repacked it. */
+/**
+ * fMP4 media playlist after the segment pipeline has repacked it. The chunk
+ * names and their `media_<n>` form are historical — chunks are now written to a
+ * shared `media/` directory and referenced as `../media/<chain>_<n>.m4s` — and
+ * kept byte-identical because the parser specs pin this text.
+ */
 export const BYTE_RANGE_MEDIA_PLAYLIST = [
     '#EXTM3U',
     '#EXT-X-VERSION:7',

@@ -23,6 +23,7 @@ export interface SessionForm {
     thumbnails: boolean;
     byteRange: boolean;
     byteRangeMaxFileSizeMB: number | null;
+    audioByteRangeMaxFileSizeMB: number | null;
     segmentDuration: number | null;
 }
 

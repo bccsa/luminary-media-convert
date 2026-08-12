@@ -1321,6 +1321,52 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return result.join('\n');
     }
 
+    /**
+     * Which byte-range chunk chain each stream directory's segments belong to.
+     *
+     * Packing shares one chain across several streams, and this is where the
+     * grouping is decided — from the config that named the directories, never
+     * by reading a name back apart. The names are built below out of labels the
+     * user typed; a reader that re-derived the angle from a `_t1_` infix would
+     * be one label containing an underscore away from packing an angle into the
+     * wrong chain, and would say nothing about it.
+     *
+     * One chain per video angle, holding every rendition of that angle: the
+     * target CDN class forwards a requested range to the client immediately
+     * while backhauling the whole object, so one chunk pull warms every
+     * rendition of the angle at the edge and an ABR step-up never lands on a
+     * cold object. Audio gets a single chain of its own instead of riding along
+     * — it is needed *concurrently* with video rather than swapped for it, so
+     * merging would duplicate it into every angle's chunks, and keeping it
+     * apart is what lets audio-only playback pull no video bytes at all.
+     */
+    buildStreamChainMap(encodeConfig: EncodeConfigDto): Record<string, string> {
+        const chains: Record<string, string> = {};
+
+        if (encodeConfig.type === 'video') {
+            const renditions = encodeConfig.videoRenditions ?? [];
+            // The same test buildVideoArgs applies when it names the stream
+            // directories, and it has to stay the same test: a different answer
+            // here maps chains onto directories that do not exist.
+            const multiTrack =
+                new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size >
+                1;
+            for (const rendition of renditions) {
+                const name = this.buildVideoStreamName(rendition, multiTrack);
+                chains[`stream_${name}`] =
+                    `v${rendition.sourceTrackIndex ?? 0}`;
+            }
+        }
+
+        // Audio-only encodes fall through to exactly this and nothing else,
+        // which is the whole special case they need.
+        for (const group of encodeConfig.audioGroups ?? []) {
+            chains[`stream_${this.buildAudioStreamName(group)}`] = 'a';
+        }
+
+        return chains;
+    }
+
     private buildVideoStreamName(
         rendition: VideoRenditionDto,
         multiTrack: boolean

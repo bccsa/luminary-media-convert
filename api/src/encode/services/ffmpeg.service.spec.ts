@@ -2104,7 +2104,12 @@ describe('FfmpegService', () => {
                 },
             });
             const promise = service.encode(opts);
-            await flushPromises();
+            // The trim path writes concat.txt with real fs I/O before it
+            // spawns, and under a loaded event loop ten setImmediate turns are
+            // not always enough to cross it — a close emitted before the
+            // process exists is a close nobody hears, and the encode hangs to
+            // the test timeout. Wait for the spawn itself instead.
+            await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
             mockProc.emitClose(0);
             await promise;
 
@@ -2949,6 +2954,94 @@ describe('FfmpegService', () => {
                 true
             );
             expect(result).toBe('1080p_t0_1920x1080');
+        });
+    });
+
+    /**
+     * Which stream directories share a byte-range chunk chain. The names have to
+     * come out of the same builders `buildVideoArgs` names the directories with
+     * — a chain keyed on a name nothing writes packs nothing.
+     */
+    describe('buildStreamChainMap', () => {
+        const rendition = (over: Record<string, unknown> = {}) => ({
+            width: 1920,
+            height: 1080,
+            videoBitrateKbps: 5000,
+            copyStream: false,
+            audioGroupId: 'hd',
+            ...over,
+        });
+
+        const audioGroup = (over: Record<string, unknown> = {}) => ({
+            id: 'hd',
+            label: 'HD_Audio',
+            audioBitrateKbps: 192,
+            channels: 2,
+            audioCodec: 'aac' as const,
+            sourceTrackIndex: 0,
+            ...over,
+        });
+
+        it('gives each angle its own chain, and all audio one', () => {
+            const config = {
+                type: 'video',
+                videoRenditions: [
+                    rendition({ label: '1080p', sourceTrackIndex: 0 }),
+                    rendition({
+                        label: '720p',
+                        width: 1280,
+                        height: 720,
+                        sourceTrackIndex: 0,
+                    }),
+                    rendition({ label: 'Side', sourceTrackIndex: 1 }),
+                ],
+                audioGroups: [
+                    audioGroup(),
+                    audioGroup({ id: 'sd', label: 'SD_Audio' }),
+                ],
+            } as unknown as EncodeConfigDto;
+
+            expect(service.buildStreamChainMap(config)).toEqual({
+                // Two tracks in play, so the directory names carry `_t<n>` —
+                // the same multiTrack test buildVideoArgs applies.
+                stream_1080p_t0_1920x1080: 'v0',
+                stream_720p_t0_1280x720: 'v0',
+                stream_Side_t1_1920x1080: 'v1',
+                stream_hd_HD_Audio: 'a',
+                stream_sd_SD_Audio: 'a',
+            });
+        });
+
+        it('needs no special case for a single angle', () => {
+            const config = {
+                type: 'video',
+                videoRenditions: [
+                    rendition({ label: '1080p' }),
+                    rendition({ label: '720p', width: 1280, height: 720 }),
+                ],
+                audioGroups: [audioGroup()],
+            } as unknown as EncodeConfigDto;
+
+            expect(service.buildStreamChainMap(config)).toEqual({
+                stream_1080p_1920x1080: 'v0',
+                stream_720p_1280x720: 'v0',
+                stream_hd_HD_Audio: 'a',
+            });
+        });
+
+        it('maps an audio-only encode to the audio chain alone', () => {
+            const config = {
+                type: 'audio',
+                audioGroups: [
+                    audioGroup(),
+                    audioGroup({ id: 'low', label: '64kbps' }),
+                ],
+            } as unknown as EncodeConfigDto;
+
+            expect(service.buildStreamChainMap(config)).toEqual({
+                stream_hd_HD_Audio: 'a',
+                stream_low_64kbps: 'a',
+            });
         });
     });
 

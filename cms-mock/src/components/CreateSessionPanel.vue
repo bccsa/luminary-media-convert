@@ -76,6 +76,13 @@ import { createSession, form, session } from '../store';
                 <input v-model.number="form.byteRangeMaxFileSizeMB" type="number" />
             </label>
             <label class="field">
+                <span>audioByteRangeMaxFileSizeMB</span>
+                <input
+                    v-model.number="form.audioByteRangeMaxFileSizeMB"
+                    type="number"
+                />
+            </label>
+            <label class="field">
                 <span>segmentDuration (s)</span>
                 <input v-model.number="form.segmentDuration" type="number" />
             </label>
