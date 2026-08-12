@@ -57,7 +57,7 @@ out="$repo/electron/bin/$target"
 
 log() { printf '\n  \033[1m%s\033[0m\n' "$1"; }
 fail() {
-    printf '\n  ✗ %s\n\n' "$1" >&2
+    printf '\n  ✗ %b\n\n' "$1" >&2
     exit 1
 }
 
