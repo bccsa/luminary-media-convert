@@ -60,7 +60,7 @@ guess about what an encoder needs:
 | `aac`                                                                                            | `-c:a aac` — native encoder, no external library                                        |
 | `libwebp` + `mjpeg`                                                                              | sprite sheets. `ThumbnailService` prefers libwebp and falls back to mjpeg, so both ship |
 | `pcm_s16le`                                                                                      | `WaveformService` pipes raw audio with `-f s16le`                                       |
-| muxers `hls`, `mp4`, `mpegts`, `image2`, `s16le`, `null`                                         | HLS output, fMP4/TS segments, sprites, waveform, capability probes                      |
+| muxers `hls`, `mp4`, `mpegts`, `image2`, `pcm_s16le`, `null`                                         | HLS output, fMP4/TS segments, sprites, waveform, capability probes                      |
 | demuxer `concat`                                                                                 | `-f concat` for trim segments and storyboard assembly                                   |
 | filters `scale` `scale_cuda` `scale_vt` `fps` `format` `trim` `concat` `tile` `crop` `aresample` | the filter graphs the services compose                                                  |
 | **all** decoders, demuxers, parsers                                                              | arbitrary user input — deliberately not narrowed                                        |
