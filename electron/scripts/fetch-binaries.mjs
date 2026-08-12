@@ -23,7 +23,6 @@ import { closeSync, existsSync, openSync, readSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { tmpdir } from 'node:os';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const binRoot = join(here, '..', 'bin');
@@ -249,7 +248,16 @@ async function main() {
     const outDir = join(binRoot, target);
     await mkdir(outDir, { recursive: true });
 
-    const staging = join(tmpdir(), `lmc-ffmpeg-${process.pid}`);
+    /*
+     * Staged inside `electron/bin/`, not the OS temp directory.
+     *
+     * `fs.rename` cannot cross volumes, and on a GitHub Windows runner the temp
+     * directory is on C: while the checkout is on D: — which failed with EXDEV
+     * the first time this ran there, a case no macOS run can reproduce because
+     * everything is one filesystem. Staging beside the destination keeps the
+     * move within one volume on every platform.
+     */
+    const staging = join(binRoot, `.staging-${process.pid}`);
     await mkdir(staging, { recursive: true });
 
     try {
