@@ -1,0 +1,86 @@
+name: Tests and build
+
+# Why this exists alongside `api-unit-tests.yml`: that workflow runs the API suite
+# and nothing else. The app's 248 tests and every shared library's suite ran only
+# on whichever machine a developer happened to be sitting at, which is how a
+# clean-clone build break reached the first Windows packaging attempt — `build:libs`
+# compiled segment-editor before the `hls` package it imports, and every developer
+# machine had a stale `hls/dist` that hid it.
+#
+# So the build job here is not ceremony: building from a clean checkout is the
+# check that failure could not survive.
+
+on:
+    push:
+        branches:
+            - main
+            - '154-**'
+    pull_request:
+        types: [opened, synchronize, reopened]
+
+permissions:
+    contents: read
+
+# A new push supersedes the run it replaces.
+concurrency:
+    group: tests-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    build:
+        name: Build from a clean checkout
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v6
+              with:
+                  node-version-file: api/.node-version
+                  cache: 'npm'
+                  cache-dependency-path: package-lock.json
+            - run: npm ci
+
+            # The shared libraries, in dependency order, with no leftover dist to
+            # lean on. This is the step that catches an ordering regression.
+            - name: Build the shared libraries
+              run: npm run build:libs
+
+            # Then everything the packaged app is made of. `build:bundled` is what
+            # dist:mac / dist:win call, so a break here breaks a release.
+            - name: Build the API and web client
+              run: npm run build:bundled
+
+            # Declarations are what consumers type-check against; a library that
+            # emits JS but no .d.ts breaks its consumers rather than itself.
+            - name: Every library emitted its type declarations
+              run: |
+                  for lib in hls encode-config segment-editor player-core player-web; do
+                    count=$(find "$lib/dist" -name '*.d.ts' 2>/dev/null | wc -l | tr -d ' ')
+                    test "$count" -gt 0 || { echo "$lib emitted no .d.ts files"; exit 1; }
+                    echo "  ✓ $lib ($count declaration files)"
+                  done
+
+    test:
+        name: ${{ matrix.workspace }} tests
+        runs-on: ubuntu-latest
+        strategy:
+            # One workspace per job, and never cancel the others: when two suites
+            # break, seeing both in one run beats discovering the second tomorrow.
+            fail-fast: false
+            matrix:
+                workspace: [hls, encode-config, segment-editor, player-core, player-web, app]
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v6
+              with:
+                  node-version-file: api/.node-version
+                  cache: 'npm'
+                  cache-dependency-path: package-lock.json
+            - run: npm ci
+
+            # Several suites import a sibling library's built output, so the
+            # libraries have to exist before any of them runs.
+            - name: Build the shared libraries
+              run: npm run build:libs
+
+            - name: Run the suite
+              run: npm -w ${{ matrix.workspace }} run test -- --run
