@@ -35,16 +35,14 @@ jobs:
             fail-fast: false
             matrix:
                 include:
-                    # Both on Apple Silicon, because GitHub has retired the Intel
-                    # image: the darwin-x64 job sat queued indefinitely on macos-13
-                    # and was never assigned a runner in any run. So Intel is
-                    # cross-compiled on arm64, which build.sh already supports.
+                    # Both on Apple Silicon: GitHub offers no Intel macOS image, so
+                    # darwin-x64 is cross-compiled on arm64.
                     #
-                    # `native` says whether the result can be *run* here. arm64 can
-                    # execute x86_64 binaries only under Rosetta, which a runner may
-                    # not have, so the capability and encode steps below are skipped
-                    # rather than failed when it is absent — a build that cannot be
-                    # probed is not the same as a build that is broken.
+                    # `native` says whether the result can be *run* here. arm64
+                    # executes x86_64 binaries only under Rosetta, which a runner may
+                    # not have, so the capability and encode steps are skipped rather
+                    # than failed when it is absent — a build that cannot be probed is
+                    # not the same as a build that is broken.
                     - { target: darwin-arm64, runner: macos-14, native: true }
                     - { target: darwin-x64, runner: macos-14, native: false }
         runs-on: ${{ matrix.runner }}
@@ -88,8 +86,8 @@ jobs:
                   done
                   echo "all required encoders and filters present"
 
-            # Features, not flags. The muxer-name fault that broke the waveform passed
-            # every flag check and only surfaced when something actually wrote a file.
+            # Features, not flags: a configure flag can name a component that the
+            # binary cannot actually use, and only writing a file proves otherwise.
             #
             # The source is built from /dev/zero rather than `lavfi`, because
             # --disable-indevs removes lavfi (it lives in libavdevice) — so there is
@@ -149,9 +147,9 @@ jobs:
 
     windows-verify:
         # The cross-build cannot be run where it was made, so a Windows runner asks
-        # it what it supports. This is the step that would catch a build that
-        # compiles cleanly and has no NVENC — a compile-time decision that cannot be
-        # added later, and the reason this workflow exists at all.
+        # it what it supports. This is what catches a build that compiles cleanly and
+        # has no NVENC — hardware support is a compile-time decision that cannot be
+        # added afterwards.
         name: win32-x64 verified on Windows
         needs: windows-cross
         runs-on: windows-latest
@@ -173,8 +171,8 @@ jobs:
                   done
                   "$FF" -hide_banner -filters | grep -q scale_cuda || { echo "MISSING scale_cuda"; exit 1; }
                   echo "NVENC, scale_cuda and the CPU fallback are all present"
-            # Features, not flags. The muxer-name fault that broke the waveform passed
-            # every flag check and only surfaced when something actually wrote a file.
+            # Features, not flags: a configure flag can name a component that the
+            # binary cannot actually use, and only writing a file proves otherwise.
             #
             # The source is built from /dev/zero rather than `lavfi`, because
             # --disable-indevs removes lavfi (it lives in libavdevice) — so there is

@@ -51,7 +51,8 @@ interface Settings {
     deniedOrigins: string[];
 }
 
-const settingsPath = (): string => join(app.getPath('userData'), 'settings.json');
+const settingsPath = (): string =>
+    join(app.getPath('userData'), 'settings.json');
 
 let settings: Settings = { allowedOrigins: [], deniedOrigins: [] };
 
@@ -72,7 +73,11 @@ async function loadSettings(): Promise<void> {
 async function saveSettings(): Promise<void> {
     try {
         await mkdir(app.getPath('userData'), { recursive: true });
-        await writeFile(settingsPath(), JSON.stringify(settings, null, 4), 'utf8');
+        await writeFile(
+            settingsPath(),
+            JSON.stringify(settings, null, 4),
+            'utf8'
+        );
     } catch (err) {
         console.error('Could not persist settings:', err);
     }
@@ -139,10 +144,15 @@ async function approveOrigin(origin: string): Promise<boolean> {
  * credentials in memory and says so.
  */
 function buildCipher():
-    | { encrypt(plaintext: string): string; decrypt(ciphertext: string): string }
+    | {
+          encrypt(plaintext: string): string;
+          decrypt(ciphertext: string): string;
+      }
     | undefined {
     if (!safeStorage.isEncryptionAvailable()) {
-        console.warn('safeStorage unavailable: S3 credentials will stay in memory');
+        console.warn(
+            'safeStorage unavailable: S3 credentials will stay in memory'
+        );
         return undefined;
     }
     return {
@@ -166,14 +176,12 @@ function buildCipher():
  *    machine happens to have — which is what makes "works on my machine" mean
  *    something, since hardware support is a compile-time decision.
  * 3. **Neither**: undefined, and the API falls back to PATH. That is the only
- *    route left to the install prompt, and it now means a developer who has
- *    never run the fetch.
+ *    route left to the install prompt, and it means a developer who has never run
+ *    the build.
  *
- * The second case is why this no longer returns early on `!app.isPackaged`. It
- * used to reason that "a developer running from source has neither, and their own
- * install is the right one" — true when the repository carried no binaries, and
- * wrong once it does: it left the one person able to notice a problem testing
- * against a different ffmpeg from every user.
+ * The second case is why an unpackaged run does not simply defer to PATH: a
+ * developer's own install would differ from the one every user gets, leaving the one
+ * person able to notice a problem testing against a different ffmpeg.
  */
 function bundledBinary(name: string): string | undefined {
     const filename = process.platform === 'win32' ? `${name}.exe` : name;
@@ -187,7 +195,7 @@ function bundledBinary(name: string): string | undefined {
                   '..',
                   'bin',
                   `${process.platform}-${process.arch}`,
-                  filename,
+                  filename
               ),
           ];
 
@@ -306,7 +314,9 @@ function createWindow(): void {
 const mediaFilters = [
     {
         name: 'Media files',
-        extensions: [...ALLOWED_EXTENSIONS].map((ext) => ext.replace(/^\./, '')),
+        extensions: [...ALLOWED_EXTENSIONS].map((ext) =>
+            ext.replace(/^\./, '')
+        ),
     },
     { name: 'All files', extensions: ['*'] },
 ];
@@ -408,7 +418,7 @@ async function start(): Promise<void> {
         // port, and the user needs to be told rather than shown an empty window.
         dialog.showErrorBox(
             'Luminary Media Convert could not start',
-            `The local encoding service failed to start.\n\n${(err as Error).message}`,
+            `The local encoding service failed to start.\n\n${(err as Error).message}`
         );
         app.exit(1);
         return;

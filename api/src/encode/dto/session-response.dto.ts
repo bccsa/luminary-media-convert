@@ -180,8 +180,8 @@ export class SessionStatusDto {
     @ApiPropertyOptional({
         description:
             'Whether the output will use byte-range HLS. Set at session creation ' +
-            'and not editable afterwards, so the client has no other way to learn ' +
-            'it — the encode config form used to assume the API default.',
+            'and not editable afterwards, so this response is the only way for the ' +
+            'client to learn it rather than assuming the API default.',
         example: true,
     })
     @Expose()
@@ -225,10 +225,10 @@ export class SessionStatusDto {
     @Expose()
     thumbnailsVtt?: string;
 
-    // The AES-128 key is deliberately absent here. It used to ride along on
-    // every status read and SSE frame, which put it in logs, proxies and
-    // screenshots for the life of the session. Fetch it from
-    // GET /api/sessions/:sessionId/key instead — see SessionKeyResponseDto.
+    // The AES-128 key is deliberately absent here. Carrying it on every status read
+    // and SSE frame would put it in logs, proxies and screenshots for the life of the
+    // session. Fetch it from GET /api/sessions/:sessionId/key — see
+    // SessionKeyResponseDto.
 
     @ApiPropertyOptional({
         description:

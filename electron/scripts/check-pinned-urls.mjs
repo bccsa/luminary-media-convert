@@ -2,15 +2,14 @@
 /**
  * Ask whether the sources our FFmpeg build depends on still exist.
  *
- * We no longer download prebuilt binaries, so this no longer watches a
- * third-party build host. It watches what the build itself fetches — FFmpeg's
- * release tarball, x264's git repository, libwebp's release tarball — because a
- * build from source has its own supply chain, and it is only shorter, not absent.
+ * Building from source has its own supply chain — FFmpeg's release tarball and
+ * signature, x264's git repository, libwebp's tarball, the NVENC headers — shorter
+ * than downloading a binary, but not absent.
  *
- * A vanished URL means `dist:mac` and `dist:win` stop working for everybody at
- * once, and the corresponding-source offer in the shipped licence notice points at
- * something a recipient can no longer fetch. A weekly check turns that from a
- * discovery during a release into a ticket with weeks of warning.
+ * A vanished URL means `dist:mac` and `dist:win` stop working for everybody at once,
+ * and the corresponding-source offer in the shipped licence notice points at
+ * something a recipient cannot fetch. A weekly check gives weeks of warning instead
+ * of a discovery during a release.
  *
  * Reachability only. Whether a newer FFmpeg exists is a judgement call: moving a
  * pin means re-verifying capabilities, re-checking the nv-codec-headers ceiling and
@@ -62,20 +61,18 @@ const httpTargets = [
 ];
 
 /**
- * Retried, because a single attempt is not evidence. ffmpeg.org failed one run in
- * three during testing while `curl -I` succeeded every time — a transient network
- * error, reported by the first version of this script as "the pinned source is
- * gone". A weekly job that cries wolf is a weekly job everybody learns to ignore,
- * which is worse than not having one.
+ * Retried, because a single attempt is not evidence: these hosts drop connections
+ * intermittently, and a transient error is not a vanished source. A weekly job that
+ * cries wolf is one everybody learns to ignore, which is worse than not having it.
  */
 const ATTEMPTS = 3;
 
 async function attempt(url) {
     const head = await fetch(url, { method: 'HEAD', redirect: 'follow' });
     if (head.ok) return { ok: true, status: head.status, method: 'HEAD' };
-    // Some hosts answer HEAD with 403/405 while serving GET perfectly well. Ask
-    // for a single byte rather than cancelling a multi-megabyte body mid-flight,
-    // which itself throws and looks like a failed request.
+    // Some hosts answer HEAD with 403/405 while serving GET perfectly well. Ask for
+    // a single byte: cancelling a multi-megabyte body mid-flight throws, and would
+    // look like a failed request.
     const ranged = await fetch(url, {
         method: 'GET',
         redirect: 'follow',

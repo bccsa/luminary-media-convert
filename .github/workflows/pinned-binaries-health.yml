@@ -1,14 +1,13 @@
 name: Pinned FFmpeg URLs still resolve
 
-# We build our own FFmpeg now, so this no longer watches a third-party build host.
-# It watches what the build itself fetches: FFmpeg's release tarball and its
-# signature, libwebp's tarball, x264's git repository and the nv-codec-headers tag.
-# Building from source shortens the supply chain; it does not remove it.
+# Watches what the build fetches: FFmpeg's release tarball and its signature,
+# libwebp's tarball, x264's git repository and the nv-codec-headers tag. Building
+# from source shortens the supply chain; it does not remove it.
 #
-# The day one of those 404s, `dist:mac` and `dist:win` stop working for everybody at
+# If one of those disappears, `dist:mac` and `dist:win` stop working for everybody at
 # once, and the corresponding-source offer in the shipped licence notice points at
-# something a recipient can no longer fetch. A weekly check turns that from a
-# discovery during a release into a ticket with weeks of warning.
+# something a recipient cannot fetch. A weekly check gives weeks of warning instead
+# of a discovery during a release.
 #
 # Deliberately only checks reachability. Whether a *newer* build exists is a
 # judgement call — bumping the pin means re-verifying capabilities and re-testing

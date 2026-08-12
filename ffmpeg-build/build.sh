@@ -107,11 +107,10 @@ echo "    ✓ sha256 matches the pin"
 # means a change to it shows up in a diff rather than silently taking effect. Its
 # authenticity is anchored by the fingerprint published on ffmpeg.org/download.html,
 # which is checked below, so the key file cannot be swapped for another.
-# Verified with gpgv, not gpg. gpgv exists for exactly this job: check a
-# detached signature against a keyring file, with no GNUPGHOME, no trustdb and no
-# agent. Two attempts with gpg failed first — a CI runner has no usable gpg home,
-# and macOS caps the agent socket path at ~104 characters, which a keyring inside
-# the repository's .work directory exceeds. gpgv has neither problem.
+# Verified with gpgv, not gpg. gpgv exists for exactly this job: check a detached
+# signature against a keyring file, with no GNUPGHOME, no trustdb and no agent. gpg
+# needs a writable home, which a CI runner does not have, and its agent socket path
+# is capped at ~104 characters on macOS — shorter than a keyring inside .work.
 keyring="$work/ffmpeg-keys.gpg"
 gpg --dearmor < "$here/ffmpeg-signing-key.asc" > "$keyring" 2>/dev/null ||
     fail "Could not read ffmpeg-build/ffmpeg-signing-key.asc"
@@ -160,10 +159,9 @@ fi
 echo "    ✓ libx264.a"
 
 # ── libwebp, ours rather than the system's ───────────────────────────────────
-# Built here for one concrete reason: with it taken from the system, ffmpeg linked
-# /opt/homebrew/opt/webp/lib/libwebp.7.dylib and the binary could not start on a
-# machine without Homebrew. Every functional test still passed, because the build
-# machine had it — the failure was reserved for users.
+# A system libwebp links the binary against a path that exists on this machine and
+# not on a user's, and every functional test still passes here because the library is
+# present — so the failure would only appear after shipping.
 log "libwebp $LIBWEBP_VERSION"
 webptar="$work/libwebp-$LIBWEBP_VERSION.tar.gz"
 if [ ! -f "$webptar" ]; then
@@ -261,11 +259,10 @@ configure_flags=(
     --disable-outdevs
     --disable-debug
 
-    # X11 is not optional-by-omission: configure auto-detects xlib and libxcb if
-    # they are installed, and the first build of this script picked up four X11
-    # dylibs from Homebrew that way. Nothing in a headless encoder wants an X
-    # server, so they are turned off explicitly rather than left to whatever the
-    # build machine happens to have.
+    # X11 is not optional by omission: configure auto-detects xlib and libxcb when
+    # they are installed and links them. Nothing in a headless encoder wants an X
+    # server, so they are disabled explicitly rather than left to whatever the build
+    # machine happens to have.
     --disable-xlib
     --disable-libxcb
     --disable-sdl2
@@ -314,16 +311,13 @@ elif [ "$arch" != "$host_arch" ]; then
 fi
 
 log "FFmpeg configure + build (this is the slow part)"
-# Why this can take 12 minutes on a CI runner where macOS takes four: fewer cores,
-# gcc rather than clang, and --enable-cuda-llvm compiling the CUDA kernels that
+# Expect a few minutes natively and up to ~12 for the Windows cross-build: fewer
+# cores, gcc rather than clang, and --enable-cuda-llvm compiling the CUDA kernels
 # scale_cuda needs. The decoder set is deliberately complete, which is most of the
-# object files.
+# ~2,000 objects.
 #
-# The output is shown rather than swallowed. It was redirected to a log file, which
-# meant a step that compiles ~1,800 objects printed nothing at all for twelve
-# minutes and was indistinguishable from a hang — the log only appeared if the
-# build failed. Every hundredth line is enough to see it moving without burying the
-# rest of the run.
+# Every hundredth line is printed so the step can be seen progressing; silence for
+# that long is indistinguishable from a hang.
 (
     cd "$src"
     # PKG_CONFIG_LIBDIR, not PKG_CONFIG_PATH: LIBDIR *replaces* the default search
@@ -346,12 +340,10 @@ cp "$src/ffmpeg$exe" "$out/ffmpeg$exe"
 cp "$src/ffprobe$exe" "$out/ffprobe$exe"
 chmod 755 "$out/ffmpeg$exe" "$out/ffprobe$exe"
 
-# ── The guard that should have existed from the first build ──────────────────
-# A binary that links anything outside /usr/lib and /System is not shippable: it
-# runs on this machine and fails on the user's. The first build of this script
-# linked six Homebrew dylibs — libwebp, libsharpyuv and four X11 libraries — and
-# every functional test passed anyway, because the build machine had them all.
-# Nothing but an explicit check catches that class of fault.
+# ── Dependency audit ────────────────────────────────────────────────────────
+# A binary that depends on libraries outside the OS set is not shippable: it runs
+# here and fails on the user's machine. No functional test catches that, because the
+# libraries are present wherever the testing happens — only an explicit check does.
 log "Dependency audit"
 if [ "$os" = "mingw32" ]; then
     # On Windows the equivalent question is which DLLs the .exe imports. Anything
@@ -374,11 +366,9 @@ fi
 echo "    ✓ no foreign dependencies — relocatable"
 
 # ── Licence notice, written by the thing that did the building ───────────────
-# The build has to write this itself. `fetch-binaries` writes a notice describing
-# the build *it* downloads, so leaving that in place left our own 20 MB binary
-# beside a file crediting osxexperts.net and claiming libx265 — which this build
-# does not contain. A notice that misdescribes what it accompanies is worse than
-# none, and it is the same fault that already had to be fixed once for Windows.
+# Written here because only this script knows what went into the binary: which
+# sources at which versions, and which GPL version applies. A notice that
+# misdescribes what it accompanies is worse than none.
 log "Licence notice"
 # 2 unless the binary says otherwise. This build never passes --enable-version3, so
 # 2 is the right answer — but it is read off the binary where that is possible,

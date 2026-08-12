@@ -4,12 +4,9 @@ name: Windows installer
 # cross-compiled for Windows on Linux (mingw-w64, as BtbN does it), and
 # electron-builder then packages it on Windows.
 #
-# This replaces the old `windows-ffmpeg-verify.yml`, which downloaded a
-# third-party ffmpeg with `fetch-binaries`. That script is gone — we build our own
-# now — and the capability checks it ran live in `ffmpeg-build.yml`, which verifies
-# the cross-compiled binary on a Windows runner. What is left here, and what that
-# workflow does not cover, is whether the *installer* builds and carries the
-# encoder into the packaged app.
+# `ffmpeg-build.yml` covers whether the encoder itself is sound. This covers the
+# installer: that electron-builder produces one, and that the encoder reaches the
+# packaged app inside it.
 #
 # Manual, plus a branch trigger: these are Windows minutes on a private repository,
 # and an installer is wanted at a release rather than on every commit.

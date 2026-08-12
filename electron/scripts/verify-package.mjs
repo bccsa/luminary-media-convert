@@ -3,16 +3,16 @@
  * Assert that a packaged app can actually encode.
  *
  * The failure this exists to catch is silent by design: electron-builder treats a
- * missing `extraResources` source as a **warning**, not an error. Park the
- * binaries, run a package, and you get a perfectly well-formed app with no
- * ffmpeg in it — which installs, launches, shows its UI, accepts a file, and only
- * then fails at the one thing it exists to do. Nothing downstream notices,
- * because the app starts fine without them.
+ * missing `extraResources` source as a **warning**, not an error. Remove the binaries
+ * and a package still succeeds, producing a well-formed app with no ffmpeg in it —
+ * which installs, launches, shows its UI, accepts a file, and only then fails at the
+ * one thing it exists to do. Nothing downstream notices, because the app starts fine
+ * without them.
  *
- * That is not hypothetical. `dist:mac` builds arm64 *and* x64, and when the binaries
- * were still downloaded a bare fetch resolved to the host architecture alone — so the
- * Intel dmg came within one commit of shipping with no encoder, invisible on a machine
- * where `bin/darwin-x64` happened to already exist.
+ * The risk is real on this project specifically: `dist:mac` builds arm64 *and* x64,
+ * so a step that prepares only the host architecture leaves the other dmg with no
+ * encoder — and that is invisible on a machine where the other `bin/<target>`
+ * directory happens to exist already.
  *
  * Run after packaging, over every app electron-builder produced:
  *

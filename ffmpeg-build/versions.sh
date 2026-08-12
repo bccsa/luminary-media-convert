@@ -21,12 +21,11 @@ FFMPEG_SIGNING_KEY="FCF986EA15E6E293A5644F10B4322F04D67658D8"
 X264_REPO="https://code.videolan.org/videolan/x264.git"
 X264_COMMIT="b35605ace3ddf7c1a5d67a2eb553f034aef41d55"  # stable @ 2025-06-08
 
-# libwebp, built from Google's own release tarball rather than taken from the
-# system. This is not tidiness: linking Homebrew's libwebp made the first build of
-# this script depend on /opt/homebrew/opt/webp/lib/libwebp.7.dylib, which does not
-# exist on a user's Mac — the exact non-relocatability that ruled out Homebrew's
-# ffmpeg in the first place. Sprites need it (ThumbnailService prefers libwebp and
-# falls back to mjpeg), so it is built static and linked in.
+# libwebp, built from Google's own release tarball rather than taken from the system.
+# A system libwebp makes the binary depend on a path that does not exist on a user's
+# machine — /opt/homebrew/... on macOS — which is the same non-relocatability that
+# rules out using Homebrew's ffmpeg. Sprites need it (ThumbnailService prefers libwebp
+# and falls back to mjpeg), so it is built static and linked in.
 LIBWEBP_VERSION="1.6.0"
 LIBWEBP_SHA256="e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564"
 
@@ -38,20 +37,17 @@ LIBWEBP_SHA256="e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564
 # and no NVIDIA hardware at all — which is why a GPU-less CI runner can produce a
 # binary with working NVENC.
 NV_CODEC_HEADERS_REPO="https://github.com/FFmpeg/nv-codec-headers.git"
-# n13.0.19.1 — and the version has both a floor and a ceiling, which is easy to
-# miss because configure only enforces the floor.
+# This pin has both a floor and a ceiling, and configure enforces only the floor.
 #
-#   Floor:   FFmpeg 8.1 requires ffnvcodec >= 12.1.14.0. Pinning n9.1.23.3 (2019)
-#            got past `git ls-remote | tail`, because a lexicographic sort puts n9
-#            after n13, and failed configure with "nvenc requested, but not all
-#            dependencies are satisfied".
+#   Floor:   FFmpeg 8.1 requires ffnvcodec >= 12.1.14.0. Below it, configure fails
+#            with "nvenc requested, but not all dependencies are satisfied".
 #   Ceiling: n13.1.15.0 renames NV_ENC_CLOCK_TIMESTAMP_SET.countingType to
-#            countingTypeLSB, and FFmpeg 8.1's nvenc.c still uses the old name, so
-#            it passes configure and then fails to *compile*. Verified by reading
-#            the header at each tag: countingType is present through n13.0.19.1.
+#            countingTypeLSB, which FFmpeg 8.1's nvenc.c still uses, so a newer tag
+#            passes configure and then fails to *compile*. countingType is present
+#            through n13.0.19.1.
 #
-# So when FFmpeg is bumped here, check this pin against the new nvenc.c rather than
-# taking the newest tag.
+# Note also that tags do not sort lexicographically: n9.x sorts after n13.x. When
+# bumping FFmpeg, choose the tag by reading nvenc.c, not by taking the newest.
 NV_CODEC_HEADERS_TAG="n13.0.19.1"
 
 # No x265. The encoder only ever writes H.264 — every variant in the master

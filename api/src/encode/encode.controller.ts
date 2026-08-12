@@ -465,10 +465,10 @@ export class EncodeController {
             documentId: session.documentId,
         };
 
-        // Known from the moment encoding starts, not from completion: a caller
-        // that reconnects mid-encode has to be able to ask for it again. The
-        // decryption key is no longer part of this payload — it is fetched
-        // separately from GET /api/sessions/:sessionId/key.
+        // Known from the moment encoding starts, not from completion: a caller that
+        // reconnects mid-encode has to be able to ask for it again. The decryption key
+        // is deliberately not part of this payload — it is fetched separately from
+        // GET /api/sessions/:sessionId/key.
         if (session.hlsUrl) result.hlsUrl = session.hlsUrl;
 
         if (
@@ -567,10 +567,10 @@ export class EncodeController {
             'Returns the session key XOR-masked with the first 16 bytes of ' +
             'SHA-256(sessionId). Unmask by repeating the XOR — the operation is ' +
             'its own inverse, and the formula is published deliberately.\n\n' +
-            'This is an obscurity measure, not DRM. The key used to ride along ' +
-            'on every status read and SSE frame, which put it in logs, proxies ' +
-            'and screenshots; behind its own endpoint and behind the mask, a ' +
-            'raw key never appears in a payload that gets copied around. ' +
+            'This is an obscurity measure, not DRM. Carrying the key on every ' +
+            'status read and SSE frame would put it in logs, proxies and ' +
+            'screenshots; behind its own endpoint and behind the mask, a raw key ' +
+            'never appears in a payload that gets copied around. ' +
             'Anyone able to play the media can still recover it — the player ' +
             'needs the key in the clear to decrypt segments.',
     })
