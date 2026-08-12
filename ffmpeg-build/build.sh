@@ -107,6 +107,46 @@ if [ ! -f "$prefix/lib/libx264.a" ]; then
 fi
 echo "    ✓ libx264.a"
 
+# ── libwebp, ours rather than the system's ───────────────────────────────────
+# Built here for one concrete reason: with it taken from the system, ffmpeg linked
+# /opt/homebrew/opt/webp/lib/libwebp.7.dylib and the binary could not start on a
+# machine without Homebrew. Every functional test still passed, because the build
+# machine had it — the failure was reserved for users.
+log "libwebp $LIBWEBP_VERSION"
+webptar="$work/libwebp-$LIBWEBP_VERSION.tar.gz"
+if [ ! -f "$webptar" ]; then
+    curl -fsSL --retry 3 -o "$webptar" \
+        "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-$LIBWEBP_VERSION.tar.gz"
+fi
+actual="$(shasum -a 256 "$webptar" | cut -d' ' -f1)"
+[ "$actual" = "$LIBWEBP_SHA256" ] ||
+    fail "libwebp digest mismatch.\n    expected $LIBWEBP_SHA256\n    got      $actual"
+
+webpsrc="$work/libwebp-$LIBWEBP_VERSION"
+[ -d "$webpsrc" ] || tar -xzf "$webptar" -C "$work"
+
+if [ ! -f "$prefix/lib/libwebp.a" ]; then
+    (
+        cd "$webpsrc"
+        webp_flags=(
+            --prefix="$prefix" --enable-static --disable-shared
+            # Only the encoder is wanted; nothing here decodes or animates webp.
+            --disable-libwebpdemux --disable-libwebpdecoder
+            --disable-libwebpextras --disable-sdl --disable-png --disable-jpeg
+            --disable-tiff --disable-gif
+        )
+        [ "$arch" != "$host_arch" ] && webp_flags+=(
+            --host="$arch-apple-darwin" CFLAGS="-arch $arch" LDFLAGS="-arch $arch"
+        )
+        ./configure "${webp_flags[@]}" >"$work/webp-configure.log" 2>&1 ||
+            { tail -20 "$work/webp-configure.log"; fail "libwebp configure failed"; }
+        make -j"$(sysctl -n hw.ncpu)" >"$work/webp-make.log" 2>&1 ||
+            { tail -20 "$work/webp-make.log"; fail "libwebp build failed"; }
+        make install >>"$work/webp-make.log" 2>&1
+    )
+fi
+echo "    ✓ libwebp.a"
+
 # ── FFmpeg ───────────────────────────────────────────────────────────────────
 # Narrow on the way out, wide on the way in: we control what is written, not what
 # users hand us. Encoders and muxers are an allow-list; decoders, demuxers and
@@ -151,6 +191,15 @@ configure_flags=(
     --disable-outdevs
     --disable-debug
 
+    # X11 is not optional-by-omission: configure auto-detects xlib and libxcb if
+    # they are installed, and the first build of this script picked up four X11
+    # dylibs from Homebrew that way. Nothing in a headless encoder wants an X
+    # server, so they are turned off explicitly rather than left to whatever the
+    # build machine happens to have.
+    --disable-xlib
+    --disable-libxcb
+    --disable-sdl2
+
     --enable-encoder="$encoders"
     --enable-muxer="$muxers"
 )
@@ -183,6 +232,24 @@ log "FFmpeg configure + build (this is the slow part)"
 cp "$src/ffmpeg" "$out/ffmpeg"
 cp "$src/ffprobe" "$out/ffprobe"
 chmod 755 "$out/ffmpeg" "$out/ffprobe"
+
+# ── The guard that should have existed from the first build ──────────────────
+# A binary that links anything outside /usr/lib and /System is not shippable: it
+# runs on this machine and fails on the user's. The first build of this script
+# linked six Homebrew dylibs — libwebp, libsharpyuv and four X11 libraries — and
+# every functional test passed anyway, because the build machine had them all.
+# Nothing but an explicit check catches that class of fault.
+log "Dependency audit"
+foreign="$(otool -L "$out/ffmpeg" "$out/ffprobe" |
+    grep -oE '^\s+/[^ ]+' | tr -d '\t ' |
+    grep -vE '^/usr/lib/|^/System/' | sort -u || true)"
+if [ -n "$foreign" ]; then
+    printf '    %s\n' $foreign >&2
+    fail "The binaries link libraries outside /usr/lib and /System. They would not
+    start on a machine without those paths. Build the dependency statically
+    instead of letting configure find the system copy."
+fi
+echo "    ✓ only system libraries — relocatable"
 
 log "Built $target"
 for b in ffmpeg ffprobe; do

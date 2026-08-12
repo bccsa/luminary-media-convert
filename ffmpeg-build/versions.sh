@@ -21,6 +21,15 @@ FFMPEG_SIGNING_KEY="FCF986EA15E6E293A5644F10B4322F04D67658D8"
 X264_REPO="https://code.videolan.org/videolan/x264.git"
 X264_COMMIT="b35605ace3ddf7c1a5d67a2eb553f034aef41d55"  # stable @ 2025-06-08
 
+# libwebp, built from Google's own release tarball rather than taken from the
+# system. This is not tidiness: linking Homebrew's libwebp made the first build of
+# this script depend on /opt/homebrew/opt/webp/lib/libwebp.7.dylib, which does not
+# exist on a user's Mac — the exact non-relocatability that ruled out Homebrew's
+# ffmpeg in the first place. Sprites need it (ThumbnailService prefers libwebp and
+# falls back to mjpeg), so it is built static and linked in.
+LIBWEBP_VERSION="1.6.0"
+LIBWEBP_SHA256="e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564"
+
 # No x265. The encoder only ever writes H.264 — every variant in the master
 # playlist is avc1 — so HEVC support is weight we would carry and never use, plus
 # a second GPL dependency to account for in the corresponding source.
