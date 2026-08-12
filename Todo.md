@@ -873,7 +873,17 @@ Decided together with the above. The reasoning, so it can be revisited on its me
 - **The GPL obligation is paperwork, not an obstacle.** ffmpeg runs as a separate process and is never linked, so the obligation travels with the binary rather than reaching this Apache-2.0 codebase (item 5a says the same). It needs someone at BCC to sign off the notice and the source offer once. Until that happens, nothing here is publicly distributable — which is a release blocker, not a design one.
 - **The size only really bites with auto-update** (item 2), where a naive feed re-downloads ~100 MB per release. `electron-updater` supports differential updates through block maps; that is the thing to get right when item 2 lands, and it is configuration rather than architecture.
 
-**One claim in this item is unverified and load-bearing.** It says "on Windows most published builds lack NVENC". That looks wrong: `electron/bin/README.md` points at gyan.dev and BtbN precisely *because* their builds carry NVENC, and those are the two anyone reaches for. If common Windows builds do include it, the lottery argument for bundling is weaker than written here, and the genuinely scarce case is a native macOS arm64 build rather than Windows. Worth checking before anyone leans on it — the decision above rests on the support burden, which does not depend on it.
+**One claim in this item was wrong, and is now checked.** It said "on Windows most published builds lack NVENC". The Windows runner (see item 40) ran `-hwaccels` and `-encoders` against the pinned BtbN build on 12 Aug 2026:
+
+```
+hwaccels: cuda  vaapi  dxva2  qsv
+encoders: h264_nvenc, hevc_nvenc, av1_nvenc, libx264
+filters:  scale_cuda
+```
+
+So everything `FfmpegService` looks for on the NVIDIA path is present, plus `libx264` for the CPU fallback. The "build lottery" argument for bundling is therefore weaker than this item claimed — nobody should repeat it. The decision to keep shipping stands, because it rests on the support burden of asking CMS editors to install and PATH a binary, which does not depend on that claim at all.
+
+The genuinely scarce case is a native macOS arm64 build, not Windows: `evermeet.cx` publishes x86_64 only and Homebrew's is not relocatable, which is why the macOS side is on a one-person site in the first place.
 
 **If it is ever revisited**, the third option below is the one to reach for rather than plain "ask the user": keep controlling *which* build is used and fetch the pinned, digest-checked binary on first run. That removes the binary from the installer without handing anyone a build lottery. What this repo can say is that the "ask the user" option is not free today: item 35 has to land first, or the first thing a user without ffmpeg sees is an encode that fails after they have committed to a destination.
 
@@ -1005,7 +1015,11 @@ Making that possible meant making the fetch script cross-platform. It shelled ou
 
 Triggered manually, and automatically when the pinned URL, digest or packaging config changes — because a new pin is exactly when "does this build have NVENC" is unanswered again. Manual by default because this is a private repository and Windows minutes bill at a multiple of Linux ones.
 
-**And item 36's NVENC claim is still open, because `strings` cannot settle it.** `h264_nvenc` and `scale_cuda` do appear in the fetched binary — but so does `videotoolbox`, which cannot work on Windows at all, so those strings come from name tables rather than proving compiled-in support. Only `-encoders` on Windows answers it.
+**Item 36's NVENC claim is settled, and it was false.** `strings` could not settle it — `h264_nvenc` and `scale_cuda` appear in the binary, but so does `videotoolbox`, which cannot work on Windows, so those come from name tables rather than proving compiled-in support. The runner answered it properly: `cuda` in `-hwaccels`, `h264_nvenc` / `hevc_nvenc` / `av1_nvenc` / `libx264` in `-encoders`, `scale_cuda` in `-filters`.
+
+**The runner also earned its keep immediately by finding a Windows-only defect on its first run.** `fs.rename` cannot cross volumes, and there the temp directory is on `C:` while the checkout is on `D:` — `EXDEV`. No macOS run can reproduce that, because everything is one filesystem. Staging now sits inside `electron/bin/` so the move stays on one volume. That is the second Windows-only fault this work has surfaced, after `unzip`, `mv` and `file` not existing there — which is the argument for the runner in one line.
+
+**Still not exercised: `dist:win` itself.** The installer step is gated behind the `package` input, which only `workflow_dispatch` supplies, and that needs the workflow on the default branch. So no NSIS installer has ever been built.
 
 ### 2. `pack` produced an app with no encoder, silently — fixed
 
