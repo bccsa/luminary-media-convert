@@ -110,11 +110,19 @@ jobs:
       # the workspaces, compiles the main process and runs electron-builder, so
       # this exercises the path a human would actually use.
       - name: Build the NSIS installer
-        if: inputs.package
+        # Also on a push to `ci/windows-pack-*`, because `inputs.package` only
+        # exists for workflow_dispatch, and workflow_dispatch needs the workflow on
+        # the default branch. Until this lands on main, a branch name is the only
+        # way to ask for a real installer.
+        if: inputs.package || startsWith(github.ref_name, 'ci/windows-pack')
         run: npm -w electron run dist:win
 
       - name: Upload the installer
-        if: inputs.package
+        # Also on a push to `ci/windows-pack-*`, because `inputs.package` only
+        # exists for workflow_dispatch, and workflow_dispatch needs the workflow on
+        # the default branch. Until this lands on main, a branch name is the only
+        # way to ask for a real installer.
+        if: inputs.package || startsWith(github.ref_name, 'ci/windows-pack')
         uses: actions/upload-artifact@v4
         with:
           name: luminary-media-convert-win-unsigned

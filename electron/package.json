@@ -10,7 +10,7 @@
         "build": "tsc -p tsconfig.json",
         "build:workspaces": "cd .. && npm run build:bundled",
         "dev": "npm run build && electron .",
-        "dist:mac": "npm run fetch-binaries && npm run build:workspaces && npm run build && electron-builder --mac --config electron-builder.yml",
+        "dist:mac": "npm run fetch-binaries darwin-arm64 && npm run fetch-binaries darwin-x64 && npm run build:workspaces && npm run build && electron-builder --mac --config electron-builder.yml",
         "dist:win": "npm run fetch-binaries win32-x64 && npm run build:workspaces && npm run build && electron-builder --win --config electron-builder.yml",
         "pack": "npm run fetch-binaries && npm run build:workspaces && npm run build && electron-builder --dir --config electron-builder.yml",
         "fetch-binaries": "node scripts/fetch-binaries.mjs"
