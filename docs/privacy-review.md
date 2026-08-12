@@ -109,6 +109,15 @@ Three flows, all initiated by the user or their own CMS:
 
 There is no fourth. No update check, no crash reporting, no usage statistics.
 
+**One was found and removed, 12 Aug 2026.** `app/index.html` linked Google Fonts —
+`preconnect` to `fonts.googleapis.com` and `fonts.gstatic.com`, plus a stylesheet —
+so every launch of a local-only app reached out to Google. It had not been working:
+the CSP is `styleSrc 'self'` with no `fontSrc`, so the packaged app blocked the
+stylesheet and fell back to the system font. But `preconnect` is a resource hint and
+is not governed by CSP, so what survived was a connection to Google on every launch
+for a font that never loaded. Removed; `--font-sans` still names Inter first, so a
+machine that has it installed uses it.
+
 ---
 
 ## 6. Decisions, not defaults

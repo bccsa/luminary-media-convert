@@ -6,12 +6,6 @@
         <link rel="icon" href="/favicon.ico" sizes="48x48" />
         <link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml" />
         <meta name="theme-color" content="#0284c7" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link
-            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-            rel="stylesheet"
-        />
         <title>Luminary Media Convert</title>
         <script>
             (function () {
@@ -21,13 +15,18 @@
                     var dark = false;
                     if (p === 'dark') dark = true;
                     else if (p === 'light') dark = false;
-                    else dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                    else
+                        dark = window.matchMedia(
+                            '(prefers-color-scheme: dark)'
+                        ).matches;
                     document.documentElement.classList.toggle('dark', dark);
                 } catch (e) {}
             })();
         </script>
     </head>
-    <body class="min-h-screen font-sans antialiased bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-100">
+    <body
+        class="min-h-screen font-sans antialiased bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-100"
+    >
         <div id="app"></div>
         <script type="module" src="/src/main.ts"></script>
     </body>
