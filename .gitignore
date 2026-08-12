@@ -30,3 +30,4 @@ docs/todo.md
 DESIGN.md
 
 test-media/*
+ffmpeg-build/.work/
