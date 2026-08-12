@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
@@ -46,16 +46,22 @@ const binRoot = join(here, '..', 'bin');
 const TARGETS = {
     'darwin-arm64': {
         version: '8.1',
-        files: [
+        arch: 'arm64',
+        /**
+         * One entry per archive, each naming what it provides. macOS ships the
+         * two binaries separately; Windows ships both in one 160 MB zip, so the
+         * shape has to allow either without downloading the same archive twice.
+         */
+        archives: [
             {
-                name: 'ffmpeg',
                 url: 'https://www.osxexperts.net/ffmpeg81arm.zip',
                 sha256: 'ebb82529562b71170807bbc6b0e7eb4f0b13af8cbb0e085bb9e8f6fe709598ad',
+                provides: [{ name: 'ffmpeg', from: 'ffmpeg' }],
             },
             {
-                name: 'ffprobe',
                 url: 'https://www.osxexperts.net/ffprobe81arm.zip',
                 sha256: 'a6640a77d38a6f0527c5b597e599cb36a3427a6931444ed80bc62542421950a1',
+                provides: [{ name: 'ffprobe', from: 'ffprobe' }],
             },
         ],
         /**
@@ -66,7 +72,6 @@ const TARGETS = {
          * Only ffmpeg is asked about codecs: ffprobe inspects media and does
          * not take `-hwaccels`, `-encoders` or `-filters` at all.
          */
-        arch: 'arm64',
         verify: {
             ffmpeg: {
                 hwaccel: 'videotoolbox',
@@ -75,7 +80,41 @@ const TARGETS = {
             },
         },
     },
+
+    /**
+     * Windows, pinned to a dated BtbN release rather than their `latest` tag —
+     * `latest` moves, and a moving URL cannot be pinned to a digest.
+     *
+     * The `-gpl` build rather than `-gpl-shared`: shared means DLLs beside the
+     * executable, and `bundledBinary()` resolves a single file. Same reasoning
+     * that ruled out Homebrew on macOS.
+     */
+    'win32-x64': {
+        version: '8.1.2',
+        // What `file` reports for a 64-bit PE executable.
+        arch: 'x86-64',
+        archives: [
+            {
+                url: 'https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-11-13-11/ffmpeg-n8.1.2-34-g9b6c8969e0-win64-gpl-8.1.zip',
+                sha256: '05eedc113542be39af5d0f78f0b1093bafb89c98cecf25b77e8644670293107f',
+                provides: [
+                    { name: 'ffmpeg.exe', from: '*/bin/ffmpeg.exe' },
+                    { name: 'ffprobe.exe', from: '*/bin/ffprobe.exe' },
+                ],
+            },
+        ],
+        verify: {
+            'ffmpeg.exe': {
+                hwaccel: 'cuda',
+                encoders: ['h264_nvenc', 'libx264'],
+                filters: ['scale_cuda'],
+            },
+        },
+    },
 };
+
+/** Whether this machine can execute the target's binaries. */
+const canRunTarget = (name) => name.split('-')[0] === process.platform;
 
 const target = process.argv[2] ?? `${process.platform}-${process.arch}`;
 
@@ -99,19 +138,45 @@ const digest = (buffer) => createHash('sha256').update(buffer).digest('hex');
  * to choose its acceleration mode, so a build that passes here is one that will
  * report the mode we expect rather than silently falling back to CPU.
  */
-function verifyCapabilities(binary, name, arch, spec) {
+function verifyCapabilities(binary, name, arch, spec, executable) {
     const run = (...args) =>
         execFileSync(binary, ['-hide_banner', ...args], { encoding: 'utf8' });
 
+    // Architecture is readable without running anything, so it is checked on
+    // every platform: `file` reports `arm64` for a Mach-O and `x86-64` for a PE.
     const described = execFileSync('file', [binary], { encoding: 'utf8' });
     if (!described.includes(arch)) fail(`${name} is not ${arch}: ${described.trim()}`);
 
-    // Runs at all, and is not quietly a shell script wrapping a system install.
-    if (!run('-version').includes(`${name} version`)) {
-        fail(`${name} did not identify itself as ${name}`);
+    /*
+     * Everything below has to *run* the binary, which a machine of a different
+     * platform cannot do — fetching win32-x64 from a Mac is useful (CI, or
+     * preparing a release) but it cannot answer "does this build have NVENC".
+     *
+     * Saying so is the point. Silently skipping would let an unverified binary
+     * reach an installer looking exactly like a verified one, and the whole
+     * reason this step exists is that hardware support is a compile-time
+     * decision that cannot be added later.
+     */
+    if (!executable) {
+        console.log(
+            `  ⚠ ${name}: architecture confirmed (${arch}), capabilities NOT checked\n` +
+                `      — this machine cannot run a ${target} binary. Before shipping, run\n` +
+                `        \`npm run fetch-binaries ${target}\` on ${target} itself, where the\n` +
+                `        checks below will actually execute.`,
+        );
+        return;
     }
 
-    if (!spec) return;
+    // Runs at all, and is not quietly a shell script wrapping a system install.
+    const selfName = name.replace(/\.exe$/, '');
+    if (!run('-version').includes(`${selfName} version`)) {
+        fail(`${name} did not identify itself as ${selfName}`);
+    }
+
+    if (!spec) {
+        console.log(`  ✓ ${name} verified`);
+        return;
+    }
 
     if (!run('-hwaccels').includes(spec.hwaccel)) {
         fail(
@@ -129,6 +194,8 @@ function verifyCapabilities(binary, name, arch, spec) {
     for (const filter of spec.filters) {
         if (!filters.includes(filter)) fail(`${name} is missing the ${filter} filter`);
     }
+
+    console.log(`  ✓ ${name} verified`);
 }
 
 async function main() {
@@ -147,40 +214,54 @@ async function main() {
     await mkdir(staging, { recursive: true });
 
     try {
-        for (const file of spec.files) {
-            const dest = join(outDir, file.name);
-            if (existsSync(dest)) {
-                console.log(`  · ${file.name} already here, skipping`);
+        for (const [index, archive] of spec.archives.entries()) {
+            const wanted = archive.provides.filter(
+                (entry) => !existsSync(join(outDir, entry.name)),
+            );
+            if (wanted.length === 0) {
+                for (const entry of archive.provides) {
+                    console.log(`  · ${entry.name} already here, skipping`);
+                }
                 continue;
             }
 
-            console.log(`  ↓ ${file.url}`);
-            const archive = await download(file.url);
+            console.log(`  ↓ ${archive.url}`);
+            const bytes = await download(archive.url);
 
-            const actual = digest(archive);
-            if (actual !== file.sha256) {
+            const actual = digest(bytes);
+            if (actual !== archive.sha256) {
                 fail(
-                    `Digest mismatch for ${file.name}.\n    expected ${file.sha256}\n    got      ${actual}\n` +
+                    `Digest mismatch for ${archive.url}.\n    expected ${archive.sha256}\n    got      ${actual}\n` +
                         '    This binary is distributed to users. Investigate before pinning the new digest.',
                 );
             }
 
-            const archivePath = join(staging, `${file.name}.zip`);
-            await writeFile(archivePath, archive);
-            execFileSync('unzip', ['-oq', archivePath, '-d', staging]);
-            execFileSync('mv', [join(staging, file.name), dest]);
-            await chmod(dest, 0o755);
-            console.log(`  ✓ ${file.name}`);
+            const archivePath = join(staging, `archive-${index}.zip`);
+            await writeFile(archivePath, bytes);
+
+            for (const entry of wanted) {
+                // `-j` flattens: Windows builds keep their binaries in
+                // `<release>/bin/`, and the destination is a flat directory.
+                execFileSync('unzip', ['-joq', archivePath, entry.from, '-d', staging]);
+                const unpacked = join(staging, basename(entry.from));
+                if (!existsSync(unpacked)) {
+                    fail(`${entry.from} was not in ${archive.url}`);
+                }
+                execFileSync('mv', [unpacked, join(outDir, entry.name)]);
+                await chmod(join(outDir, entry.name), 0o755);
+                console.log(`  ✓ ${entry.name}`);
+            }
         }
 
-        for (const file of spec.files) {
+        const names = spec.archives.flatMap((a) => a.provides.map((e) => e.name));
+        for (const name of names) {
             verifyCapabilities(
-                join(outDir, file.name),
-                file.name,
+                join(outDir, name),
+                name,
                 spec.arch,
-                spec.verify[file.name],
+                spec.verify[name],
+                canRunTarget(target),
             );
-            console.log(`  ✓ ${file.name} verified`);
         }
 
         /*
@@ -218,7 +299,13 @@ async function main() {
             ].join('\n'),
         );
 
-        console.log(`\n  All good — ${target} is ready to package.\n`);
+        console.log(
+            canRunTarget(target)
+                ? `\n  All good — ${target} is ready to package.\n`
+                : `\n  Fetched and pinned, but NOT verified: ${target} binaries cannot be run\n` +
+                      `  here. They are packageable, and a release built from them has had its\n` +
+                      `  hardware support taken on trust. Run this on ${target} to confirm.\n`,
+        );
     } finally {
         await rm(staging, { recursive: true, force: true });
     }

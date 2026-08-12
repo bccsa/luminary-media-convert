@@ -71,9 +71,29 @@ file ./ffmpeg               # must be arm64, and should say "statically linked"
 
 Needs NVENC for the NVIDIA path (`h264_nvenc` + `scale_cuda`).
 
-- <https://www.gyan.dev/ffmpeg/builds/> — the "full" or "essentials" release
-  builds include NVENC
-- or <https://github.com/BtbN/FFmpeg-Builds/releases> (`win64-gpl`)
+- <https://github.com/BtbN/FFmpeg-Builds/releases> (`win64-gpl`) — what the fetch
+  script uses, pinned to a **dated** `autobuild-*` tag rather than `latest`,
+  because `latest` moves and a moving URL cannot be pinned to a digest
+- or <https://www.gyan.dev/ffmpeg/builds/> — the "full" or "essentials" release
+  builds
+- **not** the `-gpl-shared` variants: shared means DLLs beside the executable,
+  and `bundledBinary()` resolves a single file. Same reasoning that ruled out
+  Homebrew on macOS
+
+**Size, which is worth knowing before packaging.** The static `win64-gpl` build
+is ~144 MB per binary — 297 MB for the pair, against 99 MB for the macOS two. A
+Windows installer will be correspondingly larger, and `gyan.dev`'s "essentials"
+build is the smaller option if that matters more than codec coverage.
+
+**Verification cannot happen on another platform.** The script checks the
+architecture from `file` on any machine, but `-hwaccels` / `-encoders` /
+`-filters` require *running* the binary. Fetching `win32-x64` from a Mac is
+allowed and says so loudly: the binaries are pinned and packageable, and their
+hardware support has been taken on trust until someone runs the fetch on Windows.
+
+`strings` is not a substitute. `h264_nvenc` and `scale_cuda` do appear in the
+Windows binary — but so does `videotoolbox`, which cannot work there, so the
+strings come from name tables rather than proving compiled-in support.
 
 Verify:
 

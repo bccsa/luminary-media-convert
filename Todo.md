@@ -984,7 +984,11 @@ So the install prompt (item 35) is a fallback, and an installed user on macOS sh
 ✗ No binaries defined for win32-x64. Known: darwin-arm64.
 ```
 
-So every Windows user meets the prompt today, whatever the installer says. Needs a `TARGETS` entry — URL, SHA-256, and the capabilities to verify (`h264_nvenc`, `scale_cuda`, plus `libx264` for the CPU fallback). `electron/bin/README.md` names gyan.dev and BtbN as sources. This is also where item 36's unverified claim gets settled: whoever adds it will see immediately whether NVENC is present, since the fetch script checks.
+**Done — a `win32-x64` entry exists**, pinned to a dated BtbN `autobuild-*` release (their `latest` tag moves, and a moving URL cannot carry a digest) with the SHA-256 GitHub publishes for the asset. Fetching it works: 297 MB for the pair, against 99 MB on macOS, so a Windows installer will be noticeably heavier.
+
+**What is still not done is verifying it.** The capability checks have to *run* the binary, which a Mac cannot do for a `.exe`. The script now says so rather than skipping quietly — architecture is confirmed from `file` on any platform, and the run finishes with "Fetched and pinned, but NOT verified… hardware support taken on trust". Someone has to run `npm run fetch-binaries win32-x64` on Windows before a release is trustworthy, which folds into item 5.
+
+**And item 36's NVENC claim is still open, because `strings` cannot settle it.** `h264_nvenc` and `scale_cuda` do appear in the fetched binary — but so does `videotoolbox`, which cannot work on Windows at all, so those strings come from name tables rather than proving compiled-in support. Only `-encoders` on Windows answers it.
 
 ### 2. `pack` produces an app with no encoder, silently
 
