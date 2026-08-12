@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { LuminaryPlayer, usePlayerState } from '@luminary-media-converter/player-web';
+import {
+    LuminaryPlayer,
+    usePlayerState,
+} from '@luminary-media-converter/player-web';
 import type {
     PlayerControllerApi,
     PlayerSource,
@@ -25,7 +28,9 @@ const props = defineProps<{
     previewAudioSelectOptions: { value: number; label: string }[];
 }>();
 
-const selectedAudioTrack = defineModel<number>('selectedAudioTrack', { required: true });
+const selectedAudioTrack = defineModel<number>('selectedAudioTrack', {
+    required: true,
+});
 
 const emit = defineEmits<{
     playingChange: [playing: boolean];
@@ -36,7 +41,7 @@ const playerShellRef = ref<HTMLElement | null>(null);
 const luminaryPlayerRef = ref<InstanceType<typeof LuminaryPlayer> | null>(null);
 
 const controller = computed<PlayerControllerApi | null>(
-    () => luminaryPlayerRef.value?.controller ?? null,
+    () => luminaryPlayerRef.value?.controller ?? null
 );
 
 const state = usePlayerState(controller);
@@ -48,11 +53,11 @@ const state = usePlayerState(controller);
 // and the post-cap quality ladder are whatever it found there.
 
 const angleOptions = computed(() =>
-    state.value.angles.map((angle) => ({ value: angle.id, label: angle.name })),
+    state.value.angles.map((angle) => ({ value: angle.id, label: angle.name }))
 );
 
 const showAngleRow = computed(
-    () => angleOptions.value.length > 1 && !props.hideAngleSwitcher,
+    () => angleOptions.value.length > 1 && !props.hideAngleSwitcher
 );
 
 const qualityOptions = computed(() => [
@@ -64,7 +69,7 @@ const qualityOptions = computed(() => [
 ]);
 
 const showQualitySelect = computed(
-    () => state.value.qualities.length >= 1 && !state.value.isAudioOnly,
+    () => state.value.qualities.length >= 1 && !state.value.isAudioOnly
 );
 
 /**
@@ -74,13 +79,16 @@ const showQualitySelect = computed(
 const playerAudioOptions = computed(() =>
     state.value.audioTracks.map((track) => ({
         value: track.id,
-        label: track.lang && track.lang !== track.label
-            ? `${track.label} (${track.lang})`
-            : track.label,
-    })),
+        label:
+            track.lang && track.lang !== track.label
+                ? `${track.label} (${track.lang})`
+                : track.label,
+    }))
 );
 
-const showPlayerAudioSelect = computed(() => playerAudioOptions.value.length > 1);
+const showPlayerAudioSelect = computed(
+    () => playerAudioOptions.value.length > 1
+);
 
 /** There is a picture to make full screen. */
 const canPlay = computed(() => state.value.lifecycle === 'ready');
@@ -91,7 +99,7 @@ const showPlaybackControlsRow = computed(
         props.showAudioSelect ||
         showPlayerAudioSelect.value ||
         showQualitySelect.value ||
-        canPlay.value,
+        canPlay.value
 );
 
 /** The player exposes fullscreen; it deliberately draws no button for it. */
@@ -99,10 +107,16 @@ function enterFullscreen(): void {
     void luminaryPlayerRef.value?.enterFullscreen();
 }
 
-watch(() => state.value.playing, (playing) => emit('playingChange', playing));
-watch(() => state.value.duration, (duration) => {
-    if (duration > 0) emit('durationChange', duration);
-});
+watch(
+    () => state.value.playing,
+    (playing) => emit('playingChange', playing)
+);
+watch(
+    () => state.value.duration,
+    (duration) => {
+        if (duration > 0) emit('durationChange', duration);
+    }
+);
 
 // ---- Playback surface exposed to the view ----
 
@@ -168,15 +182,19 @@ const SPLIT_KEY = 'lmc:session-player-split';
 const SPLIT_MIN = 25;
 const SPLIT_MAX = 75;
 
-const splitPercent = ref<number>((() => {
-    try {
-        const raw = localStorage.getItem(SPLIT_KEY);
-        const n = raw == null ? NaN : Number(raw);
-        return Number.isFinite(n) && n >= SPLIT_MIN && n <= SPLIT_MAX ? n : 50;
-    } catch {
-        return 50;
-    }
-})());
+const splitPercent = ref<number>(
+    (() => {
+        try {
+            const raw = localStorage.getItem(SPLIT_KEY);
+            const n = raw == null ? NaN : Number(raw);
+            return Number.isFinite(n) && n >= SPLIT_MIN && n <= SPLIT_MAX
+                ? n
+                : 50;
+        } catch {
+            return 50;
+        }
+    })()
+);
 
 const splitRowRef = ref<HTMLElement | null>(null);
 const isResizing = ref(false);
@@ -213,7 +231,9 @@ function onResizeStart(e: PointerEvent) {
     const onEnd = (ev: PointerEvent) => {
         isResizing.value = false;
         if (raf) cancelAnimationFrame(raf);
-        try { handle.releasePointerCapture(ev.pointerId); } catch {}
+        try {
+            handle.releasePointerCapture(ev.pointerId);
+        } catch {}
         handle.removeEventListener('pointermove', onMove);
         handle.removeEventListener('pointerup', onEnd);
         handle.removeEventListener('pointercancel', onEnd);
@@ -251,10 +271,10 @@ function onResizeKey(e: KeyboardEvent) {
 }
 
 const playerColStyle = computed(() =>
-    props.showAside ? { flex: `0 0 ${splitPercent.value}%` } : undefined,
+    props.showAside ? { flex: `0 0 ${splitPercent.value}%` } : undefined
 );
 const asideColStyle = computed(() =>
-    props.showAside ? { flex: `0 0 ${100 - splitPercent.value}%` } : undefined,
+    props.showAside ? { flex: `0 0 ${100 - splitPercent.value}%` } : undefined
 );
 
 const lifecycle = computed(() => state.value.lifecycle);
@@ -285,7 +305,11 @@ defineExpose({
             ref="splitRowRef"
             class="flex min-h-0 flex-1"
             :class="[
-                showAside ? 'flex-row' : (activeTab === 'trim' ? 'flex-col items-center justify-center' : 'flex-col gap-4'),
+                showAside
+                    ? 'flex-row'
+                    : activeTab === 'trim'
+                      ? 'flex-col items-center justify-center'
+                      : 'flex-col gap-4',
                 isResizing ? 'select-none' : '',
             ]"
         >
@@ -294,7 +318,9 @@ defineExpose({
                 class="flex min-h-0 min-w-0 flex-col"
                 :class="[
                     showAside ? '' : 'flex-1',
-                    !showAside && activeTab === 'trim' ? 'max-w-[min(100%,60vw)]' : '',
+                    !showAside && activeTab === 'trim'
+                        ? 'max-w-[min(100%,60vw)]'
+                        : '',
                     activeTab === 'trim' ? 'pt-3 pl-3' : '',
                     activeTab === 'trim' && !showAside ? 'pr-3' : '',
                     /*
@@ -321,14 +347,13 @@ defineExpose({
 
                 <div
                     ref="playerShellRef"
-                    :class="activeTab === 'trim'
-                        ? 'session-trim-player-shell overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'
-                        : 'w-full overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'"
+                    :class="
+                        activeTab === 'trim'
+                            ? 'session-trim-player-shell overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'
+                            : 'w-full overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'
+                    "
                 >
-                    <LuminaryPlayer
-                        ref="luminaryPlayerRef"
-                        :source="source"
-                    >
+                    <LuminaryPlayer ref="luminaryPlayerRef" :source="source">
                         <!--
                             Audio-only renderings have nothing to show, so the
                             black rectangle gets a glyph rather than looking
@@ -349,8 +374,20 @@ defineExpose({
                                 aria-hidden="true"
                             >
                                 <path d="M4 16V11a8 8 0 0 1 16 0v5" />
-                                <rect x="2" y="14" width="4" height="7" rx="2" />
-                                <rect x="18" y="14" width="4" height="7" rx="2" />
+                                <rect
+                                    x="2"
+                                    y="14"
+                                    width="4"
+                                    height="7"
+                                    rx="2"
+                                />
+                                <rect
+                                    x="18"
+                                    y="14"
+                                    width="4"
+                                    height="7"
+                                    rx="2"
+                                />
                             </svg>
                         </div>
                     </LuminaryPlayer>
@@ -374,13 +411,19 @@ defineExpose({
                     <div
                         v-if="showPlaybackControlsRow"
                         class="flex flex-wrap items-center gap-x-4 gap-y-2"
-                        :class="$slots['below-player'] ? 'shrink-0 ml-auto justify-end' : 'min-w-0'"
+                        :class="
+                            $slots['below-player']
+                                ? 'shrink-0 ml-auto justify-end'
+                                : 'min-w-0'
+                        "
                     >
                         <span
                             v-if="showAngleRow"
                             class="inline-flex shrink-0 items-center gap-1.5"
                         >
-                            <label class="playback-slot-label shrink-0">Angle:</label>
+                            <label class="playback-slot-label shrink-0"
+                                >Angle:</label
+                            >
                             <FormSelect
                                 variant="playback"
                                 presentation="custom"
@@ -388,14 +431,18 @@ defineExpose({
                                 :model-value="state.activeAngleId ?? ''"
                                 :options="angleOptions"
                                 aria-label="Camera angle"
-                                @update:model-value="controller?.setAngle(String($event))"
+                                @update:model-value="
+                                    controller?.setAngle(String($event))
+                                "
                             />
                         </span>
                         <span
                             v-if="showAudioSelect"
                             class="inline-flex shrink-0 items-center gap-1.5"
                         >
-                            <label class="playback-slot-label shrink-0">Audio:</label>
+                            <label class="playback-slot-label shrink-0"
+                                >Audio:</label
+                            >
                             <FormSelect
                                 variant="playback"
                                 presentation="custom"
@@ -409,28 +456,36 @@ defineExpose({
                             v-else-if="showPlayerAudioSelect"
                             class="inline-flex shrink-0 items-center gap-1.5"
                         >
-                            <label class="playback-slot-label shrink-0">Audio:</label>
+                            <label class="playback-slot-label shrink-0"
+                                >Audio:</label
+                            >
                             <FormSelect
                                 variant="playback"
                                 presentation="custom"
                                 :model-value="state.activeAudioTrackId ?? ''"
                                 :options="playerAudioOptions"
                                 aria-label="Audio track"
-                                @update:model-value="controller?.setAudioTrack(String($event))"
+                                @update:model-value="
+                                    controller?.setAudioTrack(String($event))
+                                "
                             />
                         </span>
                         <span
                             v-if="showQualitySelect"
                             class="inline-flex shrink-0 items-center gap-1.5"
                         >
-                            <label class="playback-slot-label shrink-0">Quality:</label>
+                            <label class="playback-slot-label shrink-0"
+                                >Quality:</label
+                            >
                             <FormSelect
                                 variant="playback"
                                 presentation="custom"
                                 :model-value="state.activeQualityId"
                                 :options="qualityOptions"
                                 aria-label="Quality"
-                                @update:model-value="controller?.setQuality(String($event))"
+                                @update:model-value="
+                                    controller?.setQuality(String($event))
+                                "
                             />
                         </span>
                         <!--
@@ -478,9 +533,13 @@ defineExpose({
                 @dblclick="onResizeReset"
                 @keydown="onResizeKey"
             >
-                <span class="session-split-handle__bar" aria-hidden="true"></span>
+                <span
+                    class="w-px h-full bg-slate-200 pointer-events-none transition-[background,width] duration-140 ease-in-out dark:bg-slate-700/60"
+                    aria-hidden="true"
+                ></span>
                 <span class="session-split-handle__grip" aria-hidden="true">
-                    <span></span><span></span><span></span><span></span><span></span><span></span>
+                    <span></span><span></span><span></span><span></span
+                    ><span></span><span></span>
                 </span>
             </div>
 
@@ -488,9 +547,11 @@ defineExpose({
             <aside
                 v-if="showAside"
                 class="flex min-h-0 flex-col overflow-hidden"
-                :class="activeTab === 'trim'
-                    ? 'gap-2 pl-4 pr-5 pt-3 pb-2 trim-aside'
-                    : 'gap-3'"
+                :class="
+                    activeTab === 'trim'
+                        ? 'gap-2 pl-4 pr-5 pt-3 pb-2 trim-aside'
+                        : 'gap-3'
+                "
                 :style="asideColStyle"
             >
                 <slot name="aside" />
@@ -563,17 +624,6 @@ defineExpose({
     user-select: none;
 }
 
-.session-split-handle__bar {
-    width: 1px;
-    height: 100%;
-    background: rgb(226 232 240); /* slate-200 */
-    transition: background 0.14s ease, width 0.14s ease;
-    pointer-events: none;
-}
-:global(html.dark) .session-split-handle__bar {
-    background: rgb(51 65 85 / 0.6); /* slate-700/60 */
-}
-
 .session-split-handle:hover .session-split-handle__bar,
 .session-split-handle:focus-visible .session-split-handle__bar,
 .session-split-handle--active .session-split-handle__bar {
@@ -581,7 +631,9 @@ defineExpose({
     width: 2px;
 }
 :global(html.dark) .session-split-handle:hover .session-split-handle__bar,
-:global(html.dark) .session-split-handle:focus-visible .session-split-handle__bar,
+:global(html.dark)
+    .session-split-handle:focus-visible
+    .session-split-handle__bar,
 :global(html.dark) .session-split-handle--active .session-split-handle__bar {
     background: rgb(14 165 233); /* sky-500 */
 }
@@ -599,9 +651,15 @@ defineExpose({
     border-radius: 8px;
     background: #fff;
     border: 1px solid rgb(203 213 225); /* slate-300 */
-    box-shadow: 0 1px 3px rgb(15 23 42 / 0.12), 0 1px 2px rgb(15 23 42 / 0.06);
+    box-shadow:
+        0 1px 3px rgb(15 23 42 / 0.12),
+        0 1px 2px rgb(15 23 42 / 0.06);
     opacity: 0;
-    transition: opacity 0.12s ease, transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+    transition:
+        opacity 0.12s ease,
+        transform 0.12s ease,
+        border-color 0.12s ease,
+        box-shadow 0.12s ease;
     pointer-events: none;
 }
 :global(html.dark) .session-split-handle__grip {
@@ -637,7 +695,10 @@ defineExpose({
 :global(html.dark) .session-split-handle--active .session-split-handle__grip {
     border-color: rgb(14 165 233); /* sky-500 */
 }
-:global(html.dark) .session-split-handle--active .session-split-handle__grip > span {
+:global(html.dark)
+    .session-split-handle--active
+    .session-split-handle__grip
+    > span {
     background: rgb(14 165 233);
 }
 </style>
