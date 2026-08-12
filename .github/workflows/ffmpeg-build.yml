@@ -35,9 +35,18 @@ jobs:
             fail-fast: false
             matrix:
                 include:
-                    # macos-14 is arm64; macos-13 is the last Intel image.
-                    - { target: darwin-arm64, runner: macos-14 }
-                    - { target: darwin-x64, runner: macos-13 }
+                    # Both on Apple Silicon, because GitHub has retired the Intel
+                    # image: the darwin-x64 job sat queued indefinitely on macos-13
+                    # and was never assigned a runner in any run. So Intel is
+                    # cross-compiled on arm64, which build.sh already supports.
+                    #
+                    # `native` says whether the result can be *run* here. arm64 can
+                    # execute x86_64 binaries only under Rosetta, which a runner may
+                    # not have, so the capability and encode steps below are skipped
+                    # rather than failed when it is absent — a build that cannot be
+                    # probed is not the same as a build that is broken.
+                    - { target: darwin-arm64, runner: macos-14, native: true }
+                    - { target: darwin-x64, runner: macos-14, native: false }
         runs-on: ${{ matrix.runner }}
         steps:
             - uses: actions/checkout@v5
@@ -49,7 +58,23 @@ jobs:
             # Native on both runners, so the binary can be asked what it supports
             # rather than trusted. These are the same questions FfmpegService asks
             # at start-up to choose its acceleration mode.
+            # Rosetta makes the x64 binary runnable on an arm64 runner when it is
+            # installed. Probed rather than assumed, and reported either way.
+            - name: Can this runner execute the build?
+              id: runnable
+              run: |
+                  if [ "${{ matrix.native }}" = "true" ]; then
+                    echo "runnable=true" >> "$GITHUB_OUTPUT"
+                  elif /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
+                    echo "runnable=true" >> "$GITHUB_OUTPUT"
+                    echo "x86_64 binaries run here under Rosetta"
+                  else
+                    echo "runnable=false" >> "$GITHUB_OUTPUT"
+                    echo "::warning::No Rosetta on this runner — ${{ matrix.target }} is built and pinned but NOT capability-tested"
+                  fi
+
             - name: What the build supports
+              if: steps.runnable.outputs.runnable == 'true'
               run: |
                   FF=electron/bin/${{ matrix.target }}/ffmpeg
                   "$FF" -hide_banner -version | head -1
@@ -70,6 +95,7 @@ jobs:
             # --disable-indevs removes lavfi (it lives in libavdevice) — so there is
             # no testsrc in these builds, and this pattern works in Git Bash too.
             - name: Encode something
+              if: steps.runnable.outputs.runnable == 'true'
               shell: bash
               run: |
                   set -euo pipefail

@@ -18,6 +18,14 @@ on:
 env:
     CI: true
 
+# Electron's postinstall downloads a ~100 MB binary, and that download is the single
+# most common cause of a red run here: "npm error RequestError: socket hang up" from
+# node_modules/electron/install.js, which has nothing to do with the code under test.
+# None of these jobs launch Electron, so the download is skipped outright rather than
+# retried — faster, and it removes the failure mode instead of hiding it.
+env:
+    ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+
 jobs:
     test:
         runs-on: ubuntu-latest

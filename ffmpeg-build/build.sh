@@ -380,11 +380,15 @@ echo "    ✓ no foreign dependencies — relocatable"
 # does not contain. A notice that misdescribes what it accompanies is worse than
 # none, and it is the same fault that already had to be fixed once for Windows.
 log "Licence notice"
+# 2 unless the binary says otherwise. This build never passes --enable-version3, so
+# 2 is the right answer — but it is read off the binary where that is possible,
+# because a licence notice should describe the artefact rather than the intention.
+# On a cross-built target that cannot be run here, the configure flags are the only
+# evidence available, and they are in this file.
 licence_version="2"
 if [ "$native" = true ]; then
-    # Read it off the binary rather than assuming: --enable-version3 is not set
-    # here, so this should say 2, and if that ever changes the notice follows.
-    "$out/ffmpeg$exe" -hide_banner -L 2>&1 | grep -q 'either version 3' && licence_version="3"
+    "$out/ffmpeg$exe" -hide_banner -L 2>/dev/null | grep -q 'either version 3' &&
+        licence_version="3"
 fi
 
 for licence in GPL-2.0.txt GPL-3.0.txt; do
@@ -431,8 +435,13 @@ for b in "ffmpeg$exe" "ffprobe$exe"; do
 done
 
 if [ "$native" = true ]; then
-    "$out/ffmpeg" -hide_banner -version | head -1 | sed 's/^/    /'
-    "$out/ffmpeg" -hide_banner -L 2>&1 | sed -n '3p' | sed 's/^/    licence: /'
+    # `|| true`: this is a report, not a check. What decides whether a build is
+    # usable are the capability probes in CI and verify-package; failing the build
+    # because a *description* could not be printed would be backwards.
+    "$out/ffmpeg$exe" -hide_banner -version 2>/dev/null | head -1 | sed 's/^/    /' || true
+    "$out/ffmpeg$exe" -hide_banner -L 2>/dev/null | sed -n '3p' | sed 's/^/    licence: /' || true
+else
+    echo "    (not run here: a $target binary cannot execute on $(uname -s)/$host_arch)"
 fi
 
 cat <<EOF
