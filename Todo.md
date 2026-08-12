@@ -174,14 +174,35 @@ Whatever is chosen must cope with the case where the CMS document was deleted en
 
 ---
 
-## 5. Windows build verification
+## 5. Windows build verification — built and installed; encoding still unverified
 
-**Today.** `electron-builder.yml` has a `win` / `nsis` target (x64, non-one-click, per-user, installation directory changeable) and the protocol registration is written to cover Windows. **It has never been built or run.**
+**12 Aug 2026: the first Windows installer was built, and it installs.** The build
+runs on a `windows-latest` GitHub runner (`.github/workflows/windows-ffmpeg-verify.yml`),
+which produced `Luminary Media Convert Setup 0.0.1.exe` (156 MB, unsigned), and Johan
+installed it on a real Windows PC — the installation completed without trouble. Before
+this, nothing in this project had ever been built for or run on Windows.
 
-**Needed.**
+Two Windows-only defects were found in the process, neither reproducible on macOS:
+`unzip`/`mv`/`file` do not exist there, and `fs.rename` cannot cross volumes (the
+runner's temp is on `C:` while the checkout is on `D:` — `EXDEV`). Both fixed.
 
-- A Windows machine (or CI runner) to build on
-- NVENC-capable `ffmpeg.exe` / `ffprobe.exe` in `electron/bin/win32-x64/` — see `electron/bin/README.md` for sources (gyan.dev, BtbN) and verification (`ffmpeg -hwaccels`, `ffmpeg -encoders | findstr nvenc`)
+**Confirmed by execution on the runner**, not inferred: `cuda` in `-hwaccels`,
+`h264_nvenc` / `hevc_nvenc` / `av1_nvenc` / `libx264` in `-encoders`, `scale_cuda` in
+`-filters`, and the licence — `--enable-gpl --enable-version3`, so v3-or-later.
+
+**Still unverified, and each needs a Windows machine rather than a runner:**
+
+- Does the installed app **launch**, and does it encode? Install succeeding says the
+  NSIS package is sound; it says nothing about the app starting or the bundled
+  `ffmpeg.exe` running
+- Whether SmartScreen warned, and how loudly — the installer is unsigned
+- `luminary-convert://` protocol registration through the installer
+- `safeStorage` (DPAPI-backed, expected to be fine) and the credential sidecar
+- The `resourcesPath` lookup with `.exe` suffixes, and paths containing spaces
+- **NVENC encoding on real NVIDIA hardware.** The runner proves the build *has* NVENC;
+  only a GPU machine proves it *encodes*. This remains the single largest untested path
+
+**Also needed:**
 - Verification of the things that differ from macOS: `luminary-convert://` protocol registration through the installer, `safeStorage` (DPAPI-backed, should be fine), the `resourcesPath` binary lookup with `.exe` suffixes, path handling with spaces (`shellQuote` covers the `execSync` probes; `execFile` callers are unaffected), and whether Windows Defender / SmartScreen blocks an unsigned installer outright
 - Confirm the NVIDIA acceleration path end-to-end, which no developer machine in this project can currently exercise
 
@@ -1019,7 +1040,9 @@ Triggered manually, and automatically when the pinned URL, digest or packaging c
 
 **The runner also earned its keep immediately by finding a Windows-only defect on its first run.** `fs.rename` cannot cross volumes, and there the temp directory is on `C:` while the checkout is on `D:` — `EXDEV`. No macOS run can reproduce that, because everything is one filesystem. Staging now sits inside `electron/bin/` so the move stays on one volume. That is the second Windows-only fault this work has surfaced, after `unzip`, `mv` and `file` not existing there — which is the argument for the runner in one line.
 
-**Still not exercised: `dist:win` itself.** The installer step is gated behind the `package` input, which only `workflow_dispatch` supplies, and that needs the workflow on the default branch. So no NSIS installer has ever been built.
+**`dist:win` now runs, and its output installs.** The installer step was gated behind the `package` input, which only `workflow_dispatch` supplies — and that needs the workflow on the default branch. A push to `ci/windows-pack-*` now asks for it too, which produced the first `.exe` (156 MB, unsigned); Johan installed it successfully on a Windows PC on 12 Aug 2026. What the install does *not* establish is that the app launches or encodes there — see item 5.
+
+**The first `dist:win` attempt failed, and the bug was not Windows-specific.** `build:libs` compiled `segment-editor` before `hls`, which it imports from, so `vue-tsc` had no declarations: `TS2307 Cannot find module '@luminary-media-converter/hls'`, and `TS7006` on a callback parameter as a consequence of the unresolved type. Invisible on a development machine, where `hls/dist` is left over from an earlier build. **Any clean clone could not build** — the runner was simply the first thing to try. Order now follows the dependency direction.
 
 ### 2. `pack` produced an app with no encoder, silently — fixed
 
