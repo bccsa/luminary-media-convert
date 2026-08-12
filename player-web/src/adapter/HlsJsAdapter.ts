@@ -20,9 +20,12 @@ import type {
     AdapterSource,
     AdapterTextTrack,
     AdapterVariant,
+    ChunkBoundary,
+    ChunkWarmOptions,
     PlayerAdapter,
     Unsubscribe,
 } from '@luminary-media-converter/player-core';
+import { ChunkPrefetcher } from './chunkWarming';
 
 /** Attribute used to correlate a `<track>` element with its adapter track id. */
 const TRACK_ID_ATTR = 'data-luminary-track-id';
@@ -148,6 +151,7 @@ export class HlsJsAdapter implements PlayerAdapter {
     private readonly video: HTMLVideoElement;
     private readonly hlsConfig: Partial<HlsConfig>;
     private hls: Hls | null = null;
+    private prefetcher: ChunkPrefetcher | null = null;
     private keyBytes: Uint8Array | null = null;
     private trackEls: HTMLTrackElement[] = [];
     private activeTextTrackId: string | null = null;
@@ -333,6 +337,40 @@ export class HlsJsAdapter implements PlayerAdapter {
         return false;
     }
 
+    // -- chunk warming ------------------------------------------------------
+
+    /**
+     * Arm the warming loop for the chains the wrapper just attached, replacing
+     * whatever was running before; an empty schedule set means stop (the
+     * wrapper's way of saying the source is gone or warming is off).
+     *
+     * The loop lives here rather than in the wrapper because it is paced
+     * against this media element and this platform's timers — see
+     * `PlayerAdapter.warmChunks` for the contract a native adapter reimplements.
+     */
+    warmChunks(schedules: ChunkBoundary[][], options: ChunkWarmOptions): void {
+        this.prefetcher?.stop();
+        this.prefetcher = null;
+        if (this.destroyed || schedules.length === 0) return;
+
+        this.prefetcher = new ChunkPrefetcher(
+            {
+                // Buffer front first — that is what crosses a boundary — with
+                // the playhead as the floor, so a video with nothing buffered
+                // yet still warms from where it is playing.
+                getWatermark: () => {
+                    const buffered = this.video.buffered;
+                    return Math.max(
+                        buffered.length ? buffered.end(buffered.length - 1) : 0,
+                        this.video.currentTime,
+                    );
+                },
+            },
+            options,
+        );
+        this.prefetcher.start(schedules);
+    }
+
     // -- events -------------------------------------------------------------
 
     on<E extends AdapterEventName>(
@@ -414,6 +452,10 @@ export class HlsJsAdapter implements PlayerAdapter {
 
     /** Tears the engine down but keeps registered adapter listeners alive. */
     private teardownEngine(): void {
+        // A loop that outlives its source warms chunks nothing will play; the
+        // wrapper re-arms it right after the next loadSource() resolves.
+        this.prefetcher?.stop();
+        this.prefetcher = null;
         this.detachMediaListeners();
         this.removeTrackElements();
         if (this.hls) {
