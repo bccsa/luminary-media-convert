@@ -860,9 +860,22 @@ So the "ask the user" half of this question is answered and shipped. What that l
 
 That is a coherent place to stand: a user who installs the app gets a known-good build with the right hardware encoders, and a developer running from source gets told what to install. It also means the two costs the item opened with are unchanged — a 146 MB `.dmg`, and the GPL obligations `electron/bin/README.md` sets out.
 
-**Still open, therefore:** whether to stop shipping the binaries now that the prompt exists. Dropping them makes the installer a few megabytes and moves the ffmpeg download outside our distribution; it also hands every user the lottery this item already documents — a build without NVENC on Windows encodes several times slower, and "install FFmpeg and put it on your PATH" is a support ticket per user. The third option from below stands too: keep controlling *which* build is used and fetch the pinned one on first run.
+### And the shipping half: keep the binaries in the installer
 
-**Not a decision for this repo.** Installer size, licensing exposure and support load are the trade, and the people carrying each should pick. What this repo can say is that the "ask the user" option is not free today: item 35 has to land first, or the first thing a user without ffmpeg sees is an encode that fails after they have committed to a destination.
+Decided together with the above. The reasoning, so it can be revisited on its merits rather than re-argued from scratch:
+
+- **The audience settles it.** These are CMS editors, not developers. "Install FFmpeg and add it to your PATH" is a support ticket per user on Windows — unzip, edit environment variables, restart — and the person answering it is us. An app that works on first launch is worth more than 140 MB of disk.
+- **146 MB is unremarkable for this class of tool.** HandBrake, OBS and DaVinci are all in that range or past it. It is a one-time download for something installed deliberately.
+- **The prompt is now a fallback doing its proper job**, not a substitute for shipping: it covers a run from source and a package built without the fetch (`pack` skips it). That is the right scope for it.
+
+**The two costs this item opened with do not go away — they get addressed directly:**
+
+- **The GPL obligation is paperwork, not an obstacle.** ffmpeg runs as a separate process and is never linked, so the obligation travels with the binary rather than reaching this Apache-2.0 codebase (item 5a says the same). It needs someone at BCC to sign off the notice and the source offer once. Until that happens, nothing here is publicly distributable — which is a release blocker, not a design one.
+- **The size only really bites with auto-update** (item 2), where a naive feed re-downloads ~100 MB per release. `electron-updater` supports differential updates through block maps; that is the thing to get right when item 2 lands, and it is configuration rather than architecture.
+
+**One claim in this item is unverified and load-bearing.** It says "on Windows most published builds lack NVENC". That looks wrong: `electron/bin/README.md` points at gyan.dev and BtbN precisely *because* their builds carry NVENC, and those are the two anyone reaches for. If common Windows builds do include it, the lottery argument for bundling is weaker than written here, and the genuinely scarce case is a native macOS arm64 build rather than Windows. Worth checking before anyone leans on it — the decision above rests on the support burden, which does not depend on it.
+
+**If it is ever revisited**, the third option below is the one to reach for rather than plain "ask the user": keep controlling *which* build is used and fetch the pinned, digest-checked binary on first run. That removes the binary from the installer without handing anyone a build lottery. What this repo can say is that the "ask the user" option is not free today: item 35 has to land first, or the first thing a user without ffmpeg sees is an encode that fails after they have committed to a destination.
 
 ### Decided for now (Johan, 11 Aug 2026): FFmpeg is mandatory, and a machine without it is told to install it
 
