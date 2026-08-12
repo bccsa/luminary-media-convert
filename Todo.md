@@ -190,12 +190,25 @@ runner's temp is on `C:` while the checkout is on `D:` — `EXDEV`). Both fixed.
 `h264_nvenc` / `hevc_nvenc` / `av1_nvenc` / `libx264` in `-encoders`, `scale_cuda` in
 `-filters`, and the licence — `--enable-gpl --enable-version3`, so v3-or-later.
 
+**Confirmed on a real Windows PC, 12 Aug 2026:** the installer runs, **SmartScreen did
+not warn** despite being unsigned, the app **opens**, and the embedded binaries are in
+place — `resources\` holds `ffmpeg.exe`, `ffprobe.exe`, `GPL-3.0.txt` and
+`LICENSE-ffmpeg.txt`. It installed under `AppData\Local\Programs`, no admin rights, as
+`perMachine: false` intends. The GPL-3.0 text and no GPL-2.0 is the per-build licence
+rule working in a shipped install (item 40).
+
+The workflow now asserts this itself rather than trusting it: the packaged
+`win-unpacked/resources` must contain both binaries, the notice and a GPL text, and the
+shipped `ffmpeg.exe` is run to prove it is real (144 MB, `n8.1.2-34-g9b6c8969e0`).
+electron-builder treats a missing `extraResources` source as a *warning* (item 5a), so
+without that step an installer could ship with no encoder and nothing would notice.
+
 **Still unverified, and each needs a Windows machine rather than a runner:**
 
-- Does the installed app **launch**, and does it encode? Install succeeding says the
-  NSIS package is sound; it says nothing about the app starting or the bundled
-  `ffmpeg.exe` running
-- Whether SmartScreen warned, and how loudly — the installer is unsigned
+- **Encoding.** Blocked outside this repository: the CMS has no upload flow yet, and the
+  app has no way to open a session without one. Nothing Windows-specific is suspected —
+  the binaries are present and the same code path works on macOS
+- Whether the encode path handles Windows paths with spaces, once it can be run at all
 - `luminary-convert://` protocol registration through the installer
 - `safeStorage` (DPAPI-backed, expected to be fine) and the credential sidecar
 - The `resourcesPath` lookup with `.exe` suffixes, and paths containing spaces
