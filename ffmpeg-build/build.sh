@@ -359,6 +359,56 @@ if [ -n "$foreign" ]; then
 fi
 echo "    ✓ no foreign dependencies — relocatable"
 
+# ── Licence notice, written by the thing that did the building ───────────────
+# The build has to write this itself. `fetch-binaries` writes a notice describing
+# the build *it* downloads, so leaving that in place left our own 20 MB binary
+# beside a file crediting osxexperts.net and claiming libx265 — which this build
+# does not contain. A notice that misdescribes what it accompanies is worse than
+# none, and it is the same fault that already had to be fixed once for Windows.
+log "Licence notice"
+licence_version="2"
+if [ "$native" = true ]; then
+    # Read it off the binary rather than assuming: --enable-version3 is not set
+    # here, so this should say 2, and if that ever changes the notice follows.
+    "$out/ffmpeg$exe" -hide_banner -L 2>&1 | grep -q 'either version 3' && licence_version="3"
+fi
+
+for licence in GPL-2.0.txt GPL-3.0.txt; do
+    from="$repo/electron/bin/licenses/$licence"
+    [ -f "$from" ] || fail "$licence is missing from electron/bin/licenses/"
+    # A v2-or-later work offers v3 as well, so both travel. (A v3-only build would
+    # ship v3 alone — see fetch-binaries.mjs for that reasoning.)
+    cp "$from" "$out/$licence"
+done
+
+cat > "$out/LICENSE-ffmpeg.txt" <<EOF
+FFmpeg $FFMPEG_VERSION ($target), built from source by this project, distributed
+under the GNU General Public License version $licence_version or later, with
+libx264 statically linked.
+
+This application invokes ffmpeg as a separate process; it is not linked against
+the FFmpeg libraries. The application itself is licensed under Apache-2.0.
+
+Licence:        GPL-$licence_version.0-or-later
+Licence text:   GPL-2.0.txt beside this file (and GPL-3.0.txt, at your option)
+FFmpeg project: https://ffmpeg.org/
+
+Corresponding source: this binary was built by ffmpeg-build/build.sh in the
+Luminary Media Convert repository, from the sources pinned in
+ffmpeg-build/versions.sh:
+
+  FFmpeg $FFMPEG_VERSION   https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz
+    sha256 $FFMPEG_SHA256
+  x264      $X264_COMMIT
+    $X264_REPO
+  libwebp $LIBWEBP_VERSION
+    sha256 $LIBWEBP_SHA256
+
+That script and versions file are the complete instructions for rebuilding this
+binary. No x265: this build writes H.264 only.
+EOF
+echo "    ✓ LICENSE-ffmpeg.txt (GPL-$licence_version.0-or-later), GPL-2.0.txt, GPL-3.0.txt"
+
 log "Built $target"
 for b in "ffmpeg$exe" "ffprobe$exe"; do
     printf '    %s  %s MB  %s\n' "$b" \
