@@ -12,6 +12,8 @@ import type {
     AdapterTextTrack,
     AdapterVariant,
     AdapterSource,
+    ChunkBoundary,
+    ChunkWarmOptions,
     PlayerAdapter,
     ServeStrategy,
     Unsubscribe,
@@ -78,6 +80,29 @@ export const ENCRYPTED_MEDIA_PLAYLIST = [
     '#EXTINF:4.000000,',
     '#EXT-X-BYTERANGE:118000@120000',
     'data_0.m4s',
+    '#EXT-X-ENDLIST',
+    '',
+].join('\n');
+
+/**
+ * Byte-range chunk chain, the shape the encoder writes: segments live in two
+ * shared chunk objects one directory up, referenced by range.
+ */
+export const CHUNKED_MEDIA_PLAYLIST = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:7',
+    '#EXT-X-TARGETDURATION:4',
+    '#EXT-X-PLAYLIST-TYPE:VOD',
+    '#EXT-X-MAP:URI="init.mp4"',
+    '#EXTINF:4.000000,',
+    '#EXT-X-BYTERANGE:120000@0',
+    '../media/v0_0.m4s',
+    '#EXTINF:4.000000,',
+    '#EXT-X-BYTERANGE:118000@120000',
+    '../media/v0_0.m4s',
+    '#EXTINF:4.000000,',
+    '#EXT-X-BYTERANGE:117000@0',
+    '../media/v0_1.m4s',
     '#EXT-X-ENDLIST',
     '',
 ].join('\n');
@@ -261,6 +286,10 @@ export class FakeAdapter implements PlayerAdapter {
     readonly variantCalls: string[] = [];
     readonly audioTrackCalls: string[] = [];
     readonly recoverCalls: string[] = [];
+    readonly warmCalls: Array<{
+        schedules: ChunkBoundary[][];
+        options: ChunkWarmOptions;
+    }> = [];
     textTracks: AdapterTextTrack[] = [];
     activeTextTrackId: string | null = null;
     playCount = 0;
@@ -361,6 +390,18 @@ export class FakeAdapter implements PlayerAdapter {
         this.recoverCalls.push(category);
         return this.recoverResult;
     }
+
+    /**
+     * A property rather than a method so a spec can set it to `undefined` and
+     * stand in for an adapter that implements no warming at all — the
+     * controller must be as happy with those as with this one.
+     */
+    warmChunks: PlayerAdapter['warmChunks'] = (
+        schedules: ChunkBoundary[][],
+        options: ChunkWarmOptions,
+    ) => {
+        this.warmCalls.push({ schedules, options });
+    };
 
     on<E extends AdapterEventName>(
         event: E,

@@ -3,8 +3,11 @@
  *
  * Fetch master → derive angles/qualities/tracks → extract the requested angle →
  * cap quality → rewrite + serve the media playlists → serve the master → hand
- * the result to the adapter. An unencrypted master that needs no narrowing is
- * passed through by its original URL, so the common case costs nothing.
+ * the result to the adapter. EVERY source takes that path, encrypted or not,
+ * narrowed or not: the media playlists it reads on the way are the same ones
+ * the engine was about to fetch anyway, and having them in hand is what lets
+ * the wrapper reason about the output (chunk boundaries for prefetch, key
+ * requirements, absolutized segment URIs) instead of guessing.
  */
 
 import {
@@ -91,6 +94,16 @@ export interface MungeOptions {
     maxHeight?: number;
 }
 
+/** One media playlist read while munging, as it was before the rewrite. */
+export interface MungedMediaPlaylist {
+    /** Absolute URL the playlist was fetched from; relative URIs resolve against it. */
+    url: string;
+    /** `VIDEO` for a variant reference, else the `#EXT-X-MEDIA` `TYPE`. */
+    mediaType: string;
+    /** Decoded text: post-LMCENC-decryption, pre-rewrite. */
+    text: string;
+}
+
 export interface MungeResult {
     source: AdapterSource;
     /** Post-cap renditions, as derived from the playlist text. */
@@ -98,6 +111,12 @@ export interface MungeResult {
     isAudioOnly: boolean;
     /** The playlist text actually handed to the engine (specs assert on it). */
     masterText: string;
+    /**
+     * Every media playlist this munge read, for consumers that need the segment
+     * layout rather than the engine-facing text — chunk prefetch, today. Empty
+     * when nothing was fetched.
+     */
+    mediaPlaylists: MungedMediaPlaylist[];
 }
 
 // ---------------------------------------------------------------------------
@@ -221,17 +240,6 @@ export async function mungeSource(
         info.nativelyAudioOnly ||
         (info.isMaster && isAudioOnlyMaster(capped));
 
-    // Pass-through: nothing to hide, nothing to narrow.
-    if (!ctx.keyHex && !info.wasEncrypted && capped === info.text) {
-        await assertNoKeyRequired(info, ctx);
-        return {
-            source: { url: info.url, isBlob: false },
-            qualities,
-            isAudioOnly,
-            masterText: capped,
-        };
-    }
-
     let keyUri: string | undefined;
     const resolveKeyUri = (): string | undefined => {
         if (!ctx.keyHex) return undefined;
@@ -246,9 +254,18 @@ export async function mungeSource(
         return keyUri;
     };
 
+    const mediaPlaylists: MungedMediaPlaylist[] = [];
+
     let servedMasterText: string;
     if (!info.isMaster) {
         requireKeyFor(capped, info.url, ctx);
+        // The URL served a media playlist directly — it IS the only stream, so
+        // it counts as video for anything reading the list back.
+        mediaPlaylists.push({
+            url: info.url,
+            mediaType: 'VIDEO',
+            text: capped,
+        });
         servedMasterText = rewriteMediaPlaylist(capped, {
             playlistUrl: info.url,
             keyUri: hasAes128Key(capped) ? resolveKeyUri() : undefined,
@@ -259,6 +276,11 @@ export async function mungeSource(
             const absolute = absolutize(ref.uri, info.url);
             const text = await fetchPlaylistText(absolute, ctx);
             requireKeyFor(text, absolute, ctx);
+            mediaPlaylists.push({
+                url: absolute,
+                mediaType: ref.mediaType ?? 'VIDEO',
+                text,
+            });
 
             const segmentReplacements =
                 ref.mediaType === 'SUBTITLES' && ctx.keyHex
@@ -293,6 +315,7 @@ export async function mungeSource(
         qualities,
         isAudioOnly,
         masterText: servedMasterText,
+        mediaPlaylists,
     };
 }
 
@@ -367,39 +390,6 @@ function requireKeyFor(
         `${url} declares AES-128 segments but no session key was supplied`,
         { url },
     );
-}
-
-/**
- * Best-effort key check for the pass-through path.
- *
- * A master that needs no munging is never rewritten, so its media playlists are
- * never read — yet they may still declare `METHOD=AES-128`. One cheap probe of
- * the first referenced playlist (cached; the engine fetches it next anyway)
- * turns that into a fail-fast `key-required` instead of an opaque engine error.
- * Probe failures are ignored: they must not break an otherwise fine load.
- */
-async function assertNoKeyRequired(
-    info: MasterInfo,
-    ctx: PipelineContext,
-): Promise<void> {
-    if (!info.isMaster) {
-        requireKeyFor(info.text, info.url, ctx);
-        return;
-    }
-    const first = collectMasterRefs(info.text)[0];
-    if (!first) return;
-
-    const absolute = absolutize(first.uri, info.url);
-    let text: string;
-    try {
-        text = await fetchPlaylistText(absolute, ctx);
-    } catch (error) {
-        if (error instanceof PipelineError && error.code === 'key-required') {
-            throw error;
-        }
-        return;
-    }
-    requireKeyFor(text, absolute, ctx);
 }
 
 function masterTrackId(

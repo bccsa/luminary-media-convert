@@ -17,10 +17,16 @@ import {
     loadMaster,
     mungeSource,
     type MasterInfo,
+    type MungeResult,
     type PipelineContext,
 } from './pipeline/pipeline.js';
 import { sortQualities, toQuality } from './pipeline/quality-cap.js';
 import { Poller } from './poller.js';
+import {
+    DEFAULT_LEAD_SECONDS,
+    DEFAULT_WARM_BYTES,
+    buildChunkSchedules,
+} from './prefetch.js';
 import {
     RecoveryManager,
     StallWatchdog,
@@ -35,6 +41,7 @@ import { StateStore, createInitialState } from './store.js';
 import {
     AUDIO_ONLY_ANGLE_ID,
     type Angle,
+    type ChunkWarmOptions,
     type PlayerAdapter,
     type PlayerControllerApi,
     type PlayerError,
@@ -55,6 +62,30 @@ export interface PlayerControllerOptions {
     serveStrategy?: ServeStrategy;
     /** Injectable WebCrypto; defaults to `globalThis.crypto.subtle`. */
     subtle?: SubtleLike;
+    /**
+     * Chunk warming for byte-range output. The schedules are built here (see
+     * `prefetch.ts`) and the loop that acts on them runs in the adapter
+     * (`PlayerAdapter.warmChunks`); the policy — on or off, how far ahead, how
+     * much — stays here so every platform warms the same way.
+     *
+     * It arms itself only when the media playlists actually carry byte ranges,
+     * so the switch exists for hosts that want it off outright — a proxy that
+     * already warms, a metered connection, a test that wants no background
+     * traffic.
+     */
+    prefetch?: {
+        enabled?: boolean;
+        leadSeconds?: number;
+        warmBytes?: number;
+        /**
+         * Console instrumentation for the warming, off by default. The
+         * requests are deliberately hard to spot in a network tab — one small
+         * range per chunk among hundreds of media requests — so this narrates
+         * them instead: schedule shape at load, each warm with its trigger
+         * context, and swallowed failures.
+         */
+        debug?: boolean;
+    };
 }
 
 export class PlayerController implements PlayerControllerApi {
@@ -86,7 +117,7 @@ export class PlayerController implements PlayerControllerApi {
 
     constructor(
         private readonly adapter: PlayerAdapter,
-        options: PlayerControllerOptions = {},
+        private readonly options: PlayerControllerOptions = {},
     ) {
         this.fetchImpl =
             options.fetchImpl ??
@@ -263,6 +294,12 @@ export class PlayerController implements PlayerControllerApi {
 
         await this.adapter.loadSource(source ?? munged!.source);
         if (generation !== this.generation) return;
+
+        // The narrowed master references only this angle's renditions plus the
+        // audio group, so the schedules built from it are exactly the chains
+        // playback is about to pull — an angle switch comes back through here
+        // and rebuilds them.
+        this.updateChunkWarming(munged);
 
         this.store.setState({
             lifecycle: 'ready',
@@ -474,10 +511,44 @@ export class PlayerController implements PlayerControllerApi {
         };
     }
 
+    /**
+     * Hand the adapter the chunk chains the munge just attached will pull,
+     * replacing whatever it was warming before. A native-HLS load has no munged
+     * playlists to read, a source without byte ranges yields no schedules, and
+     * warming can be switched off outright — all three arrive as an empty
+     * array, which the contract defines as "stop", so the call is unconditional
+     * and there is one path for both arming and stopping.
+     *
+     * Every tuning value is resolved here: the adapter is handed decisions, not
+     * a partially filled options bag it would have to know the defaults for.
+     */
+    private updateChunkWarming(munged: MungeResult | null): void {
+        const settings = this.options.prefetch;
+        const options: ChunkWarmOptions = {
+            leadSeconds: settings?.leadSeconds ?? DEFAULT_LEAD_SECONDS,
+            warmBytes: settings?.warmBytes ?? DEFAULT_WARM_BYTES,
+            fetchImpl: this.fetchImpl,
+            ...(settings?.debug
+                ? {
+                      log: (message: string) =>
+                          console.info(`[luminary-prefetch] ${message}`),
+                  }
+                : {}),
+        };
+
+        const schedules =
+            settings?.enabled === false || !munged
+                ? []
+                : buildChunkSchedules(munged.mediaPlaylists);
+
+        this.adapter.warmChunks?.(schedules, options);
+    }
+
     /** Release the previous generation's resources. */
     private teardownSource(): void {
         this.poller?.stop();
         this.poller = null;
+        this.updateChunkWarming(null);
         this.watchdog.stop();
         this.recovery.destroy();
         this.serveStrategy?.release();

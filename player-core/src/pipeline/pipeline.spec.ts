@@ -91,12 +91,18 @@ describe('describeMaster', () => {
     });
 });
 
-describe('mungeSource — pass-through', () => {
-    it('plays an unencrypted, un-narrowed master by its ORIGINAL url', async () => {
-        const ctx = context({
-            [MASTER_URL]: SIMPLE_MASTER,
-            [`${BASE}/stream_1080/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
-        });
+describe('mungeSource — plain sources take the full path too', () => {
+    const plainRoutes = {
+        [MASTER_URL]: SIMPLE_MASTER,
+        [`${BASE}/stream_1080/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+        [`${BASE}/stream_720/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+        [`${BASE}/stream_480/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+        [`${BASE}/audio_hi_128kbps/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+        [`${BASE}/audio_lo_64kbps/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+    };
+
+    it('serves an unencrypted, un-narrowed master rather than passing its URL through', async () => {
+        const ctx = context(plainRoutes);
         const info = await loadMaster(MASTER_URL, ctx);
         const result = await mungeSource(
             info,
@@ -104,13 +110,58 @@ describe('mungeSource — pass-through', () => {
             ctx,
         );
 
-        expect(result.source).toEqual({ url: MASTER_URL, isBlob: false });
-        expect(ctx.serve.served).toEqual([]);
+        expect(result.source.isBlob).toBe(true);
+        expect(result.source.url).not.toBe(MASTER_URL);
+        expect(ctx.serve.textOf(result.source.url)).toBe(result.masterText);
         expect(result.qualities.map((q) => q.id)).toEqual([
             '1080',
             '720',
             '480',
         ]);
+    });
+
+    it('reports every media playlist it read, absolute and decoded', async () => {
+        const ctx = context(plainRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(
+            info,
+            { angleId: DEFAULT_ANGLE_ID },
+            ctx,
+        );
+
+        expect(result.mediaPlaylists.map((p) => p.url)).toEqual([
+            `${BASE}/stream_1080/playlist.m3u8`,
+            `${BASE}/stream_720/playlist.m3u8`,
+            `${BASE}/stream_480/playlist.m3u8`,
+            `${BASE}/audio_hi_128kbps/playlist.m3u8`,
+            `${BASE}/audio_lo_64kbps/playlist.m3u8`,
+        ]);
+        expect(result.mediaPlaylists.map((p) => p.mediaType)).toEqual([
+            'VIDEO',
+            'VIDEO',
+            'VIDEO',
+            'AUDIO',
+            'AUDIO',
+        ]);
+        // Pre-rewrite text: the segment URI is still relative to its playlist.
+        expect(result.mediaPlaylists[0]?.text).toBe(PLAIN_MEDIA_PLAYLIST);
+    });
+
+    it('hands back the DECRYPTED text of an LMCENC media playlist', async () => {
+        const ctx = context(
+            {
+                [MASTER_URL]: AUDIO_ONLY_MASTER,
+                [`${BASE}/audio_128kbps/playlist.m3u8`]: encryptLmcenc(
+                    ENCRYPTED_MEDIA_PLAYLIST,
+                ),
+            },
+            { keyHex: TEST_KEY_HEX },
+        );
+        const info = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(result.mediaPlaylists).toHaveLength(1);
+        expect(result.mediaPlaylists[0]?.text).toBe(ENCRYPTED_MEDIA_PLAYLIST);
     });
 
     it('fails fast with key-required when the media playlists are AES-128', async () => {
@@ -124,15 +175,12 @@ describe('mungeSource — pass-through', () => {
         ).rejects.toMatchObject({ code: 'key-required' });
     });
 
-    it('tolerates an unreachable probe target rather than failing the load', async () => {
+    it('is loud about an unreachable sub-playlist, plain source or not', async () => {
         const ctx = context({ [MASTER_URL]: SIMPLE_MASTER });
         const info = await loadMaster(MASTER_URL, ctx);
-        const result = await mungeSource(
-            info,
-            { angleId: DEFAULT_ANGLE_ID },
-            ctx,
-        );
-        expect(result.source.isBlob).toBe(false);
+        await expect(
+            mungeSource(info, { angleId: DEFAULT_ANGLE_ID }, ctx),
+        ).rejects.toMatchObject({ code: 'fetch-failed' });
     });
 });
 
