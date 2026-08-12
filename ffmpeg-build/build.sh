@@ -314,6 +314,16 @@ elif [ "$arch" != "$host_arch" ]; then
 fi
 
 log "FFmpeg configure + build (this is the slow part)"
+# Why this can take 12 minutes on a CI runner where macOS takes four: fewer cores,
+# gcc rather than clang, and --enable-cuda-llvm compiling the CUDA kernels that
+# scale_cuda needs. The decoder set is deliberately complete, which is most of the
+# object files.
+#
+# The output is shown rather than swallowed. It was redirected to a log file, which
+# meant a step that compiles ~1,800 objects printed nothing at all for twelve
+# minutes and was indistinguishable from a hang — the log only appeared if the
+# build failed. Every hundredth line is enough to see it moving without burying the
+# rest of the run.
 (
     cd "$src"
     # PKG_CONFIG_LIBDIR, not PKG_CONFIG_PATH: LIBDIR *replaces* the default search
@@ -323,7 +333,11 @@ log "FFmpeg configure + build (this is the slow part)"
     export PKG_CONFIG_LIBDIR="$prefix/lib/pkgconfig"
     ./configure "${configure_flags[@]}" >"$work/ffmpeg-configure.log" 2>&1 ||
         { tail -30 "$work/ffmpeg-configure.log"; fail "FFmpeg configure failed"; }
-    make -j"$(nproc_cmd)" >"$work/ffmpeg-make.log" 2>&1 ||
+    # PIPESTATUS, because the exit status of a pipeline is the last command's —
+    # piping make through awk would otherwise report success for a failed build.
+    set -o pipefail
+    make -j"$(nproc_cmd)" 2>&1 | tee "$work/ffmpeg-make.log" |
+        awk 'NR % 100 == 0 { printf "    [%d objects] %s\n", NR, substr($0, 1, 60); fflush() }' ||
         { tail -30 "$work/ffmpeg-make.log"; fail "FFmpeg build failed"; }
 )
 
