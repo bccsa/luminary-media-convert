@@ -38,7 +38,11 @@ LIBWEBP_SHA256="e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564
 # and no NVIDIA hardware at all — which is why a GPU-less CI runner can produce a
 # binary with working NVENC.
 NV_CODEC_HEADERS_REPO="https://github.com/FFmpeg/nv-codec-headers.git"
-NV_CODEC_HEADERS_TAG="n9.1.23.3"
+# n13.1.15.0, chosen with a version sort. FFmpeg 8.1 requires ffnvcodec >= 12.1.14.0,
+# and a lexicographic `sort` puts n9.1.23.3 (from 2019) last — which is exactly the
+# tag this first carried, and why configure said "nvenc requested, but not all
+# dependencies are satisfied: ffnvcodec" after installing headers successfully.
+NV_CODEC_HEADERS_TAG="n13.1.15.0"
 
 # No x265. The encoder only ever writes H.264 — every variant in the master
 # playlist is avc1 — so HEVC support is weight we would carry and never use, plus
