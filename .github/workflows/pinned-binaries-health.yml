@@ -1,25 +1,23 @@
 name: Pinned FFmpeg URLs still resolve
 
-# Watches what the build fetches: FFmpeg's release tarball and its signature,
-# libwebp's tarball, x264's git repository and the nv-codec-headers tag. Building
-# from source shortens the supply chain; it does not remove it.
+# Checks that every source `ffmpeg-build/build.sh` fetches is reachable: FFmpeg's
+# release tarball and its signature, libwebp's tarball, x264's git repository and the
+# nv-codec-headers tag.
 #
-# If one of those disappears, `dist:mac` and `dist:win` stop working for everybody at
-# once, and the corresponding-source offer in the shipped licence notice points at
-# something a recipient cannot fetch. A weekly check gives weeks of warning instead
-# of a discovery during a release.
+# There is no schedule, because these hosts are archival rather than rolling —
+# ffmpeg.org still serves releases back to 0.6, and libwebp's host keeps old versions
+# — so a pinned source vanishing on its own is close to impossible. What does happen
+# is a wrong pin: a version that was never published, a mistyped digest, a tag that
+# does not exist. That arrives in a pull request, which is what this runs on.
 #
-# Deliberately only checks reachability. Whether a *newer* build exists is a
-# judgement call — bumping the pin means re-verifying capabilities and re-testing
-# an encode, which is not something a cron job should start.
+# `workflow_dispatch` is there to check on demand before cutting a release.
+#
+# Reachability only. Whether a *newer* version exists is a judgement call: moving a
+# pin means re-verifying capabilities, re-checking the nv-codec-headers ceiling and
+# re-testing an encode.
 
 on:
-    schedule:
-        # Mondays, 07:00 UTC. Weekly is right for a risk measured in months.
-        - cron: '0 7 * * 1'
     workflow_dispatch:
-    # And whenever the pins themselves change, so a typo in a new URL is caught
-    # by the pull request that introduces it rather than by a build weeks later.
     pull_request:
         types: [opened, synchronize, reopened]
         paths:

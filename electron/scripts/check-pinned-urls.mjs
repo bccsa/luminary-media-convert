@@ -6,10 +6,11 @@
  * signature, x264's git repository, libwebp's tarball, the NVENC headers — shorter
  * than downloading a binary, but not absent.
  *
- * A vanished URL means `dist:mac` and `dist:win` stop working for everybody at once,
- * and the corresponding-source offer in the shipped licence notice points at
- * something a recipient cannot fetch. A weekly check gives weeks of warning instead
- * of a discovery during a release.
+ * A source that cannot be fetched means `dist:mac` and `dist:win` stop working for
+ * everybody at once, and the corresponding-source offer in the shipped licence notice
+ * points at something a recipient cannot fetch. In practice the cause is a wrong pin
+ * rather than a vanished file — these hosts keep old versions indefinitely — which is
+ * why this runs on pull requests that touch the pins, and on demand before a release.
  *
  * Reachability only. Whether a newer FFmpeg exists is a judgement call: moving a
  * pin means re-verifying capabilities, re-checking the nv-codec-headers ceiling and
@@ -62,8 +63,8 @@ const httpTargets = [
 
 /**
  * Retried, because a single attempt is not evidence: these hosts drop connections
- * intermittently, and a transient error is not a vanished source. A weekly job that
- * cries wolf is one everybody learns to ignore, which is worse than not having it.
+ * intermittently, and a transient error is not a missing source. A check that cries
+ * wolf is one everybody learns to ignore, which is worse than not having it.
  */
 const ATTEMPTS = 3;
 
