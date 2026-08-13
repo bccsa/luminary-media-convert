@@ -481,6 +481,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
         const sourceFrameRate = await this.probeFrameRate(inputPath);
         const gopFrames = Math.round(segmentDuration * sourceFrameRate);
+        const trimming = !!encodeConfig.trimSegments?.length;
 
         this.logger.log(
             `Source frame rate: ${sourceFrameRate.toFixed(2)} fps, GOP: ${gopFrames} frames (${segmentDuration}s segments)`
@@ -515,14 +516,41 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             );
         }
 
-        if (encodeConfig.trimSegments?.length) {
+        if (trimming) {
             const concatPath = await this.buildConcatFile(
                 inputPath,
-                encodeConfig.trimSegments,
+                encodeConfig.trimSegments!,
                 outputDir,
                 alignmentOffset
             );
-            args.push('-f', 'concat', '-safe', '0', '-i', concatPath);
+            // The concat demuxer's inpoint seek is keyframe-granular, and it
+            // lands where the file's *default* stream says by DTS — on a
+            // multi-stream source each mapped stream can carry up to a GOP of
+            // pre-roll before the cut, a different amount per stream. Left in,
+            // the muxer clamps those backwards timestamps at every splice and
+            // lip-sync slides by the per-stream difference. So every decoded
+            // frame is tagged with its concat window (-segment_time_metadata)
+            // and the select/aselect=concatdec_select filters below drop the
+            // frames outside it — the cut becomes sample-accurate.
+            //
+            // -copyts is load-bearing: the window metadata is in the concat
+            // demuxer's stitched clock, but without it ffmpeg shifts input
+            // timestamps to start at zero — by exactly the pre-roll, since the
+            // pre-roll holds the earliest packet — and the select filters then
+            // cut a window displaced by up to a GOP (verified by frame
+            // comparison, not a theory). The stitched clock already starts at
+            // zero, so downstream muxing is unaffected.
+            args.push(
+                '-f',
+                'concat',
+                '-safe',
+                '0',
+                '-segment_time_metadata',
+                '1',
+                '-i',
+                concatPath,
+                '-copyts'
+            );
         } else if (alignmentOffset > 0) {
             // Input-level, hence in front of `-i`, and not a `-filter_complex`
             // trim: a copy-mode rendition never passes through the filter graph
@@ -562,8 +590,11 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 const splitOutputs = entries
                     .map((e) => `[reencode${e.globalIndex}]`)
                     .join('');
+                const trimSelect = trimming
+                    ? 'select=concatdec_select,'
+                    : '';
                 filterParts.push(
-                    `[0:v:${trackIdx}]split=${entries.length}${splitOutputs}`
+                    `[0:v:${trackIdx}]${trimSelect}split=${entries.length}${splitOutputs}`
                 );
                 for (const e of entries) {
                     let scalerExpr: string;
@@ -716,8 +747,37 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             [];
         let audioOutputIndex = 0;
 
+        // Trimmed audio takes the filter graph for the same concatdec_select
+        // drop as video (a repeated -filter_complex is additive). A filter
+        // input can only be consumed once, so a source track feeding several
+        // groups is fanned out with asplit. Copy-mode audio cannot pass a
+        // filter — the controller refuses copyStream with trimSegments.
+        if (trimming) {
+            const groupsByTrack = new Map<number, number[]>();
+            audioGroups.forEach((group, i) => {
+                const track = group.sourceTrackIndex;
+                if (!groupsByTrack.has(track)) groupsByTrack.set(track, []);
+                groupsByTrack.get(track)!.push(i);
+            });
+            const audioParts: string[] = [];
+            for (const [trackIdx, outs] of groupsByTrack) {
+                const labels = outs.map((i) => `[aout${i}]`).join('');
+                audioParts.push(
+                    outs.length === 1
+                        ? `[0:a:${trackIdx}]aselect=concatdec_select${labels}`
+                        : `[0:a:${trackIdx}]aselect=concatdec_select,asplit=${outs.length}${labels}`
+                );
+            }
+            args.push('-filter_complex', audioParts.join(';'));
+        }
+
         for (const group of audioGroups) {
-            args.push('-map', `0:a:${group.sourceTrackIndex}`);
+            args.push(
+                '-map',
+                trimming
+                    ? `[aout${audioOutputIndex}]`
+                    : `0:a:${group.sourceTrackIndex}`
+            );
             if (group.copyStream) {
                 args.push(`-c:a:${audioOutputIndex}`, 'copy');
             } else {
@@ -809,16 +869,30 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const { inputPath, outputDir, encodeConfig } = opts;
         const audioGroups = encodeConfig.audioGroups!;
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
+        const trimming = !!encodeConfig.trimSegments?.length;
         const args: string[] = [];
 
-        if (encodeConfig.trimSegments?.length) {
+        if (trimming) {
             const concatPath = await this.buildConcatFile(
                 inputPath,
-                encodeConfig.trimSegments,
+                encodeConfig.trimSegments!,
                 outputDir,
                 alignmentOffset
             );
-            args.push('-f', 'concat', '-safe', '0', '-i', concatPath);
+            // See buildVideoArgs: the metadata flag + aselect drop the
+            // keyframe-inexact seek pre-roll, and -copyts keeps the frames in
+            // the clock the window metadata refers to.
+            args.push(
+                '-f',
+                'concat',
+                '-safe',
+                '0',
+                '-segment_time_metadata',
+                '1',
+                '-i',
+                concatPath,
+                '-copyts'
+            );
         } else if (alignmentOffset > 0) {
             // See buildVideoArgs: input-level, so it reaches copied streams too.
             args.push('-ss', String(alignmentOffset), '-i', inputPath);
@@ -830,8 +904,30 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         args.push('-progress', 'pipe:2', '-stats_period', '1');
         args.push('-vn');
 
+        if (trimming) {
+            const groupsByTrack = new Map<number, number[]>();
+            audioGroups.forEach((group, i) => {
+                const track = group.sourceTrackIndex;
+                if (!groupsByTrack.has(track)) groupsByTrack.set(track, []);
+                groupsByTrack.get(track)!.push(i);
+            });
+            const audioParts: string[] = [];
+            for (const [trackIdx, outs] of groupsByTrack) {
+                const labels = outs.map((i) => `[aout${i}]`).join('');
+                audioParts.push(
+                    outs.length === 1
+                        ? `[0:a:${trackIdx}]aselect=concatdec_select${labels}`
+                        : `[0:a:${trackIdx}]aselect=concatdec_select,asplit=${outs.length}${labels}`
+                );
+            }
+            args.push('-filter_complex', audioParts.join(';'));
+        }
+
         audioGroups.forEach((group, i) => {
-            args.push('-map', `0:a:${group.sourceTrackIndex}`);
+            args.push(
+                '-map',
+                trimming ? `[aout${i}]` : `0:a:${group.sourceTrackIndex}`
+            );
             if (group.copyStream) {
                 args.push(`-c:a:${i}`, 'copy');
             } else {

@@ -66,6 +66,8 @@ const MAX_CONCURRENT = 3;
 @Injectable()
 export class PreviewService {
     private readonly logger = new Logger(PreviewService.name);
+    private readonly workDir =
+        process.env.WORK_DIR || join(process.cwd(), 'work');
     private readonly states = new Map<string, PreviewState>();
     private readonly pending = new Map<string, Promise<string>>();
     // Concurrency limiter for FFmpeg processes
@@ -87,7 +89,10 @@ export class PreviewService {
         }
 
         const { filePath, probeResult } = session;
-        const previewDir = join(filePath, '..', 'preview');
+        // Under the session's work directory, never beside the source file:
+        // a shared folder like ~/Downloads would share one cache across every
+        // session and file previewed from it, serving stale segments by index.
+        const previewDir = join(this.workDir, sessionId, 'preview');
         await mkdir(previewDir, { recursive: true });
 
         const duration = probeResult.format.duration;
@@ -118,7 +123,11 @@ export class PreviewService {
         // Keyframe scan for copy-mode renditions (skipped for audio-only)
         const copyRendition = renditions.find((r) => r.canCopy);
         const boundaries = copyRendition
-            ? await this.scanKeyframes(filePath, copyRendition.videoIndex)
+            ? await this.scanKeyframes(
+                  sessionId,
+                  filePath,
+                  copyRendition.videoIndex
+              )
             : [];
 
         // Generate playlists
@@ -476,10 +485,11 @@ export class PreviewService {
     }
 
     private async scanKeyframes(
+        sessionId: string,
         filePath: string,
         videoStreamIndex: number
     ): Promise<SegmentBoundary[]> {
-        const tmpDir = join(filePath, '..', 'kfscan');
+        const tmpDir = join(this.workDir, sessionId, 'kfscan');
         await mkdir(tmpDir, { recursive: true });
         const csvPath = join(tmpDir, 'segments.csv');
 
@@ -574,8 +584,11 @@ export class PreviewService {
             '#EXT-X-PLAYLIST-TYPE:VOD',
         ];
 
+        // No per-segment discontinuities: segments are extracted with -copyts,
+        // so consecutive segments share one continuous timestamp domain. A
+        // discontinuity here would make the player stitch by EXTINF instead
+        // and replay each segment's seek lead-in at every boundary.
         for (let i = 0; i < segCount; i++) {
-            if (i > 0) lines.push('#EXT-X-DISCONTINUITY');
             const segDur =
                 boundaries.length > 0
                     ? boundaries[i].duration
@@ -665,8 +678,11 @@ export class PreviewService {
 
         for (let j = 0; j < included.length; j++) {
             const idx = included[j];
-            // Each preview segment is independently extracted — timestamps are not continuous
-            if (j > 0) lines.push('#EXT-X-DISCONTINUITY');
+            // Segments carry source timestamps (-copyts): adjacent segments are
+            // continuous, so a discontinuity is only real where the trim filter
+            // skipped segments and the timeline actually jumps.
+            if (j > 0 && idx !== included[j - 1] + 1)
+                lines.push('#EXT-X-DISCONTINUITY');
             const segDur =
                 boundaries.length > 0
                     ? boundaries[idx].duration
@@ -694,6 +710,27 @@ export class PreviewService {
     ): string[] {
         const args: string[] = [];
 
+        // Every segment keeps the source's own timestamps (-copyts, with the
+        // mpegts muxer's fixed 1.4 s preload/delay offset zeroed). The media
+        // playlists declare no per-segment discontinuities, so this is what
+        // stitches independently extracted segments together: `-ss` with
+        // stream copy starts wherever the demuxer seek lands — on multi-stream
+        // sources up to a full GOP before the requested boundary (the seek is
+        // positioned on the file's default stream by DTS, and other tracks
+        // land at a sample at or before that) — and the resulting overlap is
+        // resolved by the player's buffer by timestamp instead of being
+        // replayed at every boundary.
+        const TS_OUTPUT = [
+            '-copyts',
+            '-muxdelay',
+            '0',
+            '-muxpreload',
+            '0',
+            '-f',
+            'mpegts',
+            'pipe:1',
+        ];
+
         if (rendition.audioOnly) {
             args.push(
                 '-ss',
@@ -705,7 +742,7 @@ export class PreviewService {
                 '-vn'
             );
             if (audioMap) args.push('-map', audioMap);
-            args.push('-c:a', 'aac', '-b:a', '128k', '-f', 'mpegts', 'pipe:1');
+            args.push('-c:a', 'aac', '-b:a', '128k', ...TS_OUTPUT);
             return args;
         }
 
@@ -784,7 +821,7 @@ export class PreviewService {
         }
 
         if (audioMap) args.push('-c:a', 'aac', '-b:a', '128k');
-        args.push('-f', 'mpegts', 'pipe:1');
+        args.push(...TS_OUTPUT);
 
         return args;
     }

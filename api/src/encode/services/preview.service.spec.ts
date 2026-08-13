@@ -596,6 +596,69 @@ describe('PreviewService', () => {
                 { recursive: true }
             );
         });
+
+        it('should place the preview cache under the session work directory', async () => {
+            const prevWorkDir = process.env.WORK_DIR;
+            process.env.WORK_DIR = '/wd';
+            try {
+                sessionService = makeSessionService({
+                    filePath: '/media/video.mp4',
+                    probeResult: makeProbe(),
+                });
+                service = new PreviewService(
+                    sessionService,
+                    makeFfmpegService()
+                );
+
+                await service.init('s1');
+
+                // Never beside the source file: a shared folder like
+                // ~/Downloads would share one segment cache across every
+                // session and file previewed from it.
+                expect(mockMkdir).toHaveBeenCalledWith('/wd/s1/preview', {
+                    recursive: true,
+                });
+            } finally {
+                if (prevWorkDir === undefined) delete process.env.WORK_DIR;
+                else process.env.WORK_DIR = prevWorkDir;
+            }
+        });
+
+        it('should run the keyframe scan inside the session work directory', async () => {
+            const prevWorkDir = process.env.WORK_DIR;
+            process.env.WORK_DIR = '/wd';
+            try {
+                const probe = makeProbe({
+                    videoTracks: [
+                        {
+                            index: 0,
+                            codec: 'h264',
+                            width: 854,
+                            height: 480,
+                            bitrateKbps: 2000,
+                            frameRate: 30,
+                        },
+                    ],
+                });
+                sessionService = makeSessionService({
+                    filePath: '/media/video.mp4',
+                    probeResult: probe,
+                });
+                service = new PreviewService(
+                    sessionService,
+                    makeFfmpegService()
+                );
+
+                await service.init('s1');
+
+                expect(mockMkdir).toHaveBeenCalledWith('/wd/s1/kfscan', {
+                    recursive: true,
+                });
+            } finally {
+                if (prevWorkDir === undefined) delete process.env.WORK_DIR;
+                else process.env.WORK_DIR = prevWorkDir;
+            }
+        });
     });
 
     /* ============================================================== */
@@ -821,7 +884,7 @@ describe('PreviewService', () => {
             expect(media).toContain('#EXTINF:2.000,');
         });
 
-        it('should include EXT-X-DISCONTINUITY between segments (except before the first)', async () => {
+        it('should not declare EXT-X-DISCONTINUITY between consecutive segments', async () => {
             const probe = makeProbe({
                 duration: 12,
                 videoTracks: [
@@ -843,17 +906,10 @@ describe('PreviewService', () => {
             await service.init('s1');
 
             const media = service.getPlaylist('s1', 'tok', 0)!;
-            const lines = media.split('\n');
-            // First segment should NOT have DISCONTINUITY before it
-            const firstExtinf = lines.indexOf(
-                lines.find((l) => l.startsWith('#EXTINF:'))!
-            );
-            expect(lines[firstExtinf - 1]).not.toBe('#EXT-X-DISCONTINUITY');
-            // Second segment should have DISCONTINUITY
-            const discontinuities = lines.filter(
-                (l) => l === '#EXT-X-DISCONTINUITY'
-            );
-            expect(discontinuities.length).toBe(2); // 3 segments = 2 discontinuities
+            // Segments are extracted with -copyts and share one continuous
+            // timestamp domain; a discontinuity would make the player stitch
+            // by EXTINF and replay each segment's seek lead-in.
+            expect(media).not.toContain('#EXT-X-DISCONTINUITY');
         });
 
         it('should set EXT-X-TARGETDURATION to max boundary duration', async () => {
@@ -969,15 +1025,28 @@ describe('PreviewService', () => {
             expect(media).not.toContain('segment2.ts');
         });
 
-        it('should include DISCONTINUITY between every segment', () => {
+        it('should not declare DISCONTINUITY between adjacent segments', () => {
             service.setTrimSegments('s1', [{ inSec: 0, outSec: 12 }]);
+            const media = service.getPlaylist('s1', 'tok', 0)!;
+            // Segments 0,1,2 are adjacent — timestamps are continuous
+            expect(media).not.toContain('#EXT-X-DISCONTINUITY');
+        });
+
+        it('should declare DISCONTINUITY only where the trim filter skips segments', () => {
+            // 0-3 → segment 0; 14-20 → segments 3,4. The timeline jumps
+            // between segment 0 and segment 3.
+            service.setTrimSegments('s1', [
+                { inSec: 0, outSec: 3 },
+                { inSec: 14, outSec: 20 },
+            ]);
             const media = service.getPlaylist('s1', 'tok', 0)!;
             const lines = media.split('\n');
             const discontinuities = lines.filter(
                 (l) => l === '#EXT-X-DISCONTINUITY'
             );
-            // 3 segments (0,1,2) → 2 discontinuities
-            expect(discontinuities.length).toBe(2);
+            expect(discontinuities.length).toBe(1);
+            const idx = lines.indexOf('#EXT-X-DISCONTINUITY');
+            expect(lines[idx + 2]).toContain('segment3.ts');
         });
 
         it('should not insert DISCONTINUITY before first segment', () => {
@@ -1554,6 +1623,26 @@ describe('PreviewService', () => {
             expect(ffmpegArgs).toContain('-f');
             expect(ffmpegArgs).toContain('mpegts');
             expect(ffmpegArgs).toContain('pipe:1');
+        });
+
+        it('should keep source timestamps: -copyts with zeroed mux offset', async () => {
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+            await service.getSegmentStream('s1', 0, 0);
+
+            // Playlists declare no per-segment discontinuities: independently
+            // extracted segments only stitch together because every one keeps
+            // the source's own timestamps, with the mpegts muxer's fixed
+            // preload/delay offset zeroed.
+            const ffmpegArgs = mockExecFile.mock.calls[0][1] as string[];
+            expect(ffmpegArgs).toContain('-copyts');
+            expect(ffmpegArgs[ffmpegArgs.indexOf('-muxdelay') + 1]).toBe('0');
+            expect(ffmpegArgs[ffmpegArgs.indexOf('-muxpreload') + 1]).toBe(
+                '0'
+            );
         });
     });
 
