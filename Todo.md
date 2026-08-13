@@ -436,3 +436,41 @@ than vanishing.
 **Worth a test.** The suite renders this component; a case at a narrow width asserting
 the title is still present would pin the behaviour, since this is the sort of regression
 that only shows up when someone opens a side panel.
+
+---
+
+## 44. A downloaded macOS build could not be opened — fixed
+
+**The defect.** `extraResources` copies the encoder and its licence texts into the
+bundle *after* Electron's own signature was made, which invalidates it.
+`mac.identity: null` means electron-builder never re-signs, so the app shipped with a
+signature describing a bundle that no longer matched. macOS reads that as corruption,
+not as "unsigned", and refuses a downloaded copy outright:
+
+> «Luminary Media Convert» er skadet og kan ikke åpnes. Du bør flytte det til papirkurven.
+
+Move to Bin or Cancel. No way through. Every user downloading the dmg would have got
+this.
+
+**Fixed** by `electron/build/after-pack.cjs`: ad-hoc sign after packing, before the
+installer is built, then verify — so an inconsistent signature fails the build instead
+of reaching someone's screen. Runs once per architecture; confirmed for arm64 and x64.
+
+**Why it survived so long, which is the part worth remembering.** Gatekeeper only
+assesses bundles carrying `com.apple.quarantine`, which browsers attach to downloads
+and a local build does not have. Every install on the machine that produced the build
+worked perfectly. Reproduce a real user's conditions with:
+
+```bash
+xattr -w com.apple.quarantine "0081;0;Safari;$(uuidgen)" <dmg>
+```
+
+**What ad-hoc signing does and does not buy.** The app is openable; it is not trusted.
+On macOS 15+ the user must dismiss a malware warning, open System Settings → Privacy &
+Security, click **Open Anyway**, dismiss a second warning, click it again, and
+authenticate — seven steps, with "Move to Bin" as the highlighted default throughout.
+Right-click → Open was removed by Apple and no longer helps. Verified on macOS 26.5.2.
+
+**Outstanding:** notarization removes the prompt entirely and needs the Developer ID
+certificate that auto-update also requires — see item 2. That is one purchase with
+three payoffs, and belongs in the same conversation as the GPL sign-off in item 40.
