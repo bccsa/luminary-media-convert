@@ -380,6 +380,99 @@ describe('FfmpegService', () => {
             expect(args[presetIdx + 1]).toBe('p5');
         });
 
+        it('should use h264_qsv and vpp_qsv when Intel Quick Sync is available', async () => {
+            (service as any).accelMode = 'intel';
+
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
+                ],
+                audioGroups: [
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                ],
+            };
+
+            const args = await buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            // Decode, scale and encode all stay on the GPU: the hwaccel output
+            // format has to be qsv for vpp_qsv to accept the frames at all.
+            expect(args).toContain('-hwaccel');
+            expect(args).toContain('qsv');
+            const hwFmtIdx = args.indexOf('-hwaccel_output_format');
+            expect(args[hwFmtIdx + 1]).toBe('qsv');
+
+            expect(args).toContain('h264_qsv');
+            expect(args).not.toContain('h264_nvenc');
+            expect(args).not.toContain('h264_videotoolbox');
+            expect(args).not.toContain('libx264');
+
+            const filterIdx = args.indexOf('-filter_complex');
+            const filterVal = args[filterIdx + 1];
+            expect(filterVal).toContain('vpp_qsv=w=1280:h=720');
+            expect(filterVal).not.toContain('scale_cuda');
+            expect(filterVal).not.toContain('scale_vt');
+            expect(filterVal).not.toMatch(/(?<![_a-z])scale=/);
+        });
+
+        it('should use constant quality for a VBR rendition on Quick Sync', async () => {
+            (service as any).accelMode = 'intel';
+
+            const args = await buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig: {
+                    type: 'video',
+                    segmentDuration: 6,
+                    videoRenditions: [
+                        {
+                            width: 1280,
+                            height: 720,
+                            videoBitrateKbps: 2500,
+                            copyStream: false,
+                            vbr: true,
+                            audioGroupId: 'hd',
+                            label: '720p',
+                        },
+                    ],
+                    audioGroups: [
+                        {
+                            id: 'hd',
+                            audioBitrateKbps: 192,
+                            channels: 2,
+                            audioCodec: 'aac',
+                            sourceTrackIndex: 0,
+                        },
+                    ],
+                } as EncodeConfigDto,
+            });
+
+            // QSV's constant-quality mode. look_ahead must be off, or
+            // global_quality is ignored and the bitrate cap takes over.
+            expect(args).toContain('-global_quality:v:0');
+            const laIdx = args.indexOf('-look_ahead:v:0');
+            expect(args[laIdx + 1]).toBe('0');
+            expect(args).toContain('-maxrate:v:0');
+        });
+
         it('should use h264_videotoolbox when Apple GPU is available', async () => {
             (service as any).accelMode = 'apple';
 

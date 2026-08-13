@@ -728,6 +728,8 @@ export class PreviewService {
                 '-hwaccel_output_format',
                 'videotoolbox_vld'
             );
+        } else if (useGpu && accelMode === 'intel') {
+            args.push('-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv');
         }
 
         args.push(
@@ -748,6 +750,14 @@ export class PreviewService {
             args.push('-c:v', 'h264_nvenc', '-preset', 'p1');
             if (rendition.scaleFilter) {
                 args.push('-vf', `scale_cuda=${rendition.scaleFilter}`);
+            }
+        } else if (useGpu && accelMode === 'intel') {
+            // veryfast for the same reason NVENC gets p1 here: a preview segment
+            // is generated on demand while someone waits for it.
+            args.push('-c:v', 'h264_qsv', '-preset', 'veryfast');
+            if (rendition.scaleFilter) {
+                const [w, h] = rendition.scaleFilter.split(':');
+                args.push('-vf', `vpp_qsv=w=${w}:h=${h}`);
             }
         } else if (useGpu && accelMode === 'apple') {
             args.push(

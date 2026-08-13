@@ -264,7 +264,7 @@ export class SessionStatusDto {
     @ApiPropertyOptional({
         description:
             'Hardware acceleration mode used by the server for video encoding.',
-        enum: ['cpu', 'nvidia', 'apple'],
+        enum: ['cpu', 'nvidia', 'apple', 'intel'],
         example: 'cpu',
     })
     @Expose()

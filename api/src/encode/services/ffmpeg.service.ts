@@ -50,7 +50,7 @@ export interface EncodeResult {
     segmentFormat: SegmentFormat;
 }
 
-export type AccelMode = 'cpu' | 'nvidia' | 'apple';
+export type AccelMode = 'cpu' | 'nvidia' | 'apple' | 'intel';
 
 @Injectable()
 export class FfmpegService implements OnModuleInit, OnModuleDestroy {
@@ -110,6 +110,11 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     'Apple Silicon detected, using VideoToolbox acceleration'
                 );
                 break;
+            case 'intel':
+                this.logger.log(
+                    'Intel Quick Sync detected, using QSV acceleration'
+                );
+                break;
             default:
                 this.logger.log('No GPU found, using CPU encoding');
         }
@@ -156,9 +161,51 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     private detectAcceleration(): AccelMode {
+        // Ordered by how fast the hardware is, not by how likely it is to be
+        // present: a machine with a discrete NVIDIA card and an Intel iGPU has
+        // both, and NVENC is the better of the two.
         if (this.detectNvidiaGpu()) return 'nvidia';
         if (this.detectAppleGpu()) return 'apple';
+        if (this.detectIntelQsv()) return 'intel';
         return 'cpu';
+    }
+
+    /**
+     * Quick Sync, through the oneVPL dispatcher the Windows build links.
+     *
+     * Windows only: the encoder ships `h264_qsv` there and nowhere else, and on a
+     * Mac an Intel iGPU is reached through VideoToolbox instead.
+     *
+     * Asked of the binary rather than of the machine — there is no `nvidia-smi`
+     * equivalent worth shelling out to, and the dispatcher answers the same
+     * question by refusing to initialise. All three capabilities are required:
+     * the hwaccel to decode onto the GPU, the encoder to write from it, and
+     * `vpp_qsv` to scale in between. A build with the encoder but no scaler would
+     * pick this path and then fail on every ladder.
+     */
+    private detectIntelQsv(): boolean {
+        if (process.platform !== 'win32') return false;
+        try {
+            const hwaccels = execSync(
+                `${ffmpegShellBin()} -hwaccels 2>/dev/null`,
+                { encoding: 'utf-8', timeout: 5000 }
+            );
+            if (!hwaccels.includes('qsv')) return false;
+
+            const encoders = execSync(
+                `${ffmpegShellBin()} -encoders 2>/dev/null`,
+                { encoding: 'utf-8', timeout: 5000 }
+            );
+            if (!encoders.includes('h264_qsv')) return false;
+
+            const filters = execSync(
+                `${ffmpegShellBin()} -filters 2>/dev/null`,
+                { encoding: 'utf-8', timeout: 5000 }
+            );
+            return filters.includes('vpp_qsv');
+        } catch {
+            return false;
+        }
     }
 
     private detectNvidiaGpu(): boolean {
@@ -513,6 +560,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 '-hwaccel_output_format',
                 'videotoolbox_vld'
             );
+        } else if (hasReencode && this.accelMode === 'intel') {
+            args.push('-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv');
         }
 
         if (encodeConfig.trimSegments?.length) {
@@ -571,6 +620,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                         scalerExpr = `scale_cuda=${e.rendition.width}:${e.rendition.height}`;
                     } else if (this.accelMode === 'apple') {
                         scalerExpr = `scale_vt=w=${e.rendition.width}:h=${e.rendition.height}`;
+                    } else if (this.accelMode === 'intel') {
+                        // vpp_qsv, not scale_qsv: the VPP filter is what current
+                        // FFmpeg builds carry, and it keeps the frame in QSV
+                        // memory so no download/upload round trip appears
+                        // between decode and encode.
+                        scalerExpr = `vpp_qsv=w=${e.rendition.width}:h=${e.rendition.height}`;
                     } else {
                         scalerExpr = `scale=${e.rendition.width}:${e.rendition.height}`;
                     }
@@ -617,6 +672,46 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                         `-cq:v:${videoOutputIndex}`,
                         `${cq}`,
                         `-b:v:${videoOutputIndex}`,
+                        '0',
+                        `-maxrate:v:${videoOutputIndex}`,
+                        `${r.videoBitrateKbps}k`,
+                        `-bufsize:v:${videoOutputIndex}`,
+                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
+                    );
+                } else {
+                    args.push(
+                        `-b:v:${videoOutputIndex}`,
+                        `${r.videoBitrateKbps}k`,
+                        `-maxrate:v:${videoOutputIndex}`,
+                        `${Math.round(r.videoBitrateKbps * 1.07)}k`,
+                        `-bufsize:v:${videoOutputIndex}`,
+                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
+                    );
+                }
+            } else if (this.accelMode === 'intel') {
+                // Quick Sync. `-global_quality` with `-look_ahead 0` is QSV's
+                // constant-quality mode, the counterpart of NVENC's `-cq`; the
+                // scale is the same 0-51 range as x264's CRF, so the existing
+                // bitrate-to-CRF mapping applies unchanged.
+                args.push(
+                    `-c:v:${videoOutputIndex}`,
+                    'h264_qsv',
+                    `-profile:v:${videoOutputIndex}`,
+                    'high',
+                    `-preset:v:${videoOutputIndex}`,
+                    'medium'
+                );
+                if (r.vbr) {
+                    const quality = this.bitrateToVideoCrf(
+                        r.videoBitrateKbps,
+                        r.width,
+                        r.height,
+                        sourceFrameRate
+                    );
+                    args.push(
+                        `-global_quality:v:${videoOutputIndex}`,
+                        `${quality}`,
+                        `-look_ahead:v:${videoOutputIndex}`,
                         '0',
                         `-maxrate:v:${videoOutputIndex}`,
                         `${r.videoBitrateKbps}k`,

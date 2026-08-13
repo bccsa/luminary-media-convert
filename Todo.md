@@ -162,6 +162,36 @@ Whatever is chosen must cope with the case where the CMS document was deleted en
 
 ---
 
+## 45. Intel Quick Sync — code path present, unverified on hardware
+
+`FfmpegService` detects Quick Sync and uses it: `AccelMode` gains `'intel'`,
+`detectIntelQsv()` requires the `qsv` hwaccel, the `h264_qsv` encoder *and* the
+`vpp_qsv` filter (a build with the encoder but no scaler would pick the path and then
+fail on every ladder), and both the encode and preview paths keep frames on the GPU
+with `-hwaccel qsv -hwaccel_output_format qsv`. Detection is ordered after NVIDIA, so
+a machine with both a discrete card and an iGPU uses the faster one. Reported as
+`encoder: 'intel'` on status and SSE.
+
+**Why it matters:** ordinary office Windows PCs have Intel integrated graphics and no
+discrete card. Without this the `h264_qsv` in the Windows binary is never asked for and
+those machines encode on CPU.
+
+**Unverified, and only Intel hardware can settle it** — the same position NVENC was in
+until it was tested on a real GPU. What needs seeing:
+
+- `encoder` reports `intel` on an Intel Windows machine (a session status is enough)
+- an encode completes, and the output plays
+- `vpp_qsv` accepts the frames `-hwaccel qsv` produces. This is the pairing most likely
+  to fail: the NVIDIA equivalent had exactly this bug, where a hwaccel that returned
+  software frames could not feed a GPU-only scaler
+- a preview segment generates. A QSV failure there retries on CPU, so it degrades
+  rather than breaks
+
+CPU fallback is unaffected: a machine without the encoder fails detection and encodes
+with `libx264` as before.
+
+---
+
 ## 5. Windows build verification — built, installed, and the NVIDIA path proven
 
 **12 Aug 2026: the first Windows installer was built, and it installs.** The build
