@@ -607,3 +607,36 @@ until it was tested on a real GPU. What needs seeing:
 
 CPU fallback is unaffected: a machine without the encoder fails detection and encodes
 with `libx264` as before.
+
+---
+
+## 48. Delivered thumbnails drift out of sync after trimming
+
+**Reported, not yet investigated.** After a trimmed encode, the scrub thumbnails no
+longer match the frames they preview — the sprite cue shows a moment visibly away
+from where the playhead lands. Observed on the multi-stream test source whose
+streams start apart (alignment offset ~1.06 s).
+
+**The suspects, unverified but familiar.** `ThumbnailService.packForDelivery` maps
+source-timeline thumbs onto the output timeline, and makes two assumptions the
+waveform sidecar was just cured of (item 46):
+
+1. **`outDuration` sums `(outSec - inSec)` unclamped**, but `buildConcatFile` writes
+   `inpoint = max(inSec, alignmentOffset)` — a trim range starting inside the head
+   region contributes less than its face value, so every cue after it sits late by
+   the difference. The waveform fix's Defect B was this same reduce; the corrected
+   form is in `encode.service.ts`'s sidecar block.
+2. **The non-trim path uses `sourceDuration` and no offset at all**, while the
+   encoded output starts at source `t = alignmentOffset` and is that much shorter —
+   so on a misaligned source the delivered storyboard should be wrong even without
+   a trim, cues early by ~the offset throughout. `EncodeResult.alignmentOffset`
+   exists now (added for the waveform); `packForDelivery` never receives it.
+3. `selectThumbsForOutput` picks source thumbs per output position via the ranges —
+   whatever mapping it applies inherits both errors above; check it against the
+   clamped in-points rather than the raw trim ranges.
+
+**Where.** `api/src/encode/services/thumbnail.service.ts` (`packForDelivery`,
+`selectThumbsForOutput`, `orderedRanges`), threaded from `encode.service.ts` where
+`encodeResult.alignmentOffset` is already in scope. The pre-encode source storyboard
+(trim UI filmstrip) draws on the source timeline and should be unaffected — verify
+rather than assume.
