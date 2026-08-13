@@ -31,7 +31,7 @@ Five outputs were encoded into a local MinIO and opened by three independent sto
 - **hls.js 1.6.17 at default config**, Chrome 150
 - **Safari 26.5.2's native HLS** — a plain `<video src>`, which is the only path an iOS web client has, since iOS does not give JavaScript players MediaSource for HLS
 
-The harness is [`docs/stock-player-check/`](docs/stock-player-check/README.md); raw verdicts in `results-2026-08-11.md` beside it.
+The harness is [`docs/stock-player-check/`](docs/stock-player-check/README.md); raw verdicts in `results-2026-08-11.md` beside it, and `results-2026-08-13.md` for the re-run against the shared-chunk-chain layout.
 
 | # | Output | ffmpeg | hls.js (Chrome) | Safari native | Prefix in `media/` |
 |---|---|---|---|---|---|
@@ -62,6 +62,8 @@ Two things observed and dismissed:
 
 - Cases 1 and 2 emit `Invalid NAL unit size` / `missing picture in access unit` under ffmpeg when opened **through the master**, never through the media playlist directly, and decode 300/300 frames over 10 s regardless. That is ffmpeg probing a byte-range fMP4 fragment without first reading its `#EXT-X-MAP` init segment — an artefact of the probe, not a defect in the output. Absent on case 5 because an encrypted fragment cannot be probed that way at all.
 - Chrome's native `<video src>` path fails all five with `MEDIA_ERR_SRC_NOT_SUPPORTED`. That is Chrome having no built-in HLS, not a finding about the output.
+
+**Re-run 2026-08-13, against the shared-chunk-chain layout** (section 11: `media/<chain>_<n>.m4s` chunks referenced as `../media/…`, always fMP4): all five verdicts identical — hls.js at default config plays cases 1, 2 and 5, byte ranges into the shared chunks included, and fails 3 and 4 exactly where designed. The layout change is invisible to stock clients. The known ffmpeg-CLI probe artefact reappeared on case 2 and was isolated further this time: it needs two same-codec video variants demuxed concurrently by ffmpeg itself, reproduces over `file://` with fully disjoint URL sets, and no real player drains variants that way — the bytes decode clean in isolation and by range-reconstruction. Raw verdicts in `results-2026-08-13.md`. Safari-native was not re-run (headless pass, Chromium only); the 8-11 Safari findings stand, and a hand re-check is one `serve.py` away.
 
 **Settled by the Safari run:** the byte-range fMP4 output is playable by Apple's own stack (cases 1, 2 and 5 all played), so nothing about the segment format or the byte-range packing needs revisiting for iOS web. Case 5 was the genuine unknown — Safari is stricter than hls.js about both fMP4 and key delivery — and it played, which means the "readable playlists + real `keyUrl`" configuration does work everywhere. It is still not one to recommend, for the key-delivery reasons above, but it is not a web-only trick.
 

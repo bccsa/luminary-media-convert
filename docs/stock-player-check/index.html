@@ -30,17 +30,19 @@
 
 <script src="./hls.min.js"></script>
 <script>
-const BASE = 'http://127.0.0.1:9000/media';
+// Outputs use the shared-chunk-chain layout (media/<chain>_<n>.m4s referenced
+// as ../media/… with #EXT-X-BYTERANGE) — what the encoder writes since Todo §11.
+const BASE = 'http://127.0.0.1:9000/ac-images/todo11-test/stock';
 const CASES = [
-  { id: 1, prefix: 'measure27b', name: 'Plaintext, single angle',
-    desc: 'No encryption. Baseline — must play.', expect: 'plays' },
-  { id: 2, prefix: 'sp-multiangle', name: 'Plaintext, multi-angle',
-    desc: 'Two TYPE=VIDEO rendition groups. A stock player ignores the groups and plays whichever variant its ABR picks.', expect: 'plays one angle' },
-  { id: 3, prefix: '772e6978-f002-42c5-9ca6-c23e3fde13d9', name: 'Encrypted + LMCENC playlists',
+  { id: 1, prefix: '1-plain', name: 'Plaintext, single angle',
+    desc: 'No encryption. Baseline — must play, byte ranges into ../media/ chunks included.', expect: 'plays' },
+  { id: 2, prefix: '2-multiangle', name: 'Plaintext, multi-angle',
+    desc: 'Two TYPE=VIDEO rendition groups sharing per-angle chunk chains. A stock player ignores the groups and plays whichever variant its ABR picks.', expect: 'plays one angle' },
+  { id: 3, prefix: '3-lmcenc', name: 'Encrypted + LMCENC playlists',
     desc: 'Default encrypted output. The master itself is LMCENC01 ciphertext.', expect: 'fails at the manifest' },
-  { id: 4, prefix: 'sp-enc-sentinel', name: 'Encrypted, readable playlists, luminary://key',
+  { id: 4, prefix: '4-sentinel', name: 'Encrypted, readable playlists, luminary://key',
     desc: 'encryptPlaylists:false, no keyUrl. Playlists parse; the key URI is our sentinel.', expect: 'fails at key load' },
-  { id: 5, prefix: 'sp-enc-keyurl', name: 'Encrypted, readable playlists, real keyUrl',
+  { id: 5, prefix: '5-keyurl', name: 'Encrypted, readable playlists, real keyUrl',
     desc: 'encryptPlaylists:false + a fetchable AES-128 key URL. TEST ONLY — see the write-up.', expect: 'plays' },
 ];
 
