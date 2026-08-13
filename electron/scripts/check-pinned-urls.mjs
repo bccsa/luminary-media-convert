@@ -44,20 +44,69 @@ const nvTag = pin('NV_CODEC_HEADERS_TAG');
 
 const httpTargets = [
     {
-        what: `FFmpeg ${ffmpegVersion} source`,
-        url: `https://ffmpeg.org/releases/ffmpeg-${ffmpegVersion}.tar.xz`,
-    },
-    {
-        // Without this the build cannot verify the tarball, which is the whole
-        // reason for building from source rather than downloading a binary.
-        what: `FFmpeg ${ffmpegVersion} signature`,
-        url: `https://ffmpeg.org/releases/ffmpeg-${ffmpegVersion}.tar.xz.asc`,
-    },
-    {
         what: `libwebp ${libwebpVersion}`,
         url: `https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-${libwebpVersion}.tar.gz`,
     },
 ];
+
+/**
+ * FFmpeg's tarball and signature are checked by reading the release index once,
+ * instead of requesting each file.
+ *
+ * ffmpeg.org answers a request for a file that does not exist by resetting the
+ * connection rather than returning 404, so a per-file request cannot tell "missing"
+ * from "network trouble" — and repeating the request makes resets more likely, not
+ * less. The index is a single request and gives a definite answer: the filename is
+ * listed or it is not.
+ */
+const FFMPEG_INDEX = 'https://ffmpeg.org/releases/';
+
+async function checkFfmpegRelease() {
+    let index;
+    for (let i = 1; i <= ATTEMPTS; i++) {
+        try {
+            const res = await fetch(FFMPEG_INDEX, { redirect: 'follow' });
+            if (res.ok) {
+                index = await res.text();
+                break;
+            }
+        } catch {
+            // Retry below; an unreachable index is inconclusive, not a verdict.
+        }
+        if (i < ATTEMPTS) await new Promise((r) => setTimeout(r, 2000 * i));
+    }
+
+    if (index === undefined) {
+        console.log(
+            `  ? release index unreachable  FFmpeg ${ffmpegVersion} source + signature`
+        );
+        inconclusive.push({
+            what: `FFmpeg ${ffmpegVersion} source + signature`,
+            url: FFMPEG_INDEX,
+            status: 'release index could not be fetched',
+        });
+        return;
+    }
+
+    // The signature matters as much as the tarball: without it the build cannot
+    // verify what it downloaded, which is the reason for building from source.
+    for (const file of [
+        `ffmpeg-${ffmpegVersion}.tar.xz`,
+        `ffmpeg-${ffmpegVersion}.tar.xz.asc`,
+    ]) {
+        const listed = index.includes(file);
+        console.log(
+            `  ${listed ? '✓' : '✗'} ${listed ? 'listed' : 'NOT listed'} in the release index  ${file}`
+        );
+        if (!listed) {
+            failures.push({
+                what: file,
+                url: FFMPEG_INDEX,
+                status: 'not present in the release index',
+            });
+        }
+    }
+}
 
 /**
  * Retried, because a single attempt is not evidence: these hosts drop connections
@@ -191,9 +240,13 @@ function gitRefExists(repo, ref, kind, expectCommit) {
 const failures = [];
 console.log('\n  Checking the sources ffmpeg-build/build.sh fetches\n');
 
+await checkFfmpegRelease();
+
 for (const t of httpTargets) {
     const { ok, status, method, unreachable } = await reachable(t.url);
-    console.log(`  ${ok ? '✓' : unreachable ? '?' : '✗'} ${status} (${method})  ${t.what}`);
+    console.log(
+        `  ${ok ? '✓' : unreachable ? '?' : '✗'} ${status} (${method})  ${t.what}`
+    );
     if (unreachable) inconclusive.push({ what: t.what, url: t.url, status });
     else if (!ok) failures.push({ what: t.what, url: t.url, status });
     // Spaced out: two of these targets share a host that resets connections when hit
@@ -216,9 +269,15 @@ for (const t of [
         expectCommit: pin('NV_CODEC_HEADERS_COMMIT'),
     },
 ]) {
-    const { ok, note, unreachable } = gitRefExists(t.repo, t.ref, t.kind, t.expectCommit);
+    const { ok, note, unreachable } = gitRefExists(
+        t.repo,
+        t.ref,
+        t.kind,
+        t.expectCommit
+    );
     console.log(`  ${ok ? '✓' : unreachable ? '?' : '✗'} ${t.what} — ${note}`);
-    if (unreachable) inconclusive.push({ what: t.what, url: t.repo, status: note });
+    if (unreachable)
+        inconclusive.push({ what: t.what, url: t.repo, status: note });
     else if (!ok) failures.push({ what: t.what, url: t.repo, status: note });
 }
 
@@ -226,13 +285,15 @@ if (inconclusive.length > 0) {
     const prefix = process.env.GITHUB_ACTIONS ? '::warning::' : '  ! ';
     for (const f of inconclusive) {
         console.error(
-            `${prefix}${f.what} could not be reached (${f.status}) — not a verdict on the pin`,
+            `${prefix}${f.what} could not be reached (${f.status}) — not a verdict on the pin`
         );
     }
 }
 
 if (failures.length > 0) {
-    console.error(`\n  ✗ ${failures.length} pinned source(s) unreachable.\n`);
+    console.error(
+        `\n  ✗ ${failures.length} pinned source(s) are wrong or missing.\n`
+    );
     for (const f of failures)
         console.error(`      ${f.what}  ${f.status}\n        ${f.url}`);
     console.error(
@@ -247,7 +308,7 @@ if (failures.length > 0) {
 if (inconclusive.length > 0) {
     console.log(
         `\n  ${inconclusive.length} source(s) could not be reached; the rest are fine.` +
-            '\n  Not failing: a dropped connection is not evidence that a pin is wrong.\n',
+            '\n  Not failing: a dropped connection is not evidence that a pin is wrong.\n'
     );
 } else {
     console.log('\n  All pinned sources are still reachable.\n');
