@@ -179,6 +179,7 @@ export class CmsController {
         config.segmentDuration = dto.segmentDuration;
         config.byteRange = dto.byteRange;
         config.byteRangeMaxFileSizeMB = dto.byteRangeMaxFileSizeMB;
+        config.audioByteRangeMaxFileSizeMB = dto.audioByteRangeMaxFileSizeMB;
         config.thumbnails = dto.thumbnails;
         // A CMS states a requirement; key delivery is not its business. Leaving
         // this undefined is what the encoder reads as "no encryption".

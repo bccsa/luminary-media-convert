@@ -12,6 +12,14 @@ export {
     DEFAULT_RECOVERY_POLICY,
     resolveRecoveryPolicy,
 } from './recovery.js';
+// The warming loop itself is an adapter's job (`PlayerAdapter.warmChunks`);
+// what ships from here is the schedule builder and the policy defaults.
+export {
+    buildChunkSchedules,
+    DEFAULT_LEAD_SECONDS,
+    DEFAULT_WARM_BYTES,
+} from './prefetch.js';
+export type { ChunkBoundary } from './prefetch.js';
 export {
     SidecarLoader,
     chapterTrackId,
@@ -53,6 +61,7 @@ export type {
     MasterInfo,
     MungeOptions,
     MungeResult,
+    MungedMediaPlaylist,
     PipelineContext,
 } from './pipeline/pipeline.js';
 export {

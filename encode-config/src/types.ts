@@ -10,6 +10,24 @@ export interface VideoTrackInfo {
     profile?: string;
     language?: string;
     name?: string;
+    /**
+     * Where this stream's first frame sits on the container timeline, seconds.
+     * Streams in one file routinely do not start together, and the encoder
+     * seeks past the head to make them — which is what decides whether copy
+     * mode is safe for this track. Absent on a probe from before the API
+     * reported it.
+     */
+    startTime?: number;
+    /** Frames between consecutive keyframes, sampled from the head. */
+    gopFrames?: number;
+    /** {@link gopFrames} in seconds, for saying out loud. */
+    gopSeconds?: number;
+    /**
+     * Every sampled keyframe interval was the same length. False means the
+     * source cuts keyframes where it likes, which no segment duration divides
+     * into.
+     */
+    gopRegular?: boolean;
 }
 
 export interface AudioTrackInfo {
@@ -20,6 +38,8 @@ export interface AudioTrackInfo {
     sampleRate: number;
     language?: string;
     name?: string;
+    /** See {@link VideoTrackInfo.startTime}. */
+    startTime?: number;
 }
 
 export interface FormatInfo {

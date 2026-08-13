@@ -9,7 +9,6 @@ import { mkdirSync, existsSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { promisify } from 'util';
-import { Worker } from 'worker_threads';
 import type {
     EncodeConfigDto,
     VideoRenditionDto,
@@ -19,6 +18,7 @@ import type {
 import dotenv from 'dotenv';
 import { ffmpegBin, ffmpegShellBin, ffprobeBin } from './ffbin.js';
 import { checkFfmpeg } from './ffmpeg-availability.js';
+import { ALIGNMENT_TOLERANCE_SECONDS } from './copy-mode-eligibility.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -30,11 +30,18 @@ export interface EncodeOptions {
     outputDir: string;
     encodeConfig: EncodeConfigDto;
     onProgress: (percent: number) => void;
-    byteRange?: boolean;
-    byteRangeMaxFileSizeBytes?: number;
-    preByteRangeHook?: (outputDir: string) => void | Promise<void>;
 }
 
+/**
+ * The container the output's segments arrive in.
+ *
+ * New encodes are always `'fmp4'` — a source whose streams do not start
+ * together is aligned with an input seek rather than escaped into MPEG-TS, so
+ * the output's container is no longer a property of the input. `'mpegts'`
+ * survives in the union for one reason: a `session.json` written before that
+ * change is still restored at boot, and a restored session has to report what
+ * it actually produced.
+ */
 export type SegmentFormat = 'fmp4' | 'mpegts';
 
 export interface EncodeResult {
@@ -249,15 +256,31 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     /**
-     * Check whether all streams used by the encode config have aligned start times.
-     * When aligned, fMP4 segments can be used safely. When misaligned, MPEG-TS
-     * segments are needed because hls.js's TS→fMP4 transmuxer synchronizes
-     * audio and video PTS during transmux.
+     * How far into the source every stream has to be seeked for them all to
+     * begin together — 0 when they already do.
+     *
+     * A container whose audio starts a tenth of a second after its video used
+     * to be encoded to MPEG-TS instead of fMP4, on the reasoning that hls.js
+     * resynchronises PTS while transmuxing TS and appends fMP4 as it finds it.
+     * That made the output's container format a property of whatever file the
+     * user happened to hand over, and left the format every other player
+     * prefers unavailable to exactly the sources that most needed a well-formed
+     * one.
+     *
+     * Aligning at the input instead costs the head of the programme — at most
+     * the spread, typically tens of milliseconds — and settles the question
+     * before a single frame is encoded. Only the streams the config actually
+     * maps are considered: a track nobody asked for cannot drag the whole
+     * encode forward.
+     *
+     * A probe that came back with nothing returns 0. Refusing to encode over a
+     * question ffprobe would not answer is worse than encoding as we always
+     * did.
      */
-    private async areStreamStartTimesAligned(
+    private async computeAlignmentOffset(
         inputPath: string,
         encodeConfig: EncodeConfigDto
-    ): Promise<boolean> {
+    ): Promise<number> {
         const startTimes = await this.probeStreamStartTimes(inputPath);
 
         const usedStartTimes: number[] = [];
@@ -274,23 +297,25 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 usedStartTimes.push(startTimes.audio[idx]);
         }
 
-        if (usedStartTimes.length < 2) return true;
+        if (usedStartTimes.length < 2) return 0;
 
         const maxStart = Math.max(...usedStartTimes);
         const minStart = Math.min(...usedStartTimes);
         const spread = maxStart - minStart;
 
-        if (spread < 0.05) {
+        if (spread < ALIGNMENT_TOLERANCE_SECONDS) {
             this.logger.log(
-                `Stream start times aligned (spread ${(spread * 1000).toFixed(0)}ms) — using fMP4 segments`
+                `Stream start times aligned (spread ${(spread * 1000).toFixed(0)}ms)`
             );
-            return true;
+            return 0;
         }
 
         this.logger.log(
-            `Stream start times misaligned (spread ${(spread * 1000).toFixed(0)}ms, min ${minStart.toFixed(3)}s, max ${maxStart.toFixed(3)}s) — falling back to MPEG-TS segments`
+            `Stream start times differ by ${(spread * 1000).toFixed(0)}ms ` +
+                `(min ${minStart.toFixed(3)}s, max ${maxStart.toFixed(3)}s) — ` +
+                `aligning all streams to ${maxStart}s with an input seek`
         );
-        return false;
+        return maxStart;
     }
 
     private async probeDuration(inputPath: string): Promise<number> {
@@ -352,66 +377,11 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    private async probeGopDuration(
-        inputPath: string,
-        frameRate: number
-    ): Promise<number | null> {
-        try {
-            const { stdout } = await execFileAsync(
-                ffprobeBin(),
-                [
-                    '-v',
-                    'error',
-                    '-select_streams',
-                    'v:0',
-                    '-show_frames',
-                    '-show_entries',
-                    'frame=pict_type',
-                    '-of',
-                    'csv=p=0',
-                    '-read_intervals',
-                    '%+#200',
-                    inputPath,
-                ],
-                { timeout: 60000 }
-            );
-            const frames = stdout
-                .trim()
-                .split('\n')
-                .filter((l) => l.trim());
-            let keyframeCount = 0;
-            let firstKeyIdx = -1;
-            let secondKeyIdx = -1;
-            for (let i = 0; i < frames.length; i++) {
-                if (frames[i].trim() === 'I') {
-                    keyframeCount++;
-                    if (keyframeCount === 1) firstKeyIdx = i;
-                    else if (keyframeCount === 2) {
-                        secondKeyIdx = i;
-                        break;
-                    }
-                }
-            }
-            if (
-                firstKeyIdx >= 0 &&
-                secondKeyIdx > firstKeyIdx &&
-                frameRate > 0
-            ) {
-                const gopFrames = secondKeyIdx - firstKeyIdx;
-                const gopSeconds = gopFrames / frameRate;
-                return Math.round(gopSeconds * 1000) / 1000;
-            }
-            return null;
-        } catch {
-            this.logger.warn('Could not probe GOP duration');
-            return null;
-        }
-    }
-
     private async buildConcatFile(
         inputPath: string,
         segments: TrimSegmentDto[],
-        outputDir: string
+        outputDir: string,
+        alignmentOffset = 0
     ): Promise<string> {
         const lines = ['ffconcat version 1.0'];
         /*
@@ -430,7 +400,19 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             // Escape single quotes in path for ffconcat format
             const escapedPath = absoluteInput.replace(/'/g, "'\\''");
             lines.push(`file '${escapedPath}'`);
-            lines.push(`inpoint ${seg.inSec}`);
+            // Trimming and aligning are the same operation here, so the
+            // alignment is folded into the in-points rather than added as a
+            // second seek in front of the concat demuxer — which would shift
+            // every kept range, not just the head.
+            //
+            // Misalignment exists only at the head of the source: past the
+            // latest-starting stream's first frame every stream is present, so
+            // a range beginning after that point is left exactly where the user
+            // put it. Only a range starting inside the head region moves, and
+            // it moves by at most the spread — a fraction of a second off the
+            // front of that one range, in exchange for all of its streams
+            // actually being there.
+            lines.push(`inpoint ${Math.max(seg.inSec, alignmentOffset)}`);
             lines.push(`outpoint ${seg.outSec}`);
         }
         const concatPath = join(outputDir, 'concat.txt');
@@ -491,7 +473,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
     private async buildVideoArgs(
         opts: EncodeOptions,
-        useFmp4 = true
+        alignmentOffset = 0
     ): Promise<string[]> {
         const { inputPath, outputDir, encodeConfig } = opts;
         const renditions = encodeConfig.videoRenditions!;
@@ -500,26 +482,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const sourceFrameRate = await this.probeFrameRate(inputPath);
         const gopFrames = Math.round(segmentDuration * sourceFrameRate);
 
-        let hlsTime = segmentDuration;
-        if (opts.byteRange !== false) {
-            const sourceGopDuration = await this.probeGopDuration(
-                inputPath,
-                sourceFrameRate
-            );
-            if (sourceGopDuration && sourceGopDuration > 0) {
-                hlsTime = sourceGopDuration;
-                this.logger.log(
-                    `Byte-range mode: using source GOP duration ${hlsTime}s for -hls_time (source: ${sourceFrameRate.toFixed(2)} fps, GOP: ${Math.round(hlsTime * sourceFrameRate)} frames)`
-                );
-            } else {
-                this.logger.log(
-                    `Byte-range mode: could not detect source GOP, using segment duration ${hlsTime}s for -hls_time`
-                );
-            }
-        }
-
         this.logger.log(
-            `Source frame rate: ${sourceFrameRate.toFixed(2)} fps, GOP: ${gopFrames} frames (${segmentDuration}s segments), hls_time: ${hlsTime}s`
+            `Source frame rate: ${sourceFrameRate.toFixed(2)} fps, GOP: ${gopFrames} frames (${segmentDuration}s segments)`
         );
         const args: string[] = [];
 
@@ -555,9 +519,21 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             const concatPath = await this.buildConcatFile(
                 inputPath,
                 encodeConfig.trimSegments,
-                outputDir
+                outputDir,
+                alignmentOffset
             );
             args.push('-f', 'concat', '-safe', '0', '-i', concatPath);
+        } else if (alignmentOffset > 0) {
+            // Input-level, hence in front of `-i`, and not a `-filter_complex`
+            // trim: a copy-mode rendition never passes through the filter graph
+            // at all, so a filter-level trim would align the re-encoded streams
+            // and leave the copied ones exactly as misaligned as they were. An
+            // input seek is the only mechanism that reaches every stream.
+            //
+            // It follows the hwaccel flags because those are input options too,
+            // and every input option has to be stated before the input it
+            // applies to.
+            args.push('-ss', String(alignmentOffset), '-i', inputPath);
         } else {
             args.push('-i', inputPath);
         }
@@ -708,6 +684,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                         `${Math.round(r.videoBitrateKbps * 1.5)}k`
                     );
                 }
+                // x264 puts a keyframe wherever it detects a cut, which lands
+                // off the `-g` cadence below and takes the segment boundary
+                // with it — the HLS muxer closes a chunk at the first keyframe
+                // past `-hls_time`, so a scene change two seconds early yields
+                // a short segment and the chain stops being uniform. NVENC and
+                // VideoToolbox do not scene-cut unless asked, so this is the
+                // CPU path's problem alone.
+                args.push(`-sc_threshold:v:${videoOutputIndex}`, '0');
             }
             args.push(
                 `-g:v:${videoOutputIndex}`,
@@ -759,33 +743,29 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             audioOutputIndex++;
         }
 
-        // HLS output options — use fMP4 when stream start times are aligned (preferred:
-        // CMAF-compatible, lower overhead). Fall back to MPEG-TS when misaligned, because
-        // hls.js's TS→fMP4 transmuxer synchronizes audio/video PTS during transmux,
-        // while fMP4 segments are appended directly and rely on tfdt alignment.
-        const segExt = useFmp4 ? 'm4s' : 'ts';
+        // HLS output options. fMP4 unconditionally: CMAF-compatible, lower
+        // per-segment overhead, and the format every current player is happiest
+        // with. Sources whose streams do not start together are aligned at the
+        // input above rather than escaped into MPEG-TS.
+        const segExt = 'm4s';
         args.push(
             '-f',
             'hls',
             '-hls_time',
-            String(hlsTime),
+            String(segmentDuration),
             '-hls_playlist_type',
             'vod',
             '-hls_flags',
             'independent_segments',
             '-hls_segment_type',
-            useFmp4 ? 'fmp4' : 'mpegts',
+            'fmp4',
             '-master_pl_name',
-            'master.m3u8'
+            'master.m3u8',
+            '-hls_fmp4_init_filename',
+            'init.mp4',
+            '-movflags',
+            '+negative_cts_offsets+default_base_moof'
         );
-        if (useFmp4) {
-            args.push(
-                '-hls_fmp4_init_filename',
-                'init.mp4',
-                '-movflags',
-                '+negative_cts_offsets+default_base_moof'
-            );
-        }
 
         const multiTrack =
             new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
@@ -824,7 +804,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
     private async buildAudioArgs(
         opts: EncodeOptions,
-        useFmp4 = true
+        alignmentOffset = 0
     ): Promise<string[]> {
         const { inputPath, outputDir, encodeConfig } = opts;
         const audioGroups = encodeConfig.audioGroups!;
@@ -835,9 +815,13 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             const concatPath = await this.buildConcatFile(
                 inputPath,
                 encodeConfig.trimSegments,
-                outputDir
+                outputDir,
+                alignmentOffset
             );
             args.push('-f', 'concat', '-safe', '0', '-i', concatPath);
+        } else if (alignmentOffset > 0) {
+            // See buildVideoArgs: input-level, so it reaches copied streams too.
+            args.push('-ss', String(alignmentOffset), '-i', inputPath);
         } else {
             args.push('-i', inputPath);
         }
@@ -875,7 +859,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             varParts.push(`a:${i},name:${name}`);
         }
 
-        const segExt = useFmp4 ? 'm4s' : 'ts';
+        const segExt = 'm4s';
         args.push(
             '-f',
             'hls',
@@ -886,18 +870,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             '-hls_flags',
             'independent_segments',
             '-hls_segment_type',
-            useFmp4 ? 'fmp4' : 'mpegts',
+            'fmp4',
             '-master_pl_name',
-            'master.m3u8'
+            'master.m3u8',
+            '-hls_fmp4_init_filename',
+            'init.mp4',
+            '-movflags',
+            '+negative_cts_offsets+default_base_moof'
         );
-        if (useFmp4) {
-            args.push(
-                '-hls_fmp4_init_filename',
-                'init.mp4',
-                '-movflags',
-                '+negative_cts_offsets+default_base_moof'
-            );
-        }
 
         args.push(
             '-var_stream_map',
@@ -953,23 +933,34 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             }
         }
 
-        // Use fMP4 when stream start times are aligned (CMAF-compatible, lower overhead).
-        // Fall back to MPEG-TS when misaligned — hls.js's transmuxer fixes sync for TS.
-        const useFmp4 = await this.areStreamStartTimesAligned(
+        // Settled before anything is built: a source whose streams do not start
+        // together is seeked past the head so that they do, and the output is
+        // fMP4 either way.
+        const alignmentOffset = await this.computeAlignmentOffset(
             opts.inputPath,
             encodeConfig
         );
 
+        // What the output will be, not what the input is. Progress is FFmpeg's
+        // out_time over this figure, and an aligned encode never reaches the
+        // source's full duration — the head it seeked past is duration it will
+        // never write — so leaving the offset in would park the bar short of
+        // 100% on precisely the sources this change exists for. A trimmed
+        // encode already measures its kept ranges, and the alignment is folded
+        // into those in-points rather than added to them.
         const totalDuration = encodeConfig.trimSegments?.length
             ? encodeConfig.trimSegments.reduce(
                   (sum, s) => sum + (s.outSec - s.inSec),
                   0
               )
-            : await this.probeDuration(opts.inputPath);
+            : Math.max(
+                  0,
+                  (await this.probeDuration(opts.inputPath)) - alignmentOffset
+              );
         const args =
             type === 'video'
-                ? await this.buildVideoArgs(opts, useFmp4)
-                : await this.buildAudioArgs(opts, useFmp4);
+                ? await this.buildVideoArgs(opts, alignmentOffset)
+                : await this.buildAudioArgs(opts, alignmentOffset);
 
         this.logger.debug(`FFmpeg args: ffmpeg ${args.join(' ')}`);
 
@@ -1023,16 +1014,6 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 }
 
                 (async () => {
-                    if (opts.preByteRangeHook) {
-                        await opts.preByteRangeHook(outputDir);
-                    }
-
-                    if (opts.byteRange !== false) {
-                        const maxBytes =
-                            opts.byteRangeMaxFileSizeBytes ?? 500 * 1024 * 1024;
-                        await this.convertToByteRange(outputDir, maxBytes);
-                    }
-
                     // One spec-correct master, angles and all. Splitting it per
                     // angle is the player's job now (see the hls package's
                     // extractAnglePlaylist / extractAudioOnlyPlaylist).
@@ -1047,7 +1028,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     resolve({
                         outputDir,
                         masterPlaylist: 'master.m3u8',
-                        segmentFormat: useFmp4 ? 'fmp4' : 'mpegts',
+                        segmentFormat: 'fmp4',
                     });
                 })().catch(reject);
             };
@@ -1086,45 +1067,6 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     }
                 }, this.timeoutMs);
             }
-        });
-    }
-
-    private async convertToByteRange(
-        outputDir: string,
-        maxFileSizeBytes: number
-    ): Promise<void> {
-        const tsPath = join(__dirname, 'byte-range.worker.ts');
-        const useTsWorker = existsSync(tsPath);
-        const workerPath = useTsWorker
-            ? tsPath
-            : join(__dirname, 'byte-range.worker.js');
-
-        return new Promise<void>((resolve, reject) => {
-            const worker = new Worker(workerPath, {
-                workerData: { outputDir, maxFileSizeBytes },
-                ...(useTsWorker
-                    ? { execArgv: ['--require', 'ts-node/register'] }
-                    : {}),
-            });
-
-            worker.on('message', (msg) => {
-                this.logger.log(
-                    `Byte-range conversion complete for ${msg.streamCount} stream(s) (max ${Math.round(maxFileSizeBytes / 1024 / 1024)} MB per file)`
-                );
-                resolve();
-            });
-
-            worker.on('error', (err) => {
-                reject(new Error(`Byte-range worker error: ${err.message}`));
-            });
-
-            worker.on('exit', (code) => {
-                if (code !== 0) {
-                    reject(
-                        new Error(`Byte-range worker exited with code ${code}`)
-                    );
-                }
-            });
         });
     }
 
@@ -1377,6 +1319,52 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
 
         return result.join('\n');
+    }
+
+    /**
+     * Which byte-range chunk chain each stream directory's segments belong to.
+     *
+     * Packing shares one chain across several streams, and this is where the
+     * grouping is decided — from the config that named the directories, never
+     * by reading a name back apart. The names are built below out of labels the
+     * user typed; a reader that re-derived the angle from a `_t1_` infix would
+     * be one label containing an underscore away from packing an angle into the
+     * wrong chain, and would say nothing about it.
+     *
+     * One chain per video angle, holding every rendition of that angle: the
+     * target CDN class forwards a requested range to the client immediately
+     * while backhauling the whole object, so one chunk pull warms every
+     * rendition of the angle at the edge and an ABR step-up never lands on a
+     * cold object. Audio gets a single chain of its own instead of riding along
+     * — it is needed *concurrently* with video rather than swapped for it, so
+     * merging would duplicate it into every angle's chunks, and keeping it
+     * apart is what lets audio-only playback pull no video bytes at all.
+     */
+    buildStreamChainMap(encodeConfig: EncodeConfigDto): Record<string, string> {
+        const chains: Record<string, string> = {};
+
+        if (encodeConfig.type === 'video') {
+            const renditions = encodeConfig.videoRenditions ?? [];
+            // The same test buildVideoArgs applies when it names the stream
+            // directories, and it has to stay the same test: a different answer
+            // here maps chains onto directories that do not exist.
+            const multiTrack =
+                new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size >
+                1;
+            for (const rendition of renditions) {
+                const name = this.buildVideoStreamName(rendition, multiTrack);
+                chains[`stream_${name}`] =
+                    `v${rendition.sourceTrackIndex ?? 0}`;
+            }
+        }
+
+        // Audio-only encodes fall through to exactly this and nothing else,
+        // which is the whole special case they need.
+        for (const group of encodeConfig.audioGroups ?? []) {
+            chains[`stream_${this.buildAudioStreamName(group)}`] = 'a';
+        }
+
+        return chains;
     }
 
     private buildVideoStreamName(

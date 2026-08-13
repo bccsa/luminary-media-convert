@@ -410,6 +410,83 @@ describe('HlsJsAdapter — text tracks', () => {
     });
 });
 
+describe('HlsJsAdapter — chunk warming', () => {
+    const SCHEDULES = [
+        [
+            { url: 'https://cdn.test/media/v0_0.m4s', start: 0, end: 20 },
+            { url: 'https://cdn.test/media/v0_1.m4s', start: 20, end: 40 },
+        ],
+    ];
+
+    /** jsdom gives a video no buffered ranges; stand the buffer front in. */
+    function withBufferFront(video: HTMLVideoElement, end: number): void {
+        Object.defineProperty(video, 'buffered', {
+            configurable: true,
+            value: { length: 1, start: () => 0, end: () => end },
+        });
+    }
+
+    function warmOptions(fetchImpl: typeof fetch) {
+        return { leadSeconds: 10, warmBytes: 1024, fetchImpl };
+    }
+
+    it('warms the next chunk off the media element buffer front', async () => {
+        vi.useFakeTimers();
+        const video = createVideo();
+        const adapter = new HlsJsAdapter(video);
+        await adapter.loadSource({ url: 'blob:master', isBlob: true });
+
+        const warmFetch = vi.fn(async () => ({
+            arrayBuffer: async () => new ArrayBuffer(8),
+        })) as unknown as typeof fetch;
+        adapter.warmChunks(SCHEDULES, warmOptions(warmFetch));
+
+        withBufferFront(video, 15);
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(warmFetch).toHaveBeenCalledWith('https://cdn.test/media/v0_1.m4s', {
+            headers: { Range: 'bytes=0-1023' },
+        });
+        adapter.destroy();
+        vi.useRealTimers();
+    });
+
+    it('stops the loop on empty schedules, on a new source and on destroy', async () => {
+        vi.useFakeTimers();
+        const video = createVideo();
+        const adapter = new HlsJsAdapter(video);
+        await adapter.loadSource({ url: 'blob:master', isBlob: true });
+        withBufferFront(video, 15);
+
+        /** Arm the loop and hand back the fetch it would warm through. */
+        const arm = () => {
+            const warmFetch = vi.fn() as unknown as typeof fetch;
+            adapter.warmChunks(SCHEDULES, warmOptions(warmFetch));
+            return warmFetch;
+        };
+
+        // 1. an empty call is the wrapper saying "stop".
+        const armed = arm();
+        adapter.warmChunks([], warmOptions(vi.fn() as unknown as typeof fetch));
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(armed).not.toHaveBeenCalled();
+
+        // 2. loading another source drops the previous chains.
+        const replaced = arm();
+        await adapter.loadSource({ url: 'blob:second', isBlob: true });
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(replaced).not.toHaveBeenCalled();
+
+        // 3. destroy() leaves nothing ticking.
+        const destroyed = arm();
+        adapter.destroy();
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(destroyed).not.toHaveBeenCalled();
+
+        vi.useRealTimers();
+    });
+});
+
 describe('HlsJsAdapter — recovery', () => {
     it('recovers media and network errors in place, and declines the rest', async () => {
         const adapter = new HlsJsAdapter(createVideo());

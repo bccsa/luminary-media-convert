@@ -272,10 +272,11 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
-            'HLS segment format used for encoding. "fmp4" (CMAF-compatible, lower overhead) ' +
-            'is used when source stream start times are aligned. "mpegts" is used as a fallback ' +
-            "when source streams have misaligned start times, because the player's TS transmuxer " +
-            'can synchronize audio and video during playback.',
+            'HLS segment format of the output. Always "fmp4" for a new encode: a source ' +
+            'whose streams do not start together is aligned with an input seek rather ' +
+            'than escaped into MPEG-TS, so the output container is no longer a property ' +
+            'of the input. "mpegts" appears only on a session restored from before that ' +
+            'change, which has to report what it actually produced.',
         enum: ['fmp4', 'mpegts'],
         example: 'fmp4',
     })

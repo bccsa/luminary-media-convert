@@ -11,6 +11,14 @@ export {
     type HlsJsAdapterOptions,
 } from './adapter/HlsJsAdapter';
 
+// Exported as the reference warming loop a native adapter is ported from, not
+// because a host has any reason to construct one: HlsJsAdapter owns its own.
+export {
+    ChunkPrefetcher,
+    type ChunkPrefetcherHooks,
+    type ChunkPrefetcherOptions,
+} from './adapter/chunkWarming';
+
 export {
     DEFAULT_MESSAGES,
     formatSeconds,

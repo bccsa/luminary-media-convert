@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PlayerController } from './controller.js';
+import {
+    PlayerController,
+    type PlayerControllerOptions,
+} from './controller.js';
 import { DEFAULT_ANGLE_ID } from './pipeline/pipeline.js';
 import { DEFAULT_POLL_INTERVAL_MS } from './poller.js';
+import { DEFAULT_LEAD_SECONDS, DEFAULT_WARM_BYTES } from './prefetch.js';
 import { AUDIO_ONLY_ANGLE_ID, type PlayerError } from './types.js';
 import {
     CHAPTERS_VTT,
+    CHUNKED_MEDIA_PLAYLIST,
     FakeAdapter,
     FakeServeStrategy,
     MULTI_ANGLE_MASTER,
@@ -48,6 +53,7 @@ const multiAngleRoutes: Record<string, RouteBody> = {
 function setup(
     routes: Record<string, RouteBody>,
     adapterOptions: FakeAdapterOptions = {},
+    options: PlayerControllerOptions = {},
 ) {
     const adapter = new FakeAdapter(adapterOptions);
     const fake = makeFetch(routes);
@@ -55,6 +61,10 @@ function setup(
     const controller = new PlayerController(adapter, {
         fetchImpl: fake.fetchImpl,
         serveStrategy,
+        // Off by default here: chunk warming has its own spec, and every other
+        // test in this file counts fetches.
+        prefetch: { enabled: false },
+        ...options,
     });
     const errors: PlayerError[] = [];
     controller.on('error', (error) => errors.push(error));
@@ -62,12 +72,16 @@ function setup(
 }
 
 describe('PlayerController — load', () => {
-    it('passes an unencrypted, un-narrowed master through by URL', async () => {
-        const { adapter, controller } = setup(simpleRoutes);
+    it('serves a munged master even for an unencrypted, un-narrowed source', async () => {
+        const { adapter, controller, serveStrategy } = setup(simpleRoutes);
         await controller.load({ masterUrl: MASTER_URL });
 
         expect(controller.getState().lifecycle).toBe('ready');
-        expect(adapter.loads).toEqual([{ url: MASTER_URL, isBlob: false }]);
+        expect(adapter.loads).toHaveLength(1);
+        expect(adapter.loads[0]?.isBlob).toBe(true);
+        expect(serveStrategy.textOf(adapter.loads[0]!.url)).toContain(
+            '#EXT-X-STREAM-INF',
+        );
         expect(controller.getState().qualities.map((q) => q.id)).toEqual([
             '1080',
             '720',
@@ -702,6 +716,115 @@ describe('PlayerController — preservePosition across sources', () => {
         });
         expect(adapter.seeks).toEqual([120]);
         expect(adapter.playCount).toBe(1);
+        expect(controller.getState().lifecycle).toBe('ready');
+    });
+});
+
+/**
+ * The warming LOOP belongs to the adapter (`PlayerAdapter.warmChunks`), so
+ * what is checked here is the handover: the right chains, fully resolved
+ * options, and a stop at every point the source goes away.
+ */
+describe('PlayerController — chunk warming', () => {
+    const chunkedRoutes: Record<string, RouteBody> = {
+        ...simpleRoutes,
+        [`${BASE}/stream_1080/playlist.m3u8`]: CHUNKED_MEDIA_PLAYLIST,
+        [`${BASE}/stream_720/playlist.m3u8`]: CHUNKED_MEDIA_PLAYLIST,
+        [`${BASE}/stream_480/playlist.m3u8`]: CHUNKED_MEDIA_PLAYLIST,
+    };
+
+    it('hands the adapter the attached chains with every option resolved', async () => {
+        const { adapter, controller, fetchImpl } = setup(
+            chunkedRoutes,
+            {},
+            { prefetch: { enabled: true } },
+        );
+        await controller.load({ masterUrl: MASTER_URL });
+
+        const warmed = adapter.warmCalls.filter(
+            (call) => call.schedules.length > 0,
+        );
+        expect(warmed).toHaveLength(1);
+        expect(warmed[0]?.schedules[0]).toEqual([
+            { url: `${BASE}/media/v0_0.m4s`, start: 0, end: 8 },
+            { url: `${BASE}/media/v0_1.m4s`, start: 8, end: 12 },
+        ]);
+        // Defaults are applied here, not left for the adapter to guess.
+        expect(warmed[0]?.options).toEqual({
+            leadSeconds: DEFAULT_LEAD_SECONDS,
+            warmBytes: DEFAULT_WARM_BYTES,
+            fetchImpl,
+        });
+    });
+
+    it('passes the host overrides through, log included', async () => {
+        const { adapter, controller } = setup(
+            chunkedRoutes,
+            {},
+            {
+                prefetch: {
+                    enabled: true,
+                    leadSeconds: 2,
+                    warmBytes: 1024,
+                    debug: true,
+                },
+            },
+        );
+        await controller.load({ masterUrl: MASTER_URL });
+
+        const warmed = adapter.warmCalls.at(-1);
+        expect(warmed?.options.leadSeconds).toBe(2);
+        expect(warmed?.options.warmBytes).toBe(1024);
+        expect(typeof warmed?.options.log).toBe('function');
+    });
+
+    it('stops warming when the source goes away', async () => {
+        const { adapter, controller } = setup(
+            chunkedRoutes,
+            {},
+            { prefetch: { enabled: true } },
+        );
+        await controller.load({ masterUrl: MASTER_URL });
+        controller.destroy();
+
+        expect(adapter.warmCalls.at(-1)?.schedules).toEqual([]);
+    });
+
+    it('never arms warming when the host switched it off', async () => {
+        const { adapter, controller } = setup(
+            chunkedRoutes,
+            {},
+            { prefetch: { enabled: false } },
+        );
+        await controller.load({ masterUrl: MASTER_URL });
+
+        expect(
+            adapter.warmCalls.every((call) => call.schedules.length === 0),
+        ).toBe(true);
+    });
+
+    it('has nothing to warm in output without byte ranges', async () => {
+        const { adapter, controller } = setup(
+            simpleRoutes,
+            {},
+            { prefetch: { enabled: true } },
+        );
+        await controller.load({ masterUrl: MASTER_URL });
+
+        expect(
+            adapter.warmCalls.every((call) => call.schedules.length === 0),
+        ).toBe(true);
+    });
+
+    it('drives an adapter that implements no warming at all', async () => {
+        const { adapter, controller } = setup(
+            chunkedRoutes,
+            {},
+            { prefetch: { enabled: true } },
+        );
+        adapter.warmChunks = undefined;
+
+        await controller.load({ masterUrl: MASTER_URL });
         expect(controller.getState().lifecycle).toBe('ready');
     });
 });

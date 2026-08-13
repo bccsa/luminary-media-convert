@@ -40,6 +40,43 @@ export class VideoTrackInfoDto {
     })
     @Expose()
     name?: string;
+
+    @ApiPropertyOptional({
+        example: 0.083,
+        description:
+            "Where this stream's first frame sits on the container timeline, " +
+            'in seconds. Streams in one file routinely do not start together; ' +
+            'the encode seeks past the head to align them, which is what ' +
+            'decides whether a copy-mode rendition on this track is safe.',
+    })
+    @Expose()
+    startTime?: number;
+
+    @ApiPropertyOptional({
+        example: 60,
+        description:
+            'Frames between consecutive keyframes, sampled from the head of ' +
+            'the stream. Absent when the cadence could not be established.',
+    })
+    @Expose()
+    gopFrames?: number;
+
+    @ApiPropertyOptional({
+        example: 2,
+        description: 'The keyframe interval in seconds, for display.',
+    })
+    @Expose()
+    gopSeconds?: number;
+
+    @ApiPropertyOptional({
+        example: true,
+        description:
+            'Every sampled keyframe interval was the same length. False means ' +
+            'the source cuts keyframes where it likes, which no segment ' +
+            'duration divides into — copy mode is refused for such a track.',
+    })
+    @Expose()
+    gopRegular?: boolean;
 }
 
 export class AudioTrackInfoDto {
@@ -73,6 +110,15 @@ export class AudioTrackInfoDto {
     })
     @Expose()
     name?: string;
+
+    @ApiPropertyOptional({
+        example: 0.021,
+        description:
+            "Where this stream's first sample sits on the container timeline, " +
+            'in seconds. See the same field on a video track.',
+    })
+    @Expose()
+    startTime?: number;
 }
 
 export class FormatInfoDto {

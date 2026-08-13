@@ -159,6 +159,16 @@ export class EncodeService {
                     (session.config.byteRangeMaxFileSizeMB ?? 500) *
                     1024 *
                     1024,
+                // Which stream directories share a chunk chain, decided from the
+                // config that names them rather than from the names themselves.
+                streamChains: this.ffmpegService.buildStreamChainMap(
+                    session.encodeConfig
+                ),
+                audioByteRangeMaxFileSizeBytes:
+                    (session.config.audioByteRangeMaxFileSizeMB ?? 50) *
+                    1024 *
+                    1024,
+                segmentDurationSeconds: segDur,
                 estimatedTotalSegments,
                 onProgress: (pipelineUpdate) => {
                     if (pipelineUpdate.encrypting != null)
@@ -221,9 +231,6 @@ export class EncodeService {
                 inputPath: session.filePath!,
                 outputDir,
                 encodeConfig: session.encodeConfig,
-                // Pipeline handles byte-range and encryption inline
-                byteRange: false,
-                preByteRangeHook: undefined,
                 onProgress: (percent) => {
                     currentProgress.encoding = percent;
                     this.sessionService.updatePipelineProgress(sessionId, {

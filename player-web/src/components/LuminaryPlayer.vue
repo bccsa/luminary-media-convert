@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import { PlayerController } from '@luminary-media-converter/player-core';
 import type {
     PlayerControllerApi,
+    PlayerControllerOptions,
     PlayerError,
     PlayerSource,
 } from '@luminary-media-converter/player-core';
@@ -53,6 +54,13 @@ interface Props {
      */
     previewTime?: number | null;
     /**
+     * Options handed to the default `PlayerController` — chunk-warming
+     * prefetch tuning and its debug logging live here. Read once, when the
+     * controller is built; ignored when `createController` is supplied,
+     * since that caller constructs the controller itself.
+     */
+    controllerOptions?: PlayerControllerOptions;
+    /**
      * @internal Test seam — substitutes controller construction. Not part of
      * the supported API; the default builds `PlayerController(HlsJsAdapter)`.
      */
@@ -89,7 +97,7 @@ const windowedPreviewCue = computed(() => {
 });
 
 function defaultCreateController(video: HTMLVideoElement): PlayerControllerApi {
-    return new PlayerController(new HlsJsAdapter(video));
+    return new PlayerController(new HlsJsAdapter(video), props.controllerOptions);
 }
 
 onMounted(() => {

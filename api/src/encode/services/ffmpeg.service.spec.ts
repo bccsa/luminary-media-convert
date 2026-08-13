@@ -825,87 +825,11 @@ describe('FfmpegService', () => {
             expect(args[threadsIdx + 1]).toBe('8');
         });
 
-        it('should use detected GOP duration for -hls_time in byte-range mode', async () => {
-            vi.spyOn(service as any, 'probeFrameRate').mockResolvedValue(24);
-            vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(2);
-
-            const encodeConfig: EncodeConfigDto = {
-                type: 'video',
-                segmentDuration: 6,
-                videoRenditions: [
-                    {
-                        width: 1280,
-                        height: 720,
-                        videoBitrateKbps: 2500,
-                        copyStream: false,
-                        audioGroupId: 'hd',
-                        label: '720p',
-                    },
-                ],
-                audioGroups: [
-                    {
-                        id: 'hd',
-                        audioBitrateKbps: 128,
-                        channels: 2,
-                        audioCodec: 'aac',
-                        sourceTrackIndex: 0,
-                    },
-                ],
-            };
-
-            const args = await buildVideoArgs({
-                inputPath: '/tmp/input.mp4',
-                outputDir: '/tmp/output',
-                encodeConfig,
-                byteRange: true,
-            });
-
-            const hlsTimeIdx = args.indexOf('-hls_time');
-            expect(args[hlsTimeIdx + 1]).toBe('2');
-        });
-
-        it('should fall back to segmentDuration when GOP detection fails in byte-range mode', async () => {
-            vi.spyOn(service as any, 'probeFrameRate').mockResolvedValue(30);
-            vi.spyOn(service as any, 'probeGopDuration').mockResolvedValue(
-                null
-            );
-
-            const encodeConfig: EncodeConfigDto = {
-                type: 'video',
-                segmentDuration: 8,
-                videoRenditions: [
-                    {
-                        width: 1280,
-                        height: 720,
-                        videoBitrateKbps: 2500,
-                        copyStream: false,
-                        audioGroupId: 'hd',
-                        label: '720p',
-                    },
-                ],
-                audioGroups: [
-                    {
-                        id: 'hd',
-                        audioBitrateKbps: 128,
-                        channels: 2,
-                        audioCodec: 'aac',
-                        sourceTrackIndex: 0,
-                    },
-                ],
-            };
-
-            const args = await buildVideoArgs({
-                inputPath: '/tmp/input.mp4',
-                outputDir: '/tmp/output',
-                encodeConfig,
-                byteRange: true,
-            });
-
-            const hlsTimeIdx = args.indexOf('-hls_time');
-            expect(args[hlsTimeIdx + 1]).toBe('8');
-        });
-
-        it('should use segmentDuration for -hls_time when byte-range is disabled', async () => {
+        it('should always use segmentDuration for -hls_time', async () => {
+            // The chunk chain is the encoder's decision now, not the source's:
+            // -hls_time used to be overridden with the detected source GOP
+            // whenever byte-range output was on, which made segment length a
+            // property of whatever file was handed over.
             const encodeConfig: EncodeConfigDto = {
                 type: 'video',
                 segmentDuration: 10,
@@ -934,11 +858,60 @@ describe('FfmpegService', () => {
                 inputPath: '/tmp/input.mp4',
                 outputDir: '/tmp/output',
                 encodeConfig,
-                byteRange: false,
             });
 
             const hlsTimeIdx = args.indexOf('-hls_time');
             expect(args[hlsTimeIdx + 1]).toBe('10');
+        });
+
+        it('should pin the keyframe cadence for CPU re-encodes', async () => {
+            // libx264 would otherwise cut a keyframe at every scene change,
+            // which lands off the -g cadence and drags the segment boundary
+            // with it. NVENC and VideoToolbox do not scene-cut by default.
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    {
+                        width: 1280,
+                        height: 720,
+                        videoBitrateKbps: 2500,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '720p',
+                    },
+                    {
+                        width: 854,
+                        height: 480,
+                        videoBitrateKbps: 1000,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '480p',
+                    },
+                ],
+                audioGroups: [
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                ],
+            };
+
+            const args = await buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            expect(args).toContain('libx264');
+            for (const i of [0, 1]) {
+                const idx = args.indexOf(`-sc_threshold:v:${i}`);
+                expect(idx).toBeGreaterThan(-1);
+                expect(args[idx + 1]).toBe('0');
+            }
         });
 
         it('should use -ac:a:N to target audio streams correctly', async () => {
@@ -1852,7 +1825,7 @@ describe('FfmpegService', () => {
             expect(args).not.toContain('aac');
         });
 
-        it('should use configured segment duration for audio regardless of byte-range', async () => {
+        it('should use the configured segment duration for audio', async () => {
             const encodeConfig: EncodeConfigDto = {
                 type: 'audio',
                 segmentDuration: 6,
@@ -1872,7 +1845,6 @@ describe('FfmpegService', () => {
                 inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
-                byteRange: true,
             });
 
             const hlsTimeIdx = args.indexOf('-hls_time');
@@ -1924,7 +1896,6 @@ describe('FfmpegService', () => {
                 inputPath: '/tmp/audio.flac',
                 outputDir: '/tmp/output',
                 encodeConfig,
-                byteRange: false,
             });
 
             const hlsTimeIdx = args.indexOf('-hls_time');
@@ -1970,57 +1941,13 @@ describe('FfmpegService', () => {
         });
     });
 
-    describe('probeGopDuration (private, tested via reflection)', () => {
-        // probeGopDuration uses module-scoped execFileAsync (promisified at import time),
-        // so we test the parsing logic by spying on the method itself with realistic return values.
-        // The async I/O correctness is validated through integration in buildVideoArgs/encode tests.
-
-        it('should return a number when keyframes are detected', async () => {
-            const spy = vi
-                .spyOn(service as any, 'probeGopDuration')
-                .mockResolvedValue(1);
-            const result = await (service as any).probeGopDuration(
-                '/tmp/input.mp4',
-                30
-            );
-            expect(result).toBe(1);
-            spy.mockRestore();
-        });
-
-        it('should return fractional GOP duration for non-standard frame rates', async () => {
-            const spy = vi
-                .spyOn(service as any, 'probeGopDuration')
-                .mockResolvedValue(2);
-            const result = await (service as any).probeGopDuration(
-                '/tmp/input.mp4',
-                24
-            );
-            expect(result).toBe(2);
-            spy.mockRestore();
-        });
-
-        it('should return null when detection fails', async () => {
-            const spy = vi
-                .spyOn(service as any, 'probeGopDuration')
-                .mockResolvedValue(null);
-            const result = await (service as any).probeGopDuration(
-                '/tmp/input.mp4',
-                30
-            );
-            expect(result).toBeNull();
-            spy.mockRestore();
-        });
-    });
-
     describe('encode', () => {
         let tmpDir: string;
-        let areAlignedSpy: MockInstance;
+        let alignmentOffsetSpy: MockInstance;
         let probeDurationSpy: MockInstance;
         let fixMasterPlaylistSpy: MockInstance;
         let fixAudioOnlyMasterPlaylistSpy: MockInstance;
         let probeFrameRateSpy: MockInstance;
-        let probeGopDurationSpy: MockInstance;
-        let convertToByteRangeSpy: MockInstance;
 
         const baseEncodeConfig: EncodeConfigDto = {
             type: 'video',
@@ -2062,9 +1989,9 @@ describe('FfmpegService', () => {
         beforeEach(() => {
             tmpDir = mkdtempSync(join(tmpdir(), 'ffmpeg-encode-'));
             mockSpawn.mockReset();
-            areAlignedSpy = vi
-                .spyOn(service as any, 'areStreamStartTimesAligned')
-                .mockResolvedValue(true);
+            alignmentOffsetSpy = vi
+                .spyOn(service as any, 'computeAlignmentOffset')
+                .mockResolvedValue(0);
             probeDurationSpy = vi
                 .spyOn(service as any, 'probeDuration')
                 .mockResolvedValue(100);
@@ -2077,23 +2004,15 @@ describe('FfmpegService', () => {
             probeFrameRateSpy = vi
                 .spyOn(service as any, 'probeFrameRate')
                 .mockResolvedValue(30);
-            probeGopDurationSpy = vi
-                .spyOn(service as any, 'probeGopDuration')
-                .mockResolvedValue(2);
-            convertToByteRangeSpy = vi
-                .spyOn(service as any, 'convertToByteRange')
-                .mockResolvedValue(undefined);
         });
 
         afterEach(() => {
             rmSync(tmpDir, { recursive: true, force: true });
-            areAlignedSpy.mockRestore();
+            alignmentOffsetSpy.mockRestore();
             probeDurationSpy.mockRestore();
             fixMasterPlaylistSpy.mockRestore();
             fixAudioOnlyMasterPlaylistSpy.mockRestore();
             probeFrameRateSpy.mockRestore();
-            probeGopDurationSpy.mockRestore();
-            convertToByteRangeSpy.mockRestore();
         });
 
         it('should resolve with outputDir and masterPlaylist on success', async () => {
@@ -2110,6 +2029,121 @@ describe('FfmpegService', () => {
             expect(result.outputDir).toBe(opts.outputDir);
             expect(result.masterPlaylist).toBe('master.m3u8');
             expect(result.segmentFormat).toBe('fmp4');
+        });
+
+        it('should always report fmp4, aligned or not', async () => {
+            // The output container stopped being a property of the input: a
+            // source whose streams do not start together is seeked into
+            // alignment rather than escaped into MPEG-TS.
+            for (const offset of [0, 0.1]) {
+                alignmentOffsetSpy.mockResolvedValue(offset);
+                const mockProc = createMockProcess();
+                mockSpawn.mockReturnValue(mockProc);
+
+                const promise = service.encode(makeEncodeOpts());
+                await flushPromises();
+                mockProc.emitClose(0);
+
+                const result = await promise;
+                expect(result.segmentFormat).toBe('fmp4');
+
+                const args: string[] = mockSpawn.mock.calls.at(-1)![1];
+                expect(args).toContain('-hls_segment_type');
+                expect(args[args.indexOf('-hls_segment_type') + 1]).toBe(
+                    'fmp4'
+                );
+                expect(args).toContain('-hls_fmp4_init_filename');
+            }
+        });
+
+        it('should seek the input, before -i, on a misaligned source', async () => {
+            alignmentOffsetSpy.mockResolvedValue(0.1);
+            const mockProc = createMockProcess();
+            mockSpawn.mockReturnValue(mockProc);
+
+            const promise = service.encode(makeEncodeOpts());
+            await flushPromises();
+            mockProc.emitClose(0);
+            await promise;
+
+            const args: string[] = mockSpawn.mock.calls[0][1];
+            const ssIdx = args.indexOf('-ss');
+            expect(ssIdx).toBeGreaterThan(-1);
+            expect(args[ssIdx + 1]).toBe('0.1');
+            // Input-level, so it reaches copy-mode streams too — which means
+            // it has to be stated before the input it applies to.
+            expect(ssIdx).toBeLessThan(args.indexOf('-i'));
+        });
+
+        it('should not seek an aligned source', async () => {
+            alignmentOffsetSpy.mockResolvedValue(0);
+            const mockProc = createMockProcess();
+            mockSpawn.mockReturnValue(mockProc);
+
+            const promise = service.encode(makeEncodeOpts());
+            await flushPromises();
+            mockProc.emitClose(0);
+            await promise;
+
+            const args: string[] = mockSpawn.mock.calls[0][1];
+            expect(args).not.toContain('-ss');
+        });
+
+        it('should fold the alignment into the trim in-points rather than seeking twice', async () => {
+            alignmentOffsetSpy.mockResolvedValue(0.5);
+            const mockProc = createMockProcess();
+            mockSpawn.mockReturnValue(mockProc);
+
+            const opts = makeEncodeOpts({
+                encodeConfig: {
+                    ...baseEncodeConfig,
+                    trimSegments: [
+                        { inSec: 0, outSec: 30 },
+                        { inSec: 60, outSec: 90 },
+                    ],
+                },
+            });
+            const promise = service.encode(opts);
+            // The trim path writes concat.txt with real fs I/O before it
+            // spawns, and under a loaded event loop ten setImmediate turns are
+            // not always enough to cross it — a close emitted before the
+            // process exists is a close nobody hears, and the encode hangs to
+            // the test timeout. Wait for the spawn itself instead.
+            await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
+            mockProc.emitClose(0);
+            await promise;
+
+            const args: string[] = mockSpawn.mock.calls[0][1];
+            expect(args).not.toContain('-ss');
+
+            const concat = readFileSync(
+                join(opts.outputDir, 'concat.txt'),
+                'utf-8'
+            );
+            // Only the range starting inside the misaligned head moves.
+            expect(concat).toContain('inpoint 0.5');
+            expect(concat).toContain('inpoint 60');
+        });
+
+        it('should measure progress against the duration it will write', async () => {
+            // FFmpeg never reaches the source's full duration on an aligned
+            // encode — the head it seeked past is duration it will not write —
+            // so leaving the offset in would park the bar short of 100%.
+            alignmentOffsetSpy.mockResolvedValue(10);
+            probeDurationSpy.mockResolvedValue(100);
+            const mockProc = createMockProcess();
+            mockSpawn.mockReturnValue(mockProc);
+
+            const onProgress = vi.fn();
+            const promise = service.encode(makeEncodeOpts({ onProgress }));
+            await flushPromises();
+
+            mockProc.emitStderr('out_time_us=45000000\n');
+            mockProc.emitClose(0);
+            await promise;
+
+            // 45s of a 90s output, not 45% of the source's 100s.
+            expect(onProgress).toHaveBeenCalledWith(50);
         });
 
         it('should call spawn with "ffmpeg" and correct args', async () => {
@@ -2407,54 +2441,6 @@ describe('FfmpegService', () => {
 
             await expect(promise).rejects.toThrow();
             expect((service as any).activeProcess).toBeNull();
-        });
-
-        it('should call preByteRangeHook before convertToByteRange when provided', async () => {
-            const mockProc = createMockProcess();
-            mockSpawn.mockReturnValue(mockProc);
-
-            const callOrder: string[] = [];
-            const convertSpy = vi
-                .spyOn(service as any, 'convertToByteRange')
-                .mockImplementation(async () => {
-                    callOrder.push('convertToByteRange');
-                });
-
-            const hook = vi.fn(() => {
-                callOrder.push('preByteRangeHook');
-            });
-            const opts = makeEncodeOpts({ preByteRangeHook: hook });
-            const promise = service.encode(opts);
-            await flushPromises();
-
-            mockProc.emitClose(0);
-            await promise;
-
-            expect(hook).toHaveBeenCalledWith(opts.outputDir);
-            expect(callOrder[0]).toBe('preByteRangeHook');
-            expect(callOrder[1]).toBe('convertToByteRange');
-
-            convertSpy.mockRestore();
-        });
-
-        it('should not call preByteRangeHook when not provided', async () => {
-            const mockProc = createMockProcess();
-            mockSpawn.mockReturnValue(mockProc);
-
-            const convertSpy = vi
-                .spyOn(service as any, 'convertToByteRange')
-                .mockResolvedValue(undefined);
-
-            const opts = makeEncodeOpts();
-            const promise = service.encode(opts);
-            await flushPromises();
-
-            mockProc.emitClose(0);
-            await promise;
-
-            expect(convertSpy).toHaveBeenCalled();
-
-            convertSpy.mockRestore();
         });
 
         it('should include stderr tail in error message on failure', async () => {
@@ -2971,15 +2957,101 @@ describe('FfmpegService', () => {
         });
     });
 
+    /**
+     * Which stream directories share a byte-range chunk chain. The names have to
+     * come out of the same builders `buildVideoArgs` names the directories with
+     * — a chain keyed on a name nothing writes packs nothing.
+     */
+    describe('buildStreamChainMap', () => {
+        const rendition = (over: Record<string, unknown> = {}) => ({
+            width: 1920,
+            height: 1080,
+            videoBitrateKbps: 5000,
+            copyStream: false,
+            audioGroupId: 'hd',
+            ...over,
+        });
+
+        const audioGroup = (over: Record<string, unknown> = {}) => ({
+            id: 'hd',
+            label: 'HD_Audio',
+            audioBitrateKbps: 192,
+            channels: 2,
+            audioCodec: 'aac' as const,
+            sourceTrackIndex: 0,
+            ...over,
+        });
+
+        it('gives each angle its own chain, and all audio one', () => {
+            const config = {
+                type: 'video',
+                videoRenditions: [
+                    rendition({ label: '1080p', sourceTrackIndex: 0 }),
+                    rendition({
+                        label: '720p',
+                        width: 1280,
+                        height: 720,
+                        sourceTrackIndex: 0,
+                    }),
+                    rendition({ label: 'Side', sourceTrackIndex: 1 }),
+                ],
+                audioGroups: [
+                    audioGroup(),
+                    audioGroup({ id: 'sd', label: 'SD_Audio' }),
+                ],
+            } as unknown as EncodeConfigDto;
+
+            expect(service.buildStreamChainMap(config)).toEqual({
+                // Two tracks in play, so the directory names carry `_t<n>` —
+                // the same multiTrack test buildVideoArgs applies.
+                stream_1080p_t0_1920x1080: 'v0',
+                stream_720p_t0_1280x720: 'v0',
+                stream_Side_t1_1920x1080: 'v1',
+                stream_hd_HD_Audio: 'a',
+                stream_sd_SD_Audio: 'a',
+            });
+        });
+
+        it('needs no special case for a single angle', () => {
+            const config = {
+                type: 'video',
+                videoRenditions: [
+                    rendition({ label: '1080p' }),
+                    rendition({ label: '720p', width: 1280, height: 720 }),
+                ],
+                audioGroups: [audioGroup()],
+            } as unknown as EncodeConfigDto;
+
+            expect(service.buildStreamChainMap(config)).toEqual({
+                stream_1080p_1920x1080: 'v0',
+                stream_720p_1280x720: 'v0',
+                stream_hd_HD_Audio: 'a',
+            });
+        });
+
+        it('maps an audio-only encode to the audio chain alone', () => {
+            const config = {
+                type: 'audio',
+                audioGroups: [
+                    audioGroup(),
+                    audioGroup({ id: 'low', label: '64kbps' }),
+                ],
+            } as unknown as EncodeConfigDto;
+
+            expect(service.buildStreamChainMap(config)).toEqual({
+                stream_hd_HD_Audio: 'a',
+                stream_low_64kbps: 'a',
+            });
+        });
+    });
+
     describe('FFmpeg timeout', () => {
         let tmpDir: string;
-        let areAlignedSpy: MockInstance;
+        let alignmentOffsetSpy: MockInstance;
         let probeDurationSpy: MockInstance;
         let fixMasterPlaylistSpy: MockInstance;
         let fixAudioOnlyMasterPlaylistSpy: MockInstance;
         let probeFrameRateSpy: MockInstance;
-        let probeGopDurationSpy: MockInstance;
-        let convertToByteRangeSpy: MockInstance;
 
         const baseEncodeConfig: EncodeConfigDto = {
             type: 'video',
@@ -3009,9 +3081,9 @@ describe('FfmpegService', () => {
             vi.useFakeTimers();
             tmpDir = mkdtempSync(join(tmpdir(), 'ffmpeg-timeout-'));
             mockSpawn.mockReset();
-            areAlignedSpy = vi
-                .spyOn(service as any, 'areStreamStartTimesAligned')
-                .mockResolvedValue(true);
+            alignmentOffsetSpy = vi
+                .spyOn(service as any, 'computeAlignmentOffset')
+                .mockResolvedValue(0);
             probeDurationSpy = vi
                 .spyOn(service as any, 'probeDuration')
                 .mockResolvedValue(100);
@@ -3024,24 +3096,16 @@ describe('FfmpegService', () => {
             probeFrameRateSpy = vi
                 .spyOn(service as any, 'probeFrameRate')
                 .mockResolvedValue(30);
-            probeGopDurationSpy = vi
-                .spyOn(service as any, 'probeGopDuration')
-                .mockResolvedValue(2);
-            convertToByteRangeSpy = vi
-                .spyOn(service as any, 'convertToByteRange')
-                .mockResolvedValue(undefined);
         });
 
         afterEach(() => {
             vi.useRealTimers();
             rmSync(tmpDir, { recursive: true, force: true });
-            areAlignedSpy.mockRestore();
+            alignmentOffsetSpy.mockRestore();
             probeDurationSpy.mockRestore();
             fixMasterPlaylistSpy.mockRestore();
             fixAudioOnlyMasterPlaylistSpy.mockRestore();
             probeFrameRateSpy.mockRestore();
-            probeGopDurationSpy.mockRestore();
-            convertToByteRangeSpy.mockRestore();
         });
 
         it('should reject when FFmpeg times out', async () => {
@@ -3167,72 +3231,6 @@ describe('FfmpegService', () => {
                     ],
                 })
             ).resolves.toBeUndefined();
-        });
-    });
-
-    describe('convertToByteRange', () => {
-        it('should reject when worker emits an error (real worker)', async () => {
-            const existingSpy = vi.spyOn(service as any, 'convertToByteRange');
-            if (existingSpy) existingSpy.mockRestore();
-
-            await expect(
-                (service as any).convertToByteRange(
-                    '/non/existent/dir',
-                    500 * 1024 * 1024
-                )
-            ).rejects.toThrow();
-        }, 30_000);
-
-        it('should resolve when worker sends success message', async () => {
-            useRealWorker.value = false;
-            const fakeWorker = new EventEmitter();
-            MockWorker.mockReturnValue(fakeWorker);
-
-            const promise = (service as any).convertToByteRange(
-                '/tmp/output',
-                500 * 1024 * 1024
-            );
-            fakeWorker.emit('message', { streamCount: 3 });
-
-            await expect(promise).resolves.toBeUndefined();
-            useRealWorker.value = true;
-            MockWorker.mockReset();
-        });
-
-        it('should reject when worker exits with non-zero code', async () => {
-            useRealWorker.value = false;
-            const fakeWorker = new EventEmitter();
-            MockWorker.mockReturnValue(fakeWorker);
-
-            const promise = (service as any).convertToByteRange(
-                '/tmp/output',
-                500 * 1024 * 1024
-            );
-            fakeWorker.emit('exit', 1);
-
-            await expect(promise).rejects.toThrow(
-                'Byte-range worker exited with code 1'
-            );
-            useRealWorker.value = true;
-            MockWorker.mockReset();
-        });
-
-        it('should reject when worker emits error (mocked)', async () => {
-            useRealWorker.value = false;
-            const fakeWorker = new EventEmitter();
-            MockWorker.mockReturnValue(fakeWorker);
-
-            const promise = (service as any).convertToByteRange(
-                '/tmp/output',
-                500 * 1024 * 1024
-            );
-            fakeWorker.emit('error', new Error('worker crashed'));
-
-            await expect(promise).rejects.toThrow(
-                'Byte-range worker error: worker crashed'
-            );
-            useRealWorker.value = true;
-            MockWorker.mockReset();
         });
     });
 
@@ -3405,114 +3403,89 @@ describe('FfmpegService', () => {
         });
     });
 
-    describe('areStreamStartTimesAligned (private, tested via reflection)', () => {
-        it('should return true when all start times are aligned (spread < 50ms)', async () => {
-            const ffprobeOutput = JSON.stringify({
-                streams: [
-                    { codec_type: 'video', start_time: '0.000000' },
-                    { codec_type: 'audio', start_time: '0.020000' },
-                ],
-            });
-
+    describe('computeAlignmentOffset (private, tested via reflection)', () => {
+        function mockStartTimes(streams: Record<string, string>[]) {
+            const ffprobeOutput = JSON.stringify({ streams });
             mockExecFile.mockImplementation((...args: any[]) => {
                 const cb = args[args.length - 1];
                 if (typeof cb === 'function') {
                     cb(null, { stdout: ffprobeOutput, stderr: '' });
                 }
             });
+        }
 
-            const config: EncodeConfigDto = {
-                type: 'video',
-                segmentDuration: 6,
-                videoRenditions: [
-                    {
-                        width: 1280,
-                        height: 720,
-                        videoBitrateKbps: 2500,
-                        copyStream: false,
-                        audioGroupId: 'a1',
-                        label: '720p',
-                        sourceTrackIndex: 0,
-                    },
-                ],
-                audioGroups: [
-                    {
-                        id: 'a1',
-                        label: 'Audio',
-                        audioBitrateKbps: 128,
-                        channels: 2,
-                        audioCodec: 'aac',
-                        sourceTrackIndex: 0,
-                    },
-                ],
-            };
+        const videoAndAudio: EncodeConfigDto = {
+            type: 'video',
+            segmentDuration: 6,
+            videoRenditions: [
+                {
+                    width: 1280,
+                    height: 720,
+                    videoBitrateKbps: 2500,
+                    copyStream: false,
+                    audioGroupId: 'a1',
+                    label: '720p',
+                    sourceTrackIndex: 0,
+                },
+            ],
+            audioGroups: [
+                {
+                    id: 'a1',
+                    label: 'Audio',
+                    audioBitrateKbps: 128,
+                    channels: 2,
+                    audioCodec: 'aac',
+                    sourceTrackIndex: 0,
+                },
+            ],
+        };
 
-            const result = await (service as any).areStreamStartTimesAligned(
-                '/test.mp4',
-                config
-            );
-            expect(result).toBe(true);
+        const computeAlignmentOffset = (
+            config: EncodeConfigDto
+        ): Promise<number> =>
+            (service as any).computeAlignmentOffset('/test.mp4', config);
+
+        it('should return 0 when the streams already start together', async () => {
+            mockStartTimes([
+                { codec_type: 'video', start_time: '0.000000' },
+                { codec_type: 'audio', start_time: '0.010000' },
+            ]);
+
+            expect(await computeAlignmentOffset(videoAndAudio)).toBe(0);
         });
 
-        it('should return false when start times are misaligned (spread >= 50ms)', async () => {
-            const ffprobeOutput = JSON.stringify({
-                streams: [
-                    { codec_type: 'video', start_time: '0.000000' },
-                    { codec_type: 'audio', start_time: '0.100000' },
-                ],
-            });
+        it('should return the latest start time when they do not', async () => {
+            mockStartTimes([
+                { codec_type: 'video', start_time: '0.000000' },
+                { codec_type: 'audio', start_time: '0.100000' },
+            ]);
 
-            mockExecFile.mockImplementation((...args: any[]) => {
-                const cb = args[args.length - 1];
-                if (typeof cb === 'function') {
-                    cb(null, { stdout: ffprobeOutput, stderr: '' });
-                }
-            });
-
-            const config: EncodeConfigDto = {
-                type: 'video',
-                segmentDuration: 6,
-                videoRenditions: [
-                    {
-                        width: 1280,
-                        height: 720,
-                        videoBitrateKbps: 2500,
-                        copyStream: false,
-                        audioGroupId: 'a1',
-                        label: '720p',
-                        sourceTrackIndex: 0,
-                    },
-                ],
-                audioGroups: [
-                    {
-                        id: 'a1',
-                        label: 'Audio',
-                        audioBitrateKbps: 128,
-                        channels: 2,
-                        audioCodec: 'aac',
-                        sourceTrackIndex: 0,
-                    },
-                ],
-            };
-
-            const result = await (service as any).areStreamStartTimesAligned(
-                '/test.mp4',
-                config
+            expect(await computeAlignmentOffset(videoAndAudio)).toBeCloseTo(
+                0.1
             );
-            expect(result).toBe(false);
         });
 
-        it('should return true when fewer than 2 used start times', async () => {
-            const ffprobeOutput = JSON.stringify({
-                streams: [{ codec_type: 'audio', start_time: '0.500000' }],
-            });
+        it('should treat exactly 20ms as needing alignment, and a hair under as not', async () => {
+            // The gate is the tolerance itself: under it the spread is inside
+            // one frame at any frame rate anyone ships.
+            mockStartTimes([
+                { codec_type: 'video', start_time: '0.000000' },
+                { codec_type: 'audio', start_time: '0.020000' },
+            ]);
+            expect(await computeAlignmentOffset(videoAndAudio)).toBeCloseTo(
+                0.02
+            );
 
-            mockExecFile.mockImplementation((...args: any[]) => {
-                const cb = args[args.length - 1];
-                if (typeof cb === 'function') {
-                    cb(null, { stdout: ffprobeOutput, stderr: '' });
-                }
-            });
+            mockStartTimes([
+                { codec_type: 'video', start_time: '0.000000' },
+                { codec_type: 'audio', start_time: '0.019000' },
+            ]);
+            expect(await computeAlignmentOffset(videoAndAudio)).toBe(0);
+        });
+
+        it('should return 0 when fewer than two used streams have a start time', async () => {
+            // A lone stream cannot be misaligned with anything.
+            mockStartTimes([{ codec_type: 'audio', start_time: '0.500000' }]);
 
             const config: EncodeConfigDto = {
                 type: 'audio',
@@ -3529,11 +3502,20 @@ describe('FfmpegService', () => {
                 ],
             };
 
-            const result = await (service as any).areStreamStartTimesAligned(
-                '/test.mp4',
-                config
-            );
-            expect(result).toBe(true);
+            expect(await computeAlignmentOffset(config)).toBe(0);
+        });
+
+        it('should return 0 when the probe fails', async () => {
+            // Refusing to encode over a question ffprobe would not answer is
+            // worse than encoding as we always did.
+            mockExecFile.mockImplementation((...args: any[]) => {
+                const cb = args[args.length - 1];
+                if (typeof cb === 'function') {
+                    cb(new Error('ffprobe failed'), { stdout: '', stderr: '' });
+                }
+            });
+
+            expect(await computeAlignmentOffset(videoAndAudio)).toBe(0);
         });
     });
 
@@ -3622,65 +3604,6 @@ describe('FfmpegService', () => {
 
             const result = await (service as any).probeFrameRate('/test.mp4');
             expect(result).toBe(30);
-        });
-    });
-
-    describe('probeGopDuration (private, tested via reflection)', () => {
-        it('should return GOP duration from frame analysis', async () => {
-            // Simulate: I at frame 0, then P/B frames, then I at frame 60 → GOP = 60 frames
-            const frames = [
-                'I',
-                ...Array(59).fill('P'),
-                'I',
-                ...Array(39).fill('P'),
-            ];
-            const stdout = frames.join('\n') + '\n';
-
-            mockExecFile.mockImplementation((...args: any[]) => {
-                const cb = args[args.length - 1];
-                if (typeof cb === 'function') {
-                    cb(null, { stdout, stderr: '' });
-                }
-            });
-
-            const result = await (service as any).probeGopDuration(
-                '/test.mp4',
-                30
-            );
-            // GOP = 60 frames / 30 fps = 2.0 seconds
-            expect(result).toBe(2);
-        });
-
-        it('should return null when fewer than 2 keyframes found', async () => {
-            const stdout = 'I\nP\nP\nP\nP\n';
-
-            mockExecFile.mockImplementation((...args: any[]) => {
-                const cb = args[args.length - 1];
-                if (typeof cb === 'function') {
-                    cb(null, { stdout, stderr: '' });
-                }
-            });
-
-            const result = await (service as any).probeGopDuration(
-                '/test.mp4',
-                30
-            );
-            expect(result).toBeNull();
-        });
-
-        it('should return null when ffprobe fails', async () => {
-            mockExecFile.mockImplementation((...args: any[]) => {
-                const cb = args[args.length - 1];
-                if (typeof cb === 'function') {
-                    cb(new Error('ffprobe failed'), { stdout: '', stderr: '' });
-                }
-            });
-
-            const result = await (service as any).probeGopDuration(
-                '/test.mp4',
-                30
-            );
-            expect(result).toBeNull();
         });
     });
 
@@ -4149,20 +4072,18 @@ describe('FfmpegService', () => {
 
     describe('encode stderr buffer truncation', () => {
         let tmpDir: string;
-        let areAlignedSpy: MockInstance;
+        let alignmentOffsetSpy: MockInstance;
         let probeDurationSpy: MockInstance;
         let fixMasterPlaylistSpy: MockInstance;
         let fixAudioOnlyMasterPlaylistSpy: MockInstance;
         let probeFrameRateSpy: MockInstance;
-        let probeGopDurationSpy: MockInstance;
-        let convertToByteRangeSpy: MockInstance;
 
         beforeEach(() => {
             tmpDir = mkdtempSync(join(tmpdir(), 'ffmpeg-stderr-'));
             mockSpawn.mockReset();
-            areAlignedSpy = vi
-                .spyOn(service as any, 'areStreamStartTimesAligned')
-                .mockResolvedValue(true);
+            alignmentOffsetSpy = vi
+                .spyOn(service as any, 'computeAlignmentOffset')
+                .mockResolvedValue(0);
             probeDurationSpy = vi
                 .spyOn(service as any, 'probeDuration')
                 .mockResolvedValue(100);
@@ -4175,23 +4096,15 @@ describe('FfmpegService', () => {
             probeFrameRateSpy = vi
                 .spyOn(service as any, 'probeFrameRate')
                 .mockResolvedValue(30);
-            probeGopDurationSpy = vi
-                .spyOn(service as any, 'probeGopDuration')
-                .mockResolvedValue(2);
-            convertToByteRangeSpy = vi
-                .spyOn(service as any, 'convertToByteRange')
-                .mockResolvedValue(undefined);
         });
 
         afterEach(() => {
             rmSync(tmpDir, { recursive: true, force: true });
-            areAlignedSpy.mockRestore();
+            alignmentOffsetSpy.mockRestore();
             probeDurationSpy.mockRestore();
             fixMasterPlaylistSpy.mockRestore();
             fixAudioOnlyMasterPlaylistSpy.mockRestore();
             probeFrameRateSpy.mockRestore();
-            probeGopDurationSpy.mockRestore();
-            convertToByteRangeSpy.mockRestore();
         });
 
         it('should truncate stderr buffer when it exceeds 8192 bytes', async () => {

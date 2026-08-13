@@ -164,11 +164,12 @@ Content-Type: application/json
   "segmentDuration": 6,
   "byteRange": true,
   "byteRangeMaxFileSizeMB": 500,
+  "audioByteRangeMaxFileSizeMB": 50,
   "thumbnails": true
 }
 ```
 
-Everything but `s3` is optional. `segmentDuration` defaults to 6 s, `byteRange` to true, `byteRangeMaxFileSizeMB` to 500, `thumbnails` to true for video encodes. `encryption` omitted means no encryption; `encryption.keyUrl` overrides the `luminary://key` placeholder written into `#EXT-X-KEY`.
+Everything but `s3` is optional. `segmentDuration` defaults to 6 s, `byteRange` to true, `byteRangeMaxFileSizeMB` to 500, `thumbnails` to true for video encodes. `audioByteRangeMaxFileSizeMB` (default 50) caps the shared audio chunk chain, which carries **every** audio group — minutes of content per chunk ≈ cap ÷ (audio stream count × bitrate), so a wide multi-language ladder should raise it. `encryption` omitted means no encryption; `encryption.keyUrl` overrides the `luminary://key` placeholder written into `#EXT-X-KEY`.
 
 **Response (201):**
 
@@ -328,7 +329,7 @@ The session-scoped `GET`/`PUT /api/sessions/:id/chapters` routes are the same op
 2. **Source attach** — an absolute path to a file already on the machine. `IngestService` then runs the shared post-ingest pipeline: record the path → ffprobe → initialise the preview → status `uploaded` → prime the waveform cache and source storyboard in the background.
 3. **Configure** — the client reads the probe results, computes a suggested config, and lets the user adjust renditions, audio groups, copy/VBR and trim ranges. An on-demand HLS preview is available throughout.
 4. **Queue** — FIFO, one encode at a time.
-5. **Encode** — the AES key and IV are generated *before* the status flips to `encoding`, and `hlsUrl` is published at the same moment, so anything watching that transition is handed both. FFmpeg probes per-stream start times and picks fMP4 (aligned streams) or MPEG-TS (misaligned). `SegmentPipelineService` streams each new segment through encrypt → upload → byte-range pack with bounded concurrency, so S3 uploads keep pace with FFmpeg rather than running serially afterwards.
+5. **Encode** — the AES key and IV are generated *before* the status flips to `encoding`, and `hlsUrl` is published at the same moment, so anything watching that transition is handed both. FFmpeg probes per-stream start times and aligns misaligned streams with an input seek to the latest start; output is always fMP4. `SegmentPipelineService` streams each new segment through encrypt → upload → byte-range pack with bounded concurrency, so S3 uploads keep pace with FFmpeg rather than running serially afterwards.
 6. **Finish** — `#EXT-X-KEY` tags injected, thumbnail sprites + `thumbnails.vtt` generated for video encodes, `waveform.json` written beside `master.m3u8`, and the completion event lists every object key.
 
 ### Session lifecycle
@@ -400,21 +401,24 @@ Every object key is built from `S3Service.canonicalPrefix()` — no leading, tra
 
 ## HLS Output Structure
 
-The segment format is chosen automatically from source stream alignment:
+Output is **always fMP4** (`.m4s` + a per-stream init, CMAF-compatible). A source whose streams start at different times (≥ 20 ms apart) is aligned by an input seek to the latest-starting stream's start — every stream loses the same leading fraction of a second, timestamps stay honest, and lip-sync is preserved. `segmentFormat` is reported as `"fmp4"`; `"mpegts"` appears only on sessions restored from before this change.
 
-- **fMP4** (aligned streams, spread < 50 ms) — `.m4s` + `init.mp4`. Lower overhead, CMAF-compatible.
-- **MPEG-TS** (misaligned) — `.ts`, because the player's TS transmuxer resynchronises audio/video PTS during playback.
+Copy-mode video is gated by the source: the track must not be early-starting on a misaligned source (an input seek cuts copied streams at keyframe granularity, leaving permanent desync) and its keyframe cadence must be regular and divide the segment duration exactly (compared in frames, so NTSC rates pass). An unqualified track is refused at encode submit with a message naming it; the form disables its Copy toggle with the same reason.
 
-Reported as `segmentFormat` (`"fmp4"` / `"mpegts"`). With byte-range mode on (the default), segments are consolidated into fewer large files addressed with `#EXT-X-BYTERANGE`, capped at `byteRangeMaxFileSizeMB`.
+With byte-range mode on (the default), segments are packed into **shared chunk chains** under `media/`: one chain per video angle carrying every rendition of that angle (segments interleaved by arrival), and one audio chain carrying every audio group. On a delivery edge that forwards a requested range while backhauling the whole object, one backhaul warms every quality of the playing angle, so an ABR step-up never lands on a cold object. The first chunk of each chain closes at ~20 s of content (fast edge warm-up at play-start); every later chunk is cap-sized — `byteRangeMaxFileSizeMB` for video chains, `audioByteRangeMaxFileSizeMB` for the audio chain. Media playlists stay in their stream directories and reference the chunks as `../media/…` with `#EXT-X-BYTERANGE`.
 
 ```
 {pathPrefix}/{sessionId}/          # CMS sessions get a per-session subfolder
 ├── master.m3u8
 ├── waveform.json
+├── media/
+│   ├── v0_0.m4s                   # angle 0 chain: every rendition of that angle
+│   ├── v0_1.m4s
+│   ├── v1_0.m4s                   # angle 1 chain (multi-angle sources)
+│   └── a_0.m4s                    # audio chain: every audio group
 ├── stream_1080p_1920x1080/
-│   ├── init.mp4
-│   ├── playlist.m3u8
-│   └── segment_000.m4s
+│   ├── init_0.mp4                 # ffmpeg names the init; #EXT-X-MAP matches it
+│   └── playlist.m3u8
 ├── stream_720p_1280x720/
 │   └── …
 ├── stream_HD/
@@ -426,7 +430,7 @@ Reported as `segmentFormat` (`"fmp4"` / `"mpegts"`). With byte-range mode on (th
     └── en.vtt                     # written by the chapter editor, when used
 ```
 
-Stream directory names derive from the rendition labels.
+Stream directory names derive from the rendition labels. Players can warm the next chunk ahead of the boundary — see `docs/chunk-warming.md`; `@luminary-media-converter/player-web` implements it.
 
 ---
 

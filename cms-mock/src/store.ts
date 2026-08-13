@@ -41,6 +41,7 @@ function defaults(): { apiBaseUrl: string; form: SessionForm } {
             thumbnails: true,
             byteRange: true,
             byteRangeMaxFileSizeMB: 500,
+            audioByteRangeMaxFileSizeMB: 50,
             segmentDuration: 6,
         },
     };
@@ -163,6 +164,9 @@ function createSessionBody(): Record<string, unknown> {
     };
     if (form.byteRangeMaxFileSizeMB !== null) {
         body.byteRangeMaxFileSizeMB = form.byteRangeMaxFileSizeMB;
+    }
+    if (form.audioByteRangeMaxFileSizeMB !== null) {
+        body.audioByteRangeMaxFileSizeMB = form.audioByteRangeMaxFileSizeMB;
     }
     if (form.segmentDuration !== null) {
         body.segmentDuration = form.segmentDuration;

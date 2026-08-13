@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createReadStream, createWriteStream, type WriteStream } from 'fs';
-import { readdir, readFile, stat, unlink, writeFile } from 'fs/promises';
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'fs/promises';
 import { pipeline } from 'stream/promises';
 import { join, relative, posix } from 'path';
 import type * as Minio from 'minio';
@@ -42,6 +42,27 @@ export interface PipelineProgress {
     phase?: PipelinePhase;
 }
 
+/**
+ * How much of a chain's content the first chunk of that chain carries, in
+ * seconds of timeline per stream.
+ *
+ * The first chunk is the one a viewer waits on before anything plays, so it is
+ * deliberately small: the edge warms almost immediately at play-start, and
+ * somebody who watches ten seconds and leaves has not dragged a full-size
+ * backhaul across for it. Every chunk after it is grown to the cap instead,
+ * because each extra object is a billed storage operation and a permanent cache
+ * entry — and intermediate ramp steps buy nothing once ranges pass straight
+ * through to the client, which is the property this whole layout assumes.
+ */
+const FIRST_CHUNK_SECONDS = 20;
+
+/**
+ * Default cap for the audio chain. Smaller than the video cap because the audio
+ * chain carries every audio rendition at once and is fetched by every viewer,
+ * including audio-only ones, so its backhaul wants to stay quick.
+ */
+const DEFAULT_AUDIO_CHUNK_CAP_BYTES = 50 * 1024 * 1024;
+
 export interface SegmentPipelineConfig {
     outputDir: string;
     s3Config: S3ConfigDto;
@@ -50,6 +71,18 @@ export interface SegmentPipelineConfig {
     encryptionIV?: Buffer;
     byteRange: boolean;
     byteRangeMaxFileSizeBytes: number;
+    /**
+     * Stream directory name → chunk chain id, as `FfmpegService`
+     * .buildStreamChainMap` computed it from the encode config. Absent, or
+     * missing an entry, means that directory packs into a chain of its own —
+     * the pre-shared-chain behaviour, which is a worse layout but never a
+     * failed encode.
+     */
+    streamChains?: Record<string, string>;
+    /** Cap for the audio chain. Defaults to 50 MiB. */
+    audioByteRangeMaxFileSizeBytes?: number;
+    /** Segment duration the encode was configured with. Defaults to 6. */
+    segmentDurationSeconds?: number;
     /** Estimated total segments across all streams (for progress calculation) */
     estimatedTotalSegments?: number;
     pollIntervalMs?: number;
@@ -64,16 +97,35 @@ interface ByteRangeEntry {
     mediaFile: string;
 }
 
-interface StreamState {
-    processedSegments: Set<string>;
-    initUploaded: boolean;
+/**
+ * One chunk chain: a run of `<id>_<n>.m4s` files under `media/`, shared by every
+ * stream mapped to it.
+ *
+ * Byte order inside a chunk does not matter — an edge asked for a range pulls
+ * the whole object anyway — so segments land in whatever order they arrive and
+ * nothing waits for a peer stream to catch up.
+ */
+interface ChainState {
+    id: string;
+    capBytes: number;
+    /** How many stream directories pack into this chain. */
+    streamCount: number;
     currentChunkIndex: number;
     currentChunkOffset: number;
     currentChunkStream: WriteStream | null;
-    currentChunkMediaFile: string;
+    currentChunkFile: string;
     currentChunkSegmentCount: number;
+}
+
+interface StreamState {
+    processedSegments: Set<string>;
+    /**
+     * This stream's own view of the chain: playlist-ordered, so the positional
+     * `#EXTINF` backfill still lines up even though the chunk these point into
+     * is shared with other streams.
+     */
     byteRangeEntries: ByteRangeEntry[];
-    segExt: string;
+    chain: ChainState;
 }
 
 interface UploadTask {
@@ -110,6 +162,7 @@ export class SegmentPipeline {
     private readonly pollIntervalMs: number;
     private readonly uploadConcurrency: number;
     private readonly streamStates = new Map<string, StreamState>();
+    private readonly chains = new Map<string, ChainState>();
     private readonly uploadedKeys: string[] = [];
 
     private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -192,27 +245,12 @@ export class SegmentPipeline {
 
         if (this.pipelineError) throw this.pipelineError;
 
-        // Finalize all byte-range chunk streams and enqueue for upload
+        // Close the last chunk of every chain and enqueue it. Chains, not
+        // streams: several streams share one open chunk file, and closing it
+        // once per stream would enqueue the same object several times over.
         if (this.config.byteRange) {
-            for (const [streamDir, state] of this.streamStates) {
-                if (state.currentChunkStream) {
-                    await this.finalizeCurrentChunk(streamDir, state);
-                    // Enqueue the finalized last chunk for upload
-                    const streamDirName = relative(
-                        this.config.outputDir,
-                        streamDir
-                    );
-                    const objectKey = this.objectKey(
-                        streamDirName,
-                        state.currentChunkMediaFile
-                    );
-                    this.enqueueUpload({
-                        filePath: join(streamDir, state.currentChunkMediaFile),
-                        objectKey,
-                        deleteAfterUpload: true,
-                        segmentCount: state.currentChunkSegmentCount,
-                    });
-                }
+            for (const chain of this.chains.values()) {
+                await this.finalizeCurrentChunk(chain);
             }
         }
 
@@ -242,10 +280,10 @@ export class SegmentPipeline {
             this.pollTimer = null;
         }
         // Close any open chunk streams
-        for (const state of this.streamStates.values()) {
-            if (state.currentChunkStream) {
-                state.currentChunkStream.end();
-                state.currentChunkStream = null;
+        for (const chain of this.chains.values()) {
+            if (chain.currentChunkStream) {
+                chain.currentChunkStream.end();
+                chain.currentChunkStream = null;
             }
         }
     }
@@ -268,6 +306,11 @@ export class SegmentPipeline {
             .map((e) => e.name)
             .sort();
 
+        // Sequential, under the reentrancy guard `start()` holds, and every
+        // append below is awaited. That is the whole of the concurrency story
+        // for a shared chain: two streams can never be writing into the same
+        // chunk file at once, so no lock is needed to keep their bytes — and
+        // the offsets recorded against them — from interleaving.
         for (const dir of streamDirs) {
             if (this.aborted || this.pipelineError) return;
             await this.processStream(dir);
@@ -281,33 +324,10 @@ export class SegmentPipeline {
         if (!state) {
             state = {
                 processedSegments: new Set(),
-                initUploaded: false,
-                currentChunkIndex: 0,
-                currentChunkOffset: 0,
-                currentChunkStream: null,
-                currentChunkMediaFile: '',
-                currentChunkSegmentCount: 0,
                 byteRangeEntries: [],
-                segExt: 'm4s',
+                chain: this.chainFor(streamDirName),
             };
             this.streamStates.set(streamDir, state);
-        }
-
-        // Upload init.mp4 on first encounter
-        if (!state.initUploaded) {
-            const initPath = join(streamDir, 'init.mp4');
-            try {
-                await stat(initPath);
-                const objectKey = this.objectKey(streamDirName, 'init.mp4');
-                this.enqueueUpload({
-                    filePath: initPath,
-                    objectKey,
-                    deleteAfterUpload: false, // init.mp4 may be needed for playlist rewriting
-                });
-                state.initUploaded = true;
-            } catch {
-                // init.mp4 doesn't exist yet or not using fMP4
-            }
         }
 
         // Discover segments from disk (not from playlist — FFmpeg with
@@ -320,12 +340,18 @@ export class SegmentPipeline {
             return;
         }
 
+        // The fMP4 init (`init.mp4`, or `init_<variant>.mp4` on FFmpeg 8) is
+        // deliberately NOT uploaded here. FFmpeg creates the file empty at
+        // muxer start and fills it moments later, and an upload on first
+        // sight races that write — this pipeline shipped four zero-byte inits
+        // that way, and the `uploadedKeys` dedup then refused to send the
+        // finished file behind them, so playback got an init with no moov and
+        // a black frame. Nothing can play from S3 before the encode
+        // completes anyway, so the init loses nothing by travelling with the
+        // remaining files at the end, complete by construction.
+
         const segmentFiles = files
-            .filter(
-                (f) =>
-                    f.startsWith('segment_') &&
-                    (f.endsWith('.m4s') || f.endsWith('.ts'))
-            )
+            .filter((f) => f.startsWith('segment_') && f.endsWith('.m4s'))
             .filter((f) => !state.processedSegments.has(f))
             .sort();
 
@@ -351,11 +377,6 @@ export class SegmentPipeline {
             state.processedSegments.add(filename);
             this.totalSegmentsProduced++;
 
-            // Detect segment extension from first segment
-            if (filename.endsWith('.ts')) {
-                state.segExt = 'ts';
-            }
-
             // Encrypt if needed
             if (this.config.encryptionKey && this.config.encryptionIV) {
                 try {
@@ -375,8 +396,6 @@ export class SegmentPipeline {
 
             if (this.config.byteRange) {
                 await this.appendToByteRangeChunk(
-                    streamDir,
-                    streamDirName,
                     state,
                     { extinfLine: '', filename },
                     segPath
@@ -395,81 +414,171 @@ export class SegmentPipeline {
         }
     }
 
+    /**
+     * The chain a stream directory packs into, created on first sight.
+     *
+     * An unmapped directory is not an error worth failing an encode over: it
+     * gets a chain to itself, which is exactly the per-stream layout this
+     * replaced. It is logged because the mapping is built from the same config
+     * the directory names are, so a miss means the two have drifted apart.
+     */
+    private chainFor(streamDirName: string): ChainState {
+        const mapped = this.config.streamChains?.[streamDirName];
+        if (!mapped) {
+            this.logger.warn(
+                `[pipeline] ${streamDirName}: no chunk chain configured — packing it into a chain of its own`
+            );
+        }
+
+        const id = mapped ?? streamDirName;
+        const existing = this.chains.get(id);
+        if (existing) return existing;
+
+        const streamCount = mapped
+            ? Object.values(this.config.streamChains ?? {}).filter(
+                  (v) => v === id
+              ).length
+            : 1;
+
+        const chain: ChainState = {
+            id,
+            capBytes:
+                id === 'a'
+                    ? (this.config.audioByteRangeMaxFileSizeBytes ??
+                      DEFAULT_AUDIO_CHUNK_CAP_BYTES)
+                    : this.config.byteRangeMaxFileSizeBytes,
+            streamCount: Math.max(1, streamCount),
+            currentChunkIndex: 0,
+            currentChunkOffset: 0,
+            currentChunkStream: null,
+            currentChunkFile: '',
+            currentChunkSegmentCount: 0,
+        };
+        this.chains.set(id, chain);
+        return chain;
+    }
+
+    /** Where the chunk chains are written, one directory for all of them. */
+    private get chunkDir(): string {
+        return join(this.config.outputDir, 'media');
+    }
+
+    /**
+     * How many segments close chunk 0 of a chain.
+     *
+     * `FIRST_CHUNK_SECONDS` of timeline, counted across every stream in the
+     * chain — so a chain of three renditions closes after three renditions'
+     * worth of that stretch, not after a third of it.
+     */
+    private firstChunkSegmentTarget(chain: ChainState): number {
+        const segmentDuration = this.config.segmentDurationSeconds ?? 6;
+        return (
+            chain.streamCount * Math.ceil(FIRST_CHUNK_SECONDS / segmentDuration)
+        );
+    }
+
     private async appendToByteRangeChunk(
-        streamDir: string,
-        streamDirName: string,
         state: StreamState,
         seg: { extinfLine: string; filename: string },
         segPath: string
     ): Promise<void> {
+        const chain = state.chain;
+
         // Get segment size
         const segStat = await stat(segPath);
         const segSize = segStat.size;
         if (segSize === 0) return;
 
-        // Check if we need to start a new chunk
+        if (segSize > chain.capBytes) {
+            // Said out loud because the consequence is silent: the chunk this
+            // lands in is larger than the cap, and an object over the edge's
+            // cacheable maximum is not cached at all. Nothing errors, playback
+            // works, and every request goes to origin for good.
+            this.logger.warn(
+                `[pipeline] chain ${chain.id}: segment ${seg.filename} is ${segSize} bytes, ` +
+                    `over the ${chain.capBytes}-byte chunk cap on its own — its chunk will exceed the cap`
+            );
+        }
+
+        // Roll on the byte cap.
         if (
-            state.currentChunkOffset > 0 &&
-            state.currentChunkOffset + segSize >
-                this.config.byteRangeMaxFileSizeBytes
+            chain.currentChunkOffset > 0 &&
+            chain.currentChunkOffset + segSize > chain.capBytes
         ) {
-            // Finalize current chunk — close stream and enqueue for upload
-            await this.finalizeCurrentChunk(streamDir, state);
-
-            // Enqueue the completed chunk for upload
-            const completedChunkFile = state.currentChunkMediaFile;
-            const objectKey = this.objectKey(streamDirName, completedChunkFile);
-            this.enqueueUpload({
-                filePath: join(streamDir, completedChunkFile),
-                objectKey,
-                deleteAfterUpload: true,
-                segmentCount: state.currentChunkSegmentCount,
-            });
-
-            // Start a new chunk
-            state.currentChunkIndex++;
-            state.currentChunkOffset = 0;
-            state.currentChunkSegmentCount = 0;
+            await this.finalizeCurrentChunk(chain);
         }
 
         // Ensure we have an open write stream
-        if (!state.currentChunkStream) {
-            state.currentChunkMediaFile = `media_${state.currentChunkIndex}.${state.segExt}`;
-            state.currentChunkStream = createWriteStream(
-                join(streamDir, state.currentChunkMediaFile)
+        if (!chain.currentChunkStream) {
+            await mkdir(this.chunkDir, { recursive: true });
+            chain.currentChunkFile = `${chain.id}_${chain.currentChunkIndex}.m4s`;
+            chain.currentChunkStream = createWriteStream(
+                join(this.chunkDir, chain.currentChunkFile)
             );
-            state.currentChunkStream.setMaxListeners(0);
+            chain.currentChunkStream.setMaxListeners(0);
         }
 
         // Append segment to chunk
-        await pipeline(createReadStream(segPath), state.currentChunkStream, {
+        await pipeline(createReadStream(segPath), chain.currentChunkStream, {
             end: false,
         });
 
         state.byteRangeEntries.push({
             extinfLine: seg.extinfLine,
             length: segSize,
-            offset: state.currentChunkOffset,
-            mediaFile: state.currentChunkMediaFile,
+            offset: chain.currentChunkOffset,
+            mediaFile: chain.currentChunkFile,
         });
-        state.currentChunkOffset += segSize;
-        state.currentChunkSegmentCount++;
+        chain.currentChunkOffset += segSize;
+        chain.currentChunkSegmentCount++;
 
         // Delete the original segment file (data now in chunk)
         await unlink(segPath).catch(() => {});
+
+        // And roll chunk 0 on its segment count, which is the only chunk that
+        // closes on anything but the byte cap. Checked after the append so the
+        // segment that reaches the target is inside the chunk rather than
+        // starting the next one.
+        if (
+            chain.currentChunkIndex === 0 &&
+            chain.currentChunkSegmentCount >=
+                this.firstChunkSegmentTarget(chain)
+        ) {
+            await this.finalizeCurrentChunk(chain);
+        }
     }
 
-    private async finalizeCurrentChunk(
-        streamDir: string,
-        state: StreamState
-    ): Promise<void> {
-        if (!state.currentChunkStream) return;
+    /**
+     * Close the chain's open chunk, hand it to the upload queue and move the
+     * chain on to the next index. A chain with nothing open is a no-op, which
+     * is what makes calling this from `drain()` for every chain safe.
+     */
+    private async finalizeCurrentChunk(chain: ChainState): Promise<void> {
+        if (!chain.currentChunkStream) return;
 
-        state.currentChunkStream.end();
+        chain.currentChunkStream.end();
         await new Promise<void>((resolve) =>
-            state.currentChunkStream!.on('finish', resolve)
+            chain.currentChunkStream!.on('finish', resolve)
         );
-        state.currentChunkStream = null;
+        chain.currentChunkStream = null;
+
+        this.logger.log(
+            `[pipeline] chain ${chain.id}: chunk ${chain.currentChunkFile} closed ` +
+                `(${chain.currentChunkOffset} bytes, ${chain.currentChunkSegmentCount} segments)`
+        );
+
+        this.enqueueUpload({
+            filePath: join(this.chunkDir, chain.currentChunkFile),
+            objectKey: this.chainObjectKey(chain.currentChunkFile),
+            deleteAfterUpload: true,
+            // Spans streams now, which the progress counter does not mind: it
+            // counts segments uploaded, not segments of any one stream.
+            segmentCount: chain.currentChunkSegmentCount,
+        });
+
+        chain.currentChunkIndex++;
+        chain.currentChunkOffset = 0;
+        chain.currentChunkSegmentCount = 0;
     }
 
     /**
@@ -509,9 +618,10 @@ export class SegmentPipeline {
             }
         }
 
-        // The above won't match because mediaFile is 'media_0.m4s' not
-        // 'segment_00000.m4s'. Match by order: entries are in the same
-        // order as segments in the playlist.
+        // The above won't match because mediaFile is a chunk name ('v0_0.m4s')
+        // not 'segment_00000.m4s'. Match by order: entries are in the same
+        // order as segments in the playlist — which stays true with a shared
+        // chain, because these entries are this stream's alone.
         const playlistSegments = this.parseSegments(content);
         for (let i = 0; i < state.byteRangeEntries.length; i++) {
             if (!state.byteRangeEntries[i].extinfLine && playlistSegments[i]) {
@@ -561,7 +671,10 @@ export class SegmentPipeline {
         for (const br of state.byteRangeEntries) {
             newLines.push(br.extinfLine);
             newLines.push(`#EXT-X-BYTERANGE:${br.length}@${br.offset}`);
-            newLines.push(br.mediaFile);
+            // The playlist stays in its own stream directory; the chunk it
+            // points into is shared, so it lives one level up under `media/`.
+            // `#EXT-X-MAP` is untouched — the init is per stream and stays put.
+            newLines.push(`../media/${br.mediaFile}`);
         }
         if (footerLine) newLines.push(footerLine);
         newLines.push('');
@@ -594,6 +707,11 @@ export class SegmentPipeline {
         return this.config.s3PathPrefix
             ? posix.join(this.config.s3PathPrefix, relativePath)
             : relativePath;
+    }
+
+    /** Chunk chains sit beside the stream directories, not inside one. */
+    private chainObjectKey(filename: string): string {
+        return this.objectKey('media', filename);
     }
 
     private enqueueUpload(task: UploadTask): void {

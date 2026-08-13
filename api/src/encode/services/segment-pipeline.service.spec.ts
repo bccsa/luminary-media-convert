@@ -1,4 +1,10 @@
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import {
+    mkdtempSync,
+    writeFileSync,
+    mkdirSync,
+    readFileSync,
+    rmSync,
+} from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { Logger } from '@nestjs/common';
@@ -39,6 +45,297 @@ function makePipeline(
         new Logger('Test')
     );
 }
+
+/**
+ * Byte-range packing, as it now works: several streams share one chunk chain
+ * under `media/`, rather than each stream packing a chain inside its own
+ * directory.
+ *
+ * The reason is the edge, not the encoder: the CDN class this targets forwards
+ * a requested range to the client immediately and backhauls the whole object
+ * behind it, so one chunk pull warms every rendition of an angle and an ABR
+ * step-up never lands on a cold object. That also makes byte order inside a
+ * chunk irrelevant, which is why segments may interleave freely below.
+ */
+describe('SegmentPipeline — shared chunk chains', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+        tmpDir = mkdtempSync(join(tmpdir(), 'pipeline-chunks-'));
+    });
+
+    afterEach(() => {
+        rmSync(tmpDir, { recursive: true, force: true });
+        vi.restoreAllMocks();
+    });
+
+    /** A stream directory with `sizes.length` segments of the given sizes. */
+    function seedStream(
+        dirName: string,
+        sizes: number[],
+        opts?: { init?: string[]; segmentDuration?: number }
+    ): void {
+        const dir = join(tmpDir, dirName);
+        mkdirSync(dir, { recursive: true });
+        for (const initName of opts?.init ?? []) {
+            writeFileSync(join(dir, initName), 'ftyp');
+        }
+
+        const segDur = (opts?.segmentDuration ?? 6).toFixed(6);
+        const lines = [
+            '#EXTM3U',
+            '#EXT-X-TARGETDURATION:6',
+            '#EXT-X-MAP:URI="init.mp4"',
+        ];
+        sizes.forEach((size, i) => {
+            const name = `segment_${String(i).padStart(5, '0')}.m4s`;
+            writeFileSync(
+                join(dir, name),
+                Buffer.alloc(size, dirName[7] ?? 'x')
+            );
+            lines.push(`#EXTINF:${segDur},`, name);
+        });
+        lines.push('#EXT-X-ENDLIST', '');
+        writeFileSync(join(dir, 'playlist.m3u8'), lines.join('\n'));
+    }
+
+    /**
+     * Chunks are deleted the moment they are uploaded, so what was in one has to
+     * be captured as it goes past.
+     */
+    function captureUploads(pipeline: SegmentPipeline): Map<string, Buffer> {
+        const uploads = new Map<string, Buffer>();
+        (pipeline as any).s3Service.uploadFile = vi.fn(
+            async (
+                _client: unknown,
+                _bucket: string,
+                filePath: string,
+                key: string
+            ) => {
+                uploads.set(key, readFileSync(filePath));
+            }
+        );
+        return uploads;
+    }
+
+    const readPlaylist = (dirName: string): string[] =>
+        readFileSync(join(tmpDir, dirName, 'playlist.m3u8'), 'utf-8').split(
+            '\n'
+        );
+
+    it('interleaves two renditions of an angle into one chunk, each at its own offsets', async () => {
+        seedStream('stream_1080p', [10, 20]);
+        seedStream('stream_720p', [5, 7]);
+
+        const pipeline = makePipeline(tmpDir, {
+            byteRange: true,
+            streamChains: {
+                stream_1080p: 'v0',
+                stream_720p: 'v0',
+            },
+            segmentDurationSeconds: 6,
+        });
+        const uploads = captureUploads(pipeline);
+
+        await (pipeline as any).poll();
+        await pipeline.drain();
+
+        // One object for both renditions, holding both in arrival order —
+        // directory order here, since a poll walks the directories in turn.
+        expect([...uploads.keys()]).toEqual(['prefix/media/v0_0.m4s']);
+        expect(uploads.get('prefix/media/v0_0.m4s')!.length).toBe(42);
+
+        // Each playlist addresses its own bytes inside the shared object, and
+        // reaches it one level up: playlists stay in their stream directories.
+        expect(readPlaylist('stream_1080p')).toEqual([
+            '#EXTM3U',
+            '#EXT-X-TARGETDURATION:6',
+            '#EXT-X-MAP:URI="init.mp4"',
+            '#EXTINF:6.000000,',
+            '#EXT-X-BYTERANGE:10@0',
+            '../media/v0_0.m4s',
+            '#EXTINF:6.000000,',
+            '#EXT-X-BYTERANGE:20@10',
+            '../media/v0_0.m4s',
+            '#EXT-X-ENDLIST',
+            '',
+        ]);
+        expect(
+            readPlaylist('stream_720p').filter((l) => l.includes('@'))
+        ).toEqual(['#EXT-X-BYTERANGE:5@30', '#EXT-X-BYTERANGE:7@35']);
+    });
+
+    it('packs every audio group into one chain of its own, under its own cap', async () => {
+        seedStream('stream_hd_HD_Audio', [10]);
+        seedStream('stream_sd_SD_Audio', [10]);
+        seedStream('stream_1080p', [10]);
+
+        const pipeline = makePipeline(tmpDir, {
+            byteRange: true,
+            streamChains: {
+                stream_1080p: 'v0',
+                stream_hd_HD_Audio: 'a',
+                stream_sd_SD_Audio: 'a',
+            },
+            // A cap the video chain would not notice, so a roll in the audio
+            // chain can only have come from the audio cap.
+            byteRangeMaxFileSizeBytes: 1024,
+            audioByteRangeMaxFileSizeBytes: 15,
+            segmentDurationSeconds: 6,
+        });
+        const uploads = captureUploads(pipeline);
+
+        await (pipeline as any).poll();
+        await pipeline.drain();
+
+        expect([...uploads.keys()].sort()).toEqual([
+            'prefix/media/a_0.m4s',
+            'prefix/media/a_1.m4s',
+            'prefix/media/v0_0.m4s',
+        ]);
+        expect(
+            readPlaylist('stream_hd_HD_Audio').filter((l) =>
+                l.startsWith('../media/')
+            )
+        ).toEqual(['../media/a_0.m4s']);
+        expect(
+            readPlaylist('stream_sd_SD_Audio').filter((l) =>
+                l.startsWith('../media/')
+            )
+        ).toEqual(['../media/a_1.m4s']);
+    });
+
+    it('closes the first chunk early and lets every later one grow to the cap', async () => {
+        // Ten-second segments, so the ~20 s first-chunk target is two of them
+        // for a one-stream chain. After that only the byte cap closes a chunk:
+        // 25 bytes takes two 10-byte segments and refuses the third.
+        seedStream('stream_1080p', [10, 10, 10, 10, 10], {
+            segmentDuration: 10,
+        });
+
+        const pipeline = makePipeline(tmpDir, {
+            byteRange: true,
+            streamChains: { stream_1080p: 'v0' },
+            byteRangeMaxFileSizeBytes: 25,
+            segmentDurationSeconds: 10,
+        });
+        const uploads = captureUploads(pipeline);
+
+        await (pipeline as any).poll();
+        await pipeline.drain();
+
+        expect(
+            readPlaylist('stream_1080p').filter((l) =>
+                l.startsWith('../media/')
+            )
+        ).toEqual([
+            '../media/v0_0.m4s',
+            '../media/v0_0.m4s',
+            '../media/v0_1.m4s',
+            '../media/v0_1.m4s',
+            '../media/v0_2.m4s',
+        ]);
+        expect(uploads.get('prefix/media/v0_0.m4s')!.length).toBe(20);
+        expect(uploads.get('prefix/media/v0_1.m4s')!.length).toBe(20);
+        expect(uploads.get('prefix/media/v0_2.m4s')!.length).toBe(10);
+    });
+
+    it('says so when one segment is bigger than the whole cap', async () => {
+        // Nothing fails and playback works — the chunk is simply over the edge's
+        // cacheable maximum and every request for it goes to origin, for good.
+        const warn = vi
+            .spyOn(Logger.prototype, 'warn')
+            .mockImplementation(() => {});
+        seedStream('stream_1080p', [100]);
+
+        const pipeline = makePipeline(tmpDir, {
+            byteRange: true,
+            streamChains: { stream_1080p: 'v0' },
+            byteRangeMaxFileSizeBytes: 50,
+            segmentDurationSeconds: 6,
+        });
+        captureUploads(pipeline);
+
+        await (pipeline as any).poll();
+        await pipeline.drain();
+
+        expect(
+            warn.mock.calls.some((c) =>
+                String(c[0]).includes('over the 50-byte chunk cap')
+            )
+        ).toBe(true);
+    });
+
+    it('gives a directory nothing mapped a chain to itself rather than failing', async () => {
+        const warn = vi
+            .spyOn(Logger.prototype, 'warn')
+            .mockImplementation(() => {});
+        seedStream('stream_surprise', [10]);
+
+        const pipeline = makePipeline(tmpDir, {
+            byteRange: true,
+            streamChains: { stream_1080p: 'v0' },
+            segmentDurationSeconds: 6,
+        });
+        const uploads = captureUploads(pipeline);
+
+        await (pipeline as any).poll();
+        await pipeline.drain();
+
+        expect([...uploads.keys()]).toEqual([
+            'prefix/media/stream_surprise_0.m4s',
+        ]);
+        expect(
+            warn.mock.calls.some((c) =>
+                String(c[0]).includes('no chunk chain configured')
+            )
+        ).toBe(true);
+    });
+
+    /**
+     * The fMP4 init must NOT be uploaded while the encode runs. FFmpeg creates
+     * the file empty at muxer start and fills it moments later; an upload on
+     * first sight races that write, and the `uploadedKeys` dedup in
+     * `uploadRemainingFiles` then refuses to send the finished file behind the
+     * truncated one — a zero-byte init in the bucket and a black frame at
+     * playback. It ships with the remaining files at the end, complete by
+     * construction, and loses nothing by waiting: nothing can play from S3
+     * before the encode completes.
+     */
+    it('leaves the init for uploadRemainingFiles instead of racing ffmpeg for it', async () => {
+        seedStream('stream_1080p', [10], { init: ['init.mp4'] });
+        seedStream('stream_720p', [10], {
+            init: ['init_0.mp4', 'init_1.mp4'],
+        });
+
+        const pipeline = makePipeline(tmpDir, {
+            byteRange: true,
+            streamChains: { stream_1080p: 'v0', stream_720p: 'v0' },
+            segmentDurationSeconds: 6,
+        });
+        captureUploads(pipeline);
+
+        await (pipeline as any).poll();
+        await (pipeline as any).poll();
+        await pipeline.drain();
+
+        const streamedInitKeys = (
+            (pipeline as any).s3Service.uploadFile.mock.calls as unknown[][]
+        )
+            .map((c) => c[3] as string)
+            .filter((k) => k.includes('init'));
+        expect(streamedInitKeys).toEqual([]);
+
+        // The final sweep is what sends them, once each, whatever ffmpeg
+        // named them.
+        const remaining = await pipeline.uploadRemainingFiles(tmpDir);
+        expect(remaining.filter((k) => k.includes('init')).sort()).toEqual([
+            'prefix/stream_1080p/init.mp4',
+            'prefix/stream_720p/init_0.mp4',
+            'prefix/stream_720p/init_1.mp4',
+        ]);
+    });
+});
 
 describe('SegmentPipeline', () => {
     describe('uploadRemainingFiles', () => {

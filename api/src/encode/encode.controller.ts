@@ -51,6 +51,7 @@ import { EncodeConfigDto } from './dto/encode-config.dto.js';
 import { LocalFileDto } from './dto/local-file.dto.js';
 import { ChaptersWriteDto } from './dto/chapters.dto.js';
 import { hasAllowedExtension } from './services/media-extensions.js';
+import { copyModeRejection } from './services/copy-mode-eligibility.js';
 import { IngestService } from './services/ingest.service.js';
 import { S3Service } from './services/s3.service.js';
 import { HlsEditService } from '../hls-edit/hls-edit.service.js';
@@ -359,6 +360,17 @@ export class EncodeController {
                     );
                 }
             }
+
+            // Copy mode is not a preference, it is a privilege the source has
+            // to qualify for: a copied stream is cut at its own keyframes and
+            // seeked at its own keyframes, so the source decides whether the
+            // result can be segmented evenly and stay in sync. The form greys
+            // the option out for tracks that do not qualify, but the form is
+            // one client of an HTTP API — the encode is refused here, where
+            // every caller passes, rather than after the fact by a viewer
+            // noticing the audio has slid.
+            const copyProblem = copyModeRejection(session.probeResult, dto);
+            if (copyProblem) throw new BadRequestException(copyProblem);
         } else {
             if (!dto.audioGroups?.length) {
                 throw new BadRequestException(

@@ -62,6 +62,42 @@ function makeEncodeConfig(): EncodeConfigDto {
     };
 }
 
+/**
+ * A source a copy-mode rendition qualifies for: every stream starts together,
+ * and the keyframes are a regular two seconds, which divides six-second
+ * segments exactly. Overrides make it fail one rule at a time.
+ */
+function makeCopyableProbeResult(overrides: Record<string, unknown> = {}): any {
+    return {
+        format: { duration: 120, bitrateKbps: 5000, formatName: 'mp4' },
+        videoTracks: [
+            {
+                index: 0,
+                codec: 'h264',
+                width: 1280,
+                height: 720,
+                bitrateKbps: 2500,
+                frameRate: 30,
+                startTime: 0,
+                gopFrames: 60,
+                gopSeconds: 2,
+                gopRegular: true,
+                ...overrides,
+            },
+        ],
+        audioTracks: [
+            {
+                index: 0,
+                codec: 'aac',
+                bitrateKbps: 128,
+                channels: 2,
+                sampleRate: 48000,
+                startTime: 0,
+            },
+        ],
+    };
+}
+
 function makeRequest(overrides: any = {}): any {
     return {
         protocol: 'http',
@@ -823,12 +859,16 @@ describe('EncodeController', () => {
             );
         });
 
-        it('should accept copyStream rendition with sourceTrackIndex', async () => {
-            const session = sessionService.create(makeConfig());
-            sessionService.updateStatus(session.id, 'uploaded');
-
-            const config: EncodeConfigDto = {
+        /**
+         * Copying a video stream hands the source's own bytes to the muxer, so
+         * the source — not the config — decides where segments may be cut and
+         * where the stream may be seeked to. Both conditions are refused here
+         * rather than after the fact, by a viewer noticing the audio has slid.
+         */
+        function copyConfig(): EncodeConfigDto {
+            return {
                 type: 'video',
+                segmentDuration: 6,
                 videoRenditions: [
                     {
                         width: 1280,
@@ -849,10 +889,111 @@ describe('EncodeController', () => {
                     },
                 ],
             };
+        }
+
+        function uploadedSessionWith(probeResult: any): string {
+            const session = sessionService.create(makeConfig());
+            sessionService.setProbeResult(session.id, probeResult);
+            sessionService.updateStatus(session.id, 'uploaded');
+            return session.id;
+        }
+
+        it('should accept copyStream on a source that qualifies for it', async () => {
+            const id = uploadedSessionWith(makeCopyableProbeResult());
 
             const result = await controller.startEncode(
-                session.id,
-                config,
+                id,
+                copyConfig(),
+                makeRequest()
+            );
+
+            expect(result.status).toBe('queued');
+        });
+
+        it('should refuse copyStream on a track the encode will have to seek past', async () => {
+            // Audio starts a tenth of a second late, so every stream is pulled
+            // forward to meet it — and a seek over a copied stream lands on its
+            // nearest keyframe, not the frame asked for.
+            const probeResult = makeCopyableProbeResult();
+            probeResult.audioTracks[0].startTime = 0.1;
+
+            await expect(
+                controller.startEncode(
+                    uploadedSessionWith(probeResult),
+                    copyConfig(),
+                    makeRequest()
+                )
+            ).rejects.toThrow(/starts 100 ms before the latest stream/);
+        });
+
+        it('should allow copyStream on the very track everything is aligned to', async () => {
+            // It is the one seeked exactly — the others are moved to meet it.
+            const probeResult = makeCopyableProbeResult({ startTime: 0.1 });
+
+            const result = await controller.startEncode(
+                uploadedSessionWith(probeResult),
+                copyConfig(),
+                makeRequest()
+            );
+
+            expect(result.status).toBe('queued');
+        });
+
+        it('should refuse copyStream when the keyframes do not divide the segments', async () => {
+            // 2.5s GOPs into 6s segments gives chunks of 5s and 7.5s that no
+            // EXT-X-TARGETDURATION describes honestly.
+            const probeResult = makeCopyableProbeResult({
+                gopFrames: 75,
+                gopSeconds: 2.5,
+            });
+
+            await expect(
+                controller.startEncode(
+                    uploadedSessionWith(probeResult),
+                    copyConfig(),
+                    makeRequest()
+                )
+            ).rejects.toThrow(/keyframe interval \(2.5s\) does not fit 6s/);
+        });
+
+        it('should refuse copyStream on an irregular keyframe cadence', async () => {
+            const probeResult = makeCopyableProbeResult({ gopRegular: false });
+
+            await expect(
+                controller.startEncode(
+                    uploadedSessionWith(probeResult),
+                    copyConfig(),
+                    makeRequest()
+                )
+            ).rejects.toThrow(/keyframe structure could not be determined/);
+        });
+
+        it('should refuse copyStream when the cadence could not be probed at all', async () => {
+            // Strict about what it does not know: the failure mode of a hopeful
+            // guess is a finished encode with drifting segments.
+            const probeResult = makeCopyableProbeResult({
+                gopFrames: undefined,
+                gopSeconds: undefined,
+                gopRegular: undefined,
+            });
+
+            await expect(
+                controller.startEncode(
+                    uploadedSessionWith(probeResult),
+                    copyConfig(),
+                    makeRequest()
+                )
+            ).rejects.toThrow(/keyframe structure could not be determined/);
+        });
+
+        it('should leave a re-encoded rendition alone on the same source', async () => {
+            // None of this applies to a stream being decoded and encoded again.
+            const probeResult = makeCopyableProbeResult({ gopRegular: false });
+            probeResult.audioTracks[0].startTime = 0.1;
+
+            const result = await controller.startEncode(
+                uploadedSessionWith(probeResult),
+                makeEncodeConfig(),
                 makeRequest()
             );
 

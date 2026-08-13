@@ -11,6 +11,13 @@
  * {@link PlayerController} only; they never touch the adapter or the engine.
  */
 
+import type { ChunkBoundary } from './prefetch.js';
+
+// Re-exported so this file reads as the whole contract: an adapter author
+// implementing warmChunks() needs the boundary shape in front of them, and
+// should not have to go looking in the module that happens to build it.
+export type { ChunkBoundary };
+
 // ---------------------------------------------------------------------------
 // Source description
 // ---------------------------------------------------------------------------
@@ -191,8 +198,7 @@ export interface Chapter {
 
 /** Typed, user-presentable failure. */
 export interface PlayerError {
-    code:
-        /** AES-128/LMCENC content encountered and no keyHex was supplied. */
+    code: /** AES-128/LMCENC content encountered and no keyHex was supplied. */
         | 'key-required'
         /** LMCENC payload failed to decrypt (wrong key / corrupt file). */
         | 'decrypt-failed'
@@ -379,6 +385,36 @@ export interface AdapterEventMap {
 export type AdapterEventName = keyof AdapterEventMap;
 
 /**
+ * Resolved settings for {@link PlayerAdapter.warmChunks}. Every field is
+ * already decided — the wrapper owns the policy and applies its defaults, so an
+ * adapter never has to know what an omitted value would have meant.
+ */
+export interface ChunkWarmOptions {
+    /**
+     * Warm the next chunk once the watermark is within this many seconds of
+     * the current boundary's end. Defaults to 60 in the wrapper.
+     */
+    leadSeconds: number;
+    /**
+     * Bytes to request from the head of the next chunk — enough to make the
+     * edge start pulling the object. Defaults to 65 536 in the wrapper.
+     */
+    warmBytes: number;
+    /**
+     * The `fetch` to warm with: the wrapper's own, so an auth-wrapped fetch or
+     * a Capacitor HTTP shim reaches the warming requests too.
+     */
+    fetchImpl: typeof fetch;
+    /**
+     * Instrumentation sink, absent unless the host asked for it. Warming is
+     * invisible by design — one small range per chunk among hundreds of media
+     * requests — so this is how it is watched: schedule shape when armed,
+     * every warm with its trigger context, and the failures that are swallowed.
+     */
+    log?: (message: string) => void;
+}
+
+/**
  * The engine-facing contract.
  *
  * Adapters own intra-source ABR and first-line recovery primitives; ALL
@@ -414,6 +450,69 @@ export interface PlayerAdapter {
      * engine has nothing to try — the wrapper will escalate to a reload.
      */
     recover?(category: AdapterErrorCategory): boolean;
+
+    /**
+     * Warm the chunk objects playback is about to need.
+     *
+     * Byte-range output packs many segments into a few large chunk objects
+     * (all renditions of an angle share one chain, the audio groups share
+     * another). A delivery edge forwards a requested range immediately while
+     * backhauling the whole object behind it, so the FIRST request into a
+     * chunk is the slow one. Asking for a few kilobytes of the next chunk
+     * shortly before the engine crosses into it starts that backhaul early.
+     *
+     * The wrapper calls this on every source attach — initial load, angle
+     * switch, recovery reload — with the schedules for the chains that attach
+     * will actually pull, and calls it with an EMPTY array to mean *stop*
+     * (source torn down, warming disabled, or output with no byte ranges).
+     * Implementing it is optional; an adapter that omits it simply never warms.
+     *
+     * Normative semantics — an implementation MUST:
+     *
+     * 1. **Sample the buffer front, with the playhead as the floor**:
+     *    `max(bufferedEnd, currentTime)` off the adapter's OWN media element.
+     *    A playhead-only trigger is wrong: the engine buffers tens of seconds
+     *    ahead and crosses the boundary long before the viewer reaches it, so
+     *    the warm would land after the cold request it exists to prevent.
+     * 2. **Warm on approach**: for each schedule, find the boundary containing
+     *    the watermark; when its `end` minus the watermark is at or under
+     *    `leadSeconds`, warm the NEXT boundary — but only if that boundary's
+     *    `url` differs, since a run continuing in the same object needs
+     *    nothing. The first chunk is never warmed: the engine's own start-up
+     *    requests fetch it.
+     * 3. **Warm each URL at most once per attached source**, marking it warmed
+     *    BEFORE the request goes out — two ticks must not both fire — and
+     *    never retrying a failure. The engine's own request is the fallback,
+     *    later and slower, which is the un-warmed status quo anyway.
+     * 4. **Request `Range: bytes=0-<warmBytes - 1>` through `fetchImpl`**, read
+     *    the body to completion and discard it. The bytes are ciphertext that
+     *    is never decrypted, parsed, cached or handed to the engine — reading
+     *    them only completes the request.
+     * 5. **Swallow every failure.** Warming is advisory in both directions: it
+     *    must not block a load, surface an error, or change what the viewer
+     *    sees. Report failures to `log` and move on.
+     * 6. **Keep ticking while paused.** A static watermark fetches nothing by
+     *    itself, and a player parked just short of a boundary gets its next
+     *    chunk warmed before the viewer presses play again.
+     * 7. **Sample about once a second.** Boundaries are tens of seconds apart;
+     *    finer sampling buys nothing.
+     * 8. **Stop** on an empty-schedules call, when a new source replaces the
+     *    current one, and on `destroy()` — a loop outliving its source warms
+     *    chunks nothing is going to play.
+     *
+     * The loop is deliberately adapter work rather than wrapper work: a JS
+     * interval is throttled — or suspended outright — once the page or app is
+     * backgrounded, which is exactly when a native player carries on playing.
+     * A native adapter therefore re-implements the pacing loop beside its own
+     * player (AVPlayer, ExoPlayer) instead of reusing a JS timer across the
+     * bridge; the schedules themselves are plain data and serialize fine.
+     *
+     * Reference implementation: `player-web/src/adapter/chunkWarming.ts`
+     * (`ChunkPrefetcher`), wired up in
+     * `player-web/src/adapter/HlsJsAdapter.ts`. Prose version, for porting:
+     * `docs/chunk-warming.md`.
+     */
+    warmChunks?(schedules: ChunkBoundary[][], options: ChunkWarmOptions): void;
 
     on<E extends AdapterEventName>(
         event: E,

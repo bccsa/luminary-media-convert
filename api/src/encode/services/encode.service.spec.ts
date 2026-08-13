@@ -106,6 +106,13 @@ describe('EncodeService', () => {
                 masterPlaylist: 'master.m3u8',
                 segmentFormat: 'fmp4',
             }),
+            // Matches `makeEncodeConfig`: one 720p rendition off track 0, one
+            // audio group. The real method is exercised in
+            // `ffmpeg.service.spec.ts`; here it only has to reach the pipeline.
+            buildStreamChainMap: vi.fn().mockReturnValue({
+                stream_720p_1280x720: 'v0',
+                stream_hd_HD_Audio: 'a',
+            }),
         } as any;
 
         encryptionService = {
@@ -244,6 +251,57 @@ describe('EncodeService', () => {
             await runWithPrefix('videos/project-1');
 
             expect(prefixPassedToPipeline()).toBe('videos/project-1');
+        });
+    });
+
+    /**
+     * The packer groups streams into shared chunk chains, and every input it
+     * needs to do that is decided here: which directories share a chain, how big
+     * an audio chunk may grow, and how long a segment is — the last of which
+     * sizes the deliberately small first chunk of each chain.
+     */
+    describe('chunk-chain settings given to the pipeline', () => {
+        const configPassedToPipeline = () =>
+            (segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>)
+                .mock.calls[0][0];
+
+        async function run(overrides?: Partial<CreateSessionDto>) {
+            const session = sessionService.create({
+                ...makeConfig(),
+                ...overrides,
+            });
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+            await service.processSession(session.id);
+        }
+
+        it('passes the chain map built from the encode config', async () => {
+            await run();
+
+            expect(ffmpegService.buildStreamChainMap).toHaveBeenCalledWith(
+                expect.objectContaining({ type: 'video' })
+            );
+            expect(configPassedToPipeline().streamChains).toEqual({
+                stream_720p_1280x720: 'v0',
+                stream_hd_HD_Audio: 'a',
+            });
+        });
+
+        it('defaults the audio chain cap to 50 MB and the segment duration to the config', async () => {
+            await run();
+
+            expect(
+                configPassedToPipeline().audioByteRangeMaxFileSizeBytes
+            ).toBe(50 * 1024 * 1024);
+            expect(configPassedToPipeline().segmentDurationSeconds).toBe(6);
+        });
+
+        it('carries a caller-set audio cap through', async () => {
+            await run({ audioByteRangeMaxFileSizeMB: 120 });
+
+            expect(
+                configPassedToPipeline().audioByteRangeMaxFileSizeBytes
+            ).toBe(120 * 1024 * 1024);
         });
     });
 
@@ -412,7 +470,12 @@ describe('EncodeService', () => {
         expect(updated.masterPlaylist).toBe('master.m3u8');
     });
 
-    it('should always pass byteRange: false to ffmpeg (pipeline handles byte-range)', async () => {
+    it('should leave byte-range packing to the pipeline, never to ffmpeg', async () => {
+        // FFmpeg used to be able to do the packing itself, after the encode had
+        // finished, from a worker thread. Nothing has reached that path since
+        // the pipeline started streaming segments out as they were written, and
+        // the option is gone: the session's byteRange setting goes to the
+        // pipeline and nowhere else.
         const config = makeConfig();
         config.byteRange = true;
         const session = sessionService.create(config);
@@ -421,10 +484,17 @@ describe('EncodeService', () => {
 
         await service.processSession(session.id);
 
-        expect(ffmpegService.encode).toHaveBeenCalledWith(
-            expect.objectContaining({
-                byteRange: false,
-            })
+        const opts = (ffmpegService.encode as any).mock.calls[0][0];
+        expect(Object.keys(opts).sort()).toEqual([
+            'encodeConfig',
+            'inputPath',
+            'onProgress',
+            'outputDir',
+            'sessionId',
+        ]);
+
+        expect(segmentPipelineService.createPipeline).toHaveBeenCalledWith(
+            expect.objectContaining({ byteRange: true })
         );
     });
 
@@ -597,11 +667,14 @@ describe('EncodeService', () => {
 
         await service.processSession(session.id);
 
-        // FFmpeg always gets byteRange: false, no preByteRangeHook (pipeline handles both)
+        // Byte-range packing and encryption belong to the pipeline, which
+        // streams each segment out as FFmpeg writes it; FFmpeg is handed the
+        // config and a progress callback and nothing else.
         expect(ffmpegService.encode).toHaveBeenCalledWith(
             expect.objectContaining({
-                byteRange: false,
-                preByteRangeHook: undefined,
+                sessionId: session.id,
+                inputPath: '/tmp/input.mp4',
+                encodeConfig: expect.objectContaining({ type: 'video' }),
             })
         );
 
@@ -1078,6 +1151,7 @@ describe('EncodeService — encrypting the text assets last', () => {
                 masterPlaylist: 'master.m3u8',
                 segmentFormat: 'fmp4',
             }),
+            buildStreamChainMap: vi.fn().mockReturnValue({}),
         } as any;
 
         encryptionService = {
@@ -1253,6 +1327,7 @@ describe('EncodeService — naming the finalize phases', () => {
                     segmentFormat: 'fmp4',
                 };
             }),
+            buildStreamChainMap: vi.fn().mockReturnValue({}),
         } as any;
 
         const encryptionService = {
