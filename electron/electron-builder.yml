@@ -8,6 +8,10 @@ copyright: Copyright © BCC South Africa
 # native module, so there is nothing to rebuild.
 npmRebuild: false
 
+# Runs after each platform's app directory is built and before the installer is
+# made, which is the only point at which the bundle can still be signed.
+afterPack: build/after-pack.cjs
+
 directories:
     output: release
     buildResources: build
@@ -99,9 +103,14 @@ mac:
           arch:
               - arm64
               - x64
-    # Unsigned for now: there is no Developer ID certificate in this project, and
-    # electron-builder would otherwise try to sign with whatever is in the
-    # keychain. Gatekeeper will require a right-click → Open on first launch.
+    # No Developer ID certificate in this project, and left unset electron-builder
+    # would sign with whatever happens to be in the build machine's keychain.
+    #
+    # The bundle is still ad-hoc signed, by build/after-pack.cjs: Electron ships
+    # already signed, and adding extraResources invalidates that signature, which
+    # macOS reports as "damaged and can't be opened" for any downloaded copy —
+    # a dialog with no way past it. Ad-hoc re-signing restores a valid signature,
+    # so the app asks to be trusted instead of refusing to open.
     identity: null
     hardenedRuntime: false
     gatekeeperAssess: false

@@ -125,7 +125,9 @@ The encoder's half of the contract is done and documented (CLAUDE.md "CMS contra
 
 ## 2. Auto-update
 
-**Today.** There is none. Builds are unsigned (`mac.identity: null`, `hardenedRuntime: false` in `electron/electron-builder.yml`), so macOS users must right-click → Open on first launch, and every update is a manual re-download.
+**Today.** There is none, and every update is a manual re-download.
+
+Builds carry an **ad-hoc** signature (`electron/build/after-pack.cjs`) but no Developer ID and no notarization, so macOS 15+ blocks a downloaded copy until the user goes through System Settings → Privacy & Security → Open Anyway → a second confirmation → authentication. Right-click → Open no longer works; Apple removed it. Verified on macOS 26.5.2.
 
 **Wanted.** `electron-updater` with a published feed, which requires the whole signing story first:
 
