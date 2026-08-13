@@ -504,3 +504,91 @@ Right-click → Open was removed by Apple and no longer helps. Verified on macOS
 **Outstanding:** notarization removes the prompt entirely and needs the Developer ID
 certificate that auto-update also requires — see item 2. That is one purchase with
 three payoffs, and belongs in the same conversation as the GPL sign-off in item 40.
+
+---
+
+## 45. Quick trim: smart cut — copy intact GOPs, re-encode only the boundary GOPs
+
+**What exists today.** Trimming always re-encodes every stream ("precise" mode, the
+only mode). The trim path feeds the concat demuxer with `-segment_time_metadata 1` and
+`-copyts`, and drops each cut's keyframe-inexact seek pre-roll in the filter graph
+(`select=concatdec_select` / `aselect=concatdec_select`) — cuts are sample-accurate and
+A/V stays in sync (verified by frame SSIM and audio cross-correlation to within one AAC
+frame on a 7-video-stream, mutually misaligned source). Copy mode with `trimSegments` is
+refused at encode submit: a copied stream never passes a filter, so its cuts would stay
+keyframe-granular with the pre-roll clamped at every splice — that clamping is exactly
+the lip-sync slide the current design fixed. The cost of precise mode is a full
+re-encode, which on long VOD is the whole encode time for what the user experiences as
+"just a cut".
+
+**What quick trim is.** Smart cut (the LosslessCut / VideoReDo approach): copy every
+GOP that lies wholly inside a kept range, re-encode only the partial GOPs at each cut
+boundary as short closed-GOP "bridge" segments, and splice per stream. Cuts are
+frame-exact on any source — including sources whose streams have mutually offset
+keyframe grids, because every stream is bridged on its *own* grid — at near-remux
+speed. This is why it replaced the earlier "keyframe cut mode" idea (snap cuts to
+keyframes, copy everything): a mode picker between "fast but moves your cuts" and
+"fast and exact" is a mode picker nobody should see.
+
+**The splice mechanics (settled in discussion, unimplemented).**
+
+1. **Unequal segment durations are free in HLS** — `EXTINF` varies per segment,
+   `TARGETDURATION` is the max. A re-encoded partial GOP becomes its own short segment
+   starting at an IDR. No spec problem, no player problem.
+2. **Codec parameter continuity is the real constraint.** A bridge encoded by
+   x264/NVENC/VideoToolbox will not carry the source's SPS/PPS, and in fMP4 the decoder
+   config lives in the init segment. The standard answer is a `#EXT-X-DISCONTINUITY`
+   plus a new `#EXT-X-MAP` at every part boundary (bridge → copied run → bridge …),
+   i.e. per-part init segments — the ad-insertion mechanism, which hls.js handles.
+3. **The encode stops being one ffmpeg invocation.** Per stream: scan the keyframe grid
+   (the preview's `scanKeyframes` shape), plan parts, run small bridge encodes (decode
+   from the preceding keyframe, drop frames before the cut, encode one closed GOP —
+   rate-matched to the rendition config so the quality seam stays subtle), run copy
+   remuxes for the intact spans, then author the media playlists ourselves with the
+   lossless `hls/` builder instead of letting ffmpeg's HLS muxer do it.
+4. **Audio is copied and cut at AAC-frame granularity** (~21 ms at 48 kHz). Timestamps
+   keep sync; no bridge needed.
+
+**The audit surface — everything that assumes one init per stream.** The byte-range
+chunk-chain packer and the "the fMP4 init travels with the remaining files at the end"
+rule in `SegmentPipelineService`, chunk warming (`docs/chunk-warming.md` schedules), the
+LMCENC encryption pass, and `player-core`'s munging pipeline all need checking against
+playlists with multiple `EXT-X-MAP`s (inits inside chunk chains means `BYTERANGE`d MAP
+URIs). The `hls/` parser round-trips them losslessly already; it is the consumers that
+have never seen one. This mechanism getting exercised end-to-end for the first time is
+the bulk of the work — the bridge encodes themselves are a day.
+
+**Eligibility.** Quick trim requires copy-eligible streams by definition, so it sits
+behind the same source gating as copy mode (`copy-mode-eligibility.ts`), strict on
+unknowns, refused with a message naming the track. Sources that fail the gate fall back
+to precise mode — which stays the default and the fallback for everything.
+
+**Where.** `FfmpegService` (part planning, bridge/copy job runner), a playlist assembler
+on the `hls/` library, `SegmentPipelineService` + chunk-chain packer (multi-init),
+`encode.controller.ts` (mode selection on the encode config), `EncodeConfigForm` /
+trim workspace (mode choice and messaging), player verification against a multi-MAP
+master (stock-player check harness, `docs/stock-player-check/`).
+
+---
+
+## 46. The trim timeline's audio waveform is not in sync with the audio
+
+**Reported, not yet investigated.** On the trim timeline the waveform peaks do not
+line up with what is heard — a transient lands visibly before or after the sound.
+Observed while trimming the multi-stream test source whose streams start apart
+(video grids at 0.06 / 0.62 / 1.06 s, audio at ~0.98 s).
+
+**The obvious suspect, unverified.** `WaveformService` decodes the audio track and
+buckets samples into peaks; if peak 0 is simply the first decoded sample, it holds
+the audio from ~0.98 s into the presentation — but the trim UI draws peak 0 at
+timeline zero. The whole waveform would then sit early by the audio stream's start
+offset, which matches the reported symptom and would only show on sources whose
+audio does not start at zero — the same head-offset family as the preview seek and
+concat inpoint defects fixed on this branch. Check how the peaks are bucketed
+against `format.duration`, and whether the audio stream's `startTime` from the
+probe is applied anywhere between decode and drawing.
+
+**Where.** `api/src/encode/services/waveform.service.ts` (peak computation and the
+duration the buckets are normalized against), the trim workspace's waveform
+rendering in `app/`, and — since `waveform.json` is uploaded as a playback sidecar —
+whatever consumes it in `player-web`, which would inherit the same shift.
