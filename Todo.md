@@ -538,3 +538,27 @@ on the `hls/` library, `SegmentPipelineService` + chunk-chain packer (multi-init
 `encode.controller.ts` (mode selection on the encode config), `EncodeConfigForm` /
 trim workspace (mode choice and messaging), player verification against a multi-MAP
 master (stock-player check harness, `docs/stock-player-check/`).
+
+---
+
+## 46. The trim timeline's audio waveform is not in sync with the audio
+
+**Reported, not yet investigated.** On the trim timeline the waveform peaks do not
+line up with what is heard — a transient lands visibly before or after the sound.
+Observed while trimming the multi-stream test source whose streams start apart
+(video grids at 0.06 / 0.62 / 1.06 s, audio at ~0.98 s).
+
+**The obvious suspect, unverified.** `WaveformService` decodes the audio track and
+buckets samples into peaks; if peak 0 is simply the first decoded sample, it holds
+the audio from ~0.98 s into the presentation — but the trim UI draws peak 0 at
+timeline zero. The whole waveform would then sit early by the audio stream's start
+offset, which matches the reported symptom and would only show on sources whose
+audio does not start at zero — the same head-offset family as the preview seek and
+concat inpoint defects fixed on this branch. Check how the peaks are bucketed
+against `format.duration`, and whether the audio stream's `startTime` from the
+probe is applied anywhere between decode and drawing.
+
+**Where.** `api/src/encode/services/waveform.service.ts` (peak computation and the
+duration the buckets are normalized against), the trim workspace's waveform
+rendering in `app/`, and — since `waveform.json` is uploaded as a playback sidecar —
+whatever consumes it in `player-web`, which would inherit the same shift.
