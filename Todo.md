@@ -541,27 +541,42 @@ master (stock-player check harness, `docs/stock-player-check/`).
 
 ---
 
-## 46. The trim timeline's audio waveform is not in sync with the audio
+## 46. The trim timeline's audio waveform is not in sync with the audio — fixed
 
-**Reported, not yet investigated.** On the trim timeline the waveform peaks do not
-line up with what is heard — a transient lands visibly before or after the sound.
-Observed while trimming the multi-stream test source whose streams start apart
-(video grids at 0.06 / 0.62 / 1.06 s, audio at ~0.98 s).
+**Was exactly the suspected head offset, plus three relatives found on the way.**
+`WaveformService` bucketed peaks from the first decoded audio sample, and the trim
+UI draws peak 0 at timeline zero — on a source whose audio starts ~0.98 s into the
+presentation, the whole waveform sat that far early (and stretched, since the peaks
+also ended at the audio's end rather than the timeline's).
 
-**The obvious suspect, unverified.** `WaveformService` decodes the audio track and
-buckets samples into peaks; if peak 0 is simply the first decoded sample, it holds
-the audio from ~0.98 s into the presentation — but the trim UI draws peak 0 at
-timeline zero. The whole waveform would then sit early by the audio stream's start
-offset, which matches the reported symptom and would only show on sources whose
-audio does not start at zero — the same head-offset family as the preview seek and
-concat inpoint defects fixed on this branch. Check how the peaks are bucketed
-against `format.duration`, and whether the audio stream's `startTime` from the
-probe is applied anywhere between decode and drawing.
+**The fix, all in `api/`** (`waveform.service.ts`, threaded from `ingest.service.ts`,
+`encode.controller.ts`, `encode.service.ts`, `ffmpeg.service.ts`):
 
-**Where.** `api/src/encode/services/waveform.service.ts` (peak computation and the
-duration the buckets are normalized against), the trim workspace's waveform
-rendering in `app/`, and — since `waveform.json` is uploaded as a playback sidecar —
-whatever consumes it in `player-web`, which would inherit the same shift.
+- Peak 0 now means timeline zero: `aresample=8000:async=1:first_pts=0` fills the
+  head gap with silence. `-copyts` is deliberately **not** used on a direct input —
+  ffmpeg's rebase onto the container start is the zero the client draws from, and
+  with `-copyts` an MPEG-TS recording stamped at wall-clock PTS hands `first_pts=0`
+  hours of "gap" to fill (measured: 57 MB of PCM for a 10 s file).
+- The tail spans the timeline: `apad=whole_dur=<durationSec>`, with the duration
+  passed from the probe (source) or the summed trim ranges as clamped by
+  `buildConcatFile`'s in-points (trimmed).
+- A trimmed sidecar no longer contains concat seek pre-roll: the waveform pass
+  mirrors the encode's `-segment_time_metadata 1` + `aselect=concatdec_select` +
+  `-copyts` trio.
+- The **delivered** sidecar describes the delivered media: `EncodeResult` now
+  reports `alignmentOffset`, and the encode-time sidecar removes the same head the
+  encode's alignment seek removed (`-ss` before `-i`, sample-accurate for audio).
+  The session-scoped cache keeps describing the source, which is what the trim UI
+  scrubs.
+- Sidecar `version` is 2; version-1 caches are rejected on read and recomputed, so
+  a session restored from before the fix heals on first request.
+
+Verified by decoding the produced commands against the misaligned reference source:
+sample counts exact to the timeline (`duration × 8000`), leading silence matching
+the audio's real start, argv byte-identical to before on the untouched paths.
+Full api suite green. Left open: a waveform requested in the narrow window between
+file attach and probe completion caches with no tail padding (no `durationSec`
+yet) — benign unless the audio ends early, noted here rather than machinery added.
 
 ---
 
