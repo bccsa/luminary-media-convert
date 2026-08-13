@@ -144,6 +144,105 @@ describe('FfmpegService', () => {
             expect(service.isGpuAvailable()).toBe(true);
             expect(service.getAccelMode()).toBe('apple');
         });
+
+        it('should report GPU available for intel mode', () => {
+            (service as any).accelMode = 'intel';
+            expect(service.isGpuAvailable()).toBe(true);
+            expect(service.getAccelMode()).toBe('intel');
+        });
+    });
+
+    describe('Quick Sync detection', () => {
+        const realPlatform = process.platform;
+
+        /** What ffmpeg answers for each capability query, per test. */
+        const capabilities = (opts: {
+            hwaccels?: string;
+            encoders?: string;
+            filters?: string;
+        }) => {
+            mockExecSync.mockImplementation((cmd: string) => {
+                if (cmd.includes('-hwaccels'))
+                    return opts.hwaccels ?? 'qsv\ncuda\n';
+                if (cmd.includes('-encoders'))
+                    return opts.encoders ?? 'h264_qsv libx264\n';
+                if (cmd.includes('-filters'))
+                    return opts.filters ?? 'vpp_qsv scale\n';
+                throw new Error(`unexpected command: ${cmd}`);
+            });
+        };
+
+        const setPlatform = (value: string) => {
+            Object.defineProperty(process, 'platform', {
+                value,
+                configurable: true,
+            });
+        };
+
+        afterEach(() => {
+            setPlatform(realPlatform);
+        });
+
+        const detect = () => (service as any).detectIntelQsv() as boolean;
+
+        it('does not look for Quick Sync off Windows', () => {
+            setPlatform('darwin');
+            capabilities({});
+            expect(detect()).toBe(false);
+            // An Intel Mac reaches its iGPU through VideoToolbox, and the encoder
+            // is not in the macOS build at all, so asking would be wasted work.
+            expect(mockExecSync).not.toHaveBeenCalled();
+        });
+
+        it('accepts a build with the hwaccel, the encoder and the scaler', () => {
+            setPlatform('win32');
+            capabilities({});
+            expect(detect()).toBe(true);
+        });
+
+        it('refuses a build with no qsv hwaccel', () => {
+            setPlatform('win32');
+            capabilities({ hwaccels: 'cuda\ndxva2\n' });
+            expect(detect()).toBe(false);
+        });
+
+        it('refuses a build with no h264_qsv encoder', () => {
+            setPlatform('win32');
+            capabilities({ encoders: 'libx264 h264_nvenc\n' });
+            expect(detect()).toBe(false);
+        });
+
+        it('refuses a build with the encoder but no vpp_qsv scaler', () => {
+            setPlatform('win32');
+            // The case worth having a test for: this build could encode a single
+            // rendition and would fail on every ladder, because the scaler that
+            // keeps frames in QSV memory is missing.
+            capabilities({ filters: 'scale scale_cuda\n' });
+            expect(detect()).toBe(false);
+        });
+
+        it('treats an ffmpeg that cannot be run as no Quick Sync', () => {
+            setPlatform('win32');
+            mockExecSync.mockImplementation(() => {
+                throw new Error('ENOENT');
+            });
+            expect(detect()).toBe(false);
+        });
+
+        it('prefers NVIDIA when the machine has both', () => {
+            setPlatform('win32');
+            // nvidia-smi answers, and the build has cuda as well as qsv.
+            mockExecSync.mockImplementation((cmd: string) => {
+                if (cmd.includes('nvidia-smi')) return '';
+                if (cmd.includes('-hwaccels')) return 'cuda\nqsv\n';
+                if (cmd.includes('-encoders'))
+                    return 'h264_nvenc h264_qsv libx264\n';
+                if (cmd.includes('-filters'))
+                    return 'scale_cuda vpp_qsv scale\n';
+                throw new Error(`unexpected command: ${cmd}`);
+            });
+            expect((service as any).detectAcceleration()).toBe('nvidia');
+        });
     });
 
     describe('parseProgressTime (private, tested via reflection)', () => {
