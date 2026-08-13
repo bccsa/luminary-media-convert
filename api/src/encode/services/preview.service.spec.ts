@@ -596,6 +596,69 @@ describe('PreviewService', () => {
                 { recursive: true }
             );
         });
+
+        it('should place the preview cache under the session work directory', async () => {
+            const prevWorkDir = process.env.WORK_DIR;
+            process.env.WORK_DIR = '/wd';
+            try {
+                sessionService = makeSessionService({
+                    filePath: '/media/video.mp4',
+                    probeResult: makeProbe(),
+                });
+                service = new PreviewService(
+                    sessionService,
+                    makeFfmpegService()
+                );
+
+                await service.init('s1');
+
+                // Never beside the source file: a shared folder like
+                // ~/Downloads would share one segment cache across every
+                // session and file previewed from it.
+                expect(mockMkdir).toHaveBeenCalledWith('/wd/s1/preview', {
+                    recursive: true,
+                });
+            } finally {
+                if (prevWorkDir === undefined) delete process.env.WORK_DIR;
+                else process.env.WORK_DIR = prevWorkDir;
+            }
+        });
+
+        it('should run the keyframe scan inside the session work directory', async () => {
+            const prevWorkDir = process.env.WORK_DIR;
+            process.env.WORK_DIR = '/wd';
+            try {
+                const probe = makeProbe({
+                    videoTracks: [
+                        {
+                            index: 0,
+                            codec: 'h264',
+                            width: 854,
+                            height: 480,
+                            bitrateKbps: 2000,
+                            frameRate: 30,
+                        },
+                    ],
+                });
+                sessionService = makeSessionService({
+                    filePath: '/media/video.mp4',
+                    probeResult: probe,
+                });
+                service = new PreviewService(
+                    sessionService,
+                    makeFfmpegService()
+                );
+
+                await service.init('s1');
+
+                expect(mockMkdir).toHaveBeenCalledWith('/wd/s1/kfscan', {
+                    recursive: true,
+                });
+            } finally {
+                if (prevWorkDir === undefined) delete process.env.WORK_DIR;
+                else process.env.WORK_DIR = prevWorkDir;
+            }
+        });
     });
 
     /* ============================================================== */

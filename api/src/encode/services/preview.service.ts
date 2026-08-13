@@ -66,6 +66,8 @@ const MAX_CONCURRENT = 3;
 @Injectable()
 export class PreviewService {
     private readonly logger = new Logger(PreviewService.name);
+    private readonly workDir =
+        process.env.WORK_DIR || join(process.cwd(), 'work');
     private readonly states = new Map<string, PreviewState>();
     private readonly pending = new Map<string, Promise<string>>();
     // Concurrency limiter for FFmpeg processes
@@ -87,7 +89,10 @@ export class PreviewService {
         }
 
         const { filePath, probeResult } = session;
-        const previewDir = join(filePath, '..', 'preview');
+        // Under the session's work directory, never beside the source file:
+        // a shared folder like ~/Downloads would share one cache across every
+        // session and file previewed from it, serving stale segments by index.
+        const previewDir = join(this.workDir, sessionId, 'preview');
         await mkdir(previewDir, { recursive: true });
 
         const duration = probeResult.format.duration;
@@ -118,7 +123,11 @@ export class PreviewService {
         // Keyframe scan for copy-mode renditions (skipped for audio-only)
         const copyRendition = renditions.find((r) => r.canCopy);
         const boundaries = copyRendition
-            ? await this.scanKeyframes(filePath, copyRendition.videoIndex)
+            ? await this.scanKeyframes(
+                  sessionId,
+                  filePath,
+                  copyRendition.videoIndex
+              )
             : [];
 
         // Generate playlists
@@ -476,10 +485,11 @@ export class PreviewService {
     }
 
     private async scanKeyframes(
+        sessionId: string,
         filePath: string,
         videoStreamIndex: number
     ): Promise<SegmentBoundary[]> {
-        const tmpDir = join(filePath, '..', 'kfscan');
+        const tmpDir = join(this.workDir, sessionId, 'kfscan');
         await mkdir(tmpDir, { recursive: true });
         const csvPath = join(tmpDir, 'segments.csv');
 
