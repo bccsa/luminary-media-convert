@@ -174,7 +174,7 @@ Whatever is chosen must cope with the case where the CMS document was deleted en
 
 ---
 
-## 5. Windows build verification — built and installed; encoding still unverified
+## 5. Windows build verification — built, installed, and the NVIDIA path proven
 
 **12 Aug 2026: the first Windows installer was built, and it installs.** The build
 runs on a `windows-latest` GitHub runner (`.github/workflows/windows-ffmpeg-verify.yml`),
@@ -212,8 +212,23 @@ without that step an installer could ship with no encoder and nothing would noti
 - `luminary-convert://` protocol registration through the installer
 - `safeStorage` (DPAPI-backed, expected to be fine) and the credential sidecar
 - The `resourcesPath` lookup with `.exe` suffixes, and paths containing spaces
-- **NVENC encoding on real NVIDIA hardware.** The runner proves the build *has* NVENC;
-  only a GPU machine proves it *encodes*. This remains the single largest untested path
+- ~~**NVENC encoding on real NVIDIA hardware.**~~ **Done, 13 Aug 2026.** Tested by Johan
+  on a Windows PC with an NVIDIA GPU, using the cross-compiled binary from
+  `ffmpeg-build.yml`:
+  - `h264_nvenc` encoded 50/50 frames. There is no software fallback for that encoder —
+    without a GPU and driver it fails to load `nvEncodeAPI64.dll` — so this is a real
+    hardware encode.
+  - The **full pipeline** works: `-hwaccel cuda -hwaccel_output_format cuda` in,
+    `scale_cuda` to resize, `h264_nvenc` out, with the output reported as
+    `cuda(tv, progressive)` — frames stayed in GPU memory the whole way. This is the
+    path `FfmpegService` takes on an NVIDIA machine.
+  - `scale_cuda` was the part that could not be verified anywhere else: its CUDA kernels
+    are compiled by clang through `--enable-cuda-llvm` rather than NVIDIA's `nvcc`, and
+    a GPU-less runner cannot say whether that produces working kernels.
+
+  **Not established: throughput.** Both tests used a 320x240 two-second clip, where
+  CUDA context setup and first-run kernel JIT dominate (5.17 s elapsed for 2 s of
+  video). A speed comparison needs a 1080p file on local disk, not a network share
 
 **Also needed:**
 - Verification of the things that differ from macOS: `luminary-convert://` protocol registration through the installer, `safeStorage` (DPAPI-backed, should be fine), the `resourcesPath` binary lookup with `.exe` suffixes, path handling with spaces (`shellQuote` covers the `execSync` probes; `execFile` callers are unaffected), and whether Windows Defender / SmartScreen blocks an unsigned installer outright
