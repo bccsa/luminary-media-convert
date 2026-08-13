@@ -379,6 +379,26 @@ export class EncodeController {
             }
         }
 
+        // A trim is cut sample-accurately in the filter graph
+        // (select/aselect=concatdec_select), and a copied stream never passes
+        // through a filter: its cuts would stay keyframe-granular, with each
+        // cut's seek pre-roll clamped at the splice and lip-sync slid by up to
+        // a GOP. Refused rather than approximated; Todo item 45 (quick trim)
+        // is the plan for fast keyframe-based cutting done honestly.
+        if (dto.trimSegments?.length) {
+            const copied = dto.videoRenditions?.some((r) => r.copyStream)
+                ? 'video rendition'
+                : dto.audioGroups?.some((g) => g.copyStream)
+                  ? 'audio group'
+                  : null;
+            if (copied) {
+                throw new BadRequestException(
+                    `Trimming re-encodes every stream, but a ${copied} has copy mode enabled. ` +
+                        'Disable copy mode on all streams or remove the trim.'
+                );
+            }
+        }
+
         this.sessionService.setEncodeConfig(sessionId, dto);
 
         if (dto.trimSegments?.length) {
