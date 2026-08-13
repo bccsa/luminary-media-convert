@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls';
 import { existsSync } from 'fs';
-import { copyFile, readdir, rm, writeFile } from 'fs/promises';
+import { readdir, rm, writeFile } from 'fs/promises';
 import { join, posix } from 'path';
 import { estimateOutputBytes, formatBytes } from './output-estimate.js';
 import { freeBytes } from './disk-space.js';
@@ -13,7 +13,11 @@ import {
 import { FfmpegService } from './ffmpeg.service.js';
 import { EncryptionService } from './encryption.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
-import { WaveformService } from './waveform.service.js';
+import {
+    readCachedWaveform,
+    WAVEFORM_SIDECAR_VERSION,
+    WaveformService,
+} from './waveform.service.js';
 import { S3Service } from './s3.service.js';
 import {
     SegmentPipelineService,
@@ -325,26 +329,77 @@ export class EncodeService {
                     const concatFilePath = join(outputDir, 'concat.txt');
                     const hasConcatFile = existsSync(concatFilePath);
                     const outputSidecarPath = join(outputDir, 'waveform.json');
-                    const cachePath = this.waveformService.cachePath(sessionId);
+                    // This sidecar describes the delivered media, whose t=0 is
+                    // the source's t=alignmentOffset. The session cache
+                    // describes the source, for a trim UI that scrubs the
+                    // source preview — the two are the same timeline only when
+                    // nothing was seeked past, so any offset at all rules the
+                    // cache out and the peaks are recomputed against the head
+                    // the encode actually kept.
+                    //
+                    // Read rather than copied: the cache outlives a restart, so
+                    // a sidecar from before the peaks were aligned to the
+                    // timeline can still be sitting there, and copying the file
+                    // whole is exactly the path that would not notice.
+                    const alignmentOffset = encodeResult.alignmentOffset;
+                    const cached =
+                        hasConcatFile || alignmentOffset > 0
+                            ? null
+                            : await readCachedWaveform(
+                                  this.waveformService.cachePath(sessionId)
+                              );
 
-                    if (!hasConcatFile && existsSync(cachePath)) {
+                    if (cached) {
                         // Upload-time prime already produced peaks for this
                         // exact source timeline. Reuse instead of running
                         // ffmpeg a second time.
-                        await copyFile(cachePath, outputSidecarPath);
+                        await writeFile(
+                            outputSidecarPath,
+                            JSON.stringify(cached)
+                        );
                         this.logger.log(
                             `Reused cached waveform sidecar for session ${sessionId}`
                         );
                     } else {
+                        // A trimmed encode's timeline is the stitched concat
+                        // clock, so the span the peaks have to cover is the
+                        // segments' summed length, not the source's duration —
+                        // measured from the in-points buildConcatFile actually
+                        // wrote, which are clamped to the alignment offset. A
+                        // range starting inside the head contributes only what
+                        // survives that clamp, and taking it at face value
+                        // would have apad make up the difference in silence the
+                        // encode never wrote.
+                        const durationSec = hasConcatFile
+                            ? (session.encodeConfig.trimSegments ?? []).reduce(
+                                  (total, segment) =>
+                                      total +
+                                      Math.max(
+                                          0,
+                                          segment.outSec -
+                                              Math.max(
+                                                  segment.inSec,
+                                                  alignmentOffset
+                                              )
+                                      ),
+                                  0
+                              )
+                            : Math.max(
+                                  0,
+                                  (session.probeResult?.format?.duration ?? 0) -
+                                      alignmentOffset
+                              );
                         const peaks =
                             await this.waveformService.generateWaveform({
                                 inputPath: session.filePath!,
                                 concatFilePath: hasConcatFile
                                     ? concatFilePath
                                     : undefined,
+                                durationSec,
+                                startOffsetSec: alignmentOffset,
                             });
                         const payload = {
-                            version: 1,
+                            version: WAVEFORM_SIDECAR_VERSION,
                             sampleRate: 8000,
                             numPeaks: peaks.length,
                             peaks,

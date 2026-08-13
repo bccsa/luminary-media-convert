@@ -1001,6 +1001,25 @@ describe('EncodeController', () => {
         });
     });
 
+    describe('getWaveform', () => {
+        it('hands the waveform pass the probed duration, so the peaks span the timeline', async () => {
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setProbeResult(session.id, {
+                format: { duration: 166.68, bitrateKbps: 5000 },
+                videoTracks: [],
+                audioTracks: [{ index: 0, codec: 'aac', channels: 2 }],
+            } as any);
+
+            await controller.getWaveform(session.id, session.sessionToken);
+
+            expect(waveformService.getOrComputeCached).toHaveBeenCalledWith(
+                session.id,
+                { inputPath: '/tmp/input.mp4', durationSec: 166.68 }
+            );
+        });
+    });
+
     describe('streamEvents - encoder field', () => {
         it('should include encoder field from getAccelMode in SSE events', () => {
             ffmpegService.getAccelMode.mockReturnValue('nvidia');

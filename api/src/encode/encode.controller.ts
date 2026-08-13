@@ -896,7 +896,10 @@ export class EncodeController {
         try {
             const sidecar = await this.waveformService.getOrComputeCached(
                 sessionId,
-                { inputPath: filePath }
+                {
+                    inputPath: filePath,
+                    durationSec: session.probeResult?.format?.duration,
+                }
             );
             return { peaks: sidecar.peaks, numPeaks: sidecar.numPeaks };
         } catch (err) {

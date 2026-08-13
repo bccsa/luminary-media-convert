@@ -9,7 +9,14 @@ vi.mock('./disk-space.js', async (importOriginal) => ({
     freeBytes: (...args: any[]) => mockFreeBytes(...args),
 }));
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { EncodeService } from './encode.service.js';
@@ -17,7 +24,10 @@ import { SessionService } from './session.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import { EncryptionService } from './encryption.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
-import { WaveformService } from './waveform.service.js';
+import {
+    WAVEFORM_SIDECAR_VERSION,
+    WaveformService,
+} from './waveform.service.js';
 import { S3Service } from './s3.service.js';
 import {
     SegmentPipelineService,
@@ -1517,5 +1527,225 @@ describe('EncodeService — naming the finalize phases', () => {
             );
             expect(uploadPhase[0].uploading).toBe(0);
         });
+    });
+});
+
+/*
+ * The delivered waveform sidecar describes the delivered media, whose t=0 is
+ * the source's t=alignmentOffset — these tests pin the decisions that keep it
+ * honest: when the session cache may stand in for a fresh pass, which head the
+ * fresh pass removes, and which span a trimmed encode's peaks have to cover.
+ */
+describe('EncodeService — the delivered waveform sidecar', () => {
+    let service: EncodeService;
+    let sessionService: SessionService;
+    let waveformService: Mocked<WaveformService>;
+    let testWorkDir: string;
+    /** What the mocked encode reports having seeked past. */
+    let alignmentOffset: number;
+    /** Mirrors buildConcatFile: a trimmed encode leaves concat.txt behind. */
+    let writeConcat: boolean;
+    /**
+     * The sidecar as it went up: completion cleanup empties the session
+     * directory, so the file has to be caught at upload time, which is the
+     * moment that matters anyway — it is what lands next to master.m3u8.
+     */
+    let uploadedSidecar: any;
+
+    const probeWithAudio = {
+        format: { duration: 120, bitrateKbps: 5000, formatName: 'matroska' },
+        videoTracks: [
+            {
+                index: 0,
+                codec: 'h264',
+                width: 1920,
+                height: 1080,
+                bitrateKbps: 5000,
+                frameRate: 24,
+            },
+        ],
+        audioTracks: [
+            { index: 1, codec: 'aac', channels: 2, bitrateKbps: 192 },
+        ],
+    } as any;
+
+    beforeEach(() => {
+        testWorkDir = mkdtempSync(join(tmpdir(), 'luminary-sidecar-'));
+        process.env.WORK_DIR = testWorkDir;
+        alignmentOffset = 0;
+        writeConcat = false;
+        uploadedSidecar = null;
+
+        sessionService = new SessionService({ emit: () => {} } as any);
+
+        const ffmpegService = {
+            encode: vi.fn(async (opts: any) => {
+                mkdirSync(opts.outputDir, { recursive: true });
+                if (writeConcat) {
+                    writeFileSync(
+                        join(opts.outputDir, 'concat.txt'),
+                        'ffconcat version 1.0\n'
+                    );
+                }
+                return {
+                    outputDir: opts.outputDir,
+                    masterPlaylist: 'master.m3u8',
+                    segmentFormat: 'fmp4',
+                    alignmentOffset,
+                };
+            }),
+            buildStreamChainMap: vi.fn().mockReturnValue({}),
+        } as any;
+
+        const encryptionService = {
+            generateKey: vi.fn().mockReturnValue(Buffer.alloc(16, 0xcd)),
+            generateIV: vi.fn().mockReturnValue(Buffer.alloc(16, 0xab)),
+            injectKeyTagsIntoPlaylists: vi.fn().mockResolvedValue(undefined),
+            encryptTextAssets: vi.fn().mockResolvedValue([]),
+        } as any;
+
+        const thumbnailService = {
+            packForDelivery: vi.fn().mockResolvedValue(null),
+            removePreview: vi.fn().mockResolvedValue(undefined),
+        } as any;
+
+        waveformService = {
+            generateWaveform: vi.fn().mockResolvedValue([0.1, 0.2]),
+            cachePath: vi.fn((id: string) =>
+                join(testWorkDir, id, 'waveform.json')
+            ),
+        } as any;
+
+        service = new EncodeService(
+            sessionService,
+            ffmpegService,
+            encryptionService,
+            thumbnailService,
+            waveformService,
+            {} as any,
+            {
+                createPipeline: vi.fn(() => {
+                    const pipeline = makeMockPipeline();
+                    (pipeline.uploadRemainingFiles as any).mockImplementation(
+                        async (dir: string) => {
+                            const sidecarPath = join(dir, 'waveform.json');
+                            if (existsSync(sidecarPath)) {
+                                uploadedSidecar = JSON.parse(
+                                    readFileSync(sidecarPath, 'utf-8')
+                                );
+                            }
+                            return [];
+                        }
+                    );
+                    return pipeline;
+                }),
+            } as any
+        );
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+        rmSync(testWorkDir, { recursive: true, force: true });
+        delete process.env.WORK_DIR;
+    });
+
+    async function run(encodeConfig: EncodeConfigDto): Promise<string> {
+        const session = sessionService.create(makeConfig());
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, encodeConfig);
+        sessionService.setProbeResult(session.id, probeWithAudio);
+        await service.processSession(session.id);
+        return session.id;
+    }
+
+    function primeCache(sessionId: string, version: number): number[] {
+        const peaks = [0.9, 0.8, 0.7];
+        mkdirSync(join(testWorkDir, sessionId), { recursive: true });
+        writeFileSync(
+            waveformService.cachePath(sessionId),
+            JSON.stringify({
+                version,
+                sampleRate: 8000,
+                numPeaks: peaks.length,
+                peaks,
+            })
+        );
+        return peaks;
+    }
+
+    it('reuses the session cache only for an untouched timeline', async () => {
+        const session = sessionService.create(makeConfig());
+        const peaks = primeCache(session.id, WAVEFORM_SIDECAR_VERSION);
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+        sessionService.setProbeResult(session.id, probeWithAudio);
+
+        await service.processSession(session.id);
+
+        expect(waveformService.generateWaveform).not.toHaveBeenCalled();
+        expect(uploadedSidecar.peaks).toEqual(peaks);
+    });
+
+    it('rejects a cache from before the peaks were timeline-aligned', async () => {
+        const session = sessionService.create(makeConfig());
+        primeCache(session.id, 1);
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+        sessionService.setProbeResult(session.id, probeWithAudio);
+
+        await service.processSession(session.id);
+
+        expect(waveformService.generateWaveform).toHaveBeenCalledTimes(1);
+        expect(uploadedSidecar.version).toBe(
+            WAVEFORM_SIDECAR_VERSION
+        );
+    });
+
+    it('removes the head the alignment seek removed, cache or no cache', async () => {
+        alignmentOffset = 1.5;
+        const session = sessionService.create(makeConfig());
+        primeCache(session.id, WAVEFORM_SIDECAR_VERSION);
+        sessionService.setFilePath(session.id, '/tmp/input.mp4');
+        sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+        sessionService.setProbeResult(session.id, probeWithAudio);
+
+        await service.processSession(session.id);
+
+        expect(waveformService.generateWaveform).toHaveBeenCalledWith(
+            expect.objectContaining({
+                startOffsetSec: 1.5,
+                durationSec: 118.5,
+                concatFilePath: undefined,
+            })
+        );
+    });
+
+    it('spans a trimmed encode by the in-points buildConcatFile actually writes', async () => {
+        alignmentOffset = 1.06;
+        writeConcat = true;
+        const sessionId = await run({
+            ...makeEncodeConfig(),
+            trimSegments: [
+                // Starts inside the head region: contributes outSec minus the
+                // clamped in-point, not its face value.
+                { inSec: 0.5, outSec: 10 },
+                { inSec: 60, outSec: 70 },
+            ],
+        });
+
+        expect(waveformService.generateWaveform).toHaveBeenCalledWith(
+            expect.objectContaining({
+                concatFilePath: join(
+                    testWorkDir,
+                    sessionId,
+                    'output',
+                    'concat.txt'
+                ),
+                durationSec: expect.closeTo(18.94, 5),
+            })
+        );
+        expect(uploadedSidecar.version).toBe(
+            WAVEFORM_SIDECAR_VERSION
+        );
     });
 });

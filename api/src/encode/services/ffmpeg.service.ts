@@ -48,6 +48,15 @@ export interface EncodeResult {
     outputDir: string;
     masterPlaylist: string;
     segmentFormat: SegmentFormat;
+    /**
+     * Source seconds the encode seeked past to bring the streams into line, so
+     * the output's t=0 is the source's t=alignmentOffset. Reported because
+     * anything describing the output on its own timeline — the waveform sidecar
+     * — has to remove the same head, and this is the only place the figure is
+     * worked out. 0 on an already-aligned source, and folded into the concat
+     * in-points rather than added to them on a trimmed encode.
+     */
+    alignmentOffset: number;
 }
 
 export type AccelMode = 'cpu' | 'nvidia' | 'apple' | 'intel';
@@ -1220,6 +1229,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                         outputDir,
                         masterPlaylist: 'master.m3u8',
                         segmentFormat: 'fmp4',
+                        alignmentOffset,
                     });
                 })().catch(reject);
             };

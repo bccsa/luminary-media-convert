@@ -57,7 +57,10 @@ export class IngestService {
         // serves from cache. Skipped for files with no audio tracks.
         if (probeResult.audioTracks.length > 0) {
             void this.waveformService
-                .getOrComputeCached(sessionId, { inputPath: destPath })
+                .getOrComputeCached(sessionId, {
+                    inputPath: destPath,
+                    durationSec: probeResult.format?.duration,
+                })
                 .catch((err) => {
                     this.logger.warn(
                         `Background waveform prime failed for ${sessionId}: ${(err as Error).message}`
