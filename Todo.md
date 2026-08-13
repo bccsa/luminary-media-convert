@@ -1117,3 +1117,59 @@ It holds less well for `segment-editor` and `encode-config`. Both are `private: 
 4. **Leave `segment-editor`'s and `player-web`'s CSS alone** unless something else forces it. The first is a canvas whose layout maths the tests do not cover; the second has hosts beyond this repository.
 
 **What would change the calculus:** if `player-web` or `segment-editor` are ever published for real, self-contained CSS stops being a choice and becomes a requirement — and item 41 is then closed by decision rather than by work.
+
+---
+
+## 42. Discard belongs beside Start encoding, and the player controls should wrap under them
+
+**Asked for.** Two changes to the row under the player:
+
+1. **Move `Discard session` down** out of the topline (`SessionTopline.vue`) and put it
+   next to `Start encoding`, which lives in `SessionView.vue` inside the player strip's
+   default slot. The two are both actions on the session, and pairing them puts the
+   destructive one where the constructive one already is.
+2. **When the column narrows, `Audio` / `Quality` / fullscreen should wrap below those
+   two buttons** rather than competing with them on one line. They are in the player
+   strip's `#aside` template today, on the same row.
+
+**Note the interaction with item 43.** Moving `Discard session` out of the topline
+removes the widest `shrink-0` element from that row, so it will make the overflow in 43
+less visible — without fixing it. The title still collapses first. Do 43 as a layout
+fix in its own right, not as a side effect of this.
+
+**Where.** `app/src/components/session-view/SessionTopline.vue` (the discard and delete
+buttons, and their `discard` / `delete` emits), and `app/src/views/SessionView.vue`
+around the `Start encoding` button and the `#aside` template. The topline renders in two
+places — inside the player column and standalone before there is a player — so both
+paths need checking, and `SessionView.spec.ts` asserts on `discard-session` /
+`delete-session` test ids.
+
+---
+
+## 43. The session topline overflows its column and drops the title
+
+**A visual bug, seen when the encode-config panel is open** and the player column
+narrows: the session name disappears entirely, and `Discard session` is clipped by the
+panel — the row runs underneath it.
+
+**Two separate causes, both in `SessionTopline.vue`:**
+
+1. **Line 92: the row itself is `shrink-0`.** `class="session-topline flex min-w-0
+   shrink-0 items-center gap-2 pb-2"` — so when its column narrows the row keeps its
+   intrinsic width and overflows rather than fitting. That is why the discard button
+   ends up under the neighbouring panel instead of staying inside the column.
+2. **Line 124: the title is the only element that can shrink.** It carries `min-w-0
+   truncate`, while the back arrow, the `|`, the `·` separators, the status badge and
+   `Created just now` are all `shrink-0`. When width runs out, flexbox takes it from the
+   only thing that will give — so the **session name** truncates to nothing while
+   `Created just now`, which nobody needs at that moment, keeps its full width.
+
+**The ranking is upside down.** In a cramped row the useful order is: back arrow,
+title, status, then the timestamp as the first thing to go. Options: let the row shrink
+and give `Created just now` a `min-w-0 truncate` or hide it below a breakpoint; and give
+the title a sensible `min-w` so it degrades to a few characters plus an ellipsis rather
+than vanishing.
+
+**Worth a test.** The suite renders this component; a case at a narrow width asserting
+the title is still present would pin the behaviour, since this is the sort of regression
+that only shows up when someone opens a side panel.
