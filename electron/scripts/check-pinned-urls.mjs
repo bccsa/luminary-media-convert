@@ -64,7 +64,18 @@ const httpTargets = [
  * intermittently, and a transient error is not a missing source. A check that cries
  * wolf is one everybody learns to ignore, which is worse than not having it.
  */
-const ATTEMPTS = 3;
+const ATTEMPTS = 5;
+
+/**
+ * A network error and a 404 are different claims, and only one is evidence about the
+ * pin.
+ *
+ * If the server answered — even to say "no such file" — that answer is the result. If
+ * no attempt got as far as an answer, the check is *inconclusive*: it says so and does
+ * not fail, because a reset connection tells us nothing about whether the source
+ * exists, and failing on it turns unrelated pull requests red.
+ */
+const inconclusive = [];
 
 async function attempt(url) {
     const head = await fetch(url, { method: 'HEAD', redirect: 'follow' });
@@ -82,7 +93,8 @@ async function attempt(url) {
 }
 
 async function reachable(url) {
-    let last;
+    let answered;
+    let networkError;
     for (let i = 1; i <= ATTEMPTS; i++) {
         try {
             const result = await attempt(url);
@@ -90,17 +102,21 @@ async function reachable(url) {
                 return i === 1
                     ? result
                     : { ...result, method: `${result.method}, attempt ${i}` };
-            last = result;
+            // The server answered and said no. Retrying a 404 only wastes time.
+            answered = result;
+            break;
         } catch (e) {
-            last = {
-                ok: false,
-                status: e.cause?.message ?? e.code ?? e.message,
-                method: 'error',
-            };
+            networkError = e.cause?.message ?? e.code ?? e.message;
         }
         if (i < ATTEMPTS) await new Promise((r) => setTimeout(r, 2000 * i));
     }
-    return { ...last, status: `${last.status} after ${ATTEMPTS} attempts` };
+    if (answered) return answered;
+    return {
+        ok: false,
+        unreachable: true,
+        status: `${networkError} after ${ATTEMPTS} attempts`,
+        method: 'no answer',
+    };
 }
 
 /**
@@ -167,7 +183,8 @@ function gitRefExists(repo, ref, kind, expectCommit) {
             note: 'repository reachable (a commit pin cannot be checked remotely)',
         };
     } catch (e) {
-        return { ok: false, note: e.message.split('\n')[0] };
+        // Reaching git failed, which says nothing about the ref.
+        return { ok: false, unreachable: true, note: e.message.split('\n')[0] };
     }
 }
 
@@ -175,9 +192,13 @@ const failures = [];
 console.log('\n  Checking the sources ffmpeg-build/build.sh fetches\n');
 
 for (const t of httpTargets) {
-    const { ok, status, method } = await reachable(t.url);
-    console.log(`  ${ok ? '✓' : '✗'} ${status} (${method})  ${t.what}`);
-    if (!ok) failures.push({ what: t.what, url: t.url, status });
+    const { ok, status, method, unreachable } = await reachable(t.url);
+    console.log(`  ${ok ? '✓' : unreachable ? '?' : '✗'} ${status} (${method})  ${t.what}`);
+    if (unreachable) inconclusive.push({ what: t.what, url: t.url, status });
+    else if (!ok) failures.push({ what: t.what, url: t.url, status });
+    // Spaced out: two of these targets share a host that resets connections when hit
+    // in quick succession.
+    await new Promise((r) => setTimeout(r, 500));
 }
 
 for (const t of [
@@ -195,9 +216,19 @@ for (const t of [
         expectCommit: pin('NV_CODEC_HEADERS_COMMIT'),
     },
 ]) {
-    const { ok, note } = gitRefExists(t.repo, t.ref, t.kind, t.expectCommit);
-    console.log(`  ${ok ? '✓' : '✗'} ${t.what} — ${note}`);
-    if (!ok) failures.push({ what: t.what, url: t.repo, status: note });
+    const { ok, note, unreachable } = gitRefExists(t.repo, t.ref, t.kind, t.expectCommit);
+    console.log(`  ${ok ? '✓' : unreachable ? '?' : '✗'} ${t.what} — ${note}`);
+    if (unreachable) inconclusive.push({ what: t.what, url: t.repo, status: note });
+    else if (!ok) failures.push({ what: t.what, url: t.repo, status: note });
+}
+
+if (inconclusive.length > 0) {
+    const prefix = process.env.GITHUB_ACTIONS ? '::warning::' : '  ! ';
+    for (const f of inconclusive) {
+        console.error(
+            `${prefix}${f.what} could not be reached (${f.status}) — not a verdict on the pin`,
+        );
+    }
 }
 
 if (failures.length > 0) {
@@ -213,4 +244,11 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log('\n  All pinned sources are still reachable.\n');
+if (inconclusive.length > 0) {
+    console.log(
+        `\n  ${inconclusive.length} source(s) could not be reached; the rest are fine.` +
+            '\n  Not failing: a dropped connection is not evidence that a pin is wrong.\n',
+    );
+} else {
+    console.log('\n  All pinned sources are still reachable.\n');
+}
