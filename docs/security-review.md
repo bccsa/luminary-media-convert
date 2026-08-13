@@ -202,7 +202,7 @@ disagree with the reasoning rather than rediscover the fact.
   technical reading, not legal advice — see `electron/bin/README.md`.
 - **Running the API as a remote service would invalidate this review.** The
   deploy workflows and Dockerfile that still described that mode have since been
-  removed (Todo item 0c), which is why this is now a note rather than an open
+  removed, which is why this is now a note rather than an open
   risk. Should it ever be reversed, the origin allowlist stops being a sufficient
   perimeter: a native approval dialog only means something when someone is
   sitting at the machine.

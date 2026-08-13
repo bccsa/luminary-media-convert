@@ -1039,7 +1039,7 @@ describe('FfmpegService', () => {
              *
              * The controller rejects a non-absolute source at ingest, so this
              * cannot happen today — but the sprite packer had exactly this bug
-             * (item 39) and was also safe by a guarantee made in another file,
+             * and was also safe by a guarantee made in another file,
              * right up until it was not.
              */
             const args = await buildVideoArgs({

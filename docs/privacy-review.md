@@ -152,4 +152,3 @@ machine that has it installed uses it.
   sites panel makes it prunable; nothing prunes it automatically.
 - **If the API is ever run as a shared service again**, this review does not
   apply. Every conclusion here rests on one process, one user, one machine.
-  Tracked as Todo item 0c.
