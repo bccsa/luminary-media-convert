@@ -229,6 +229,17 @@ function verifyApp(appDir, appDirName) {
             `${appDirName}: LICENSE-libwebp.txt is missing — libwebp is statically linked (BSD-3-Clause)`
         );
     }
+    // libvpl is statically linked into the Windows binaries only — it is what gives
+    // them Quick Sync — and MIT asks for its notice to travel with the copy.
+    const notices = ['LICENSE-ffmpeg.txt', 'LICENSE-libwebp.txt'];
+    if (exe === '.exe') {
+        if (!existsSync(join(res, 'LICENSE-libvpl.txt'))) {
+            problems.push(
+                `${appDirName}: LICENSE-libvpl.txt is missing — libvpl is statically linked (MIT)`
+            );
+        }
+        notices.push('LICENSE-libvpl.txt');
+    }
     const gpl = readdirSync(res).filter((f) => /^GPL-[\d.]+\.txt$/.test(f));
     if (gpl.length === 0) {
         problems.push(
@@ -236,7 +247,7 @@ function verifyApp(appDir, appDirName) {
                 'require a *copy* of the licence to travel with the binary; a link is not one.'
         );
     } else {
-        console.log(`    ✓ ${['LICENSE-ffmpeg.txt', ...gpl].join(', ')}`);
+        console.log(`    ✓ ${[...notices, ...gpl].join(', ')}`);
     }
 
     // The API serves this at / in a packaged build; without it the window is blank.

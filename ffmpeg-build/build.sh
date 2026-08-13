@@ -67,7 +67,9 @@ tools=(gpg gpgv shasum nasm pkg-config make git curl)
 # clang compiles the CUDA kernels scale_cuda needs (--enable-cuda-llvm), so the
 # Windows cross-build wants it as much as a native macOS build.
 tools+=(clang)
-[ "$os" = "mingw32" ] && tools+=("${cross_prefix}objdump")
+# cmake and the C++ cross-compiler are for libvpl, the Quick Sync dispatcher: the
+# only dependency here that is neither autotools nor plain C, and Windows-only.
+[ "$os" = "mingw32" ] && tools+=("${cross_prefix}objdump" "${cross_prefix}g++" cmake)
 for tool in "${tools[@]}"; do
     command -v "$tool" >/dev/null 2>&1 ||
         fail "$tool is missing. On macOS: brew install nasm pkg-config gnupg"
@@ -235,6 +237,73 @@ if [ "$os" = "mingw32" ]; then
     echo "    ✓ ffnvcodec.pc"
 fi
 
+# ── libvpl, the Quick Sync dispatcher (Windows only) ─────────────────────────
+# Quick Sync is reached through Intel's oneVPL dispatcher, which is what
+# --enable-libvpl links against. The dispatcher is a loader: it finds the real Media
+# SDK runtime inside the user's Intel graphics driver at run time. So, as with NVENC
+# above, the build machine needs no Intel GPU and no Intel SDK.
+#
+# It is the one dependency here that is CMake rather than autotools, and the one
+# written in C++ — which matters at link time, not build time. See the vpl.pc fixup
+# below.
+if [ "$os" = "mingw32" ]; then
+    log "libvpl $LIBVPL_TAG"
+    vplsrc="$work/libvpl"
+    [ -d "$vplsrc/.git" ] || git clone -q "$LIBVPL_REPO" "$vplsrc"
+    git -C "$vplsrc" fetch -q --tags --force origin
+    # Same rule as nv-codec-headers: the commit is what is checked out, and the tag
+    # is only confirmed to point at it, so a moved tag fails here rather than
+    # quietly changing what gets linked in.
+    tagged="$(git -C "$vplsrc" rev-list -n1 "$LIBVPL_TAG" 2>/dev/null || true)"
+    [ "$tagged" = "$LIBVPL_COMMIT" ] ||
+        fail "libvpl $LIBVPL_TAG points at ${tagged:-nothing},\n    expected $LIBVPL_COMMIT"
+    git -C "$vplsrc" checkout -q "$LIBVPL_COMMIT"
+
+    vpl_stamp="$prefix/.libvpl-$LIBVPL_COMMIT"
+    if [ ! -f "$vpl_stamp" ]; then
+        rm -f "$prefix"/.libvpl-* "$prefix/lib/libvpl.a" "$prefix/lib/pkgconfig/vpl.pc"
+        # CMake has no --host to infer the target from, the way the autotools
+        # projects above do, so it is told outright.
+        cat > "$work/mingw-toolchain.cmake" <<TOOLCHAIN
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+set(CMAKE_C_COMPILER ${cross_prefix}gcc)
+set(CMAKE_CXX_COMPILER ${cross_prefix}g++)
+set(CMAKE_RC_COMPILER ${cross_prefix}windres)
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+TOOLCHAIN
+        (
+            cd "$vplsrc"
+            rm -rf build
+            # CMAKE_INSTALL_LIBDIR is pinned to plain `lib`. GNUInstallDirs picks a
+            # multiarch subdirectory on some distributions, and the FFmpeg configure
+            # below searches $prefix/lib/pkgconfig and nowhere else — the package
+            # would land somewhere pkg-config never looks and be reported absent.
+            cmake -S . -B build \
+                -DCMAKE_TOOLCHAIN_FILE="$work/mingw-toolchain.cmake" \
+                -DCMAKE_INSTALL_PREFIX="$prefix" \
+                -DCMAKE_INSTALL_LIBDIR=lib \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DBUILD_SHARED_LIBS=OFF \
+                -DBUILD_TESTS=OFF \
+                -DBUILD_EXAMPLES=OFF \
+                -DINSTALL_EXAMPLES=OFF \
+                >"$work/libvpl-configure.log" 2>&1 ||
+                { tail -20 "$work/libvpl-configure.log"; fail "libvpl configure failed"; }
+            cmake --build build -j"$(nproc_cmd)" >"$work/libvpl-make.log" 2>&1 ||
+                { tail -20 "$work/libvpl-make.log"; fail "libvpl build failed"; }
+            cmake --install build >>"$work/libvpl-make.log" 2>&1
+        )
+        # libvpl is C++, and its own vpl.pc leaves Libs.private empty. Statically
+        # linking it into FFmpeg — a C program linked with gcc — then ends in
+        # undefined C++ symbols, and FFmpeg's configure reports that not as a link
+        # error but as "libvpl >= 2.6 not found". Put the C++ runtime back.
+        echo "Libs.private: -lstdc++" >> "$prefix/lib/pkgconfig/vpl.pc"
+        touch "$vpl_stamp"
+    fi
+    echo "    ✓ libvpl.a + vpl.pc"
+fi
+
 # ── FFmpeg ───────────────────────────────────────────────────────────────────
 # Narrow on the way out, wide on the way in: we control what is written, not what
 # users hand us. Encoders and muxers are an allow-list; decoders, demuxers and
@@ -249,7 +318,11 @@ demuxers=""   # empty = leave every demuxer enabled
 
 case "$target" in
     darwin-*) encoders="$encoders,h264_videotoolbox" ;;
-    win32-*) encoders="$encoders,h264_nvenc" ;;
+    # Windows gets both hardware paths, because we do not know which GPU the
+    # machine has: NVENC for NVIDIA, h264_qsv for Intel Quick Sync. Both are
+    # loaded from the user's driver at run time, so carrying both costs a
+    # compiled-in encoder each and nothing at all on a machine without them.
+    win32-*) encoders="$encoders,h264_nvenc,h264_qsv" ;;
 esac
 
 configure_flags=(
@@ -309,6 +382,13 @@ if [ "$os" = "mingw32" ]; then
         --enable-nvenc
         --enable-cuda-llvm
         --enable-ffnvcodec
+
+        # Intel Quick Sync, through the oneVPL dispatcher built above. libmfx is
+        # the older route to the same encoders and FFmpeg refuses to have both;
+        # libvpl is the one still maintained, and the one FFmpeg tells you to use.
+        # This brings in the `qsv` hwaccel and the `*_qsv` filters as well as
+        # h264_qsv, since filters are not narrowed in this build.
+        --enable-libvpl
 
         # FFmpeg prefixes pkg-config with --cross-prefix, looking for
         # x86_64-w64-mingw32-pkg-config, which mingw-w64 does not ship. Left alone
@@ -425,10 +505,20 @@ else
 fi
 
 nv_pin_line=""
+vpl_pin_line=""
+vpl_static_line=""
 if [ "$os" = "mingw32" ]; then
     nv_pin_line="
   nv-codec-headers $NV_CODEC_HEADERS_TAG ($NV_CODEC_HEADERS_COMMIT)
     $NV_CODEC_HEADERS_REPO"
+    vpl_pin_line="
+  libvpl $LIBVPL_TAG ($LIBVPL_COMMIT)
+    $LIBVPL_REPO"
+    # nv-codec-headers are headers and add nothing to the conveyed work; libvpl is
+    # a library that ends up inside the binary, so it belongs in the list above too.
+    vpl_static_line="
+  libvpl    MIT — see LICENSE-libvpl.txt beside this file"
+    cp "$vplsrc/LICENSE" "$out/LICENSE-libvpl.txt"
 fi
 
 for licence in "${gpl_texts[@]}"; do
@@ -453,7 +543,7 @@ FFmpeg project: https://ffmpeg.org/
 
 Statically linked, under their own terms:
   libx264   GPL-2.0-or-later, covered by the GPL text above
-  libwebp   BSD-3-Clause — see LICENSE-libwebp.txt beside this file
+  libwebp   BSD-3-Clause — see LICENSE-libwebp.txt beside this file$vpl_static_line
 
 Corresponding source: this binary was built by ffmpeg-build/build.sh in the
 Luminary Media Convert repository, from the sources pinned in
@@ -464,13 +554,15 @@ ffmpeg-build/versions.sh:
   x264      $X264_COMMIT
     $X264_REPO
   libwebp $LIBWEBP_VERSION
-    sha256 $LIBWEBP_SHA256$nv_pin_line
+    sha256 $LIBWEBP_SHA256$nv_pin_line$vpl_pin_line
 
 That script and versions file are the complete instructions for rebuilding this
 binary. No x265: this build writes H.264 only.
 EOF
 cp "$webpsrc/COPYING" "$out/LICENSE-libwebp.txt"
-echo "    ✓ LICENSE-ffmpeg.txt (GPL-$licence_version.0-or-later), ${gpl_texts[*]}, LICENSE-libwebp.txt"
+notices="LICENSE-ffmpeg.txt (GPL-$licence_version.0-or-later), ${gpl_texts[*]}, LICENSE-libwebp.txt"
+[ "$os" = "mingw32" ] && notices="$notices, LICENSE-libvpl.txt"
+echo "    ✓ $notices"
 
 log "Built $target"
 for b in "ffmpeg$exe" "ffprobe$exe"; do

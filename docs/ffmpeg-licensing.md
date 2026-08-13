@@ -39,6 +39,7 @@ One recipe, so one licence position for every platform:
 | `--enable-libx264`  | yes     | GPL library; this is what forces `--enable-gpl`           |
 | `--enable-libx265`  | **no**  | Not built: the encoder writes H.264 only                  |
 | `--enable-libwebp`  | yes     | BSD-3-Clause; its notice ships as `LICENSE-libwebp.txt`   |
+| `--enable-libvpl`   | Windows | MIT; its notice ships as `LICENSE-libvpl.txt`             |
 
 The Windows binary is cross-compiled on Linux and then run on a Windows runner to
 confirm what it supports, rather than having its capabilities inferred on a Mac.
@@ -105,7 +106,9 @@ The full texts of **GPL-2.0** and **GPL-3.0** are vendored in
 carried into the app by `extraResources`. The builds are v2-or-later, so both texts
 travel: "or later" genuinely offers v3, and a recipient taking that option should not
 have to go looking for the text. libwebp is statically linked and BSD-3-Clause, so its
-notice ships as `LICENSE-libwebp.txt` beside them.
+notice ships as `LICENSE-libwebp.txt` beside them; the Windows binaries also link
+libvpl (Intel's Quick Sync dispatcher), which is MIT and asks the same, so
+`LICENSE-libvpl.txt` travels with those.
 
 They are committed rather than downloaded at build time — 53 KB of text that
 never changes, which has to ship whether or not anyone reruns a build. The
@@ -121,14 +124,15 @@ The general rule, from the FSF FAQ:
 > Corresponding source means the source from which users can rebuild the same
 > binary.
 
-**What "corresponding" covers here is wider than FFmpeg alone.** x264 and libwebp
-are statically linked into the binaries, so they are part of the work conveyed, and
-the corresponding source is:
+**What "corresponding" covers here is wider than FFmpeg alone.** x264, libwebp and
+(on Windows) libvpl are statically linked into the binaries, so they are part of the
+work conveyed, and the corresponding source is:
 
 - the FFmpeg source — one version, 8.1, for all three targets
 - the x264 source at the pinned commit
 - the libwebp source at the pinned version
 - the nv-codec-headers at the pinned commit (Windows)
+- the libvpl source at the pinned commit (Windows)
 - the recipe itself, since the configure line decides what the binary is
 
 All of that is `ffmpeg-build/versions.sh` plus `ffmpeg-build/build.sh`, and the
@@ -156,7 +160,7 @@ So the workable shapes, in order of simplicity:
 1. **Make this repository public** (the stated plan) — `ffmpeg-build/` then _is_ the
    offer, at a stable location, for as long as the repository exists.
 2. Until then, **each release carries a source bundle beside the installer**:
-   `ffmpeg-build/` plus the FFmpeg, x264 and libwebp sources it pins.
+   `ffmpeg-build/` plus the FFmpeg, x264, libwebp and libvpl sources it pins.
 
 Under v2 alone the options are narrower (§3: accompany with source, or a written
 offer valid three years), which is a second reason the v2-or-later position in §1
@@ -224,7 +228,7 @@ target entry, and nothing about the recipe is macOS- or Windows-specific.
 | May we distribute these binaries?      | Yes — no `--enable-nonfree`                                                                                                       |
 | Under which licence?                   | **GPL v2-or-later**, all three targets — one recipe, no `--enable-version3`                                                       |
 | Does it affect our Apache-2.0 licence? | No — separate process, arm's-length communication, an aggregate                                                                   |
-| Licence text shipped?                  | Yes — GPL-2.0 and GPL-3.0, plus `LICENSE-libwebp.txt` for the statically linked BSD component                                     |
+| Licence text shipped?                  | Yes — GPL-2.0 and GPL-3.0, plus `LICENSE-libwebp.txt` (BSD) and, on Windows, `LICENSE-libvpl.txt` (MIT)                           |
 | Which platforms?                       | mac arm64, mac Intel, Windows x64 (§8)                                                                                            |
 | Is the corresponding source named?     | Yes — `ffmpeg-build/` and its pins, named in the shipped notice                                                                   |
 | Are we compliant today?                | **Only once a recipient can reach it.** While this repository is private, a release must carry the source alongside the installer |

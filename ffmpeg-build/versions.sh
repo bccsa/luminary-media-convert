@@ -55,6 +55,27 @@ NV_CODEC_HEADERS_TAG="n13.0.19.1"
 # commit, and these headers are compiled into the shipped Windows binary.
 NV_CODEC_HEADERS_COMMIT="88fee5c37318c991a8762d423530f91681e32e3a"
 
+# libvpl — Intel's oneVPL dispatcher, for the Windows target only. This is what
+# `--enable-libvpl` links, and it is what gives the build Quick Sync (`h264_qsv`,
+# `vpp_qsv`, the `qsv` hwaccel).
+#
+# Like the NVENC headers above, it needs no Intel hardware to build against: the
+# dispatcher is a loader, and the actual Media SDK runtime it calls comes out of the
+# user's Intel graphics driver at run time. A GPU-less runner therefore produces a
+# binary with working Quick Sync, exactly as it does for NVENC.
+#
+# Unlike them it is a real library that gets statically linked, so it is part of the
+# work conveyed and its licence (MIT) ships beside the binary.
+#
+# FFmpeg 8.1 requires `vpl >= 2.6`; this is well past that. Tags here do sort
+# sensibly, and there is no known ceiling — but a bump is still a rebuild-and-probe,
+# because a dispatcher that fails to load a runtime does so silently at run time.
+LIBVPL_REPO="https://github.com/intel/libvpl.git"
+LIBVPL_TAG="v2.17.0"
+# Lightweight tag, so `ls-remote` advertises one hash and it is the commit. Pinned
+# alongside the tag all the same: the tag is mutable, the commit is not.
+LIBVPL_COMMIT="d77f9195cf495b937631607333288fd917ae8939"
+
 # No x265. The encoder only ever writes H.264 — every variant in the master
 # playlist is avc1 — so HEVC support is weight we would carry and never use, plus
 # a second GPL dependency to account for in the corresponding source.

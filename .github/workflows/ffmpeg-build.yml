@@ -135,7 +135,10 @@ jobs:
             - name: Install mingw-w64 and build tools
               run: |
                   sudo apt-get update
-                  sudo apt-get install -y mingw-w64 nasm pkg-config gnupg clang
+                  # cmake builds libvpl, the Quick Sync dispatcher. Present on this
+                  # image already, named anyway: the job should not depend on what
+                  # a runner image happens to carry this month.
+                  sudo apt-get install -y mingw-w64 nasm pkg-config gnupg clang cmake
             - name: Build
               run: ./ffmpeg-build/build.sh win32-x64
             - uses: actions/upload-artifact@v4
@@ -166,11 +169,19 @@ jobs:
                   "$FF" -hide_banner -version | head -1
                   "$FF" -hide_banner -L | sed -n '2,4p'
                   "$FF" -hide_banner -hwaccels
-                  for e in libx264 h264_nvenc aac libwebp mjpeg pcm_s16le; do
+                  for e in libx264 h264_nvenc h264_qsv aac libwebp mjpeg pcm_s16le; do
                     "$FF" -hide_banner -encoders | grep -qw "$e" || { echo "MISSING encoder $e"; exit 1; }
                   done
-                  "$FF" -hide_banner -filters | grep -q scale_cuda || { echo "MISSING scale_cuda"; exit 1; }
-                  echo "NVENC, scale_cuda and the CPU fallback are all present"
+                  for f in scale_cuda vpp_qsv scale_qsv; do
+                    "$FF" -hide_banner -filters | grep -qE " $f +" || { echo "MISSING filter $f"; exit 1; }
+                  done
+                  # Presence, which is all this runner can answer: it has neither an
+                  # NVIDIA nor an Intel GPU, so no hardware encode can be attempted
+                  # here. Whether the encoder was compiled in is the question a
+                  # cross-build cannot answer for itself, and it is the one that
+                  # cannot be fixed after shipping.
+                  "$FF" -hide_banner -hwaccels | grep -qw qsv || { echo "MISSING qsv hwaccel"; exit 1; }
+                  echo "NVENC, Quick Sync and the CPU fallback are all present"
             # Features, not flags: a configure flag can name a component that the
             # binary cannot actually use, and only writing a file proves otherwise.
             #

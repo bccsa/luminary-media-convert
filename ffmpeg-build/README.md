@@ -53,17 +53,17 @@ _given_.
 Every item below was taken from the arguments the API actually passes, not from a
 guess about what an encoder needs:
 
-| Need                                                                                             | Where it comes from                                                                     |
-| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| `libx264`                                                                                        | CPU fallback, and every rendition on a machine with no GPU                              |
-| `h264_videotoolbox` (macOS) / `h264_nvenc` (Windows)                                             | `FfmpegService` acceleration modes                                                      |
-| `aac`                                                                                            | `-c:a aac` — native encoder, no external library                                        |
-| `libwebp` + `mjpeg`                                                                              | sprite sheets. `ThumbnailService` prefers libwebp and falls back to mjpeg, so both ship |
-| `pcm_s16le`                                                                                      | `WaveformService` pipes raw audio with `-f s16le`                                       |
-| muxers `hls`, `mp4`, `mpegts`, `image2`, `pcm_s16le`, `segment`, `webp`, `null`                  | HLS output, fMP4/TS segments, sprites, waveform, capability probes                      |
-| demuxer `concat`                                                                                 | `-f concat` for trim segments and storyboard assembly                                   |
-| filters `scale` `scale_cuda` `scale_vt` `fps` `format` `trim` `concat` `tile` `crop` `aresample` | the filter graphs the services compose                                                  |
-| **all** decoders, demuxers, parsers                                                              | arbitrary user input — deliberately not narrowed                                        |
+| Need                                                                                                       | Where it comes from                                                                     |
+| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `libx264`                                                                                                  | CPU fallback, and every rendition on a machine with no GPU                              |
+| `h264_videotoolbox` (macOS) / `h264_nvenc` + `h264_qsv` (Windows)                                          | `FfmpegService` acceleration modes; Windows carries both GPU paths                      |
+| `aac`                                                                                                      | `-c:a aac` — native encoder, no external library                                        |
+| `libwebp` + `mjpeg`                                                                                        | sprite sheets. `ThumbnailService` prefers libwebp and falls back to mjpeg, so both ship |
+| `pcm_s16le`                                                                                                | `WaveformService` pipes raw audio with `-f s16le`                                       |
+| muxers `hls`, `mp4`, `mpegts`, `image2`, `pcm_s16le`, `segment`, `webp`, `null`                            | HLS output, fMP4/TS segments, sprites, waveform, capability probes                      |
+| demuxer `concat`                                                                                           | `-f concat` for trim segments and storyboard assembly                                   |
+| filters `scale` `scale_cuda` `scale_vt` `vpp_qsv` `fps` `format` `trim` `concat` `tile` `crop` `aresample` | the filter graphs the services compose                                                  |
+| **all** decoders, demuxers, parsers                                                                        | arbitrary user input — deliberately not narrowed                                        |
 
 Turned off: documentation, `ffplay`, capture devices, and **networking** — the app
 only ever reads and writes local files, so a build that cannot open a socket is
@@ -96,9 +96,15 @@ BtbN made, and for the same reason: MSYS2 is a second world to maintain while a
 cross-compiler is one `apt` package.
 
 ```bash
-sudo apt-get install -y mingw-w64 nasm pkg-config gnupg clang
+sudo apt-get install -y mingw-w64 nasm pkg-config gnupg clang cmake
 ./ffmpeg-build/build.sh win32-x64
 ```
+
+**Both GPU vendors, because we cannot know which one the machine has.** The Windows
+binary carries `h264_nvenc` for NVIDIA and `h264_qsv` for Intel Quick Sync, and falls
+back to `libx264` when it has neither. Neither hardware encoder can be added after
+the build — that is the whole reason the pair is compiled in rather than chosen at
+run time.
 
 **NVENC needs only headers.** ffmpeg compiles against `nv-codec-headers` and loads
 the encoder from the user's NVIDIA driver at runtime, so the build machine needs no
@@ -112,6 +118,20 @@ by configure. FFmpeg 8.1 needs `ffnvcodec >= 12.1.14.0`, but `n13.1.15.0` rename
 `nvenc.c` still uses — so a too-new header passes configure and then fails to
 compile, twelve minutes in. Re-check the pin against `nvenc.c` whenever FFmpeg moves.
 
+**Quick Sync needs a library, and it is the one thing here that is neither autotools
+nor C.** `--enable-libvpl` links Intel's oneVPL dispatcher, built from
+[`intel/libvpl`](https://github.com/intel/libvpl) with CMake and a generated mingw
+toolchain file. Like NVENC it is a loader — the real Media SDK runtime comes out of
+the user's Intel graphics driver — so again no Intel hardware is involved in building
+it. Unlike NVENC it is a real library that gets statically linked, so it is part of
+the conveyed work and its MIT notice ships as `LICENSE-libvpl.txt`.
+
+One sharp edge worth knowing before it costs an afternoon: libvpl is C++, and its
+`vpl.pc` leaves `Libs.private` empty. Statically linking it into FFmpeg then fails on
+undefined C++ symbols — and FFmpeg's `configure` reports that not as a link error but
+as `libvpl >= 2.6 not found`. `build.sh` appends `Libs.private: -lstdc++` to the
+installed `.pc` for exactly this reason.
+
 The `.exe` links statically, so it carries libgcc and libwinpthread rather than
 expecting DLLs beside it, and the build audits its own import table to prove it.
 
@@ -119,6 +139,13 @@ expecting DLLs beside it, and the build audits its own import table to prove it.
 then runs the result on a `windows-latest` runner, which reported `cuda` among the
 hwaccels, `h264_nvenc` and `libx264` among the encoders, `scale_cuda` among the
 filters, and wrote an HLS ladder, a libwebp sprite and 32,768 bytes of raw PCM.
+
+The same job asks the binary for `h264_qsv`, `vpp_qsv`, `scale_qsv` and `qsv` among
+the hwaccels. That is **presence, not function**: the runner has neither an NVIDIA
+nor an Intel GPU, so no hardware encode can be attempted on it by either path.
+Presence is still the question worth asking there, because it is the one a
+cross-build cannot answer for itself and the one that cannot be fixed after
+shipping. A Quick Sync encode on real Intel hardware has not been run.
 
 ## Measured, not estimated
 

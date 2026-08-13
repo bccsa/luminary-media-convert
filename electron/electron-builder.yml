@@ -59,6 +59,10 @@ extraResources:
           # libwebp is statically linked and BSD-3-Clause, whose binary-redistribution
           # condition is reproducing its notice with the distribution.
           - LICENSE-libwebp.txt
+          # libvpl (Intel's Quick Sync dispatcher) is statically linked into the
+          # Windows binaries and MIT-licensed, which asks the same of us. Absent
+          # from the macOS builds, and a filter that matches nothing is not an error.
+          - LICENSE-libvpl.txt
           - GPL-*.txt
 
 protocols:

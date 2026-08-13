@@ -3,8 +3,8 @@
  * Ask whether the sources our FFmpeg build depends on still exist.
  *
  * Building from source has its own supply chain — FFmpeg's release tarball and
- * signature, x264's git repository, libwebp's tarball, the NVENC headers — shorter
- * than downloading a binary, but not absent.
+ * signature, x264's git repository, libwebp's tarball, the NVENC headers, the Quick
+ * Sync dispatcher — shorter than downloading a binary, but not absent.
  *
  * A source that cannot be fetched means `dist:mac` and `dist:win` stop working for
  * everybody at once, and the corresponding-source offer in the shipped licence notice
@@ -267,6 +267,13 @@ for (const t of [
         ref: nvTag,
         kind: 'tag',
         expectCommit: pin('NV_CODEC_HEADERS_COMMIT'),
+    },
+    {
+        what: `libvpl ${pin('LIBVPL_TAG')}`,
+        repo: pin('LIBVPL_REPO'),
+        ref: pin('LIBVPL_TAG'),
+        kind: 'tag',
+        expectCommit: pin('LIBVPL_COMMIT'),
     },
 ]) {
     const { ok, note, unreachable } = gitRefExists(
