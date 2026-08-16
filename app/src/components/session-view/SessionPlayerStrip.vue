@@ -393,29 +393,25 @@ defineExpose({
                     </LuminaryPlayer>
                 </div>
                 <!--
-                    Below-player row: Angle / Audio / Quality dropdowns, on the
-                    left edge the session title used to hold. The title moved to
-                    the topline above the player, and these selects took the
-                    alignment rather than staying pinned right against nothing.
+                    Below-player rows: the session actions (Start encoding,
+                    Discard/Delete) on the first line, flush with the player's
+                    own left edge; Angle / Audio / Quality / fullscreen wrap to
+                    a line of their own underneath rather than competing with
+                    the actions for the same row.
                 -->
                 <div
                     v-if="showPlaybackControlsRow || $slots['below-player']"
-                    class="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 pt-3"
+                    class="shrink-0 flex flex-col items-start gap-2 pt-3"
                 >
                     <div
                         v-if="$slots['below-player']"
-                        class="min-w-0 flex-[1_1_16rem]"
+                        class="min-w-0 w-full"
                     >
                         <slot name="below-player" />
                     </div>
                     <div
                         v-if="showPlaybackControlsRow"
-                        class="flex flex-wrap items-center gap-x-4 gap-y-2"
-                        :class="
-                            $slots['below-player']
-                                ? 'shrink-0 ml-auto justify-end'
-                                : 'min-w-0'
-                        "
+                        class="min-w-0 flex flex-wrap items-center gap-x-4 gap-y-2"
                     >
                         <span
                             v-if="showAngleRow"
@@ -516,11 +512,18 @@ defineExpose({
                 </div>
             </div>
 
-            <!-- Resize handle: drag to repartition player ↔ aside -->
+            <!--
+                Resize handle: drag to repartition player ↔ aside. Large
+                (10px) hit area; a slim 1px bar at rest thickens to 2px in
+                sky on hover / focus / drag, with a small grip pill (dots)
+                fading in alongside it to communicate draggability. `group`
+                on the handle drives the bar/grip's hover and focus-visible
+                state; `isResizing` (mid-drag, not a CSS pseudo-class) is
+                bound directly since nothing native covers it.
+            -->
             <div
                 v-if="showAside"
-                class="session-split-handle"
-                :class="{ 'session-split-handle--active': isResizing }"
+                class="group relative flex shrink-0 grow-0 basis-2.5 cursor-col-resize touch-none items-center justify-center self-stretch outline-none select-none"
                 role="separator"
                 aria-orientation="vertical"
                 aria-label="Resize player and side panel"
@@ -534,12 +537,25 @@ defineExpose({
                 @keydown="onResizeKey"
             >
                 <span
-                    class="w-px h-full bg-slate-200 pointer-events-none transition-[background,width] duration-140 ease-in-out dark:bg-slate-700/60"
+                    class="h-full w-px pointer-events-none bg-slate-200 transition-[background-color,width] duration-140 ease-in-out group-hover:w-0.5 group-hover:bg-sky-600 group-focus-visible:w-0.5 group-focus-visible:bg-sky-600 dark:bg-slate-700/60 dark:group-hover:bg-sky-500 dark:group-focus-visible:bg-sky-500"
+                    :class="isResizing ? 'w-0.5 bg-sky-600 dark:bg-sky-500' : ''"
                     aria-hidden="true"
                 ></span>
-                <span class="session-split-handle__grip" aria-hidden="true">
-                    <span></span><span></span><span></span><span></span
-                    ><span></span><span></span>
+                <span
+                    class="pointer-events-none absolute top-1/2 left-1/2 grid -translate-x-1/2 -translate-y-1/2 scale-[0.94] grid-cols-[repeat(2,4px)] auto-rows-[4px] gap-0.75 rounded-lg border border-slate-300 bg-white p-[7px_5px] opacity-0 shadow-[0_1px_3px_rgb(15_23_42/0.12),0_1px_2px_rgb(15_23_42/0.06)] transition-[opacity,transform,border-color,box-shadow] duration-120 ease-in-out group-hover:scale-100 group-hover:opacity-100 group-focus-visible:scale-100 group-focus-visible:opacity-100 dark:border-slate-600 dark:bg-slate-800 dark:shadow-[0_1px_3px_rgb(0_0_0/0.45)]"
+                    :class="
+                        isResizing
+                            ? 'scale-100 opacity-100 border-sky-600 shadow-[0_2px_6px_rgb(2_132_199/0.25)] dark:border-sky-500'
+                            : ''
+                    "
+                    aria-hidden="true"
+                >
+                    <span
+                        v-for="n in 6"
+                        :key="n"
+                        class="h-1 w-1 rounded-full bg-slate-400 dark:bg-slate-500"
+                        :class="isResizing ? 'bg-sky-600 dark:bg-sky-500' : ''"
+                    ></span>
                 </span>
             </div>
 
@@ -603,102 +619,5 @@ defineExpose({
 .trim-aside :deep(.se-list-section--split) {
     flex: 1 1 0%;
     max-height: none;
-}
-
-/* ---- Resize handle between player column and aside ----
- * Large hit area (10px), slim 1px bar at rest, thickens to 2px in sky-500 on
- * hover / focus / active. A small grip pill (dots) fades in to communicate
- * draggability.
- */
-.session-split-handle {
-    position: relative;
-    flex: 0 0 10px;
-    align-self: stretch;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: col-resize;
-    touch-action: none;
-    outline: none;
-    -webkit-user-select: none;
-    user-select: none;
-}
-
-.session-split-handle:hover .session-split-handle__bar,
-.session-split-handle:focus-visible .session-split-handle__bar,
-.session-split-handle--active .session-split-handle__bar {
-    background: rgb(2 132 199); /* sky-600 */
-    width: 2px;
-}
-:global(html.dark) .session-split-handle:hover .session-split-handle__bar,
-:global(html.dark)
-    .session-split-handle:focus-visible
-    .session-split-handle__bar,
-:global(html.dark) .session-split-handle--active .session-split-handle__bar {
-    background: rgb(14 165 233); /* sky-500 */
-}
-
-.session-split-handle__grip {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%) scale(0.94);
-    display: grid;
-    grid-template-columns: repeat(2, 4px);
-    grid-auto-rows: 4px;
-    gap: 3px;
-    padding: 7px 5px;
-    border-radius: 8px;
-    background: #fff;
-    border: 1px solid rgb(203 213 225); /* slate-300 */
-    box-shadow:
-        0 1px 3px rgb(15 23 42 / 0.12),
-        0 1px 2px rgb(15 23 42 / 0.06);
-    opacity: 0;
-    transition:
-        opacity 0.12s ease,
-        transform 0.12s ease,
-        border-color 0.12s ease,
-        box-shadow 0.12s ease;
-    pointer-events: none;
-}
-:global(html.dark) .session-split-handle__grip {
-    background: rgb(30 41 59); /* slate-800 */
-    border-color: rgb(71 85 105); /* slate-600 */
-    box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
-}
-
-.session-split-handle__grip > span {
-    width: 4px;
-    height: 4px;
-    border-radius: 9999px;
-    background: rgb(148 163 184); /* slate-400 */
-}
-:global(html.dark) .session-split-handle__grip > span {
-    background: rgb(100 116 139); /* slate-500 */
-}
-
-.session-split-handle:hover .session-split-handle__grip,
-.session-split-handle:focus-visible .session-split-handle__grip,
-.session-split-handle--active .session-split-handle__grip {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-}
-
-.session-split-handle--active .session-split-handle__grip {
-    border-color: rgb(2 132 199); /* sky-600 */
-    box-shadow: 0 2px 6px rgb(2 132 199 / 0.25);
-}
-.session-split-handle--active .session-split-handle__grip > span {
-    background: rgb(2 132 199); /* sky-600 */
-}
-:global(html.dark) .session-split-handle--active .session-split-handle__grip {
-    border-color: rgb(14 165 233); /* sky-500 */
-}
-:global(html.dark)
-    .session-split-handle--active
-    .session-split-handle__grip
-    > span {
-    background: rgb(14 165 233);
 }
 </style>

@@ -2013,12 +2013,9 @@ onUnmounted(() => {
                                     :session-id="sessionId"
                                     :status="currentStatus"
                                     :created-at="summary?.createdAt"
-                                    :can-discard="canDiscardSession"
+                                    :can-discard="false"
                                     :discard-label="discardLabel"
-                                    :can-delete="canDeleteFinishedSession"
-                                    :cancel-error="cancelError"
-                                    @discard="onCancelEncode"
-                                    @delete="deleteModalOpen = true"
+                                    :can-delete="false"
                                 />
                             </template>
 
@@ -2029,22 +2026,63 @@ onUnmounted(() => {
                                 previously as far from them as the layout allowed.
                                 The title is the only thing that explains a
                                 disabled state, so it travels with the button.
+
+                                Discard/Cancel (or Delete, once finished) sits
+                                right beside it — both are actions on the
+                                session, and pairing them puts the destructive
+                                one where the constructive one already is,
+                                instead of up in the topline.
                             -->
-                            <template v-if="showProbeConfig" #below-player>
-                                <button
-                                    type="button"
-                                    data-testid="start-encoding"
-                                    class="cursor-pointer rounded-lg bg-sky-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600 sm:px-5 sm:py-2.5 sm:text-sm"
-                                    :disabled="!encodeConfigCanSubmit || submitting"
-                                    :title="
-                                        !encodeConfigCanSubmit && !submitting
-                                            ? 'Open Encode settings and complete the ladder (all required options) first.'
-                                            : undefined
-                                    "
-                                    @click="onStartEncodingFromTrim"
-                                >
-                                    {{ submitting ? 'Starting…' : 'Start encoding' }}
-                                </button>
+                            <template
+                                v-if="
+                                    showProbeConfig ||
+                                    canDiscardSession ||
+                                    canDeleteFinishedSession
+                                "
+                                #below-player
+                            >
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <button
+                                        v-if="showProbeConfig"
+                                        type="button"
+                                        data-testid="start-encoding"
+                                        class="shrink-0 cursor-pointer rounded-lg bg-sky-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-slate-700 dark:hover:bg-slate-600 sm:px-5 sm:py-2.5 sm:text-sm"
+                                        :disabled="!encodeConfigCanSubmit || submitting"
+                                        :title="
+                                            !encodeConfigCanSubmit && !submitting
+                                                ? 'Open Encode settings and complete the ladder (all required options) first.'
+                                                : undefined
+                                        "
+                                        @click="onStartEncodingFromTrim"
+                                    >
+                                        {{ submitting ? 'Starting…' : 'Start encoding' }}
+                                    </button>
+                                    <button
+                                        v-if="canDiscardSession"
+                                        type="button"
+                                        data-testid="discard-session"
+                                        class="shrink-0 cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/40"
+                                        @click="onCancelEncode"
+                                    >
+                                        {{ discardLabel }}
+                                    </button>
+                                    <button
+                                        v-else-if="canDeleteFinishedSession"
+                                        type="button"
+                                        data-testid="delete-session"
+                                        class="shrink-0 cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950/40"
+                                        @click="deleteModalOpen = true"
+                                    >
+                                        Delete session
+                                    </button>
+                                    <span
+                                        v-if="cancelError"
+                                        data-testid="discard-error"
+                                        class="min-w-0 max-w-[18rem] truncate text-xs text-red-600 dark:text-red-400"
+                                        :title="cancelError"
+                                        >{{ cancelError }}</span
+                                    >
+                                </div>
                                 <!--
                                     Which of the two cutting paths the button is
                                     about to take. Derived from the ladder's copy

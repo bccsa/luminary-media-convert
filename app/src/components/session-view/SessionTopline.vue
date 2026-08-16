@@ -89,7 +89,7 @@ function createdLabel(createdAt: number | null | undefined): string {
 
 <template>
     <div
-        class="session-topline flex min-w-0 shrink-0 items-center gap-2 pb-2"
+        class="session-topline flex min-w-0 items-center gap-2 pb-2"
         data-testid="session-topline"
     >
         <router-link
@@ -121,7 +121,7 @@ function createdLabel(createdAt: number | null | undefined): string {
         >
 
         <span
-            class="min-w-0 truncate text-base font-semibold text-slate-800 dark:text-slate-100"
+            class="min-w-20 truncate text-base font-semibold text-slate-800 dark:text-slate-100"
             :title="props.sessionName || props.sessionId"
         >
             {{ props.sessionName || 'Untitled session' }}
@@ -142,14 +142,16 @@ function createdLabel(createdAt: number | null | undefined): string {
         </template>
 
         <template v-if="props.createdAt">
-            <span
-                class="shrink-0 text-slate-300 dark:text-slate-600"
-                aria-hidden="true"
-                >·</span
-            >
-            <span class="shrink-0 text-xs text-slate-500 dark:text-slate-400">
-                {{ createdLabel(props.createdAt) }}
-            </span>
+            <div class="flex min-w-0 items-center gap-2">
+                <span
+                    class="shrink-0 text-slate-300 dark:text-slate-600"
+                    aria-hidden="true"
+                    >·</span
+                >
+                <span class="min-w-0 truncate text-xs text-slate-500 dark:text-slate-400">
+                    {{ createdLabel(props.createdAt) }}
+                </span>
+            </div>
         </template>
 
         <div class="min-w-0 flex-1" />
