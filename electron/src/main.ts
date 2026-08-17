@@ -7,7 +7,7 @@ import {
     shell,
 } from 'electron';
 import { randomBytes } from 'node:crypto';
-import { createWriteStream, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
@@ -251,141 +251,6 @@ function focusSession(sessionId: string): void {
     pendingSessionId = null;
 }
 
-/* ------------------------------------------------------------------ *
- * TEMPORARY: diagnostics for the packaged app
- *
- * A packaged build has no devtools and writes nothing to disk, so a bug found on
- * a machine that is not a developer's reports as a symptom and nothing else —
- * "the player can't read" with no error, no failing request, no stack. That is
- * not enough to fix anything from.
- *
- * Remove both of these once the Windows playback bugs are settled. They are
- * deliberately blunt: everything the renderer logs, plus main-process output,
- * appended to one file the user can send.
- * ------------------------------------------------------------------ */
-
-/** Where the log goes. Named so it is findable without being told the path. */
-function diagnosticsLogPath(): string {
-    return join(app.getPath('userData'), 'luminary-debug.log');
-}
-
-let diagnosticsStream: import('node:fs').WriteStream | undefined;
-
-/**
- * Tee the main process's own output into the log.
- *
- * The API runs in this process and reports through Nest's logger, which writes to
- * stdout — and a packaged GUI app on Windows has no console attached, so every
- * "Segment r0/s0 failed", every ffmpeg stderr tail, and every reason behind a 400
- * went nowhere. The renderer's console said only that a request failed, never why.
- */
-function captureProcessOutput(): void {
-    // Electron binds the main process's `console` to Chromium's logging rather
-    // than to process.stdout, so patching the streams alone caught Nest's boot
-    // lines (written with stdout.write) and none of the service loggers (which
-    // go through console.*). Wrap the console methods as well.
-    for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
-        const original = console[method].bind(console);
-        console[method] = (...args: unknown[]): void => {
-            try {
-                const text = args
-                    .map((a) => (typeof a === 'string' ? a : String(a)))
-                    .join(' ');
-                for (const line of text.split('\n')) {
-                    if (line.trim())
-                        writeDiagnostic(`main:${method} ${line.trimEnd()}`);
-                }
-            } catch {
-                // Never let logging break the logger.
-            }
-            original(...args);
-        };
-    }
-
-    for (const stream of [process.stdout, process.stderr] as const) {
-        const original = stream.write.bind(stream);
-        stream.write = ((chunk: any, ...rest: any[]): boolean => {
-            try {
-                const text = typeof chunk === 'string' ? chunk : String(chunk);
-                // The logger already ends its lines; keep the file one-per-line.
-                for (const line of text.split('\n')) {
-                    if (line.trim()) writeDiagnostic(`main ${line.trimEnd()}`);
-                }
-            } catch {
-                // Never let logging break the stream it is wrapping.
-            }
-            return original(chunk, ...rest);
-        }) as typeof stream.write;
-    }
-}
-
-function writeDiagnostic(line: string): void {
-    try {
-        if (!diagnosticsStream) {
-            diagnosticsStream = createWriteStream(diagnosticsLogPath(), {
-                flags: 'a',
-            });
-        }
-        diagnosticsStream.write(`${new Date().toISOString()} ${line}\n`);
-    } catch {
-        // Logging must never be the thing that breaks the app.
-    }
-}
-
-function attachDiagnostics(win: BrowserWindow): void {
-    writeDiagnostic(
-        `--- launch: ${app.getVersion()} on ${process.platform} ${process.arch}, packaged=${app.isPackaged}`
-    );
-
-    // F12 and Ctrl/Cmd+Shift+I, which a packaged build otherwise ignores.
-    win.webContents.on('before-input-event', (_event, input) => {
-        const toggle =
-            input.key === 'F12' ||
-            (input.control && input.shift && input.key.toLowerCase() === 'i') ||
-            (input.meta && input.alt && input.key.toLowerCase() === 'i');
-        if (input.type === 'keyDown' && toggle) {
-            win.webContents.toggleDevTools();
-        }
-    });
-
-    // Everything the renderer logs, including the player's own errors.
-    win.webContents.on(
-        'console-message',
-        (_event, level, message, line, sourceId) => {
-            const name = ['debug', 'info', 'warning', 'error'][level] ?? level;
-            writeDiagnostic(
-                `renderer:${name} ${message}  (${sourceId}:${line})`
-            );
-        }
-    );
-
-    // Requests the renderer made that never arrived — the failure mode a
-    // "could not be played" message hides.
-    win.webContents.session.webRequest.onErrorOccurred((details) => {
-        writeDiagnostic(
-            `request-failed ${details.error} ${details.method} ${details.url}`
-        );
-    });
-
-    // A 404 is a *successful* request with an unhappy status, so it never reaches
-    // onErrorOccurred — the first pass of this logging recorded transport errors
-    // only and showed nothing for a page full of red 404s in the console.
-    win.webContents.session.webRequest.onCompleted((details) => {
-        if (details.statusCode >= 400) {
-            writeDiagnostic(
-                `http-${details.statusCode} ${details.method} ${details.url}`
-            );
-        }
-    });
-
-    win.webContents.on('render-process-gone', (_event, details) =>
-        writeDiagnostic(`render-process-gone ${JSON.stringify(details)}`)
-    );
-    win.webContents.on('did-fail-load', (_e, code, description, url) =>
-        writeDiagnostic(`did-fail-load ${code} ${description} ${url}`)
-    );
-}
-
 function createWindow(): void {
     if (mainWindow && !mainWindow.isDestroyed()) {
         focusWindow();
@@ -412,8 +277,6 @@ function createWindow(): void {
     mainWindow.on('closed', () => {
         mainWindow = undefined;
     });
-
-    attachDiagnostics(mainWindow);
 
     // Anything that is not the app itself belongs in the user's browser, not in
     // a chrome-less window with a preload bridge attached to it.
@@ -488,27 +351,10 @@ function registerIpc(): void {
  * Lifecycle
  * ------------------------------------------------------------------ */
 
-// TEMPORARY (see attachDiagnostics): a startup that fails before the window has
-// no way to say so — no window, no devtools, and on Windows no console attached
-// to a GUI app, so the app simply does not appear. Recording the milestones and
-// the failure gives the log something to show for it.
-process.on('uncaughtException', (err) => {
-    writeDiagnostic(`uncaughtException ${err?.stack ?? err}`);
-    dialog.showErrorBox(
-        'Luminary Media Convert could not start',
-        `${err?.message ?? err}\n\nDetails were written to:\n${diagnosticsLogPath()}`
-    );
-    app.exit(1);
-});
-process.on('unhandledRejection', (reason) => {
-    writeDiagnostic(`unhandledRejection ${String(reason)}`);
-});
-
 if (!app.requestSingleInstanceLock()) {
     // Someone double-clicked the app, or followed a luminary-convert:// link,
     // while it was already running. The instance that holds the lock is the one
     // with the server on the port; this one has nothing to add.
-    writeDiagnostic('single-instance lock not acquired — another copy is running');
     app.quit();
 } else {
     app.on('second-instance', () => {
@@ -540,12 +386,8 @@ function registerProtocolClient(): void {
 }
 
 async function start(): Promise<void> {
-    captureProcessOutput();
-    writeDiagnostic('start: waiting for app ready');
     await app.whenReady();
-    writeDiagnostic('start: app ready');
     await loadSettings();
-    writeDiagnostic('start: settings loaded');
     registerIpc();
 
     try {
@@ -570,9 +412,7 @@ async function start(): Promise<void> {
             staticAppDir: bundledWebClient(),
         });
         console.log(`Encoding API listening on ${server.url}`);
-        writeDiagnostic(`start: API listening on ${server.url}`);
     } catch (err) {
-        writeDiagnostic(`start: API failed — ${(err as Error).stack}`);
         // Nothing works without it — most likely something else already has the
         // port, and the user needs to be told rather than shown an empty window.
         dialog.showErrorBox(
@@ -585,11 +425,7 @@ async function start(): Promise<void> {
 
     // Before the window: FFmpeg is not optional, and an app window is a promise
     // that something can be done with it.
-    if (!(await encoderPresent())) {
-        writeDiagnostic('start: ffmpeg/ffprobe not usable — stopping before the window');
-        return;
-    }
-    writeDiagnostic('start: encoder present, opening the window');
+    if (!(await encoderPresent())) return;
 
     createWindow();
 

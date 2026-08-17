@@ -46,21 +46,6 @@ const controller = computed<PlayerControllerApi | null>(
 
 const state = usePlayerState(controller);
 
-// TEMPORARY diagnostics: the player folds every failure into one of a few UI
-// strings, and the generic one covers half a dozen distinct causes. Logging the
-// real code and message puts the distinction in the console — and, packaged, in
-// the desktop shell's debug log. Remove with the shell's diagnostics.
-watch(
-    () => state.value.error,
-    (error) => {
-        if (!error) return;
-        console.error(
-            `[player] ${error.code}${error.fatal ? ' (fatal)' : ''}: ${error.message}`,
-            error.cause ?? ''
-        );
-    }
-);
-
 // ---- Player-driven selectors (angles / qualities / audio tracks) ----
 //
 // All three come from the controller's state: the master is parsed once by the
