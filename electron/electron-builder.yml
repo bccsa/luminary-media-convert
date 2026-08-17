@@ -43,45 +43,66 @@ files:
 # exits or logs a missing-driver error while the same code runs fine unpackaged.
 asar: true
 
+# Served at / by the API in the packaged app; see bundledWebClient(). Shared by
+# every target, so it stays at the root.
 extraResources:
-    # Served at / by the API in the packaged app; see bundledWebClient().
     - from: ../app/dist
       to: app
-    # ffmpeg/ffprobe for this platform, dropped beside the app's resources where
-    # bundledBinary() looks for them. Built by ffmpeg-build/build.sh, which
-    # dist:mac / dist:win run first — they are not in the repository. The GPL
-    # licence text travels with them, which is the condition of shipping a GPL
-    # build at all.
-    - from: bin/${platform}-${arch}
-      to: .
-      filter:
-          - ffmpeg*
-          - ffprobe*
-          # The notice, and the licence texts it refers to. GPLv2 §1 obliges a
-          # *copy* of the licence to travel with the binary — a URL is not one.
-          - LICENSE-ffmpeg.txt
-          # libwebp is statically linked and BSD-3-Clause, whose binary-redistribution
-          # condition is reproducing its notice with the distribution.
-          - LICENSE-libwebp.txt
-          # libvpl (Intel's Quick Sync dispatcher) is statically linked into the
-          # Windows binaries and MIT-licensed, which asks the same of us. Absent
-          # from the macOS builds, and a filter that matches nothing is not an error.
-          - LICENSE-libvpl.txt
-          - GPL-*.txt
 
+# ffmpeg/ffprobe are declared per platform rather than once with a macro.
+#
+# `${platform}` expands to the *host*, not the target, so a Windows package built
+# on a Mac took `bin/darwin-arm64` and shipped macOS binaries inside a .exe app —
+# an app that installs, opens, and cannot encode. It was invisible while packaging
+# only ever happened on a matching runner, and `${arch}` is safe because
+# electron-builder runs one pass per architecture.
+#
+# The binaries are built by ffmpeg-build/build.sh (dist:mac / dist:win run it) and
+# are not in the repository. The licence texts travel with them, which is the
+# condition of shipping a GPL build at all.
 protocols:
     - name: Luminary Media Convert
       schemes:
           - luminary-convert
 
-# Every artifact names its architecture, including x64. electron-builder's default
-# omits the arch for x64, which on a download page puts "…-0.0.1.dmg" beside
-# "…-0.0.1-arm64.dmg" and reads as though the unlabelled one were the normal
-# build — the wrong guess for most Macs sold since 2020, and unrecoverable for a
-# user who cannot run what they downloaded.
-artifactName: ${productName}-${version}-${arch}.${ext}
+# Every artifact names its platform *and* its architecture, and both are stated
+# per platform rather than by macro.
+#
+# The arch matters because electron-builder's default omits it for x64, which on a
+# download page puts "…-0.0.1.dmg" beside "…-0.0.1-arm64.dmg" and reads as though
+# the unlabelled one were the normal build — the wrong guess for most Macs sold
+# since 2020, and unrecoverable for someone who cannot run what they downloaded.
+#
+# The platform matters because macOS and Windows both produce an x64 `zip`. With
+# the arch alone, `…-0.0.1-x64.zip` names either one, so building both on one
+# machine silently overwrote the first — and a download page would offer a file
+# that was a Mac app or a Windows app depending on build order. Never an issue on
+# CI, where each runner builds one platform.
+#
+# `${platform}` is not used: it expands to the *host*, so it would label a
+# cross-built Windows zip "darwin". See extraResources above.
 
 mac:
+    artifactName: ${productName}-${version}-mac-${arch}.${ext}
+    extraResources:
+        - from: ../app/dist
+          to: app
+        - from: bin/darwin-${arch}
+          to: .
+          filter: &encoderFiles
+              - ffmpeg*
+              - ffprobe*
+              # The notice, and the licence texts it refers to. GPLv2 §1 obliges a
+              # *copy* of the licence to travel with the binary — a URL is not one.
+              - LICENSE-ffmpeg.txt
+              # libwebp is statically linked and BSD-3-Clause, whose binary-redistribution
+              # condition is reproducing its notice with the distribution.
+              - LICENSE-libwebp.txt
+              # libvpl (Intel's Quick Sync dispatcher) is statically linked into the
+              # Windows binaries and MIT-licensed, which asks the same of us. Absent
+              # from the macOS builds, and a filter that matches nothing is not an error.
+              - LICENSE-libvpl.txt
+              - GPL-*.txt
     category: public.app-category.video
     # build/icon.icns, carrying every size from 16px to 1024px. Named
     # explicitly rather than left to electron-builder's filename convention, so
@@ -119,6 +140,13 @@ dmg:
     title: Luminary Media Convert
 
 win:
+    artifactName: ${productName}-${version}-win-${arch}.${ext}
+    extraResources:
+        - from: ../app/dist
+          to: app
+        - from: bin/win32-${arch}
+          to: .
+          filter: *encoderFiles
     # electron-builder derives the .ico from this PNG, which is why the source
     # is kept at 1024×1024 — it needs 256px at minimum for a modern icon.
     icon: build/icon.png
