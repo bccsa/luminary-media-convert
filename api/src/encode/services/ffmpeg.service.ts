@@ -25,6 +25,11 @@ import dotenv from 'dotenv';
 import { ffmpegBin, ffprobeBin } from './ffbin.js';
 import { checkFfmpeg } from './ffmpeg-availability.js';
 import { ALIGNMENT_TOLERANCE_SECONDS } from './copy-mode-eligibility.js';
+import type { QuickTrimPlan } from './quick-trim-plan.js';
+import {
+    runQuickTrim,
+    type QuickTrimStreamTarget,
+} from './quick-trim-runner.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -119,6 +124,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      */
     private unusableReason: string | null = null;
     private activeProcess: ChildProcess | null = null;
+    /**
+     * A quick trim in flight has been cancelled — set by
+     * {@link killActiveProcess}, which kills the job running now; this is what
+     * stops the *next* one from starting. Cleared when a run begins.
+     */
+    private quickTrimCancelled = false;
     private readonly timeoutMs = process.env.FFMPEG_TIMEOUT_MS
         ? parseInt(process.env.FFMPEG_TIMEOUT_MS, 10)
         : 0;
@@ -1463,6 +1474,166 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         });
     }
 
+    /**
+     * Encode a trim by copying whole GOPs and re-encoding only the cut points.
+     *
+     * The plan says what to produce; {@link runQuickTrim} produces it, through
+     * this service's own single process slot so a quick trim occupies the
+     * encoder exactly as an ordinary encode does — one child at a time, killed
+     * by the same `killActiveProcess`.
+     *
+     * Throws `QuickTrimRunError` when the source will not cut where the plan
+     * says (the caller's answer is the precise path) and
+     * `QuickTrimCancelledError` when the run was cancelled (the caller's answer
+     * is nothing at all).
+     */
+    async encodeQuickTrim(
+        opts: EncodeOptions,
+        plan: QuickTrimPlan
+    ): Promise<EncodeResult> {
+        this.quickTrimCancelled = false;
+        return runQuickTrim(
+            {
+                accelMode: this.accelMode,
+                targets: this.quickTrimStreamTargets(opts.encodeConfig),
+                isCancelled: () => this.quickTrimCancelled,
+                logger: {
+                    log: (m) => this.logger.log(m),
+                    warn: (m) => this.logger.warn(m),
+                    debug: (m) => this.logger.debug(m),
+                    error: (m) => this.logger.error(m),
+                },
+                runJob: (args, onTime, label) =>
+                    this.runFfmpegJob(args, onTime, label),
+            },
+            opts,
+            plan
+        );
+    }
+
+    /**
+     * The output streams a config produces, named the way this service names
+     * them everywhere else.
+     *
+     * Public because the plan is built somewhere else: whoever scans keyframe
+     * grids and calls `planQuickTrim` has to key its streams by the same
+     * directory names the runner will write, and deriving them twice is how
+     * they drift apart.
+     */
+    quickTrimStreamTargets(config: EncodeConfigDto): QuickTrimStreamTarget[] {
+        const targets: QuickTrimStreamTarget[] = [];
+
+        if (config.type === 'video') {
+            const renditions = config.videoRenditions ?? [];
+            const multiTrack =
+                new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size >
+                1;
+            for (const rendition of renditions) {
+                targets.push({
+                    streamDir: `stream_${this.buildVideoStreamName(
+                        rendition,
+                        multiTrack
+                    )}`,
+                    kind: 'video',
+                    sourceTrackIndex: rendition.sourceTrackIndex ?? 0,
+                    rendition,
+                });
+            }
+        }
+
+        for (const group of config.audioGroups ?? []) {
+            targets.push({
+                streamDir: `stream_${this.buildAudioStreamName(group)}`,
+                kind: 'audio',
+                sourceTrackIndex: group.sourceTrackIndex,
+                group,
+            });
+        }
+
+        return targets;
+    }
+
+    /**
+     * One ffmpeg job, run to completion in the single process slot.
+     *
+     * The same spawn/settle/kill shape {@link encode} uses, minus the encode's
+     * own progress arithmetic — a quick trim's caller knows which part of the
+     * whole plan this job covers and scales the reported time itself.
+     */
+    private runFfmpegJob(
+        args: string[],
+        onTime: (seconds: number) => void,
+        label: string
+    ): Promise<void> {
+        this.logger.debug(`FFmpeg (${label}): ffmpeg ${args.join(' ')}`);
+
+        return new Promise<void>((resolve, reject) => {
+            const proc = spawn(ffmpegBin(), args, {
+                stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            this.activeProcess = proc;
+
+            let stderrBuffer = '';
+            proc.stderr?.on('data', (chunk: Buffer) => {
+                try {
+                    const text = chunk.toString();
+                    stderrBuffer += text;
+                    if (stderrBuffer.length > 8192) {
+                        stderrBuffer = stderrBuffer.slice(-8192);
+                    }
+                    const currentTime = this.parseProgressTime(text);
+                    if (currentTime !== null) onTime(currentTime);
+                } catch {
+                    // Never let stderr parsing crash the process
+                }
+            });
+
+            proc.stdout?.resume();
+
+            let settled = false;
+            let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+            const settle = (err?: Error) => {
+                if (settled) return;
+                settled = true;
+                this.activeProcess = null;
+                if (timeoutTimer) clearTimeout(timeoutTimer);
+                if (err) reject(err);
+                else resolve();
+            };
+
+            proc.on('error', (err) => {
+                settle(new Error(`FFmpeg spawn error: ${err.message}`));
+            });
+
+            proc.on('close', (code, signal) => {
+                if (code === 0) {
+                    settle();
+                    return;
+                }
+                settle(
+                    new Error(
+                        `FFmpeg (${label}) exited with code ${code}` +
+                            `${signal ? ` (signal: ${signal})` : ''}. ` +
+                            `stderr tail:\n${stderrBuffer.slice(-2000)}`
+                    )
+                );
+            });
+
+            if (this.timeoutMs > 0) {
+                timeoutTimer = setTimeout(() => {
+                    if (settled) return;
+                    this.logger.warn(
+                        `FFmpeg timeout (${this.timeoutMs}ms) for ${label}, killing process`
+                    );
+                    proc.kill('SIGKILL');
+                    settle(
+                        new Error(`FFmpeg timed out after ${this.timeoutMs}ms`)
+                    );
+                }, this.timeoutMs);
+            }
+        });
+    }
+
     private async fixMasterPlaylist(
         outputDir: string,
         config: EncodeConfigDto
@@ -1788,6 +1959,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     killActiveProcess(): void {
+        // Killing the child ends the job running now; a quick trim is a
+        // sequence of them, so the flag is what keeps the next one from
+        // starting. Harmless for an ordinary encode, which reads it never.
+        this.quickTrimCancelled = true;
         if (this.activeProcess && !this.activeProcess.killed) {
             this.logger.log('Killing active FFmpeg process (user cancel)');
             this.activeProcess.kill('SIGTERM');
