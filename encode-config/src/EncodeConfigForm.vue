@@ -15,6 +15,41 @@ import {
     getAudioTierForHeight,
 } from './audioGroups';
 import { applySavedTrackLabels } from './trackLabels';
+import {
+    isValidLanguageCode,
+    LANGUAGE_OPTIONS,
+    languageName,
+    normalizeLanguageInput,
+} from './language-codes';
+import { copyModeBlockedReason, latestStreamStart } from './copyMode';
+
+/**
+ * Keep a language field to something a player can act on.
+ *
+ * Lower-cased and letters-only as it is typed, capped at three, because these
+ * strings travel verbatim into `#EXT-X-MEDIA:LANGUAGE=`: `ENG` and `eng` reach a
+ * player as two different languages, and `en` reaches it as none it recognises.
+ * Writing the element's value back as well as the model's keeps the two in step
+ * when this changed what was typed.
+ */
+function onLanguageInput(event: Event, apply: (value: string) => void): void {
+    const el = event.target as HTMLInputElement;
+    const next = normalizeLanguageInput(el.value)
+        .replace(/[^a-z]/g, '')
+        .slice(0, 3);
+    if (el.value !== next) el.value = next;
+    apply(next);
+}
+
+/** What the field says about itself on hover, valid or not. */
+function languageTitle(code: string | undefined | null): string {
+    const normalized = normalizeLanguageInput(code);
+    if (normalized === '') return 'ISO 639-2 three-letter code, e.g. eng';
+    const name = languageName(normalized);
+    return name
+        ? `${normalized} — ${name}`
+        : `${normalized} is not an ISO 639-2 code`;
+}
 
 const props = withDefaults(
     defineProps<{
@@ -59,6 +94,35 @@ const editableAudioTracks = reactive<AudioTrackInfo[]>(
 const showVideoRenditionSourceColumn = computed(
     () => editableVideoTracks.length > 1
 );
+
+/**
+ * The segment length the encode will actually use — byte-range output pins it
+ * at 6 s. Copy eligibility turns on this number, so it has to be the same one
+ * `buildEncodeConfig` submits.
+ */
+const effectiveSegmentDuration = computed(() =>
+    props.byteRange ? 6 : segmentDuration.value
+);
+
+/** Where the encoder will seek to, 0 when the source needs no aligning. */
+const alignmentStart = computed(() => latestStreamStart(props.probeResult));
+
+/**
+ * Why this rendition cannot be copied, or null when it can.
+ *
+ * A courtesy so nobody ticks a box the API refuses — see `copyMode.ts`. It is
+ * asked of the track the rendition is currently pointed at, so changing the
+ * source picker changes the answer.
+ */
+function copyBlockedReason(rendition: VideoRendition): string | null {
+    const track = editableVideoTracks[rendition.sourceTrackIndex ?? 0];
+    if (!track) return null;
+    return copyModeBlockedReason(
+        track,
+        alignmentStart.value,
+        effectiveSegmentDuration.value
+    );
+}
 
 const ABR_LADDER = [
     { height: 2160, width: 3840, bitrateKbps: 15000, label: '4K' },
@@ -117,11 +181,22 @@ function reanalyzeVideo() {
             (track) => {
                 const tier = getAudioTierForHeight(track.height);
                 const audioGroupId = mapTierToGroupId(tier.groupId, tierIds);
+                // Multi-angle output has always defaulted to copying each
+                // angle — it is far and away the cheapest thing to do with a
+                // second camera. It is only offered where the source qualifies
+                // for it, though, or the form would open on a configuration the
+                // API refuses and the tick box would be greyed out and ticked.
+                const canCopy =
+                    copyModeBlockedReason(
+                        track,
+                        alignmentStart.value,
+                        effectiveSegmentDuration.value
+                    ) == null;
                 return {
                     width: track.width,
                     height: track.height,
                     videoBitrateKbps: track.bitrateKbps || 1000,
-                    copyStream: true,
+                    copyStream: canCopy,
                     sourceTrackIndex: track.index,
                     audioGroupId,
                     label: track.name ?? `Track ${track.index}`,
@@ -290,6 +365,12 @@ function onCopyToggle(rendition: VideoRendition) {
 }
 
 function onCopySourceChange(rendition: VideoRendition) {
+    // Pointing a copy rendition at a track that does not qualify would leave
+    // the tick box greyed out and still ticked, with no way back. Drop to
+    // re-encode instead; the reason is on the tooltip.
+    if (rendition.copyStream && copyBlockedReason(rendition) != null) {
+        rendition.copyStream = false;
+    }
     if (rendition.copyStream && rendition.sourceTrackIndex != null) {
         const track = editableVideoTracks[rendition.sourceTrackIndex];
         if (track) {
@@ -677,10 +758,21 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                     </td>
                                     <td class="ecf-td">
                                         <input
-                                            v-model="t.language"
+                                            :value="t.language"
                                             type="text"
                                             class="ecf-input ecf-input-xs ecf-input-center"
+                                            :class="{
+                                                'ecf-input-invalid':
+                                                    !isValidLanguageCode(
+                                                        t.language,
+                                                    ),
+                                            }"
                                             placeholder="und"
+                                            list="ecf-language-codes"
+                                            maxlength="3"
+                                            autocapitalize="off"
+                                            spellcheck="false"
+                                            :title="languageTitle(t.language)"
                                             data-track-field="audio-language"
                                             :data-track-index="t.index"
                                             :data-row="
@@ -688,6 +780,12 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                                 audioIdx
                                             "
                                             data-col="0"
+                                            @input="
+                                                onLanguageInput(
+                                                    $event,
+                                                    (v) => (t.language = v),
+                                                )
+                                            "
                                             @keydown="onTrackInputKeydown"
                                         />
                                     </td>
@@ -893,14 +991,22 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                                 />
                                                 VBR
                                             </label>
-                                            <label class="ecf-toggle">
+                                            <label
+                                                class="ecf-toggle"
+                                                :title="
+                                                    copyBlockedReason(r) ??
+                                                    undefined
+                                                "
+                                            >
                                                 <input
                                                     type="checkbox"
                                                     v-model="r.copyStream"
                                                     class="ecf-checkbox"
                                                     :disabled="
                                                         editableVideoTracks.length ===
-                                                        0
+                                                            0 ||
+                                                        copyBlockedReason(r) !=
+                                                            null
                                                     "
                                                     @change="onCopyToggle(r)"
                                                 />
@@ -1082,10 +1188,30 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                         </td>
                                         <td class="ecf-lt-td">
                                             <input
-                                                v-model="g.language"
+                                                :value="g.language"
                                                 type="text"
                                                 class="ecf-input ecf-input-lang"
+                                                :class="{
+                                                    'ecf-input-invalid':
+                                                        !isValidLanguageCode(
+                                                            g.language,
+                                                        ),
+                                                }"
                                                 placeholder="eng"
+                                                list="ecf-language-codes"
+                                                maxlength="3"
+                                                autocapitalize="off"
+                                                spellcheck="false"
+                                                :title="
+                                                    languageTitle(g.language)
+                                                "
+                                                @input="
+                                                    onLanguageInput(
+                                                        $event,
+                                                        (v) =>
+                                                            (g.language = v),
+                                                    )
+                                                "
                                             />
                                         </td>
                                         <td class="ecf-lt-td ecf-lt-td--opts">
@@ -1230,5 +1356,20 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                 }}
             </button>
         </div>
-    </div>
+    
+        <!--
+            One list for both language fields. Typing is the fast path — three
+            letters — but nobody remembers whether German is `ger` or `deu`, and
+            both are correct, so the names are here to be searched.
+        -->
+        <datalist id="ecf-language-codes">
+            <option
+                v-for="[code, name] in LANGUAGE_OPTIONS"
+                :key="code"
+                :value="code"
+            >
+                {{ name }}
+            </option>
+        </datalist>
+</div>
 </template>

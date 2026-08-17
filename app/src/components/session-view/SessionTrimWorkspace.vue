@@ -144,6 +144,7 @@ const trimToolbarHasVisibleContent = computed(() => {
             :on-play-pause="onPlayPause"
             :is-playing="isPreviewPlaying"
             :show-list="false"
+            :show-clear-all="false"
             keyboard-scope="global"
             :fps="segmentEditorProbeFps"
             :thumbnail-vtt-url="thumbnailVttUrl"
@@ -151,6 +152,16 @@ const trimToolbarHasVisibleContent = computed(() => {
             combined-controls
             @segment-removed="emit('segmentRemoved', $event)"
         >
+            <!--
+                `controls-end` is the controls bar's end cluster — the same
+                grid cell as the keyboard-shortcuts button, so the appearance
+                menu sits directly beside it rather than adrift in the bar.
+                The app header that used to hold it is gone.
+            -->
+            <template #controls-end>
+                <slot name="timeline-end" />
+            </template>
+
             <template #toolbar-before-clear>
                 <!--
                     Without this a half-drawn filmstrip looks like a failure. It

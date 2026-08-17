@@ -82,6 +82,90 @@ describe('ProbeService', () => {
         mockExecFile.mockReset();
     });
 
+    /**
+     * ffprobe reports `und` for a stream with no language tag. Passed through, it
+     * is a placeholder every reader downstream has to know about — and the guard
+     * in `applySavedTrackLabels` did not, so a saved language was never restored
+     * to a source that had none while saved track names came back fine.
+     */
+    describe('language normalisation', () => {
+        async function languagesFor(tags: Record<string, unknown> | undefined) {
+            mockExecFileResult(
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: 1920,
+                            height: 1080,
+                            avg_frame_rate: '25/1',
+                            ...(tags ? { tags } : {}),
+                        },
+                        {
+                            index: 1,
+                            codec_type: 'audio',
+                            codec_name: 'aac',
+                            channels: 2,
+                            sample_rate: '48000',
+                            ...(tags ? { tags } : {}),
+                        },
+                    ],
+                })
+            );
+            const result = await service.probe('/tmp/test.mp4');
+            return {
+                video: result.videoTracks[0]?.language,
+                audio: result.audioTracks[0]?.language,
+            };
+        }
+
+        it('treats "und" as no language at all', async () => {
+            expect(await languagesFor({ language: 'und' })).toEqual({
+                video: undefined,
+                audio: undefined,
+            });
+        });
+
+        it("does not rely on ffprobe's casing", async () => {
+            expect(await languagesFor({ language: 'UND' })).toEqual({
+                video: undefined,
+                audio: undefined,
+            });
+        });
+
+        it.each([
+            ['', 'empty'],
+            ['   ', 'whitespace'],
+        ])('treats an %s tag as no language (%s)', async (value) => {
+            expect(await languagesFor({ language: value })).toEqual({
+                video: undefined,
+                audio: undefined,
+            });
+        });
+
+        it('leaves a real language alone', async () => {
+            expect(await languagesFor({ language: 'nor' })).toEqual({
+                video: 'nor',
+                audio: 'nor',
+            });
+        });
+
+        it('trims a padded tag rather than carrying the spaces', async () => {
+            expect(await languagesFor({ language: ' deu ' })).toEqual({
+                video: 'deu',
+                audio: 'deu',
+            });
+        });
+
+        it('reports nothing when the stream carries no tags object', async () => {
+            expect(await languagesFor(undefined)).toEqual({
+                video: undefined,
+                audio: undefined,
+            });
+        });
+    });
+
     describe('probe', () => {
         it('should parse a standard MP4 with 1 video + 1 audio track', async () => {
             mockExecFileResult(makeFfprobeOutput());
@@ -274,7 +358,9 @@ describe('ProbeService', () => {
 
             const result = await service.probe('/tmp/test.mkv');
 
-            expect(mockExecFile).toHaveBeenCalledTimes(2);
+            // Initial probe, packet sampling, and one keyframe-cadence probe
+            // for the single video track.
+            expect(mockExecFile).toHaveBeenCalledTimes(3);
             // sampleDuration = Math.min(10, 60) = 10
             // 300000 bytes * 8 / 10s / 1000 = 240 kbps for video
             expect(result.videoTracks[0].bitrateKbps).toBe(240);
@@ -306,7 +392,7 @@ describe('ProbeService', () => {
 
             await service.probe('/tmp/test.mkv');
 
-            expect(mockExecFile).toHaveBeenCalledTimes(2);
+            expect(mockExecFile).toHaveBeenCalledTimes(3);
             const secondCallArgs = mockExecFile.mock.calls[1][1] as string[];
             expect(secondCallArgs).toContain('-read_intervals');
             // Spread through the file: 10%, 50%, and 90% clamped to the last
@@ -520,8 +606,15 @@ describe('ProbeService', () => {
             const result = await service.probe('/tmp/test.mp4');
 
             expect(result.videoTracks[0].bitrateKbps).toBe(0);
-            // execFile should only be called once (for the initial probe, not for packets)
-            expect(mockExecFile).toHaveBeenCalledTimes(1);
+            // No packet sampling at all — there is no duration to price
+            // against. The keyframe-cadence probe still runs; it is not asking
+            // about duration.
+            const sampledPackets = mockExecFile.mock.calls.some((call) =>
+                (call[1] as string[]).includes(
+                    'packet=stream_index,size,pts_time'
+                )
+            );
+            expect(sampledPackets).toBe(false);
         });
 
         it('should return "unknown" codec when codec_name is absent', async () => {
@@ -753,6 +846,258 @@ describe('ProbeService', () => {
                     tags: { NUMBER_OF_BYTES: '7500000', DURATION: 'invalid' },
                 })
             ).toBe(0);
+        });
+    });
+
+    /**
+     * Two things the encoder has to know about a source before it will let a
+     * rendition be copied rather than re-encoded: where each stream begins, and
+     * whether the keyframes arrive on a cadence that segments can be cut on.
+     * Both travel on the probe result, so the form can grey the option out
+     * before anyone submits a config the API will refuse.
+     */
+    describe('start times', () => {
+        it('reports where each stream begins', async () => {
+            mockExecFileResult(
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: 1920,
+                            height: 1080,
+                            bit_rate: '5000000',
+                            avg_frame_rate: '30/1',
+                            start_time: '0.000000',
+                        },
+                        {
+                            index: 1,
+                            codec_type: 'audio',
+                            codec_name: 'aac',
+                            bit_rate: '192000',
+                            channels: 2,
+                            sample_rate: '48000',
+                            start_time: '0.083000',
+                        },
+                    ],
+                })
+            );
+
+            const result = await service.probe('/tmp/test.mp4');
+
+            expect(result.videoTracks[0].startTime).toBe(0);
+            expect(result.audioTracks[0].startTime).toBeCloseTo(0.083);
+        });
+
+        it('reads a missing or unusable start time as the top of the timeline', async () => {
+            // Zero rather than undefined: everything downstream compares one
+            // stream's start against another's, and a third case would have to
+            // be answered somewhere.
+            mockExecFileResult(
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: 1920,
+                            height: 1080,
+                            bit_rate: '5000000',
+                            avg_frame_rate: '30/1',
+                        },
+                        {
+                            index: 1,
+                            codec_type: 'audio',
+                            codec_name: 'aac',
+                            bit_rate: '192000',
+                            channels: 2,
+                            sample_rate: '48000',
+                            start_time: 'N/A',
+                        },
+                    ],
+                })
+            );
+
+            const result = await service.probe('/tmp/test.mp4');
+
+            expect(result.videoTracks[0].startTime).toBe(0);
+            expect(result.audioTracks[0].startTime).toBe(0);
+        });
+    });
+
+    describe('probeGopInfo', () => {
+        function mockFrames(pictTypes: string[]) {
+            mockExecFileResult(pictTypes.join('\n') + '\n');
+        }
+
+        it('reports a regular cadence measured across every interval', async () => {
+            // I at 0, 60 and 120 — two intervals of sixty frames.
+            mockFrames([
+                'I',
+                ...Array(59).fill('P'),
+                'I',
+                ...Array(59).fill('P'),
+                'I',
+                ...Array(20).fill('P'),
+            ]);
+
+            expect(await service.probeGopInfo('/tmp/test.mp4', 0, 30)).toEqual({
+                gopFrames: 60,
+                gopSeconds: 2,
+                regular: true,
+            });
+        });
+
+        it('counts a keyframe whose row carries side data', async () => {
+            // ffprobe appends side data to the frame's own CSV row, so a
+            // keyframe with an SEI message reads
+            // "I,H.26[45] User Data Unregistered SEI message". Real H.264
+            // sources carry these; matching the whole line missed every one.
+            mockFrames([
+                'I,H.26[45] User Data Unregistered SEI message',
+                ...Array(59).fill('P'),
+                'I,H.26[45] User Data Unregistered SEI message',
+                ...Array(20).fill('P'),
+            ]);
+
+            expect(await service.probeGopInfo('/tmp/test.mp4', 0, 30)).toEqual({
+                gopFrames: 60,
+                gopSeconds: 2,
+                regular: true,
+            });
+        });
+
+        it('reports an irregular cadence rather than the first interval it saw', async () => {
+            // The whole reason for measuring past the first pair: a source that
+            // opens with a tidy GOP and then cuts keyframes wherever the
+            // picture changes would otherwise be copied on the strength of it.
+            mockFrames([
+                'I',
+                ...Array(59).fill('P'),
+                'I',
+                ...Array(19).fill('P'),
+                'I',
+                ...Array(20).fill('P'),
+            ]);
+
+            const result = await service.probeGopInfo('/tmp/test.mp4', 0, 30);
+            expect(result).toEqual({
+                gopFrames: 60,
+                gopSeconds: 2,
+                regular: false,
+            });
+        });
+
+        it('asks only about the track it was given', async () => {
+            mockFrames(['I', ...Array(59).fill('P'), 'I']);
+
+            await service.probeGopInfo('/tmp/test.mp4', 1, 30);
+
+            const args = mockExecFile.mock.calls[0][1] as string[];
+            expect(args).toContain('-select_streams');
+            expect(args[args.indexOf('-select_streams') + 1]).toBe('v:1');
+            // A window, not the whole file — this runs at ingest.
+            expect(args).toContain('%+#200');
+        });
+
+        it('returns null when the window holds fewer than two keyframes', async () => {
+            mockFrames(['I', 'P', 'P', 'P']);
+
+            expect(
+                await service.probeGopInfo('/tmp/test.mp4', 0, 30)
+            ).toBeNull();
+        });
+
+        it('returns null when ffprobe fails', async () => {
+            mockExecFile.mockImplementation((_cmd, _args, _opts, cb) => {
+                cb(new Error('ffprobe failed'), { stdout: '', stderr: '' });
+            });
+
+            expect(
+                await service.probeGopInfo('/tmp/test.mp4', 0, 30)
+            ).toBeNull();
+        });
+
+        it('returns null without asking anything when the frame rate is unknown', async () => {
+            expect(
+                await service.probeGopInfo('/tmp/test.mp4', 0, 0)
+            ).toBeNull();
+            expect(mockExecFile).not.toHaveBeenCalled();
+        });
+
+        it('lands on the probe result, one track at a time', async () => {
+            mockExecFileSequence([
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: 1920,
+                            height: 1080,
+                            bit_rate: '5000000',
+                            avg_frame_rate: '30/1',
+                        },
+                        {
+                            index: 1,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: 1280,
+                            height: 720,
+                            bit_rate: '2500000',
+                            avg_frame_rate: '30/1',
+                        },
+                    ],
+                }),
+                // Track 0: a clean 60-frame cadence.
+                [
+                    'I',
+                    ...Array(59).fill('P'),
+                    'I',
+                    ...Array(59).fill('P'),
+                    'I',
+                ].join('\n') + '\n',
+                // Track 1: keyframes wherever it likes.
+                [
+                    'I',
+                    ...Array(29).fill('P'),
+                    'I',
+                    ...Array(9).fill('P'),
+                    'I',
+                ].join('\n') + '\n',
+            ]);
+
+            const result = await service.probe('/tmp/multi-angle.mp4');
+
+            expect(result.videoTracks[0].gopFrames).toBe(60);
+            expect(result.videoTracks[0].gopSeconds).toBe(2);
+            expect(result.videoTracks[0].gopRegular).toBe(true);
+            expect(result.videoTracks[1].gopRegular).toBe(false);
+        });
+
+        it('leaves the fields absent when the cadence cannot be established', async () => {
+            mockExecFileSequence([
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: 1920,
+                            height: 1080,
+                            bit_rate: '5000000',
+                            avg_frame_rate: '30/1',
+                        },
+                    ],
+                }),
+                new Error('ffprobe failed'),
+            ]);
+
+            const result = await service.probe('/tmp/test.mp4');
+
+            expect(result.videoTracks[0].gopFrames).toBeUndefined();
+            expect(result.videoTracks[0].gopRegular).toBeUndefined();
         });
     });
 });

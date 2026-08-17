@@ -8,6 +8,7 @@ import type { ReadStream } from 'fs';
 import { SessionService } from './session.service.js';
 import type { ProbeResult, AudioTrackInfo } from './probe.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
+import { ffmpegBin } from './ffbin.js';
 
 const MAX_AUDIO_BITRATE_KBPS = 150;
 
@@ -65,6 +66,8 @@ const MAX_CONCURRENT = 3;
 @Injectable()
 export class PreviewService {
     private readonly logger = new Logger(PreviewService.name);
+    private readonly workDir =
+        process.env.WORK_DIR || join(process.cwd(), 'work');
     private readonly states = new Map<string, PreviewState>();
     private readonly pending = new Map<string, Promise<string>>();
     // Concurrency limiter for FFmpeg processes
@@ -73,18 +76,23 @@ export class PreviewService {
 
     constructor(
         private readonly sessionService: SessionService,
-        private readonly ffmpegService: FfmpegService,
+        private readonly ffmpegService: FfmpegService
     ) {}
 
     async init(sessionId: string): Promise<void> {
         const session = this.sessionService.get(sessionId);
         if (!session?.filePath || !session.probeResult) {
-            this.logger.warn(`Cannot init preview for ${sessionId}: no file or probe`);
+            this.logger.warn(
+                `Cannot init preview for ${sessionId}: no file or probe`
+            );
             return;
         }
 
         const { filePath, probeResult } = session;
-        const previewDir = join(filePath, '..', 'preview');
+        // Under the session's work directory, never beside the source file:
+        // a shared folder like ~/Downloads would share one cache across every
+        // session and file previewed from it, serving stale segments by index.
+        const previewDir = join(this.workDir, sessionId, 'preview');
         await mkdir(previewDir, { recursive: true });
 
         const duration = probeResult.format.duration;
@@ -95,28 +103,36 @@ export class PreviewService {
         let renditions = this.buildRenditions(probeResult);
         if (renditions.length === 0) {
             if (audioTracks.length === 0) {
-                this.logger.warn(`No suitable video renditions for ${sessionId}`);
+                this.logger.warn(
+                    `No suitable video renditions for ${sessionId}`
+                );
                 return;
             }
-            renditions = [{
-                videoIndex: -1,
-                width: 0,
-                height: 0,
-                bitrateKbps: 128,
-                canCopy: false,
-                audioOnly: true,
-            }];
+            renditions = [
+                {
+                    videoIndex: -1,
+                    width: 0,
+                    height: 0,
+                    bitrateKbps: 128,
+                    canCopy: false,
+                    audioOnly: true,
+                },
+            ];
         }
 
         // Keyframe scan for copy-mode renditions (skipped for audio-only)
         const copyRendition = renditions.find((r) => r.canCopy);
         const boundaries = copyRendition
-            ? await this.scanKeyframes(filePath, copyRendition.videoIndex)
+            ? await this.scanKeyframes(
+                  sessionId,
+                  filePath,
+                  copyRendition.videoIndex
+              )
             : [];
 
         // Generate playlists
         const mediaPlaylists = renditions.map((_, i) =>
-            this.generateMediaPlaylist(boundaries, duration, i),
+            this.generateMediaPlaylist(boundaries, duration, i)
         );
         const masterPlaylist = this.generateMasterPlaylist(renditions);
 
@@ -132,16 +148,19 @@ export class PreviewService {
         });
 
         const renditionSummary = renditions
-            .map((r) => r.audioOnly
-                ? 'audio-only(aac)'
-                : `${r.width}x${r.height}(${r.canCopy ? 'copy' : 'transcode'})`)
+            .map((r) =>
+                r.audioOnly
+                    ? 'audio-only(aac)'
+                    : `${r.width}x${r.height}(${r.canCopy ? 'copy' : 'transcode'})`
+            )
             .join(', ');
-        const audioSummary = audioTracks.length > 1
-            ? `, ${audioTracks.length} audio track(s) [${audioTracks.map((a) => a.language ?? a.name ?? 'und').join(', ')}]`
-            : '';
+        const audioSummary =
+            audioTracks.length > 1
+                ? `, ${audioTracks.length} audio track(s) [${audioTracks.map((a) => a.language ?? a.name ?? 'und').join(', ')}]`
+                : '';
         this.logger.log(
             `Preview initialized for ${sessionId}: ${renditions.length} rendition(s) [${renditionSummary}]${audioSummary}, ` +
-                `${boundaries.length || Math.ceil(duration / SEGMENT_DURATION)} segments`,
+                `${boundaries.length || Math.ceil(duration / SEGMENT_DURATION)} segments`
         );
     }
 
@@ -156,7 +175,10 @@ export class PreviewService {
     }
 
     /** Store trim segments and regenerate filtered media playlists */
-    setTrimSegments(sessionId: string, segments: { inSec: number; outSec: number }[]): void {
+    setTrimSegments(
+        sessionId: string,
+        segments: { inSec: number; outSec: number }[]
+    ): void {
         const state = this.states.get(sessionId);
         if (!state) return;
 
@@ -164,32 +186,42 @@ export class PreviewService {
 
         // Regenerate media playlists filtered to trim ranges
         state.mediaPlaylists = state.renditions.map((_, i) =>
-            this.generateFilteredMediaPlaylist(state, i),
+            this.generateFilteredMediaPlaylist(state, i)
         );
 
         this.logger.log(
-            `Preview playlists filtered to ${segments.length} trim segment(s) for session ${sessionId}`,
+            `Preview playlists filtered to ${segments.length} trim segment(s) for session ${sessionId}`
         );
     }
 
     /** Get master or media playlist */
-    getPlaylist(sessionId: string, token: string, renditionIndex?: number, audioTrackIndex?: number): string | null {
+    getPlaylist(
+        sessionId: string,
+        token: string,
+        renditionIndex?: number,
+        audioTrackIndex?: number
+    ): string | null {
         const state = this.states.get(sessionId);
         if (!state) return null;
 
         let playlist: string;
-        if (renditionIndex !== undefined && renditionIndex < state.mediaPlaylists.length) {
+        if (
+            renditionIndex !== undefined &&
+            renditionIndex < state.mediaPlaylists.length
+        ) {
             playlist = state.mediaPlaylists[renditionIndex];
         } else {
             playlist = state.masterPlaylist;
         }
 
         // Append token (and audio track for cache isolation) to all URLs
-        const audioParam = (audioTrackIndex !== undefined && state.audioTracks.length > 1)
-            ? `&audio=${audioTrackIndex}` : '';
+        const audioParam =
+            audioTrackIndex !== undefined && state.audioTracks.length > 1
+                ? `&audio=${audioTrackIndex}`
+                : '';
         return playlist.replace(
             /((?:segment\d+\.ts|r\d+\/playlist\.m3u8))/g,
-            `$1?token=${token}${audioParam}`,
+            `$1?token=${token}${audioParam}`
         );
     }
 
@@ -198,20 +230,25 @@ export class PreviewService {
         sessionId: string,
         renditionIndex: number,
         segmentIndex: number,
-        audioTrackIndex?: number,
+        audioTrackIndex?: number
     ): Promise<{ stream: ReadStream; size: number } | null> {
         const state = this.states.get(sessionId);
         if (!state) return null;
-        if (renditionIndex < 0 || renditionIndex >= state.renditions.length) return null;
+        if (renditionIndex < 0 || renditionIndex >= state.renditions.length)
+            return null;
 
-        const totalSegments = state.segmentBoundaries.length > 0
-            ? state.segmentBoundaries.length
-            : Math.ceil(state.duration / SEGMENT_DURATION);
+        const totalSegments =
+            state.segmentBoundaries.length > 0
+                ? state.segmentBoundaries.length
+                : Math.ceil(state.duration / SEGMENT_DURATION);
         if (segmentIndex < 0 || segmentIndex >= totalSegments) return null;
 
         const ai = audioTrackIndex ?? 0;
         // Cache segments per (rendition, audioTrack) pair when multi-audio
-        const cacheDir = state.audioTracks.length > 1 ? `r${renditionIndex}a${ai}` : `r${renditionIndex}`;
+        const cacheDir =
+            state.audioTracks.length > 1
+                ? `r${renditionIndex}a${ai}`
+                : `r${renditionIndex}`;
         const segDir = join(state.previewDir, cacheDir);
         const segPath = join(segDir, `segment${segmentIndex}.ts`);
 
@@ -231,29 +268,51 @@ export class PreviewService {
         const cacheKey = `${sessionId}:${cacheDir}:${segmentIndex}`;
         let promise = this.pending.get(cacheKey);
         if (!promise) {
-            promise = this.extractSegment(state, renditionIndex, segmentIndex, segPath, ai);
+            promise = this.extractSegment(
+                state,
+                renditionIndex,
+                segmentIndex,
+                segPath,
+                ai
+            );
             promise.catch(() => {}); // prevent unhandled rejection if cancelled
             this.pending.set(cacheKey, promise);
-            promise.finally(() => this.pending.delete(cacheKey)).catch(() => {});
+            promise
+                .finally(() => this.pending.delete(cacheKey))
+                .catch(() => {});
         }
 
         try {
             await promise;
         } catch (e: any) {
-            this.logger.warn(`Segment ${cacheDir}/s${segmentIndex} extraction error: ${e.message}`);
+            this.logger.warn(
+                `Segment ${cacheDir}/s${segmentIndex} extraction error: ${e.message}`
+            );
             return null;
         }
 
         if (existsSync(segPath)) {
             const s = await stat(segPath);
             if (s.size > 0) {
-                this.prefetchSegments(sessionId, state, cacheDir, renditionIndex, segmentIndex + 1, 3, ai);
+                this.prefetchSegments(
+                    sessionId,
+                    state,
+                    cacheDir,
+                    renditionIndex,
+                    segmentIndex + 1,
+                    3,
+                    ai
+                );
                 return { stream: createReadStream(segPath), size: s.size };
             }
-            this.logger.warn(`Segment r${renditionIndex}/s${segmentIndex} produced empty file, deleting`);
+            this.logger.warn(
+                `Segment r${renditionIndex}/s${segmentIndex} produced empty file, deleting`
+            );
             await rm(segPath, { force: true }).catch(() => {});
         } else {
-            this.logger.warn(`Segment r${renditionIndex}/s${segmentIndex} file not found after extraction`);
+            this.logger.warn(
+                `Segment r${renditionIndex}/s${segmentIndex} file not found after extraction`
+            );
         }
 
         return null;
@@ -267,22 +326,35 @@ export class PreviewService {
         renditionIndex: number,
         startIndex: number,
         count: number,
-        audioTrackIndex: number,
+        audioTrackIndex: number
     ): void {
-        const totalSegments = state.segmentBoundaries.length > 0
-            ? state.segmentBoundaries.length
-            : Math.ceil(state.duration / SEGMENT_DURATION);
+        const totalSegments =
+            state.segmentBoundaries.length > 0
+                ? state.segmentBoundaries.length
+                : Math.ceil(state.duration / SEGMENT_DURATION);
 
-        for (let i = startIndex; i < startIndex + count && i < totalSegments; i++) {
+        for (
+            let i = startIndex;
+            i < startIndex + count && i < totalSegments;
+            i++
+        ) {
             const segPath = join(state.previewDir, cacheDir, `segment${i}.ts`);
             const cacheKey = `${sessionId}:${cacheDir}:${i}`;
 
             if (existsSync(segPath) || this.pending.has(cacheKey)) continue;
 
-            const promise = this.extractSegment(state, renditionIndex, i, segPath, audioTrackIndex);
+            const promise = this.extractSegment(
+                state,
+                renditionIndex,
+                i,
+                segPath,
+                audioTrackIndex
+            );
             promise.catch(() => {});
             this.pending.set(cacheKey, promise);
-            promise.finally(() => this.pending.delete(cacheKey)).catch(() => {});
+            promise
+                .finally(() => this.pending.delete(cacheKey))
+                .catch(() => {});
         }
     }
 
@@ -290,7 +362,9 @@ export class PreviewService {
         const state = this.states.get(sessionId);
         if (!state) return;
         this.states.delete(sessionId);
-        await rm(state.previewDir, { recursive: true, force: true }).catch(() => {});
+        await rm(state.previewDir, { recursive: true, force: true }).catch(
+            () => {}
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -341,26 +415,30 @@ export class PreviewService {
 
             // All streams > 480p — use the smallest one
             const smallest = [...videos].sort((a, b) => a.height - b.height)[0];
-            return [{
-                videoIndex: smallest.index,
-                width: smallest.width,
-                height: smallest.height,
-                bitrateKbps: smallest.bitrateKbps,
-                canCopy: true,
-            }];
+            return [
+                {
+                    videoIndex: smallest.index,
+                    width: smallest.width,
+                    height: smallest.height,
+                    bitrateKbps: smallest.bitrateKbps,
+                    canCopy: true,
+                },
+            ];
         }
 
         if (canCopyCodec) {
             const v = videos[0];
             if (v.height <= MAX_PREVIEW_HEIGHT) {
                 // Source fits within preview height — single copy rendition
-                return [{
-                    videoIndex: v.index,
-                    width: v.width,
-                    height: v.height,
-                    bitrateKbps: v.bitrateKbps,
-                    canCopy: true,
-                }];
+                return [
+                    {
+                        videoIndex: v.index,
+                        width: v.width,
+                        height: v.height,
+                        bitrateKbps: v.bitrateKbps,
+                        canCopy: true,
+                    },
+                ];
             }
             // Source > 480p — fall through to generate multiple transcode renditions
         }
@@ -368,10 +446,12 @@ export class PreviewService {
         // Transcode mode (HEVC, ProRes, >480p H.264, etc.) — generate 2-3 renditions
         const renditions: Rendition[] = [];
         const v = videos[0];
-        const heights = [480, 360, 240].filter((h) => h <= Math.max(v.height, 240));
+        const heights = [480, 360, 240].filter(
+            (h) => h <= Math.max(v.height, 240)
+        );
 
         for (const h of heights) {
-            const w = Math.round(v.width * h / v.height / 2) * 2;
+            const w = Math.round((v.width * h) / v.height / 2) * 2;
             renditions.push({
                 videoIndex: v.index,
                 width: w,
@@ -405,31 +485,50 @@ export class PreviewService {
     }
 
     private async scanKeyframes(
+        sessionId: string,
         filePath: string,
-        videoStreamIndex: number,
+        videoStreamIndex: number
     ): Promise<SegmentBoundary[]> {
-        const tmpDir = join(filePath, '..', 'kfscan');
+        const tmpDir = join(this.workDir, sessionId, 'kfscan');
         await mkdir(tmpDir, { recursive: true });
         const csvPath = join(tmpDir, 'segments.csv');
 
         try {
-            await execFileAsync('ffmpeg', [
-                '-i', filePath,
-                '-map', `0:v:${videoStreamIndex}`,
-                '-c:v', 'copy', '-an',
-                '-f', 'segment',
-                '-segment_time', String(SEGMENT_DURATION),
-                '-segment_list', csvPath,
-                '-segment_list_type', 'csv',
-                '-y', join(tmpDir, 'seg%d.ts'),
-            ], { timeout: 120_000 });
+            await execFileAsync(
+                ffmpegBin(),
+                [
+                    '-i',
+                    filePath,
+                    '-map',
+                    `0:v:${videoStreamIndex}`,
+                    '-c:v',
+                    'copy',
+                    '-an',
+                    '-f',
+                    'segment',
+                    '-segment_time',
+                    String(SEGMENT_DURATION),
+                    '-segment_list',
+                    csvPath,
+                    '-segment_list_type',
+                    'csv',
+                    '-y',
+                    join(tmpDir, 'seg%d.ts'),
+                ],
+                { timeout: 120_000 }
+            );
 
             const csv = await readFile(csvPath, 'utf8');
-            return csv.trim().split('\n')
+            return csv
+                .trim()
+                .split('\n')
                 .filter((line) => line.length > 0)
                 .map((line) => {
                     const parts = line.split(',');
-                    return { start: parseFloat(parts[1]), duration: parseFloat(parts[2]) - parseFloat(parts[1]) };
+                    return {
+                        start: parseFloat(parts[1]),
+                        duration: parseFloat(parts[2]) - parseFloat(parts[1]),
+                    };
                 });
         } catch (e) {
             this.logger.warn(`Keyframe scan failed: ${e}`);
@@ -447,12 +546,12 @@ export class PreviewService {
             if (r.audioOnly) {
                 lines.push(
                     `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},CODECS="mp4a.40.2"`,
-                    `r${i}/playlist.m3u8`,
+                    `r${i}/playlist.m3u8`
                 );
             } else {
                 lines.push(
                     `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${r.width}x${r.height}`,
-                    `r${i}/playlist.m3u8`,
+                    `r${i}/playlist.m3u8`
                 );
             }
         }
@@ -463,15 +562,18 @@ export class PreviewService {
     private generateMediaPlaylist(
         boundaries: SegmentBoundary[],
         duration: number,
-        renditionIndex: number,
+        renditionIndex: number
     ): string {
-        const segCount = boundaries.length > 0
-            ? boundaries.length
-            : Math.ceil(duration / SEGMENT_DURATION);
+        const segCount =
+            boundaries.length > 0
+                ? boundaries.length
+                : Math.ceil(duration / SEGMENT_DURATION);
 
         let maxDuration = SEGMENT_DURATION;
         if (boundaries.length > 0) {
-            maxDuration = Math.ceil(Math.max(...boundaries.map((b) => b.duration)));
+            maxDuration = Math.ceil(
+                Math.max(...boundaries.map((b) => b.duration))
+            );
         }
 
         const lines = [
@@ -482,11 +584,18 @@ export class PreviewService {
             '#EXT-X-PLAYLIST-TYPE:VOD',
         ];
 
+        // No per-segment discontinuities: segments are extracted with -copyts,
+        // so consecutive segments share one continuous timestamp domain. A
+        // discontinuity here would make the player stitch by EXTINF instead
+        // and replay each segment's seek lead-in at every boundary.
         for (let i = 0; i < segCount; i++) {
-            if (i > 0) lines.push('#EXT-X-DISCONTINUITY');
-            const segDur = boundaries.length > 0
-                ? boundaries[i].duration
-                : Math.min(SEGMENT_DURATION, duration - i * SEGMENT_DURATION);
+            const segDur =
+                boundaries.length > 0
+                    ? boundaries[i].duration
+                    : Math.min(
+                          SEGMENT_DURATION,
+                          duration - i * SEGMENT_DURATION
+                      );
             lines.push(`#EXTINF:${segDur.toFixed(3)},`);
             lines.push(`segment${i}.ts`);
         }
@@ -497,27 +606,37 @@ export class PreviewService {
 
     private generateFilteredMediaPlaylist(
         state: PreviewState,
-        renditionIndex: number,
+        renditionIndex: number
     ): string {
         const trims = state.trimSegments;
         if (!trims?.length) {
-            return this.generateMediaPlaylist(state.segmentBoundaries, state.duration, renditionIndex);
+            return this.generateMediaPlaylist(
+                state.segmentBoundaries,
+                state.duration,
+                renditionIndex
+            );
         }
 
         const boundaries = state.segmentBoundaries;
-        const segCount = boundaries.length > 0
-            ? boundaries.length
-            : Math.ceil(state.duration / SEGMENT_DURATION);
+        const segCount =
+            boundaries.length > 0
+                ? boundaries.length
+                : Math.ceil(state.duration / SEGMENT_DURATION);
 
         // Find segments that overlap any trim range
         const included: number[] = [];
         for (let i = 0; i < segCount; i++) {
-            const segStart = boundaries.length > 0
-                ? boundaries[i].start
-                : i * SEGMENT_DURATION;
-            const segDur = boundaries.length > 0
-                ? boundaries[i].duration
-                : Math.min(SEGMENT_DURATION, state.duration - i * SEGMENT_DURATION);
+            const segStart =
+                boundaries.length > 0
+                    ? boundaries[i].start
+                    : i * SEGMENT_DURATION;
+            const segDur =
+                boundaries.length > 0
+                    ? boundaries[i].duration
+                    : Math.min(
+                          SEGMENT_DURATION,
+                          state.duration - i * SEGMENT_DURATION
+                      );
             const segEnd = segStart + segDur;
 
             for (const trim of trims) {
@@ -529,15 +648,23 @@ export class PreviewService {
         }
 
         if (included.length === 0) {
-            return this.generateMediaPlaylist(boundaries, state.duration, renditionIndex);
+            return this.generateMediaPlaylist(
+                boundaries,
+                state.duration,
+                renditionIndex
+            );
         }
 
         // Compute max duration for #EXT-X-TARGETDURATION
         let maxDuration = SEGMENT_DURATION;
         for (const idx of included) {
-            const dur = boundaries.length > 0
-                ? boundaries[idx].duration
-                : Math.min(SEGMENT_DURATION, state.duration - idx * SEGMENT_DURATION);
+            const dur =
+                boundaries.length > 0
+                    ? boundaries[idx].duration
+                    : Math.min(
+                          SEGMENT_DURATION,
+                          state.duration - idx * SEGMENT_DURATION
+                      );
             if (dur > maxDuration) maxDuration = dur;
         }
 
@@ -551,11 +678,18 @@ export class PreviewService {
 
         for (let j = 0; j < included.length; j++) {
             const idx = included[j];
-            // Each preview segment is independently extracted — timestamps are not continuous
-            if (j > 0) lines.push('#EXT-X-DISCONTINUITY');
-            const segDur = boundaries.length > 0
-                ? boundaries[idx].duration
-                : Math.min(SEGMENT_DURATION, state.duration - idx * SEGMENT_DURATION);
+            // Segments carry source timestamps (-copyts): adjacent segments are
+            // continuous, so a discontinuity is only real where the trim filter
+            // skipped segments and the timeline actually jumps.
+            if (j > 0 && idx !== included[j - 1] + 1)
+                lines.push('#EXT-X-DISCONTINUITY');
+            const segDur =
+                boundaries.length > 0
+                    ? boundaries[idx].duration
+                    : Math.min(
+                          SEGMENT_DURATION,
+                          state.duration - idx * SEGMENT_DURATION
+                      );
             lines.push(`#EXTINF:${segDur.toFixed(3)},`);
             lines.push(`segment${idx}.ts`);
         }
@@ -572,19 +706,43 @@ export class PreviewService {
         audioMap: string | null,
         rendition: Rendition,
         accelMode: string,
-        useGpu: boolean,
+        useGpu: boolean
     ): string[] {
         const args: string[] = [];
 
+        // Every segment keeps the source's own timestamps (-copyts, with the
+        // mpegts muxer's fixed 1.4 s preload/delay offset zeroed). The media
+        // playlists declare no per-segment discontinuities, so this is what
+        // stitches independently extracted segments together: `-ss` with
+        // stream copy starts wherever the demuxer seek lands — on multi-stream
+        // sources up to a full GOP before the requested boundary (the seek is
+        // positioned on the file's default stream by DTS, and other tracks
+        // land at a sample at or before that) — and the resulting overlap is
+        // resolved by the player's buffer by timestamp instead of being
+        // replayed at every boundary.
+        const TS_OUTPUT = [
+            '-copyts',
+            '-muxdelay',
+            '0',
+            '-muxpreload',
+            '0',
+            '-f',
+            'mpegts',
+            'pipe:1',
+        ];
+
         if (rendition.audioOnly) {
             args.push(
-                '-ss', String(start),
-                '-t', String(segDur),
-                '-i', filePath,
-                '-vn',
+                '-ss',
+                String(start),
+                '-t',
+                String(segDur),
+                '-i',
+                filePath,
+                '-vn'
             );
             if (audioMap) args.push('-map', audioMap);
-            args.push('-c:a', 'aac', '-b:a', '128k', '-f', 'mpegts', 'pipe:1');
+            args.push('-c:a', 'aac', '-b:a', '128k', ...TS_OUTPUT);
             return args;
         }
 
@@ -601,14 +759,25 @@ export class PreviewService {
         if (useGpu && accelMode === 'nvidia') {
             args.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda');
         } else if (useGpu && accelMode === 'apple') {
-            args.push('-hwaccel', 'videotoolbox', '-hwaccel_output_format', 'videotoolbox_vld');
+            args.push(
+                '-hwaccel',
+                'videotoolbox',
+                '-hwaccel_output_format',
+                'videotoolbox_vld'
+            );
+        } else if (useGpu && accelMode === 'intel') {
+            args.push('-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv');
         }
 
         args.push(
-            '-ss', String(start),
-            '-t', String(segDur),
-            '-i', filePath,
-            '-map', videoMap,
+            '-ss',
+            String(start),
+            '-t',
+            String(segDur),
+            '-i',
+            filePath,
+            '-map',
+            videoMap
         );
         if (audioMap) args.push('-map', audioMap);
 
@@ -619,21 +788,50 @@ export class PreviewService {
             if (rendition.scaleFilter) {
                 args.push('-vf', `scale_cuda=${rendition.scaleFilter}`);
             }
-        } else if (useGpu && accelMode === 'apple') {
-            args.push('-c:v', 'h264_videotoolbox', '-allow_sw', '1', '-realtime', '0', '-b:v', '1500k');
+        } else if (useGpu && accelMode === 'intel') {
+            // veryfast for the same reason NVENC gets p1 here: a preview segment
+            // is generated on demand while someone waits for it.
+            args.push('-c:v', 'h264_qsv', '-preset', 'veryfast');
             if (rendition.scaleFilter) {
-                args.push('-vf', `scale_vt=w=${rendition.scaleFilter.split(':')[0]}:h=-2`);
+                const [w, h] = rendition.scaleFilter.split(':');
+                args.push('-vf', `vpp_qsv=w=${w}:h=${h}`);
+            }
+        } else if (useGpu && accelMode === 'apple') {
+            args.push(
+                '-c:v',
+                'h264_videotoolbox',
+                '-allow_sw',
+                '1',
+                '-realtime',
+                '0',
+                '-b:v',
+                '1500k'
+            );
+            if (rendition.scaleFilter) {
+                args.push(
+                    '-vf',
+                    `scale_vt=w=${rendition.scaleFilter.split(':')[0]}:h=-2`
+                );
             }
         } else {
             // CPU fallback
-            args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-tune', 'zerolatency');
+            args.push(
+                '-c:v',
+                'libx264',
+                '-preset',
+                'ultrafast',
+                '-crf',
+                '28',
+                '-tune',
+                'zerolatency'
+            );
             if (rendition.scaleFilter) {
                 args.push('-vf', `scale=${rendition.scaleFilter}`);
             }
         }
 
         if (audioMap) args.push('-c:a', 'aac', '-b:a', '128k');
-        args.push('-f', 'mpegts', 'pipe:1');
+        args.push(...TS_OUTPUT);
 
         return args;
     }
@@ -643,55 +841,82 @@ export class PreviewService {
         renditionIndex: number,
         segmentIndex: number,
         outputPath: string,
-        audioTrackIndex?: number,
+        audioTrackIndex?: number
     ): Promise<string> {
         const rendition = state.renditions[renditionIndex];
         const boundary = state.segmentBoundaries[segmentIndex];
         const start = boundary?.start ?? segmentIndex * SEGMENT_DURATION;
-        const segDur = boundary?.duration ?? Math.min(SEGMENT_DURATION, state.duration - start);
+        const segDur =
+            boundary?.duration ??
+            Math.min(SEGMENT_DURATION, state.duration - start);
 
         // Ensure output directory exists
         await mkdir(join(outputPath, '..'), { recursive: true });
 
-        const videoMap = rendition.audioOnly ? '' : `0:v:${rendition.videoIndex}`;
+        const videoMap = rendition.audioOnly
+            ? ''
+            : `0:v:${rendition.videoIndex}`;
         const audioTrack = state.audioTracks[audioTrackIndex ?? 0] ?? null;
         const audioMap = audioTrack ? `0:a:${audioTrack.streamIndex}` : null;
 
         const accelMode = this.ffmpegService.getAccelMode();
-        const useGpu = !rendition.canCopy && !rendition.audioOnly && accelMode !== 'cpu';
+        const useGpu =
+            !rendition.canCopy && !rendition.audioOnly && accelMode !== 'cpu';
 
         const args = this.buildSegmentArgs(
-            state.filePath, start, segDur, videoMap, audioMap,
-            rendition, accelMode, useGpu,
+            state.filePath,
+            start,
+            segDur,
+            videoMap,
+            audioMap,
+            rendition,
+            accelMode,
+            useGpu
         );
 
-        this.logger.debug(`Segment r${renditionIndex}/s${segmentIndex} (${useGpu ? accelMode : rendition.canCopy ? 'copy' : 'cpu'})`);
+        this.logger.debug(
+            `Segment r${renditionIndex}/s${segmentIndex} (${useGpu ? accelMode : rendition.canCopy ? 'copy' : 'cpu'})`
+        );
 
         // Wait for a concurrency slot
         await this.acquireSlot();
 
         try {
             const timeout = rendition.canCopy ? 30_000 : 120_000;
-            const opts = { timeout, maxBuffer: 50 * 1024 * 1024, encoding: 'buffer' as BufferEncoding };
+            const opts = {
+                timeout,
+                maxBuffer: 50 * 1024 * 1024,
+                encoding: 'buffer' as BufferEncoding,
+            };
 
             let result: { stdout: any };
             try {
-                result = await execFileAsync('ffmpeg', args, opts);
+                result = await execFileAsync(ffmpegBin(), args, opts);
             } catch (gpuErr: any) {
                 if (!useGpu) throw gpuErr;
                 // GPU failed (e.g. NVENC session limit) — retry with CPU
-                this.logger.warn(`GPU encode failed for r${renditionIndex}/s${segmentIndex}, falling back to CPU: ${gpuErr.message}`);
-                const cpuArgs = this.buildSegmentArgs(
-                    state.filePath, start, segDur, videoMap, audioMap,
-                    rendition, 'cpu', false,
+                this.logger.warn(
+                    `GPU encode failed for r${renditionIndex}/s${segmentIndex}, falling back to CPU: ${gpuErr.message}`
                 );
-                result = await execFileAsync('ffmpeg', cpuArgs, opts);
+                const cpuArgs = this.buildSegmentArgs(
+                    state.filePath,
+                    start,
+                    segDur,
+                    videoMap,
+                    audioMap,
+                    rendition,
+                    'cpu',
+                    false
+                );
+                result = await execFileAsync(ffmpegBin(), cpuArgs, opts);
             }
 
             // Write segment data ourselves — guaranteed flushed via writeFile
             await writeFile(outputPath, result.stdout);
         } catch (e: any) {
-            this.logger.error(`Segment r${renditionIndex}/s${segmentIndex} failed: ${e.message}`);
+            this.logger.error(
+                `Segment r${renditionIndex}/s${segmentIndex} failed: ${e.message}`
+            );
             throw e;
         } finally {
             this.releaseSlot();

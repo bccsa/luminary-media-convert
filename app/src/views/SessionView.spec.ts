@@ -14,39 +14,49 @@ import { shallowMount, flushPromises } from '@vue/test-utils';
  * about this view's own wiring.
  */
 
-const { detail, status, waveform } = vi.hoisted(() => ({
-    detail: vi.fn(),
-    status: vi.fn(),
-    waveform: vi.fn(),
-}));
-
-vi.mock('@auth0/auth0-vue', () => ({
-    useAuth0: () => ({ getAccessTokenSilently: async () => 'token' }),
-}));
+const { detail, status, waveform, subscribe, push, deleteSessionMock } =
+    vi.hoisted(() => ({
+        detail: vi.fn(),
+        status: vi.fn(),
+        waveform: vi.fn(),
+        // Handled rather than ignored, so a test can assert which statuses open
+        // an event stream — and drive the events the view reacts to.
+        subscribe: vi.fn(),
+        // Shared rather than minted per useRouter() call, so a test can assert
+        // that the view did *not* navigate.
+        push: vi.fn(),
+        deleteSessionMock: vi.fn(),
+    }));
 
 vi.mock('vue-router', () => ({
     useRoute: () => ({ params: { id: 'sess-1' } }),
-    useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+    useRouter: () => ({ push, replace: vi.fn() }),
 }));
 
 vi.mock('../api', () => ({
-    getSessionDetail: detail,
+    API_BASE: '',
+    getSession: detail,
     getSessionStatus: status,
+    listSessions: vi
+        .fn()
+        .mockResolvedValue([{ sessionId: 'sess-1', sessionToken: 'sess_token' }]),
+    ingestLocalFile: vi.fn().mockResolvedValue({}),
     startEncode: vi.fn().mockResolvedValue({}),
-    deleteSession: vi.fn().mockResolvedValue({}),
-    updateSessionName: vi.fn().mockResolvedValue({}),
-    getSessionWaveform: waveform,
+    deleteSession: deleteSessionMock,
+    subscribeSessionEvents: subscribe,
+    getChapters: vi.fn().mockResolvedValue(null),
+    putChapters: vi.fn().mockResolvedValue(undefined),
 }));
 
 import SessionView from './SessionView.vue';
+import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vue';
 
 /** A probed session sitting in the pre-encode state, which is where trimming happens. */
 function uploadedSession(overrides: Record<string, unknown> = {}) {
     return {
-        id: 'sess-1',
+        sessionId: 'sess-1',
         status: 'uploaded',
-        name: 'test',
-        encodingApiUrl: 'https://api.example.com',
+        title: 'test',
         sessionToken: 'sess_token',
         probeResult: {
             format: { duration: 120 },
@@ -57,9 +67,41 @@ function uploadedSession(overrides: Record<string, unknown> = {}) {
     };
 }
 
+/**
+ * `shallowMount` does not render a stub's slots, and a good deal of this view
+ * now lives in `SessionPlayerStrip`'s — the session topline in `#player-top`,
+ * the encode action in `#below-player`, the pipeline bars and chapter panel in
+ * `#aside`. Stubbed blind, all of it is invisible to a test while being
+ * perfectly visible on screen, which is the wrong way round for a suite whose
+ * job is to notice things disappearing.
+ */
+const PLAYER_STRIP_STUB = {
+    // Named, so `findComponent({ name: 'SessionPlayerStrip' })` still finds it —
+    // an anonymous stub object is matched by nothing.
+    name: 'SessionPlayerStrip',
+    // The real component's props, so tests that read them off the stub — the
+    // player source, the sidecar URLs — keep working. A bare template stub
+    // declares none and silently reports every prop as undefined.
+    props: (SessionPlayerStrip as unknown as { props: unknown }).props,
+    template:
+        '<div><slot name="player-top" /><slot /><slot name="below-player" /><slot name="aside" /></div>',
+};
+
 async function mountView() {
     const wrapper = shallowMount(SessionView, {
-        global: { stubs: { Teleport: true, Transition: true } },
+        global: {
+            stubs: {
+                Teleport: true,
+                Transition: true,
+                // The real topline renders a <router-link> back to the list, and
+                // no router is installed here.
+                RouterLink: true,
+                SessionPlayerStrip: PLAYER_STRIP_STUB,
+                // Rendered rather than stubbed: it carries the back arrow and
+                // the discard/delete buttons these tests assert on.
+                SessionTopline: false,
+            },
+        },
     });
     await flushPromises();
     return wrapper;
@@ -76,6 +118,7 @@ describe('SessionView', () => {
             probeResult: uploadedSession().probeResult,
         });
         waveform.mockResolvedValue({ peaks: [0.1, 0.9, 0.4] });
+        deleteSessionMock.mockResolvedValue(undefined);
         // Routed by URL: a single blanket shape made previewAudioTracks a
         // non-array and the resulting render error took the whole mount down,
         // which then looked like "the view never loaded the session".
@@ -111,7 +154,7 @@ describe('SessionView', () => {
     it('loads the session it was routed to', async () => {
         await mountView();
 
-        expect(detail).toHaveBeenCalledWith('token', 'sess-1');
+        expect(detail).toHaveBeenCalledWith('sess-1');
     });
 
     it('surfaces a load failure instead of rendering an empty shell', async () => {
@@ -155,15 +198,15 @@ describe('SessionView', () => {
      * reason visible only in the console.
      */
     describe('undeliverable storage', () => {
-        function completedWith(s3Config: Record<string, unknown>) {
+        function completedWith(hlsUrl: string | undefined) {
             detail.mockResolvedValue(
                 uploadedSession({
                     status: 'completed',
                     masterPlaylist: 'out/master.m3u8',
-                    s3Config,
+                    hlsUrl,
                 })
             );
-            status.mockResolvedValue({ status: 'completed' });
+            status.mockResolvedValue({ status: 'completed', hlsUrl });
         }
 
         const banner = (w: Awaited<ReturnType<typeof mountView>>) =>
@@ -176,15 +219,14 @@ describe('SessionView', () => {
         });
 
         it('warns when the storage config has no Public URL', async () => {
-            completedWith({
-                endPoint: 'https://acct.r2.cloudflarestorage.com',
-                bucket: 'medias',
-            });
+            // Opened without a public base URL, so nothing can say where the
+            // finished files are.
+            completedWith(undefined);
 
             const wrapper = await mountView();
 
             expect(banner(wrapper).exists()).toBe(true);
-            expect(banner(wrapper).text()).toContain('no Public URL');
+            expect(banner(wrapper).text()).toContain('no public playback URL');
         });
 
         it('names mixed content as the cause when the page is secure', async () => {
@@ -195,11 +237,7 @@ describe('SessionView', () => {
                 protocol: 'https:',
             });
             // Certain to fail: the browser refuses before the request is sent.
-            completedWith({
-                endPoint: 'https://acct.r2.cloudflarestorage.com',
-                bucket: 'medias',
-                publicUrl: 'http://10.0.0.1:9000/medias',
-            });
+            completedWith('http://10.0.0.1:9000/medias/master.m3u8');
 
             const wrapper = await mountView();
 
@@ -207,11 +245,7 @@ describe('SessionView', () => {
         });
 
         it('stays quiet when a usable Public URL is set', async () => {
-            completedWith({
-                endPoint: 'https://acct.r2.cloudflarestorage.com',
-                bucket: 'medias',
-                publicUrl: 'https://pub-abc.r2.dev',
-            });
+            completedWith('https://pub-abc.r2.dev/master.m3u8');
 
             const wrapper = await mountView();
 
@@ -233,6 +267,210 @@ describe('SessionView', () => {
      * which reads as the encode ignoring the trim — it was queried twice on
      * exactly that basis.
      */
+    /**
+     * The sidecar conventions are all relative to the folder the master sits in,
+     * while everything the API records is a full object key from the bucket
+     * root. Mixing the two dropped the session folder out of the chapters URL,
+     * and because the player treats a missing sidecar as nothing worth
+     * reporting, saved chapters silently never appeared.
+     */
+    describe('sidecar URLs on a completed session', () => {
+        const MASTER_KEY = 'sess-1/master.m3u8';
+        const HLS_URL = `http://127.0.0.1:9000/media/${MASTER_KEY}`;
+
+        function playerSource(wrapper: Awaited<ReturnType<typeof mountView>>) {
+            const strip = wrapper.findComponent({ name: 'SessionPlayerStrip' });
+            return strip.exists()
+                ? (strip.props('source') as { sidecars?: { chapters?: { url: string }[] } } | null)
+                : null;
+        }
+
+        async function completedView() {
+            detail.mockResolvedValue(
+                uploadedSession({
+                    status: 'completed',
+                    masterPlaylist: MASTER_KEY,
+                    thumbnailsVtt: 'sess-1/thumbnails/thumbnails.vtt',
+                    hlsUrl: HLS_URL,
+                })
+            );
+            status.mockResolvedValue({
+                status: 'completed',
+                masterPlaylist: MASTER_KEY,
+                thumbnailsVtt: 'sess-1/thumbnails/thumbnails.vtt',
+                hlsUrl: HLS_URL,
+            });
+            const wrapper = await mountView();
+            await flushPromises();
+            return wrapper;
+        }
+
+        it('points the chapters sidecar beside the master, not at the bucket root', async () => {
+            const source = playerSource(await completedView());
+            const url = source?.sidecars?.chapters?.[0]?.url;
+
+            expect(url).toBe('http://127.0.0.1:9000/media/sess-1/chapters/en.vtt');
+            // The bug: the session folder missing, so every session 404s.
+            expect(url).not.toBe('http://127.0.0.1:9000/media/chapters/en.vtt');
+        });
+
+        it('keeps the session folder even when the prefix is nested', async () => {
+            const master = 'shows/ep12/sess-1/master.m3u8';
+            const hlsUrl = `https://cdn.example.com/media/${master}`;
+            detail.mockResolvedValue(
+                uploadedSession({
+                    status: 'completed',
+                    masterPlaylist: master,
+                    hlsUrl,
+                })
+            );
+            status.mockResolvedValue({
+                status: 'completed',
+                masterPlaylist: master,
+                hlsUrl,
+            });
+
+            const wrapper = await mountView();
+            await flushPromises();
+
+            expect(playerSource(wrapper)?.sidecars?.chapters?.[0]?.url).toBe(
+                'https://cdn.example.com/media/shows/ep12/sess-1/chapters/en.vtt'
+            );
+        });
+    });
+
+    /**
+     * The API accepts a delete from `created` through `encoding` and refuses it
+     * in `encrypting` / `uploading_to_s3`. The view offered the button for
+     * exactly the wrong set: absent through the whole configuring stretch, and
+     * present in `encrypting`, where it could only fail — silently, because the
+     * refusal was swallowed and the route change happened anyway.
+     */
+    describe('discarding a session', () => {
+        const button = (w: Awaited<ReturnType<typeof mountView>>) =>
+            w.find('[data-testid="discard-session"]');
+
+        async function viewAt(state: string) {
+            detail.mockResolvedValue(uploadedSession({ status: state }));
+            // The probe result travels with every status from `uploaded` on; the
+            // view reads it as the signal that the session is past ingest, and
+            // without one an `uploaded` session renders as though it were not.
+            status.mockResolvedValue({
+                status: state,
+                probeResult: uploadedSession().probeResult,
+            });
+            return mountView();
+        }
+
+        it.each(['created', 'uploading', 'uploaded', 'queued', 'encoding'])(
+            'offers the discard in %s, which the API accepts',
+            async (state) => {
+                expect(button(await viewAt(state)).exists()).toBe(true);
+            }
+        );
+
+        it.each(['encrypting', 'uploading_to_s3'])(
+            'does not offer it in %s, which the API refuses',
+            async (state) => {
+                expect(button(await viewAt(state)).exists()).toBe(false);
+            }
+        );
+
+        it('calls it cancelling only once there is an encode to cancel', async () => {
+            expect(button(await viewAt('uploaded')).text()).toBe('Discard session');
+            expect(button(await viewAt('encoding')).text()).toBe('Cancel encoding');
+        });
+
+        it('surfaces a refusal instead of navigating away as though it worked', async () => {
+            const wrapper = await viewAt('encoding');
+            deleteSessionMock.mockRejectedValueOnce(
+                new Error('Cannot delete session in "encrypting" status')
+            );
+
+            await button(wrapper).trigger('click');
+            await flushPromises();
+
+            expect(wrapper.find('[data-testid="discard-error"]').text()).toContain(
+                'Cannot delete session'
+            );
+            expect(push).not.toHaveBeenCalledWith('/sessions');
+        });
+
+        it('leaves for the list when the delete succeeds', async () => {
+            const wrapper = await viewAt('encoding');
+            deleteSessionMock.mockResolvedValueOnce(undefined);
+
+            await button(wrapper).trigger('click');
+            await flushPromises();
+
+            expect(push).toHaveBeenCalledWith('/sessions');
+        });
+    });
+
+    /**
+     * Draining at 100% is not the encode finishing: playlist key tags, a fresh
+     * FFmpeg pass for sprites, the waveform sidecar and text-asset encryption
+     * all still run before the status leaves `encoding`. Reporting none of it
+     * left a full bar sitting over unfinished work, which reads as stalled.
+     */
+    describe('post-drain phase caption', () => {
+        async function captionFor(phase?: string) {
+            detail.mockResolvedValue(uploadedSession({ status: 'encoding' }));
+            status.mockResolvedValue({
+                status: 'encoding',
+                probeResult: uploadedSession().probeResult,
+                pipelineProgress: { encoding: 100, ...(phase ? { phase } : {}) },
+            });
+            // The pipeline bars live in SessionPlayerStrip's #aside slot, and
+            // shallowMount does not render a stub's slots — so this one stub
+            // has to pass them through or the caption is invisible to the test
+            // while being perfectly visible on screen.
+            const wrapper = shallowMount(SessionView, {
+                global: {
+                    stubs: {
+                        Teleport: true,
+                        Transition: true,
+                        SessionPlayerStrip: PLAYER_STRIP_STUB,
+                    },
+                },
+            });
+            await flushPromises();
+            const el = wrapper.find('[data-testid="pipeline-phase"]');
+            return el.exists() ? el.text() : null;
+        }
+
+        it('names the expensive step instead of leaving a full bar unexplained', async () => {
+            expect(await captionFor('thumbnails')).toContain('Generating thumbnails');
+        });
+
+        it('names the other post-drain steps too', async () => {
+            expect(await captionFor('waveform')).toContain('Generating waveform');
+            expect(await captionFor('encrypting-playlists')).toContain(
+                'Encrypting playlists'
+            );
+        });
+
+        it('captions the upload that follows, whose bar restarts from zero', async () => {
+            // The one phase that outlives `encoding`. Without it the S3 bar
+            // dropping back to 0 for the playlists and sprites reads as work
+            // being lost rather than as a different set of files being counted.
+            expect(await captionFor('uploading-playlists')).toContain(
+                'Uploading playlists'
+            );
+        });
+
+        it('says nothing while the segment pipeline is still the whole story', async () => {
+            // The bar already reads "Encoding"; a caption there would be noise.
+            expect(await captionFor()).toBeNull();
+        });
+
+        it('says nothing for a phase it does not recognise', async () => {
+            // A newer API naming a step this build has never heard of must not
+            // render a blank line or the raw identifier.
+            expect(await captionFor('some-future-step')).toBeNull();
+        });
+    });
+
     describe('storyboard on a trimmed timeline', () => {
         const TRIMS = [{ inSec: 10, outSec: 20 }];
 
@@ -370,6 +608,110 @@ describe('SessionView', () => {
             await flushPromises();
 
             expect(status).toHaveBeenCalled();
+        });
+    });
+
+    /**
+     * The event stream is what tells this page that thumbnails, ingest bytes and
+     * pipeline phases have moved. A page that never opens one is not merely a
+     * little behind: everything it shows falls back to whatever slow safety net
+     * each consumer happens to have.
+     */
+    describe('the event stream after a load', () => {
+        const streamOpened = () =>
+            subscribe.mock.calls.some((c) => c[0] === 'sess-1');
+
+        it('opens one for a session loaded in the configure phase', async () => {
+            // The bug this pins: 'uploaded' returned early and started nothing,
+            // so a page loaded or reloaded while the user was choosing cuts had
+            // no stream at all and the filmstrip waited out the storyboard's
+            // 20-second parachute before showing a single frame.
+            await mountView();
+
+            expect(streamOpened()).toBe(true);
+        });
+
+        it('opens one for a session whose file has not arrived yet', async () => {
+            // The file may be attached from another window; this page should
+            // see that happen rather than sit on a stale picker.
+            detail.mockResolvedValue(uploadedSession({ status: 'created' }));
+            status.mockResolvedValue({ status: 'created' });
+
+            await mountView();
+
+            expect(streamOpened()).toBe(true);
+        });
+
+        it('opens one for a session that is already encoding', async () => {
+            detail.mockResolvedValue(uploadedSession({ status: 'encoding' }));
+            status.mockResolvedValue({ status: 'encoding' });
+
+            await mountView();
+
+            expect(streamOpened()).toBe(true);
+        });
+
+        it('opens none for a completed session, which has nothing left to say', async () => {
+            detail.mockResolvedValue(
+                uploadedSession({
+                    status: 'completed',
+                    masterPlaylist: 'out/master.m3u8',
+                })
+            );
+            status.mockResolvedValue({ status: 'completed' });
+
+            await mountView();
+
+            expect(streamOpened()).toBe(false);
+        });
+    });
+
+    /**
+     * The filmstrip refetches when the encoder says it has sampled more frames.
+     * That signal folds the completion flag into the count, because the final
+     * report is made after the finished VTT is written and usually repeats the
+     * last count it already announced — a repeat the watcher cannot see.
+     */
+    describe('storyboard refresh signal', () => {
+        const storyboardFetches = () =>
+            (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+                (c) => String(c[0]).includes('thumbnails.vtt')
+            ).length;
+
+        /** Push an event the way the session's SSE stream would. */
+        async function push(fields: Record<string, unknown>) {
+            const onEvent = subscribe.mock.calls[0][2];
+            onEvent({ status: 'uploaded', ...fields });
+            await flushPromises();
+        }
+
+        it('refetches when the encoder reports more frames', async () => {
+            await mountView();
+            const before = storyboardFetches();
+
+            await push({ storyboardThumbCount: 123 });
+
+            expect(storyboardFetches()).toBe(before + 1);
+        });
+
+        it('spends nothing on a report that repeats the count', async () => {
+            await mountView();
+            await push({ storyboardThumbCount: 123 });
+            const before = storyboardFetches();
+
+            await push({ storyboardThumbCount: 123 });
+
+            expect(storyboardFetches()).toBe(before);
+        });
+
+        it('reads the finished report as news even at an unchanged count', async () => {
+            await mountView();
+            await push({ storyboardThumbCount: 123 });
+            const before = storyboardFetches();
+
+            await push({ storyboardThumbCount: 123, storyboardComplete: true });
+
+            expect(storyboardFetches()).toBe(before + 1);
         });
     });
 

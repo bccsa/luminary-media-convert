@@ -1,125 +1,152 @@
 # Luminary Encoding API
 
-Open-source, stateless HLS/ABR encoding service built with NestJS. Accepts encoding requests via REST API, processes media files with FFmpeg (GPU-accelerated when NVIDIA or Apple Silicon hardware is available), uploads HLS output to any S3-compatible storage, and delivers status updates via webhooks or polling.
+The encoding service behind Luminary Media Convert. A NestJS application that probes media with ffprobe, encodes it to HLS/ABR with FFmpeg (GPU-accelerated when NVIDIA or Apple Silicon hardware is available), optionally encrypts it with AES-128, streams the output to any S3-compatible storage, and reports progress over SSE or polling.
 
-The Encoding API is designed to run standalone on GPU-equipped hardware. It has no dependency on any external user management layer.
+It runs two ways from one code path:
+
+- **Embedded** — `createServer(options)` from `src/bootstrap.ts`. The Electron shell hosts it in its main process and passes the API token, origin policy, credential cipher, window hook, ffmpeg paths and static client directory directly.
+- **Standalone** — `src/main.ts` calls the same function with values read from the environment, and turns on Swagger at `/api/docs`.
+
+It binds to **loopback only** (`127.0.0.1`). Nothing here is meant to be reachable from the network the machine is on: CORS and tokens are answers to questions a remote caller only gets to ask if it can open the socket. The default embedded port is `31711`; standalone defaults to `3000`.
 
 ## Table of Contents
 
 - [Authentication](#authentication)
+- [Origin gating and Local Network Access](#origin-gating-and-local-network-access)
 - [Environment Variables](#environment-variables)
-- [API Documentation](#api-documentation)
-  - [1. Create an Encoding Session](#1-create-an-encoding-session)
-  - [2. Upload the Source File (tus)](#2-upload-the-source-file-tus)
-  - [3. Poll Session Status](#3-poll-session-status)
-  - [4. Start Encoding](#4-start-encoding)
-  - [5. Delete a Session](#5-delete-a-session)
-- [Webhook Callbacks](#webhook-callbacks)
-- [Authorization Webhook](#authorization-webhook)
+- [Embedding the API](#embedding-the-api)
+- [Endpoints](#endpoints)
+  - [1. Create a session](#1-create-a-session)
+  - [2. Attach a local file](#2-attach-a-local-file)
+  - [3. Poll session status](#3-poll-session-status)
+  - [4. Start encoding](#4-start-encoding)
+  - [5. Delete a session](#5-delete-a-session)
+  - [CMS handshake](#cms-handshake)
+  - [HLS edit](#hls-edit)
 - [Encoding Workflow](#encoding-workflow)
+- [Credential Handling](#credential-handling)
+- [Encrypted HLS and the `luminary://key` contract](#encrypted-hls-and-the-luminarykey-contract)
 - [GPU Acceleration](#gpu-acceleration)
 - [S3 Compatibility](#s3-compatibility)
 - [HLS Output Structure](#hls-output-structure)
+- [Disk Guards and Session Sweeping](#disk-guards-and-session-sweeping)
 - [Error Handling](#error-handling)
+- [Development](#development)
 
 ---
 
 ## Authentication
 
-The Encoding API uses key-based authentication with no external identity provider dependency. All credentials are passed via the `X-API-Key` header or `Authorization: Bearer` header.
+There is no identity provider, no key store and no external validation webhook. Three credential tiers, resolved in order by `AuthResolverGuard`. Endpoints declare what they accept with `@AuthTypes(...)`, defaulting to `['master']`.
 
-### Master API Key
+| Credential | Form | Held by | Scope |
+|---|---|---|---|
+| Instance API token | `X-API-Key: <token>` | The app's own UI | Everything — it is accepted regardless of an endpoint's `@AuthTypes`. Minted per launch by the Electron main process and handed to the renderer over the preload bridge; standalone it comes from `MASTER_API_KEY` |
+| Session token | `Authorization: Bearer sess_*`, or `?token=` on the preview / waveform / storyboard routes | The UI, per session | One session: attach a file, encode, poll, delete, chapters, preview |
+| Read token | `?token=read_*` | The CMS that opened the session | Watch only: the SSE stream and the status endpoint. Cannot start, cancel, or reach the source file. Minted only for CMS-created sessions |
 
-The master key is configured via the `MASTER_API_KEY` environment variable. It is accepted on **all** endpoints. This is the only credential needed for standalone or development use.
+A request that presents an `X-API-Key` which does not match is rejected outright — it does not fall through to the other tiers. When no token is configured at all, key auth is effectively disabled and every keyed endpoint refuses.
 
-```
-X-API-Key: <master_api_key>
-```
+## Origin gating and Local Network Access
 
-In a multi-tenant deployment, the master key is used by the management layer (e.g., a SaaS service) to create sessions on behalf of users. End users never see the master key.
+`/api/cms/*` is not key-authenticated. There is no credential a page in a browser could hold that the pages around it could not also read, so the question worth asking is *which site is calling* — and that is the one thing the browser answers honestly.
 
-### API Keys
-
-API keys provide scoped access to session operations (create, upload, encode, poll, preview, delete). The Encoding API does not store or manage API keys -- it validates them via an external **key validation webhook** (`KEY_VALIDATION_WEBHOOK_URL`).
-
-When an API key is presented, the Encoding API sends it to the configured webhook URL. The external service validates the key and returns metadata (userId, webhookUrl, authorizationUrl). Validation results are cached briefly (default 60s, configurable via `KEY_VALIDATION_CACHE_TTL_MS`).
-
-```
-X-API-Key: lmc_...
-```
-
-If `KEY_VALIDATION_WEBHOOK_URL` is not configured, the Encoding API operates in **standalone mode** -- only the master key is accepted and API key authentication is not available.
-
-### Session Tokens
-
-When a session is created, a session token (`sess_*` prefix) is returned. This scoped token grants access to a single session for upload (tus), polling, encode submission, and preview playback. It cannot create new sessions.
-
-```
-Authorization: Bearer sess_...
-```
-
-### Authentication Summary
-
-| Credential | Header | Scope | Provisioning |
-|------------|--------|-------|-------------|
-| Master key | `X-API-Key` | All endpoints (superkey) | `MASTER_API_KEY` env var |
-| API key | `X-API-Key` | Session operations only | Validated via `KEY_VALIDATION_WEBHOOK_URL` (externally managed) |
-| Session token | `Authorization: Bearer sess_*` | Single session only | Returned by `POST /api/sessions` |
+- `OriginRegistry` holds an allowlist. Origins are normalised (lower-cased, no trailing slash) and compared exactly.
+- Standalone, the allowlist is `CMS_ALLOWED_ORIGINS` (comma-separated) and there is no approver: an unknown origin is simply refused.
+- Embedded, the host also supplies an `originApprover`. The Electron shell shows a native dialog, remembers both allows and denies in its settings file, and serialises dialogs so two requests milliseconds apart cannot stack two modal sheets over one decision.
+- After binding, the server approves its own address, so a packaged app never asks the user whether to trust itself.
+- CORS refusal is expressed by withholding the header, not by raising — the browser reports an ordinary CORS block instead of the API returning 500 to something it deliberately turned away.
+- A public page reaching `127.0.0.1` is a private-network request: `privateNetworkAccessMiddleware` answers Chrome's Local Network Access preflight with `Access-Control-Allow-Private-Network: true`. That is a grant of *reachability* only; who may talk to the API is still the allowlist's decision on the same response.
+- A request with **no** `Origin` (curl, or a renderer whose origin browsers report inconsistently) is accepted only from a loopback peer.
 
 ---
 
 ## Environment Variables
 
+Only relevant when running standalone — the embedding host passes these in code.
+
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `MASTER_API_KEY` | **Yes** | -- | Master API key accepted on all endpoints (superkey). Set to any secret string. |
-| `PORT` | No | `3000` | HTTP server port |
-| `WORK_DIR` | No | `./work` | Directory for temporary files during encoding |
-| `FFMPEG_TIMEOUT_MS` | No | `0` (none) | Max time for FFmpeg process before forced kill |
-| `FFMPEG_THREADS` | No | `8` | Number of threads for FFmpeg encoding |
-| `MAX_UPLOAD_SIZE` | No | `10737418240` (10 GB) | Maximum upload file size in bytes |
-| `CORS_ORIGIN` | No | `*` (all origins) | Allowed CORS origin. Set to a specific origin to restrict access. |
-| `KEY_VALIDATION_WEBHOOK_URL` | No | -- | URL the Encoding API calls to validate API keys. When not configured, only the master key works (standalone mode). |
-| `KEY_VALIDATION_WEBHOOK_TIMEOUT_MS` | No | `5000` | Key validation webhook response timeout |
-| `KEY_VALIDATION_CACHE_TTL_MS` | No | `60000` | How long to cache key validation results (default 60s) |
-| `AUTHORIZATION_WEBHOOK_URL` | No | -- | Global authorization webhook URL (per-key config from validation response takes precedence) |
-| `AUTHORIZATION_WEBHOOK_TIMEOUT_MS` | No | `5000` | Authorization webhook response timeout |
-| `AUTHORIZATION_WEBHOOK_FAIL_MODE` | No | `open` | Behavior when authorization webhook is unreachable: `open` or `closed` |
-| `TUSD_BINARY_PATH` | No | -- | Override path to the tusd Go binary |
+| `MASTER_API_KEY` | for keyed endpoints | — | The instance API token accepted on `X-API-Key` |
+| `PORT` | No | `3000` | HTTP port (the embedded default is `31711`) |
+| `HOST` | No | `127.0.0.1` | Bind address |
+| `WORK_DIR` | No | `./work` | Scratch directory for sessions, previews and sidecars |
+| `CMS_ALLOWED_ORIGINS` | No | — | Comma-separated origins allowed to use `/api/cms/*` |
+| `FFMPEG_PATH` | No | PATH lookup | Absolute path to the ffmpeg executable |
+| `FFPROBE_PATH` | No | PATH lookup | Absolute path to the ffprobe executable |
+| `FFMPEG_TIMEOUT_MS` | No | none | Max FFmpeg runtime before a forced kill |
+| `FFMPEG_THREADS` | No | — | Thread count passed to FFmpeg |
+| `DISK_RESERVE_BYTES` | No | `2147483648` (2 GB) | Free space kept in hand on the work volume |
+| `SESSION_ABANDONED_MAX_AGE_HOURS` | No | `6` | How long an idle session may sit before it is swept |
+| `SESSION_CLEANUP_CRON` | No | `0 * * * *` | Sweep schedule |
+| `S3_UPLOAD_STALL_TIMEOUT_MS` | No | `300000` | Stall detector for S3 uploads (judged on bytes sent, not files completed) |
 
 Example `api/.env`:
 
 ```bash
-MASTER_API_KEY=my-secret-master-key
+MASTER_API_KEY=dev-token
 PORT=3000
+CMS_ALLOWED_ORIGINS=http://localhost:5199
 ```
 
 ---
 
-## API Documentation
+## Embedding the API
 
-Interactive Swagger/OpenAPI documentation is available at `/api/docs` when the server is running.
+```ts
+import { createServer, DEFAULT_PORT, ALLOWED_EXTENSIONS } from '@luminary-media-converter/api';
 
-### Endpoints Summary
+const server = await createServer({
+    port: DEFAULT_PORT,          // 31711
+    host: '127.0.0.1',           // default
+    workDir: '/path/to/work',
+    localApiToken: token,        // accepted on X-API-Key
+    cmsAllowedOrigins: [...],    // trusted without asking
+    originApprover: async (origin) => /* ask the user */ true,
+    credentialCipher: { encrypt, decrypt },   // e.g. Electron safeStorage
+    onCmsSessionCreated: (sessionId) => focusWindow(),
+    ffmpegPath, ffprobePath,     // omit to use PATH
+    staticAppDir: '/path/to/app/dist',        // served at /
+    enableSwagger: false,
+});
+
+// server: { app, port, url, close() }
+```
+
+`workDir` and the ffmpeg paths are written into `process.env` before Nest instantiates anything, because that is how the services already read them and each is a value the whole process shares. The token, cipher, origin policy and window hook are per-host objects and go through injection tokens bound by the global `RuntimeOptionsModule`. Always construct the app through `AppModule.forRoot(...)`; importing `AppModule` bare leaves those tokens unbound.
+
+`ALLOWED_EXTENSIONS` is re-exported so a host's file picker offers exactly the extensions the API will accept — two lists that drifted apart would show a user a file and then refuse it.
+
+---
+
+## Endpoints
+
+Interactive OpenAPI docs at `/api/docs` when Swagger is enabled.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/sessions` | Master key or API key | Create encoding session |
-| ALL | `/api/tus`, `/api/tus/*` | Session token | Tus upload endpoint |
-| GET | `/api/sessions/:sessionId` | Master key, API key, or session token | Poll session status |
-| POST | `/api/sessions/:sessionId/encode` | Master key, API key, or session token | Submit encoding config |
-| DELETE | `/api/sessions/:sessionId` | Master key or API key | Cancel and delete session |
-| SSE | `/api/sessions/:sessionId/events?token=sess_*` | Session token (query param) | Real-time session status stream |
+| POST | `/api/sessions` | token | Create a session |
+| GET | `/api/sessions` | token | List every session, newest first (includes session tokens) |
+| POST | `/api/sessions/:id/local-file` | token, session | Attach a file already on this machine |
+| POST | `/api/sessions/:id/encode` | token, session | Submit the encode config and enqueue |
+| GET | `/api/sessions/:id` | token, session, read | Poll status |
+| GET | `/api/sessions/:id/events` | `?token=` (session or read) | SSE event stream |
+| DELETE | `/api/sessions/:id` | token, session | Cancel and delete (not while `encrypting` / `uploading_to_s3`) |
+| GET / PUT | `/api/sessions/:id/chapters` | token, session | Read / write `chapters/<lang>.vtt` in the session's own prefix |
+| GET | `/api/sessions/:id/waveform` | `?token=` | Waveform peaks for the source |
+| GET | `/api/sessions/:id/preview/**` | `?token=` | On-demand preview master / rendition playlists and MPEG-TS segments |
+| GET | `/api/sessions/:id/thumbnails/**` | `?token=` | Pre-encode source storyboard VTT and sprite sheets |
+| GET | `/api/cms/health` | none | Liveness probe for the CMS |
+| POST | `/api/cms/sessions` | Origin | Open (or reuse) a session for a CMS document |
+| POST | `/api/hls/{read,mutate,discover,chapters/read,chapters/write,waveform/read}` | token | Stateless HLS-edit operations against inline S3 credentials |
 
-### 1. Create an Encoding Session
+### 1. Create a session
 
 ```
 POST /api/sessions
-X-API-Key: <master_key_or_api_key>
+X-API-Key: <instance token>
 Content-Type: application/json
 ```
-
-**Request Body:**
 
 ```json
 {
@@ -133,599 +160,318 @@ Content-Type: application/json
     "secretKey": "YOUR_SECRET_KEY",
     "pathPrefix": "videos/my-project"
   },
-  "webhook": {
-    "url": "https://myapp.example.com/webhooks/encode",
-    "sessionToken": "my-webhook-secret-token"
-  },
-  "encryption": {
-    "enabled": true,
-    "keyUrl": "https://myapp.example.com/keys"
-  },
+  "encryption": { "enabled": true },
   "segmentDuration": 6,
   "byteRange": true,
   "byteRangeMaxFileSizeMB": 500,
+  "audioByteRangeMaxFileSizeMB": 50,
   "thumbnails": true
 }
 ```
 
-The `webhook`, `encryption`, `segmentDuration`, `byteRange`, `byteRangeMaxFileSizeMB`, and `thumbnails` fields are all optional.
-
-- `segmentDuration` defaults to `6` seconds
-- `byteRange` defaults to `true` (consolidate segments into fewer large files)
-- `byteRangeMaxFileSizeMB` defaults to `500` MB
-- `thumbnails` defaults to `true` for video encodes (generates WebVTT thumbnail sprites)
-- `encryption` enables AES-128 HLS encryption when provided
-- When using an API key whose validated metadata includes a `webhookUrl`, that URL is used automatically if no per-session webhook is configured
+Everything but `s3` is optional. `segmentDuration` defaults to 6 s, `byteRange` to true, `byteRangeMaxFileSizeMB` to 500, `thumbnails` to true for video encodes. `audioByteRangeMaxFileSizeMB` (default 50) caps the shared audio chunk chain, which carries **every** audio group — minutes of content per chunk ≈ cap ÷ (audio stream count × bitrate), so a wide multi-language ladder should raise it. `encryption` omitted means no encryption; `encryption.keyUrl` overrides the `luminary://key` placeholder written into `#EXT-X-KEY`.
 
 **Response (201):**
 
 ```json
 {
   "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "tusEndpoint": "http://localhost:3000/api/tus",
-  "sessionToken": "sess_f8e7d6c5b4a3291087654321",
-  "maxUploadSize": 10737418240
+  "sessionToken": "sess_f8e7d6c5b4a3291087654321"
 }
 ```
 
-**curl example:**
+### 2. Attach a local file
 
-```bash
-API_KEY="your-master-or-api-key"
+The source is used **where it is** — never copied and never moved, so a multi-gigabyte pick costs no disk and no wait. The file belongs to the user throughout: nothing here writes to it or removes it, including on failure.
 
-curl -X POST http://localhost:3000/api/sessions \
-  -H "X-API-Key: $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "s3": {
-      "endPoint": "minio.example.com",
-      "port": 9000,
-      "useSSL": false,
-      "bucket": "media-output",
-      "accessKey": "minioadmin",
-      "secretKey": "minioadmin"
-    }
-  }'
+```
+POST /api/sessions/:sessionId/local-file
+Authorization: Bearer <sessionToken>
+Content-Type: application/json
+
+{ "path": "/Users/me/Movies/episode-12.mov" }
 ```
 
----
+The path must be absolute (a relative path would resolve against the encoder's working directory, not where the user was standing), must be a regular file, and must carry an allowed media extension. The call returns the session status once the file has been probed — status `uploaded`, with `probeResult` attached.
 
-### 2. Upload the Source File (tus)
+**`201`** on success; **`400`** when the path is missing, not a file, not a media file, or the session is past `created`.
 
-File upload uses the [tus protocol](https://tus.io) for resumable, chunked uploads. After creating a session, upload your file to the `tusEndpoint` using any tus client library.
-
-The upload must include:
-
-- **Authorization header**: `Bearer <sessionToken>` (the session token from session creation)
-- **Metadata**: `sessionId` (the session ID from step 1), `filename` (original filename)
-
-The tus protocol supports **parallel uploads** — the client splits the file into chunks and uploads multiple chunks concurrently, significantly improving upload speed on high-bandwidth connections. The recommended configuration is 50 MB chunks with up to 5 parallel uploads. The tus protocol also supports automatic **resume** — if a connection drops mid-upload, the client can resume from the last successfully uploaded byte without re-uploading the entire file.
-
-On upload completion, the API automatically probes the file with ffprobe. The session transitions through `uploading` -> `uploaded`, and probe results become available via the poll endpoint.
-
-Incomplete uploads expire after 10 minutes and are cleaned up automatically on server shutdown.
-
-**JavaScript (tus-js-client):**
-
-```javascript
-import * as tus from 'tus-js-client';
-
-const upload = new tus.Upload(file, {
-  endpoint: tusEndpoint,
-  retryDelays: [0, 1000, 3000, 5000],
-  parallelUploads: 5,
-  chunkSize: 50 * 1024 * 1024,
-  metadata: {
-    sessionId: sessionId,
-    filename: file.name,
-    filetype: file.type,
-  },
-  headers: {
-    Authorization: `Bearer ${sessionToken}`,
-  },
-  onProgress(bytesUploaded, bytesTotal) {
-    console.log(`${Math.round((bytesUploaded / bytesTotal) * 100)}%`);
-  },
-  onSuccess() {
-    console.log('Upload complete');
-  },
-});
-
-upload.start();
-```
-
-**curl (tus creation + upload):**
-
-```bash
-# Create tus upload
-curl -X POST http://localhost:3000/api/tus \
-  -H "Authorization: Bearer $SESSION_TOKEN" \
-  -H "Tus-Resumable: 1.0.0" \
-  -H "Upload-Length: $(stat -f%z video.mp4)" \
-  -H 'Upload-Metadata: sessionId '$(echo -n $SESSION_ID | base64)',filename '$(echo -n video.mp4 | base64) \
-  -D -
-
-# Upload data to the returned Location URL
-curl -X PATCH http://localhost:3000/api/tus/<upload-id> \
-  -H "Authorization: Bearer $SESSION_TOKEN" \
-  -H "Tus-Resumable: 1.0.0" \
-  -H "Upload-Offset: 0" \
-  -H "Content-Type: application/offset+octet-stream" \
-  --data-binary @video.mp4
-```
-
----
-
-### 3. Poll Session Status
-
-Poll the current status of an encoding session. This is the primary status mechanism when webhooks are not configured. After upload completes, poll until `status` is `uploaded` to retrieve probe results.
+### 3. Poll session status
 
 ```
 GET /api/sessions/:sessionId
-X-API-Key: <master_key_or_api_key>
-# or: Authorization: Bearer <session_token>
+X-API-Key: <instance token>
+# or: Authorization: Bearer <sessionToken>
+# or: ?token=<session or read token>
 ```
-
-Or:
-
-```
-GET /api/sessions/:sessionId
-X-API-Key: lmc_...
-```
-
-**Response (200):**
-
-```json
-{
-  "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "status": "encoding",
-  "progress": 45.5
-}
-```
-
-**Status values:**
 
 | Status | Description | Extra fields |
 |---|---|---|
-| `created` | Session created, awaiting file upload | -- |
-| `uploading` | File upload in progress (tus) | -- |
-| `uploaded` | Upload complete, file probed | `probeResult` |
-| `queued` | Encoding queued, waiting in FIFO queue | `queuePosition` |
-| `encoding` | FFmpeg actively processing | `progress` (0-100) |
-| `encrypting` | HLS encryption in progress | `progress` (0-100) |
-| `uploading_to_s3` | Encoding done, uploading output to S3 | `progress` (0-100) |
-| `completed` | All files uploaded to S3 | `files`, `masterPlaylist`, `anglePlaylists`, `encoder`, `segmentFormat`, `thumbnailsVtt` |
-| `failed` | Error occurred | `error` |
+| `created` | Session created, awaiting a source file | — |
+| `uploading` | Source ingest in progress | `progress`, `ingestTotalBytes` |
+| `uploaded` | Source in place and probed | `probeResult` |
+| `queued` | Waiting in the FIFO queue | `queuePosition` |
+| `encoding` | FFmpeg running | `progress`, `pipelineProgress`, `hlsUrl`, `encryptionKeyHex` |
+| `encrypting` | Segment encryption | `progress`, `pipelineProgress` |
+| `uploading_to_s3` | Output going to the bucket | `progress`, `pipelineProgress` |
+| `completed` | Done | `files`, `masterPlaylist`, `thumbnailsVtt`, `segmentFormat` |
+| `failed` | Error | `error`, and `canRetry` when the source and credentials are both still available |
 
-**Uploaded status response (with probe results):**
+`hlsUrl` and `encryptionKeyHex` appear from the moment encoding starts, not at completion — a caller that reconnects mid-encode has to be able to ask for them again. `title`, `documentId`, `encoder` and any submitted `trimSegments` are always reported.
 
-```json
-{
-  "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "status": "uploaded",
-  "probeResult": {
-    "format": {
-      "duration": 120.5,
-      "bitrateKbps": 5000,
-      "formatName": "mov,mp4,m4a,3gp,3g2,mj2"
-    },
-    "videoTracks": [
-      {
-        "index": 0,
-        "codec": "h264",
-        "width": 1920,
-        "height": 1080,
-        "bitrateKbps": 4500,
-        "frameRate": 30,
-        "profile": "High"
-      }
-    ],
-    "audioTracks": [
-      {
-        "index": 0,
-        "codec": "aac",
-        "bitrateKbps": 192,
-        "channels": 2,
-        "sampleRate": 48000,
-        "language": "eng"
-      }
-    ]
-  }
-}
-```
-
----
-
-### 4. Start Encoding
-
-After the file is uploaded and probed (session status is `uploaded`), submit an encoding configuration to start the encoding process.
+### 4. Start encoding
 
 ```
 POST /api/sessions/:sessionId/encode
-X-API-Key: <master_key_or_api_key>
-# or: Authorization: Bearer <session_token>
+Authorization: Bearer <sessionToken>
 Content-Type: application/json
 ```
 
-**Video encoding request body:**
+Video:
 
 ```json
 {
   "type": "video",
   "videoRenditions": [
-    {
-      "width": 1920,
-      "height": 1080,
-      "videoBitrateKbps": 5000,
-      "copyStream": false,
-      "audioGroupId": "hd",
-      "label": "1080p",
-      "vbr": true
-    },
-    {
-      "width": 1280,
-      "height": 720,
-      "videoBitrateKbps": 2500,
-      "copyStream": false,
-      "audioGroupId": "hd",
-      "label": "720p",
-      "vbr": true
-    },
-    {
-      "width": 854,
-      "height": 480,
-      "videoBitrateKbps": 1000,
-      "copyStream": false,
-      "audioGroupId": "mid",
-      "label": "480p",
-      "vbr": true
-    }
+    { "width": 1920, "height": 1080, "videoBitrateKbps": 5000, "copyStream": false, "audioGroupId": "hd", "label": "1080p", "vbr": true },
+    { "width": 1280, "height": 720,  "videoBitrateKbps": 2500, "copyStream": false, "audioGroupId": "hd", "label": "720p",  "vbr": true }
   ],
   "audioGroups": [
-    {
-      "id": "hd",
-      "label": "HD Audio",
-      "audioBitrateKbps": 256,
-      "channels": 2,
-      "audioCodec": "aac",
-      "sourceTrackIndex": 0,
-      "language": "eng",
-      "vbr": true
-    },
-    {
-      "id": "mid",
-      "label": "Standard Audio",
-      "audioBitrateKbps": 128,
-      "channels": 2,
-      "audioCodec": "aac",
-      "sourceTrackIndex": 0,
-      "language": "eng",
-      "vbr": true
-    }
-  ]
+    { "id": "hd", "label": "HD Audio", "audioBitrateKbps": 256, "channels": 2, "audioCodec": "aac", "sourceTrackIndex": 0, "language": "eng", "vbr": true }
+  ],
+  "trimSegments": [{ "inSec": 12.0, "outSec": 300.5 }]
 }
 ```
 
-**Audio-only encoding request body:**
+Audio-only:
 
 ```json
 {
   "type": "audio",
   "audioGroups": [
-    {
-      "id": "hd",
-      "label": "High Quality",
-      "audioBitrateKbps": 192,
-      "channels": 2,
-      "audioCodec": "aac",
-      "sourceTrackIndex": 0,
-      "vbr": true
-    },
-    {
-      "id": "low",
-      "label": "Bandwidth Saving",
-      "audioBitrateKbps": 64,
-      "channels": 2,
-      "audioCodec": "aac",
-      "sourceTrackIndex": 0,
-      "vbr": true
-    }
+    { "id": "hd",  "label": "High Quality",     "audioBitrateKbps": 192, "channels": 2, "audioCodec": "aac", "sourceTrackIndex": 0, "vbr": true },
+    { "id": "low", "label": "Bandwidth Saving", "audioBitrateKbps": 64,  "channels": 2, "audioCodec": "aac", "sourceTrackIndex": 0, "vbr": true }
   ]
 }
 ```
 
-**Response (202):**
+Validated on the way in: a video encode needs at least one rendition and one audio group, every rendition's `audioGroupId` must name a group that exists, and a `copyStream` rendition needs a `sourceTrackIndex`. `trimSegments` is the only way to express trimming, and it lives here rather than on the session.
 
-```json
-{
-  "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "status": "queued",
-  "queuePosition": 1
-}
-```
+The session must be `uploaded`, **or** `failed` with its source file still on disk (a retry). A session restored without its S3 credentials is refused here rather than burning the whole encode and failing at the upload with an opaque authentication error.
 
----
+**Response (202):** `{ "sessionId": "…", "status": "queued", "queuePosition": 1 }`
 
-### 5. Delete a Session
-
-Cancel and delete a session. Allowed in `created`, `uploading`, `uploaded`, `queued`, or `encoding` status. Queued sessions are removed from the queue. Encoding sessions have their FFmpeg process terminated.
+### 5. Delete a session
 
 ```
 DELETE /api/sessions/:sessionId
-X-API-Key: <master_key_or_api_key>
 ```
 
-**Response:** `204 No Content`
+`204 No Content`. Allowed from `created`, `uploading`, `uploaded`, `queued`, `encoding`, `failed` and `completed` — the terminal two included, which is the only way their disk is ever reclaimed. `encrypting` and `uploading_to_s3` are refused, because the pipeline is mid-write and pulling its files out from under it leaves half an output in the bucket. Queued sessions are dequeued, encoding sessions have their FFmpeg process killed, and the whole work directory (session record, preview cache, sidecars, credential sidecar) is removed.
 
----
+### CMS handshake
 
-### Encrypted HLS Playback
+`GET /api/cms/health` → `{ "status": "ok", "apiVersion": "0.0.1" }`, unauthenticated. A probe that says only "something is listening on this port, and it is us" gives away nothing, and the CMS needs it before it can decide whether to show the affordance at all.
 
-Encrypted HLS playback is handled client-side. The encryption key hex is included in the completion webhook payload (`encryptionKeyHex` field). Clients rewrite HLS playlists to replace `#EXT-X-KEY` URIs with a blob URL containing the raw key bytes.
-
----
-
-## Webhook Callbacks
-
-Webhooks are optional. When a `webhook` configuration is provided in the session creation request (or returned by the key validation webhook as part of the API key's metadata), the service sends HTTP POST requests to the webhook URL throughout the encoding lifecycle. Each request includes:
-
-- **Header**: `X-Session-Token: <your-session-token>` -- verify this matches the token you provided to authenticate the callback.
-- **Header**: `Content-Type: application/json`
-
-### Webhook Payload
+`POST /api/cms/sessions`, gated by Origin:
 
 ```json
 {
-  "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "status": "encoding",
-  "progress": 45.5,
-  "queuePosition": null,
-  "message": "Encoding: 45.5% complete",
-  "error": null,
-  "files": null,
-  "masterPlaylist": null
+  "documentId": "post_01HTZ8Y0J4",
+  "title": "Episode 12 — The Long Way Round",
+  "s3": { "…": "…" },
+  "publicBaseUrl": "https://cdn.example.com/media",
+  "encryption": { "required": true },
+  "existingMedia": { "hlsUrl": "…", "hlsKey": "…" }
 }
 ```
 
-### Webhook Events
-
-| Status | When | Key fields |
-|---|---|---|
-| `queued` | Encoding config submitted, waiting in queue | `queuePosition` |
-| `queued` | Queue position updated (earlier job finished) | `queuePosition` |
-| `encoding` | Encoding started / progress update (~every 5%) | `progress` |
-| `encrypting` | HLS encryption in progress | `progress` |
-| `uploading_to_s3` | Encoding complete, uploading files | `progress` |
-| `completed` | All done | `files`, `masterPlaylist`, `anglePlaylists`, `encoder`, `segmentFormat`, `thumbnailsVtt`, `encryptionKeyHex` |
-| `failed` | Error at any stage | `error` |
-
-### Completed Webhook Example
+→
 
 ```json
 {
-  "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "status": "completed",
-  "progress": 100,
-  "message": "Encoding and upload complete",
-  "files": [
-    "videos/my-project/master.m3u8",
-    "videos/my-project/stream_1080p_1920x1080/init.mp4",
-    "videos/my-project/stream_1080p_1920x1080/playlist.m3u8",
-    "videos/my-project/stream_1080p_1920x1080/segment_000.m4s"
-  ],
-  "masterPlaylist": "videos/my-project/master.m3u8",
-  "encoder": "apple",
-  "segmentFormat": "fmp4",
-  "encryptionKeyHex": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+  "sessionId": "…",
+  "readToken": "read_…",
+  "eventsUrl": "http://127.0.0.1:31711/api/sessions/<id>/events?token=read_…",
+  "apiVersion": "0.0.1",
+  "reused": false
 }
 ```
 
-`encryptionKeyHex` is present on `completed` status when HLS encryption was used. It contains the AES-128 key as a hex string for client-side playlist rewriting.
+- The response carries identifiers and a read token, **never** the storage credentials it was sent.
+- `documentId` is an idempotency key: a repeat click returns the session already in flight (`reused: true`) instead of starting a second encode against the same post. Finished sessions do not match — that click means "replace what is there".
+- Every session writes to its own subfolder, `<pathPrefix>/<sessionId>`, so a replacement cannot be half-live while the second encode runs.
+- `existingMedia` is validated and stored for a future edit mode; nothing acts on it today.
+- Creating or reusing a session fires the host's session hook, which brings the desktop window forward — the user has a file to choose.
 
----
+The CMS then subscribes to `eventsUrl`. The first `encoding` event carries `hlsUrl` and `encryptionKeyHex` together; that pair is what the CMS saves against its document.
 
-## Authorization Webhook
+### HLS edit
 
-The Encoding API supports an optional authorization webhook -- an HTTP callback invoked before processing privileged operations. This allows an external system to enforce authorization decisions without the Encoding API needing any awareness of users, plans, or billing.
+Stateless operations against inline S3 credentials, used for post-encode edits:
 
-### Configuration
+| Path | Description |
+|---|---|
+| `POST /api/hls/read` | Fetch and parse a master playlist; returns the parsed master + current ETag |
+| `POST /api/hls/mutate` | Apply ordered operations (upsert/remove subtitle, upsert/remove chapters) with `If-Match`; returns the new ETag. `409` on mismatch |
+| `POST /api/hls/discover` | Scan a folder prefix for HLS masters / angles |
+| `POST /api/hls/chapters/read` | Read `chapters/<lang>.vtt`; `404` when absent |
+| `POST /api/hls/chapters/write` | Write `chapters/<lang>.vtt` (≤ 1 MiB, `text/vtt`) |
+| `POST /api/hls/waveform/read` | Read `waveform.json`; `404` when absent |
 
-The authorization webhook URL is configured:
-
-1. **Per API key** -- `authorizationUrl` returned by the key validation webhook (takes precedence)
-2. **Globally** -- `AUTHORIZATION_WEBHOOK_URL` environment variable
-
-When no authorization URL is configured, all requests are allowed.
-
-### Trigger Points
-
-| Operation | Endpoint | Payload includes |
-|-----------|----------|-----------------|
-| Session creation | `POST /api/sessions` | API key metadata, S3 config summary |
-| Encode start | `POST /api/sessions/:id/encode` | API key metadata, encode config, cost estimate |
-
-### Authorization Request
-
-The Encoding API sends a POST to the configured URL:
-
-```json
-{
-  "action": "create_session",
-  "userId": "<user-id-from-key-validation>",
-  "apiKeyMetadata": { "planTier": "payg" },
-  "sessionId": "<session-id>",
-  "encodeConfig": null,
-  "costEstimate": null,
-  "timestamp": "2026-03-16T10:00:00Z"
-}
-```
-
-### Authorization Response
-
-```json
-{ "allowed": true }
-```
-
-Or:
-
-```json
-{
-  "allowed": false,
-  "reason": "Monthly encoding limit reached"
-}
-```
-
-### Failure Behavior
-
-- `allowed: true` (or HTTP 200 with no body) -- operation proceeds
-- `allowed: false` -- request rejected with `403 Forbidden` including the `reason`
-- Webhook unreachable or 5xx -- configurable via `AUTHORIZATION_WEBHOOK_FAIL_MODE`:
-  - `open` (default) -- allow the request, log a warning
-  - `closed` -- reject the request
+The session-scoped `GET`/`PUT /api/sessions/:id/chapters` routes are the same operations with the bucket and prefix resolved from the session, so the caller supplies nothing but a language.
 
 ---
 
 ## Encoding Workflow
 
-1. **Session creation** -- Client sends S3 credentials, optional webhook URL, encryption config, and encoding options (segment duration, byte-range, thumbnails). Service returns a tus upload endpoint and session token.
-2. **File upload** -- Client uploads the source media file via tus (resumable, chunked). On completion, the API auto-probes the file with ffprobe.
-3. **Probe and configure** -- Client polls for probe results (detected video/audio tracks), then submits an encoding configuration (video renditions, audio groups, copy/re-encode choices).
-4. **Queue processing** -- The session enters a FIFO queue. Sessions are processed one at a time in first-come-first-served order.
-5. **Encoding** -- FFmpeg probes per-stream start times and selects the optimal segment format: fMP4 segments (`.m4s` + `init.mp4`) when streams are aligned, or MPEG-TS segments (`.ts`) when streams have misaligned start times. When byte-range mode is enabled (default), segments are consolidated into fewer large files using HLS byte-range addressing. Progress is reported via webhooks or polling.
-6. **Encryption** -- If encryption is enabled, HLS segments are encrypted with AES-128 via a worker thread. The encryption key hex is included in the completion webhook for client-side playback.
-7. **Thumbnail generation** -- For video encodes (when enabled), sprite-based thumbnails with a WebVTT file are generated for timeline scrubbing.
-8. **S3 upload** -- All output files are uploaded to the client-specified S3 bucket.
-9. **Completion** -- Final webhook includes the full list of S3 object keys, master playlist path, thumbnail VTT path, and encryption key hex (if encrypted).
+1. **Session creation** — S3 destination plus segment / byte-range / thumbnail / encryption options. Returns a session token.
+2. **Source attach** — an absolute path to a file already on the machine. `IngestService` then runs the shared post-ingest pipeline: record the path → ffprobe → initialise the preview → status `uploaded` → prime the waveform cache and source storyboard in the background.
+3. **Configure** — the client reads the probe results, computes a suggested config, and lets the user adjust renditions, audio groups, copy/VBR and trim ranges. An on-demand HLS preview is available throughout.
+4. **Queue** — FIFO, one encode at a time.
+5. **Encode** — the AES key and IV are generated *before* the status flips to `encoding`, and `hlsUrl` is published at the same moment, so anything watching that transition is handed both. FFmpeg probes per-stream start times and aligns misaligned streams with an input seek to the latest start; output is always fMP4. `SegmentPipelineService` streams each new segment through encrypt → upload → byte-range pack with bounded concurrency, so S3 uploads keep pace with FFmpeg rather than running serially afterwards.
+6. **Finish** — `#EXT-X-KEY` tags injected, thumbnail sprites + `thumbnails.vtt` generated for video encodes, `waveform.json` written beside `master.m3u8`, and the completion event lists every object key.
 
-### Session Lifecycle
+### Session lifecycle
 
 ```
 created -> uploading -> uploaded -> queued -> encoding -> encrypting -> uploading_to_s3 -> completed
                                                        \-> failed
 ```
 
+A `failed` session whose source is still on disk and whose credentials are still usable reports `canRetry: true` and can be encoded again without re-ingesting.
+
+---
+
+## Credential Handling
+
+S3 credentials arrive per session and must survive a restart without ever sitting in plaintext on disk.
+
+- `session.json` in the session's work directory **never** holds S3 keys, cipher or no cipher: they are written as `<redacted>`. A file on the user's disk is exactly the place a stolen credential is found, and nothing reading the session record needs them.
+- Given a `CredentialCipher`, the keys go in a `credentials.enc` sidecar. The Electron implementation wraps `safeStorage`, whose key lives in the OS keychain.
+- Without a cipher, nothing is written: the API warns once that credentials are memory-only and sessions will not survive a restart. A stranded session is a far smaller problem than a plaintext key in the work directory.
+- Both files are written `0o600` and swapped into place via `.tmp` + rename.
+- At boot, terminal sessions are purged, in-flight sessions become `failed` ("the encoder restarted"), and any session whose credentials could not be recovered becomes `failed` with an explanation. Every path that would reach S3 checks `hasUsableCredentials()` first.
+
+---
+
+## Encrypted HLS and the `luminary://key` contract
+
+Keys are generated locally (`randomBytes(16)`) and never leave the machine, so there is nothing to serve them over HTTP. With no explicit `keyUrl`, `#EXT-X-KEY` carries the sentinel `luminary://key` (`LUMINARY_KEY_PLACEHOLDER_URI`, exported from `@luminary-media-converter/hls`). A player is expected to recognise it and swap in the key it already holds — the hex reported as `encryptionKeyHex` on the session and on the SSE stream — typically by rewriting the playlist and pointing the URI at a blob URL of the raw bytes. `app/src/components/HlsPlayer.vue` is the reference implementation.
+
+Multi-angle output is a single spec-correct master: each angle is an `#EXT-X-MEDIA:TYPE=VIDEO` group and every `#EXT-X-STREAM-INF` carries `VIDEO="<group>"`. Players that want to pin one angle, or drop video entirely, narrow the playlist client-side with `listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist` from the same package.
+
 ---
 
 ## GPU Acceleration
 
-The service automatically detects hardware acceleration at startup, checking for NVIDIA first, then Apple Silicon, with CPU as the final fallback.
+Detected once at startup, NVIDIA first, then Apple Silicon, then CPU.
 
 ### NVIDIA (Linux / Windows)
 
-Detected when `nvidia-smi` is available and `ffmpeg -hwaccels` includes `cuda`.
+`nvidia-smi` available and `ffmpeg -hwaccels` includes `cuda`.
 
 - **Decoder**: `-hwaccel cuda -hwaccel_output_format cuda`
 - **Encoder**: `h264_nvenc`
-- **Scaler**: `scale_cuda` (keeps frames in GPU memory)
+- **Scaler**: `scale_cuda` (frames stay in GPU memory)
 
 ### Apple Silicon (macOS M1+)
 
-Detected when platform is `darwin`, architecture is `arm64`, and FFmpeg supports `videotoolbox`, `h264_videotoolbox`, and `scale_vt`.
+Platform `darwin`, arch `arm64`, and FFmpeg supporting `videotoolbox`, `h264_videotoolbox` and `scale_vt`.
 
 - **Decoder**: `-hwaccel videotoolbox -hwaccel_output_format videotoolbox_vld`
 - **Encoder**: `h264_videotoolbox`
-- **Scaler**: `scale_vt` (keeps frames in VideoToolbox GPU memory)
+- **Scaler**: `scale_vt`
 
-### CPU Fallback
+### CPU fallback
 
-When no GPU is detected, the service uses `libx264` with resolution-based presets. Audio encoding always uses CPU.
+`libx264` with resolution-based presets. Audio always encodes on CPU.
 
-The active mode is logged at startup and reported in session status responses via the `encoder` field.
+The active mode is logged at startup and reported as the `encoder` field on status responses and SSE events. `PreviewService` shares the same detection. This is why packaged builds ship their own ffmpeg — hardware support is a compile-time decision, and a user's own build may have none of it.
 
 ---
 
 ## S3 Compatibility
 
-The service uses the MinIO JavaScript client for S3 uploads, compatible with:
+Uploads go through the MinIO JavaScript client, which works with MinIO, Cloudflare R2, AWS S3, Backblaze B2, DigitalOcean Spaces and anything else speaking S3. Credentials are per session, so different sessions can target different buckets or providers.
 
-- MinIO
-- Cloudflare R2
-- AWS S3
-- Backblaze B2
-- DigitalOcean Spaces
-- Any other S3-compatible storage
-
-S3 credentials are provided per-session, so different sessions can upload to different buckets or storage providers.
+Every object key is built from `S3Service.canonicalPrefix()` — no leading, trailing or doubled slashes, whatever the caller typed.
 
 ---
 
 ## HLS Output Structure
 
-The segment format is chosen automatically based on source stream alignment:
+Output is **always fMP4** (`.m4s` + a per-stream init, CMAF-compatible). A source whose streams start at different times (≥ 20 ms apart) is aligned by an input seek to the latest-starting stream's start — every stream loses the same leading fraction of a second, timestamps stay honest, and lip-sync is preserved. `segmentFormat` is reported as `"fmp4"`; `"mpegts"` appears only on sessions restored from before this change.
 
-- **fMP4** (default when streams are aligned) -- fragmented MP4 / CMAF segments (`.m4s` + `init.mp4`). Lower overhead, wider CMAF compatibility.
-- **MPEG-TS** (fallback when streams have misaligned start times) -- Transport Stream segments (`.ts`). The player's TS transmuxer synchronizes audio/video PTS during playback.
+Copy-mode video is gated by the source: the track must not be early-starting on a misaligned source (an input seek cuts copied streams at keyframe granularity, leaving permanent desync) and its keyframe cadence must be regular and divide the segment duration exactly (compared in frames, so NTSC rates pass). An unqualified track is refused at encode submit with a message naming it; the form disables its Copy toggle with the same reason.
 
-When byte-range mode is enabled (default), individual segments are consolidated into fewer large files using HLS `#EXT-X-BYTERANGE` addressing, significantly reducing the number of S3 objects.
-
-The session status response includes a `segmentFormat` field (`"fmp4"` or `"mpegts"`) indicating which format was used.
-
-**fMP4 output** (aligned streams) for a session with 2 video renditions and 2 audio groups:
+With byte-range mode on (the default), segments are packed into **shared chunk chains** under `media/`: one chain per video angle carrying every rendition of that angle (segments interleaved by arrival), and one audio chain carrying every audio group. On a delivery edge that forwards a requested range while backhauling the whole object, one backhaul warms every quality of the playing angle, so an ABR step-up never lands on a cold object. The first chunk of each chain closes at ~20 s of content (fast edge warm-up at play-start); every later chunk is cap-sized — `byteRangeMaxFileSizeMB` for video chains, `audioByteRangeMaxFileSizeMB` for the audio chain. Media playlists stay in their stream directories and reference the chunks as `../media/…` with `#EXT-X-BYTERANGE`.
 
 ```
-{pathPrefix}/
-+-- master.m3u8
-+-- stream_1080p_1920x1080/
-|   +-- init.mp4
-|   +-- playlist.m3u8
-|   +-- segment_000.m4s
-|   +-- segment_001.m4s
-+-- stream_720p_1280x720/
-|   +-- init.mp4
-|   +-- playlist.m3u8
-|   +-- segment_000.m4s
-+-- stream_HD/
-|   +-- init.mp4
-|   +-- playlist.m3u8
-|   +-- segment_000.m4s
-+-- stream_Standard/
-|   +-- init.mp4
-|   +-- playlist.m3u8
-|   +-- segment_000.m4s
-+-- thumbnails/
-    +-- thumbnails.vtt
-    +-- sprite_*.jpg
+{pathPrefix}/{sessionId}/          # CMS sessions get a per-session subfolder
+├── master.m3u8
+├── waveform.json
+├── media/
+│   ├── v0_0.m4s                   # angle 0 chain: every rendition of that angle
+│   ├── v0_1.m4s
+│   ├── v1_0.m4s                   # angle 1 chain (multi-angle sources)
+│   └── a_0.m4s                    # audio chain: every audio group
+├── stream_1080p_1920x1080/
+│   ├── init_0.mp4                 # ffmpeg names the init; #EXT-X-MAP matches it
+│   └── playlist.m3u8
+├── stream_720p_1280x720/
+│   └── …
+├── stream_HD/
+│   └── …
+├── thumbnails/
+│   ├── thumbnails.vtt
+│   └── sprite_*.jpg
+└── chapters/
+    └── en.vtt                     # written by the chapter editor, when used
 ```
 
-Stream directory names are derived from the rendition labels (e.g. `stream_1080p_1920x1080`, `stream_HD`).
+Stream directory names derive from the rendition labels. Players can warm the next chunk ahead of the boundary — see `docs/chunk-warming.md`; `@luminary-media-converter/player-web` implements it.
+
+---
+
+## Disk Guards and Session Sweeping
+
+- `disk-space.ts` refuses an ingest or an encode that would not fit, keeping `DISK_RESERVE_BYTES` (2 GB by default) in hand. Checked *before* the transfer, so a doomed ingest does not cost the user the whole transfer first.
+- `SessionCleanupService` sweeps hourly and removes only genuinely idle sessions — `created`, `uploading`, `uploaded` — that have shown no activity for `SESSION_ABANDONED_MAX_AGE_HOURS`. Queued and encoding sessions are left alone.
+- Abandonment is judged on `lastActivityAt`, not `createdAt`: a slow multi-gigabyte ingest is hours old and perfectly alive, while a tab closed on the config screen is hours old and never coming back.
+- Finished sessions are discarded at boot along with their work directory, so no age threshold has to stand in for "the user is done looking at this".
 
 ---
 
 ## Error Handling
 
-- **Process isolation**: FFmpeg runs as a child process. Crashes, timeouts, or errors in FFmpeg never crash the NestJS service.
-- **Queue resilience**: A failed encoding job is marked as `failed` with an error webhook, and the queue continues to the next job.
-- **Graceful shutdown**: On `SIGTERM`/`SIGINT`, in-flight FFmpeg processes are terminated cleanly, and expired tus uploads are cleaned up before the service exits.
-- **Webhook failures**: If a webhook delivery fails, it is logged but never blocks or crashes the encoding pipeline.
-- **Upload resilience**: The tus protocol supports resumable uploads -- if a connection drops, the client can resume from where it left off.
-- **Temp file cleanup**: Working files are removed after each session completes or fails.
+- **Process isolation**: FFmpeg runs as a child process. Crashes, timeouts and errors never take the service down.
+- **Queue resilience**: a failed job is marked `failed` with its error and the queue moves on.
+- **Graceful shutdown**: `enableShutdownHooks()` plus `OnModuleDestroy` on `QueueService` and `FfmpegService`. The Electron host defers quitting until `server.close()` resolves — quitting out from under Nest leaves orphan ffmpeg processes and half-written output.
+- **User files are never touched**: a probe that could not read a source file fails the session, not the file.
 
 ---
 
 ## Development
 
 ```bash
-# Development mode with watch
-npm -w api run start:dev
-
-# Production build
+npm -w api run dev          # watch mode
 npm -w api run build
-npm -w api run start:prod
-
-# Unit tests
-npm -w api test
-
-# End-to-end tests
-npm -w api run test:e2e
+npm -w api run start:prod   # node dist/main
+npm -w api test             # unit tests (Vitest)
+npm -w api run test:e2e     # end-to-end tests
 ```
+
+Many specs were intentionally left broken during the local-only migration and are tracked for restoration in [`../Todo.md`](../Todo.md).
 
 ## Tech Stack
 
-- Node.js with TypeScript (ES2023, nodenext modules)
-- NestJS 11 (Express platform)
-- Key-based authentication (master key + webhook-validated API keys + session tokens)
-- FFmpeg via child_process (GPU-accelerated when available)
-- MinIO JS client for S3 uploads
-- class-validator + class-transformer for DTO validation
-- Swagger/OpenAPI at `/api/docs`
+- Node.js with TypeScript (ES2023, `nodenext` modules)
+- NestJS 11 (Express platform), embeddable via `createServer()`
+- Token-based auth (instance token + session tokens + read tokens) and an Origin allowlist for CMS callers
+- helmet CSP, per-request CORS, Local Network Access preflight support
+- FFmpeg / ffprobe via `child_process`, GPU-accelerated when available
+- MinIO JS client for S3
+- `class-validator` + `class-transformer` for DTO validation
+- Swagger/OpenAPI at `/api/docs` when enabled
 - Vitest for testing

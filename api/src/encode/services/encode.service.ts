@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls';
 import { existsSync } from 'fs';
-import { copyFile, readdir, rm, writeFile } from 'fs/promises';
+import { readdir, rm, writeFile } from 'fs/promises';
 import { join, posix } from 'path';
 import { estimateOutputBytes, formatBytes } from './output-estimate.js';
 import { freeBytes } from './disk-space.js';
@@ -12,15 +13,17 @@ import {
 import { FfmpegService } from './ffmpeg.service.js';
 import { EncryptionService } from './encryption.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
-import { WaveformService } from './waveform.service.js';
+import {
+    readCachedWaveform,
+    WAVEFORM_SIDECAR_VERSION,
+    WaveformService,
+} from './waveform.service.js';
 import { S3Service } from './s3.service.js';
-import { WebhookService } from './webhook.service.js';
 import {
     SegmentPipelineService,
+    type PipelinePhase,
     type PipelineProgress,
 } from './segment-pipeline.service.js';
-
-import type { WebhookPayloadDto } from '../dto/webhook-payload.dto.js';
 
 @Injectable()
 export class EncodeService {
@@ -35,7 +38,6 @@ export class EncodeService {
         private readonly thumbnailService: ThumbnailService,
         private readonly waveformService: WaveformService,
         private readonly s3Service: S3Service,
-        private readonly webhookService: WebhookService,
         private readonly segmentPipelineService: SegmentPipelineService
     ) {}
 
@@ -63,12 +65,6 @@ export class EncodeService {
         if (shortfall) {
             this.logger.error(`Session ${sessionId} refused: ${shortfall}`);
             this.sessionService.setFailed(sessionId, shortfall);
-            await this.sendWebhook(session, {
-                sessionId,
-                status: 'failed',
-                error: shortfall,
-                message: 'Encoding failed',
-            });
             return;
         }
 
@@ -86,32 +82,32 @@ export class EncodeService {
         });
 
         try {
-            this.sessionService.updateStatus(sessionId, 'encoding');
-            this.sessionService.setOutputDir(sessionId, outputDir);
-            await this.sendWebhook(session, {
-                sessionId,
-                status: 'encoding',
-                progress: 0,
-                message: 'Encoding started',
-            });
-
             const encryptionEnabled =
-                session.config.encryption?.enabled !== false &&
-                !!session.config.encryption?.keyUrl;
+                session.config.encryption != null &&
+                session.config.encryption.enabled !== false;
 
-            // Pre-compute encryption materials
+            // Pre-compute encryption materials. This happens before the status
+            // flips to 'encoding' so anything watching that transition can be
+            // handed the key it will need to play the output back.
             let encryptionKey: Buffer | undefined;
             let encryptionIV: Buffer | undefined;
-            let encryptionSalt: Buffer | undefined;
 
             if (encryptionEnabled) {
-                encryptionSalt = this.encryptionService.generateSalt();
-                encryptionKey = this.encryptionService.deriveKey(
-                    sessionId,
-                    encryptionSalt
-                );
+                encryptionKey = this.encryptionService.generateKey();
                 encryptionIV = this.encryptionService.generateIV();
+                // On the session before the status flips, so the 'encoding'
+                // event and every status read after it carry the key. A CMS
+                // that only learned it at completion would have a playable URL
+                // in hand, and nothing able to decrypt it, for the length of
+                // the encode.
+                this.sessionService.setEncryptionKey(
+                    sessionId,
+                    encryptionKey.toString('hex')
+                );
             }
+
+            this.sessionService.updateStatus(sessionId, 'encoding');
+            this.sessionService.setOutputDir(sessionId, outputDir);
 
             // Set up S3 path prefix. This is the prefix every uploaded key is
             // built from — segments, playlists and sidecars all route through
@@ -120,6 +116,20 @@ export class EncodeService {
             const s3PathPrefix = S3Service.canonicalPrefix(
                 session.config.s3.pathPrefix
             );
+
+            // The playback URL is fully determined once the prefix is — the
+            // encode writes exactly one master playlist, at a known name — so
+            // it is published now rather than on completion. The caller can
+            // save it against its own record while the encode runs, instead of
+            // holding a half-finished record open for however long that takes.
+            if (session.publicBaseUrl) {
+                const masterKey = posix.join(s3PathPrefix, 'master.m3u8');
+                const base = session.publicBaseUrl.replace(/\/+$/, '');
+                this.sessionService.setHlsUrl(
+                    sessionId,
+                    `${base}/${masterKey}`
+                );
+            }
 
             // Current pipeline progress state (updated by both FFmpeg and pipeline callbacks)
             // Initialize all bars so the UI shows them from the start
@@ -153,6 +163,16 @@ export class EncodeService {
                     (session.config.byteRangeMaxFileSizeMB ?? 500) *
                     1024 *
                     1024,
+                // Which stream directories share a chunk chain, decided from the
+                // config that names them rather than from the names themselves.
+                streamChains: this.ffmpegService.buildStreamChainMap(
+                    session.encodeConfig
+                ),
+                audioByteRangeMaxFileSizeBytes:
+                    (session.config.audioByteRangeMaxFileSizeMB ?? 50) *
+                    1024 *
+                    1024,
+                segmentDurationSeconds: segDur,
                 estimatedTotalSegments,
                 onProgress: (pipelineUpdate) => {
                     if (pipelineUpdate.encrypting != null)
@@ -165,6 +185,50 @@ export class EncodeService {
                 },
             });
 
+            /**
+             * Name the post-drain step the session is on.
+             *
+             * These run after the bar has reached 100% and before the status
+             * leaves `encoding`, so without this the UI shows a finished
+             * pipeline over work that is still going. Carried on the existing
+             * `pipelineProgress` rather than as a new status, because they are
+             * not states a session can be resumed or cancelled in — they are
+             * commentary on the one it is already in.
+             */
+            /**
+             * Each post-drain step is timed as well as named.
+             *
+             * This item asked for a measurement before anyone optimised, and a
+             * measurement nobody can repeat is worth little — the answer
+             * depends on the source, the machine and whether the sprite pass
+             * had a concat file to work from. Logging it on every encode means
+             * the next person asking "why the wait" reads it off their own run
+             * instead of guessing from someone else's.
+             */
+            let phaseStartedAt = 0;
+            let phaseInProgress: PipelinePhase | null = null;
+
+            const finishPhase = (): void => {
+                if (!phaseInProgress) return;
+                const seconds = ((Date.now() - phaseStartedAt) / 1000).toFixed(
+                    1
+                );
+                this.logger.log(
+                    `Session ${sessionId}: ${phaseInProgress} took ${seconds}s`
+                );
+                phaseInProgress = null;
+            };
+
+            const reportPhase = (phase: PipelinePhase): void => {
+                finishPhase();
+                phaseInProgress = phase;
+                phaseStartedAt = Date.now();
+                currentProgress.phase = phase;
+                this.sessionService.updatePipelineProgress(sessionId, {
+                    ...currentProgress,
+                });
+            };
+
             pipeline.start();
 
             // Run FFmpeg — pipeline polls for segments in the background
@@ -173,22 +237,11 @@ export class EncodeService {
                 inputPath: session.filePath!,
                 outputDir,
                 encodeConfig: session.encodeConfig,
-                // Pipeline handles byte-range and encryption inline
-                byteRange: false,
-                preByteRangeHook: undefined,
                 onProgress: (percent) => {
                     currentProgress.encoding = percent;
                     this.sessionService.updatePipelineProgress(sessionId, {
                         ...currentProgress,
                     });
-                    if (percent % 5 < 1 || percent >= 99) {
-                        this.sendWebhook(session, {
-                            sessionId,
-                            status: 'encoding',
-                            progress: percent,
-                            message: `Encoding: ${percent}% complete`,
-                        }).catch(() => {});
-                    }
                 },
             });
 
@@ -197,52 +250,64 @@ export class EncodeService {
                 throw pipeline.error;
             }
 
-            // Drain remaining segments + finalize byte-range chunks
+            // FFmpeg's own progress reporting stops a hair short often enough
+            // that the bar sits at 98% for the whole finalize stretch. FFmpeg
+            // has returned, so encoding is provably over — pinned before the
+            // first phase is reported, or the drain gets captioned under a bar
+            // still claiming to be mid-encode.
+            currentProgress.encoding = 100;
+
+            // Drain remaining segments + finalize byte-range chunks.
+            //
+            // Reported, because this is the first thing that happens after the
+            // bar reaches 100% and it is not instant: byte-range consolidation
+            // rewrites playlists and can still be uploading. Measuring the
+            // post-drain steps without it left the earliest part of the wait
+            // unaccounted for.
+            reportPhase('draining');
             await pipeline.drain();
 
             // Playlist post-processing (must happen after drain rewrites byte-range playlists)
             if (encryptionEnabled) {
+                reportPhase('finalising-playlists');
                 await this.encryptionService.injectKeyTagsIntoPlaylists(
                     outputDir,
-                    session.config.encryption!.keyUrl!,
+                    session.config.encryption?.keyUrl ??
+                        LUMINARY_KEY_PLACEHOLDER_URI,
                     encryptionIV!
                 );
             }
 
-            // Generate thumbnails
+            // Pack the ingest-time thumbs into delivered sprite sheets.
+            //
+            // Nothing is decoded from the source here — the frames were sampled
+            // once at ingest, and packing lays out whichever of them the output
+            // timeline keeps. Which is why `session.config.thumbnails !== false`
+            // now gates only the pack and its S3 delivery: the individual thumbs
+            // are generated at ingest regardless, because the trim UI's
+            // filmstrip needs them whether or not the output ships a storyboard.
+            // The flag's meaning — "no thumbnails in the output" — is unchanged.
             let thumbnailsVttRelPath: string | undefined;
             if (
                 session.encodeConfig.type === 'video' &&
                 session.config.thumbnails !== false
             ) {
+                // This used to be the expensive one — a fresh FFmpeg pass over
+                // the finished output, measured at 114.7s of a 125s encode. It
+                // now lays out frames sampled once at ingest and decodes
+                // nothing, so it is reported for completeness rather than
+                // because anyone will be left waiting on it.
+                reportPhase('thumbnails');
                 try {
-                    const concatFilePath = join(outputDir, 'concat.txt');
-                    const hasConcatFile = existsSync(concatFilePath);
-                    const trimmedDuration = session.encodeConfig.trimSegments
-                        ?.length
-                        ? session.encodeConfig.trimSegments.reduce(
-                              (sum, s) => sum + (s.outSec - s.inSec),
-                              0
-                          )
-                        : undefined;
-
                     const thumbResult =
-                        await this.thumbnailService.generateThumbnails({
+                        await this.thumbnailService.packForDelivery({
+                            sessionId,
                             inputPath: session.filePath!,
                             outputDir,
-                            duration:
-                                trimmedDuration ??
-                                session.probeResult?.format?.duration ??
-                                0,
-                            sourceWidth:
-                                session.probeResult?.videoTracks?.[0]?.width ??
-                                1920,
-                            sourceHeight:
-                                session.probeResult?.videoTracks?.[0]?.height ??
-                                1080,
-                            concatFilePath: hasConcatFile
-                                ? concatFilePath
-                                : undefined,
+                            sourceDuration:
+                                session.probeResult?.format?.duration ?? 0,
+                            trimSegments: session.encodeConfig.trimSegments,
+                            videoTracks: session.probeResult?.videoTracks,
                         });
                     if (thumbResult) {
                         thumbnailsVttRelPath = thumbResult.vttRelativePath;
@@ -261,31 +326,82 @@ export class EncodeService {
             // Works for both video and audio-only encodes; respects trim concat.
             // Non-fatal: a missing waveform just means the client won't render it.
             if ((session.probeResult?.audioTracks?.length ?? 0) > 0) {
+                reportPhase('waveform');
                 try {
                     const concatFilePath = join(outputDir, 'concat.txt');
                     const hasConcatFile = existsSync(concatFilePath);
                     const outputSidecarPath = join(outputDir, 'waveform.json');
-                    const cachePath =
-                        this.waveformService.cachePath(sessionId);
+                    // This sidecar describes the delivered media, whose t=0 is
+                    // the source's t=alignmentOffset. The session cache
+                    // describes the source, for a trim UI that scrubs the
+                    // source preview — the two are the same timeline only when
+                    // nothing was seeked past, so any offset at all rules the
+                    // cache out and the peaks are recomputed against the head
+                    // the encode actually kept.
+                    //
+                    // Read rather than copied: the cache outlives a restart, so
+                    // a sidecar from before the peaks were aligned to the
+                    // timeline can still be sitting there, and copying the file
+                    // whole is exactly the path that would not notice.
+                    const alignmentOffset = encodeResult.alignmentOffset;
+                    const cached =
+                        hasConcatFile || alignmentOffset > 0
+                            ? null
+                            : await readCachedWaveform(
+                                  this.waveformService.cachePath(sessionId)
+                              );
 
-                    if (!hasConcatFile && existsSync(cachePath)) {
+                    if (cached) {
                         // Upload-time prime already produced peaks for this
                         // exact source timeline. Reuse instead of running
                         // ffmpeg a second time.
-                        await copyFile(cachePath, outputSidecarPath);
+                        await writeFile(
+                            outputSidecarPath,
+                            JSON.stringify(cached)
+                        );
                         this.logger.log(
                             `Reused cached waveform sidecar for session ${sessionId}`
                         );
                     } else {
+                        // A trimmed encode's timeline is the stitched concat
+                        // clock, so the span the peaks have to cover is the
+                        // segments' summed length, not the source's duration —
+                        // measured from the in-points buildConcatFile actually
+                        // wrote, which are clamped to the alignment offset. A
+                        // range starting inside the head contributes only what
+                        // survives that clamp, and taking it at face value
+                        // would have apad make up the difference in silence the
+                        // encode never wrote.
+                        const durationSec = hasConcatFile
+                            ? (session.encodeConfig.trimSegments ?? []).reduce(
+                                  (total, segment) =>
+                                      total +
+                                      Math.max(
+                                          0,
+                                          segment.outSec -
+                                              Math.max(
+                                                  segment.inSec,
+                                                  alignmentOffset
+                                              )
+                                      ),
+                                  0
+                              )
+                            : Math.max(
+                                  0,
+                                  (session.probeResult?.format?.duration ?? 0) -
+                                      alignmentOffset
+                              );
                         const peaks =
                             await this.waveformService.generateWaveform({
                                 inputPath: session.filePath!,
                                 concatFilePath: hasConcatFile
                                     ? concatFilePath
                                     : undefined,
+                                durationSec,
+                                startOffsetSec: alignmentOffset,
                             });
                         const payload = {
-                            version: 1,
+                            version: WAVEFORM_SIDECAR_VERSION,
                             sampleRate: 8000,
                             numPeaks: peaks.length,
                             peaks,
@@ -305,41 +421,71 @@ export class EncodeService {
                 }
             }
 
-            // Upload remaining files (playlists, thumbnails, master.m3u8)
-            this.sessionService.updateStatus(sessionId, 'uploading_to_s3');
-            this.sessionService.updateProgress(sessionId, 0);
-            await this.sendWebhook(session, {
-                sessionId,
-                status: 'uploading_to_s3',
-                progress: 0,
-                message: 'Uploading playlists and thumbnails to S3',
-            });
+            // Encrypt the text assets — playlists and VTT sidecars — last.
+            //
+            // Strictly after everything that reads or rewrites a playlist:
+            // the pipeline drain (byte-range packing rewrites media
+            // playlists), key-tag injection, and thumbnail VTT generation.
+            // Anything moved below this line would be parsing ciphertext.
+            //
+            // Segments went to S3 as they were produced and are already
+            // AES-128 encrypted; the text assets only leave in
+            // `uploadRemainingFiles`, immediately below, so this is the last
+            // moment they exist in plaintext anywhere.
+            //
+            // One decision, not two: encrypting the segments and leaving the
+            // playlists, chapters and subtitles beside them in the clear
+            // protects very little, so this follows `enabled` unless a caller
+            // explicitly opts out for a player that cannot decrypt playlists.
+            if (
+                encryptionEnabled &&
+                session.config.encryption?.encryptPlaylists !== false
+            ) {
+                reportPhase('encrypting-playlists');
+                await this.encryptionService.encryptTextAssets(
+                    outputDir,
+                    encryptionKey!
+                );
+            }
 
-            await pipeline.uploadRemainingFiles(outputDir);
+            // Upload remaining files (playlists, thumbnails, master.m3u8).
+            //
+            // The upload has a phase of its own — it reports real per-file
+            // progress below, and the S3 bar restarts from 0 for it, because
+            // what that bar counted until now was segments and this is a
+            // different set of files. The caption is what stops the reset
+            // reading as work being lost.
+            //
+            // Set before the status flips, not after: leaving the previous
+            // step's phase in place for even one event would caption the
+            // upload with whatever ran before it, which is the thing this
+            // caption exists to prevent.
+            finishPhase();
+            currentProgress.phase = 'uploading-playlists';
+            currentProgress.uploading = 0;
+            this.sessionService.updatePipelineProgress(sessionId, {
+                ...currentProgress,
+            });
+            this.sessionService.updateStatus(sessionId, 'uploading_to_s3');
+
+            await pipeline.uploadRemainingFiles(outputDir, {
+                onFileProgress: (done, total) => {
+                    currentProgress.uploading =
+                        total > 0 ? Math.round((done / total) * 100) : 100;
+                    this.sessionService.updatePipelineProgress(sessionId, {
+                        ...currentProgress,
+                    });
+                },
+            });
 
             // Collect all uploaded keys
             const allKeys = pipeline.keys;
 
-            // Resolve master playlist and angle playlists
-            const anglePlaylistsWithKeys = encodeResult.anglePlaylists.map(
-                (ap) => {
-                    const key =
-                        allKeys.find(
-                            (k) => k.split('/').pop() === ap.filename
-                        ) ?? '';
-                    return { name: ap.name, key };
-                }
-            );
-
-            const masterPlaylistKey =
+            // The encode writes a single master playlist — angles included.
+            const effectiveMasterPlaylist =
                 allKeys.find(
                     (k) => k.split('/').pop() === encodeResult.masterPlaylist
                 ) ?? '';
-
-            const effectiveMasterPlaylist =
-                anglePlaylistsWithKeys.length > 0
-                    ? anglePlaylistsWithKeys[0].key
-                    : masterPlaylistKey;
 
             const thumbnailsVttKey = thumbnailsVttRelPath
                 ? allKeys.find((k) => k.endsWith(thumbnailsVttRelPath!))
@@ -349,9 +495,6 @@ export class EncodeService {
                 sessionId,
                 allKeys,
                 effectiveMasterPlaylist,
-                anglePlaylistsWithKeys.length > 0
-                    ? anglePlaylistsWithKeys
-                    : undefined,
                 thumbnailsVttKey,
                 encodeResult.segmentFormat,
                 encryptionKey ? encryptionKey.toString('hex') : undefined
@@ -367,57 +510,17 @@ export class EncodeService {
                 .removePreview(sessionId)
                 .catch((err: Error) => {
                     this.logger.warn(
-                        `Could not drop source storyboard for ${sessionId}: ${err.message}`,
+                        `Could not drop source storyboard for ${sessionId}: ${err.message}`
                     );
                 });
-
-            await this.sendWebhook(session, {
-                sessionId,
-                status: 'completed',
-                progress: 100,
-                message: 'Encoding and upload complete',
-                files: allKeys,
-                masterPlaylist: effectiveMasterPlaylist,
-                anglePlaylists:
-                    anglePlaylistsWithKeys.length > 0
-                        ? anglePlaylistsWithKeys
-                        : undefined,
-                thumbnailsVtt: thumbnailsVttKey,
-                encryptionKeyHex: encryptionKey
-                    ? encryptionKey.toString('hex')
-                    : undefined,
-                probeResult: session.probeResult ?? undefined,
-            });
 
             this.logger.log(`Session ${sessionId} completed successfully`);
         } catch (err) {
             const errorMsg = (err as Error).message || 'Unknown error';
             this.logger.error(`Session ${sessionId} failed: ${errorMsg}`);
             this.sessionService.setFailed(sessionId, errorMsg);
-            await this.sendWebhook(session, {
-                sessionId,
-                status: 'failed',
-                error: errorMsg,
-                message: 'Encoding failed',
-            });
         } finally {
             await this.cleanupSessionFiles(sessionId);
-        }
-    }
-
-    private async sendWebhook(
-        session: Session,
-        payload: WebhookPayloadDto
-    ): Promise<void> {
-        if (!session.config.webhook) return;
-        try {
-            await this.webhookService.send(
-                session.config.webhook.url,
-                session.config.webhook.sessionToken,
-                payload
-            );
-        } catch {
-            // Webhook errors are already logged inside WebhookService
         }
     }
 
@@ -453,7 +556,10 @@ export class EncodeService {
      */
     private async diskShortfall(session: Session): Promise<string | null> {
         const duration = session.probeResult?.format?.duration ?? 0;
-        const needed = estimateOutputBytes(session.encodeConfig ?? {}, duration);
+        const needed = estimateOutputBytes(
+            session.encodeConfig ?? {},
+            duration
+        );
         if (needed <= 0) return null;
 
         const free = await freeBytes(this.workDir);

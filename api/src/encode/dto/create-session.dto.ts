@@ -9,7 +9,6 @@ import {
 import { Expose, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { S3ConfigDto } from './s3-config.dto.js';
-import { WebhookConfigDto } from './webhook-config.dto.js';
 import { EncryptionConfigDto } from './encryption-config.dto.js';
 
 export class CreateSessionDto {
@@ -49,6 +48,23 @@ export class CreateSessionDto {
 
     @ApiPropertyOptional({
         description:
+            'Max size in MB of a byte-range file in the audio chain. The audio chain ' +
+            'carries every audio rendition of the encode, so the timeline a chunk ' +
+            'covers is cap / (audio stream count x bytes per minute per stream): ' +
+            '50 MB over 3 stereo streams at ~1.4 MB/min is around 12 minutes, and ' +
+            'over a 15-stream multi-language ladder around 2. Raise it for a wide ' +
+            'ladder, or its boundaries come round several times an hour. Defaults to 50.',
+        default: 50,
+        example: 50,
+    })
+    @IsNumber()
+    @IsOptional()
+    @Min(1)
+    @Expose()
+    audioByteRangeMaxFileSizeMB?: number;
+
+    @ApiPropertyOptional({
+        description:
             'Generate WebVTT thumbnail sprites for scrubbing preview. Only applies to video encodes. Defaults to true.',
         default: true,
     })
@@ -65,17 +81,6 @@ export class CreateSessionDto {
     @Type(() => S3ConfigDto)
     @Expose()
     s3: S3ConfigDto;
-
-    @ApiPropertyOptional({
-        description:
-            'Webhook configuration for status callbacks. If omitted, no webhooks are sent — use the polling endpoint instead.',
-        type: WebhookConfigDto,
-    })
-    @IsOptional()
-    @ValidateNested()
-    @Type(() => WebhookConfigDto)
-    @Expose()
-    webhook?: WebhookConfigDto;
 
     @ApiPropertyOptional({
         description:

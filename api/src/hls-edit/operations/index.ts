@@ -15,9 +15,19 @@ export interface OperationContext {
     master: HlsParsedMaster;
     s3EtagService: S3EtagService;
     writtenKeys: string[];
+    /**
+     * AES-128 session key hex, when the session's text assets are LMCENC01
+     * encrypted. Handlers that write sidecars of their own (subtitle VTTs)
+     * must encrypt them with it — the master they are being referenced from
+     * is already encrypted, and a plaintext sidecar beside it undoes the point.
+     */
+    keyHex?: string;
 }
 
-export type OperationHandler = (op: HlsOperationDto, ctx: OperationContext) => Promise<void>;
+export type OperationHandler = (
+    op: HlsOperationDto,
+    ctx: OperationContext
+) => Promise<void>;
 
 /**
  * Registry of supported mutation types. Each handler is a stub in this
@@ -27,20 +37,31 @@ export type OperationHandler = (op: HlsOperationDto, ctx: OperationContext) => P
  */
 export const OPERATION_HANDLERS: Record<string, OperationHandler> = {
     upsertSubtitle: async () => {
-        throw new NotImplementedException('upsertSubtitle is not yet implemented');
+        throw new NotImplementedException(
+            'upsertSubtitle is not yet implemented'
+        );
     },
     removeSubtitle: async () => {
-        throw new NotImplementedException('removeSubtitle is not yet implemented');
+        throw new NotImplementedException(
+            'removeSubtitle is not yet implemented'
+        );
     },
     upsertChapters: async () => {
-        throw new NotImplementedException('upsertChapters is not yet implemented');
+        throw new NotImplementedException(
+            'upsertChapters is not yet implemented'
+        );
     },
     removeChapters: async () => {
-        throw new NotImplementedException('removeChapters is not yet implemented');
+        throw new NotImplementedException(
+            'removeChapters is not yet implemented'
+        );
     },
 };
 
-export async function applyOperation(op: HlsOperationDto, ctx: OperationContext): Promise<void> {
+export async function applyOperation(
+    op: HlsOperationDto,
+    ctx: OperationContext
+): Promise<void> {
     const handler = OPERATION_HANDLERS[op.type];
     if (!handler) {
         throw new BadRequestException(`Unknown HLS operation type: ${op.type}`);

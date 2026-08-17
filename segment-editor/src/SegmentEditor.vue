@@ -47,6 +47,16 @@ interface Props {
     showList?: boolean;
     /** Show the keyboard help button. */
     showHelp?: boolean;
+    /**
+     * Show the built-in "Clear All" button in the controls row.
+     *
+     * Default true, so hosts that have always had it keep it — `subtitles` mode
+     * in particular, where the editor is the only place the cues live. Set false
+     * when the host puts a clear of its own somewhere the things it deletes are
+     * visible; pair it with the exposed `requestClearAll()` so the confirmation
+     * is still this component's.
+     */
+    showClearAll?: boolean;
     /** Max/min zoom (1 = fit to duration, 2 = 2× zoom, ...). */
     maxZoom?: number;
     /** Compact NLE-style hint row below playback controls (In/Out keys, jog, zoom). */
@@ -105,6 +115,7 @@ const props = withDefaults(defineProps<Props>(), {
     showPlaybackControls: true,
     showList: true,
     showHelp: true,
+    showClearAll: true,
     showTimeline: true,
     maxZoom: 40,
     isPlaying: false,
@@ -1026,6 +1037,8 @@ function onKeyDown(e: KeyboardEvent) {
         }
         case 'j': case 'J': { e.preventDefault(); return stepSeek(-1, 10); }
         case 'l': case 'L': { e.preventDefault(); return stepSeek(1, 10); }
+        case 'Home': { e.preventDefault(); return emitSeek(0, true); }
+        case 'End': { e.preventDefault(); return emitSeek(props.duration, true); }
         case 'k': case 'K': { if (props.onPlayPause) { e.preventDefault(); props.onPlayPause(); } return; }
         case ',': { if (props.fps > 0) { e.preventDefault(); return frameStep(-1); } return; }
         case '.': { if (props.fps > 0) { e.preventDefault(); return frameStep(1); } return; }
@@ -1040,6 +1053,21 @@ function onKeyDown(e: KeyboardEvent) {
             return;
         }
         case 'Delete': case 'Backspace': {
+            if (selectedIds.value.size > 0) {
+                e.preventDefault();
+                deleteSelected();
+            }
+            return;
+        }
+        // ⌘/Ctrl + X, the binding a user actually reaches for to cut. Delete
+        // and Backspace were the only ones bound, which made a shortcut that
+        // exists feel like one that does not. Same action as the Cut button, so
+        // it is subject to the same rule: nothing selected, nothing happens.
+        //
+        // Below the typing guard on purpose — in a chapter title, ⌘X is the
+        // input's own cut and stays that way.
+        case 'x': case 'X': {
+            if (!(e.metaKey || e.ctrlKey)) return;
             if (selectedIds.value.size > 0) {
                 e.preventDefault();
                 deleteSelected();
@@ -1366,14 +1394,25 @@ function canObserveResize(): boolean {
 /** Resolved once per colour change: reading a CSS variable forces style recalc. */
 let waveformColorCache: { key: string; value: string } | null = null;
 
+/**
+ * Peaks are drawn white over the filmstrip, which carries a dark gradient along
+ * its bottom for exactly that purpose. An audio source has no frames, so that
+ * gradient is not there either and white peaks all but vanished into a light
+ * track. Without a strip behind them they take a colour that contrasts with the
+ * track itself, which means it has to follow the theme rather than being fixed.
+ */
 function resolveWaveformColor(): string {
     if (props.waveformColor) return props.waveformColor;
     const rootEl = rootElRef.value || document.documentElement;
-    const key = rootEl.className;
+    const overFilmstrip = thumbnailStripTiles.value.length > 0;
+    const variable = overFilmstrip ? '--se-waveform' : '--se-waveform-bare';
+    // The variant is part of the key: the same element resolves two different
+    // colours depending on what is behind the canvas.
+    const key = `${rootEl.className}|${variable}`;
     if (waveformColorCache?.key === key) return waveformColorCache.value;
     const value =
-        getComputedStyle(rootEl).getPropertyValue('--se-waveform').trim() ||
-        'rgba(255,255,255,0.35)';
+        getComputedStyle(rootEl).getPropertyValue(variable).trim() ||
+        (overFilmstrip ? 'rgba(255,255,255,0.35)' : 'rgba(51,85,125,0.72)');
     waveformColorCache = { key, value };
     return value;
 }
@@ -1483,6 +1522,19 @@ watch([viewStart, visibleSpan], () => {
     scheduleWaveformDraw();
 });
 
+// The peaks' colour depends on whether the filmstrip is behind them, so the
+// canvas has to be repainted when the strip appears or goes away — thumbnails
+// arrive well after the waveform on a source that is still being sampled, and
+// without this the peaks kept the colour chosen for a bare track underneath a
+// filmstrip that had since loaded.
+watch(
+    () => thumbnailStripTiles.value.length > 0,
+    () => {
+        waveformColorCache = null;
+        scheduleWaveformDraw();
+    },
+);
+
 
 onMounted(() => {
     rafId = requestAnimationFrame(tick);
@@ -1535,6 +1587,17 @@ defineExpose({
     addSegment: addSegmentAtPlayhead,
     removeSegment,
     clearAll,
+    /**
+     * Ask to clear everything, showing this component's own confirmation.
+     *
+     * `clearAll` deletes outright, which is right for a host that has already
+     * asked. A host that has merely moved the *button* somewhere better should
+     * not have to rebuild the sheet that goes with it — and two confirmations
+     * for one destructive action is how they end up wording it differently.
+     */
+    requestClearAll: () => {
+        if (segments.value.length > 0) confirmClearOpen.value = true;
+    },
     undo,
     redo,
     zoomTo,
@@ -1604,14 +1667,14 @@ defineExpose({
                     type="button"
                     class="se-btn se-btn--danger"
                     :disabled="!hasSelection"
-                    :title="hasSelection ? 'Cut the selected range · Delete — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
+                    :title="hasSelection ? 'Cut the selected range · Delete or ⌘/Ctrl + X — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
                     @click="deleteSelected"
                 >
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
                     Cut
                 </button>
                 <button
-                    v-else-if="segments.length > 0"
+                    v-else-if="showClearAll && segments.length > 0"
                     type="button"
                     class="se-btn se-btn--danger"
                     @click="confirmClearOpen = true"
@@ -1634,10 +1697,6 @@ defineExpose({
                     title="Redo"
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
                 <slot name="toolbar-before-clear" />
-                <span v-if="pendingInSec !== null" class="se-pending">
-                    In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
-                    · <span class="se-pending-cancel">Esc cancels</span>
-                </span>
                 <label v-if="showTimeline" class="se-zoom">
                     Zoom
                     <input
@@ -1818,10 +1877,21 @@ defineExpose({
                     :style="draftRangeStyle"
                     aria-hidden="true"
                 />
+                <!--
+                    The bar is positioned by its left edge, so at 100% it sat
+                    entirely past the track's right edge and was clipped — the
+                    playhead vanished exactly at the end of playback. The
+                    translateX slides it back by its own width in proportion to
+                    its position: flush left at 0%, flush right at 100%, and
+                    imperceptibly offset in between.
+                -->
                 <div
                     v-if="playheadPercent >= 0 && playheadPercent <= 100"
                     class="se-playhead"
-                    :style="{ left: `${playheadPercent}%` }"
+                    :style="{
+                        left: `${playheadPercent}%`,
+                        transform: `translateX(-${playheadPercent}%)`,
+                    }"
                 />
                 <div
                     v-if="snapGuide !== null"
@@ -2027,14 +2097,14 @@ defineExpose({
                     type="button"
                     class="se-btn se-btn--danger"
                     :disabled="!hasSelection"
-                    :title="hasSelection ? 'Cut the selected range · Delete — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
+                    :title="hasSelection ? 'Cut the selected range · Delete or ⌘/Ctrl + X — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
                     @click="deleteSelected"
                 >
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
                     Cut
                 </button>
                 <button
-                    v-else-if="segments.length > 0"
+                    v-else-if="showClearAll && segments.length > 0"
                     type="button"
                     class="se-btn se-btn--danger"
                     @click="confirmClearOpen = true"
@@ -2056,10 +2126,12 @@ defineExpose({
                     @click="redo"
                     title="Redo"
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
-                <span v-if="pendingInSec !== null" class="se-pending">
-                    In {{ formatTime(pendingInSec) }} — Mark Out <span class="se-kbd">O</span> or <span class="se-kbd">]</span>
-                    · <span class="se-pending-cancel">Esc cancels</span>
-                </span>
+                <!--
+                    No textual "In … — Mark Out …" hint here: the pending
+                    in-point is already drawn on the track itself, and the ?
+                    overlay documents the I / O / Esc keys. The banner restated
+                    both in the toolbar and mostly read as noise.
+                -->
             </div>
 
             <div v-if="showToolbar" class="se-controls-bar__zoom">
@@ -2106,14 +2178,24 @@ defineExpose({
             </div>
 
             <!-- When the header is suppressed, the keyboard-shortcuts button moves to the
-                 far right of the controls bar (so users still have a way to open help). -->
-            <button
-                v-if="showHelp && !showHeader"
-                type="button"
-                class="se-btn se-btn--icon se-controls-bar__help"
-                title="Keyboard shortcuts (?)"
-                @click="helpOpen = !helpOpen"
-            ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
+                 far right of the controls bar (so users still have a way to open help).
+                 `controls-end` puts a host's own icon buttons in the same cluster: the bar
+                 is a three-column grid, so anything rendered as its own grid item lands in
+                 a different cell and reads as unrelated to the help button rather than
+                 grouped with it. -->
+            <div
+                v-if="(showHelp && !showHeader) || $slots['controls-end']"
+                class="se-controls-bar__end"
+            >
+                <slot name="controls-end" />
+                <button
+                    v-if="showHelp && !showHeader"
+                    type="button"
+                    class="se-btn se-btn--icon se-controls-bar__help"
+                    title="Keyboard shortcuts (?)"
+                    @click="helpOpen = !helpOpen"
+                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
+            </div>
         </div>
 
         <div
@@ -2303,12 +2385,13 @@ defineExpose({
                         <dt>← / →</dt><dd>Step 1 second back / forward</dd>
                         <dt>1 / 2 / 3 + arrow</dt><dd>Step 10s / 30s / 60s</dd>
                         <dt>J / L</dt><dd>Step 10s back / forward</dd>
+                        <dt>Home / End</dt><dd>Jump to start / end</dd>
                         <dt v-if="fps > 0">, / .</dt><dd v-if="fps > 0">Step one frame ({{ fps }} fps)</dd>
                         <dt>I</dt><dd>Mark In at playhead (Resolve-style)</dd>
                         <dt>O</dt><dd>Mark Out at playhead</dd>
                         <dt>[ / ]</dt><dd>Mark In / Mark Out (alternate)</dd>
                         <dt>Alt + ← / →</dt><dd>Nudge nearest edge of selected segment</dd>
-                        <dt>Delete</dt><dd>Remove selected segment(s)</dd>
+                        <dt>Delete / ⌘ / Ctrl + X</dt><dd>Remove selected segment(s)</dd>
                         <dt>⌘ / Ctrl + Z</dt><dd>Undo</dd>
                         <dt>⌘ / Ctrl + Shift + Z</dt><dd>Redo</dd>
                         <dt>+ / −</dt><dd>Zoom in / out (0 resets)</dd>

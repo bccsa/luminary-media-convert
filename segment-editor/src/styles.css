@@ -10,6 +10,20 @@
     --se-text-danger: rgb(220 38 38);
     --se-track: rgb(241 245 249);
     --se-track-hover: rgb(224 242 254);
+    /*
+     * Button surfaces, separate from `--se-track`.
+     *
+     * The two were one token, so the controls under the timeline wore the
+     * timeline's own fill — in the dark theme a blue-950 that read as a
+     * component borrowed from another app next to the host's slate buttons.
+     * `--se-track` still paints the timeline and the scrollbar, which should
+     * look like the surface they are; these paint the things you click.
+     */
+    --se-btn-bg: rgb(248 250 252);
+    --se-btn-bg-hover: rgb(241 245 249);
+    /* Filled play/pause: sky-600 under white, darkening on hover. */
+    --se-btn-accent-fg: #ffffff;
+    --se-btn-accent-hover: rgb(3 105 161);
     --se-accent: rgb(2 132 199);
     --se-accent-soft: rgba(14, 165, 233, 0.14);
     --se-accent-active: rgba(14, 165, 233, 0.28);
@@ -22,7 +36,16 @@
     --se-segment-label: #ffffff;
     --se-segment-label-bg: rgb(15 23 42 / 0.78);
     --se-ruler-tick: rgba(100, 116, 139, 0.28);
+    /* Over the filmstrip, against its dark bottom gradient. */
     --se-waveform: rgba(255, 255, 255, 0.85);
+    /* On the bare track — an audio source has no frames, so the gradient that
+       made white peaks legible is not there either. On such a timeline the
+       waveform is the only content, so it carries colour rather than sitting
+       back in grey: a desaturated slate-blue, kin to the app's sky without
+       being it. The distance matters — the playhead is sky-700 and marked
+       segments wash in sky at 14%, and an accent-coloured waveform would blur
+       both the playhead during playback and the edge of a selection. */
+    --se-waveform-bare: rgba(51, 85, 125, 0.72);
     --se-list-hover: rgba(14, 165, 233, 0.08);
     --se-list-selected: rgba(14, 165, 233, 0.12);
     --se-kbd-bg: rgb(250 250 250);
@@ -59,6 +82,15 @@ html.dark .se-root {
     --se-text-danger: #f87171;
     --se-track: #172554;
     --se-track-hover: #1e3a5f;
+    /* slate-800 / slate-700: what the host app paints its own buttons with,
+       which is the point — see the light block for why these are not
+       `--se-track`. */
+    --se-btn-bg: rgb(30 41 59);
+    --se-btn-bg-hover: rgb(51 65 85);
+    /* The dark accent is a light sky, so the glyph on top of it is near-black
+       rather than white — white on sky-400 is barely legible. */
+    --se-btn-accent-fg: rgb(2 6 23);
+    --se-btn-accent-hover: #7dd3fc;
     --se-accent: #38bdf8;
     --se-accent-soft: rgba(56, 189, 248, 0.2);
     --se-accent-active: rgba(56, 189, 248, 0.38);
@@ -72,6 +104,10 @@ html.dark .se-root {
     --se-segment-label-bg: rgb(2 6 23 / 0.82);
     --se-ruler-tick: rgba(148, 163, 184, 0.22);
     --se-waveform: rgba(255, 255, 255, 0.85);
+    /* Dark theme: the same slate-blue read from the other side — the peaks
+       lighten instead of darkening, and stay short of the white used over the
+       filmstrip, which glared against a plain background. */
+    --se-waveform-bare: rgba(125, 190, 235, 0.75);
     --se-list-hover: rgba(56, 189, 248, 0.08);
     --se-list-selected: rgba(56, 189, 248, 0.14);
     --se-kbd-bg: rgb(15 23 42 / 0.45);
@@ -222,7 +258,7 @@ html.dark .se-root {
     font-weight: 500;
     font-family: inherit;
     color: var(--se-text);
-    background: var(--se-track);
+    background: var(--se-btn-bg);
     border: 1px solid var(--se-border);
     border-radius: var(--se-radius-sm);
     cursor: pointer;
@@ -232,7 +268,7 @@ html.dark .se-root {
 }
 
 .se-btn:hover:not(:disabled) {
-    background: var(--se-track-hover);
+    background: var(--se-btn-bg-hover);
     border-color: var(--se-border);
 }
 
@@ -273,11 +309,6 @@ html.dark .se-root {
 .se-zoom input[type='range'] {
     width: 96px;
     accent-color: var(--se-accent);
-}
-
-.se-pending {
-    font-size: 0.75rem;
-    color: var(--se-text-warning);
 }
 
 .se-timeline-wrap {
@@ -573,14 +604,24 @@ html.dark .se-root {
     background: var(--se-scrollbar-thumb-hover);
 }
 
+/*
+ * Play/pause is the one control in this bar that leads, so it is filled rather
+ * than outlined.
+ *
+ * It used to be an accent border over an accent wash, which is this library's
+ * own vocabulary for a *toggled-on* state — and play/pause is not a toggle, it
+ * is the primary action. That read as ambiguous against the old navy buttons and
+ * would read as more ambiguous against slate ones, where an outline is the
+ * quietest thing in the row rather than the loudest.
+ */
 .se-btn--playback {
     min-width: 3rem;
     padding: 0.375rem 0.875rem;
     justify-content: center;
     font-size: 1rem;
     border-color: var(--se-accent);
-    background: var(--se-accent-soft);
-    color: var(--se-accent);
+    background: var(--se-accent);
+    color: var(--se-btn-accent-fg);
 }
 
 .se-btn--playback .se-icon {
@@ -588,18 +629,15 @@ html.dark .se-root {
     height: 1.375rem;
 }
 
+/* Own hover, because the generic `.se-btn:hover` would drop it back to a plain
+   button surface mid-press. */
 .se-btn--playback:hover:not(:disabled) {
-    background: var(--se-accent-active);
-    border-color: var(--se-accent);
+    background: var(--se-btn-accent-hover);
+    border-color: var(--se-btn-accent-hover);
 }
 
 .se-kbd--inline {
     margin-left: 0.2rem;
-}
-
-.se-pending-cancel {
-    opacity: 0.75;
-    font-size: 0.6875rem;
 }
 
 .se-shortcuts-strip {
@@ -793,10 +831,21 @@ html.dark .se-root {
     vertical-align: unset;
 }
 
+/*
+ * A readout, not a control — so it should not lead the bar.
+ *
+ * At 1rem/600 against buttons at 0.75rem/500 it was the loudest thing in a row
+ * whose point is the transport. Monospace stays: the digits must not change
+ * width as the playhead moves, or the whole bar twitches. Kept at full
+ * `--se-text` rather than dimmed, because it is still something people read at
+ * a glance; size and weight are what were shouting.
+ *
+ * Any change here belongs to `.se-time-above` too — same readout, other layout.
+ */
 .se-controls-bar__time {
     font-family: var(--se-font-mono);
-    font-size: 1rem;
-    font-weight: 600;
+    font-size: 0.8125rem;
+    font-weight: 500;
     letter-spacing: 0.02em;
     color: var(--se-text);
     flex-shrink: 0;
@@ -856,9 +905,20 @@ html.dark .se-root {
     max-width: min(28rem, calc(100vw - 4rem));
 }
 
-.se-controls-bar__help {
+/*
+ * The end cluster of the controls bar: host-supplied icon buttons sitting with
+ * the keyboard-shortcuts button rather than in a grid cell of their own.
+ */
+.se-controls-bar__end {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
     flex-shrink: 0;
     justify-self: end;
+}
+
+.se-controls-bar__help {
+    flex-shrink: 0;
 }
 
 .se-playback-controls__center {
@@ -912,10 +972,13 @@ html.dark .se-root {
     min-width: 0;
 }
 
+/* The same readout in the layouts that do not use the combined bar (chapters,
+   subtitles). Matched to `.se-controls-bar__time` deliberately — two sizes for
+   one value is how the two layouts drift apart. */
 .se-time-above {
     font-family: var(--se-font-mono);
-    font-size: 0.9375rem;
-    font-weight: 600;
+    font-size: 0.8125rem;
+    font-weight: 500;
     letter-spacing: 0.02em;
     color: var(--se-text);
     margin-bottom: 0.375rem;

@@ -1,95 +1,161 @@
 # Luminary Media Convert
 
-Monorepo containing an open-source HLS/ABR encoding API and a closed-source SaaS platform for multi-user media encoding. The Encoding API runs standalone on GPU-equipped hardware, while the SaaS layer adds user management, API key management, session history, and billing interfaces via a separate service backed by CouchDB.
+A local-only desktop media encoder. It takes a file already on your machine, encodes it to HLS/ABR with FFmpeg (GPU-accelerated where the hardware allows), optionally encrypts it with AES-128, and uploads the result straight to your own S3-compatible storage. Nothing is uploaded to us, because there is no us: the encoder, the UI and the credentials all live on the one machine.
 
-## System Architecture
+It also speaks to the Luminary CMS. A user clicking "upload media" on a post in their browser opens a session on the local encoder; the file is chosen in the desktop app, and the CMS is handed back a playback URL and (when encrypted) the key, over a live event stream.
+
+## Architecture
 
 ```
-                  Web App (SPA)              Admin Panel (SPA)
-                  app/                       admin/
-                  port 5173                  port 5174
-                       |                          |
-            Session token                    JWT (admin-only)
-            (from SaaS)                           |
-                       |   JWT (Auth0)            |
-                       |   for SaaS ──────────────|
-                       v                          v
-                  Encoding API              SaaS Service
-                  api/                      saas/
-                  port 3000                 port 3001
-                  (open source)             (closed source)
-                       ^                     |         ^
-                       |                     |         |
-                  API key (validated    Creates sessions   Key validation
-                  via SaaS webhook)     via master key     webhook
-                       |
-              Third-Party Services
+   Luminary CMS (browser, another origin)          Desktop app (Electron)
+              │                                    ┌──────────────────────────┐
+              │  GET  /api/cms/health              │  main process            │
+              │  POST /api/cms/sessions ──────────►│   • Encoding API (Nest)  │
+              │       (gated by Origin, TOFU)      │   • safeStorage cipher   │
+              │                                    │   • origin dialogs       │
+              │  SSE  /api/sessions/:id/events ◄───│   • ffmpeg / ffprobe     │
+              │       hlsUrl + encryptionKeyHex    │                          │
+                                                   │  renderer = app/dist     │
+                                                   └───────────┬──────────────┘
+                                                               │  local file, by reference
+                                                               ▼
+                                                    S3-compatible storage
+                                                    (the user's own bucket)
 ```
 
-**Encoding API** -- Stateless, open-source encoding service. Accepts master key or webhook-validated API key authentication. Creates sessions, receives file uploads via tus, probes media, encodes to HLS/ABR with FFmpeg (GPU-accelerated when available), uploads output to S3-compatible storage, and delivers status updates via webhooks and SSE. Encrypted HLS playback is handled entirely client-side (no server-side key serving). Has no key store and no `/api/keys` endpoints.
+The API binds to `127.0.0.1` only. The renderer authenticates with a token minted per launch and passed over the preload bridge; a CMS is authorised by its browser Origin, approved once by the user in a native dialog and remembered thereafter.
 
-**SaaS Service** -- Closed-source management layer. Manages users, API keys (client-side generated, hash-only storage), S3 configs (AES-256-GCM encrypted credentials), creates sessions on behalf of web app users (master key), validates API keys via webhook endpoint, stores session history in CouchDB, and exposes admin endpoints. Sessions are tracked from creation through completion with real-time SSE updates. Does not proxy encoding -- clients talk to the Encoding API directly using session tokens.
+## Workspaces
 
-## Monorepo Structure
-
-| Workspace | Description | License | README |
-|-----------|-------------|---------|--------|
-| `api/` | Encoding API -- HLS/ABR encoding service | Apache 2.0 | [api/README.md](api/README.md) |
-| `app/` | Web Application -- Vue 3 SPA for uploading and encoding | Proprietary | [app/README.md](app/README.md) |
-| `admin/` | Admin Panel -- Vue 3 SPA for system administration | Proprietary | [admin/README.md](admin/README.md) |
-| `saas/` | SaaS Service -- User management, API keys, session history | Proprietary | [saas/README.md](saas/README.md) |
-| `encode-config/` | Shared encoding config component and types | Apache 2.0 | [encode-config/README.md](encode-config/README.md) |
-| `tusd/` | Node.js wrapper for the Go tusd binary | MIT | [tusd/README.md](tusd/README.md) |
+| Workspace | Description | README |
+|---|---|---|
+| `api/` | Encoding API — NestJS, embeddable via `createServer()` | [api/README.md](api/README.md) |
+| `app/` | Vue 3 renderer UI | [app/README.md](app/README.md) |
+| `electron/` | Desktop shell, hosts the API in-process, packaging | [electron/bin/README.md](electron/bin/README.md) (ffmpeg binaries) |
+| `cms-mock/` | Dev-only stand-in for the Luminary CMS | [cms-mock/README.md](cms-mock/README.md) |
+| `encode-config/` | Shared encode-config form + types | [encode-config/README.md](encode-config/README.md) |
+| `segment-editor/` | Shared timeline editor (trim / chapters / subtitles) | [segment-editor/README.md](segment-editor/README.md) |
+| `hls/` | Shared HLS parsing, key utilities, angle extraction | — |
 
 ## Prerequisites
 
-- **Node.js** >= 18
-- **FFmpeg** (with `libx264` and `aac`; optional GPU encoders: `h264_nvenc` for NVIDIA, `h264_videotoolbox` for Apple Silicon)
-- **CouchDB** (required for the SaaS Service)
-- **Auth0 account** (required for the web app, admin panel, and SaaS Service)
+- **Node.js** ≥ 18
+- **FFmpeg + ffprobe** on `PATH` for development (with `libx264` and `aac`; `h264_nvenc` for NVIDIA, `h264_videotoolbox` + `scale_vt` for Apple Silicon). Packaged builds ship their own — see [electron/bin/README.md](electron/bin/README.md)
+- An **S3-compatible bucket** to write output to (MinIO, R2, AWS S3, B2, Spaces…)
 
-## Quick Start
+## Quick start
 
 ```bash
-# Install all dependencies (hoisted via npm workspaces)
 npm install
+```
 
-# Start all services in development mode
+### Browser development (fastest loop)
+
+```bash
 npm run dev
 ```
 
-This starts:
+Runs the shared-library watch builds, the API on `http://127.0.0.1:3000` (Swagger at `/api/docs`), and the web client on `http://localhost:5173`.
 
-| Service | URL |
-|---------|-----|
-| Encoding API | `http://localhost:3000` (docs at `/api/docs`) |
-| SaaS Service | `http://localhost:3001` (docs at `/saas/docs`) |
-| Web Application | `http://localhost:5173` |
-| Admin Panel | `http://localhost:5174` |
-| encode-config | Watch build (library mode) |
-
-## Auth0 Post Login Action
-
-Auth0 does not include the user's email in access tokens by default. The SaaS Service needs the email to match Auth0 accounts to CouchDB user documents. You must configure a Post Login Action in Auth0 — see [SaaS Service README](saas/README.md#auth0-post-login-action-required) for full setup instructions.
-
-## Seed Admin User
-
-Before using the admin panel, seed an initial admin user in CouchDB:
+`api/.env`:
 
 ```bash
-npm run seed:admin -- --email admin@example.com --name "Admin User"
+MASTER_API_KEY=dev-token
+CMS_ALLOWED_ORIGINS=http://localhost:5199
 ```
 
-The admin user's Auth0 account is linked automatically on first login via email matching.
+`app/.env`:
 
-The seed CLI runs from compiled JavaScript (`saas/dist/scripts/seed-admin.js`), so it works inside the production Docker image (`saas/Dockerfile`) where devDependencies are pruned. From a fresh checkout, run `npm -w saas run build` once before invoking `seed:admin`.
+```bash
+VITE_API_URL=http://127.0.0.1:3000
+VITE_API_TOKEN=dev-token
+```
+
+There is no preload bridge in a plain browser, so a dropped file cannot be resolved to a real path — the local-file flow needs the Electron shell.
+
+### Desktop development
+
+```bash
+npm run dev:electron
+```
+
+Builds the libraries and the API, then runs Vite and Electron together.
+
+> If the app starts and no window ever appears, check for `ELECTRON_RUN_AS_NODE=1` in your environment (VS Code terminals and some agent runners set it) and `unset` it. With it set, `electron .` runs as plain Node.
+
+### Testing the CMS flow
+
+```bash
+npm -w cms-mock run dev     # http://localhost:5199
+```
+
+A dev-only app that drives the real handshake against the running encoder: health check, `POST /api/cms/sessions`, an SSE console that highlights the first event carrying `hlsUrl` + `encryptionKeyHex`, and a playback check that lists video angles, renders the extracted single-angle and audio-only playlists, and previews the `luminary://key` substitution a player performs. It runs on a different origin on purpose, so origin gating and CORS are genuinely exercised. Defaults assume a local MinIO with an anonymously readable `media` bucket.
+
+## Packaging
+
+Each command builds the encoder it ships first, then the workspaces, then the app —
+so a clean clone produces a complete artifact with no separate steps.
+
+```bash
+npm -w electron run dist:mac            # dmg + zip, arm64 and x64
+npm -w electron run dist:win            # NSIS installer, x64 — needs a Windows machine
+npm -w electron run dist:win-portable   # portable zip, x64 — builds on macOS too
+npm -w electron run pack                # unpacked directory, for inspection
+npm -w electron run verify-package      # assert every packaged app can actually encode
+```
+
+Artifacts land in `electron/release/`, named `<product>-<version>-<mac|win>-<arch>.<ext>`.
+Neither the artifacts nor the ffmpeg binaries are in the repository.
+
+### What each build needs
+
+| Target | Host | Prerequisites |
+|---|---|---|
+| macOS dmg/zip | macOS | `brew install nasm pkg-config gnupg` (plus the Xcode CLT) |
+| Windows portable zip | macOS or Linux | the above, plus `brew install mingw-w64 cmake llvm` |
+| Windows NSIS installer | Windows | a Windows machine, or Wine — which is why the portable target exists |
+
+**LLVM is not optional for the Windows build.** `--enable-cuda-llvm` gives `scale_cuda`
+for the NVIDIA path and needs a clang with the NVPTX backend, which Apple's clang does
+not have. Put it first on `PATH`:
+
+```bash
+PATH="/opt/homebrew/opt/llvm/bin:$PATH" npm -w electron run dist:win-portable
+```
+
+The ffmpeg build itself is [`ffmpeg-build/README.md`](ffmpeg-build/README.md) — why we
+build rather than download, what goes in, and the GPL position. `electron/bin/README.md`
+covers where the binaries land and their licences.
+
+### What is signed, and what a user sees
+
+Builds are **unsigned** — there is no Developer ID and no Authenticode certificate, so
+there is no auto-update either. macOS bundles are still *ad-hoc* signed by
+`electron/build/after-pack.cjs`, without which a downloaded copy is refused outright as
+"damaged". On macOS 15 and later, opening an unsigned app takes System Settings →
+Privacy & Security → **Open Anyway**; right-click → Open no longer works, Apple removed
+it. Windows shows a SmartScreen warning. The portable Windows build additionally carries
+the stock Electron icon, because stamping it needs Wine.
+
+See [Todo.md](Todo.md) for signing, notarization and auto-update.
+
+## Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Libraries (watch) + API + web client |
+| `npm run dev:electron` | Libraries (watch) + API build + web client + Electron |
+| `npm -w api run dev` | API dev server with watch |
+| `npm -w api run build` / `test` / `test:e2e` | Build and test the API |
+| `npm -w app run dev` / `build` / `test` | Web client |
+| `npm -w cms-mock run dev` | CMS mock on port 5199 |
+| `npm -w electron run dev` / `dist:mac` / `dist:win` / `pack` | Desktop shell |
+| `npm -w electron run dist:win-portable` | Portable Windows zip, buildable on macOS |
+| `npm -w {hls,encode-config,segment-editor,player-core,player-web} run build` / `dev` / `test` | Shared libraries |
 
 ## Documentation
 
-- [Encoding API Reference](api/README.md) -- Full API documentation, authentication, webhooks, encoding workflow
-- [Web Application](app/README.md) -- Client setup and environment variables
-- [Admin Panel](admin/README.md) -- Admin features and role setup
-- [SaaS Service](saas/README.md) -- CouchDB setup, admin endpoints, seed commands
-- [User Requirements Specification](docs/URS-saas-adaptation.md)
-- [Functional Design Specification](docs/FDS-saas-adaptation.md)
-- [Implementation Plan](docs/implementation-plan.md)
+- [CLAUDE.md](CLAUDE.md) — the deep reference: architecture, CMS contract, trust model, endpoint tables, conventions, packaging notes
+- [api/README.md](api/README.md) — API reference, authentication, environment, encoding workflow, output layout
+- [app/README.md](app/README.md) — renderer structure and environment
+- [Todo.md](Todo.md) — known gaps and follow-up work

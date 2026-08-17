@@ -1,39 +1,93 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useAuth0 } from '@auth0/auth0-vue';
 import { useTheme, type ThemePreference } from '../composables/useTheme';
 
-const { user, logout } = useAuth0();
-const { preference, setPreference } = useTheme();
+/**
+ * Appearance menu. There is no account any more — the app runs locally with no
+ * sign-in — so what was the account menu keeps its place and its shape, and
+ * carries the one setting that was ever really in it.
+ */
 
-const returnTo = window.location.origin;
+const props = withDefaults(
+    defineProps<{
+        /**
+         * Which way the panel opens. It lives in the timeline's controls at the
+         * very bottom of the window on the session view, where a panel dropping
+         * downwards opens past the edge of the screen.
+         */
+        drop?: 'down' | 'up';
+        /**
+         * `editor` borrows the segment editor's own button styling, for the
+         * instance that sits in the timeline's controls bar next to the
+         * keyboard-shortcuts button. Those classes are injected globally by the
+         * library, and `.se-controls-bar .se-btn` sizes them to match, so the
+         * two buttons come out identical rather than merely similar.
+         */
+        variant?: 'default' | 'editor';
+    }>(),
+    { drop: 'down', variant: 'default' }
+);
+
+const { preference, setPreference } = useTheme();
 
 const open = ref(false);
 const rootEl = ref<HTMLElement | null>(null);
 
-const themeOptions: { value: ThemePreference; label: string; description: string }[] = [
-    { value: 'light', label: 'Light', description: 'Always light' },
-    { value: 'system', label: 'Auto', description: 'Match system' },
-    { value: 'dark', label: 'Dark', description: 'Always dark' },
+const panelPositionClass = computed(() =>
+    props.drop === 'up'
+        ? 'bottom-full mb-2 origin-bottom-right'
+        : 'top-full mt-2 origin-top-right'
+);
+
+const triggerClass = computed(() =>
+    props.variant === 'editor'
+        ? 'se-btn se-btn--icon cursor-pointer'
+        : 'flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-slate-700 shadow-sm ring-slate-900/5 transition-colors hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:ring-white/10'
+);
+
+/**
+ * The three appearance choices, each with the icon that stands for it.
+ *
+ * `description` no longer prints as a second line — three mutually exclusive
+ * options did not need one, and it was most of the panel's height — but it is
+ * kept as the row's `title` and as its accessible name. "Auto" is the one label
+ * that does not carry its own meaning, and losing the explanation entirely
+ * would have made it a guess.
+ */
+const themeOptions: {
+    value: ThemePreference;
+    label: string;
+    description: string;
+    /** SVG path(s), drawn at 24×24 with a 1.75 stroke. */
+    icon: string[];
+}[] = [
+    {
+        value: 'light',
+        label: 'Light',
+        description: 'Always light',
+        icon: [
+            'M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z',
+        ],
+    },
+    {
+        value: 'system',
+        label: 'Auto',
+        description: 'Match system',
+        // Half-lit circle: the same glyph the Luminary app uses for "follow the
+        // system", and the only one of the three that has to say "either".
+        icon: [
+            'M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0v6.19a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 11.44V5.25',
+        ],
+    },
+    {
+        value: 'dark',
+        label: 'Dark',
+        description: 'Always dark',
+        icon: [
+            'M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z',
+        ],
+    },
 ];
-
-const email = computed(() => user.value?.email ?? '');
-
-const initials = computed(() => {
-    const u = user.value;
-    if (!u) return '?';
-    const name = typeof u.name === 'string' ? u.name.trim() : '';
-    if (name) {
-        const parts = name.split(/\s+/).filter(Boolean);
-        if (parts.length >= 2) {
-            return (parts[0]!.charAt(0) + parts[parts.length - 1]!.charAt(0)).toUpperCase();
-        }
-        return name.slice(0, 2).toUpperCase();
-    }
-    const em = typeof u.email === 'string' ? u.email.trim() : '';
-    if (em) return em.slice(0, 2).toUpperCase();
-    return '?';
-});
 
 function toggle() {
     open.value = !open.value;
@@ -69,11 +123,10 @@ watch(open, (v) => {
 
 function pickTheme(p: ThemePreference) {
     setPreference(p);
-}
-
-function signOut() {
+    // Three mutually exclusive options: the choice is made, so the panel has
+    // nothing left to offer. It used to stay open until dismissed, which read
+    // as though the click had not registered.
     close();
-    logout({ logoutParams: { returnTo } });
 }
 </script>
 
@@ -81,13 +134,27 @@ function signOut() {
     <div ref="rootEl" class="relative shrink-0">
         <button
             type="button"
-            class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-xs font-semibold text-slate-800 shadow-sm ring-slate-900/5 transition-colors hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 dark:ring-white/10"
+            :class="triggerClass"
             :aria-expanded="open"
             aria-haspopup="true"
-            aria-label="Account menu"
+            aria-label="Appearance"
+            title="Appearance"
             @click.stop="toggle"
         >
-            {{ initials }}
+            <svg
+                :class="variant === 'editor' ? 'se-icon' : 'h-5 w-5'"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="1.75"
+                aria-hidden="true"
+            >
+                <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"
+                />
+            </svg>
         </button>
 
         <Transition
@@ -98,70 +165,65 @@ function signOut() {
             leave-from-class="scale-100 opacity-100"
             leave-to-class="scale-95 opacity-0"
         >
+            <!--
+                Three rows, an icon each, no heading and no descriptions: the
+                panel was 18rem wide and four rows tall for a choice between
+                three words, and it opens from a sun icon that has already said
+                what it is about.
+
+                The checkmark column went with the descriptions, so selection is
+                carried by the row's fill and an accent icon instead. What must
+                not go with it is `role="menuitemradio"` + `aria-checked`, which
+                is what tells a screen reader that these are three states of one
+                setting rather than three buttons.
+            -->
             <div
                 v-if="open"
-                class="absolute right-0 top-full z-50 mt-2 w-[min(18rem,calc(100vw-2rem))] origin-top-right rounded-xl border border-slate-200 bg-white py-1 shadow-xl ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10"
+                class="absolute right-0 z-50 w-fit rounded-xl border border-slate-200 bg-white p-1 shadow-xl ring-1 ring-slate-900/5 dark:border-slate-700 dark:bg-slate-800 dark:ring-white/10"
+                :class="panelPositionClass"
                 role="menu"
-                aria-label="Account"
+                aria-label="Appearance"
                 @click.stop
             >
-                <div class="border-b border-slate-100 px-3 py-3 dark:border-slate-700">
-                    <p class="text-xs font-medium text-slate-500 dark:text-slate-400">Signed in as</p>
-                    <p class="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-slate-100" :title="email">
-                        {{ email || '—' }}
-                    </p>
-                </div>
-
-                <div class="px-2 py-2" role="none">
-                    <p
-                        id="account-appearance-label"
-                        class="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500"
-                    >
-                        Appearance
-                    </p>
-                    <div class="space-y-0.5" role="group" aria-labelledby="account-appearance-label">
-                        <button
-                            v-for="opt in themeOptions"
-                            :key="opt.value"
-                            type="button"
-                            role="menuitemradio"
-                            :aria-checked="preference === opt.value"
-                            class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-slate-800 transition-colors hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700"
-                            @click="pickTheme(opt.value)"
-                        >
-                            <span
-                                class="flex h-4 w-4 shrink-0 items-center justify-center rounded border border-slate-300 dark:border-slate-600"
-                                aria-hidden="true"
-                            >
-                                <svg
-                                    v-if="preference === opt.value"
-                                    class="h-3 w-3 text-slate-600 dark:text-slate-400"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                    stroke="currentColor"
-                                    stroke-width="2.5"
-                                >
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                            </span>
-                            <span class="min-w-0 flex-1">
-                                <span class="block font-medium">{{ opt.label }}</span>
-                                <span class="block text-xs font-normal text-slate-500 dark:text-slate-400">{{
-                                    opt.description
-                                }}</span>
-                            </span>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="border-t border-slate-100 px-2 py-2 dark:border-slate-700">
+                <div class="space-y-0.5" role="group" aria-label="Appearance">
                     <button
+                        v-for="opt in themeOptions"
+                        :key="opt.value"
                         type="button"
-                        role="menuitem"
-                        class="flex w-full cursor-pointer items-center justify-center rounded-lg px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                        @click="signOut"
+                        role="menuitemradio"
+                        :aria-checked="preference === opt.value"
+                        :aria-label="`${opt.label} — ${opt.description}`"
+                        :title="opt.description"
+                        class="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors"
+                        :class="
+                            preference === opt.value
+                                ? 'bg-sky-50 font-medium text-sky-900 dark:bg-sky-500/15 dark:text-sky-100'
+                                : 'font-normal text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700'
+                        "
+                        @click="pickTheme(opt.value)"
                     >
-                        Sign out
+                        <svg
+                            class="h-4 w-4 shrink-0"
+                            :class="
+                                preference === opt.value
+                                    ? 'text-sky-600 dark:text-sky-400'
+                                    : 'text-slate-400 dark:text-slate-500'
+                            "
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            stroke-width="1.75"
+                            aria-hidden="true"
+                        >
+                            <path
+                                v-for="(d, i) in opt.icon"
+                                :key="i"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                :d="d"
+                            />
+                        </svg>
+                        {{ opt.label }}
                     </button>
                 </div>
             </div>

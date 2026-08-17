@@ -1,203 +1,262 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UnauthorizedException } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { KeyValidationWebhookService } from './key-validation-webhook.service';
-import { SessionService } from '../encode/services/session.service';
-import { AuthResolverGuard } from './auth-resolver.guard';
-import type { CreateSessionDto } from '../encode/dto/create-session.dto';
+import type { ExecutionContext } from '@nestjs/common';
+import type { Reflector } from '@nestjs/core';
+import { AuthResolverGuard } from './auth-resolver.guard.js';
+import type {
+    SessionService,
+    Session,
+} from '../encode/services/session.service.js';
+import type { AuthType } from './auth-types.decorator.js';
 
-function makeConfig(): CreateSessionDto {
-    return {
-        s3: {
-            endPoint: 's3.example.com',
-            bucket: 'test',
-            accessKey: 'key',
-            secretKey: 'secret',
-        },
-    };
+const INSTANCE_TOKEN = 'a'.repeat(64);
+
+const getBySessionToken = vi.fn<(t: string) => Session | undefined>();
+const getByReadToken = vi.fn<(t: string) => Session | undefined>();
+const sessions = {
+    getBySessionToken,
+    getByReadToken,
+} as unknown as SessionService;
+
+function session(id: string): Session {
+    return { id } as Session;
 }
 
-function createMockContext(
-    headers: Record<string, string> = {},
-    params: Record<string, string> = {},
-): any {
-    const request = { headers, params };
-    return {
-        switchToHttp: () => ({
-            getRequest: () => request,
-        }),
-        getHandler: () => () => {},
-        getClass: () => class {},
-    };
+/** A request shaped the way the guard reads it, with sane empty defaults. */
+function request({
+    headers = {},
+    query = {},
+    params = {},
+}: {
+    headers?: Record<string, string>;
+    query?: Record<string, unknown>;
+    params?: Record<string, string>;
+} = {}) {
+    return { headers, query, params } as any;
 }
 
-describe('AuthResolverGuard', () => {
-    let guard: AuthResolverGuard;
-    let reflector: Reflector;
-    let keyValidationService: KeyValidationWebhookService;
-    let sessionService: SessionService;
-    const savedMasterKey = process.env.MASTER_API_KEY;
+function contextFor(req: any): ExecutionContext {
+    return {
+        switchToHttp: () => ({ getRequest: () => req }),
+        getHandler: () => undefined,
+        getClass: () => undefined,
+    } as unknown as ExecutionContext;
+}
 
-    beforeEach(() => {
-        vi.clearAllMocks();
-        process.env.MASTER_API_KEY = 'test-master-key';
-        reflector = new Reflector();
-        keyValidationService = {
-            validateKey: vi.fn().mockResolvedValue(null),
-        } as any;
-        sessionService = new SessionService({ emit: () => {} } as any);
-        guard = new AuthResolverGuard(
-            reflector,
-            keyValidationService,
-            sessionService,
+/**
+ * Guard whose endpoint declares `allowed`; undefined means no decorator.
+ *
+ * Two functions rather than one with a defaulted key: passing `undefined`
+ * explicitly to a defaulted parameter uses the default, so a single builder
+ * could not express "this instance has no token" at all — the test asking for it
+ * would have been handed the real one and passed for the wrong reason.
+ */
+function buildWith(
+    allowed: AuthType[] | undefined,
+    instanceToken: string | undefined
+) {
+    const reflector = {
+        getAllAndOverride: () => allowed,
+    } as unknown as Reflector;
+    return new AuthResolverGuard(reflector, sessions, instanceToken);
+}
+
+function build(allowed?: AuthType[]) {
+    return buildWith(allowed, INSTANCE_TOKEN);
+}
+
+beforeEach(() => {
+    getBySessionToken.mockReset().mockReturnValue(undefined);
+    getByReadToken.mockReset().mockReturnValue(undefined);
+});
+
+describe('AuthResolverGuard — the instance token', () => {
+    it('lets the app’s own UI through', async () => {
+        const req = request({ headers: { 'x-api-key': INSTANCE_TOKEN } });
+
+        await expect(build().canActivate(contextFor(req))).resolves.toBe(true);
+        expect(req.authType).toBe('instance');
+    });
+
+    it('is accepted on an endpoint that does not list it', async () => {
+        // It is a superkey by design: the local UI holds it and drives
+        // everything, so no endpoint gets to refuse it.
+        const req = request({ headers: { 'x-api-key': INSTANCE_TOKEN } });
+
+        await expect(
+            build(['read']).canActivate(contextFor(req))
+        ).resolves.toBe(true);
+    });
+
+    it('rejects a wrong key outright instead of trying the weaker tiers', async () => {
+        // A present-but-wrong key is a caller who thinks they are privileged.
+        // Falling through would let a stale key quietly downgrade to read
+        // access, which is worse than telling them plainly.
+        const req = request({
+            headers: {
+                'x-api-key': 'b'.repeat(64),
+                authorization: 'Bearer sess_ok',
+            },
+        });
+        getBySessionToken.mockReturnValue(session('s1'));
+
+        await expect(
+            build(['session']).canActivate(contextFor(req))
+        ).rejects.toThrow(UnauthorizedException);
+        expect(getBySessionToken).not.toHaveBeenCalled();
+    });
+
+    it('rejects a key of the wrong length without comparing it', async () => {
+        // timingSafeEqual throws on a length mismatch, so the length is checked
+        // first — the guard must refuse, not crash.
+        const req = request({ headers: { 'x-api-key': 'short' } });
+
+        await expect(build().canActivate(contextFor(req))).rejects.toThrow(
+            UnauthorizedException
         );
     });
 
-    afterEach(() => {
-        if (savedMasterKey !== undefined) {
-            process.env.MASTER_API_KEY = savedMasterKey;
-        } else {
-            delete process.env.MASTER_API_KEY;
-        }
+    it('refuses every key when the instance has none configured', async () => {
+        const req = request({ headers: { 'x-api-key': INSTANCE_TOKEN } });
+
+        await expect(
+            buildWith(['instance'], undefined).canActivate(contextFor(req))
+        ).rejects.toThrow(UnauthorizedException);
+    });
+});
+
+describe('AuthResolverGuard — session tokens', () => {
+    it('accepts a Bearer sess_ token where the endpoint allows it', async () => {
+        const req = request({ headers: { authorization: 'Bearer sess_abc' } });
+        getBySessionToken.mockReturnValue(session('s1'));
+
+        await expect(
+            build(['session']).canActivate(contextFor(req))
+        ).resolves.toBe(true);
+        expect(req.authType).toBe('session');
+        expect(req.session.id).toBe('s1');
     });
 
-    describe('master key', () => {
-        it('should accept master key on any endpoint', async () => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
-                'apikey',
-                'session',
-            ]);
+    it('is ignored on an endpoint that does not allow it', async () => {
+        const req = request({ headers: { authorization: 'Bearer sess_abc' } });
+        getBySessionToken.mockReturnValue(session('s1'));
 
-            const ctx = createMockContext({ 'x-api-key': 'test-master-key' });
-            const result = await guard.canActivate(ctx);
-
-            expect(result).toBe(true);
-            const request = ctx.switchToHttp().getRequest();
-            expect(request.authType).toBe('master');
-        });
-
-        it('should reject when MASTER_API_KEY env var is not set', async () => {
-            delete process.env.MASTER_API_KEY;
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
-                'master',
-            ]);
-
-            const ctx = createMockContext({ 'x-api-key': 'test-master-key' });
-            await expect(guard.canActivate(ctx)).rejects.toThrow(
-                UnauthorizedException,
-            );
-        });
+        await expect(
+            build(['instance']).canActivate(contextFor(req))
+        ).rejects.toThrow(UnauthorizedException);
     });
 
-    describe('API key validated via webhook', () => {
-        it('should authenticate and attach metadata to request', async () => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
-                'apikey',
-            ]);
-            const metadata = {
-                userId: 'user-1',
-                webhookUrl: 'https://example.com/hook',
-            };
-            (keyValidationService.validateKey as ReturnType<typeof vi.fn>).mockResolvedValue(metadata);
+    it('rejects a token no session answers to', async () => {
+        const req = request({ headers: { authorization: 'Bearer sess_gone' } });
 
-            const ctx = createMockContext({ 'x-api-key': 'external-key-123' });
-            const result = await guard.canActivate(ctx);
-
-            expect(result).toBe(true);
-            const request = ctx.switchToHttp().getRequest();
-            expect(request.authType).toBe('apikey');
-            expect(request.apiKey).toBe(metadata);
-        });
-
-        it('should return 401 when webhook returns null', async () => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
-                'apikey',
-            ]);
-            (keyValidationService.validateKey as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-
-            const ctx = createMockContext({ 'x-api-key': 'bad-key' });
-            await expect(guard.canActivate(ctx)).rejects.toThrow(
-                UnauthorizedException,
-            );
-        });
-
-        it('should reject regular API key on master-only endpoints', async () => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
-                'master',
-            ]);
-            const metadata = { userId: 'user-1' };
-            (keyValidationService.validateKey as ReturnType<typeof vi.fn>).mockResolvedValue(metadata);
-
-            const ctx = createMockContext({ 'x-api-key': 'external-key-123' });
-            await expect(guard.canActivate(ctx)).rejects.toThrow(
-                UnauthorizedException,
-            );
-        });
+        await expect(
+            build(['session']).canActivate(contextFor(req))
+        ).rejects.toThrow('Invalid or expired session token');
     });
 
-    describe('session token', () => {
-        it('should authenticate via Bearer sess_ token', async () => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
-                'session',
-            ]);
-            const session = sessionService.create(makeConfig());
-            const ctx = createMockContext(
-                { authorization: `Bearer ${session.sessionToken}` },
-                { sessionId: session.id },
-            );
-
-            const result = await guard.canActivate(ctx);
-
-            expect(result).toBe(true);
-            const request = ctx.switchToHttp().getRequest();
-            expect(request.authType).toBe('session');
-            expect(request.session.id).toBe(session.id);
+    it('refuses a valid token aimed at somebody else’s session', async () => {
+        // Holding one session's token must not open another's.
+        const req = request({
+            headers: { authorization: 'Bearer sess_abc' },
+            params: { sessionId: 's2' },
         });
+        getBySessionToken.mockReturnValue(session('s1'));
+
+        await expect(
+            build(['session']).canActivate(contextFor(req))
+        ).rejects.toThrow('Token does not match the requested session');
     });
 
-    describe('no credentials', () => {
-        it('should throw when no credentials provided', async () => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
-                'apikey',
-                'session',
-            ]);
+    it('ignores an Authorization header that is not a session token', async () => {
+        const req = request({ headers: { authorization: 'Bearer read_abc' } });
 
-            const ctx = createMockContext();
-            await expect(guard.canActivate(ctx)).rejects.toThrow(
-                UnauthorizedException,
-            );
-        });
+        await expect(
+            build(['session']).canActivate(contextFor(req))
+        ).rejects.toThrow('No valid authentication credentials provided');
+    });
+});
+
+describe('AuthResolverGuard — read tokens on the query string', () => {
+    it('accepts a read token where the endpoint opts in', async () => {
+        // EventSource and a plain <a> cannot set headers, so a browser watching
+        // a session has to carry its credential in the URL.
+        const req = request({ query: { token: 'read_abc' } });
+        getByReadToken.mockReturnValue(session('s1'));
+
+        await expect(
+            build(['read']).canActivate(contextFor(req))
+        ).resolves.toBe(true);
+        expect(req.authType).toBe('read');
+        expect(req.session.id).toBe('s1');
     });
 
-    describe('session token failures', () => {
-        it('should throw when sess_ token is not found', async () => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
-                'session',
-            ]);
+    it('also accepts a session token there', async () => {
+        // The UI reaches preview, waveform and storyboard from <video> and <img>
+        // tags, which have the same problem.
+        const req = request({ query: { token: 'sess_abc' } });
+        getBySessionToken.mockReturnValue(session('s1'));
 
-            const ctx = createMockContext(
-                { authorization: 'Bearer sess_nonexistenttoken' },
-                { sessionId: 'some-session-id' },
-            );
+        await expect(
+            build(['read']).canActivate(contextFor(req))
+        ).resolves.toBe(true);
+    });
 
-            await expect(guard.canActivate(ctx)).rejects.toThrow(
-                'Invalid or expired session token',
-            );
+    it('is ignored on an endpoint that does not opt in', async () => {
+        const req = request({ query: { token: 'read_abc' } });
+        getByReadToken.mockReturnValue(session('s1'));
+
+        await expect(
+            build(['session']).canActivate(contextFor(req))
+        ).rejects.toThrow(UnauthorizedException);
+        expect(getByReadToken).not.toHaveBeenCalled();
+    });
+
+    it('refuses a read token aimed at another session', async () => {
+        const req = request({
+            query: { token: 'read_abc' },
+            params: { sessionId: 's2' },
         });
+        getByReadToken.mockReturnValue(session('s1'));
 
-        it('should throw when session token does not match requested sessionId', async () => {
-            vi.spyOn(reflector, 'getAllAndOverride').mockReturnValue([
-                'session',
-            ]);
+        await expect(
+            build(['read']).canActivate(contextFor(req))
+        ).rejects.toThrow('Invalid or expired token');
+    });
 
-            const session = sessionService.create(makeConfig());
-            const ctx = createMockContext(
-                { authorization: `Bearer ${session.sessionToken}` },
-                { sessionId: 'different-session-id' },
-            );
+    it('rejects an unknown token rather than falling through', async () => {
+        const req = request({ query: { token: 'read_gone' } });
 
-            await expect(guard.canActivate(ctx)).rejects.toThrow(
-                'Token does not match the requested session',
-            );
-        });
+        await expect(
+            build(['read']).canActivate(contextFor(req))
+        ).rejects.toThrow('Invalid or expired token');
+    });
+
+    it('ignores a repeated token parameter', async () => {
+        // Express gives an array for `?token=a&token=b`. Only a plain string is
+        // a credential; an array must not be coerced into one.
+        const req = request({ query: { token: ['read_abc', 'read_def'] } });
+
+        await expect(
+            build(['read']).canActivate(contextFor(req))
+        ).rejects.toThrow('No valid authentication credentials provided');
+    });
+});
+
+describe('AuthResolverGuard — defaults', () => {
+    it('requires the instance token when the endpoint declares nothing', async () => {
+        const req = request({ headers: { authorization: 'Bearer sess_abc' } });
+        getBySessionToken.mockReturnValue(session('s1'));
+
+        await expect(
+            build(undefined).canActivate(contextFor(req))
+        ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('refuses a request carrying nothing at all', async () => {
+        await expect(
+            build(['instance', 'session', 'read']).canActivate(
+                contextFor(request())
+            )
+        ).rejects.toThrow('No valid authentication credentials provided');
     });
 });

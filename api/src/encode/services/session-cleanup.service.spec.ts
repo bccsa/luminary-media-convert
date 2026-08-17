@@ -1,92 +1,87 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SessionCleanupService } from './session-cleanup.service.js';
+import type { SessionService } from './session.service.js';
 
-function makeService(
-    cleanup = vi.fn().mockReturnValue(0),
-    cleanupAbandoned = vi.fn().mockReturnValue(0),
-) {
-    const sessionService = { cleanup, cleanupAbandoned } as any;
-    return {
-        service: new SessionCleanupService(sessionService),
-        cleanup,
-        cleanupAbandoned,
-    };
+const HOUR_MS = 60 * 60 * 1000;
+
+const cleanupAbandoned = vi.fn<(maxAgeMs: number) => number>();
+const sessions = { cleanupAbandoned } as unknown as SessionService;
+
+function build(): SessionCleanupService {
+    return new SessionCleanupService(sessions);
 }
 
+beforeEach(() => {
+    cleanupAbandoned.mockReset().mockReturnValue(0);
+});
+
+afterEach(() => {
+    delete process.env.SESSION_ABANDONED_MAX_AGE_HOURS;
+});
+
 describe('SessionCleanupService', () => {
-    afterEach(() => {
-        delete process.env.SESSION_MAX_AGE_HOURS;
-        delete process.env.SESSION_ABANDONED_MAX_AGE_HOURS;
+    it('sweeps at the six-hour default', () => {
+        build().sweep();
+
+        expect(cleanupAbandoned).toHaveBeenCalledWith(6 * HOUR_MS);
     });
 
-    it('sweeps sessions older than a day by default', () => {
-        const { service, cleanup } = makeService();
-        service.sweep();
-        expect(cleanup).toHaveBeenCalledWith(24 * 60 * 60 * 1000);
+    it('honours SESSION_ABANDONED_MAX_AGE_HOURS', () => {
+        process.env.SESSION_ABANDONED_MAX_AGE_HOURS = '2';
+
+        build().sweep();
+
+        expect(cleanupAbandoned).toHaveBeenCalledWith(2 * HOUR_MS);
     });
 
-    it('honours a configured retention window', () => {
-        process.env.SESSION_MAX_AGE_HOURS = '72';
-        const { service, cleanup } = makeService();
-        service.sweep();
-        expect(cleanup).toHaveBeenCalledWith(72 * 60 * 60 * 1000);
+    it('accepts a fractional window', () => {
+        // Useful on a small volume, and nothing in the parsing requires whole
+        // hours — so a value that works must not be rejected for looking odd.
+        process.env.SESSION_ABANDONED_MAX_AGE_HOURS = '0.5';
+
+        build().sweep();
+
+        expect(cleanupAbandoned).toHaveBeenCalledWith(0.5 * HOUR_MS);
     });
 
-    it('accepts a window shorter than an hour', () => {
-        process.env.SESSION_MAX_AGE_HOURS = '0.5';
-        const { service, cleanup } = makeService();
-        service.sweep();
-        expect(cleanup).toHaveBeenCalledWith(30 * 60 * 1000);
-    });
-
-    it.each(['nonsense', '0', '-5', ''])(
-        'falls back to the default rather than deleting early on %p',
+    it.each(['nonsense', '0', '-3', 'NaN', ''])(
+        'falls back to the default rather than deleting early on %o',
         (value) => {
-            process.env.SESSION_MAX_AGE_HOURS = value;
-            const { service, cleanup } = makeService();
-            service.sweep();
-            expect(cleanup).toHaveBeenCalledWith(24 * 60 * 60 * 1000);
-        },
+            // This sweep deletes a user's uploaded media. A misread setting must
+            // never shorten the window — the safe direction is to keep files
+            // longer than asked, not to bin them sooner.
+            process.env.SESSION_ABANDONED_MAX_AGE_HOURS = value;
+
+            build().sweep();
+
+            expect(cleanupAbandoned).toHaveBeenCalledWith(6 * HOUR_MS);
+        }
     );
 
-    it('reports how many it removed', () => {
-        const { service } = makeService(vi.fn().mockReturnValue(3));
-        expect(service.sweep()).toBe(3);
+    it('ignores surrounding whitespace', () => {
+        process.env.SESSION_ABANDONED_MAX_AGE_HOURS = '  3  ';
+
+        build().sweep();
+
+        expect(cleanupAbandoned).toHaveBeenCalledWith(3 * HOUR_MS);
     });
 
-    describe('abandoned sessions', () => {
-        it('sweeps them on a shorter clock than finished ones', () => {
-            // A forgotten upload holds space nobody will use; a finished session
-            // may still be wanted.
-            const { service, cleanupAbandoned } = makeService();
-            service.sweep();
-            expect(cleanupAbandoned).toHaveBeenCalledWith(6 * 60 * 60 * 1000);
-        });
+    it('returns how many sessions were swept', () => {
+        cleanupAbandoned.mockReturnValue(4);
 
-        it('honours a configured idle window', () => {
-            process.env.SESSION_ABANDONED_MAX_AGE_HOURS = '2';
-            const { service, cleanupAbandoned } = makeService();
-            service.sweep();
-            expect(cleanupAbandoned).toHaveBeenCalledWith(2 * 60 * 60 * 1000);
-        });
+        expect(build().sweep()).toBe(4);
+    });
 
-        it.each(['nonsense', '0', '-5', ''])(
-            'falls back rather than deleting early on %p',
-            (value) => {
-                process.env.SESSION_ABANDONED_MAX_AGE_HOURS = value;
-                const { service, cleanupAbandoned } = makeService();
-                service.sweep();
-                expect(cleanupAbandoned).toHaveBeenCalledWith(
-                    6 * 60 * 60 * 1000,
-                );
-            },
-        );
+    it('re-reads the setting on every sweep', () => {
+        // The service is long-lived and the schedule fires for the life of the
+        // process; reading once at construction would pin the first value.
+        const service = build();
+        service.sweep();
 
-        it('counts both sweeps in what it reports', () => {
-            const { service } = makeService(
-                vi.fn().mockReturnValue(3),
-                vi.fn().mockReturnValue(2),
-            );
-            expect(service.sweep()).toBe(5);
-        });
+        process.env.SESSION_ABANDONED_MAX_AGE_HOURS = '1';
+        service.sweep();
+
+        expect(cleanupAbandoned).toHaveBeenNthCalledWith(1, 6 * HOUR_MS);
+        expect(cleanupAbandoned).toHaveBeenNthCalledWith(2, 1 * HOUR_MS);
     });
 });

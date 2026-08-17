@@ -44,10 +44,13 @@ export class S3EtagService {
         });
     }
 
-    async getObjectWithEtag(config: S3ConfigDto, key: string): Promise<ObjectWithEtag> {
+    async getObjectWithEtag(
+        config: S3ConfigDto,
+        key: string
+    ): Promise<ObjectWithEtag> {
         const client = this.createClient(config);
         const resp = await client.send(
-            new GetObjectCommand({ Bucket: config.bucket, Key: key }),
+            new GetObjectCommand({ Bucket: config.bucket, Key: key })
         );
         const body = await streamToBuffer(resp.Body as NodeJS.ReadableStream);
         const etag = stripQuotes(resp.ETag ?? '');
@@ -63,7 +66,7 @@ export class S3EtagService {
         key: string,
         body: Buffer | string,
         ifMatch: string,
-        contentType: string,
+        contentType: string
     ): Promise<PutResult> {
         const client = this.createClient(config);
         try {
@@ -74,12 +77,16 @@ export class S3EtagService {
                     Body: body,
                     ContentType: contentType,
                     IfMatch: ifMatch,
-                }),
+                })
             );
             return { etag: stripQuotes(resp.ETag ?? '') };
         } catch (err) {
             if (isPreconditionFailed(err)) {
-                const current = await this.headEtag(client, config.bucket, key).catch(() => undefined);
+                const current = await this.headEtag(
+                    client,
+                    config.bucket,
+                    key
+                ).catch(() => undefined);
                 throw new ConflictException({
                     message: 'Master playlist was modified since last read',
                     code: 'ETAG_MISMATCH',
@@ -94,7 +101,7 @@ export class S3EtagService {
         config: S3ConfigDto,
         key: string,
         body: Buffer | string,
-        contentType: string,
+        contentType: string
     ): Promise<PutResult> {
         const client = this.createClient(config);
         const resp = await client.send(
@@ -103,13 +110,19 @@ export class S3EtagService {
                 Key: key,
                 Body: body,
                 ContentType: contentType,
-            }),
+            })
         );
         return { etag: stripQuotes(resp.ETag ?? '') };
     }
 
-    private async headEtag(client: S3Client, bucket: string, key: string): Promise<string> {
-        const resp = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    private async headEtag(
+        client: S3Client,
+        bucket: string,
+        key: string
+    ): Promise<string> {
+        const resp = await client.send(
+            new HeadObjectCommand({ Bucket: bucket, Key: key })
+        );
         return stripQuotes(resp.ETag ?? '');
     }
 }
@@ -120,7 +133,11 @@ function stripQuotes(etag: string): string {
 
 function isPreconditionFailed(err: unknown): boolean {
     if (!err || typeof err !== 'object') return false;
-    const e = err as { name?: string; $metadata?: { httpStatusCode?: number }; Code?: string };
+    const e = err as {
+        name?: string;
+        $metadata?: { httpStatusCode?: number };
+        Code?: string;
+    };
     return (
         e.name === 'PreconditionFailed' ||
         e.Code === 'PreconditionFailed' ||

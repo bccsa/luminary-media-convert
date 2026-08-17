@@ -1,41 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { createCipheriv, createHmac, randomBytes } from 'crypto';
-import { createReadStream, createWriteStream, existsSync } from 'fs';
-import {
-    readdir,
-    readFile,
-    rename,
-    unlink,
-    writeFile,
-} from 'fs/promises';
+import { createCipheriv, randomBytes } from 'crypto';
+import { createReadStream, createWriteStream } from 'fs';
+import { readdir, readFile, rename, unlink, writeFile } from 'fs/promises';
 import { pipeline } from 'stream/promises';
-import { join } from 'path';
-import { Worker } from 'worker_threads';
-import dotenv from 'dotenv';
-
-dotenv.config();
+import { join, relative } from 'path';
+import { encryptTextAsset, isLmcencPayload } from './lmcenc.js';
 
 @Injectable()
 export class EncryptionService {
     private readonly logger = new Logger(EncryptionService.name);
 
-    deriveKey(sessionId: string, salt?: Buffer): Buffer {
-        const seed = process.env.HLS_ENCRYPTION_SEED;
-        if (!seed) {
-            throw new Error(
-                'HLS_ENCRYPTION_SEED environment variable is required for HLS encryption',
-            );
-        }
-        const input = salt
-            ? Buffer.concat([Buffer.from(sessionId), salt])
-            : Buffer.from(sessionId);
-        return createHmac('sha256', seed)
-            .update(input)
-            .digest()
-            .subarray(0, 16);
-    }
-
-    generateSalt(): Buffer {
+    /**
+     * A fresh AES-128 key per encode. Nothing derives it from a shared secret,
+     * so a leaked key compromises exactly one session's output.
+     */
+    generateKey(): Buffer {
         return randomBytes(16);
     }
 
@@ -46,7 +25,7 @@ export class EncryptionService {
     async encryptSegment(
         filePath: string,
         key: Buffer,
-        iv: Buffer,
+        iv: Buffer
     ): Promise<void> {
         const tmpPath = filePath + '.enc.tmp';
         try {
@@ -54,7 +33,7 @@ export class EncryptionService {
             await pipeline(
                 createReadStream(filePath),
                 cipher,
-                createWriteStream(tmpPath),
+                createWriteStream(tmpPath)
             );
             await rename(tmpPath, filePath);
         } catch (err) {
@@ -66,16 +45,67 @@ export class EncryptionService {
     async injectKeyTagsIntoPlaylists(
         outputDir: string,
         keyUrl: string,
-        iv: Buffer,
+        iv: Buffer
     ): Promise<void> {
         const keyTag = `#EXT-X-KEY:METHOD=AES-128,URI="${keyUrl}",IV=0x${iv.toString('hex')}`;
         const playlists = await this.findPlaylistFiles(outputDir);
-        await Promise.all(
-            playlists.map((p) => this.injectKeyTag(p, keyTag)),
-        );
+        await Promise.all(playlists.map((p) => this.injectKeyTag(p, keyTag)));
         this.logger.log(
-            `Injected key tags into ${playlists.length} playlist(s)`,
+            `Injected key tags into ${playlists.length} playlist(s)`
         );
+    }
+
+    /**
+     * Encrypt every playlist and WebVTT sidecar under `outputDir` in place.
+     *
+     * The last thing that happens to the output before it is uploaded: the
+     * files are replaced by their LMCENC01 wrappers under the same names, so
+     * S3 keys, extensions and playlist references are all unchanged. Anything
+     * that still needs to *read* a playlist — key-tag injection, byte-range
+     * rewriting, thumbnail VTT generation — must already have run, because
+     * from here on the files are ciphertext.
+     *
+     * Each file gets its own IV. Files that already carry the magic are left
+     * alone, so a re-run (a retry, a partially-completed pass) cannot
+     * double-encrypt and strand the output.
+     *
+     * Returns the encrypted paths, relative to `outputDir`.
+     */
+    async encryptTextAssets(outputDir: string, key: Buffer): Promise<string[]> {
+        const files = await this.findTextAssetFiles(outputDir);
+        const encrypted: string[] = [];
+
+        for (const filePath of files) {
+            const content = await readFile(filePath);
+            if (isLmcencPayload(content)) continue;
+            await writeFile(filePath, encryptTextAsset(content, key));
+            encrypted.push(
+                relative(outputDir, filePath).split(/[\\/]/).join('/')
+            );
+        }
+
+        this.logger.log(
+            `Encrypted ${encrypted.length} playlist/VTT file(s) with the session key`
+        );
+        return encrypted;
+    }
+
+    /** Every `.m3u8` and `.vtt` file under `dir`, recursively. */
+    private async findTextAssetFiles(dir: string): Promise<string[]> {
+        const found: string[] = [];
+        const entries = await readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+            const fullPath = join(dir, entry.name);
+            if (entry.isDirectory()) {
+                found.push(...(await this.findTextAssetFiles(fullPath)));
+            } else if (
+                entry.name.endsWith('.m3u8') ||
+                entry.name.endsWith('.vtt')
+            ) {
+                found.push(fullPath);
+            }
+        }
+        return found;
     }
 
     private async findPlaylistFiles(dir: string): Promise<string[]> {
@@ -94,7 +124,7 @@ export class EncryptionService {
 
     private async injectKeyTag(
         filePath: string,
-        keyTag: string,
+        keyTag: string
     ): Promise<void> {
         const content = await readFile(filePath, 'utf-8');
         if (!content.includes('#EXTINF:')) return;
@@ -115,75 +145,4 @@ export class EncryptionService {
             await writeFile(filePath, result.join('\n'), 'utf-8');
         }
     }
-
-    async encryptHlsOutput(
-        outputDir: string,
-        sessionId: string,
-        keyUrl: string,
-        onProgress?: (percent: number) => void,
-    ): Promise<{ key: Buffer; iv: Buffer }> {
-        const seed = process.env.HLS_ENCRYPTION_SEED;
-        if (!seed) {
-            throw new Error(
-                'HLS_ENCRYPTION_SEED environment variable is required for HLS encryption',
-            );
-        }
-
-        const salt = this.generateSalt();
-
-        const tsPath = join(__dirname, 'encryption.worker.ts');
-        const useTsWorker = existsSync(tsPath);
-        const workerPath = useTsWorker
-            ? tsPath
-            : join(__dirname, 'encryption.worker.js');
-
-        return new Promise<{ key: Buffer; iv: Buffer }>((resolve, reject) => {
-            const worker = new Worker(workerPath, {
-                workerData: { outputDir, sessionId, keyUrl, seed, salt: salt.toString('hex') },
-                ...(useTsWorker
-                    ? {
-                          execArgv: [
-                              '--require',
-                              'ts-node/register',
-                          ],
-                      }
-                    : {}),
-            });
-
-            worker.on('message', (msg) => {
-                if (msg.type === 'progress') {
-                    onProgress?.(msg.percent);
-                    return;
-                }
-
-                const key = Buffer.from(msg.key);
-                const iv = Buffer.from(msg.iv);
-
-                this.logger.log(
-                    `Encrypted ${msg.segmentsEncrypted} segment(s) across ${msg.streamDirCount} stream(s) for session ${sessionId} (IV: ${iv.toString('hex')})`,
-                );
-
-                resolve({ key, iv });
-            });
-
-            worker.on('error', (err) => {
-                reject(
-                    new Error(
-                        `Encryption worker error: ${err.message}`,
-                    ),
-                );
-            });
-
-            worker.on('exit', (code) => {
-                if (code !== 0) {
-                    reject(
-                        new Error(
-                            `Encryption worker exited with code ${code}`,
-                        ),
-                    );
-                }
-            });
-        });
-    }
-
 }

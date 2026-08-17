@@ -19,6 +19,28 @@ import { sourceToOutput } from './trimTimeline';
  * the result is served to the editor as a blob and relative paths have nothing
  * left to resolve against.
  */
+/**
+ * The same storyboard, with its sprite references resolved against where the
+ * VTT actually came from.
+ *
+ * Needed whenever the file is handed to the editor as a blob rather than at its
+ * own address — after decryption, say — since a blob URL gives a relative
+ * sprite path nothing to resolve against. Cue times are left exactly as they
+ * are; this is not {@link retimeStoryboardVtt}.
+ */
+export function absolutizeStoryboardVtt(text: string, vttUrl: string): string {
+    const baseUrl = vttUrl.substring(0, vttUrl.lastIndexOf('/'));
+    const lines: string[] = ['WEBVTT', ''];
+    for (const cue of parseThumbnailVtt(text, baseUrl)) {
+        lines.push(
+            `${formatVttTimestamp(cue.startTime)} --> ${formatVttTimestamp(cue.endTime)}`,
+            `${cue.spriteUrl}#xywh=${cue.x},${cue.y},${cue.w},${cue.h}`,
+            '',
+        );
+    }
+    return lines.join('\n');
+}
+
 export function retimeStoryboardVtt(
     text: string,
     vttUrl: string,

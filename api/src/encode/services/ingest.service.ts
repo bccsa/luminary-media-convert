@@ -1,0 +1,109 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { SessionService } from './session.service.js';
+import { ProbeService } from './probe.service.js';
+import { PreviewService } from './preview.service.js';
+import { WaveformService } from './waveform.service.js';
+import {
+    selectStoryboardTrack,
+    ThumbnailService,
+} from './thumbnail.service.js';
+
+/**
+ * The post-ingest pipeline, shared by every way a source file arrives.
+ *
+ * Whatever put the file on disk — a local pick, a URL fetch — everything after
+ * that point is identical, so it lives here rather than in whichever ingest
+ * path happened to own it first.
+ */
+@Injectable()
+export class IngestService {
+    private readonly logger = new Logger(IngestService.name);
+
+    constructor(
+        private readonly sessionService: SessionService,
+        private readonly probeService: ProbeService,
+        private readonly previewService: PreviewService,
+        private readonly waveformService: WaveformService,
+        private readonly thumbnailService: ThumbnailService
+    ) {}
+
+    /**
+     * Run the post-ingest pipeline once a source file is in place at destPath:
+     * record file path, probe metadata, init preview, and transition the
+     * session to 'uploaded'. Clients learn of the transition over SSE or by
+     * polling.
+     */
+    async finalizeUpload(sessionId: string, destPath: string): Promise<void> {
+        this.sessionService.setFilePath(sessionId, destPath);
+
+        const probeResult = await this.probeService.probe(destPath);
+
+        // Initialize preview before exposing probe result —
+        // clients poll for probeResult and immediately use preview
+        // endpoints, so the preview must be ready first.
+        this.sessionService.setProbeResult(sessionId, probeResult);
+        try {
+            await this.previewService.init(sessionId);
+        } catch (err) {
+            this.logger.warn(
+                `Preview init failed for ${sessionId}: ${(err as Error).message}`
+            );
+        }
+
+        this.sessionService.updateStatus(sessionId, 'uploaded');
+
+        // Prime the waveform cache in the background — by the time the user
+        // opens the trim UI, the JSON is already on disk and the HTTP GET
+        // serves from cache. Skipped for files with no audio tracks.
+        if (probeResult.audioTracks.length > 0) {
+            void this.waveformService
+                .getOrComputeCached(sessionId, {
+                    inputPath: destPath,
+                    durationSec: probeResult.format?.duration,
+                })
+                .catch((err) => {
+                    this.logger.warn(
+                        `Background waveform prime failed for ${sessionId}: ${(err as Error).message}`
+                    );
+                });
+        }
+
+        // Same for the storyboard: the trim timeline wants frames as soon as it
+        // opens, and generating them takes an ffmpeg pass over the whole file.
+        // The track is chosen rather than taken first: on a multi-angle file the
+        // first track is as likely to be a 144p proxy as the camera the user
+        // means to look at.
+        const video = selectStoryboardTrack(probeResult.videoTracks);
+        const duration = probeResult.format?.duration ?? 0;
+        if (video && duration > 0) {
+            void this.thumbnailService
+                .getOrGeneratePreview(sessionId, {
+                    inputPath: destPath,
+                    duration,
+                    trackIndex: video.index,
+                    sourceWidth: video.width,
+                    sourceHeight: video.height,
+                    // Pushed over the session's event stream, so the trim
+                    // timeline refetches when there is genuinely more to draw
+                    // rather than on a blind timer.
+                    onProgress: (count, complete) =>
+                        this.sessionService.updateStoryboardProgress(
+                            sessionId,
+                            count,
+                            complete
+                        ),
+                })
+                .catch((err) => {
+                    this.logger.warn(
+                        `Background storyboard prime failed for ${sessionId}: ${(err as Error).message}`
+                    );
+                });
+        }
+
+        this.logger.log(
+            `Ingest complete for session ${sessionId}: ` +
+                `${probeResult.videoTracks.length} video, ` +
+                `${probeResult.audioTracks.length} audio track(s)`
+        );
+    }
+}

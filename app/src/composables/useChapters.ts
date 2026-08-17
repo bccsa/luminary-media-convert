@@ -4,7 +4,7 @@ import {
     parseVtt,
     exportChaptersVtt,
 } from '@luminary-media-converter/segment-editor';
-import { getSessionChapters, putSessionChapters } from '../api';
+import { getChapters, putChapters } from '../api';
 import { errorMessage } from '../utils/errors';
 
 const STORAGE_KEY_PREFIX = 'luminary_chapters_';
@@ -58,11 +58,12 @@ export interface UseChaptersOptions {
     /** Default 'en'. */
     lang?: string;
     /**
-     * Async getter for the current access token. Called fresh on every API
-     * call so long edit sessions don't run with a stale bearer.
+     * Getter for the session's bearer token. Called fresh on every API call —
+     * the view may still have been waiting on the session list when the editor
+     * mounted, and a token read once at setup would have been null forever.
      */
-    getAccessToken: () => Promise<string>;
-    /** Test seam — provide an alternate fetch for the SaaS proxy. */
+    getSessionToken: () => string | Promise<string>;
+    /** Test seam — provide an alternate fetch. */
     fetchRemote?: (sessionId: string, lang: string, token: string) => Promise<{ vtt: string } | null>;
     /** Test seam — provide an alternate uploader. */
     saveRemoteImpl?: (sessionId: string, lang: string, vtt: string, token: string) => Promise<void>;
@@ -72,7 +73,7 @@ export interface UseChaptersOptions {
 
 /**
  * Owns chapter editing state for a single session, with localStorage as the
- * dirty buffer and S3 (via the SaaS proxy) as the canonical store.
+ * dirty buffer and S3 (via the local API) as the canonical store.
  *
  * Load priority (v1): if localStorage has an entry for the session, the editor
  * opens with those segments + isDirty=true. Only `saveRemote` (success) or
@@ -81,7 +82,7 @@ export interface UseChaptersOptions {
 export function useChapters(opts: UseChaptersOptions) {
     const lang = opts.lang ?? 'en';
     const autosaveMs = opts.autosaveMs ?? AUTOSAVE_DEBOUNCE_MS;
-    const getAccessToken = opts.getAccessToken;
+    const getSessionToken = opts.getSessionToken;
 
     const segments: Ref<Segment[]> = ref([]);
     const isDirty = ref(false);
@@ -99,10 +100,10 @@ export function useChapters(opts: UseChaptersOptions) {
     let loadEpoch = 0;
 
     const fetchRemote = opts.fetchRemote
-        ?? ((sessionId: string, l: string, token: string) => getSessionChapters(token, sessionId, l));
+        ?? ((sessionId: string, l: string, token: string) => getChapters(sessionId, l, token));
     const saveRemoteImpl = opts.saveRemoteImpl
         ?? ((sessionId: string, l: string, vtt: string, token: string) =>
-            putSessionChapters(token, sessionId, vtt, l));
+            putChapters(sessionId, l, vtt, token));
 
     async function load(sessionId: string): Promise<void> {
         const epoch = ++loadEpoch;
@@ -124,7 +125,7 @@ export function useChapters(opts: UseChaptersOptions) {
         }
 
         try {
-            const token = await getAccessToken();
+            const token = await getSessionToken();
             if (epoch !== loadEpoch || activeSessionId !== sessionId) return;
             const remote = await fetchRemote(sessionId, lang, token);
             if (epoch !== loadEpoch || activeSessionId !== sessionId) return;
@@ -159,7 +160,7 @@ export function useChapters(opts: UseChaptersOptions) {
         isSaving.value = true;
         try {
             const vtt = exportChaptersVtt(segments.value);
-            const token = await getAccessToken();
+            const token = await getSessionToken();
             await saveRemoteImpl(activeSessionId, lang, vtt, token);
             isDirty.value = false;
             lastSavedAt.value = new Date();
@@ -174,7 +175,7 @@ export function useChapters(opts: UseChaptersOptions) {
         clearLocal(activeSessionId);
         suppressAutosave = true;
         try {
-            const token = await getAccessToken();
+            const token = await getSessionToken();
             const remote = await fetchRemote(activeSessionId, lang, token);
             segments.value = remote?.vtt ? parseVtt(remote.vtt) : [];
             isDirty.value = false;

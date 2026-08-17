@@ -1,0 +1,162 @@
+appId: org.bccsa.luminary-media-convert
+productName: Luminary Media Convert
+copyright: Copyright © BCC South Africa
+
+# electron-builder would otherwise run its own production `npm install` inside
+# this workspace before packaging, which in a hoisted monorepo prunes the root
+# node_modules out from under the build that is running. Nothing here is a
+# native module, so there is nothing to rebuild.
+npmRebuild: false
+
+# Runs after each platform's app directory is built and before the installer is
+# made, which is the only point at which the bundle can still be signed.
+afterPack: build/after-pack.cjs
+
+directories:
+    output: release
+    buildResources: build
+
+# The main process loads the API out of the workspace package, so both this
+# workspace's build output and the hoisted node_modules have to be in the app.
+files:
+    - dist/**/*
+    - package.json
+    - '!**/*.map'
+    - '!**/*.ts'
+    # The API workspace is copied whole. Its dev environment file is not ours to
+    # ship, and `work/` is scratch space that can hold gigabytes of somebody's
+    # last encode.
+    - '!**/.env'
+    - '!**/node_modules/@luminary-media-converter/api/work'
+    - '!**/node_modules/@luminary-media-converter/api/{.node-version,nest-cli.json,eslint.config.mjs}'
+
+# On, and this was tested rather than assumed: the packaged app was launched
+# from outside the repository (so nothing could resolve upwards into the
+# development node_modules) and the API started, served the client and answered
+# requests from inside the archive.
+#
+# One thing to know if this ever regresses: electron-builder 25 collected the
+# hoisted workspace dependencies incompletely — `call-bind-apply-helpers` ended
+# up only nested under `call-bind`, express failed to load, and Nest reported it
+# as "No driver (HTTP) has been selected", which points nowhere near the real
+# cause. Version 26 collects it correctly. Symptom to look for: the packaged app
+# exits or logs a missing-driver error while the same code runs fine unpackaged.
+asar: true
+
+# Served at / by the API in the packaged app; see bundledWebClient(). Shared by
+# every target, so it stays at the root.
+extraResources:
+    - from: ../app/dist
+      to: app
+
+# ffmpeg/ffprobe are declared per platform rather than once with a macro.
+#
+# `${platform}` expands to the *host*, not the target, so a Windows package built
+# on a Mac took `bin/darwin-arm64` and shipped macOS binaries inside a .exe app —
+# an app that installs, opens, and cannot encode. It was invisible while packaging
+# only ever happened on a matching runner, and `${arch}` is safe because
+# electron-builder runs one pass per architecture.
+#
+# The binaries are built by ffmpeg-build/build.sh (dist:mac / dist:win run it) and
+# are not in the repository. The licence texts travel with them, which is the
+# condition of shipping a GPL build at all.
+protocols:
+    - name: Luminary Media Convert
+      schemes:
+          - luminary-convert
+
+# Every artifact names its platform *and* its architecture, and both are stated
+# per platform rather than by macro.
+#
+# The arch matters because electron-builder's default omits it for x64, which on a
+# download page puts "…-0.0.1.dmg" beside "…-0.0.1-arm64.dmg" and reads as though
+# the unlabelled one were the normal build — the wrong guess for most Macs sold
+# since 2020, and unrecoverable for someone who cannot run what they downloaded.
+#
+# The platform matters because macOS and Windows both produce an x64 `zip`. With
+# the arch alone, `…-0.0.1-x64.zip` names either one, so building both on one
+# machine silently overwrote the first — and a download page would offer a file
+# that was a Mac app or a Windows app depending on build order. Never an issue on
+# CI, where each runner builds one platform.
+#
+# `${platform}` is not used: it expands to the *host*, so it would label a
+# cross-built Windows zip "darwin". See extraResources above.
+
+mac:
+    artifactName: ${productName}-${version}-mac-${arch}.${ext}
+    extraResources:
+        - from: ../app/dist
+          to: app
+        - from: bin/darwin-${arch}
+          to: .
+          filter: &encoderFiles
+              - ffmpeg*
+              - ffprobe*
+              # The notice, and the licence texts it refers to. GPLv2 §1 obliges a
+              # *copy* of the licence to travel with the binary — a URL is not one.
+              - LICENSE-ffmpeg.txt
+              # libwebp is statically linked and BSD-3-Clause, whose binary-redistribution
+              # condition is reproducing its notice with the distribution.
+              - LICENSE-libwebp.txt
+              # libvpl (Intel's Quick Sync dispatcher) is statically linked into the
+              # Windows binaries and MIT-licensed, which asks the same of us. Absent
+              # from the macOS builds, and a filter that matches nothing is not an error.
+              - LICENSE-libvpl.txt
+              - GPL-*.txt
+    category: public.app-category.video
+    # build/icon.icns, carrying every size from 16px to 1024px. Named
+    # explicitly rather than left to electron-builder's filename convention, so
+    # a rename in build/ fails the packaging run instead of silently shipping
+    # the stock Electron icon. Source vector is build/icon.svg.
+    icon: build/icon.icns
+    # Per-architecture builds rather than one universal binary. A universal app
+    # would carry both Electron slices *and* both ffmpeg builds — roughly 200 MB
+    # of binaries where each machine needs 100 — and the two macOS ffmpeg builds
+    # are separate downloads at different versions, not a lipo'd pair. Two dmgs
+    # keep each user's download to what their Mac can run. extraResources picks
+    # the matching electron/bin/${platform}-${arch} directory per build.
+    target:
+        - target: dmg
+          arch:
+              - arm64
+              - x64
+        - target: zip
+          arch:
+              - arm64
+              - x64
+    # No Developer ID certificate in this project, and left unset electron-builder
+    # would sign with whatever happens to be in the build machine's keychain.
+    #
+    # The bundle is still ad-hoc signed, by build/after-pack.cjs: Electron ships
+    # already signed, and adding extraResources invalidates that signature, which
+    # macOS reports as "damaged and can't be opened" for any downloaded copy —
+    # a dialog with no way past it. Ad-hoc re-signing restores a valid signature,
+    # so the app asks to be trusted instead of refusing to open.
+    identity: null
+    hardenedRuntime: false
+    gatekeeperAssess: false
+
+dmg:
+    title: Luminary Media Convert
+
+win:
+    artifactName: ${productName}-${version}-win-${arch}.${ext}
+    extraResources:
+        - from: ../app/dist
+          to: app
+        - from: bin/win32-${arch}
+          to: .
+          filter: *encoderFiles
+    # electron-builder derives the .ico from this PNG, which is why the source
+    # is kept at 1024×1024 — it needs 256px at minimum for a modern icon.
+    icon: build/icon.png
+    target:
+        - target: nsis
+          arch:
+              - x64
+
+nsis:
+    oneClick: false
+    perMachine: false
+    allowToChangeInstallationDirectory: true
+    shortcutName: Luminary Media Convert

@@ -4,12 +4,17 @@ import {
     OnModuleInit,
     OnModuleDestroy,
 } from '@nestjs/common';
-import { spawn, execFile, execSync, type ChildProcess } from 'child_process';
+import {
+    spawn,
+    execFile,
+    execFileSync,
+    execSync,
+    type ChildProcess,
+} from 'child_process';
 import { mkdirSync, existsSync } from 'fs';
-import { readFile, writeFile, unlink } from 'fs/promises';
-import { join } from 'path';
+import { readFile, writeFile } from 'fs/promises';
+import { join, resolve } from 'path';
 import { promisify } from 'util';
-import { Worker } from 'worker_threads';
 import type {
     EncodeConfigDto,
     VideoRenditionDto,
@@ -17,6 +22,9 @@ import type {
     TrimSegmentDto,
 } from '../dto/encode-config.dto.js';
 import dotenv from 'dotenv';
+import { ffmpegBin, ffprobeBin } from './ffbin.js';
+import { checkFfmpeg } from './ffmpeg-availability.js';
+import { ALIGNMENT_TOLERANCE_SECONDS } from './copy-mode-eligibility.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -28,31 +36,88 @@ export interface EncodeOptions {
     outputDir: string;
     encodeConfig: EncodeConfigDto;
     onProgress: (percent: number) => void;
-    byteRange?: boolean;
-    byteRangeMaxFileSizeBytes?: number;
-    preByteRangeHook?: (outputDir: string) => void | Promise<void>;
 }
 
-export interface AnglePlaylist {
-    name: string;
-    filename: string;
-}
-
+/**
+ * The container the output's segments arrive in.
+ *
+ * New encodes are always `'fmp4'` — a source whose streams do not start
+ * together is aligned with an input seek rather than escaped into MPEG-TS, so
+ * the output's container is no longer a property of the input. `'mpegts'`
+ * survives in the union for one reason: a `session.json` written before that
+ * change is still restored at boot, and a restored session has to report what
+ * it actually produced.
+ */
 export type SegmentFormat = 'fmp4' | 'mpegts';
 
 export interface EncodeResult {
     outputDir: string;
     masterPlaylist: string;
-    anglePlaylists: AnglePlaylist[];
     segmentFormat: SegmentFormat;
+    /**
+     * Source seconds the encode seeked past to bring the streams into line, so
+     * the output's t=0 is the source's t=alignmentOffset. Reported because
+     * anything describing the output on its own timeline — the waveform sidecar
+     * — has to remove the same head, and this is the only place the figure is
+     * worked out. 0 on an already-aligned source, and folded into the concat
+     * in-points rather than added to them on a trimmed encode.
+     */
+    alignmentOffset: number;
 }
 
-export type AccelMode = 'cpu' | 'nvidia' | 'apple';
+/**
+ * An output path for FFmpeg's HLS muxer, always with `/` separators.
+ *
+ * These strings do not stay on the filesystem: the muxer derives the URIs it
+ * writes into `master.m3u8` from the playlist path it was given. `join()` is
+ * platform-specific, so on Windows the master came out carrying
+ * `stream_720p_1280x720\playlist.m3u8` — a backslash is not a separator in a
+ * URL, so a player resolves the whole thing as one filename, fetches the wrong
+ * base, and every `#EXT-X-MAP` init 404s. The collection uploads perfectly and
+ * is unplayable, on Windows only.
+ *
+ * FFmpeg accepts forward slashes on Windows (`C:/…`), so normalising costs
+ * nothing and keeps the playlists spec-correct wherever they were produced.
+ */
+export function hlsOutputPath(...parts: string[]): string {
+    return join(...parts).replace(/\\/g, '/');
+}
+
+export type AccelMode = 'cpu' | 'nvidia' | 'apple' | 'intel';
+
+/**
+ * Whether an ffmpeg failure is the hardware encoder refusing to start, as
+ * opposed to a bad source or a bad configuration that CPU would fail on too.
+ *
+ * Matched on what the encoders actually say. NVENC over its session cap:
+ * "Could not open encoder before EOF" with `-22 (Invalid argument)`; NVENC/QSV/
+ * VideoToolbox init failures name the encoder in the bracketed tag. Deliberately
+ * narrow — a retry that swallowed every error would turn one honest failure into
+ * two slow ones.
+ */
+export function isHardwareEncoderFailure(err: unknown): boolean {
+    const text = err instanceof Error ? err.message : String(err);
+    if (!/h264_(nvenc|qsv|videotoolbox)/.test(text)) return false;
+    return (
+        /Could not open encoder/i.test(text) ||
+        /OpenEncodeSessionEx failed/i.test(text) ||
+        /out of memory/i.test(text) ||
+        /session limit|too many concurrent|exceeded/i.test(text) ||
+        /Error while opening encoder/i.test(text) ||
+        /Invalid argument/.test(text)
+    );
+}
 
 @Injectable()
 export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(FfmpegService.name);
     private accelMode: AccelMode = 'cpu';
+    /**
+     * Why FFmpeg cannot be used here, or null when it can. Set once by
+     * {@link onModuleInit}; null before it runs, which is before Nest serves
+     * anything.
+     */
+    private unusableReason: string | null = null;
     private activeProcess: ChildProcess | null = null;
     private readonly timeoutMs = process.env.FFMPEG_TIMEOUT_MS
         ? parseInt(process.env.FFMPEG_TIMEOUT_MS, 10)
@@ -62,6 +127,33 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         : 8;
 
     async onModuleInit(): Promise<void> {
+        /*
+         * Is there a usable FFmpeg at all — is it installed, and is it new
+         * enough? Asked before the acceleration probes below, which answer a
+         * different question and used to be the only question asked: each wraps
+         * `execSync` in `try/catch` and falls through to 'cpu', so a machine with
+         * no ffmpeg whatsoever reported "No GPU found, using CPU encoding" and
+         * said nothing more until the first encode, several user decisions later.
+         */
+        const { availability, reason, detail } = await checkFfmpeg();
+        this.unusableReason = reason;
+        if (reason) {
+            this.logger.error(reason);
+            // Which options were missing, for us rather than for the user —
+            // "too old" alone is not diagnosable when a build fails this
+            // check unexpectedly.
+            if (detail) this.logger.error(detail);
+            // The probes below would only spawn an absent or too-old binary
+            // several more times to reach the same conclusion.
+            this.accelMode = 'cpu';
+            return;
+        }
+
+        this.logger.log(
+            `FFmpeg ${availability.ffmpeg.version ?? '(unknown version)'}, ` +
+                `ffprobe ${availability.ffprobe.version ?? '(unknown version)'}`
+        );
+
         this.accelMode = this.detectAcceleration();
         switch (this.accelMode) {
             case 'nvidia':
@@ -74,10 +166,31 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     'Apple Silicon detected, using VideoToolbox acceleration'
                 );
                 break;
+            case 'intel':
+                this.logger.log(
+                    'Intel Quick Sync detected, using QSV acceleration'
+                );
+                break;
             default:
                 this.logger.log('No GPU found, using CPU encoding');
         }
         this.logger.log(`FFmpeg threads: ${this.threads}`);
+    }
+
+    /**
+     * Why this machine cannot encode, or null when it can.
+     *
+     * Read by the endpoints that would otherwise spawn ffmpeg or ffprobe, so a
+     * missing or too-old install is refused with something actionable instead of
+     * surfacing as an `ENOENT`, or as a mid-encode failure on an unrecognised
+     * option, partway through a session.
+     *
+     * Decided once at startup rather than per request: the probes spawn several
+     * processes, and an install does not change under a running app often enough
+     * to pay that on every call.
+     */
+    unavailableReason(): string | null {
+        return this.unusableReason;
     }
 
     async onModuleDestroy(): Promise<void> {
@@ -104,9 +217,59 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     private detectAcceleration(): AccelMode {
+        // Ordered by how fast the hardware is, not by how likely it is to be
+        // present: a machine with a discrete NVIDIA card and an Intel iGPU has
+        // both, and NVENC is the better of the two.
         if (this.detectNvidiaGpu()) return 'nvidia';
         if (this.detectAppleGpu()) return 'apple';
+        if (this.detectIntelQsv()) return 'intel';
         return 'cpu';
+    }
+
+    /**
+     * Quick Sync, through the oneVPL dispatcher the Windows build links.
+     *
+     * Windows only: the encoder ships `h264_qsv` there and nowhere else, and on a
+     * Mac an Intel iGPU is reached through VideoToolbox instead.
+     *
+     * Asked of the binary rather than of the machine — there is no `nvidia-smi`
+     * equivalent worth shelling out to, and the dispatcher answers the same
+     * question by refusing to initialise. All three capabilities are required:
+     * the hwaccel to decode onto the GPU, the encoder to write from it, and
+     * `vpp_qsv` to scale in between. A build with the encoder but no scaler would
+     * pick this path and then fail on every ladder.
+     */
+    /**
+     * One capability listing from the ffmpeg binary (`-hwaccels`, `-encoders`,
+     * `-filters`), or '' when it cannot be asked.
+     *
+     * argv execution, never a shell string. The shell form composed
+     * `'<path>' -hwaccels 2>/dev/null`, which is doubly wrong on Windows: cmd.exe
+     * does not treat single quotes as quoting (and the packaged path contains
+     * spaces), and `/dev/null` is a literal file path there. Every probe threw,
+     * every catch fell through — so the packaged Windows app always reported
+     * "No GPU found, using CPU encoding", and Quick Sync, which is gated to
+     * win32, could never be detected on the only platform it exists for.
+     */
+    private ffmpegCapabilityList(flag: string): string {
+        try {
+            return execFileSync(ffmpegBin(), ['-hide_banner', flag], {
+                encoding: 'utf-8',
+                timeout: 5000,
+                stdio: ['ignore', 'pipe', 'ignore'],
+            });
+        } catch {
+            return '';
+        }
+    }
+
+    private detectIntelQsv(): boolean {
+        if (process.platform !== 'win32') return false;
+        if (!this.ffmpegCapabilityList('-hwaccels').includes('qsv'))
+            return false;
+        if (!this.ffmpegCapabilityList('-encoders').includes('h264_qsv'))
+            return false;
+        return this.ffmpegCapabilityList('-filters').includes('vpp_qsv');
     }
 
     private detectNvidiaGpu(): boolean {
@@ -116,42 +279,22 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             return false;
         }
 
-        try {
-            const hwaccels = execSync('ffmpeg -hwaccels 2>/dev/null', {
-                encoding: 'utf-8',
-                timeout: 5000,
-            });
-            return hwaccels.includes('cuda');
-        } catch {
-            return false;
-        }
+        return this.ffmpegCapabilityList('-hwaccels').includes('cuda');
     }
 
     private detectAppleGpu(): boolean {
         if (process.platform !== 'darwin' || process.arch !== 'arm64') {
             return false;
         }
-        try {
-            const hwaccels = execSync('ffmpeg -hwaccels 2>/dev/null', {
-                encoding: 'utf-8',
-                timeout: 5000,
-            });
-            if (!hwaccels.includes('videotoolbox')) return false;
-
-            const encoders = execSync('ffmpeg -encoders 2>/dev/null', {
-                encoding: 'utf-8',
-                timeout: 5000,
-            });
-            if (!encoders.includes('h264_videotoolbox')) return false;
-
-            const filters = execSync('ffmpeg -filters 2>/dev/null', {
-                encoding: 'utf-8',
-                timeout: 5000,
-            });
-            return filters.includes('scale_vt');
-        } catch {
+        if (!this.ffmpegCapabilityList('-hwaccels').includes('videotoolbox'))
             return false;
-        }
+        if (
+            !this.ffmpegCapabilityList('-encoders').includes(
+                'h264_videotoolbox'
+            )
+        )
+            return false;
+        return this.ffmpegCapabilityList('-filters').includes('scale_vt');
     }
 
     /**
@@ -162,7 +305,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     ): Promise<{ video: number[]; audio: number[] }> {
         try {
             const { stdout } = await execFileAsync(
-                'ffprobe',
+                ffprobeBin(),
                 [
                     '-v',
                     'error',
@@ -192,15 +335,31 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     /**
-     * Check whether all streams used by the encode config have aligned start times.
-     * When aligned, fMP4 segments can be used safely. When misaligned, MPEG-TS
-     * segments are needed because hls.js's TS→fMP4 transmuxer synchronizes
-     * audio and video PTS during transmux.
+     * How far into the source every stream has to be seeked for them all to
+     * begin together — 0 when they already do.
+     *
+     * A container whose audio starts a tenth of a second after its video used
+     * to be encoded to MPEG-TS instead of fMP4, on the reasoning that hls.js
+     * resynchronises PTS while transmuxing TS and appends fMP4 as it finds it.
+     * That made the output's container format a property of whatever file the
+     * user happened to hand over, and left the format every other player
+     * prefers unavailable to exactly the sources that most needed a well-formed
+     * one.
+     *
+     * Aligning at the input instead costs the head of the programme — at most
+     * the spread, typically tens of milliseconds — and settles the question
+     * before a single frame is encoded. Only the streams the config actually
+     * maps are considered: a track nobody asked for cannot drag the whole
+     * encode forward.
+     *
+     * A probe that came back with nothing returns 0. Refusing to encode over a
+     * question ffprobe would not answer is worse than encoding as we always
+     * did.
      */
-    private async areStreamStartTimesAligned(
+    private async computeAlignmentOffset(
         inputPath: string,
         encodeConfig: EncodeConfigDto
-    ): Promise<boolean> {
+    ): Promise<number> {
         const startTimes = await this.probeStreamStartTimes(inputPath);
 
         const usedStartTimes: number[] = [];
@@ -217,29 +376,31 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 usedStartTimes.push(startTimes.audio[idx]);
         }
 
-        if (usedStartTimes.length < 2) return true;
+        if (usedStartTimes.length < 2) return 0;
 
         const maxStart = Math.max(...usedStartTimes);
         const minStart = Math.min(...usedStartTimes);
         const spread = maxStart - minStart;
 
-        if (spread < 0.05) {
+        if (spread < ALIGNMENT_TOLERANCE_SECONDS) {
             this.logger.log(
-                `Stream start times aligned (spread ${(spread * 1000).toFixed(0)}ms) — using fMP4 segments`
+                `Stream start times aligned (spread ${(spread * 1000).toFixed(0)}ms)`
             );
-            return true;
+            return 0;
         }
 
         this.logger.log(
-            `Stream start times misaligned (spread ${(spread * 1000).toFixed(0)}ms, min ${minStart.toFixed(3)}s, max ${maxStart.toFixed(3)}s) — falling back to MPEG-TS segments`
+            `Stream start times differ by ${(spread * 1000).toFixed(0)}ms ` +
+                `(min ${minStart.toFixed(3)}s, max ${maxStart.toFixed(3)}s) — ` +
+                `aligning all streams to ${maxStart}s with an input seek`
         );
-        return false;
+        return maxStart;
     }
 
     private async probeDuration(inputPath: string): Promise<number> {
         try {
             const { stdout } = await execFileAsync(
-                'ffprobe',
+                ffprobeBin(),
                 [
                     '-v',
                     'error',
@@ -264,7 +425,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private async probeFrameRate(inputPath: string): Promise<number> {
         try {
             const { stdout } = await execFileAsync(
-                'ffprobe',
+                ffprobeBin(),
                 [
                     '-v',
                     'error',
@@ -295,73 +456,42 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    private async probeGopDuration(
-        inputPath: string,
-        frameRate: number
-    ): Promise<number | null> {
-        try {
-            const { stdout } = await execFileAsync(
-                'ffprobe',
-                [
-                    '-v',
-                    'error',
-                    '-select_streams',
-                    'v:0',
-                    '-show_frames',
-                    '-show_entries',
-                    'frame=pict_type',
-                    '-of',
-                    'csv=p=0',
-                    '-read_intervals',
-                    '%+#200',
-                    inputPath,
-                ],
-                { timeout: 60000 }
-            );
-            const frames = stdout
-                .trim()
-                .split('\n')
-                .filter((l) => l.trim());
-            let keyframeCount = 0;
-            let firstKeyIdx = -1;
-            let secondKeyIdx = -1;
-            for (let i = 0; i < frames.length; i++) {
-                if (frames[i].trim() === 'I') {
-                    keyframeCount++;
-                    if (keyframeCount === 1) firstKeyIdx = i;
-                    else if (keyframeCount === 2) {
-                        secondKeyIdx = i;
-                        break;
-                    }
-                }
-            }
-            if (
-                firstKeyIdx >= 0 &&
-                secondKeyIdx > firstKeyIdx &&
-                frameRate > 0
-            ) {
-                const gopFrames = secondKeyIdx - firstKeyIdx;
-                const gopSeconds = gopFrames / frameRate;
-                return Math.round(gopSeconds * 1000) / 1000;
-            }
-            return null;
-        } catch {
-            this.logger.warn('Could not probe GOP duration');
-            return null;
-        }
-    }
-
     private async buildConcatFile(
         inputPath: string,
         segments: TrimSegmentDto[],
-        outputDir: string
+        outputDir: string,
+        alignmentOffset = 0
     ): Promise<string> {
         const lines = ['ffconcat version 1.0'];
+        /*
+         * Absolute, because the concat demuxer resolves relative entries against
+         * the *list file's own directory* — not this process's working directory.
+         * A relative source would be looked for inside `outputDir` and the trim
+         * would fail on a file that is plainly there.
+         *
+         * The controller already rejects a non-absolute source at ingest, so this
+         * is belt and braces — but the sprite packer had exactly this bug (item
+         * 39) and was safe by the same kind of distant guarantee right up until
+         * it wasn't.
+         */
+        const absoluteInput = resolve(inputPath);
         for (const seg of segments) {
             // Escape single quotes in path for ffconcat format
-            const escapedPath = inputPath.replace(/'/g, "'\\''");
+            const escapedPath = absoluteInput.replace(/'/g, "'\\''");
             lines.push(`file '${escapedPath}'`);
-            lines.push(`inpoint ${seg.inSec}`);
+            // Trimming and aligning are the same operation here, so the
+            // alignment is folded into the in-points rather than added as a
+            // second seek in front of the concat demuxer — which would shift
+            // every kept range, not just the head.
+            //
+            // Misalignment exists only at the head of the source: past the
+            // latest-starting stream's first frame every stream is present, so
+            // a range beginning after that point is left exactly where the user
+            // put it. Only a range starting inside the head region moves, and
+            // it moves by at most the spread — a fraction of a second off the
+            // front of that one range, in exchange for all of its streams
+            // actually being there.
+            lines.push(`inpoint ${Math.max(seg.inSec, alignmentOffset)}`);
             lines.push(`outpoint ${seg.outSec}`);
         }
         const concatPath = join(outputDir, 'concat.txt');
@@ -422,7 +552,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
     private async buildVideoArgs(
         opts: EncodeOptions,
-        useFmp4 = true
+        alignmentOffset = 0
     ): Promise<string[]> {
         const { inputPath, outputDir, encodeConfig } = opts;
         const renditions = encodeConfig.videoRenditions!;
@@ -430,27 +560,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
         const sourceFrameRate = await this.probeFrameRate(inputPath);
         const gopFrames = Math.round(segmentDuration * sourceFrameRate);
-
-        let hlsTime = segmentDuration;
-        if (opts.byteRange !== false) {
-            const sourceGopDuration = await this.probeGopDuration(
-                inputPath,
-                sourceFrameRate
-            );
-            if (sourceGopDuration && sourceGopDuration > 0) {
-                hlsTime = sourceGopDuration;
-                this.logger.log(
-                    `Byte-range mode: using source GOP duration ${hlsTime}s for -hls_time (source: ${sourceFrameRate.toFixed(2)} fps, GOP: ${Math.round(hlsTime * sourceFrameRate)} frames)`
-                );
-            } else {
-                this.logger.log(
-                    `Byte-range mode: could not detect source GOP, using segment duration ${hlsTime}s for -hls_time`
-                );
-            }
-        }
+        const trimming = !!encodeConfig.trimSegments?.length;
 
         this.logger.log(
-            `Source frame rate: ${sourceFrameRate.toFixed(2)} fps, GOP: ${gopFrames} frames (${segmentDuration}s segments), hls_time: ${hlsTime}s`
+            `Source frame rate: ${sourceFrameRate.toFixed(2)} fps, GOP: ${gopFrames} frames (${segmentDuration}s segments)`
         );
         const args: string[] = [];
 
@@ -480,15 +593,56 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 '-hwaccel_output_format',
                 'videotoolbox_vld'
             );
+        } else if (hasReencode && this.accelMode === 'intel') {
+            args.push('-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv');
         }
 
-        if (encodeConfig.trimSegments?.length) {
+        if (trimming) {
             const concatPath = await this.buildConcatFile(
                 inputPath,
-                encodeConfig.trimSegments,
-                outputDir
+                encodeConfig.trimSegments!,
+                outputDir,
+                alignmentOffset
             );
-            args.push('-f', 'concat', '-safe', '0', '-i', concatPath);
+            // The concat demuxer's inpoint seek is keyframe-granular, and it
+            // lands where the file's *default* stream says by DTS — on a
+            // multi-stream source each mapped stream can carry up to a GOP of
+            // pre-roll before the cut, a different amount per stream. Left in,
+            // the muxer clamps those backwards timestamps at every splice and
+            // lip-sync slides by the per-stream difference. So every decoded
+            // frame is tagged with its concat window (-segment_time_metadata)
+            // and the select/aselect=concatdec_select filters below drop the
+            // frames outside it — the cut becomes sample-accurate.
+            //
+            // -copyts is load-bearing: the window metadata is in the concat
+            // demuxer's stitched clock, but without it ffmpeg shifts input
+            // timestamps to start at zero — by exactly the pre-roll, since the
+            // pre-roll holds the earliest packet — and the select filters then
+            // cut a window displaced by up to a GOP (verified by frame
+            // comparison, not a theory). The stitched clock already starts at
+            // zero, so downstream muxing is unaffected.
+            args.push(
+                '-f',
+                'concat',
+                '-safe',
+                '0',
+                '-segment_time_metadata',
+                '1',
+                '-i',
+                concatPath,
+                '-copyts'
+            );
+        } else if (alignmentOffset > 0) {
+            // Input-level, hence in front of `-i`, and not a `-filter_complex`
+            // trim: a copy-mode rendition never passes through the filter graph
+            // at all, so a filter-level trim would align the re-encoded streams
+            // and leave the copied ones exactly as misaligned as they were. An
+            // input seek is the only mechanism that reaches every stream.
+            //
+            // It follows the hwaccel flags because those are input options too,
+            // and every input option has to be stated before the input it
+            // applies to.
+            args.push('-ss', String(alignmentOffset), '-i', inputPath);
         } else {
             args.push('-i', inputPath);
         }
@@ -517,8 +671,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 const splitOutputs = entries
                     .map((e) => `[reencode${e.globalIndex}]`)
                     .join('');
+                const trimSelect = trimming ? 'select=concatdec_select,' : '';
                 filterParts.push(
-                    `[0:v:${trackIdx}]split=${entries.length}${splitOutputs}`
+                    `[0:v:${trackIdx}]${trimSelect}split=${entries.length}${splitOutputs}`
                 );
                 for (const e of entries) {
                     let scalerExpr: string;
@@ -526,6 +681,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                         scalerExpr = `scale_cuda=${e.rendition.width}:${e.rendition.height}`;
                     } else if (this.accelMode === 'apple') {
                         scalerExpr = `scale_vt=w=${e.rendition.width}:h=${e.rendition.height}`;
+                    } else if (this.accelMode === 'intel') {
+                        // vpp_qsv, not scale_qsv: the VPP filter is what current
+                        // FFmpeg builds carry, and it keeps the frame in QSV
+                        // memory so no download/upload round trip appears
+                        // between decode and encode.
+                        scalerExpr = `vpp_qsv=w=${e.rendition.width}:h=${e.rendition.height}`;
                     } else {
                         scalerExpr = `scale=${e.rendition.width}:${e.rendition.height}`;
                     }
@@ -572,6 +733,46 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                         `-cq:v:${videoOutputIndex}`,
                         `${cq}`,
                         `-b:v:${videoOutputIndex}`,
+                        '0',
+                        `-maxrate:v:${videoOutputIndex}`,
+                        `${r.videoBitrateKbps}k`,
+                        `-bufsize:v:${videoOutputIndex}`,
+                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
+                    );
+                } else {
+                    args.push(
+                        `-b:v:${videoOutputIndex}`,
+                        `${r.videoBitrateKbps}k`,
+                        `-maxrate:v:${videoOutputIndex}`,
+                        `${Math.round(r.videoBitrateKbps * 1.07)}k`,
+                        `-bufsize:v:${videoOutputIndex}`,
+                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
+                    );
+                }
+            } else if (this.accelMode === 'intel') {
+                // Quick Sync. `-global_quality` with `-look_ahead 0` is QSV's
+                // constant-quality mode, the counterpart of NVENC's `-cq`; the
+                // scale is the same 0-51 range as x264's CRF, so the existing
+                // bitrate-to-CRF mapping applies unchanged.
+                args.push(
+                    `-c:v:${videoOutputIndex}`,
+                    'h264_qsv',
+                    `-profile:v:${videoOutputIndex}`,
+                    'high',
+                    `-preset:v:${videoOutputIndex}`,
+                    'medium'
+                );
+                if (r.vbr) {
+                    const quality = this.bitrateToVideoCrf(
+                        r.videoBitrateKbps,
+                        r.width,
+                        r.height,
+                        sourceFrameRate
+                    );
+                    args.push(
+                        `-global_quality:v:${videoOutputIndex}`,
+                        `${quality}`,
+                        `-look_ahead:v:${videoOutputIndex}`,
                         '0',
                         `-maxrate:v:${videoOutputIndex}`,
                         `${r.videoBitrateKbps}k`,
@@ -639,6 +840,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                         `${Math.round(r.videoBitrateKbps * 1.5)}k`
                     );
                 }
+                // x264 puts a keyframe wherever it detects a cut, which lands
+                // off the `-g` cadence below and takes the segment boundary
+                // with it — the HLS muxer closes a chunk at the first keyframe
+                // past `-hls_time`, so a scene change two seconds early yields
+                // a short segment and the chain stops being uniform. NVENC and
+                // VideoToolbox do not scene-cut unless asked, so this is the
+                // CPU path's problem alone.
+                args.push(`-sc_threshold:v:${videoOutputIndex}`, '0');
             }
             args.push(
                 `-g:v:${videoOutputIndex}`,
@@ -663,8 +872,37 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             [];
         let audioOutputIndex = 0;
 
+        // Trimmed audio takes the filter graph for the same concatdec_select
+        // drop as video (a repeated -filter_complex is additive). A filter
+        // input can only be consumed once, so a source track feeding several
+        // groups is fanned out with asplit. Copy-mode audio cannot pass a
+        // filter — the controller refuses copyStream with trimSegments.
+        if (trimming) {
+            const groupsByTrack = new Map<number, number[]>();
+            audioGroups.forEach((group, i) => {
+                const track = group.sourceTrackIndex;
+                if (!groupsByTrack.has(track)) groupsByTrack.set(track, []);
+                groupsByTrack.get(track)!.push(i);
+            });
+            const audioParts: string[] = [];
+            for (const [trackIdx, outs] of groupsByTrack) {
+                const labels = outs.map((i) => `[aout${i}]`).join('');
+                audioParts.push(
+                    outs.length === 1
+                        ? `[0:a:${trackIdx}]aselect=concatdec_select${labels}`
+                        : `[0:a:${trackIdx}]aselect=concatdec_select,asplit=${outs.length}${labels}`
+                );
+            }
+            args.push('-filter_complex', audioParts.join(';'));
+        }
+
         for (const group of audioGroups) {
-            args.push('-map', `0:a:${group.sourceTrackIndex}`);
+            args.push(
+                '-map',
+                trimming
+                    ? `[aout${audioOutputIndex}]`
+                    : `0:a:${group.sourceTrackIndex}`
+            );
             if (group.copyStream) {
                 args.push(`-c:a:${audioOutputIndex}`, 'copy');
             } else {
@@ -690,33 +928,29 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             audioOutputIndex++;
         }
 
-        // HLS output options — use fMP4 when stream start times are aligned (preferred:
-        // CMAF-compatible, lower overhead). Fall back to MPEG-TS when misaligned, because
-        // hls.js's TS→fMP4 transmuxer synchronizes audio/video PTS during transmux,
-        // while fMP4 segments are appended directly and rely on tfdt alignment.
-        const segExt = useFmp4 ? 'm4s' : 'ts';
+        // HLS output options. fMP4 unconditionally: CMAF-compatible, lower
+        // per-segment overhead, and the format every current player is happiest
+        // with. Sources whose streams do not start together are aligned at the
+        // input above rather than escaped into MPEG-TS.
+        const segExt = 'm4s';
         args.push(
             '-f',
             'hls',
             '-hls_time',
-            String(hlsTime),
+            String(segmentDuration),
             '-hls_playlist_type',
             'vod',
             '-hls_flags',
             'independent_segments',
             '-hls_segment_type',
-            useFmp4 ? 'fmp4' : 'mpegts',
+            'fmp4',
             '-master_pl_name',
-            'master.m3u8'
+            'master.m3u8',
+            '-hls_fmp4_init_filename',
+            'init.mp4',
+            '-movflags',
+            '+negative_cts_offsets+default_base_moof'
         );
-        if (useFmp4) {
-            args.push(
-                '-hls_fmp4_init_filename',
-                'init.mp4',
-                '-movflags',
-                '+negative_cts_offsets+default_base_moof'
-            );
-        }
 
         const multiTrack =
             new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
@@ -724,7 +958,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const varParts: string[] = [];
         for (const { rendition, outputIndex } of videoIndexMap) {
             const name = this.buildVideoStreamName(rendition, multiTrack);
-            let part = `v:${outputIndex},agroup:${rendition.audioGroupId},name:${name}`;
+            const part = `v:${outputIndex},agroup:${rendition.audioGroupId},name:${name}`;
             varParts.push(part);
         }
 
@@ -746,8 +980,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         args.push(
             '-hls_segment_filename',
-            join(outputDir, 'stream_%v', `segment_%05d.${segExt}`),
-            join(outputDir, 'stream_%v', 'playlist.m3u8')
+            hlsOutputPath(outputDir, 'stream_%v', `segment_%05d.${segExt}`),
+            hlsOutputPath(outputDir, 'stream_%v', 'playlist.m3u8')
         );
 
         return args;
@@ -755,20 +989,38 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
     private async buildAudioArgs(
         opts: EncodeOptions,
-        useFmp4 = true
+        alignmentOffset = 0
     ): Promise<string[]> {
         const { inputPath, outputDir, encodeConfig } = opts;
         const audioGroups = encodeConfig.audioGroups!;
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
+        const trimming = !!encodeConfig.trimSegments?.length;
         const args: string[] = [];
 
-        if (encodeConfig.trimSegments?.length) {
+        if (trimming) {
             const concatPath = await this.buildConcatFile(
                 inputPath,
-                encodeConfig.trimSegments,
-                outputDir
+                encodeConfig.trimSegments!,
+                outputDir,
+                alignmentOffset
             );
-            args.push('-f', 'concat', '-safe', '0', '-i', concatPath);
+            // See buildVideoArgs: the metadata flag + aselect drop the
+            // keyframe-inexact seek pre-roll, and -copyts keeps the frames in
+            // the clock the window metadata refers to.
+            args.push(
+                '-f',
+                'concat',
+                '-safe',
+                '0',
+                '-segment_time_metadata',
+                '1',
+                '-i',
+                concatPath,
+                '-copyts'
+            );
+        } else if (alignmentOffset > 0) {
+            // See buildVideoArgs: input-level, so it reaches copied streams too.
+            args.push('-ss', String(alignmentOffset), '-i', inputPath);
         } else {
             args.push('-i', inputPath);
         }
@@ -777,8 +1029,30 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         args.push('-progress', 'pipe:2', '-stats_period', '1');
         args.push('-vn');
 
+        if (trimming) {
+            const groupsByTrack = new Map<number, number[]>();
+            audioGroups.forEach((group, i) => {
+                const track = group.sourceTrackIndex;
+                if (!groupsByTrack.has(track)) groupsByTrack.set(track, []);
+                groupsByTrack.get(track)!.push(i);
+            });
+            const audioParts: string[] = [];
+            for (const [trackIdx, outs] of groupsByTrack) {
+                const labels = outs.map((i) => `[aout${i}]`).join('');
+                audioParts.push(
+                    outs.length === 1
+                        ? `[0:a:${trackIdx}]aselect=concatdec_select${labels}`
+                        : `[0:a:${trackIdx}]aselect=concatdec_select,asplit=${outs.length}${labels}`
+                );
+            }
+            args.push('-filter_complex', audioParts.join(';'));
+        }
+
         audioGroups.forEach((group, i) => {
-            args.push('-map', `0:a:${group.sourceTrackIndex}`);
+            args.push(
+                '-map',
+                trimming ? `[aout${i}]` : `0:a:${group.sourceTrackIndex}`
+            );
             if (group.copyStream) {
                 args.push(`-c:a:${i}`, 'copy');
             } else {
@@ -806,7 +1080,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             varParts.push(`a:${i},name:${name}`);
         }
 
-        const segExt = useFmp4 ? 'm4s' : 'ts';
+        const segExt = 'm4s';
         args.push(
             '-f',
             'hls',
@@ -817,25 +1091,21 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             '-hls_flags',
             'independent_segments',
             '-hls_segment_type',
-            useFmp4 ? 'fmp4' : 'mpegts',
+            'fmp4',
             '-master_pl_name',
-            'master.m3u8'
+            'master.m3u8',
+            '-hls_fmp4_init_filename',
+            'init.mp4',
+            '-movflags',
+            '+negative_cts_offsets+default_base_moof'
         );
-        if (useFmp4) {
-            args.push(
-                '-hls_fmp4_init_filename',
-                'init.mp4',
-                '-movflags',
-                '+negative_cts_offsets+default_base_moof'
-            );
-        }
 
         args.push(
             '-var_stream_map',
             varParts.join(' '),
             '-hls_segment_filename',
-            join(outputDir, 'stream_%v', `segment_%05d.${segExt}`),
-            join(outputDir, 'stream_%v', 'playlist.m3u8')
+            hlsOutputPath(outputDir, 'stream_%v', `segment_%05d.${segExt}`),
+            hlsOutputPath(outputDir, 'stream_%v', 'playlist.m3u8')
         );
 
         return args;
@@ -884,28 +1154,90 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             }
         }
 
-        // Use fMP4 when stream start times are aligned (CMAF-compatible, lower overhead).
-        // Fall back to MPEG-TS when misaligned — hls.js's transmuxer fixes sync for TS.
-        const useFmp4 = await this.areStreamStartTimesAligned(
+        // Settled before anything is built: a source whose streams do not start
+        // together is seeked past the head so that they do, and the output is
+        // fMP4 either way.
+        const alignmentOffset = await this.computeAlignmentOffset(
             opts.inputPath,
             encodeConfig
         );
 
+        // What the output will be, not what the input is. Progress is FFmpeg's
+        // out_time over this figure, and an aligned encode never reaches the
+        // source's full duration — the head it seeked past is duration it will
+        // never write — so leaving the offset in would park the bar short of
+        // 100% on precisely the sources this change exists for. A trimmed
+        // encode already measures its kept ranges, and the alignment is folded
+        // into those in-points rather than added to them.
         const totalDuration = encodeConfig.trimSegments?.length
             ? encodeConfig.trimSegments.reduce(
                   (sum, s) => sum + (s.outSec - s.inSec),
                   0
               )
-            : await this.probeDuration(opts.inputPath);
-        const args =
+            : Math.max(
+                  0,
+                  (await this.probeDuration(opts.inputPath)) - alignmentOffset
+              );
+        const buildArgs = () =>
             type === 'video'
-                ? await this.buildVideoArgs(opts, useFmp4)
-                : await this.buildAudioArgs(opts, useFmp4);
+                ? this.buildVideoArgs(opts, alignmentOffset)
+                : this.buildAudioArgs(opts, alignmentOffset);
+
+        try {
+            return await this.runEncode(
+                await buildArgs(),
+                opts,
+                totalDuration,
+                alignmentOffset
+            );
+        } catch (err) {
+            // A hardware encoder that will not open is not a reason to fail the
+            // job when libx264 is right there. The case that surfaced this: a
+            // GeForce driver caps concurrent NVENC sessions (2, 3, 5 or 8 by
+            // generation) and a six-rendition ladder opens six — every session
+            // past the cap fails with "Could not open encoder before EOF /
+            // Invalid argument", and the whole encode with it. The preview has
+            // retried on CPU for this exact reason since it was written; the
+            // encode never did.
+            if (this.accelMode === 'cpu' || !isHardwareEncoderFailure(err)) {
+                throw err;
+            }
+            this.logger.warn(
+                `${this.accelMode} encoder failed to open, retrying this encode on CPU: ` +
+                    `${(err as Error).message.split('\n')[0]}`
+            );
+            const previous = this.accelMode;
+            this.accelMode = 'cpu';
+            try {
+                return await this.runEncode(
+                    await buildArgs(),
+                    opts,
+                    totalDuration,
+                    alignmentOffset
+                );
+            } finally {
+                // Per encode, not for good: the next job may be a single
+                // rendition the GPU handles fine, and the acceleration mode is
+                // what the UI reports as the machine's capability.
+                this.accelMode = previous;
+            }
+        }
+    }
+
+    /** Spawn one ffmpeg run for {@link encode} and wait for it. */
+    private runEncode(
+        args: string[],
+        opts: EncodeOptions,
+        totalDuration: number,
+        alignmentOffset: number
+    ): Promise<EncodeResult> {
+        const { outputDir, encodeConfig, onProgress } = opts;
+        const type = encodeConfig.type;
 
         this.logger.debug(`FFmpeg args: ffmpeg ${args.join(' ')}`);
 
         return new Promise<EncodeResult>((resolve, reject) => {
-            const proc = spawn('ffmpeg', args, {
+            const proc = spawn(ffmpegBin(), args, {
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
             this.activeProcess = proc;
@@ -954,48 +1286,11 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 }
 
                 (async () => {
-                    if (opts.preByteRangeHook) {
-                        await opts.preByteRangeHook(outputDir);
-                    }
-
-                    if (opts.byteRange !== false) {
-                        const maxBytes =
-                            opts.byteRangeMaxFileSizeBytes ?? 500 * 1024 * 1024;
-                        await this.convertToByteRange(outputDir, maxBytes);
-                    }
-
-                    let anglePlaylists: AnglePlaylist[] = [];
-                    let masterPlaylistFilename = 'master.m3u8';
+                    // One spec-correct master, angles and all. Splitting it per
+                    // angle is the player's job now (see the hls package's
+                    // extractAnglePlaylist / extractAudioOnlyPlaylist).
                     if (type === 'video') {
                         await this.fixMasterPlaylist(outputDir, encodeConfig);
-                        anglePlaylists = await this.generateAnglePlaylists(
-                            outputDir,
-                            encodeConfig
-                        );
-                        if (anglePlaylists.length > 1) {
-                            const masterPath = join(outputDir, 'master.m3u8');
-                            await unlink(masterPath).catch(() => {});
-                            masterPlaylistFilename =
-                                anglePlaylists[0]?.filename ?? 'master.m3u8';
-                        }
-
-                        const audioOnlyPlaylist =
-                            await this.generateAudioOnlyPlaylist(
-                                outputDir,
-                                encodeConfig
-                            );
-                        if (audioOnlyPlaylist) {
-                            if (
-                                anglePlaylists.length === 1 &&
-                                anglePlaylists[0].name === 'Default'
-                            ) {
-                                anglePlaylists[0] = {
-                                    ...anglePlaylists[0],
-                                    name: 'Video',
-                                };
-                            }
-                            anglePlaylists.push(audioOnlyPlaylist);
-                        }
                     } else {
                         await this.fixAudioOnlyMasterPlaylist(
                             outputDir,
@@ -1004,9 +1299,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     }
                     resolve({
                         outputDir,
-                        masterPlaylist: masterPlaylistFilename,
-                        anglePlaylists,
-                        segmentFormat: useFmp4 ? 'fmp4' : 'mpegts',
+                        masterPlaylist: 'master.m3u8',
+                        segmentFormat: 'fmp4',
+                        alignmentOffset,
                     });
                 })().catch(reject);
             };
@@ -1045,45 +1340,6 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     }
                 }, this.timeoutMs);
             }
-        });
-    }
-
-    private async convertToByteRange(
-        outputDir: string,
-        maxFileSizeBytes: number
-    ): Promise<void> {
-        const tsPath = join(__dirname, 'byte-range.worker.ts');
-        const useTsWorker = existsSync(tsPath);
-        const workerPath = useTsWorker
-            ? tsPath
-            : join(__dirname, 'byte-range.worker.js');
-
-        return new Promise<void>((resolve, reject) => {
-            const worker = new Worker(workerPath, {
-                workerData: { outputDir, maxFileSizeBytes },
-                ...(useTsWorker
-                    ? { execArgv: ['--require', 'ts-node/register'] }
-                    : {}),
-            });
-
-            worker.on('message', (msg) => {
-                this.logger.log(
-                    `Byte-range conversion complete for ${msg.streamCount} stream(s) (max ${Math.round(maxFileSizeBytes / 1024 / 1024)} MB per file)`
-                );
-                resolve();
-            });
-
-            worker.on('error', (err) => {
-                reject(new Error(`Byte-range worker error: ${err.message}`));
-            });
-
-            worker.on('exit', (code) => {
-                if (code !== 0) {
-                    reject(
-                        new Error(`Byte-range worker exited with code ${code}`)
-                    );
-                }
-            });
         });
     }
 
@@ -1182,146 +1438,6 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 return line.replace(/NAME="[^"]*"/, `NAME="${name}"`);
             })
             .join('\n');
-    }
-
-    /**
-     * Parse the already-fixed master.m3u8 (which has VIDEO="angle" attributes)
-     * and split it into one playlist per angle. Does NOT upload the original
-     * multi-angle master because most HLS web players don't support it.
-     */
-    private async generateAnglePlaylists(
-        outputDir: string,
-        config: EncodeConfigDto
-    ): Promise<AnglePlaylist[]> {
-        const renditions = config.videoRenditions ?? [];
-        if (renditions.length === 0) return [];
-
-        const masterPath = join(outputDir, 'master.m3u8');
-        const uniqueTracks = new Set(
-            renditions.map((r) => r.sourceTrackIndex ?? 0)
-        );
-        if (uniqueTracks.size <= 1) {
-            return [{ name: 'Default', filename: 'master.m3u8' }];
-        }
-
-        let content: string;
-        try {
-            content = await readFile(masterPath, 'utf-8');
-        } catch {
-            return [];
-        }
-        const lines = content.split('\n');
-
-        let extVersion = '#EXT-X-VERSION:3';
-        const audioMediaLines: string[] = [];
-        const streamsByAngle = new Map<
-            string,
-            { infLine: string; uri: string }[]
-        >();
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (line.startsWith('#EXT-X-VERSION:')) {
-                extVersion = line;
-            } else if (
-                line.startsWith('#EXT-X-MEDIA:') &&
-                line.includes('TYPE=AUDIO')
-            ) {
-                audioMediaLines.push(line);
-            } else if (line.startsWith('#EXT-X-STREAM-INF:')) {
-                const uriLine = lines[i + 1]?.trim();
-                if (!uriLine || uriLine.startsWith('#')) continue;
-
-                const videoMatch = line.match(/VIDEO="([^"]+)"/);
-                const angleId = videoMatch?.[1] ?? 'default';
-
-                if (!streamsByAngle.has(angleId)) {
-                    streamsByAngle.set(angleId, []);
-                }
-
-                const cleanedLine = line.replace(/,?VIDEO="[^"]*"/g, '');
-                streamsByAngle
-                    .get(angleId)!
-                    .push({ infLine: cleanedLine, uri: uriLine });
-            }
-        }
-
-        this.logger.debug(
-            `generateAnglePlaylists: found ${streamsByAngle.size} angle(s) in master.m3u8: ` +
-                `${[...streamsByAngle.entries()].map(([k, v]) => `"${k}" (${v.length} streams)`).join(', ')}`
-        );
-
-        const nameByTrackIndex = new Map<number, string>();
-        for (const tn of config.videoTrackNames ?? []) {
-            nameByTrackIndex.set(tn.index, tn.name ?? `Angle ${tn.index}`);
-        }
-
-        const sanitize = (s: string): string =>
-            s
-                .replace(/[^a-zA-Z0-9_-]/g, '_')
-                .replace(/_+/g, '_')
-                .replace(/^_|_$/g, '') || 'angle';
-
-        const anglePlaylists: AnglePlaylist[] = [];
-
-        for (const [angleId, streams] of streamsByAngle) {
-            const angleName =
-                [...nameByTrackIndex.values()].find(
-                    (name) => sanitize(name) === angleId
-                ) ?? angleId;
-
-            const filename = `${angleId}.m3u8`;
-            const parts: string[] = ['#EXTM3U', extVersion, ...audioMediaLines];
-
-            for (const { infLine, uri } of streams) {
-                parts.push(infLine, uri);
-            }
-
-            const anglePath = join(outputDir, filename);
-            await writeFile(anglePath, parts.join('\n') + '\n', 'utf-8');
-            anglePlaylists.push({ name: angleName, filename });
-
-            this.logger.debug(
-                `generateAnglePlaylists: wrote "${filename}" for angle "${angleName}" with ${streams.length} stream(s)`
-            );
-        }
-
-        return anglePlaylists;
-    }
-
-    /**
-     * Generate a standalone audio-only master playlist from a video encode's
-     * audio streams. Follows the same structure as audio-file-upload playlists.
-     */
-    private async generateAudioOnlyPlaylist(
-        outputDir: string,
-        config: EncodeConfigDto
-    ): Promise<AnglePlaylist | null> {
-        const audioGroups = config.audioGroups ?? [];
-        if (audioGroups.length === 0) return null;
-
-        const masterPath = join(outputDir, 'master.m3u8');
-        let extVersion = '#EXT-X-VERSION:7';
-        try {
-            const raw = await readFile(masterPath, 'utf-8');
-            const versionMatch = raw.match(/#EXT-X-VERSION:\d+/);
-            if (versionMatch) extVersion = versionMatch[0];
-        } catch {
-            // master.m3u8 may not exist yet
-        }
-
-        const content = this.buildAudioOnlyMasterContent(
-            extVersion,
-            audioGroups
-        );
-        const filename = 'audio_only.m3u8';
-        await writeFile(join(outputDir, filename), content, 'utf-8');
-
-        this.logger.debug(
-            `generateAudioOnlyPlaylist: wrote "${filename}" with ${audioGroups.length} audio group(s)`
-        );
-
-        return { name: 'Audio only', filename };
     }
 
     /**
@@ -1476,6 +1592,52 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
 
         return result.join('\n');
+    }
+
+    /**
+     * Which byte-range chunk chain each stream directory's segments belong to.
+     *
+     * Packing shares one chain across several streams, and this is where the
+     * grouping is decided — from the config that named the directories, never
+     * by reading a name back apart. The names are built below out of labels the
+     * user typed; a reader that re-derived the angle from a `_t1_` infix would
+     * be one label containing an underscore away from packing an angle into the
+     * wrong chain, and would say nothing about it.
+     *
+     * One chain per video angle, holding every rendition of that angle: the
+     * target CDN class forwards a requested range to the client immediately
+     * while backhauling the whole object, so one chunk pull warms every
+     * rendition of the angle at the edge and an ABR step-up never lands on a
+     * cold object. Audio gets a single chain of its own instead of riding along
+     * — it is needed *concurrently* with video rather than swapped for it, so
+     * merging would duplicate it into every angle's chunks, and keeping it
+     * apart is what lets audio-only playback pull no video bytes at all.
+     */
+    buildStreamChainMap(encodeConfig: EncodeConfigDto): Record<string, string> {
+        const chains: Record<string, string> = {};
+
+        if (encodeConfig.type === 'video') {
+            const renditions = encodeConfig.videoRenditions ?? [];
+            // The same test buildVideoArgs applies when it names the stream
+            // directories, and it has to stay the same test: a different answer
+            // here maps chains onto directories that do not exist.
+            const multiTrack =
+                new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size >
+                1;
+            for (const rendition of renditions) {
+                const name = this.buildVideoStreamName(rendition, multiTrack);
+                chains[`stream_${name}`] =
+                    `v${rendition.sourceTrackIndex ?? 0}`;
+            }
+        }
+
+        // Audio-only encodes fall through to exactly this and nothing else,
+        // which is the whole special case they need.
+        for (const group of encodeConfig.audioGroups ?? []) {
+            chains[`stream_${this.buildAudioStreamName(group)}`] = 'a';
+        }
+
+        return chains;
     }
 
     private buildVideoStreamName(

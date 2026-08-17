@@ -30,7 +30,8 @@ describe('disk-space', () => {
     });
 
     afterEach(() => {
-        if (originalReserve === undefined) delete process.env.DISK_RESERVE_BYTES;
+        if (originalReserve === undefined)
+            delete process.env.DISK_RESERVE_BYTES;
         else process.env.DISK_RESERVE_BYTES = originalReserve;
     });
 
@@ -101,9 +102,9 @@ describe('disk-space', () => {
             // than a running encode needs to write into.
             mockStatfs.mockResolvedValueOnce(withFree(5));
 
-            await expect(
-                ingestShortfall('/work', 4 * GB)
-            ).resolves.toMatch(/Not enough disk space/);
+            await expect(ingestShortfall('/work', 4 * GB)).resolves.toMatch(
+                /Not enough disk space/
+            );
         });
 
         it('accepts that same file once the reserve is turned off', async () => {
@@ -121,7 +122,9 @@ describe('disk-space', () => {
         it('stays silent when free space cannot be read', async () => {
             mockStatfs.mockRejectedValueOnce(new Error('ENOSYS'));
 
-            await expect(ingestShortfall('/work', 500 * GB)).resolves.toBeNull();
+            await expect(
+                ingestShortfall('/work', 500 * GB)
+            ).resolves.toBeNull();
         });
     });
 
@@ -147,7 +150,9 @@ describe('disk-space', () => {
         it('lets an upload continue when there is room for the rest of it', async () => {
             mockStatfs.mockResolvedValueOnce(withFree(100));
 
-            await expect(inFlightShortfall('/work', 10 * GB)).resolves.toBeNull();
+            await expect(
+                inFlightShortfall('/work', 10 * GB)
+            ).resolves.toBeNull();
         });
 
         it('judges on the reserve even when the remaining size is unknown', async () => {
@@ -162,7 +167,9 @@ describe('disk-space', () => {
         it('stays silent when free space cannot be read', async () => {
             mockStatfs.mockRejectedValueOnce(new Error('ENOSYS'));
 
-            await expect(inFlightShortfall('/work', 500 * GB)).resolves.toBeNull();
+            await expect(
+                inFlightShortfall('/work', 500 * GB)
+            ).resolves.toBeNull();
         });
     });
 });

@@ -5,8 +5,13 @@ export type SidecarKind = 'subtitles' | 'chapters' | 'waveform';
  *
  * Convention:
  *   subtitles → `<masterFolder>/subtitles/<filename>` (e.g. `en.vtt`)
- *   chapters  → `<masterFolder>/chapters.vtt` (filename is ignored)
+ *   chapters  → `<masterFolder>/chapters/<filename>` (e.g. `en.vtt`)
  *   waveform  → `<masterFolder>/waveform.json` (filename is ignored)
+ *
+ * Chapters are per-language, the same shape as subtitles — this mirrors what
+ * the encoding API's chapter endpoints actually read and write
+ * (`chaptersKey()` in `hls-edit.service.ts`). It used to say `chapters.vtt`
+ * with the filename ignored, which no longer described any live behaviour.
  *
  * Mirrors the existing thumbnails layout (`<masterFolder>/thumbnails/thumbnails.vtt`).
  */
@@ -17,9 +22,9 @@ export function sidecarPath(masterKey: string, kind: SidecarKind, filename: stri
     if (kind === 'subtitles') {
         return `${folder}subtitles/${filename}`;
     }
-    if (kind === 'waveform') {
-        return `${folder}waveform.json`;
+    if (kind === 'chapters') {
+        return `${folder}chapters/${filename}`;
     }
-    // chapters is a single file — filename arg kept for signature symmetry
-    return `${folder}chapters.vtt`;
+    // waveform is a single file — filename arg kept for signature symmetry
+    return `${folder}waveform.json`;
 }

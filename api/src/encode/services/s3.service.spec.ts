@@ -45,7 +45,9 @@ describe('S3Service', () => {
         };
 
         it('should return HLS content type for .m3u8', () => {
-            expect(getContentType('master.m3u8')).toBe('application/vnd.apple.mpegurl');
+            expect(getContentType('master.m3u8')).toBe(
+                'application/vnd.apple.mpegurl'
+            );
         });
 
         it('should return fMP4 segment content type for .m4s', () => {
@@ -61,7 +63,9 @@ describe('S3Service', () => {
         });
 
         it('should handle full paths', () => {
-            expect(getContentType('/tmp/output/v0/playlist.m3u8')).toBe('application/vnd.apple.mpegurl');
+            expect(getContentType('/tmp/output/v0/playlist.m3u8')).toBe(
+                'application/vnd.apple.mpegurl'
+            );
         });
 
         it('should return image/webp for .webp', () => {
@@ -87,11 +91,13 @@ describe('S3Service', () => {
 
     describe('createClient (private)', () => {
         it('should create a MinIO client with given config', () => {
-            (service as any).createClient(makeS3Config({
-                port: 9000,
-                useSSL: false,
-                region: 'us-east-1',
-            }));
+            (service as any).createClient(
+                makeS3Config({
+                    port: 9000,
+                    useSSL: false,
+                    region: 'us-east-1',
+                })
+            );
 
             expect(minio.Client).toHaveBeenCalledWith({
                 endPoint: 's3.example.com',
@@ -107,7 +113,7 @@ describe('S3Service', () => {
             (service as any).createClient(makeS3Config());
 
             expect(minio.Client).toHaveBeenCalledWith(
-                expect.objectContaining({ useSSL: true }),
+                expect.objectContaining({ useSSL: true })
             );
         });
 
@@ -115,7 +121,7 @@ describe('S3Service', () => {
             (service as any).createClient(makeS3Config({ useSSL: false }));
 
             expect(minio.Client).toHaveBeenCalledWith(
-                expect.objectContaining({ useSSL: false }),
+                expect.objectContaining({ useSSL: false })
             );
         });
     });
@@ -141,7 +147,7 @@ describe('S3Service', () => {
 
         it('collapses doubled separators', () => {
             expect(S3Service.canonicalPrefix('//videos//project-1//')).toBe(
-                'videos/project-1',
+                'videos/project-1'
             );
         });
 
@@ -155,7 +161,7 @@ describe('S3Service', () => {
 
         it('leaves an already-canonical prefix alone', () => {
             expect(S3Service.canonicalPrefix('videos/project-1')).toBe(
-                'videos/project-1',
+                'videos/project-1'
             );
         });
     });
@@ -164,13 +170,18 @@ describe('S3Service', () => {
         it('should upload file with correct content type using fPutObject', async () => {
             const client = new (MockClient as any)();
 
-            await service.uploadFile(client, 'my-bucket', '/tmp/sprite.webp', 'thumbnails/sprite.webp');
+            await service.uploadFile(
+                client,
+                'my-bucket',
+                '/tmp/sprite.webp',
+                'thumbnails/sprite.webp'
+            );
 
             expect(mockFPutObject).toHaveBeenCalledWith(
                 'my-bucket',
                 'thumbnails/sprite.webp',
                 '/tmp/sprite.webp',
-                { 'Content-Type': 'image/webp' },
+                { 'Content-Type': 'image/webp' }
             );
         });
 
@@ -178,9 +189,96 @@ describe('S3Service', () => {
             const debugSpy = vi.spyOn((service as any).logger, 'debug');
             const client = new (MockClient as any)();
 
-            await service.uploadFile(client, 'my-bucket', '/tmp/file.m3u8', 'output/file.m3u8');
+            await service.uploadFile(
+                client,
+                'my-bucket',
+                '/tmp/file.m3u8',
+                'output/file.m3u8'
+            );
 
             expect(debugSpy).toHaveBeenCalledWith('Uploaded: output/file.m3u8');
         });
+    });
+});
+
+describe('S3Service — Content-Type for encrypted text assets', () => {
+    let service: S3Service;
+    let dir: string;
+
+    const LMCENC = (body: string): Buffer =>
+        Buffer.concat([
+            Buffer.from('LMCENC01', 'ascii'),
+            Buffer.alloc(16, 0x11), // IV
+            Buffer.from(body),
+        ]);
+
+    beforeEach(() => {
+        service = new S3Service();
+        dir = mkdtempSync(join(tmpdir(), 'lmcenc-ct-'));
+        mockFPutObject.mockReset();
+        mockFPutObject.mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+        rmSync(dir, { recursive: true, force: true });
+    });
+
+    async function contentTypeOf(
+        name: string,
+        body: Buffer | string
+    ): Promise<string> {
+        const path = join(dir, name);
+        writeFileSync(path, body);
+        return service.resolveContentType(path);
+    }
+
+    it('stores an encrypted playlist as octet-stream', async () => {
+        // Anything that reads the extension and decides to transcode the
+        // charset or gzip the body corrupts the ciphertext for every viewer.
+        expect(await contentTypeOf('master.m3u8', LMCENC('cipher'))).toBe(
+            'application/octet-stream'
+        );
+    });
+
+    it('stores an encrypted VTT as octet-stream', async () => {
+        expect(await contentTypeOf('chapters.vtt', LMCENC('cipher'))).toBe(
+            'application/octet-stream'
+        );
+    });
+
+    it('leaves plaintext playlists and VTTs as they were', async () => {
+        expect(await contentTypeOf('master.m3u8', '#EXTM3U\n')).toBe(
+            'application/vnd.apple.mpegurl'
+        );
+        expect(await contentTypeOf('chapters.vtt', 'WEBVTT\n')).toBe(
+            'text/vtt'
+        );
+    });
+
+    it('does not sniff files that were never text assets', async () => {
+        expect(await contentTypeOf('segment_000.m4s', LMCENC('x'))).toBe(
+            'video/iso.segment'
+        );
+    });
+
+    it('falls back to the extension when the file cannot be read', async () => {
+        expect(
+            await service.resolveContentType(join(dir, 'missing.m3u8'))
+        ).toBe('application/vnd.apple.mpegurl');
+    });
+
+    it('uploads an encrypted playlist with the sniffed content type', async () => {
+        const path = join(dir, 'master.m3u8');
+        writeFileSync(path, LMCENC('cipher'));
+        const client = new (MockClient as any)();
+
+        await service.uploadFile(client, 'bucket', path, 'out/master.m3u8');
+
+        expect(mockFPutObject).toHaveBeenCalledWith(
+            'bucket',
+            'out/master.m3u8',
+            path,
+            { 'Content-Type': 'application/octet-stream' }
+        );
     });
 });

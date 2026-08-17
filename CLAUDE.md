@@ -2,23 +2,27 @@
 
 ## Overview
 
-A folder-based npm workspaces monorepo containing:
+A local-only desktop media encoder. A folder-based npm workspaces monorepo containing:
 
-- **`api/`** — NestJS REST API service (the "Encoding API") that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA or Apple Silicon GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via SSE, webhooks, or polling. Also provides on-demand HLS preview streaming during upload, HTTP/S URL ingestion as an alternative to tus uploads, and a stateless HLS-edit API for mutating master playlists and writing chapter sidecars in S3.
-- **`app/`** — Vue 3 single-page web client for uploading files (tus or "From URL" mode), monitoring encoding sessions, editing chapters, and managing API keys and S3 configs.
-- **`saas/`** — NestJS SaaS Service providing multi-tenant user management, session history, webhook ingestion, API key management, S3 config storage, an admin dashboard, and a thin proxy layer over the Encoding API's HLS-edit and chapter endpoints. Backed by CouchDB and authenticated via Auth0 JWT.
-- **`admin/`** — Vue 3 admin panel SPA for managing users, sessions, and viewing the dashboard. Authenticated via Auth0.
-- **`encode-config/`** — Shared Vue 3 component library providing the `EncodeConfigForm` component, encoding/probe type definitions, and layout-based config persistence. Published as `@luminary-media-converter/encode-config` for consumption by the app (and potentially other clients).
+- **`api/`** — NestJS REST API service (the "Encoding API") that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA or Apple Silicon GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via SSE or polling. Also provides on-demand HLS preview streaming before/during encoding, a source storyboard and waveform for the trim timeline, a CMS handshake API, and a stateless HLS-edit API for mutating master playlists and reading/writing chapter and waveform sidecars in S3. Exposed as a library (`createServer()` in `api/src/bootstrap.ts`) so the desktop shell can host it in-process; `api/src/main.ts` is the same code path run standalone from the environment.
+- **`app/`** — Vue 3 single-page client, the renderer of the desktop app: session list, local file pick, probe → encode config, trim/chapters authoring, preview and encoded playback. Served by the API itself in a packaged build, by Vite in development.
+- **`electron/`** — Electron shell. Starts the Encoding API in the main process, serves the built `app/dist` through it, mints the UI's API token per launch, supplies a `safeStorage` credential cipher, shows the trust-on-first-use origin dialogs, registers the `luminary-convert://` protocol, and packages mac (dmg/zip) and Windows (NSIS) builds via electron-builder.
+- **`cms-mock/`** — Dev-only Vue 3 app standing in for the Luminary CMS, so the whole CMS → encoder flow (origin gating, `documentId` reuse, `hlsUrl`/key delivery, `luminary://key` substitution, angle extraction) can be exercised locally. Not shipped; nothing depends on it.
+- **`encode-config/`** — Shared Vue 3 component library providing the `EncodeConfigForm` component, encoding/probe type definitions, and layout-based config persistence. Published as `@luminary-media-converter/encode-config`.
 - **`segment-editor/`** — Shared Vue 3 component library providing a player-agnostic timeline `SegmentEditor` for trim / chapters / subtitles authoring, plus WebVTT helpers (`exportChaptersVtt`, `exportSubtitlesVtt`, `parseVtt`). Published as `@luminary-media-converter/segment-editor`.
-- **`hls/`** — Shared TypeScript library providing HLS master/media playlist parsing and building, key/IV utilities, and sidecar path conventions (chapters, subtitles, thumbnails). Published as `@luminary-media-converter/hls`; consumed by both `api/` and `saas/`.
-- **`tusd/`** — Node.js wrapper (`node-tusd`) around the Go `tusd` binary, providing a `TusdServer` class that spawns tusd as a child process, proxies HTTP requests, and dispatches lifecycle hooks (auth, upload create/finish, progress) via an internal HTTP hook server.
+- **`hls/`** — Shared TypeScript library providing **lossless** HLS master/media playlist parsing and building (round-trips real FFmpeg output byte-faithfully, unknown tags/attributes preserved via WeakMap-backed metadata), the LMCENC encrypted-text-asset format helpers (`enc-format.ts`), S3-key utilities, sidecar path conventions, the `LUMINARY_KEY_PLACEHOLDER_URI` constant, and angle/audio-only extraction (text helpers + model-level `extractAngle`). Published as `@luminary-media-converter/hls`; consumed by `api/`, `app/`, `cms-mock/` and `player-core/`.
+- **`player-core/`** — Framework-agnostic, headless player wrapper: HLS munging pipeline (client-side angle extraction, quality capping, key handling, LMCENC decryption), `PlayerController` state store, recovery/stall/coming-soon policy, and the `PlayerAdapter` contract for pluggable engines (hls.js today; AVPlayer/ExoPlayer adapters later in a Capacitor shell). Published as `@luminary-media-converter/player-core`. See `player-core/src/types.ts` for the full contract.
+- **`player-web/`** — Web reference implementation of the player: `HlsJsAdapter` (hls.js on a plain `<video>`, in-memory AES key delivery via a custom key loader — no key blob URLs), `LuminaryPlayer.vue`, iOS-style fullscreen controls with orientation lock, and `PlayerMessages` i18n (every user-facing string overridable; scoped slots for full custom UI). It draws no chrome over the picture outside fullscreen: entering is a double-click / double-tap on the video, or `enterFullscreen()` from the host — which is where the button belongs (the encoder puts it beside its angle / audio / quality selectors). Inside fullscreen the controls, exit button included, are the player's. Also home to the **chunk-warming loop** (`ChunkPrefetcher` in `adapter/chunkWarming.ts`, driven through the optional `PlayerAdapter.warmChunks` contract — see `docs/chunk-warming.md`) and a dev-only test harness (`npm -w player-web run demo`: plays any master URL + optional key through the real player, with warming console instrumentation). Published as `@luminary-media-converter/player-web`; consumed by `app/`.
+
+There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, webhook delivery, or PWA/Cloudflare deployment. Those workspaces (`saas/`, `admin/`, `tusd/`) were removed in the local-only migration.
 
 ## Monorepo Structure
 
-- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls", "segment-editor", "tusd", "saas", "admin"]`)
+- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls", "segment-editor", "player-core", "player-web", "cms-mock", "electron"]`)
 - Dependencies are hoisted to the root `node_modules/`
 - Run workspace scripts from root: `npm -w api run <script>` or `npm -w app run <script>`
-- Root `npm run dev` starts all workspaces concurrently (via `concurrently`): encode-config watch build, segment-editor watch build, hls watch build, API dev server, SaaS dev server, web client dev server, and admin panel dev server
+- Root `npm run dev` — browser development: builds the shared libraries, then runs their watch builds (each Vue library watches JS and `.d.ts` side by side, so a type-check during dev is not left staring at a `dist` with no declarations), the API dev server and the Vite web client concurrently
+- Root `npm run dev:electron` — desktop development: same watch builds plus a compiled API build, the Vite web client, and the Electron shell pointed at it
 
 ## Tech Stack
 
@@ -26,591 +30,532 @@ A folder-based npm workspaces monorepo containing:
 
 - **Runtime**: Node.js with TypeScript (ES2023 target, `nodenext` modules)
 - **Framework**: NestJS 11 (Express platform)
-- **Authentication**: Composite `AuthResolverGuard` resolving (in order) Master API Key (env `MASTER_API_KEY`, via `X-API-Key` header) → tenant API Key (validated via webhook to the SaaS Service) → Session Token (Bearer `sess_*` for session-scoped endpoints). Endpoints declare allowed methods via the `@AuthTypes(...)` decorator. Auth0 JWT is no longer used by the Encoding API directly; clients reach it via API keys (or the SaaS proxy)
-- **Rate limiting**: `@nestjs/throttler` (`short`: 100/sec, `medium`: 1000/min). High-throughput endpoints (SSE, segment streaming, tus, encode lifecycle) use `@SkipThrottle()`
-- **Media processing**: FFmpeg via child_process (NVIDIA NVENC or Apple VideoToolbox when GPU detected, CPU fallback), ffprobe for media analysis
-- **S3 storage**: MinIO JS client (universal S3 compatibility: MinIO, R2, AWS S3, B2, etc.)
-- **Validation**: `class-validator` + `class-transformer` with a global `ValidationPipe`
-- **API docs**: `@nestjs/swagger` (OpenAPI at `/api/docs`)
-- **CORS**: Enabled via `CORS_ORIGIN` env var (defaults to `http://localhost:5173`)
-- **Testing**: Vitest (`*.spec.ts` colocated in `api/src/`, e2e in `api/test/` via `test:e2e` config)
-- **Code style**: Prettier (single quotes, 4-space indent), ESLint with TypeScript ESLint
+- **Embeddable**: `createServer(options)` in `bootstrap.ts` returns `{ app, port, url, close() }`. Host-specific values (API token, origin policy, credential cipher, window hook) arrive through the global `RuntimeOptionsModule`; `workDir` and the ffmpeg paths are set into `process.env` before Nest instantiates anything, because that is how the services already read them
+- **Bind address**: loopback only (`127.0.0.1`), default port `31711` (`DEFAULT_PORT`); standalone `main.ts` defaults to `PORT=3000`
+- **Authentication**: `AuthResolverGuard` resolving, in order, the instance API token (`X-API-Key`) → session token (`Authorization: Bearer sess_*`) → read token (`?token=read_*`, only on endpoints that opt in). Endpoints declare allowed methods with `@AuthTypes(...)`, defaulting to `['instance']`. The CMS endpoints are gated by browser Origin instead of by a key
+- **Security headers**: `helmet` with a CSP that widens `img/connect/media/worker` sources only when the API is also serving the web client (playlists and segments come from whichever S3 endpoint the user configured, and are handed to the player as `blob:` URLs)
+- **CORS**: origin decided per request by `OriginRegistry`; refusal withholds the header rather than raising. `privateNetworkAccessMiddleware` answers Chrome's Local Network Access preflight. `EXPOSED_HEADERS` lists everything the client reads off a response (currently `X-Storyboard-Complete`)
+- **Rate limiting**: `@nestjs/throttler` (`short`: 100/sec, `medium`: 1000/min) with a global guard; the encode, CMS and HLS-edit controllers are `@SkipThrottle()`
+- **Scheduling**: `@nestjs/schedule` — hourly sweep of abandoned sessions
+- **Media processing**: FFmpeg via child_process (NVIDIA NVENC or Apple VideoToolbox when detected, CPU fallback), ffprobe for media analysis
+- **S3 storage**: MinIO JS client (universal S3 compatibility: MinIO, R2, AWS S3, B2, Spaces)
+- **Validation**: `class-validator` + `class-transformer` with a global `ValidationPipe` (transform, whitelist, forbidNonWhitelisted)
+- **API docs**: `@nestjs/swagger` — published at `/api/docs` only when `enableSwagger` is passed (standalone `main.ts` does; the Electron host does not)
+- **Testing**: Vitest (`*.spec.ts` colocated in `api/src/`, e2e in `api/test/`). Note: many specs were intentionally left broken during the migration — see `Todo.md`
 
-### Shared Encode Config (`encode-config/`)
+### Desktop Shell (`electron/`)
 
-- **Framework**: Vue 3 (Composition API, `<script setup>`)
-- **Build**: Vite 6 (library mode, watch build for dev)
-- **Language**: TypeScript
-- **Exports**: `EncodeConfigForm` Vue component, probe/encode config TypeScript types, `layoutStorage` utilities
-- **Peer dependency**: Vue 3
-
-### Shared Segment Editor (`segment-editor/`)
-
-- **Package name**: `@luminary-media-converter/segment-editor`
-- **Framework**: Vue 3 (Composition API, `<script setup>`)
-- **Build**: Vite 6 (library mode with `vite-plugin-css-injected-by-js`; `vue-tsc` for type emit)
-- **Exports**: `SegmentEditor` Vue component, `Segment` / `SegmentEditorMode` types, WebVTT helpers (`exportChaptersVtt`, `exportSubtitlesVtt`, `parseVtt`, `formatVttTimestamp`, `parseVttTimestamp`), and time helpers (`formatTime`, `formatDuration`, `parseTime`)
-- **Modes**: `trim` (no labels, no overlap), `chapters` (labels, no overlap, ripple-edit by default), `subtitles` (labels, overlap allowed)
-- **Player-agnostic**: consumers pass `getCurrentTime()` and optional `onSeek` / `onPlayPause` callbacks; works with any HTML video/audio element or Video.js
-- **Testing**: Vitest with `@vue/test-utils` and `jsdom`
-- **Peer dependency**: Vue 3
-
-### Shared HLS Library (`hls/`)
-
-- **Package name**: `@luminary-media-converter/hls`
-- **Runtime**: Pure TypeScript library (no framework dependency), built via `tsc`
-- **Exports**: master/media playlist parsers and builders (`parseMasterPlaylist`, `buildMasterPlaylist`, etc.), AES-128 key/IV utilities, and sidecar path conventions (`sidecarPath` for chapters, subtitles, thumbnails)
-- **Testing**: Vitest
-- **Consumers**: `api/` (encoding output, HLS-edit module) and `saas/` (session import, HLS proxy)
-
-### Tusd Wrapper (`tusd/`)
-
-- **Package name**: `node-tusd` (private workspace package)
-- **Runtime**: Node.js with TypeScript (ES2023 target, `nodenext` modules, ESM)
-- **Core**: Wraps the Go `tusd` binary via child process spawning + HTTP proxying
-- **Hook server**: Internal Express-like HTTP server receives webhook callbacks from tusd
-- **Binary resolution**: 3-level fallback — `TUSD_BINARY_PATH` env var → local `bin/tusd` → system PATH
-- **Testing**: Jest
-- **Exports**: `TusdServer` class, `findTusdBinary` utility, TypeScript types (`TusdServerConfig`, `RequestInfo`, `UploadInfo`, `HookType`)
+- **Package**: `@luminary-media-converter/electron` (private), main `dist/main.js`, Electron 33, electron-builder 26
+- **Main process** (`src/main.ts`): single-instance lock, `luminary-convert://` protocol client, settings persisted in `app.getPath('userData')/settings.json`, TOFU origin dialogs (serialized through a queue), `safeStorage`-backed credential cipher, bundled ffmpeg/ffprobe resolution, static web client resolution, graceful shutdown that waits for Nest's hooks before quitting
+- **Renderer**: `BrowserWindow` with `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`; external links are pushed to the system browser
+- **Preload** (`src/preload.ts`): exactly five calls on `window.luminary` — `getApiToken()`, `getPathForFile(file)` (Electron 32 removed `File.path`; `webUtils` is only reachable in the preload), `showOpenDialog()`, and the CMS-session pair `onShowSession(cb)` / `takePendingSession()`
+- **Work directory**: `userData/work`
 
 ### Web Client (`app/`)
 
 - **Framework**: Vue 3 (Composition API, `<script setup>`)
-- **Build**: Vite 6
-- **Routing**: Vue Router 4 (history mode)
-- **Styling**: Tailwind CSS v4
-- **Language**: TypeScript
-- **Authentication**: Auth0 via `@auth0/auth0-vue` SDK (Universal Login, automatic token management)
-- **Media playback**: Video.js 8 with custom HLS quality selector and thumbnail preview plugins; client-side encrypted HLS playback via blob URL rewriting in `HlsPlayer.vue`; chapter cues injected from the chapter sidecar VTT (player-reported duration is treated as authoritative over source probe duration)
-- **Testing**: Vitest
-- **API communication**: Fetch-based client (`api.ts`) communicates with both the SaaS Service and the Encoding API; file uploads use `tus-js-client` for resumable chunked uploads (50 MB chunks, 5 parallel uploads), or "From URL" mode where the API server downloads the source from a public HTTP/S URL
-- **Real-time updates**: SSE via `GET /api/sessions/:id/events` on the Encoding API for live encoding progress
-- **Shared packages**: `@luminary-media-converter/encode-config` (form, types, layout storage) and `@luminary-media-converter/segment-editor` (chapter editor, WebVTT helpers)
-- **PWA**: `vite-plugin-pwa` — installable manifest, Workbox precache of app shell only, update prompt via `PwaUpdatePrompt.vue`; `app/public/_headers` for COOP/COEP and SW cache control on Cloudflare deploy
+- **Build**: Vite 6, Tailwind CSS v4, TypeScript
+- **Routing**: Vue Router 4 (history mode) — `/` → `/sessions`, `/sessions`, `/sessions/:id`
+- **Auth**: no sign-in. The UI's credential is the instance API token, taken from the preload bridge in the desktop app and from `VITE_API_TOKEN` in browser development (`src/auth-token.ts`)
+- **API base**: same-origin by default (the packaged app is served by the API); `VITE_API_URL` for browser development
+- **Media playback**: `LuminaryPlayer` from `@luminary-media-converter/player-web` (hls.js on a plain `<video>`, driven by the `player-core` controller). Angle switching, quality selection, audio tracks and encrypted playback all go through the controller; the AES key is fetched masked from `GET /api/sessions/:id/key`, unmasked in memory (`utils/keyMask.ts`) and handed to the player, which serves it to hls.js from memory — no key blob URLs
+- **Shared packages**: `@luminary-media-converter/encode-config`, `@luminary-media-converter/segment-editor`, `@luminary-media-converter/hls`, `@luminary-media-converter/player-core`, `@luminary-media-converter/player-web`
+- **Real-time updates**: SSE via `GET /api/sessions/:id/events`, with a polling fallback in `useSessionPoller`
+- **Testing**: Vitest + `@vue/test-utils` + jsdom
 
-### SaaS Service (`saas/`)
+### Shared Encode Config (`encode-config/`)
 
-- **Runtime**: Node.js with TypeScript (ES2023 target, `nodenext` modules)
-- **Framework**: NestJS 11 (Express platform)
-- **Authentication**: Auth0 JWT validation via `@nestjs/passport` + `passport-jwt` + `jwks-rsa` (admin guard on admin-only endpoints; `@SkipAdmin()` to bypass)
-- **Rate limiting**: `@nestjs/throttler` (`short`: 20/sec, `medium`: 100/min)
-- **Database**: CouchDB via `nano` client
-- **Scheduling**: `@nestjs/schedule` for periodic tasks (session cleanup)
-- **Testing**: Vitest
-- **Modules**: Auth, Users, Sessions, Webhooks, Dashboard, S3Configs, Me, Keys, Crypto, Database
-- **Outbound proxy**: `hls-edit.client.ts` forwards HLS-edit and chapter requests from authenticated users to the Encoding API using the master key, so browsers never see API credentials
+- Vue 3 library built with Vite 6 in library mode (watch build for dev)
+- Exports `EncodeConfigForm`, probe/encode config types, `layoutStorage` (config persistence keyed by a media-layout fingerprint)
+- Peer dependency: Vue 3
 
-### Admin Panel (`admin/`)
+### Shared Segment Editor (`segment-editor/`)
 
-- **Framework**: Vue 3 (Composition API, `<script setup>`)
-- **Build**: Vite 6
-- **Routing**: Vue Router 4 (history mode)
-- **Styling**: Tailwind CSS v4
-- **Language**: TypeScript
-- **Authentication**: Auth0 via `@auth0/auth0-vue` SDK
-- **Testing**: Vitest
+- Vue 3 library, Vite 6 library mode with `vite-plugin-css-injected-by-js`, `vue-tsc` for type emit
+- Exports `SegmentEditor`, `Segment` / `SegmentEditorMode` types, WebVTT helpers and time helpers
+- Modes: `trim` (no labels, no overlap), `chapters` (labels, no overlap, ripple edit), `subtitles` (labels, overlap allowed)
+- Player-agnostic: consumers pass `getCurrentTime()` and optional `onSeek` / `onPlayPause`
+- Testing: Vitest with `@vue/test-utils` and jsdom
+
+### Shared HLS Library (`hls/`)
+
+- Pure TypeScript, built with `tsc`
+- Exports master/media playlist parsers and builders, AES-128 key/IV utilities, `LUMINARY_KEY_PLACEHOLDER_URI`, `normalizeS3Key`, `deriveAngleName`, sidecar path conventions (`sidecarPath`), and the angle helpers `listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist`
+- Testing: Vitest
+- Consumers: `api/`, `app/`, `cms-mock/`
+
+### CMS Mock (`cms-mock/`)
+
+- Vue 3 + Vite, runs on port **5199** deliberately: a different origin from the API, so every request goes through the real CORS / origin-gating path
+- Panels: connection (`GET /api/cms/health`), create session (`POST /api/cms/sessions`), SSE console, playback check (fetches `hlsUrl`, lists angles, renders extracted single-angle and audio-only playlists, previews the `luminary://key` substitution)
+- Form values persist to `localStorage`; defaults are prefilled for a local MinIO
 
 ## Project Structure
 
 ```
 api/
 ├── src/
-│   ├── main.ts                          # Entry point: bootstraps NestJS, Swagger, CORS, raw body parser
-│   ├── app.module.ts                    # Root module: imports AuthModule, EncodeModule, HlsEditModule, ThrottlerModule (global guard)
+│   ├── main.ts                          # Standalone entry: dotenv + createServer({ enableSwagger: true })
+│   ├── bootstrap.ts                     # createServer(): the embeddable API — helmet/CSP, static client, CORS, PNA, listen
+│   ├── app.module.ts                    # Root module; AppModule.forRoot(runtimeOptions)
+│   ├── runtime-options.module.ts        # @Global module binding host-supplied token / origin policy / cipher / window hook
+│   ├── cors.config.ts                   # CORS options bound to the origin registry + LNA/PNA preflight middleware
+│   ├── version.ts                       # API_VERSION, read from api/package.json (reported to the CMS)
 │   ├── auth/
-│   │   ├── auth.module.ts              # Auth module — exports AuthResolverGuard + KeyValidationWebhookService
-│   │   ├── auth-resolver.guard.ts      # Composite guard: master key (env) → API key (validated via webhook) → session Bearer token
-│   │   ├── auth-types.decorator.ts     # @AuthTypes('master', 'apikey', 'session') metadata for endpoints
-│   │   ├── authorization-webhook.service.ts # Outbound authorization webhook for create-session policy
-│   │   ├── key-validation-webhook.service.ts # Outbound webhook to SaaS to validate user API keys (LRU cached)
-│   │   └── key-validation.types.ts
+│   │   ├── auth.module.ts
+│   │   ├── auth-resolver.guard.ts       # instance token → session token → read token
+│   │   ├── auth-types.decorator.ts      # @AuthTypes('master' | 'session' | 'read')
+│   │   └── local-auth.config.ts         # LOCAL_API_TOKEN injection token + env fallback
+│   ├── cms/
+│   │   ├── cms.module.ts                # Provides OriginRegistry (shared by the controller and the CORS layer)
+│   │   ├── origin-registry.ts           # Allowlist + trust-on-first-use approver, one approval in flight per origin
+│   │   └── cms-session-hook.ts          # CMS_SESSION_HOOK — fire-and-forget "bring your window forward"
 │   ├── encode/
-│   │   ├── encode.module.ts             # Feature module
-│   │   ├── encode.controller.ts         # REST endpoints under /api/sessions (create, encode, SSE, preview, url-upload, delete)
+│   │   ├── encode.module.ts
+│   │   ├── encode.controller.ts         # /api/sessions — create, list, local-file, encode, status, SSE, delete, chapters, waveform, preview, storyboard
+│   │   ├── cms.controller.ts            # /api/cms — health, sessions (origin-gated)
+│   │   ├── session-status.ts            # SessionStatus union
 │   │   ├── dto/
-│   │   │   ├── create-session.dto.ts    # Session creation request (S3 + webhook + encryption + segment + thumbnail config)
-│   │   │   ├── encode-config.dto.ts     # Encoding configuration (type, video renditions, audio groups, VBR, labels, trimSegments)
-│   │   │   ├── encryption-config.dto.ts # HLS encryption configuration DTO
-│   │   │   ├── probe-result.dto.ts      # Probe result DTOs for Swagger docs
-│   │   │   ├── rendition.dto.ts         # Legacy rendition DTO (unused — VideoRenditionDto in encode-config.dto.ts is used)
-│   │   │   ├── review-range.dto.ts      # Review range DTOs (keyframe-aligned in/out points, not yet wired up)
-│   │   │   ├── s3-config.dto.ts         # S3 storage credentials
-│   │   │   ├── url-upload.dto.ts        # HTTP/S URL ingestion request (url + optional filename override)
-│   │   │   ├── webhook-config.dto.ts    # Webhook URL + session token
-│   │   │   ├── session-response.dto.ts  # Response DTOs (create, upload, encode, status + anglePlaylists + encoder + segmentFormat + thumbnailsVtt)
-│   │   │   └── webhook-payload.dto.ts   # Webhook callback payload + SessionStatus type (includes encryptionKeyHex)
+│   │   │   ├── create-session.dto.ts        # S3 + encryption + segment + byte-range + thumbnail options
+│   │   │   ├── cms-create-session.dto.ts    # documentId, title, s3, publicBaseUrl, encryption.required, existingMedia (accepted, unused)
+│   │   │   ├── cms-session-response.dto.ts  # sessionId, readToken, eventsUrl, apiVersion, reused (+ health DTO)
+│   │   │   ├── local-file.dto.ts            # absolute path of a file already on this machine
+│   │   │   ├── encode-config.dto.ts         # type, video renditions, audio groups, VBR, labels, trimSegments
+│   │   │   ├── encryption-config.dto.ts     # enabled + optional keyUrl
+│   │   │   ├── chapters.dto.ts              # session-scoped chapter write body
+│   │   │   └── s3-config.dto.ts, probe-result.dto.ts, session-response.dto.ts, rendition.dto.ts, review-range.dto.ts
 │   │   └── services/
-│   │       ├── session.service.ts       # In-memory session store + token management
-│   │       ├── probe.service.ts         # ffprobe wrapper: media analysis + multi-strategy bitrate detection
-│   │       ├── queue.service.ts         # FIFO encoding queue (one-at-a-time, graceful drain on shutdown)
-│   │       ├── ffmpeg.service.ts        # FFmpeg process management, GPU detection, angle playlist generation, stream alignment detection
-│   │       ├── s3.service.ts            # S3 upload via MinIO client (with concurrency options)
-│   │       ├── webhook.service.ts       # Webhook POST delivery
-│   │       ├── session-events.service.ts # SSE event emitter for real-time session updates (RxJS Subject)
-│   │       ├── encode.service.ts        # Orchestrates encoding pipeline (async hooks support)
-│   │       ├── encryption.service.ts    # AES-128 HLS encryption (key derivation + worker-based segment encryption)
-│   │       ├── encryption.worker.ts     # Worker thread for encryption processing
-│   │       ├── byte-range.worker.ts     # Worker thread for non-blocking byte-range HLS segment consolidation
-│   │       ├── segment-pipeline.service.ts # Streaming pipeline: poll FFmpeg output dir → encrypt → upload → byte-range pack with bounded concurrency
-│   │       ├── media-extensions.ts      # Allow-list of media file extensions + Content-Type → extension mapping
-│   │       ├── thumbnail.service.ts     # Sprite-based thumbnail generation with WebVTT
-│   │       ├── tus-upload.service.ts    # Resumable file upload via tusd Go binary (node-tusd wrapper)
-│   │       ├── url-fetch.service.ts     # HTTP/S source ingestion: parallel Range downloads, SSRF guards, progress + heartbeat events
-│   │       └── preview.service.ts       # On-demand HLS preview: ABR renditions, segment extraction, GPU-accelerated transcoding, trim-segment aware
+│   │       ├── session.service.ts           # Session store + tokens + persistence (session.json, credentials.enc) + restore/sweep
+│   │       ├── session-events.service.ts    # SSE event subject (SessionEvent shape)
+│   │       ├── session-cleanup.service.ts   # Hourly sweep of abandoned sessions
+│   │       ├── credential-cipher.ts         # CredentialCipher interface + CREDENTIAL_CIPHER token
+│   │       ├── ingest.service.ts            # Shared post-ingest pipeline: probe → preview init → uploaded → prime waveform/storyboard
+│   │       ├── probe.service.ts             # ffprobe wrapper + multi-strategy bitrate detection
+│   │       ├── queue.service.ts             # FIFO encoding queue (one at a time, graceful drain)
+│   │       ├── ffmpeg.service.ts            # FFmpeg process management, GPU detection, multi-angle master, stream-alignment probe
+│   │       ├── ffbin.ts                     # ffmpegBin()/ffprobeBin() from FFMPEG_PATH/FFPROBE_PATH, else PATH; shellQuote()
+│   │       ├── encode.service.ts            # Orchestrates the pipeline; generates the key, publishes hlsUrl at encode start
+│   │       ├── encryption.service.ts        # AES-128 key/IV generation + #EXT-X-KEY injection
+│   │       ├── encryption.worker.ts         # Worker thread for segment encryption
+│   │       ├── segment-pipeline.service.ts  # Streaming encrypt → upload → byte-range pack with bounded concurrency
+│   │       ├── s3.service.ts                # MinIO upload, canonicalPrefix()
+│   │       ├── thumbnail.service.ts         # Output sprite sheets + WebVTT, and the pre-encode source storyboard
+│   │       ├── waveform.service.ts          # Waveform peaks (cached per session, written as waveform.json sidecar)
+│   │       ├── preview.service.ts           # On-demand HLS preview (ABR, MPEG-TS, trim-aware, GPU-accelerated)
+│   │       ├── disk-space.ts                # Free-space guard with a reserve, checked before ingest and before encode
+│   │       ├── output-estimate.ts           # Estimated output size / formatBytes
+│   │       └── media-extensions.ts          # ALLOWED_EXTENSIONS allow-list (re-exported from bootstrap for the host's file picker)
 │   └── hls-edit/
-│       ├── hls-edit.module.ts           # Feature module
-│       ├── hls-edit.controller.ts       # Stateless endpoints under /api/hls (read, mutate, discover, chapters/read, chapters/write)
-│       ├── hls-edit.service.ts          # Orchestrates parse → mutate → If-Match write of master.m3u8 in S3
-│       ├── s3-etag.service.ts           # ETag-aware S3 GET/PUT with optimistic concurrency
-│       ├── dto/
-│       │   ├── read.dto.ts              # Read request (inline S3 credentials)
-│       │   ├── mutate.dto.ts            # Mutate request (ordered ops + If-Match ETag)
-│       │   ├── discover.dto.ts          # Discover request (folderPrefix scan for masters / angles)
-│       │   ├── chapters-read.dto.ts     # Read chapter sidecar VTT
-│       │   └── chapters-write.dto.ts    # Write chapter sidecar VTT
-│       └── operations/                  # Mutation operation handlers (upsertSubtitle, removeSubtitle, upsertChapters, removeChapters)
-│           └── index.ts
+│       ├── hls-edit.module.ts
+│       ├── hls-edit.controller.ts       # /api/hls — read, mutate, discover, chapters/read, chapters/write, waveform/read
+│       ├── hls-edit.service.ts          # parse → mutate → If-Match write of master.m3u8 in S3
+│       ├── s3-etag.service.ts           # ETag-aware GET/PUT with optimistic concurrency
+│       ├── dto/                         # read, mutate, discover, chapters-read, chapters-write, waveform-read
+│       └── operations/index.ts          # upsertSubtitle, removeSubtitle, upsertChapters, removeChapters
 
-encode-config/
+electron/
 ├── src/
-│   ├── index.ts                         # Package entry: exports EncodeConfigForm, types, layoutStorage
-│   ├── types.ts                         # Shared types: ProbeResult, EncodeConfig, VideoRendition, AudioGroup, etc.
-│   ├── EncodeConfigForm.vue             # Probe results display + encoding config (renditions, audio groups, VBR, copy)
-│   ├── layoutStorage.ts                 # Encode config persistence keyed by media layout fingerprint
-│   ├── styles.css                       # Component styles
-│   └── env.d.ts                         # Vue SFC type declarations
-├── package.json
-├── vite.config.ts
-└── tsconfig.json
-
-segment-editor/
-├── src/
-│   ├── index.ts                         # Package entry: SegmentEditor + types + VTT/time helpers
-│   ├── SegmentEditor.vue                # Player-agnostic timeline editor (trim / chapters / subtitles)
-│   ├── types.ts                         # Segment, SegmentEditorMode, createSegmentId
-│   ├── time.ts                          # formatTime / formatDuration / parseTime
-│   ├── vtt.ts                           # exportChaptersVtt / exportSubtitlesVtt / parseVtt / format/parseVttTimestamp
-│   ├── styles.css                       # Component styles + CSS custom properties for theming
-│   └── env.d.ts
-├── __tests__/                           # Vitest tests
-├── README.md                            # Detailed usage / props / shortcuts reference
-├── package.json
-├── vite.config.ts
-├── vitest.config.ts
-└── tsconfig.json
-
-hls/
-├── src/
-│   ├── index.ts                         # Re-exports parse, build, keys, sidecar
-│   ├── parse.ts                         # parseMasterPlaylist / parseMediaPlaylist
-│   ├── build.ts                         # buildMasterPlaylist / buildMediaPlaylist
-│   ├── keys.ts                          # AES-128 key/IV utilities
-│   ├── sidecar.ts                       # sidecarPath() — chapters/subtitles path conventions
-│   └── *.spec.ts                        # Vitest tests
-├── package.json
+│   ├── main.ts                          # App lifecycle, API host, settings, TOFU dialogs, cipher, IPC, protocol, shutdown
+│   └── preload.ts                       # window.luminary: getApiToken, getPathForFile, showOpenDialog
+├── bin/
+│   └── README.md                        # How to source ffmpeg/ffprobe per platform (binaries are NOT committed)
+├── electron-builder.yml                 # mac dmg+zip (arm64), win nsis (x64), extraResources, asar, protocol
+├── package.json                         # dev / dist:mac / dist:win / pack
 └── tsconfig.json
 
 app/
 ├── src/
-│   ├── main.ts                          # Vue app entry point (Auth0, Vue Router)
-│   ├── App.vue                          # Root component (Auth0 identity check, navigation shell)
-│   ├── router.ts                        # Vue Router routes (sessions, keys, s3-configs, import)
-│   ├── api.ts                           # Fetch-based API client (SaaS Service + Encoding API + preview + url-upload + chapters)
-│   ├── api.spec.ts                      # API client tests (Vitest)
-│   ├── types.ts                         # App-specific types (S3Config, SessionStatus, etc.) + re-exports from encode-config
-│   ├── style.css                        # Global styles (Tailwind import)
-│   ├── videojs-quality-selector.ts      # Custom Video.js HLS quality selector plugin (native ES6)
-│   ├── videojs-thumbnail-preview.ts     # Custom Video.js thumbnail preview plugin (timeline scrubbing)
+│   ├── main.ts                          # Vue app entry (router only — no auth provider)
+│   ├── App.vue                          # Shell: primary nav + appearance menu
+│   ├── router.ts                        # /sessions, /sessions/:id
+│   ├── api.ts                           # Fetch client for the local API (X-API-Key or session Bearer)
+│   ├── auth-token.ts                    # Preload bridge token, else VITE_API_TOKEN
+│   ├── session-tokens.ts                # Session token map seeded from GET /api/sessions
+│   ├── types.ts                         # App types + re-exports from encode-config
 │   ├── components/
-│   │   ├── SessionConfigForm.vue        # S3 config + file selection form (tus or "From URL" mode)
-│   │   ├── FileDropZone.vue             # Drag-and-drop file upload area
-│   │   ├── HlsPlayer.vue               # Reusable Video.js HLS player: client-side encrypted playback (blob URL rewriting), chapter cue track injection
-│   │   ├── ProgressBar.vue              # Reusable progress bar component
-│   │   ├── StatusBadge.vue              # Reusable status badge with icon support
-│   │   └── InlineConfirm.vue            # Inline confirmation with overlay positioning
+│   │   ├── AppPrimaryNav.vue, AccountMenu.vue   # nav shell; the "account" menu is now appearance/theme only
+│   │   ├── FileDropZone.vue             # Drop / pick a local file (paths via the preload bridge)
+│   │   ├── ProgressBar.vue, StatusBadge.vue, FormSelect.vue, FormSelectListbox.vue
+│   │   ├── ConfirmDangerModal.vue, DeleteSessionModal.vue
+│   │   └── session-view/
+│   │       ├── SessionWorkflowPanel.vue      # Probe → encode config → start
+│   │       ├── SessionTrimWorkspace.vue      # Trim timeline (waveform, storyboard, zoom, cuts)
+│   │       ├── SessionPlayerStrip.vue        # LuminaryPlayer + angle/quality/audio selectors (usePlayerState)
+│   │       ├── SessionPostProcessPanel.vue   # Chapters authoring
+│   │       └── SessionOutputPanel.vue        # Output summary / playback URLs
 │   ├── composables/
-│   │   ├── useActiveUploads.ts          # Singleton upload tracker surviving navigation (tus + URL ingest)
-│   │   ├── useChapters.ts               # Chapter sidecar load/save: localStorage draft + debounced autosave to SaaS, parse/export VTT
-│   │   └── useSessionPoller.ts          # Polling composable (2s interval, auto-stops on terminal status)
-│   ├── views/
-│   │   ├── EncodeView.vue               # New encoding session (S3 config + file/URL selection → create + start upload/url-fetch → navigate to session)
-│   │   ├── SessionView.vue              # Unified session lifecycle view (uploading → encoding config → progress → playback) with preview player, audio track selector, and chapter editor (during/after encoding)
-│   │   ├── SessionHistoryView.vue       # Paginated session list with search and filters
-│   │   ├── SessionImportView.vue        # Import external HLS outputs
-│   │   ├── ApiKeysView.vue              # API key management
-│   │   └── S3ConfigsView.vue            # S3 config management
-│   └── utils/                           # (empty — layoutStorage moved to encode-config package)
-├── index.html
-├── package.json
-├── tsconfig.json
-├── tsconfig.app.json
-├── vite.config.ts
-└── env.d.ts
-
-tusd/
-├── src/
-│   ├── index.ts                         # Package entry: exports TusdServer, findTusdBinary, types
-│   ├── server.ts                        # TusdServer class: spawns tusd binary, manages lifecycle
-│   ├── types.ts                         # Config and hook types (TusdServerConfig, RequestInfo, UploadInfo, HookType)
-│   ├── hook-server.ts                   # Internal HTTP server receiving webhook callbacks from tusd binary
-│   ├── proxy.ts                         # HTTP proxy forwarding requests to tusd child process
-│   └── binary.ts                        # Tusd binary resolution: TUSD_BINARY_PATH env → bin/tusd → system PATH
-├── bin/
-│   └── tusd                             # Compiled tusd Go binary (platform-specific)
-├── scripts/
-│   └── download-tusd.sh                 # Downloads tusd binary for the current platform
-├── __tests__/                           # Jest tests (tusd workspace)
-├── package.json
-└── tsconfig.json
-
-saas/
-├── src/
-│   ├── main.ts                          # Entry point: bootstraps NestJS, Swagger, CORS
-│   ├── app.module.ts                    # Root module: imports all feature modules
-│   ├── auth/
-│   │   ├── auth.module.ts              # Auth module (Passport + JWT strategy)
-│   │   ├── jwt.strategy.ts            # Auth0 JWT validation strategy
-│   │   ├── jwt-auth.guard.ts          # NestJS guard wrapping Passport JWT
-│   │   ├── admin.guard.ts             # Admin role guard
-│   │   ├── skip-admin.decorator.ts    # Decorator to bypass admin guard
-│   │   └── identity.service.ts        # User identity resolution + provisioning
-│   ├── crypto/
-│   │   ├── crypto.module.ts            # Crypto module
-│   │   └── crypto.service.ts           # Encryption utilities (API key hashing, etc.)
-│   ├── database/
-│   │   ├── database.module.ts          # CouchDB database module
-│   │   ├── database.service.ts         # CouchDB client via nano
-│   │   └── indexes.ts                  # CouchDB design document indexes
-│   ├── users/
-│   │   ├── users.module.ts             # Users module
-│   │   ├── users.controller.ts         # User CRUD endpoints (admin)
-│   │   ├── users.service.ts            # User persistence in CouchDB
-│   │   ├── dto/                        # Create/update/response DTOs
-│   │   └── interfaces/                 # User document interface
-│   ├── sessions/
-│   │   ├── sessions.module.ts          # Sessions module
-│   │   ├── sessions.controller.ts      # User-facing session endpoints (CRUD, url-upload, name, move, rename-prefix, check-prefix, hls/read, hls/mutate, chapters GET/PUT)
-│   │   ├── admin-sessions.controller.ts # Session management endpoints (admin)
-│   │   ├── sessions.service.ts         # Session persistence in CouchDB
-│   │   ├── session-events.service.ts   # Session event handling
-│   │   ├── session-cleanup.service.ts  # Periodic cleanup of stale sessions
-│   │   ├── hls-parser.service.ts       # HLS manifest parsing for session import (uses @luminary-media-converter/hls)
-│   │   ├── hls-edit.client.ts          # Outbound HTTP client that proxies HLS-edit / chapter calls to the Encoding API using the master key
-│   │   ├── s3-client.service.ts        # S3 client for session import operations
-│   │   ├── dto/                        # Create / import / url-upload / move-session-files / rename-session-prefix / response / S3 / encryption DTOs
-│   │   └── interfaces/                 # Session document interface
-│   ├── webhooks/
-│   │   ├── webhooks.module.ts          # Webhooks module
-│   │   ├── webhooks.controller.ts      # Webhook ingestion endpoints (from Encoding API)
-│   │   ├── webhooks.service.ts         # Webhook processing + session status updates
-│   │   └── dto/                        # Authorize request, encoding webhook, validate key DTOs
-│   ├── keys/
-│   │   ├── keys.module.ts              # API keys module
-│   │   ├── keys.controller.ts          # API key CRUD endpoints (user-facing)
-│   │   ├── admin-keys.controller.ts    # API key management endpoints (admin)
-│   │   ├── keys.service.ts             # API key persistence + hashing in CouchDB
-│   │   ├── dto/                        # Create/response DTOs
-│   │   └── interfaces/                 # API key document interface
-│   ├── s3-configs/
-│   │   ├── s3-configs.module.ts        # S3 configs module
-│   │   ├── s3-configs.controller.ts    # S3 config CRUD endpoints (user-facing)
-│   │   ├── s3-configs.service.ts       # S3 config persistence in CouchDB (encrypted credentials)
-│   │   ├── dto/                        # Create/update/response DTOs
-│   │   └── interfaces/                 # S3 config document interface
-│   ├── dashboard/
-│   │   ├── dashboard.module.ts         # Dashboard module
-│   │   ├── dashboard.controller.ts     # Dashboard stats endpoints (admin)
-│   │   └── dashboard.service.ts        # Aggregated stats from CouchDB
-│   └── me/
-│       ├── me.module.ts                # Me module
-│       └── me.controller.ts            # Current user profile endpoint
-├── package.json
-└── tsconfig.json
-
-admin/
-├── src/
-│   ├── main.ts                          # Vue app entry point (Auth0, Vue Router)
-│   ├── App.vue                          # Root component (navigation shell)
-│   ├── router.ts                        # Vue Router routes (dashboard, users, sessions)
-│   ├── api.ts                           # Fetch-based API client (SaaS Service admin endpoints)
-│   ├── utils/
-│   │   └── status.ts                    # Session status utilities
+│   │   ├── useSessionPoller.ts          # SSE with polling fallback, stops on terminal status
+│   │   ├── useChapters.ts               # Chapter load/save (localStorage draft + debounced write to the API)
+│   │   ├── useChapterTrimSync.ts, useTrimDeletions.ts, useTrimPlayback.ts, useTrimmedStoryboard.ts
+│   │   └── useStoryboard.ts, useEncodeEta.ts, useAppLayout.ts, useTheme.ts
+│   ├── utils/                           # errors, format, status, storyboardVtt, trimPlayback, trimTimeline, keyMask
 │   └── views/
-│       ├── DashboardView.vue            # Admin dashboard with stats
-│       ├── UsersListView.vue            # User list with search
-│       ├── UserDetailView.vue           # User detail view
-│       ├── UserFormView.vue             # User create/edit form
-│       ├── SessionsListView.vue         # Session list with filters
-│       └── SessionDetailView.vue        # Session detail view
-├── package.json
-├── tsconfig.json
-└── vite.config.ts
+│       ├── ActiveSessionsView.vue       # Session list (polls GET /api/sessions)
+│       └── SessionView.vue              # Full session lifecycle
+└── vite.config.ts                       # Port 5173, strictPort, Vitest config
+
+cms-mock/
+├── src/
+│   ├── App.vue, main.ts, store.ts, types.ts
+│   └── components/{ConnectionPanel,CreateSessionPanel,EventConsole,PlaybackCheck}.vue
+├── README.md
+└── vite.config.ts                       # Port 5199
+
+hls/src/{index,parse,build,keys,sidecar,angles}.ts
+encode-config/src/{index,types,EncodeConfigForm.vue,layoutStorage,styles.css}
+segment-editor/src/{index,SegmentEditor.vue,types,time,vtt,styles.css}
 ```
 
 ## Architecture
 
-### Two-phase encoding pipeline
+### Where sessions come from
 
-1. **POST** `/api/sessions` — Client sends S3 config + optional webhook/encryption/thumbnail config (authenticated by master key or tenant API key)
-2. Service returns `{ sessionId, tusEndpoint, sessionToken, maxUploadSize }`
-3. Source ingestion — one of:
-   - **Tus**: Client uploads the source file via the **tus protocol** to `/api/tus` using the session token (resumable, chunked); or
-   - **From URL**: Client calls `POST /api/sessions/:id/url-upload` with a public HTTP/S URL — the API server downloads the source directly with parallel HTTP Range requests and SSRF guards
-4. On upload/ingestion completion, API auto-probes the file with ffprobe and sets session status to `uploaded`
-5. Client polls `GET /api/sessions/:id` (or subscribes to SSE) to receive probe results — detected tracks (video and audio metadata)
-6. Client computes suggested encoding config from probe results, user reviews and modifies (renditions, audio groups, copy/VBR toggles, optional trim segments); auto-selects audio-only mode when no video tracks detected
-7. **POST** `/api/sessions/:id/encode` — Client submits final encoding config (type: `'video'` or `'audio'`, with optional `trimSegments`)
-8. Session enters FIFO queue; webhook sent (if configured) with `queued` status + queue position
-9. When session reaches front of queue, FFmpeg probes stream start times and encodes to HLS with ABR variants (fMP4 segments when streams are aligned, MPEG-TS fallback when misaligned). When `trimSegments` is set, only those time ranges are encoded and concatenated in order
-10. Progress updates sent via SSE (`GET /api/sessions/:id/events`), webhooks (~every 5%), or client polls `GET /api/sessions/:id`
-11. For video encodes, master playlist is post-processed (audio names, video groups) and per-angle playlists generated when multiple video tracks are present
-12. Output files uploaded to client-specified S3 bucket via MinIO client (with configurable concurrency); `SegmentPipelineService` streams segments through encrypt → upload → byte-range pack as FFmpeg produces them, instead of waiting for the full encode to finish
-13. Final webhook sent with `completed` status + list of S3 object keys + master playlist + angle playlists (if applicable) + `encryptionKeyHex` (when encryption is enabled)
+**Today, every session originates in the CMS.** The renderer lists sessions (`GET /api/sessions`, instance token), and the user drives one from the file pick onwards; it has no "new session" affordance, because it has nowhere to get an S3 destination or a `publicBaseUrl` from. `ActiveSessionsView` says as much: "Sessions opened from Luminary CMS".
 
-### Media analysis (ProbeService)
+`POST /api/sessions` (create a session with an inline S3 config, returning a session token) still exists and is fully supported — it is what the CMS route builds on and what an integration or a test harness uses directly. Nothing in `app/` calls it.
 
-- Wraps `ffprobe -v quiet -print_format json -show_format -show_streams`
-- Detects video tracks (codec, resolution, bitrate, frame rate, profile, language, name)
-- Detects audio tracks (codec, bitrate, channels, sample rate, language, name)
-- Multi-strategy bitrate detection per stream: `bit_rate` → `tags.BPS` → `tags.NUMBER_OF_BYTES`/`tags.DURATION` → packet-based CSV computation via ffprobe
-- Returns raw probe results to the client; encoding config suggestions are computed entirely in the `EncodeConfigForm` component (from the `encode-config` package)
+### The CMS contract
 
-### URL ingestion (UrlFetchService)
+The CMS is an ordinary web app on another origin; the encoder listens on loopback. Nothing is ever uploaded from the browser, and the response never echoes back what was sent.
 
-Alternative to tus uploads — the API server downloads the source media directly from a public HTTP/S URL:
+1. **`GET /api/cms/health`** — unauthenticated liveness probe returning `{ status: 'ok', apiVersion }`. The CMS calls this before showing the "upload media" affordance at all; when it fails it offers a `luminary-convert://` launch link instead.
+2. **`POST /api/cms/sessions`** — authorised by the caller's `Origin`, not by a key (there is no credential a page could hold that the pages around it could not also read). Body:
+    ```jsonc
+    {
+        "documentId": "post_01HTZ8Y0J4", // idempotency key
+        "title": "Episode 12", // shown in the local app
+        "s3": {
+            /* endPoint, port?, useSSL?, bucket, region?, accessKey, secretKey, pathPrefix? */
+        },
+        "publicBaseUrl": "https://cdn.example.com/media",
+        "encryption": { "required": true }, // optional; a CMS states a requirement, not a key policy
+        "segmentDuration": 6, // optional
+        "byteRange": true, // optional
+        "byteRangeMaxFileSizeMB": 500, // optional
+        "audioByteRangeMaxFileSizeMB": 50, // optional; caps the shared audio chunk chain
+        "thumbnails": true, // optional
+        "existingMedia": { "hlsUrl": "…", "hlsKey": "…" }, // validated + accepted, NOT acted on yet
+    }
+    ```
+    Response `201`:
+    ```json
+    {
+        "sessionId": "…",
+        "readToken": "read_…",
+        "eventsUrl": "http://127.0.0.1:31711/api/sessions/<id>/events?token=read_…",
+        "apiVersion": "0.0.1",
+        "reused": false
+    }
+    ```
 
-- **HEAD probe + smart fallback**: Probes content length, Content-Disposition, Content-Type, and Range support; derives a filename and validates the extension against the media allow-list (`media-extensions.ts`)
-- **Parallel Range downloads**: Splits the file into `streams` ranges (default 4, max 16) when the source supports `Accept-Ranges: bytes` and the file is ≥ 16 MB; falls back to single-stream when not supported
-- **SSRF guards**: Resolves the hostname via DNS and blocks cloud-metadata endpoints (`169.254.0.0/16`, link-local IPv6 `fe80::/10`); only `http`/`https` protocols accepted
-- **Progress + heartbeat events**: Reports byte progress every 500 ms and emits heartbeat events every 2 s so the SSE stream and webhooks stay live
-- **Cancellation**: Tracks per-session `AbortController` so deleting the session cleanly aborts the in-flight download
-- **Status flow**: `created` → `uploading` (with download progress) → `uploaded` (auto-probed by ffprobe), exactly like the tus path so downstream logic is unchanged
+    - **Idempotency**: a repeat click on the same `documentId` returns the session already in flight (`reused: true`) rather than starting a second one. Only _active_ sessions match — a finished one means "replace what is there".
+    - **Per-session subfolder**: the destination becomes `<canonicalPrefix(pathPrefix)>/<sessionId>`, so a re-encode of the same post cannot half-overwrite the live output.
+    - **Window focus**: creating (or reusing) a session fires `CMS_SESSION_HOOK`, which the Electron host uses to bring its window forward — the user has to pick a file, and the app may be behind the browser.
+    - **`eventsUrl`** is built from the request's own `Host`, because the port is assigned by the host app and this process has no better idea of it than the caller does.
+3. **SSE** — the CMS subscribes to `eventsUrl` with `EventSource`. Events are the `SessionEvent` shape:
+    ```ts
+    { sessionId, status, progress?, pipelineProgress?, queuePosition?, error?, files?,
+      masterPlaylist?, thumbnailsVtt?, hlsUrl?, segmentFormat?,
+      encoder?, probeResult?, ingestTotalBytes? }
+    ```
+    **The event that matters** is the first `status: "encoding"`: it carries `hlsUrl`, published at encode _start_, not at completion — the destination key is settled long before the first segment exists. The decryption key is **no longer part of any status/SSE payload**: the CMS fetches it from `GET /api/sessions/:id/key?token=read_…` → `{ maskedKeyHex }` and unmasks it (XOR with the first 16 bytes of `SHA-256(sessionId)` — self-inverse, formula published; an obscurity measure keeping raw keys out of logs/proxies, not DRM). `hlsUrl` + the unmasked key are what Luminary saves as `MediaDto { hlsUrl, hlsKey }`. `cms-mock/src/store.ts` (`captureHlsKey`) is the reference implementation.
+4. **Polling fallback** — `GET /api/sessions/:id?token=read_…` returns the same `hlsUrl`, so a CMS that reconnects mid-encode can ask again; the key comes from the key endpoint as above.
 
-### Server-side on-demand HLS preview
+### Trust model: three token tiers plus an origin allowlist
 
-`PreviewService` generates HLS preview streams on-demand during the encoding phase (or after upload completes):
+| Tier               | Form                                                                                                  | Who holds it                    | What it can do                                                                                                                                                                                                                            |
+| ------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Instance API token | `X-API-Key: <token>`                                                                                  | The app's own UI only           | Everything. Minted per launch by the Electron main process (`randomBytes(32)`), handed to the renderer over the preload bridge, never written to disk. Standalone it falls back to `LOCAL_API_TOKEN` (or the deprecated `MASTER_API_KEY`) |
+| Session token      | `Authorization: Bearer sess_*` (also accepted as `?token=` on preview / waveform / storyboard routes) | The UI, per session             | Drive one session: attach a file, start the encode, poll, delete, read/write its chapters, stream its preview                                                                                                                             |
+| Read token         | `?token=read_*`                                                                                       | The CMS that opened the session | Watch only: the SSE stream and the status endpoint. Cannot start, cancel, or reach the source file. Minted only for `origin: 'cms'` sessions                                                                                              |
 
-- **ABR preview renditions**: Intelligently generates 2-3 transcode renditions (480p/360p/240p) or uses copy-mode for H.264/VP8/VP9 codecs. Segments extracted on-demand during playback and cached locally
-- **GPU-accelerated transcoding**: Supports NVIDIA NVENC (`h264_nvenc` + `scale_cuda`) and Apple VideoToolbox (`h264_videotoolbox` + `scale_vt`) with automatic CPU fallback
-- **Concurrency control**: Limits to 3 concurrent FFmpeg processes for segment extraction; prefetches upcoming segments for smooth playback
-- **Multi-audio support**: Intelligently selects audio tracks (one per language, or all if no language metadata). Filters to max 150 kbps per track. Client-side audio track selector dropdown. Each (rendition, audioTrack) pair cached separately
-- **Trim-segment aware**: When the encode config specifies `trimSegments`, the preview reflects the trimmed timeline so the user can verify cut points before queueing the full encode
-- **Segment format**: HLS segments in MPEG-TS format, 4 seconds each. Master playlist aggregates all renditions with BANDWIDTH and RESOLUTION info
-- **Cache**: Preview cache in `${WORK_DIR}/${sessionId}/preview/` directory, automatically cleaned up when session is deleted
+`AuthResolverGuard` tries them in that order. A present-but-wrong `X-API-Key` is rejected immediately rather than falling through. The instance token is a superkey: it is accepted regardless of `@AuthTypes(...)`.
+
+`/api/cms/*` sits outside that chain — it is gated by `Origin`. A request with no `Origin` (curl, or a renderer whose origin browsers report inconsistently) is accepted only from a loopback peer, so an origin-less request off the network cannot walk past the allowlist by omitting the header.
+
+### Local Network Access, PNA and trust on first use
+
+A public web app reaching `127.0.0.1` is a private-network request. Chrome sends `Access-Control-Request-Private-Network: true` on the preflight and drops the real request unless the response grants it — `privateNetworkAccessMiddleware` sets `Access-Control-Allow-Private-Network: true` on those preflights, and is registered _before_ the CORS middleware, which is what ends the preflight response. That is only a grant of reachability; _who_ may talk to the API is still the origin allowlist's decision, applied by the CORS layer on the same response.
+
+`OriginRegistry` holds the allowlist:
+
+- Origins are normalised (lower-cased, no trailing slash) and compared exactly.
+- Known origin → synchronous yes. Unknown origin with no approver → no (a headless run cannot be talked into trusting anything it was not configured with).
+- Unknown origin with an approver → the Electron host shows a native "Allow this site to use the encoder?" dialog. One approval is in flight per origin, and the host serialises dialogs through a queue, so two tabs — or a page that opens an event stream and posts a session in the same tick — cannot stack two modal sheets over one decision. A dialog that fails to open is not consent.
+- Decisions persist to `userData/settings.json` as `allowedOrigins` / `deniedOrigins`. Denials are remembered too, so a site that keeps retrying cannot turn "no" into a dialog every few seconds.
+- After binding, the server approves its own address (`http://<host>:<port>`, plus `127.0.0.1` and `localhost` forms), so the app never asks the user whether to trust itself.
+- Standalone, the allowlist comes from `CMS_ALLOWED_ORIGINS` (comma-separated) and there is no approver.
+
+### `luminary://key` and the client-side player contract
+
+Encryption keys are generated locally (`randomBytes(16)`) and never leave the machine, so there is nothing to serve them over HTTP. When no explicit `keyUrl` is configured, `#EXT-X-KEY` is written with the sentinel URI `luminary://key` (`LUMINARY_KEY_PLACEHOLDER_URI`, exported from `@luminary-media-converter/hls`).
+
+A Luminary player is therefore expected to:
+
+1. Fetch the master and media playlists, decrypting LMCENC-wrapped ones (an encrypted session encrypts its playlists and sidecars too, unless it opted out).
+2. Supply the key for `luminary://key` (and any other AES-128 key URI — a locally supplied key always wins). The wrapper normalizes key URIs to the sentinel and the engine adapter serves the raw bytes **from memory** (hls.js custom key loader; `AVAssetResourceLoaderDelegate` / ExoPlayer `DataSource` later) — a key blob URL is only the fallback for adapters without a key hook.
+3. Feed the munged playlists to the engine. **`player-core` (`PlayerController` + pipeline) is the reference implementation**, with `player-web`'s `HlsJsAdapter`/`LuminaryPlayer` as the web engine binding; the media encoder app consumes exactly these.
+
+The encoder writes **one** spec-correct multi-angle `master.m3u8`: each camera angle is an `#EXT-X-MEDIA:TYPE=VIDEO` rendition group and every `#EXT-X-STREAM-INF` carries `VIDEO="<group>"`. Most players ignore video rendition groups and simply play whichever variant their ABR logic picks, so narrowing happens client-side with the `hls/` helpers — this is the contract, not an implementation detail:
+
+- `listVideoAngles(masterText)` → `{ id, name, isDefault }[]` (empty for a single-angle master)
+- `extractAnglePlaylist(masterText, angleId)` → a master pinned to one angle; returns the input unchanged when there is nothing to narrow, so it is safe to apply unconditionally
+- `extractAudioOnlyPlaylist(masterText)` → an audio-only master, one variant per audio `GROUP-ID`, or `null` when there are no audio groups
+
+### Credential protection
+
+S3 credentials arrive per session and must survive a restart without ever sitting in plaintext on disk.
+
+- `session.json` (in `<workDir>/<sessionId>/`) **never** holds S3 keys, cipher or no cipher: `accessKey` / `secretKey` are written as `<redacted>` (`REDACTED_CREDENTIAL`).
+- When the host supplies a `CredentialCipher`, the keys go in a `credentials.enc` sidecar beside it. The Electron implementation is a thin wrapper over `safeStorage`, whose key lives in the OS keychain and is unlocked by the logged-in user rather than by anything on disk.
+- With no cipher (standalone dev, or a Linux desktop with no keyring), nothing is written and the API logs "S3 credentials are held in memory only" once. That is deliberate: a stranded session is a smaller problem than a plaintext key in the work directory.
+- Both files are written `0o600` and swapped into place via a `.tmp` + rename.
+- On restart, sessions are restored from `session.json`. Terminal sessions are purged outright, work directory and all. In-flight statuses become `failed` ("The encoder restarted while this session was in progress"). Any session whose credentials could not be recovered becomes `failed` with "Credentials unavailable after restart — create the session again from the CMS", and `hasUsableCredentials()` guards every path that would otherwise reach S3 with placeholders (encode start, chapter read/write).
+
+### Encoding pipeline
+
+1. `POST /api/cms/sessions` (the CMS) or `POST /api/sessions` (a direct integration) creates the session.
+2. `POST /api/sessions/:id/local-file` attaches an absolute path. **The source is used where it is** — never copied, never moved, never written to or deleted, including on failure. Validated as absolute, a regular file, and in the `ALLOWED_EXTENSIONS` allow-list (which `bootstrap.ts` re-exports so the host's file picker offers exactly the extensions the API will accept).
+3. `IngestService.finalizeUpload` runs the shared post-ingest pipeline: record the path → ffprobe → initialise the preview → status `uploaded` → prime the waveform cache and the source storyboard in the background.
+4. The client computes a suggested encode config from the probe results (`EncodeConfigForm`); the user adjusts renditions / audio groups / copy / VBR and optionally marks trim segments.
+5. `POST /api/sessions/:id/encode` validates the config (video needs ≥ 1 rendition and ≥ 1 audio group; every rendition's `audioGroupId` must exist; `copyStream` needs a `sourceTrackIndex`), refuses sessions without usable credentials, and enqueues. A `failed` session whose source file is still on disk may be retried (`canRetry` on the status response).
+6. FIFO queue, one encode at a time.
+7. `EncodeService` clears any previous output, generates the AES key/IV **before** flipping to `encoding`, publishes `hlsUrl` (`publicBaseUrl` + `/` + `<prefix>/master.m3u8`), and starts `SegmentPipelineService`, which polls the FFmpeg output directory and streams each new segment through encrypt → upload → byte-range pack with bounded concurrency, instead of waiting for the encode to finish.
+8. Output is **always fMP4** (`.m4s` + a per-stream init; ffmpeg names it — `init.mp4`, or `init_<variant>.mp4` on FFmpeg 8 — and `#EXT-X-MAP` matches whichever it wrote). A source whose used streams start ≥ 20 ms apart is aligned with an input seek (`-ss` to the latest start; concat `inpoint` bump when trimming) — every stream loses the same head, timestamps stay honest, lip-sync is preserved (verified to sub-millisecond by content correlation). `segmentFormat` reports `'fmp4'`; `'mpegts'` survives only on sessions restored from before this change. **Copy-mode video is gated by the source** (`copy-mode-eligibility.ts`): the track must not be early-starting on a misaligned source (keyframe-granular seek ⇒ permanent desync) and its keyframe cadence must be regular and divide the segment duration, compared in frames so NTSC rates pass; strict on unknowns. Refused at encode submit with a message naming the track; `EncodeConfigForm` disables the Copy toggle with the same reason from probe data (`gopFrames`/`gopRegular`/`startTime` on the probe result).
+9. After drain: `#EXT-X-KEY` tags injected (when encrypted), thumbnail sprites + `thumbnails.vtt` generated for video encodes, `waveform.json` written as a sidecar next to `master.m3u8`. On an encrypted session every `.m3u8` and `.vtt` is then LMCENC-encrypted with the same key (AES-128-CBC, fresh IV per file, `LMCENC01` magic — see `docs/encrypted-sidecar-format.md`) as the **final** pre-upload step; encrypted objects upload as `application/octet-stream`. `encryption.encryptPlaylists: false` opts out, for output that must stay readable by players that cannot decrypt playlists.
+10. Completion sets `files`, `masterPlaylist`, `thumbnailsVtt` and `segmentFormat`, and emits the final event. The key is never in the payload — clients use `GET /api/sessions/:id/key`.
+
+Disk is guarded on both ends: `disk-space.ts` refuses an ingest or an encode that will not fit, keeping a reserve (`DISK_RESERVE_BYTES`, default 2 GB), so a full volume cannot take the next encode down with it.
 
 ### Encoding features
 
-- **Video + audio-only modes**: `EncodeConfigDto.type` is `'video'` or `'audio'`; audio-only mode encodes HLS with audio groups only (no video renditions)
-- **Trim segments**: Optional `trimSegments` on the encode config restricts the encode to one or more `[in, out]` ranges (each ≥ 0.5 s, non-overlapping). FFmpeg encodes only those ranges and concatenates them in order
-- **Streaming pipeline**: `SegmentPipelineService` polls the FFmpeg output directory and streams each new segment through encrypt → upload → byte-range pack with bounded concurrency. This keeps S3 uploads pipelined with FFmpeg progress instead of running serially after the encode completes
-- **Adaptive segment format**: Before encoding, `FfmpegService` probes per-stream start times via ffprobe. When all used streams are aligned (spread < 50ms), fMP4 segments (`.m4s` + `init.mp4`) are used for CMAF compatibility and lower overhead. When streams have misaligned start times, MPEG-TS segments (`.ts`) are used as a fallback because the player's TS transmuxer synchronizes audio/video PTS during playback. The chosen format is reported to the client via the `segmentFormat` field in the session status response
-- **Byte-range HLS**: When enabled (default), segments are consolidated into fewer large files using HLS byte-range addressing (`#EXT-X-BYTERANGE`), reducing the number of S3 objects. Configurable max file size per consolidated file. Consolidation runs in a non-blocking worker thread (`byte-range.worker.ts`) to avoid blocking the main event loop
-- **Copy mode** (`-c:v copy` / `-c:a copy`): Pass-through for pre-encoded streams, avoiding re-encoding
-- **VBR encoding**: Video renditions and audio groups support VBR mode (CRF/CQ) instead of fixed bitrate via `vbr` flag
-- **Audio groups**: Different audio quality tiers mapped to video renditions via HLS `#EXT-X-MEDIA` GROUP-ID
-- **Multi-track audio**: Supports multiple audio tracks (e.g., different languages) with proper `EXT-X-MEDIA` entries including language tags and GROUP-IDs
-- **Multi-angle video**: Sources with multiple video tracks produce per-angle HLS playlists via `generateAnglePlaylists`; `videoTrackNames` in config controls angle names
-- **Master playlist post-processing**: `fixMasterPlaylist` rewrites FFmpeg's master.m3u8 to inject correct audio group NAMEs and VIDEO group annotations per rendition
-- **Metadata**: Language and name attributes in `-var_stream_map` for HLS `#EXT-X-MEDIA` and `#EXT-X-STREAM-INF` tags; rendition `label` for HLS NAME
-- **Channel control**: Mono/stereo/5.1/7.1 per audio group via `-ac`
-- **Encoder reporting**: Session status includes `encoder` field indicating the acceleration mode used (`cpu`, `nvidia`, or `apple`) and `segmentFormat` field indicating the HLS segment format (`fmp4` or `mpegts`)
-- **HLS encryption**: Optional AES-128 encryption for HLS segments via `EncryptionService` (uses worker threads for encryption processing). The encryption key hex is included in the completion webhook payload (`encryptionKeyHex`) and stored in CouchDB by the SaaS Service. Encrypted playback is handled entirely client-side in `HlsPlayer.vue` via blob URL rewriting — fetching playlists from S3, replacing `#EXT-X-KEY` URIs with a blob URL of the key, and serving modified playlists as blob URLs. No server involvement for decryption
-- **Thumbnail generation**: `ThumbnailService` generates sprite-based thumbnail previews with a WebVTT file for timeline scrubbing; enabled by default for video encodes via `thumbnails` option in session creation
+- **Video + audio-only modes**: `EncodeConfigDto.type` is `'video'` or `'audio'`
+- **Trim segments**: optional `trimSegments` restricts the encode to one or more `[in, out]` ranges, concatenated in order. The preview reflects the trimmed timeline so cut points can be checked before queueing
+- **Byte-range HLS**: on by default; segments packed into **shared chunk chains** under `media/` at the prefix root — one chain per video angle carrying every rendition of that angle (interleaved by arrival; byte order inside a chunk is irrelevant to a whole-object backhaul, so no cross-stream barrier exists), one audio chain carrying every audio group. Media playlists stay per-stream and reference chunks as `../media/<chain>_<n>.m4s` with `#EXT-X-BYTERANGE` (ciphertext offsets). The first chunk of a chain closes at ~20 s of content so a byte-range-forwarding edge warms almost immediately at play-start; later chunks are cap-sized (`byteRangeMaxFileSizeMB` default 500 for video chains, `audioByteRangeMaxFileSizeMB` default 50 for the audio chain — it aggregates every language, wide ladders should raise it). Chain identity comes from `FfmpegService.buildStreamChainMap`, never from parsing directory names. Packing happens in `SegmentPipelineService` as segments arrive; the fMP4 init is deliberately **not** uploaded mid-encode (FFmpeg creates it empty and fills it later — an early upload raced that write and shipped zero-byte inits), it travels with the remaining files at the end
+- **Copy mode** (`-c:v copy` / `-c:a copy`) and **VBR** (CRF/CQ) per rendition and per audio group
+- **Audio groups** mapped to renditions via HLS `#EXT-X-MEDIA` `GROUP-ID`; multi-track audio with language/name attributes; mono/stereo/5.1/7.1 via `-ac`
+- **Multi-angle video**: multiple source video tracks become `TYPE=VIDEO` rendition groups in the single master (see the player contract above)
+- **HLS encryption**: AES-128 via worker threads; key hex published at encode start
+- **Thumbnails**: sprite sheets + WebVTT for the encoded output, plus a separate pre-encode _source storyboard_ served from `/api/sessions/:id/thumbnails/*` so the trim timeline can show frames before anything is encoded (`X-Storyboard-Complete` tells the client when sampling has finished)
+- **Waveform**: peaks computed once per source, cached on disk, served over HTTP for the trim UI and written to S3 as `waveform.json`
 
-### Upload resilience
+### Server-side on-demand HLS preview
 
-- **Tus protocol**: Resumable, chunked uploads via the Go `tusd` binary wrapped by `node-tusd` (backend) and `tus-js-client` (frontend, 50 MB chunks, 5 parallel uploads, automatic retries)
-- **Tusd architecture**: `TusdServer` (from `node-tusd` workspace) spawns the Go `tusd` binary as a child process on an ephemeral port, runs an internal HTTP hook server for lifecycle events, and proxies incoming Express requests to tusd
-- **Upload expiration**: Incomplete uploads expire after 10 minutes; expired uploads cleaned up on shutdown via `TusUploadService.onModuleDestroy()` (based on `.info` sidecar file mtime)
-- **Bearer auth on tus**: Every tus request is authenticated via the upload token (validated in `onIncomingRequest` hook before proxying to tusd)
+`PreviewService` generates preview HLS on demand once the source is probed:
 
-### Web client flow
+- 2–3 ABR renditions (480p/360p/240p), copy-mode for H.264/VP8/VP9 where possible
+- Segments extracted on demand, cached under `<workDir>/<sessionId>/preview/`, with prefetch and a cap of 3 concurrent FFmpeg processes
+- GPU-accelerated (NVENC / VideoToolbox) with CPU fallback, sharing `FfmpegService`'s detection
+- Multi-audio: one track per language (or all when unlabelled), each `(rendition, audioTrack)` pair cached separately
+- Trim-aware; MPEG-TS segments of 4 s
+- Removed when the session is deleted
 
-1. User signs in via Auth0 Universal Login (redirect flow); `App.vue` verifies identity with the SaaS Service
-2. User navigates to `/sessions/new` (`EncodeView`), selects an S3 config and either a local file or an HTTP/S URL in `SessionConfigForm`
-3. On submit, `EncodeView` creates a session (via SaaS Service) and either starts a tus upload (resumable, chunked) or kicks off URL ingestion via `POST /saas/sessions/:id/url-upload`; navigates to `/sessions/:id` (`SessionView`) immediately. The URL-mode UI shows download progress, ETA, and total size
-4. `SessionView` handles the full session lifecycle — upload/ingest progress is shown via the `useActiveUploads` singleton composable that survives navigation
-5. After upload/ingest completes the Encoding API auto-probes the file; `SessionView` polls or listens via SSE until probe results are available
-6. The HLS preview player is available once probe + at least one rendition's worth of segments exist; audio track selector shown when multiple tracks detected
-7. `EncodeConfigForm` (from `encode-config` package) computes a suggested encoding config from the probe results on mount; user reviews and configures encoding (renditions, audio groups, copy/VBR toggles, optional trim segments)
-8. User clicks "Start Encoding" — `SessionView` strips client-only `audioTrackMetadata` and submits the encode config; saves config to `layoutStorage` for future reuse
-9. Real-time encoding progress displayed via SSE (`GET /api/sessions/:id/events`) with `useSessionPoller` as fallback
-10. **Chapter editor**: during and after encoding, `SessionView` mounts the `SegmentEditor` (chapters mode) wired to `useChapters`, which loads any existing `chapters.vtt` from S3, autosaves drafts to localStorage, and writes back to S3 (debounced) via the SaaS chapter proxy. The HLS player consumes player-reported duration (not source-probe duration) to keep cue positions aligned with the actual stream
-11. On completion, `HlsPlayer` shows a Video.js player for the HLS master playlist; for encrypted sessions, playlists are rewritten client-side (blob URL rewriting of `#EXT-X-KEY` URIs) for seamless playback. Chapter cues are injected from `chapters.vtt`
-12. Session history available at `/sessions` (`SessionHistoryView`) with paginated search and filters; external HLS outputs can be imported at `/sessions/import`
-13. API keys managed at `/keys` (`ApiKeysView`); S3 configs managed at `/s3-configs` (`S3ConfigsView`)
+### Session persistence and sweeping
 
-### FIFO queue
-
-- One encoding job runs at a time
-- Sessions processed in first-come-first-served order
-- Queue position updates sent via webhook when positions shift
+- Sessions live in memory and are mirrored to `<workDir>/<sessionId>/session.json` after anything worth keeping changes. Progress is deliberately not persisted — it ticks several times a second and is worthless after a restart
+- `lastActivityAt` (not `createdAt`) decides abandonment, so a slow multi-gigabyte ingest is not mistaken for a closed tab; `touch()` records liveness during long transfers
+- `SessionCleanupService` sweeps hourly (`SESSION_CLEANUP_CRON`) and removes only _idle_ sessions — `created`, `uploading`, `uploaded` — idle longer than `SESSION_ABANDONED_MAX_AGE_HOURS` (default 6). Queued and encoding sessions are never swept
+- Finished sessions are not swept on a clock; they are discarded at boot, so no age threshold has to stand in for "the user is done looking at this"
+- Deleting a session removes its work directory whole (session record, preview cache, sidecars, credentials sidecar). `encrypting` and `uploading_to_s3` are the statuses that cannot be deleted — the pipeline is mid-write, and pulling its files out from under it leaves half an output in the bucket
 
 ## API Endpoints
 
-Auth on the Encoding API resolves via `AuthResolverGuard`: `master` = `X-API-Key` matching `MASTER_API_KEY`; `apikey` = `X-API-Key` validated via webhook to the SaaS Service; `session` = `Authorization: Bearer sess_*` matching the session's stored token. Each endpoint declares allowed methods via `@AuthTypes(...)`.
+Auth column: **instance** = the instance `X-API-Key` token; **session** = `Bearer sess_*`; **read** = `?token=read_*`; **origin** = browser Origin allowlist; **query token** = `?token=` carrying the session token.
 
-### Encoding sessions
+### Encoding sessions (`/api/sessions`)
 
-| Method | Path | Allowed auth | Description |
-|--------|------|--------------|-------------|
-| POST | `/api/sessions` | master, apikey | Create encoding session (S3 + webhook + encryption + thumbnail config) |
-| ALL | `/api/tus` , `/api/tus/*` | Bearer (session token) | Tus upload endpoint — resumable chunked file upload, auto-probes on completion |
-| POST | `/api/sessions/:sessionId/url-upload` | master, apikey, session | Ingest the source file from an HTTP/S URL (parallel Range download, SSRF-guarded). Returns 202; progress reported via SSE |
-| POST | `/api/sessions/:sessionId/encode` | master, apikey, session | Submit encoding config (with optional `trimSegments`), enqueue for processing |
-| GET | `/api/sessions/:sessionId` | master, apikey, session | Poll session status |
-| GET | `/api/sessions/:sessionId/events` | Token (query) | Stream session events via SSE (status, progress, probe results, completion) |
-| DELETE | `/api/sessions/:sessionId` | master, apikey, session | Cancel and delete session (any non-terminal status) |
-| GET | `/api/sessions/:sessionId/preview/audio-tracks` | Token (query) | Get available audio tracks for preview (with language, name, isDefault) |
-| GET | `/api/sessions/:sessionId/preview/playlist.m3u8` | Token (query) | HLS master playlist for preview; supports `?audio=<trackIndex>` |
-| GET | `/api/sessions/:sessionId/preview/r:rendition/playlist.m3u8` | Token (query) | HLS rendition media playlist for preview |
-| GET | `/api/sessions/:sessionId/preview/r:rendition/:filename` | Token (query) | Stream MPEG-TS preview segment on-demand |
+| Method | Path                                                  | Auth                              | Description                                                                                                                                                                                                                                                           |
+| ------ | ----------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/sessions`                                       | token                             | Create a session (S3 + encryption + segment/byte-range/thumbnail options). Returns `{ sessionId, sessionToken }`                                                                                                                                                      |
+| GET    | `/api/sessions`                                       | token                             | List every session on this instance, newest first, including session tokens (the UI is the only holder of the instance token)                                                                                                                                         |
+| POST   | `/api/sessions/:id/local-file`                        | token, session                    | Attach an absolute path to a file already on this machine. Returns once probed                                                                                                                                                                                        |
+| POST   | `/api/sessions/:id/encode`                            | token, session                    | Submit the encode config and enqueue. `202`                                                                                                                                                                                                                           |
+| GET    | `/api/sessions/:id`                                   | token, session, read              | Poll status: probe results, progress, `hlsUrl`, `canRetry`, `queuePosition`, trim segments, files on completion (no key — see `/key`)                                                                                                                                 |
+| GET    | `/api/sessions/:id/events`                            | query token (session **or** read) | SSE event stream                                                                                                                                                                                                                                                      |
+| GET    | `/api/sessions/:id/key`                               | token, session, read              | Masked AES-128 session key `{ maskedKeyHex }` (XOR `SHA-256(sessionId)[0..16]`, self-inverse). 404 when the session has no encryption                                                                                                                                 |
+| DELETE | `/api/sessions/:id`                                   | token, session                    | Cancel and delete. Allowed from `created`, `uploading`, `uploaded`, `queued`, `encoding`, `failed`, `completed` — the terminal two included, which is the only way their disk is reclaimed. `encrypting` and `uploading_to_s3` are refused: the pipeline is mid-write |
+| GET    | `/api/sessions/:id/chapters?lang=en`                  | token, session                    | Read `chapters/<lang>.vtt` from the session's own prefix                                                                                                                                                                                                              |
+| PUT    | `/api/sessions/:id/chapters?lang=en`                  | token, session                    | Write `chapters/<lang>.vtt` (≤ 1 MiB, `text/vtt`). `204`                                                                                                                                                                                                              |
+| GET    | `/api/sessions/:id/waveform`                          | query token                       | Waveform peaks for the source (`{ peaks, numPeaks }`)                                                                                                                                                                                                                 |
+| GET    | `/api/sessions/:id/preview/audio-tracks`              | query token                       | Preview audio tracks                                                                                                                                                                                                                                                  |
+| GET    | `/api/sessions/:id/preview/playlist.m3u8`             | query token                       | Preview master playlist (`?audio=<index>`)                                                                                                                                                                                                                            |
+| GET    | `/api/sessions/:id/preview/r:rendition/playlist.m3u8` | query token                       | Preview rendition playlist                                                                                                                                                                                                                                            |
+| GET    | `/api/sessions/:id/preview/r:rendition/:filename`     | query token                       | Preview MPEG-TS segment                                                                                                                                                                                                                                               |
+| GET    | `/api/sessions/:id/thumbnails/thumbnails.vtt`         | query token                       | Source storyboard WebVTT (cues rewritten to absolute, token-carrying sprite URLs; `X-Storyboard-Complete`)                                                                                                                                                            |
+| GET    | `/api/sessions/:id/thumbnails/:filename`              | query token                       | Source storyboard sprite sheet                                                                                                                                                                                                                                        |
 
-### HLS edit (stateless, takes inline S3 credentials)
+### CMS handshake (`/api/cms`)
 
-| Method | Path | Allowed auth | Description |
-|--------|------|--------------|-------------|
-| POST | `/api/hls/read` | master, apikey | Fetch and parse a master playlist; returns parsed master + current ETag |
-| POST | `/api/hls/mutate` | master, apikey | Apply ordered ops (upsert/remove subtitle, upsert/remove chapters) with If-Match; returns new ETag |
-| POST | `/api/hls/discover` | master, apikey | Scan a folder prefix for HLS masters / angle playlists |
-| POST | `/api/hls/chapters/read` | master, apikey | Read `chapters/<lang>.vtt` under a folder prefix; 404 when absent |
-| POST | `/api/hls/chapters/write` | master, apikey | Write `chapters/<lang>.vtt` under a folder prefix (≤ 1 MiB, `Content-Type: text/vtt`) |
+| Method | Path                | Auth   | Description                                                                     |
+| ------ | ------------------- | ------ | ------------------------------------------------------------------------------- |
+| GET    | `/api/cms/health`   | none   | `{ status: 'ok', apiVersion }` — is the local encoder installed and running     |
+| POST   | `/api/cms/sessions` | origin | Open (or reuse) a session for a CMS document; returns `readToken` + `eventsUrl` |
 
-### SaaS Service highlights
+### HLS edit (`/api/hls`, stateless, inline S3 credentials)
 
-The SaaS Service (`/saas/...`) is Auth0-authenticated and exposes user-facing CRUD plus a thin proxy over the Encoding API's HLS-edit endpoints (using the master key on the way out). Notable session routes:
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/saas/sessions` | Create session via the Encoding API |
-| POST | `/saas/sessions/import` | Import an external HLS output |
-| POST | `/saas/sessions/:sessionId/url-upload` | Proxy URL ingestion to the Encoding API |
-| PATCH | `/saas/sessions/:sessionId/name` | Rename a stored session |
-| POST | `/saas/sessions/:sessionId/move` | Move output files between S3 prefixes |
-| POST | `/saas/sessions/:sessionId/rename-prefix` | Rename a session's S3 prefix in place |
-| GET | `/saas/sessions/check-prefix` | Check whether a candidate S3 prefix is free |
-| POST | `/saas/sessions/:sessionId/hls/read` | Proxy `/api/hls/read` |
-| POST | `/saas/sessions/:sessionId/hls/mutate` | Proxy `/api/hls/mutate` |
-| GET | `/saas/sessions/:sessionId/chapters` | Proxy `/api/hls/chapters/read` |
-| PUT | `/saas/sessions/:sessionId/chapters` | Proxy `/api/hls/chapters/write` |
+| Method | Path                      | Auth  | Description                                                                                                                 |
+| ------ | ------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/hls/read`           | token | Fetch and parse a master playlist; returns the parsed master + current ETag                                                 |
+| POST   | `/api/hls/mutate`         | token | Apply ordered ops (upsert/remove subtitle, upsert/remove chapters) with `If-Match`; returns the new ETag. `409` on mismatch |
+| POST   | `/api/hls/discover`       | token | Scan a folder prefix for HLS masters / angles                                                                               |
+| POST   | `/api/hls/chapters/read`  | token | Read `chapters/<lang>.vtt` under a prefix; `404` when absent                                                                |
+| POST   | `/api/hls/chapters/write` | token | Write `chapters/<lang>.vtt` under a prefix                                                                                  |
+| POST   | `/api/hls/waveform/read`  | token | Read `waveform.json` under a prefix; `404` when absent                                                                      |
 
 ## Session Lifecycle
 
 ```
 created -> uploading -> uploaded -> queued -> encoding -> encrypting -> uploading_to_s3 -> completed
-                                                      \-> failed
+                                                       \-> failed
 ```
+
+`failed` is reachable from any point. A `failed` session whose source file is still on disk and whose credentials are still usable reports `canRetry: true` and can be encoded again without re-ingesting.
 
 ## Key Conventions
 
-- DTOs use `class-validator` decorators and are validated via NestJS `ValidationPipe` (whitelist + forbidNonWhitelisted)
-- Webhook configuration is optional in `CreateSessionDto` — when omitted, no webhooks are sent; clients can poll instead
-- Session-level options (`segmentDuration`, `byteRange`, `byteRangeMaxFileSizeMB`, `thumbnails`, `encryption`) are set at session creation time in `CreateSessionDto`, not in the encode config
-- `EncodeConfigDto.trimSegments` is the only way to express trimming — it lives on the encode config submitted at the start of encoding, not on the create-session call
-- FFmpeg args are built dynamically based on GPU availability, encode config (audio groups, copy mode, metadata)
-- File uploads use the tus protocol via the Go `tusd` binary (wrapped by the `node-tusd` workspace package) with 10 GB max size, mounted via `EncodeModule.onModuleInit()` on `/api/tus`
-- URL ingestion is implemented in `UrlFetchService` — same final state machine as tus (`uploading` → `uploaded`) so downstream code is unchanged
-- Encoding API authenticates via `AuthResolverGuard` (master key / tenant API key / session Bearer); the SaaS Service still uses Auth0 JWT and proxies HLS-edit / chapter calls to the Encoding API with the master key on outbound
-- Both API and SaaS register `ThrottlerModule` globally; long-lived endpoints (SSE, segment streaming, tus, encode lifecycle) annotate `@SkipThrottle()`
-- Graceful shutdown enabled (`app.enableShutdownHooks()`); `QueueService`, `FfmpegService`, and `TusUploadService` implement `OnModuleDestroy` to clean up active processes and expired uploads
-- Environment config via `dotenv`: `PORT`, `WORK_DIR`, `FFMPEG_TIMEOUT_MS`, `FFMPEG_THREADS`, `CORS_ORIGIN`, `MAX_UPLOAD_SIZE`, `HLS_ENCRYPTION_SEED`, `MASTER_API_KEY`, `KEY_VALIDATION_WEBHOOK_URL`, `AUTHORIZATION_WEBHOOK_URL`, `SESSION_MAX_AGE_HOURS`, `SESSION_CLEANUP_CRON` (API); `VITE_AUTH0_DOMAIN`, `VITE_AUTH0_CLIENT_ID`, `VITE_AUTH0_AUDIENCE`, `VITE_API_BASE_URL`, `VITE_SAAS_API_BASE_URL` (app); `TUSD_BINARY_PATH` (optional override for tusd binary location); CouchDB, Auth0, and `ENCODING_API_URL` + `ENCODING_API_MASTER_KEY` for the HLS-edit proxy (saas); Auth0 config (admin)
-- Swagger decorators on all DTOs and endpoints for auto-generated API docs
-- Web client manages S3 configs via the SaaS Service (stored in CouchDB with encrypted credentials); encode configs are persisted via `layoutStorage` (from the `encode-config` package) keyed by media layout fingerprint
-- Shared types (ProbeResult, EncodeConfig, VideoRendition, AudioGroup) are defined in `encode-config/src/types.ts` and re-exported by both the encode-config package and `app/src/types.ts`
-- Chapter editing uses `useChapters` (app composable) wrapping the `SegmentEditor` from `@luminary-media-converter/segment-editor`; drafts persist in localStorage and autosave to S3 (debounced ~2 s) via the SaaS chapter proxy
-- Video.js quality selector is a custom plugin (`videojs-quality-selector.ts`) using native ES6 classes — the `videojs-hls-quality-selector` npm package is incompatible with Video.js 8 (Babel `_inheritsLoose` cannot extend native ES6 classes)
-- Vite config uses `resolve.dedupe: ['video.js']` to ensure a single Video.js instance across all modules
-- PWA via `vite-plugin-pwa` in `app/vite.config.ts`: web manifest + Workbox service worker precaches same-origin build assets only; `PwaUpdatePrompt.vue` prompts on new deploys (`registerType: 'prompt'`). Offline shell does not make APIs available. Icons in `app/public/`; regenerate with `npm -w app run generate:pwa-icons`
+- DTOs use `class-validator` and are validated by a global `ValidationPipe` (whitelist + forbidNonWhitelisted). Even fields nothing acts on yet — `existingMedia` — are validated, because a shape that was never checked is a shape that will be wrong by the time something reads it
+- Session-level options (`segmentDuration`, `byteRange`, `byteRangeMaxFileSizeMB`, `audioByteRangeMaxFileSizeMB`, `thumbnails`, `encryption` — incl. `encryption.encryptPlaylists`) belong to session creation; `trimSegments` belongs to the encode config submitted at encode start
+- Host-specific values reach the API through `AppModule.forRoot()` → `RuntimeOptionsModule` (a `@Global` module): `LOCAL_API_TOKEN`, `ORIGIN_POLICY`, `CREDENTIAL_CIPHER`, `CMS_SESSION_HOOK`. Never import `AppModule` directly — a bare import leaves those tokens unbound. `workDir` and the ffmpeg paths go through `process.env` instead, because that is how the services already read them and they are process-wide anyway
+- ffmpeg/ffprobe are resolved per call through `ffbin.ts` (`FFMPEG_PATH` / `FFPROBE_PATH`, else PATH), never captured at import time, so the host can set them before Nest instantiates anything. `shellQuote()` exists because a macOS install path always contains a space
+- The API binds loopback unconditionally (`DEFAULT_HOST`). CORS and tokens answer questions a remote caller only gets to ask if it can open the socket
+- Anything the web client reads off a response header must be added to `EXPOSED_HEADERS` in `cors.config.ts`, or `response.headers.get()` silently returns null
+- Responses a COEP-`credentialless` page embeds cross-origin (storyboard VTT and sprites) set `Cross-Origin-Resource-Policy: cross-origin`; Helmet's default of `same-origin` would have the browser drop them
+- Object keys always go through `S3Service.canonicalPrefix()` — no leading, trailing or doubled slashes
+- Graceful shutdown: `app.enableShutdownHooks()`; `QueueService` and `FfmpegService` implement `OnModuleDestroy`. The Electron host intercepts `before-quit`, awaits `server.close()`, and only then quits — quitting out from under Nest leaves orphan ffmpeg processes and half-written output
+- All playback behavior lives in `player-core` (munging, quality capping, angle switching, recovery/stall policy, coming-soon polling, chapters/subtitles) so web and future native players behave identically; engine specifics live behind `PlayerAdapter` implementations (`player-web`'s `HlsJsAdapter`). Implementing apps talk to `PlayerController` only. There is no munge fast path: every source — encrypted or not — fetches and rewrites its media playlists, so behavior never depends on what the source happens to be
+- Chunk warming splits along the same line: `player-core` builds the boundary schedules (`buildChunkSchedules`, pure, serializable) and owns the policy (`PlayerControllerOptions.prefetch`); the pacing loop is adapter work via the optional `warmChunks` contract, because a JS interval is throttled in the background exactly when a native player keeps playing. `docs/chunk-warming.md` is the normative spec a native adapter implements against
+- Quality capping is **load-time only**: `PlayerSource.maxHeight` munges higher renditions out of the playlist; a playing video keeps its old cap until the next `load()`. Selecting the `Audio only` pseudo-angle (`AUDIO_ONLY_ANGLE_ID`) plays a munged master with zero video variants — no video bytes are downloaded
+- LMCENC (`docs/encrypted-sidecar-format.md`) is the only sanctioned way to encrypt playlists/VTTs; detection is by magic prefix, never by absence-sniffing, and plaintext assets keep working when a key is configured
+- Encryption is one decision: an encrypted session encrypts segments, playlists, chapters and (once written) subtitles under the same key. Derived artefacts are outside that scope by decision, not by omission — the thumbnail sprite WebP images and `waveform.json` stay plaintext; `docs/encrypted-sidecar-format.md` lists them and says why. Chapters saved after the encode are encrypted on write and decrypted on read by the same rule, so the output never ends up half-readable. Anything in the app that reads a delivered `.vtt` directly — the storyboard filmstrip — must decrypt it (`useStoryboardVttUrl`)
+- The renderer's only privileged capabilities are the three preload calls. Everything else it does goes over HTTP to the local API like any other client, which keeps one set of rules about what is allowed
 
-## Source File Preview (COOP/COEP Headers)
+## Environment Variables
 
-The web client includes a local source file preview feature powered by FFmpeg.wasm (multi-threaded). This uses `SharedArrayBuffer` and WORKERFS to mount local files directly without copying them into wasm memory — essential for large files (multi-GB).
+### API (`api/.env`, standalone only — the Electron host passes these in code)
 
-`SharedArrayBuffer` requires two HTTP response headers on the page serving the web client:
+| Variable                          | Default                       | Description                                                                                                                                  |
+| --------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LOCAL_API_TOKEN`                 | —                             | The instance API token accepted on `X-API-Key`. Unset disables key auth entirely. `MASTER_API_KEY` is still read, with a deprecation warning |
+| `PORT`                            | `3000` (standalone `main.ts`) | HTTP port. The embedded default is `31711` (`DEFAULT_PORT`)                                                                                  |
+| `HOST`                            | `127.0.0.1`                   | Bind address                                                                                                                                 |
+| `WORK_DIR`                        | `./work`                      | Scratch directory for sessions, previews, sidecars                                                                                           |
+| `CMS_ALLOWED_ORIGINS`             | —                             | Comma-separated origins trusted without asking (there is no approver standalone)                                                             |
+| `FFMPEG_PATH` / `FFPROBE_PATH`    | PATH lookup                   | Absolute paths to the binaries                                                                                                               |
+| `FFMPEG_TIMEOUT_MS`               | none                          | Max FFmpeg runtime before a forced kill                                                                                                      |
+| `FFMPEG_THREADS`                  | —                             | Thread count passed to FFmpeg                                                                                                                |
+| `DISK_RESERVE_BYTES`              | `2147483648`                  | Free space to keep in hand on the work volume                                                                                                |
+| `SESSION_ABANDONED_MAX_AGE_HOURS` | `6`                           | How long an idle session may sit before it is swept                                                                                          |
+| `SESSION_CLEANUP_CRON`            | `0 * * * *`                   | Sweep schedule                                                                                                                               |
+| `S3_UPLOAD_STALL_TIMEOUT_MS`      | `300000`                      | Stall detector for S3 uploads (measured in bytes sent, not files completed)                                                                  |
 
-```
-Cross-Origin-Opener-Policy: same-origin
-Cross-Origin-Embedder-Policy: credentialless
-```
+### Web client (`app/.env`, browser development only)
 
-**Development:** Already configured in `app/vite.config.ts` via `server.headers`.
+| Variable         | Description                                                            |
+| ---------------- | ---------------------------------------------------------------------- |
+| `VITE_API_URL`   | Base URL of the local API. Empty in the packaged app (same origin)     |
+| `VITE_API_TOKEN` | Stands in for the preload bridge token when running in a plain browser |
 
-**Production:** These headers must be set on the web server or CDN serving the built `app/dist/` files. Examples:
+### Electron
 
-- **Nginx:**
-  ```nginx
-  location / {
-      add_header Cross-Origin-Opener-Policy "same-origin" always;
-      add_header Cross-Origin-Embedder-Policy "credentialless" always;
-      # ... existing config
-  }
-  ```
+| Variable                | Description                                        |
+| ----------------------- | -------------------------------------------------- |
+| `LUMINARY_PORT`         | Override the API port                              |
+| `ELECTRON_RENDERER_URL` | Dev renderer URL (default `http://localhost:5173`) |
 
-- **Caddy:**
-  ```
-  header Cross-Origin-Opener-Policy "same-origin"
-  header Cross-Origin-Embedder-Policy "credentialless"
-  ```
+## FFmpeg is a hard requirement
 
-- **Cloudflare Workers (this repo):** `app/public/_headers` is copied into the build output and sets COOP/COEP on all routes plus `Cache-Control: no-cache` on `sw.js`, `workbox-*.js`, and `manifest.webmanifest`
-- **Cloudflare Pages / Workers (generic):** Add headers via `_headers` in the static assets directory:
-  ```
-  /*
-    Cross-Origin-Opener-Policy: same-origin
-    Cross-Origin-Embedder-Policy: credentialless
-  ```
+`ffmpeg-availability.ts` probes `ffmpeg -version` / `ffprobe -version` at startup and answers **presence**, which is a different question from the acceleration detection below and must not be confused with it: every capability probe fails identically whether a binary is absent or merely lacks NVENC, so asking only about capability reported a machine with no FFmpeg at all as "No GPU found, using CPU encoding".
 
-- **AWS CloudFront:** Add via response headers policy (custom headers).
-
-- **Vercel:** Add via `vercel.json`:
-  ```json
-  { "headers": [{ "source": "/(.*)", "headers": [
-    { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
-    { "key": "Cross-Origin-Embedder-Policy", "value": "credentialless" }
-  ]}]}
-  ```
-
-**Why `credentialless` instead of `require-corp`:** The `credentialless` COEP policy allows cross-origin resources (Auth0 redirects, CDN scripts, S3-hosted media) to load without explicit CORP headers — they just load without cookies. This is compatible with Auth0 Universal Login and third-party scripts. The stricter `require-corp` would break these integrations.
-
-**Without these headers:** `SharedArrayBuffer` is unavailable, WORKERFS mount fails, and FFmpeg.wasm falls back to copying the entire file into wasm memory (MEMFS). This works for small files but fails for large ones (>2GB browser memory limit).
+- The **Electron host** refuses to open a window without it, offering _Get FFmpeg_ / _Quit_ — there is nothing useful to do in a window that cannot probe, preview, thumbnail or encode. It closes the server before exiting rather than quitting out from under Nest
+- The **API** refuses ingest and encode start with `503` and the same user-facing text. Ingest is the one that matters: attaching a source probes it immediately, so a missing install used to present as a failed probe, which reads as a bad file
+- `probeFfmpegBinaries` / `missingBinariesMessage` / `FFMPEG_DOWNLOAD_URL` are re-exported from `bootstrap.ts` so the host reaches the same verdict the API does. Call them _after_ `createServer` (or after setting `FFMPEG_PATH` / `FFPROBE_PATH`) — the paths are read per call, so probing earlier asks about PATH instead of the bundled binaries
+- **FFmpeg 4.4 or newer is required**, and that is what the user is told. The requirement is _enforced_ by probing the binary for the options the pipeline uses unconditionally (`ffmpeg-capabilities.ts`), never by comparing version strings — real builds report `4.4.2-0ubuntu0.22.04.1`, `7.1.1_2` and `N-113140-gd12b0e6f4b`, and the nightly has no version to compare. `MIN_FFMPEG_VERSION` exists to tell people what to install; it was established by reading FFmpeg's own source at release tags (`-stats_period` is absent in `n4.3`, present in `n4.4`, and is the newest option required)
+- **User-facing text says the version; the log says the options.** "The installed FFmpeg is too old (version 3.4.8). Luminary Media Convert needs FFmpeg 4.4 or newer" goes to the dialog; the list of unsupported flags goes to the log, where the reader is us
 
 ## GPU Detection
 
-At startup, `FfmpegService.onModuleInit()` detects the acceleration mode (`AccelMode`: `'cpu' | 'nvidia' | 'apple'`):
+At startup `FfmpegService.onModuleInit()` detects the acceleration mode (`AccelMode`: `'cpu' | 'nvidia' | 'apple'`):
 
-1. **NVIDIA**: `nvidia-smi` available + `ffmpeg -hwaccels` includes `cuda` → `h264_nvenc` encoder, `scale_cuda` filter, `-hwaccel cuda`
-2. **Apple Silicon**: `darwin` platform + `arm64` arch + `ffmpeg -hwaccels` includes `videotoolbox` + `ffmpeg -encoders` includes `h264_videotoolbox` + `ffmpeg -filters` includes `scale_vt` → `h264_videotoolbox` encoder, `scale_vt` filter, `-hwaccel videotoolbox -hwaccel_output_format videotoolbox_vld`
-3. **CPU fallback**: `libx264` encoder, standard `scale` filter
+1. **NVIDIA**: `nvidia-smi` available + `ffmpeg -hwaccels` includes `cuda` → `h264_nvenc`, `scale_cuda`, `-hwaccel cuda -hwaccel_output_format cuda`
+2. **Apple Silicon**: `darwin` + `arm64` + `videotoolbox` in `-hwaccels` + `h264_videotoolbox` in `-encoders` + `scale_vt` in `-filters` → `h264_videotoolbox`, `scale_vt`, `-hwaccel videotoolbox -hwaccel_output_format videotoolbox_vld`
+3. **CPU fallback**: `libx264` with resolution-based presets. Audio always encodes on CPU
 
-`PreviewService` shares the same GPU detection from `FfmpegService` and uses it for preview transcoding with automatic CPU fallback.
+`PreviewService` shares the same detection. The active mode is reported as `encoder` on status responses and SSE events.
 
-## Scripts
+This is exactly why the packaged app ships its own ffmpeg: hardware encoding is a compile-time decision, and a user's own build may have none of it.
 
-From the repo root:
+## Development Workflows
 
-- `npm run dev` — start all workspaces in dev mode (via `concurrently`): encode-config watch, segment-editor watch, hls watch, API, SaaS, web client, admin
-- `npm -w api run start:dev` — API dev server with watch mode
-- `npm -w api run build` — compile API to `api/dist/`
-- `npm -w api run start:prod` — run compiled API output
-- `npm -w api test` — unit tests (Vitest)
-- `npm -w api run test:e2e` — end-to-end tests (Vitest, separate config)
-- `npm -w app run dev` — web client dev server (Vite, port 5173)
-- `npm -w app run build` — production build of the web client
-- `npm -w app run test` — web client tests (Vitest)
-- `npm -w saas run dev` — SaaS Service dev server with watch mode
-- `npm -w saas run build` — compile SaaS Service
-- `npm -w saas run test` — unit tests (Vitest)
-- `npm -w saas run seed:admin -- <email>` — seed an admin user (or `npm run seed:admin -- <email>` from root)
-- `npm -w admin run dev` — admin panel dev server (Vite)
-- `npm -w admin run build` — production build of the admin panel
-- `npm -w admin run test` — admin panel tests (Vitest)
-- `npm -w encode-config run build` — build encode-config library
-- `npm -w encode-config run dev` — watch build encode-config library
-- `npm -w segment-editor run build` — build segment-editor library
-- `npm -w segment-editor run dev` — watch build segment-editor library
-- `npm -w segment-editor run test` — segment-editor tests (Vitest)
-- `npm -w hls run build` — build hls library
-- `npm -w hls run dev` — watch build hls library
-- `npm -w hls run test` — hls library tests (Vitest)
-- `npm -w tusd run build` — build tusd wrapper library
-- `npm -w tusd run download-tusd` — download the tusd Go binary for the current platform
+### Browser development (fastest loop, no Electron)
+
+```bash
+npm install
+npm run dev
+```
+
+Starts the shared-library watch builds, the API on `http://127.0.0.1:3000` (Swagger at `/api/docs`), and the web client on `http://localhost:5173`.
+
+`api/.env`:
+
+```bash
+LOCAL_API_TOKEN=dev-token
+# Every browser page that calls the API needs an entry — including the web
+# client itself. In Electron it is same-origin and sends no Origin header, so
+# it needs none there; in browser dev it is a cross-origin page like any other
+# and is refused without this (there is no approver dialog outside Electron).
+CMS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5199
+```
+
+`app/.env`:
+
+```bash
+VITE_API_URL=http://127.0.0.1:3000
+VITE_API_TOKEN=dev-token
+```
+
+`VITE_API_URL` and the API's `PORT` have to agree; Electron's own default is `31711` (`DEFAULT_PORT` in `api/src/bootstrap.ts`), so setting `PORT` to that lets one `app/.env` serve both modes — at the cost of not being able to run `dev` and `dev:electron` at once.
+
+Browser dev has no preload bridge, so a dropped file cannot be resolved to a real path — the local-file flow only works inside the Electron shell.
+
+### Desktop development
+
+```bash
+npm run dev:electron
+```
+
+Builds the shared libraries and the API, then runs the Vite client and Electron together. The main process retries the renderer URL for 30 s, because Vite is routinely a few seconds behind Electron.
+
+**Gotcha — `ELECTRON_RUN_AS_NODE`.** Some parent processes (VS Code's integrated terminal, agent runners) export `ELECTRON_RUN_AS_NODE=1`. With it set, `electron .` runs as a plain Node process: no window ever appears and none of the `app` / `BrowserWindow` code runs. If the desktop app "starts and does nothing", check `env | grep ELECTRON` and `unset ELECTRON_RUN_AS_NODE` first.
+
+### Exercising the CMS flow
+
+```bash
+npm -w cms-mock run dev     # http://localhost:5199
+```
+
+Run it against a running API (default `http://127.0.0.1:31711`, editable in the UI). Its origin differs from the API's on purpose, so the real CORS / origin-gating path is exercised — in the desktop app the first request raises the native approval dialog. It walks health → create session → SSE console (highlighting the first event carrying `hlsUrl`, pinned in `MediaDto` shape) → playback check (angle extraction and the `luminary://key` substitution). Defaults assume a local MinIO with an anonymously readable `media` bucket.
+
+## Packaging
+
+`electron/electron-builder.yml`:
+
+- **Targets**: macOS `dmg` + `zip` (arm64), Windows `nsis` (x64). Run `npm -w electron run dist:mac` / `dist:win`, or `pack` for an unpacked directory
+- **Windows can be built from a Mac**, which is what `dist:win-portable` is for: it produces a portable `zip` rather than the NSIS installer, because NSIS needs Wine and a portable zip needs nothing. `-c.win.signAndEditExecutable=false` is what avoids Wine entirely — the cost is that the `.exe` carries the stock Electron icon, since stamping the icon is itself a Wine job. Prerequisites are `brew install mingw-w64 cmake llvm`, and **LLVM is not optional**: `--enable-cuda-llvm` gives `scale_cuda` for the NVIDIA path and needs a clang with the NVPTX backend, which Apple's clang does not have. Put it first on `PATH` when building ffmpeg: `PATH="/opt/homebrew/opt/llvm/bin:$PATH" npm -w electron run dist:win-portable`
+- **The ffmpeg binaries are declared per platform, not by macro.** `${platform}` expands to the _host_, so `bin/${platform}-${arch}` quietly packaged macOS binaries inside a Windows app when cross-building — an app that installs, opens, and cannot encode. It was invisible while packaging only ever ran on a matching runner. `mac.extraResources` and `win.extraResources` now name `bin/darwin-${arch}` and `bin/win32-${arch}` outright, sharing one filter list through a YAML anchor. `${arch}` is safe because electron-builder runs one pass per architecture. `verify-package.mjs` reads the Mach-O/PE header and fails the build on a mismatch, which is how this was caught
+- **All three build what they ship.** Each runs `build:workspaces` → the root's `build:bundled` (the five shared libraries, then the API, then the web client) before `electron-builder`. They used to compile only Electron's own TypeScript and package whatever `app/dist` and `api/dist` happened to contain — the last build anyone ran, or nothing at all on a clean clone, since both are gitignored. `npm -w` does not work from inside a workspace directory, hence the `cd ..` hop
+- **A `VITE_*` value cannot follow a developer's `.env` into a build.** Vite bakes every one it finds into every bundle, so `app/src/api.ts` and `auth-token.ts` read theirs strictly inside `import.meta.env.DEV`, which no `vite build` sets. `API_BASE` compiles to `""` — same-origin, which is the only correct answer once the API is serving the client. Pinned by tests that assert `DEV: false` _with_ the variables set, not merely absent
+- **`asar: true`** — verified rather than assumed: the packaged app was launched from outside the repository (so nothing could resolve upwards into the development `node_modules`) and the API started, served the client and answered requests from inside the archive
+- **electron-builder 26 is required.** Version 25 collected the hoisted workspace dependencies incompletely — `call-bind-apply-helpers` ended up only nested under `call-bind`, express failed to load, and Nest reported it as "No driver (HTTP) has been selected", which points nowhere near the real cause. Symptom if this regresses: the packaged app exits or logs a missing-driver error while the same code runs fine unpackaged
+- **`npmRebuild: false`** — electron-builder would otherwise run its own production `npm install` inside the workspace, which in a hoisted monorepo prunes the root `node_modules` out from under the running build. Nothing here is a native module
+- **`extraResources`**: `app/dist` → `app/` (served at `/` by the API via `bundledWebClient()`), and `electron/bin/${platform}-${arch}/{ffmpeg,ffprobe}` → the resources root (found by `bundledBinary()`)
+- **ffmpeg binaries are not in the repository** — tens of megabytes each and separately licensed. See `electron/bin/README.md` for where to get builds with VideoToolbox (macOS arm64) and NVENC (Windows x64), how to verify them, and the GPL/LGPL consequences of shipping them. Without them the packaged app falls back to whatever `ffmpeg` is on PATH: runnable on a developer machine, not shippable
+- **Ad-hoc signed, not notarized.** There is no Developer ID certificate, so `mac.identity: null` — but the bundle is still signed, by `electron/build/after-pack.cjs`. Electron ships already signed, and copying `extraResources` in afterwards invalidates that signature; macOS reads a broken signature as corruption and refuses a downloaded copy outright with "is damaged and can't be opened", offering only the Bin. Ad-hoc re-signing restores a valid seal, which turns that into the ordinary "Apple could not verify" prompt a user can accept
+- **Opening it on macOS 15 and later takes seven steps, and right-click → Open is not one of them.** Apple removed that bypass: the path is dismiss the warning → System Settings → Privacy & Security → **Open Anyway** → a second warning → Open Anyway → authenticate. "Move to Bin" is the highlighted default throughout. Notarization is what removes this, and needs the same certificate as auto-update
+- **Only downloaded copies are checked.** Gatekeeper assesses a bundle only when it carries `com.apple.quarantine`, which a locally built one does not — so a signing defect is invisible on the machine that produced it. Test with `xattr -w com.apple.quarantine "0081;0;Safari;$(uuidgen)" <dmg>` before shipping
+- Windows builds are unsigned (no Authenticode certificate) but install and open without a SmartScreen warning in testing
+- **Protocol**: `luminary-convert://` is registered so a CMS can offer a launch link when the encoder is not running. From source, the scheme is registered against `process.execPath` plus the resolved project path, or the OS would launch a bare Electron with no app to run
+- Excluded from the package: `.env`, the API workspace's `work/` directory, and its lint/build config
+
+## Follow-ups
+
+Known gaps and deferred work are tracked in [`Todo.md`](Todo.md). Notably: CMS edit mode for existing collections (`existingMedia` is accepted and ignored), auto-update and code signing, Linux builds, Windows build verification, storage that is never reclaimed when a document is deleted or a collection superseded, and restoring the test suites that were intentionally broken during the migration.

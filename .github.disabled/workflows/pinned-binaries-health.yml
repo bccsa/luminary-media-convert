@@ -1,0 +1,39 @@
+name: Pinned FFmpeg URLs still resolve
+
+# Checks that every source `ffmpeg-build/build.sh` fetches is reachable: FFmpeg's
+# release tarball and its signature, libwebp's tarball, x264's git repository and the
+# nv-codec-headers tag. It catches a pin that names something unpublished — a wrong
+# version, a mistyped digest, a tag that does not exist.
+#
+# Runs on pull requests that touch the pins, and on demand before cutting a release.
+#
+# Reachability only. Whether a *newer* version exists is a judgement call: moving a
+# pin means re-verifying capabilities, re-checking the nv-codec-headers ceiling and
+# re-testing an encode.
+
+on:
+    workflow_dispatch:
+    pull_request:
+        types: [opened, synchronize, reopened]
+        paths:
+            - ffmpeg-build/versions.sh
+            - electron/scripts/check-pinned-urls.mjs
+            - .github/workflows/pinned-binaries-health.yml
+
+permissions:
+    contents: read
+
+jobs:
+    check:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v6
+              with:
+                  node-version-file: api/.node-version
+
+            # Read the URLs out of the pin table rather than repeating them here.
+            # A copy in this file would drift, and a health check that watches the
+            # wrong URLs is worse than none.
+            - name: Every pinned URL is still reachable
+              run: node electron/scripts/check-pinned-urls.mjs

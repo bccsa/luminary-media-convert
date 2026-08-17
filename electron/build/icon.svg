@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!--
+    Luminary Media Convert — app icon source.
+
+    The tile is inset to 824×824 inside the 1024 canvas: macOS reserves that
+    margin for the Dock's own sizing, and an icon drawn edge to edge sits
+    visibly larger than every other app beside it.
+
+    The mark is a play triangle inside a broken aperture ring — the media and
+    the light the product is named for. Both survive 16px: a filled triangle
+    and a ring read as silhouettes long after any detail is gone, which is why
+    there are no rays, nested gradients or lettering here.
+
+    Geometry is derived from one centre (512, 500) — a touch above true centre,
+    which is where the eye reads the middle of a tile. The ring's endpoints are
+    computed from that centre and a radius rather than eyeballed: an arc whose
+    endpoints do not lie on the intended circle silently relocates its centre,
+    which is how the first draft ended up with the ring hanging low and right
+    of the triangle it was meant to enclose.
+  -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#132338"/>
+      <stop offset="55%" stop-color="#0d1a2b"/>
+      <stop offset="100%" stop-color="#0a1220"/>
+    </linearGradient>
+
+    <linearGradient id="beam" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0%" stop-color="#7dd3fc"/>
+      <stop offset="50%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+
+    <linearGradient id="ring" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0%" stop-color="#7dd3fc"/>
+      <stop offset="60%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+
+    <!-- Light pooling behind the mark, so the triangle sits in the tile rather
+         than on it. -->
+    <radialGradient id="glow" cx="0.5" cy="0.45" r="0.5">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.40"/>
+      <stop offset="55%" stop-color="#0ea5e9" stop-opacity="0.11"/>
+      <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- A single specular sweep across the top: the one cue that makes a flat
+         tile read as a physical object. -->
+    <linearGradient id="sheen" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.13"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <clipPath id="tileClip">
+      <rect x="100" y="100" width="824" height="824" rx="185" ry="185"/>
+    </clipPath>
+  </defs>
+
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="url(#tile)"/>
+
+  <g clip-path="url(#tileClip)">
+    <circle cx="512" cy="480" r="420" fill="url(#glow)"/>
+    <path d="M100 100 H924 V430 C760 330 420 300 100 470 Z" fill="url(#sheen)"/>
+  </g>
+
+  <!--
+    Aperture ring, centre (512, 500), r 258, opened over 52° centred on the
+    lower-right diagonal. Endpoints are r·(cos θ, sin θ) offset from the centre:
+    θ = 71° → (596.0, 743.9) and θ = 19° → (755.9, 584.0). The arc runs the long
+    way round (large-arc = 1, sweep = 1), so the gap is the 52° between them.
+  -->
+  <path
+    d="M 596.0 743.9 A 258 258 0 1 1 755.9 584.0"
+    fill="none"
+    stroke="url(#ring)"
+    stroke-width="46"
+    stroke-linecap="round"
+  />
+
+  <!--
+    Play triangle. Vertices are pulled in by half the stroke width and the
+    corners rounded by stroke-linejoin, which gives an exact, uniform radius
+    without hand-fitted arcs. Outer extents land on x 449→663, y 368→632, and
+    the centroid on x ≈ 512 — a triangle centred on its bounding box reads as
+    sitting too far right, because its mass is on the flat side.
+  -->
+  <path
+    d="M 449 386 L 645 500 L 449 614 Z"
+    fill="url(#beam)"
+    stroke="url(#beam)"
+    stroke-width="36"
+    stroke-linejoin="round"
+  />
+
+  <!-- Hairline lift on the tile edge; without it the dark tile dissolves into a
+       dark Dock or a dark wallpaper. -->
+  <rect
+    x="100" y="100" width="824" height="824" rx="185" ry="185"
+    fill="none" stroke="#ffffff" stroke-opacity="0.09" stroke-width="3"
+  />
+</svg>

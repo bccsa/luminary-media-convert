@@ -8,14 +8,18 @@
         "encode-config",
         "hls",
         "segment-editor",
-        "tusd",
-        "saas",
-        "admin"
+        "player-core",
+        "player-web",
+        "cms-mock",
+        "electron"
     ],
     "scripts": {
-        "predev": "npm -w encode-config run build && npm -w segment-editor run build",
-        "dev": "npm run predev && concurrently -k -n ecfg,segd,hls,api,saas,app,admin -c green,gray,white,blue,yellow,magenta,cyan \"npm -w encode-config run dev\" \"npm -w segment-editor run dev\" \"npm -w hls run dev\" \"npm -w api run dev\" \"npm -w saas run dev\" \"npm -w app run dev\" \"npm -w admin run dev\"",
-        "seed:admin": "npm -w saas run seed:admin --"
+        "build:libs": "npm -w hls run build && npm -w encode-config run build && npm -w segment-editor run build && npm -w player-core run build && npm -w player-web run build",
+        "build:bundled": "npm run build:libs && npm -w api run build && npm -w app run build",
+        "predev": "npm run build:libs",
+        "dev": "npm run predev && concurrently -k -n ecfg,segd,hls,pcor,plyw,api,app -c green,gray,white,cyan,red,blue,magenta \"npm -w encode-config run dev\" \"npm -w segment-editor run dev\" \"npm -w hls run dev\" \"npm -w player-core run dev\" \"npm -w player-web run dev\" \"npm -w api run dev\" \"npm -w app run dev\"",
+        "predev:electron": "npm run build:libs && npm -w api run build",
+        "dev:electron": "concurrently -k -n ecfg,segd,hls,pcor,plyw,app,elec -c green,gray,white,cyan,red,magenta,yellow \"npm -w encode-config run dev\" \"npm -w segment-editor run dev\" \"npm -w hls run dev\" \"npm -w player-core run dev\" \"npm -w player-web run dev\" \"npm -w app run dev\" \"npm -w electron run dev\""
     },
     "devDependencies": {
         "concurrently": "^9.2.1"

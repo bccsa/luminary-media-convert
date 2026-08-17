@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Expose, Type } from 'class-transformer';
 import { ProbeResultDto } from './probe-result.dto.js';
+import type { PipelinePhase } from '../services/segment-pipeline.service.js';
 
 export class SessionResponseDto {
     @ApiProperty({
@@ -12,27 +13,11 @@ export class SessionResponseDto {
 
     @ApiProperty({
         description:
-            'TUS upload endpoint. Create a tus upload to this URL, passing the sessionId as upload metadata.',
-        example: 'http://localhost:3000/api/tus',
-    })
-    @Expose()
-    tusEndpoint: string;
-
-    @ApiProperty({
-        description:
-            'Bearer token to authenticate session requests (tus uploads, polling, preview). Send as "Authorization: Bearer <token>".',
+            'Bearer token to authenticate session requests (ingestion, polling, preview). Send as "Authorization: Bearer <token>".',
         example: 'sess_f8e7d6c5b4a3291087654321',
     })
     @Expose()
     sessionToken: string;
-
-    @ApiProperty({
-        description:
-            'Maximum allowed upload file size in bytes.',
-        example: 10737418240,
-    })
-    @Expose()
-    maxUploadSize: number;
 }
 
 export class EncodeStartResponseDto {
@@ -56,6 +41,63 @@ export class EncodeStartResponseDto {
     })
     @Expose()
     queuePosition?: number;
+}
+
+/**
+ * One row of the local session list.
+ *
+ * Carries the session token, which the status response never does: this
+ * endpoint is master-key-only and exists for the local UI, which needs a
+ * per-session credential for the preview and waveform routes without having to
+ * remember one from whenever the session was created.
+ */
+export class SessionSummaryDto {
+    @ApiProperty({ description: 'Session identifier.' })
+    @Expose()
+    sessionId: string;
+
+    @ApiPropertyOptional({
+        description: 'Title supplied when the session was created.',
+    })
+    @Expose()
+    title?: string;
+
+    @ApiProperty({
+        description: 'Current session status.',
+        example: 'encoding',
+    })
+    @Expose()
+    status: string;
+
+    @ApiProperty({ description: 'Progress percentage (0-100).', example: 42 })
+    @Expose()
+    progress: number;
+
+    @ApiProperty({
+        description: 'Creation time, epoch milliseconds.',
+        example: 1770000000000,
+    })
+    @Expose()
+    createdAt: number;
+
+    @ApiProperty({
+        description: 'Bearer token for the session-scoped endpoints.',
+        example: 'sess_f8e7d6c5b4a3291087654321',
+    })
+    @Expose()
+    sessionToken: string;
+
+    @ApiPropertyOptional({
+        description: 'Public playback URL, once encoding has started.',
+    })
+    @Expose()
+    hlsUrl?: string;
+
+    @ApiPropertyOptional({
+        description: 'Failure message, when status is "failed".',
+    })
+    @Expose()
+    error?: string;
 }
 
 export class SessionStatusDto {
@@ -95,11 +137,26 @@ export class SessionStatusDto {
     @ApiPropertyOptional({
         description:
             'Detailed pipeline progress with separate encoding, encrypting, and uploading indicators. ' +
-            'Present when status is "encoding" or "uploading_to_s3".',
-        example: { encoding: 45.5, encrypting: 30, uploading: 10 },
+            'Present when status is "encoding" or "uploading_to_s3". ' +
+            '"phase" identifies the step running after the segment pipeline drains — ' +
+            'draining, finalising-playlists, thumbnails, waveform, encrypting-playlists, ' +
+            'uploading-playlists — most of which report no percentage of their own. ' +
+            'It is an identifier, not a sentence: the client owns the wording, and one it ' +
+            'does not recognise renders nothing.',
+        example: {
+            encoding: 100,
+            encrypting: 100,
+            uploading: 40,
+            phase: 'uploading-playlists',
+        },
     })
     @Expose()
-    pipelineProgress?: { encoding: number; encrypting?: number; uploading?: number };
+    pipelineProgress?: {
+        encoding: number;
+        encrypting?: number;
+        uploading?: number;
+        phase?: PipelinePhase;
+    };
 
     @ApiPropertyOptional({
         description:
@@ -121,7 +178,18 @@ export class SessionStatusDto {
     canRetry?: boolean;
 
     @ApiPropertyOptional({
-        description: 'Probe results from the uploaded file. Present when status is "uploaded".',
+        description:
+            'Whether the output will use byte-range HLS. Set at session creation ' +
+            'and not editable afterwards, so this response is the only way for the ' +
+            'client to learn it rather than assuming the API default.',
+        example: true,
+    })
+    @Expose()
+    byteRange?: boolean;
+
+    @ApiPropertyOptional({
+        description:
+            'Probe results from the uploaded file. Present when status is "uploaded".',
         type: ProbeResultDto,
     })
     @Type(() => ProbeResultDto)
@@ -151,34 +219,43 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
-            'Per-angle playlists for angle switching. Present when status is "completed" and video was encoded.',
-        example: [
-            { name: 'Main angle', key: 'videos/project-1/master.m3u8' },
-            { name: 'Side angle', key: 'videos/project-1/side_angle.m3u8' },
-        ],
-    })
-    @Expose()
-    anglePlaylists?: { name: string; key: string }[];
-
-    @ApiPropertyOptional({
-        description:
             'S3 object key of the WebVTT thumbnails file. Present when status is "completed" and thumbnails were generated.',
         example: 'videos/project-1/thumbnails/thumbnails.vtt',
     })
     @Expose()
     thumbnailsVtt?: string;
 
-    @ApiPropertyOptional({
-        description:
-            'Hex-encoded AES-128 encryption key. Present when status is "completed" and encryption was enabled.',
-        example: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
-    })
-    @Expose()
-    encryptionKeyHex?: string;
+    // The AES-128 key is deliberately absent here. Carrying it on every status read
+    // and SSE frame would put it in logs, proxies and screenshots for the life of the
+    // session. Fetch it from GET /api/sessions/:sessionId/key — see
+    // SessionKeyResponseDto.
 
     @ApiPropertyOptional({
         description:
-            'Error message. Present when status is "failed".',
+            'Public URL of the master playlist, built from the caller-supplied ' +
+            "publicBaseUrl and the session's object key. Present from the moment " +
+            'encoding starts, for sessions created with a publicBaseUrl.',
+        example: 'https://cdn.example.com/media/a1b2c3d4/master.m3u8',
+    })
+    @Expose()
+    hlsUrl?: string;
+
+    @ApiPropertyOptional({
+        description: 'Title supplied by the caller that opened the session.',
+        example: 'Episode 12 — The Long Way Round',
+    })
+    @Expose()
+    title?: string;
+
+    @ApiPropertyOptional({
+        description: "The CMS document this session's output belongs to.",
+        example: 'post_01HTZ8Y0J4',
+    })
+    @Expose()
+    documentId?: string;
+
+    @ApiPropertyOptional({
+        description: 'Error message. Present when status is "failed".',
         example: 'FFmpeg exited with code 1: Invalid input file',
     })
     @Expose()
@@ -187,7 +264,7 @@ export class SessionStatusDto {
     @ApiPropertyOptional({
         description:
             'Hardware acceleration mode used by the server for video encoding.',
-        enum: ['cpu', 'nvidia', 'apple'],
+        enum: ['cpu', 'nvidia', 'apple', 'intel'],
         example: 'cpu',
     })
     @Expose()
@@ -195,10 +272,11 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
-            'HLS segment format used for encoding. "fmp4" (CMAF-compatible, lower overhead) ' +
-            'is used when source stream start times are aligned. "mpegts" is used as a fallback ' +
-            'when source streams have misaligned start times, because the player\'s TS transmuxer ' +
-            'can synchronize audio and video during playback.',
+            'HLS segment format of the output. Always "fmp4" for a new encode: a source ' +
+            'whose streams do not start together is aligned with an input seek rather ' +
+            'than escaped into MPEG-TS, so the output container is no longer a property ' +
+            'of the input. "mpegts" appears only on a session restored from before that ' +
+            'change, which has to report what it actually produced.',
         enum: ['fmp4', 'mpegts'],
         example: 'fmp4',
     })
@@ -216,6 +294,26 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
+            'Thumbnails sampled so far for the source storyboard. Grows while the ' +
+            'ingest-time sampling pass runs; the client refetches the storyboard VTT ' +
+            'when this grows, rather than polling blindly for more frames.',
+        example: 120,
+    })
+    @Expose()
+    storyboardThumbCount?: number;
+
+    @ApiPropertyOptional({
+        description:
+            'True once the source storyboard is fully sampled and its VTT is final. ' +
+            'A separate flag because the last in-progress report usually already ' +
+            'carries the full thumbnail count.',
+        example: true,
+    })
+    @Expose()
+    storyboardComplete?: boolean;
+
+    @ApiPropertyOptional({
+        description:
             'Trim ranges submitted with the encode config, in source-timeline seconds. ' +
             'Present once encoding has been requested and the config specified trimming. ' +
             'Clients use these to render the output timeline (duration, waveform) rather ' +
@@ -227,4 +325,27 @@ export class SessionStatusDto {
     })
     @Expose()
     trimSegments?: { inSec: number; outSec: number }[];
+}
+
+/**
+ * The session's AES-128 key, masked.
+ *
+ * Masking is an obscurity measure, not a security one, and the formula is
+ * published here on purpose — see {@link maskKeyHex}. Its whole job is to keep
+ * raw keys out of status payloads and the logs that copy them.
+ */
+export class SessionKeyResponseDto {
+    @ApiProperty({
+        description:
+            'Hex-encoded AES-128 session key, XOR-masked. Unmask with:\n\n' +
+            '    mask = SHA-256(sessionId)[0..15]\n' +
+            '    key  = maskedKey XOR mask\n\n' +
+            'XOR is its own inverse, so the same operation masks and unmasks. ' +
+            'This is obscurity, not DRM: it keeps the raw key out of status ' +
+            'responses, SSE frames and the logs that copy them, and nothing ' +
+            'more — any client able to play the media can recover the key.',
+        example: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
+    })
+    @Expose()
+    maskedKeyHex: string;
 }

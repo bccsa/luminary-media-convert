@@ -142,8 +142,10 @@ describe('SegmentEditor — mark in / mark out', () => {
         await flush();
         w.vm.markIn();
         await flush();
+        // The marker on the track is the whole of the feedback — the toolbar
+        // banner that used to restate it in words was removed.
         expect(w.find('.se-pending-marker').exists()).toBe(true);
-        expect(w.find('.se-pending').exists()).toBe(true);
+        expect(w.find('.se-pending').exists()).toBe(false);
     });
 
     it('creates a segment when Mark Out closes a pending-in marker', async () => {
@@ -454,6 +456,69 @@ describe('SegmentEditor — selection', () => {
         keyDown(getTimeline(w), 'Backspace');
         await flush();
         expect(latestSegments(w)).toHaveLength(0);
+    });
+
+    it('Cmd/Ctrl + X cuts the selection, which is what a user reaches for', async () => {
+        // Delete and Backspace were the only bindings, so the shortcut that
+        // exists felt like one that does not.
+        for (const modifier of ['metaKey', 'ctrlKey'] as const) {
+            const w = mountEditor({ segments: [seg(1, 0, 5), seg(2, 10, 15)] });
+            await flush();
+            const segEl = w.find('.se-segment').element as HTMLElement;
+            mouseAt(segEl, 'mousedown', 2);
+            mouseAt(document.body, 'mouseup', 2);
+            await flush();
+
+            keyDown(getTimeline(w), 'x', { [modifier]: true });
+            await flush();
+
+            expect(latestSegments(w)).toHaveLength(1);
+            expect(latestSegments(w)[0].inSec).toBe(10);
+        }
+    });
+
+    it('bare X does not cut — it is the modifier that means cut', async () => {
+        const w = mountEditor({ segments: [seg(1, 0, 5)] });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+
+        keyDown(getTimeline(w), 'x');
+        await flush();
+
+        expect(latestSegments(w)).toHaveLength(1);
+    });
+
+    it('leaves Cmd/Ctrl + X to the input when a field has focus', async () => {
+        /*
+         * Typing a chapter title and cutting a word must cut the word, not the
+         * chapter. The typing guard already did this for Delete; the new binding
+         * sits below it so it inherits the same rule.
+         */
+        // `keyboardScope: 'global'` on purpose: the default 'focus' scope never
+        // attaches a window listener, so a keypress in a detached input could
+        // not reach the editor whatever the guard did — the test would pass
+        // while proving nothing. Global is also the scope the trim workspace
+        // mounts with, which is where this actually matters.
+        const w = mountEditor({
+            segments: [seg(1, 0, 5)],
+            props: { keyboardScope: 'global' },
+        });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+
+        const input = document.createElement('input');
+        document.body.appendChild(input);
+        keyDown(input, 'x', { metaKey: true });
+        await flush();
+
+        expect(latestSegments(w)).toHaveLength(1);
+        input.remove();
     });
 });
 
@@ -1440,6 +1505,23 @@ describe('SegmentEditor — list rendering', () => {
         // currentTime is static in tests, so each click steps from the same value.
         expect(onSeek).toHaveBeenCalledWith(19);
         expect(onSeek).toHaveBeenCalledWith(21);
+    });
+
+    it('Home and End jump exactly to the start and end of the timeline', async () => {
+        // The two positions the step keys only ever creep toward. Home/End land
+        // on them in one press — 0 and the full duration, not one step short.
+        const onSeek = vi.fn();
+        const t = { value: 42.7 };
+        const w = mountEditor({ currentTime: t, props: { onSeek } });
+        await flush();
+
+        keyOn(getTimeline(w), 'Home');
+        await flush();
+        expect(onSeek).toHaveBeenLastCalledWith(0);
+
+        keyOn(getTimeline(w), 'End');
+        await flush();
+        expect(onSeek).toHaveBeenLastCalledWith(100);
     });
 
     it('play/pause button triggers onPlayPause', async () => {
@@ -2442,5 +2524,71 @@ describe('SegmentEditor — marking between existing segments', () => {
         w.vm.markOut();
         await flush();
         expect(latestSegments(w)[0].outSec).toBe(60);
+    });
+});
+
+describe('SegmentEditor — Clear All placement', () => {
+    /** The library's own Clear All, wherever it renders in the controls row. */
+    function clearButton(w: ReturnType<typeof mountEditor>) {
+        return w
+            .findAll('button')
+            .find((b) => b.text().trim() === 'Clear All');
+    }
+
+    it('shows Clear All by default, so hosts that had it keep it', async () => {
+        // subtitles mode especially: the editor is the only place the cues live,
+        // so removing the button unconditionally would strand that mode.
+        const w = mountEditor({
+            segments: [seg(1, 0, 5, 'A')],
+            props: { mode: 'subtitles' },
+        });
+        await flush();
+
+        expect(clearButton(w)).toBeDefined();
+    });
+
+    it('hides it when the host puts its own clear beside the list', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 0, 5, 'A')],
+            props: { mode: 'chapters', showClearAll: false },
+        });
+        await flush();
+
+        expect(clearButton(w)).toBeUndefined();
+    });
+
+    it('still confirms when the host asks, using this component\'s own sheet', async () => {
+        /*
+         * The point of exposing `requestClearAll` rather than only `clearAll`:
+         * a host that has merely moved the button should not rebuild the
+         * confirmation, or the same destructive action ends up worded two ways.
+         */
+        const w = mountEditor({
+            segments: [seg(1, 0, 5, 'A')],
+            props: { mode: 'chapters', showClearAll: false },
+        });
+        await flush();
+
+        (w.vm as unknown as { requestClearAll: () => void }).requestClearAll();
+        await flush();
+
+        expect(document.body.textContent).toContain('Clear all');
+        expect(latestSegments(w)).toHaveLength(1);
+        // The sheet is teleported to <body>, so it outlives this wrapper unless
+        // the wrapper goes with it — and the next test asserts on its absence.
+        w.unmount();
+    });
+
+    it('does not confirm when there is nothing to clear', async () => {
+        // Teleported sheets from earlier tests live on in <body>; clear them so
+        // this asserts on what *this* mount did.
+        document.querySelectorAll('.se-confirm').forEach((n) => n.remove());
+        const w = mountEditor({ props: { mode: 'chapters', showClearAll: false } });
+        await flush();
+
+        (w.vm as unknown as { requestClearAll: () => void }).requestClearAll();
+        await flush();
+
+        expect(document.querySelector('.se-confirm')).toBeNull();
     });
 });

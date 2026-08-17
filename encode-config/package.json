@@ -19,7 +19,7 @@
     ],
     "scripts": {
         "build": "vite build && vue-tsc --declaration --emitDeclarationOnly --outDir dist && cp src/styles.css dist/styles.css",
-        "dev": "vite build --watch",
+        "dev": "concurrently -k -n js,dts -c blue,gray \"vite build --watch\" \"vue-tsc --declaration --emitDeclarationOnly --outDir dist --watch --preserveWatchOutput\"",
         "test": "vitest run"
     },
     "peerDependencies": {

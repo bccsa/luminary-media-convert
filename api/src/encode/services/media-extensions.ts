@@ -1,7 +1,30 @@
 export const ALLOWED_EXTENSIONS = new Set([
-    '.mp4', '.mkv', '.mov', '.avi', '.webm', '.flv', '.wmv', '.m4v', '.ts',
-    '.mts', '.m2ts', '.mpg', '.mpeg', '.3gp', '.3g2', '.mxf', '.ogv',
-    '.mp3', '.aac', '.flac', '.wav', '.ogg', '.m4a', '.wma', '.opus', '.aiff',
+    '.mp4',
+    '.mkv',
+    '.mov',
+    '.avi',
+    '.webm',
+    '.flv',
+    '.wmv',
+    '.m4v',
+    '.ts',
+    '.mts',
+    '.m2ts',
+    '.mpg',
+    '.mpeg',
+    '.3gp',
+    '.3g2',
+    '.mxf',
+    '.ogv',
+    '.mp3',
+    '.aac',
+    '.flac',
+    '.wav',
+    '.ogg',
+    '.m4a',
+    '.wma',
+    '.opus',
+    '.aiff',
 ]);
 
 export function hasAllowedExtension(filename: string): boolean {
@@ -39,7 +62,9 @@ const CONTENT_TYPE_TO_EXT: Record<string, string> = {
     'audio/x-aiff': '.aiff',
 };
 
-export function extensionFromContentType(contentType: string | null | undefined): string | null {
+export function extensionFromContentType(
+    contentType: string | null | undefined
+): string | null {
     if (!contentType) return null;
     const main = contentType.split(';')[0]!.trim().toLowerCase();
     return CONTENT_TYPE_TO_EXT[main] ?? null;
