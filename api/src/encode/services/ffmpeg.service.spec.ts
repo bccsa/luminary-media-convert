@@ -12,10 +12,11 @@ import { tmpdir } from 'os';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 
-const { mockSpawn, mockExecSync, mockExecFile, MockWorker, useRealWorker } =
+const { mockSpawn, mockExecSync, mockExecFileSync, mockExecFile, MockWorker, useRealWorker } =
     vi.hoisted(() => ({
         mockSpawn: vi.fn(),
         mockExecSync: vi.fn(),
+        mockExecFileSync: vi.fn(),
         mockExecFile: vi.fn(),
         MockWorker: vi.fn(),
         useRealWorker: { value: true },
@@ -27,6 +28,7 @@ vi.mock('child_process', async (importOriginal) => {
         ...actual,
         spawn: mockSpawn,
         execSync: mockExecSync,
+        execFileSync: mockExecFileSync,
         execFile: mockExecFile,
     };
 });
@@ -54,6 +56,8 @@ vi.mock('worker_threads', async (importOriginal) => {
 
 import {
     FfmpegService,
+    hlsOutputPath,
+    isHardwareEncoderFailure,
     type AccelMode,
     type EncodeOptions,
 } from './ffmpeg.service.js';
@@ -161,13 +165,20 @@ describe('FfmpegService', () => {
             encoders?: string;
             filters?: string;
         }) => {
+            mockExecFileSync.mockImplementation(
+                (_bin: string, args: string[]) => {
+                    if (args.includes('-hwaccels'))
+                        return opts.hwaccels ?? 'qsv\ncuda\n';
+                    if (args.includes('-encoders'))
+                        return opts.encoders ?? 'h264_qsv libx264\n';
+                    if (args.includes('-filters'))
+                        return opts.filters ?? 'vpp_qsv scale\n';
+                    throw new Error(`unexpected args: ${args.join(' ')}`);
+                }
+            );
+            // nvidia-smi (and anything else still on the shell path) is absent
+            // unless a test says otherwise.
             mockExecSync.mockImplementation((cmd: string) => {
-                if (cmd.includes('-hwaccels'))
-                    return opts.hwaccels ?? 'qsv\ncuda\n';
-                if (cmd.includes('-encoders'))
-                    return opts.encoders ?? 'h264_qsv libx264\n';
-                if (cmd.includes('-filters'))
-                    return opts.filters ?? 'vpp_qsv scale\n';
                 throw new Error(`unexpected command: ${cmd}`);
             });
         };
@@ -234,13 +245,18 @@ describe('FfmpegService', () => {
             // nvidia-smi answers, and the build has cuda as well as qsv.
             mockExecSync.mockImplementation((cmd: string) => {
                 if (cmd.includes('nvidia-smi')) return '';
-                if (cmd.includes('-hwaccels')) return 'cuda\nqsv\n';
-                if (cmd.includes('-encoders'))
-                    return 'h264_nvenc h264_qsv libx264\n';
-                if (cmd.includes('-filters'))
-                    return 'scale_cuda vpp_qsv scale\n';
                 throw new Error(`unexpected command: ${cmd}`);
             });
+            mockExecFileSync.mockImplementation(
+                (_bin: string, args: string[]) => {
+                    if (args.includes('-hwaccels')) return 'cuda\nqsv\n';
+                    if (args.includes('-encoders'))
+                        return 'h264_nvenc h264_qsv libx264\n';
+                    if (args.includes('-filters'))
+                        return 'scale_cuda vpp_qsv scale\n';
+                    throw new Error(`unexpected args: ${args.join(' ')}`);
+                }
+            );
             expect((service as any).detectAcceleration()).toBe('nvidia');
         });
     });
@@ -3430,10 +3446,15 @@ describe('FfmpegService', () => {
         it('should detect NVIDIA GPU when nvidia-smi succeeds and hwaccels includes cuda', async () => {
             mockExecSync.mockImplementation((cmd: string) => {
                 if (cmd === 'nvidia-smi') return '';
-                if (cmd === 'ffmpeg -hwaccels 2>/dev/null')
-                    return 'Hardware acceleration methods:\ncuda\n';
                 throw new Error('not available');
             });
+            mockExecFileSync.mockImplementation(
+                (_bin: string, args: string[]) => {
+                    if (args.includes('-hwaccels'))
+                        return 'Hardware acceleration methods:\ncuda\n';
+                    throw new Error('not available');
+                }
+            );
 
             await service.onModuleInit();
             expect(service.getAccelMode()).toBe('nvidia');
@@ -3442,6 +3463,9 @@ describe('FfmpegService', () => {
 
         it('should fall through when nvidia-smi fails', async () => {
             mockExecSync.mockImplementation(() => {
+                throw new Error('not available');
+            });
+            mockExecFileSync.mockImplementation(() => {
                 throw new Error('not available');
             });
 
@@ -3462,16 +3486,19 @@ describe('FfmpegService', () => {
             });
 
             try {
-                mockExecSync.mockImplementation((cmd: string) => {
-                    if (cmd === 'nvidia-smi') throw new Error('not available');
-                    if (cmd === 'ffmpeg -hwaccels 2>/dev/null')
-                        return 'Hardware acceleration methods:\nvideotoolbox\n';
-                    if (cmd === 'ffmpeg -encoders 2>/dev/null')
-                        return 'h264_videotoolbox';
-                    if (cmd === 'ffmpeg -filters 2>/dev/null')
-                        return 'scale_vt';
+                mockExecSync.mockImplementation(() => {
                     throw new Error('not available');
                 });
+                mockExecFileSync.mockImplementation(
+                    (_bin: string, args: string[]) => {
+                        if (args.includes('-hwaccels'))
+                            return 'Hardware acceleration methods:\nvideotoolbox\n';
+                        if (args.includes('-encoders'))
+                            return 'h264_videotoolbox';
+                        if (args.includes('-filters')) return 'scale_vt';
+                        throw new Error('not available');
+                    }
+                );
 
                 await service.onModuleInit();
                 expect(service.getAccelMode()).toBe('apple');
@@ -3490,6 +3517,9 @@ describe('FfmpegService', () => {
 
         it('should fall back to CPU when neither GPU is detected', async () => {
             mockExecSync.mockImplementation(() => {
+                throw new Error('not available');
+            });
+            mockExecFileSync.mockImplementation(() => {
                 throw new Error('not available');
             });
 
@@ -3511,14 +3541,18 @@ describe('FfmpegService', () => {
             });
 
             try {
-                mockExecSync.mockImplementation((cmd: string) => {
-                    if (cmd === 'nvidia-smi') throw new Error('not available');
-                    if (cmd === 'ffmpeg -hwaccels 2>/dev/null')
-                        return 'Hardware acceleration methods:\nvideotoolbox\n';
-                    if (cmd === 'ffmpeg -encoders 2>/dev/null')
-                        return 'some_other_encoder';
+                mockExecSync.mockImplementation(() => {
                     throw new Error('not available');
                 });
+                mockExecFileSync.mockImplementation(
+                    (_bin: string, args: string[]) => {
+                        if (args.includes('-hwaccels'))
+                            return 'Hardware acceleration methods:\nvideotoolbox\n';
+                        if (args.includes('-encoders'))
+                            return 'some_other_encoder';
+                        throw new Error('not available');
+                    }
+                );
 
                 await service.onModuleInit();
                 expect(service.getAccelMode()).toBe('cpu');
@@ -4481,5 +4515,87 @@ describe('FfmpegService', () => {
             expect(videoMediaLines).toHaveLength(1);
             expect(videoMediaLines[0]).toContain('GROUP-ID="Main"');
         });
+    });
+});
+
+describe('hlsOutputPath', () => {
+    /*
+     * These strings become URIs. FFmpeg's HLS muxer derives the variant URIs it
+     * writes into master.m3u8 from the playlist path it is handed, so a Windows
+     * separator reaches the playlist verbatim:
+     *
+     *     stream_720p_1280x720\playlist.m3u8
+     *
+     * A backslash is not a separator in a URL. The player resolves that whole
+     * string as one filename, so every relative reference inside — the
+     * #EXT-X-MAP init above all — is fetched against the wrong base and 404s.
+     * The collection uploads completely and cannot be played, on Windows only,
+     * which is why it survived every macOS and Linux run.
+     */
+    it('joins with forward slashes', () => {
+        expect(hlsOutputPath('/work/out', 'stream_%v', 'playlist.m3u8')).toBe(
+            '/work/out/stream_%v/playlist.m3u8'
+        );
+    });
+
+    it('leaves no backslash anywhere in the result', () => {
+        // Stands in for a Windows outputDir, which arrives already separated.
+        const windowsish = 'C:\\Users\\SCC\\work\\session\\output';
+        const result = hlsOutputPath(windowsish, 'stream_%v', 'playlist.m3u8');
+
+        expect(result).not.toContain('\\');
+        expect(result.endsWith('/stream_%v/playlist.m3u8')).toBe(true);
+    });
+
+    it('keeps the FFmpeg pattern tokens intact', () => {
+        // %v and %05d are muxer placeholders — normalising must not touch them.
+        expect(hlsOutputPath('/out', 'stream_%v', 'segment_%05d.m4s')).toBe(
+            '/out/stream_%v/segment_%05d.m4s'
+        );
+    });
+});
+
+describe('isHardwareEncoderFailure', () => {
+    // Verbatim from a GeForce machine whose driver caps concurrent NVENC
+    // sessions: a six-rendition ladder opened six encoders and every one past
+    // the cap failed like this. The encode used to die with it; it now retries
+    // on CPU.
+    const nvencOverCap =
+        'FFmpeg exited with code 4294967274. stderr tail:\n' +
+        '[vost#0:1/h264_nvenc @ 0000022801fabac0] Terminating thread with return code -22 (Invalid argument)\n' +
+        '[enc:h264_nvenc @ 0000022801bc9440] Could not open encoder before EOF\n' +
+        '[vost#0:4/h264_nvenc @ 0000022801bce640] Task finished with error code: -22 (Invalid argument)\n' +
+        '[out#0/hls @ 00000228019ce780] Nothing was written into output file, because at least one of its streams received no packets.\n' +
+        'Conversion failed!';
+
+    it('recognises NVENC refusing to open', () => {
+        expect(isHardwareEncoderFailure(new Error(nvencOverCap))).toBe(true);
+    });
+
+    it('recognises the other hardware encoders too', () => {
+        expect(
+            isHardwareEncoderFailure(
+                new Error('[enc:h264_qsv @ 0x1] Error while opening encoder - maybe incorrect parameters')
+            )
+        ).toBe(true);
+        expect(
+            isHardwareEncoderFailure(
+                new Error('[h264_videotoolbox @ 0x1] Error: cannot create compression session: -12903 Invalid argument')
+            )
+        ).toBe(true);
+    });
+
+    it('does not retry a failure CPU would share', () => {
+        // A bad source is a bad source; encoding it twice helps nobody.
+        expect(
+            isHardwareEncoderFailure(
+                new Error('[mov @ 0x1] moov atom not found\n/in.mp4: Invalid data found when processing input')
+            )
+        ).toBe(false);
+        // libx264 is the CPU path — nothing to fall back to.
+        expect(
+            isHardwareEncoderFailure(new Error('[libx264 @ 0x1] Invalid argument'))
+        ).toBe(false);
+        expect(isHardwareEncoderFailure(new Error('FFmpeg timed out after 60000ms'))).toBe(false);
     });
 });

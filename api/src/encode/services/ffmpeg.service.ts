@@ -4,7 +4,7 @@ import {
     OnModuleInit,
     OnModuleDestroy,
 } from '@nestjs/common';
-import { spawn, execFile, execSync, type ChildProcess } from 'child_process';
+import { spawn, execFile, execFileSync, execSync, type ChildProcess } from 'child_process';
 import { mkdirSync, existsSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
@@ -16,7 +16,7 @@ import type {
     TrimSegmentDto,
 } from '../dto/encode-config.dto.js';
 import dotenv from 'dotenv';
-import { ffmpegBin, ffmpegShellBin, ffprobeBin } from './ffbin.js';
+import { ffmpegBin, ffprobeBin } from './ffbin.js';
 import { checkFfmpeg } from './ffmpeg-availability.js';
 import { ALIGNMENT_TOLERANCE_SECONDS } from './copy-mode-eligibility.js';
 
@@ -59,7 +59,48 @@ export interface EncodeResult {
     alignmentOffset: number;
 }
 
+/**
+ * An output path for FFmpeg's HLS muxer, always with `/` separators.
+ *
+ * These strings do not stay on the filesystem: the muxer derives the URIs it
+ * writes into `master.m3u8` from the playlist path it was given. `join()` is
+ * platform-specific, so on Windows the master came out carrying
+ * `stream_720p_1280x720\playlist.m3u8` — a backslash is not a separator in a
+ * URL, so a player resolves the whole thing as one filename, fetches the wrong
+ * base, and every `#EXT-X-MAP` init 404s. The collection uploads perfectly and
+ * is unplayable, on Windows only.
+ *
+ * FFmpeg accepts forward slashes on Windows (`C:/…`), so normalising costs
+ * nothing and keeps the playlists spec-correct wherever they were produced.
+ */
+export function hlsOutputPath(...parts: string[]): string {
+    return join(...parts).replace(/\\/g, '/');
+}
+
 export type AccelMode = 'cpu' | 'nvidia' | 'apple' | 'intel';
+
+/**
+ * Whether an ffmpeg failure is the hardware encoder refusing to start, as
+ * opposed to a bad source or a bad configuration that CPU would fail on too.
+ *
+ * Matched on what the encoders actually say. NVENC over its session cap:
+ * "Could not open encoder before EOF" with `-22 (Invalid argument)`; NVENC/QSV/
+ * VideoToolbox init failures name the encoder in the bracketed tag. Deliberately
+ * narrow — a retry that swallowed every error would turn one honest failure into
+ * two slow ones.
+ */
+export function isHardwareEncoderFailure(err: unknown): boolean {
+    const text = err instanceof Error ? err.message : String(err);
+    if (!/h264_(nvenc|qsv|videotoolbox)/.test(text)) return false;
+    return (
+        /Could not open encoder/i.test(text) ||
+        /OpenEncodeSessionEx failed/i.test(text) ||
+        /out of memory/i.test(text) ||
+        /session limit|too many concurrent|exceeded/i.test(text) ||
+        /Error while opening encoder/i.test(text) ||
+        /Invalid argument/.test(text)
+    );
+}
 
 @Injectable()
 export class FfmpegService implements OnModuleInit, OnModuleDestroy {
@@ -192,29 +233,37 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      * `vpp_qsv` to scale in between. A build with the encoder but no scaler would
      * pick this path and then fail on every ladder.
      */
+    /**
+     * One capability listing from the ffmpeg binary (`-hwaccels`, `-encoders`,
+     * `-filters`), or '' when it cannot be asked.
+     *
+     * argv execution, never a shell string. The shell form composed
+     * `'<path>' -hwaccels 2>/dev/null`, which is doubly wrong on Windows: cmd.exe
+     * does not treat single quotes as quoting (and the packaged path contains
+     * spaces), and `/dev/null` is a literal file path there. Every probe threw,
+     * every catch fell through — so the packaged Windows app always reported
+     * "No GPU found, using CPU encoding", and Quick Sync, which is gated to
+     * win32, could never be detected on the only platform it exists for.
+     */
+    private ffmpegCapabilityList(flag: string): string {
+        try {
+            return execFileSync(ffmpegBin(), ['-hide_banner', flag], {
+                encoding: 'utf-8',
+                timeout: 5000,
+                stdio: ['ignore', 'pipe', 'ignore'],
+            });
+        } catch {
+            return '';
+        }
+    }
+
     private detectIntelQsv(): boolean {
         if (process.platform !== 'win32') return false;
-        try {
-            const hwaccels = execSync(
-                `${ffmpegShellBin()} -hwaccels 2>/dev/null`,
-                { encoding: 'utf-8', timeout: 5000 }
-            );
-            if (!hwaccels.includes('qsv')) return false;
-
-            const encoders = execSync(
-                `${ffmpegShellBin()} -encoders 2>/dev/null`,
-                { encoding: 'utf-8', timeout: 5000 }
-            );
-            if (!encoders.includes('h264_qsv')) return false;
-
-            const filters = execSync(
-                `${ffmpegShellBin()} -filters 2>/dev/null`,
-                { encoding: 'utf-8', timeout: 5000 }
-            );
-            return filters.includes('vpp_qsv');
-        } catch {
+        if (!this.ffmpegCapabilityList('-hwaccels').includes('qsv'))
             return false;
-        }
+        if (!this.ffmpegCapabilityList('-encoders').includes('h264_qsv'))
+            return false;
+        return this.ffmpegCapabilityList('-filters').includes('vpp_qsv');
     }
 
     private detectNvidiaGpu(): boolean {
@@ -224,54 +273,22 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             return false;
         }
 
-        try {
-            const hwaccels = execSync(
-                `${ffmpegShellBin()} -hwaccels 2>/dev/null`,
-                {
-                    encoding: 'utf-8',
-                    timeout: 5000,
-                }
-            );
-            return hwaccels.includes('cuda');
-        } catch {
-            return false;
-        }
+        return this.ffmpegCapabilityList('-hwaccels').includes('cuda');
     }
 
     private detectAppleGpu(): boolean {
         if (process.platform !== 'darwin' || process.arch !== 'arm64') {
             return false;
         }
-        try {
-            const hwaccels = execSync(
-                `${ffmpegShellBin()} -hwaccels 2>/dev/null`,
-                {
-                    encoding: 'utf-8',
-                    timeout: 5000,
-                }
-            );
-            if (!hwaccels.includes('videotoolbox')) return false;
-
-            const encoders = execSync(
-                `${ffmpegShellBin()} -encoders 2>/dev/null`,
-                {
-                    encoding: 'utf-8',
-                    timeout: 5000,
-                }
-            );
-            if (!encoders.includes('h264_videotoolbox')) return false;
-
-            const filters = execSync(
-                `${ffmpegShellBin()} -filters 2>/dev/null`,
-                {
-                    encoding: 'utf-8',
-                    timeout: 5000,
-                }
-            );
-            return filters.includes('scale_vt');
-        } catch {
+        if (!this.ffmpegCapabilityList('-hwaccels').includes('videotoolbox'))
             return false;
-        }
+        if (
+            !this.ffmpegCapabilityList('-encoders').includes(
+                'h264_videotoolbox'
+            )
+        )
+            return false;
+        return this.ffmpegCapabilityList('-filters').includes('scale_vt');
     }
 
     /**
@@ -959,8 +976,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         args.push(
             '-hls_segment_filename',
-            join(outputDir, 'stream_%v', `segment_%05d.${segExt}`),
-            join(outputDir, 'stream_%v', 'playlist.m3u8')
+            hlsOutputPath(outputDir, 'stream_%v', `segment_%05d.${segExt}`),
+            hlsOutputPath(outputDir, 'stream_%v', 'playlist.m3u8')
         );
 
         return args;
@@ -1083,8 +1100,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             '-var_stream_map',
             varParts.join(' '),
             '-hls_segment_filename',
-            join(outputDir, 'stream_%v', `segment_%05d.${segExt}`),
-            join(outputDir, 'stream_%v', 'playlist.m3u8')
+            hlsOutputPath(outputDir, 'stream_%v', `segment_%05d.${segExt}`),
+            hlsOutputPath(outputDir, 'stream_%v', 'playlist.m3u8')
         );
 
         return args;
@@ -1157,10 +1174,61 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                   0,
                   (await this.probeDuration(opts.inputPath)) - alignmentOffset
               );
-        const args =
+        const buildArgs = () =>
             type === 'video'
-                ? await this.buildVideoArgs(opts, alignmentOffset)
-                : await this.buildAudioArgs(opts, alignmentOffset);
+                ? this.buildVideoArgs(opts, alignmentOffset)
+                : this.buildAudioArgs(opts, alignmentOffset);
+
+        try {
+            return await this.runEncode(
+                await buildArgs(),
+                opts,
+                totalDuration,
+                alignmentOffset
+            );
+        } catch (err) {
+            // A hardware encoder that will not open is not a reason to fail the
+            // job when libx264 is right there. The case that surfaced this: a
+            // GeForce driver caps concurrent NVENC sessions (2, 3, 5 or 8 by
+            // generation) and a six-rendition ladder opens six — every session
+            // past the cap fails with "Could not open encoder before EOF /
+            // Invalid argument", and the whole encode with it. The preview has
+            // retried on CPU for this exact reason since it was written; the
+            // encode never did.
+            if (this.accelMode === 'cpu' || !isHardwareEncoderFailure(err)) {
+                throw err;
+            }
+            this.logger.warn(
+                `${this.accelMode} encoder failed to open, retrying this encode on CPU: ` +
+                    `${(err as Error).message.split('\n')[0]}`
+            );
+            const previous = this.accelMode;
+            this.accelMode = 'cpu';
+            try {
+                return await this.runEncode(
+                    await buildArgs(),
+                    opts,
+                    totalDuration,
+                    alignmentOffset
+                );
+            } finally {
+                // Per encode, not for good: the next job may be a single
+                // rendition the GPU handles fine, and the acceleration mode is
+                // what the UI reports as the machine's capability.
+                this.accelMode = previous;
+            }
+        }
+    }
+
+    /** Spawn one ffmpeg run for {@link encode} and wait for it. */
+    private runEncode(
+        args: string[],
+        opts: EncodeOptions,
+        totalDuration: number,
+        alignmentOffset: number
+    ): Promise<EncodeResult> {
+        const { outputDir, encodeConfig, onProgress } = opts;
+        const type = encodeConfig.type;
 
         this.logger.debug(`FFmpeg args: ffmpeg ${args.join(' ')}`);
 
