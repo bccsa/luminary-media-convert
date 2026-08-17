@@ -148,19 +148,77 @@ Builds carry an **ad-hoc** signature (`electron/build/after-pack.cjs`) but no De
 
 ---
 
-## 4. Stale-collection cleanup
+## 4. Nothing ever deletes a collection from storage
 
-**Today.** Every CMS session writes to its own `<pathPrefix>/<sessionId>/` subfolder. That is what keeps a re-encode from being half-live while it runs — but nothing ever deletes the superseded one. Re-encoding a post three times leaves three complete collections in the bucket, and only the newest is referenced by the CMS.
+Two separate leaks, one shared difficulty. Neither is implemented.
 
-**Wanted.** A strategy, then an implementation. Options, roughly:
+**Leak one — the document is deleted.** Deleting a blog or page leaves its entire HLS
+collection in the bucket: hundreds of objects, the master, every media playlist, the
+chunk chains, the sprites and the sidecars. Nothing reclaims them, ever.
 
-- The CMS tells the encoder the previous `hlsUrl` (it already can, via `existingMedia`) and the encoder deletes that prefix once the new collection is complete and the CMS has acknowledged the new URL. Ordering matters: delete after the CMS has saved, never before, or a failed save loses both.
-- Or the encoder never deletes and ships a "storage" view listing collections under a prefix with their last-modified dates, letting the user prune.
-- Or a retention rule (keep the newest N per `documentId`), which needs a durable `documentId` → prefix mapping that outlives the session record — sessions are purged at boot.
+Worth being precise about what changed here, because it is easy to read as a
+regression and it is half of one. Uploaded audio *was* cleaned up: on a delete request
+`processPostTagDto` called `processMedia({ fileCollections: [] }, prevDoc?.media, …)`,
+and an empty keep-list meant "delete all the previous files from S3". That path went
+when the upload pipeline did. An HLS collection was never covered by it — the old code
+only knew `fileCollections`, so it could not have deleted a prefix it had no list of.
 
-Whatever is chosen must cope with the case where the CMS document was deleted entirely, and must never delete a prefix it did not create.
+The asymmetry is the thing to fix. Images are still deleted on document deletion, by
+`deleteImage(prevDoc.imageData, prevDoc.imageBucketId, db)`, three lines above the
+comment that says media is not. Media is now the only asset type that leaks.
 
----
+**Leak two — the collection is superseded.** Every CMS session writes to its own
+`<pathPrefix>/<sessionId>/` subfolder, which is what stops a re-encode being half-live
+while it runs. But nothing deletes the one it replaced, so re-encoding a post three
+times leaves three complete collections with only the newest referenced.
+
+### Where the work belongs
+
+**Leak one belongs in the CMS API**, beside `deleteImage`, not in the encoder. The
+premise of the comment currently in `processPostTagDto` — that this API cannot know
+which objects belong to the collection — is weaker than it sounds: `media.hlsUrl`
+gives the bucket and the prefix, and the API already holds the credentials, since
+that is precisely what `GET /storage/encoderconfig` hands out. "List under
+`<prefix>/`, delete what is there" is something `S3Service` can already do. The CMS is
+also the only party that knows the document is gone; the encoder may not be running.
+
+**Leak two is the encoder's**, or nobody's:
+
+- The CMS sends the previous `hlsUrl` (it can already, via `existingMedia`) and the
+  encoder deletes that prefix once the new collection is complete **and the CMS has
+  acknowledged the new URL**. Ordering matters: delete after the save, never before, or
+  a failed save loses both.
+- Or the encoder never deletes, and offers a storage view listing collections under a
+  prefix with their dates, for a human to prune.
+- Or a retention rule — keep the newest N per `documentId` — which needs a durable
+  `documentId` → prefix mapping that outlives the session record. Sessions are purged
+  at boot, so that mapping does not exist today.
+
+### Watch out for
+
+**Never delete a prefix we did not create.** This is the part that needs a decision
+rather than an implementation, and it got sharper when the Video field became editable:
+`media.hlsUrl` is now a value a person can type. It could name a prefix shared with
+other content, a bucket root, or someone else's collection entirely. Deleting
+everything under a pasted URL's parent path is a data-loss bug waiting to happen.
+
+Candidate guards, none free:
+
+- Delete only when the last path segment parses as the UUID the encoder uses for a
+  session prefix — cheap, and matches every collection the encoder has ever written.
+- Keep a marker object the encoder writes into each prefix it owns, and refuse to
+  delete a prefix without one — sound, but needs the encoder to start writing it, so it
+  cannot protect anything already in a bucket.
+- Require the prefix to sit under the bucket's configured `pathPrefix`, so a typo
+  cannot reach outside the area the CMS was given.
+
+**Deleting a shared bucket is not idempotent.** A failed delete halfway through leaves a
+partial collection that is neither playable nor reclaimable by the same code path, so
+whatever runs has to tolerate re-running, and report what it could not remove rather
+than failing silently.
+
+**Decide immediate or swept.** Immediate is simpler and matches images. A sweep is safer
+against a mis-resolved prefix, because a bad decision can be caught before it executes.
 
 ## 5. Windows build verification — built, installed, and the NVIDIA path proven
 

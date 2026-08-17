@@ -558,4 +558,4 @@ Run it against a running API (default `http://127.0.0.1:31711`, editable in the 
 
 ## Follow-ups
 
-Known gaps and deferred work are tracked in [`Todo.md`](Todo.md). Notably: CMS edit mode for existing collections (`existingMedia` is accepted and ignored), auto-update and code signing, Linux builds, Windows build verification, stale-collection cleanup, and restoring the test suites that were intentionally broken during the migration.
+Known gaps and deferred work are tracked in [`Todo.md`](Todo.md). Notably: CMS edit mode for existing collections (`existingMedia` is accepted and ignored), auto-update and code signing, Linux builds, Windows build verification, storage that is never reclaimed when a document is deleted or a collection superseded, and restoring the test suites that were intentionally broken during the migration.
