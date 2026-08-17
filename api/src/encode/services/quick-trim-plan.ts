@@ -23,6 +23,16 @@
  */
 const EPSILON = 1e-6;
 
+/** Median gap between consecutive keyframes, or undefined below two. */
+function medianStep(keyframes: number[]): number | undefined {
+    if (keyframes.length < 2) return undefined;
+    const gaps = keyframes
+        .slice(1)
+        .map((k, i) => k - keyframes[i])
+        .sort((a, b) => a - b);
+    return gaps[Math.floor(gaps.length / 2)];
+}
+
 /**
  * How a config asks for its streams to be produced — copied wholesale, encoded
  * again, or (only ever by mistake) some of each.
@@ -110,6 +120,17 @@ export interface StreamGrid {
      * planner uses the exact times and lets the muxer round them.
      */
     keyframes: number[] | null;
+    /**
+     * The stream's first frames arrive out of presentation order (B-frames):
+     * its first keyframe presents at t=0 but *decodes* at a negative time, and
+     * a copy part starting there gets shifted by the reorder delay — fMP4
+     * decode timelines cannot start negative, so the muxer moves the whole
+     * part and the measurement (correctly) refuses it. When set, the copy
+     * span of a range never starts at `keyframes[0]`; the head is bridged
+     * through the first GOP instead. Mid-file starts are unaffected: their
+     * decode times are positive under -copyts.
+     */
+    reordersAtStart?: boolean;
 }
 
 export interface QuickTrimPart {
@@ -117,6 +138,16 @@ export interface QuickTrimPart {
     kind: 'bridge' | 'copy';
     /** Position in this stream's part sequence, counted across all ranges. */
     partIndex: number;
+    /**
+     * Which kept range this part belongs to, indexing `trimSegments`.
+     *
+     * The runner produces every copy part of one range in a *single* ffmpeg
+     * job, and this is how it knows where one range's copy run ends: two
+     * consecutive copy parts may be a copy split inside a range (one job) or
+     * the tail of one range and the head of the next (two jobs, seeking to
+     * different places in the source), and their times alone do not say which.
+     */
+    rangeIndex: number;
     /** First segment number this part may write — `partIndex * 100000`. */
     startNumber: number;
     /** Part bounds on the source timeline, seconds. */
@@ -134,6 +165,13 @@ export interface QuickTrimPart {
 export interface QuickTrimStreamPlan {
     streamDir: string;
     parts: QuickTrimPart[];
+    /**
+     * Median keyframe spacing of this stream's grid, seconds; absent for
+     * audio. The runner's copy-job seek aims one GOP past its keyframe with
+     * this — the demuxer's landing rule (measured on both reference files) is
+     * "largest keyframe at or before target minus one GOP".
+     */
+    keyframeStep?: number;
 }
 
 export interface QuickTrimPlan {
@@ -200,16 +238,27 @@ interface RangeJunctions {
 
 function junctionsFor(
     keyframes: number[],
-    range: QuickTrimRange
+    range: QuickTrimRange,
+    reordersAtStart = false
 ): RangeJunctions | null {
+    // See StreamGrid.reordersAtStart: a copy span must not start at the
+    // file's first keyframe on a B-frame stream, so that keyframe is neither
+    // a valid in-point nor an on-keyframe head — the head part becomes a
+    // bridge through the first GOP instead.
+    const copyFloor = reordersAtStart
+        ? keyframes[0] + EPSILON
+        : Number.NEGATIVE_INFINITY;
+
     const headOnKeyframe = keyframes.some(
-        (k) => Math.abs(k - range.inSec) <= EPSILON
+        (k) => Math.abs(k - range.inSec) <= EPSILON && k > copyFloor
     );
     const tailOnKeyframe = keyframes.some(
         (k) => Math.abs(k - range.outSec) <= EPSILON
     );
 
-    const inPoint = keyframes.find((k) => k > range.inSec + EPSILON);
+    const inPoint = keyframes.find(
+        (k) => k > range.inSec + EPSILON && k > copyFloor
+    );
     let outPoint: number | undefined;
     for (const k of keyframes) {
         if (k < range.outSec - EPSILON) outPoint = k;
@@ -258,14 +307,16 @@ function validateRanges(ranges: QuickTrimRange[]): QuickTrimRejection | null {
 /**
  * The three parts of one kept range, appended to a stream's sequence.
  *
- * `ownInit` says whether the part introduces a decoder configuration the
- * previous part did not have. A bridge always does — it is a fresh encode with
- * its own SPS/PPS. So does the first copy part *after* a bridge, because it
- * returns to the source's init; without a map of its own it would inherit the
- * bridge's and decode as noise. Copy following copy needs nothing.
+ * `ownInit` marks the parts that begin an ffmpeg run, because a run writes an
+ * init of its own and its segments can only be decoded against that one. A
+ * bridge is always its own run — a fresh encode with its own SPS/PPS. So is the
+ * first copy part of every kept range: the runner produces a range's copy span
+ * in one job, seeking to that range's start. A copy part split off *inside* a
+ * range comes out of the same run and continues its init.
  */
 function appendParts(
     parts: QuickTrimPart[],
+    rangeIndex: number,
     spans: { kind: 'bridge' | 'copy'; start: number; end: number }[]
 ): void {
     for (const span of spans) {
@@ -273,13 +324,15 @@ function appendParts(
         parts.push({
             kind: span.kind,
             partIndex: parts.length,
+            rangeIndex,
             startNumber: parts.length * PART_NUMBER_STRIDE,
             start: span.start,
             end: span.end,
             ownInit:
                 previous === undefined ||
                 span.kind === 'bridge' ||
-                previous.kind === 'bridge',
+                previous.kind === 'bridge' ||
+                previous.rangeIndex !== rangeIndex,
         });
     }
 }
@@ -318,11 +371,15 @@ export function planQuickTrim(
     for (const stream of streams) {
         const parts: QuickTrimPart[] = [];
 
-        for (const range of trimSegments) {
+        for (const [rangeIndex, range] of trimSegments.entries()) {
             if (stream.kind === 'video') {
-                const junctions = junctionsFor(stream.keyframes!, range);
+                const junctions = junctionsFor(
+                    stream.keyframes!,
+                    range,
+                    stream.reordersAtStart
+                );
                 if (!junctions) return rejectRange(stream.streamDir, range);
-                appendParts(parts, [
+                appendParts(parts, rangeIndex, [
                     {
                         kind: junctions.headOnKeyframe ? 'copy' : 'bridge',
                         start: range.inSec,
@@ -343,14 +400,18 @@ export function planQuickTrim(
             }
 
             const junctions = reference
-                ? junctionsFor(reference.keyframes!, range)
+                ? junctionsFor(
+                      reference.keyframes!,
+                      range,
+                      reference.reordersAtStart
+                  )
                 : null;
             if (reference && !junctions)
                 return rejectRange(reference.streamDir, range);
             const third = (range.outSec - range.inSec) / 3;
             const inPoint = junctions?.inPoint ?? range.inSec + third;
             const outPoint = junctions?.outPoint ?? range.outSec - third;
-            appendParts(parts, [
+            appendParts(parts, rangeIndex, [
                 { kind: 'copy', start: range.inSec, end: inPoint },
                 { kind: 'copy', start: inPoint, end: outPoint },
                 { kind: 'copy', start: outPoint, end: range.outSec },
@@ -365,7 +426,15 @@ export function planQuickTrim(
             };
         }
 
-        planned.push({ streamDir: stream.streamDir, parts });
+        const keyframeStep =
+            stream.kind === 'video' && stream.keyframes
+                ? medianStep(stream.keyframes)
+                : undefined;
+        planned.push({
+            streamDir: stream.streamDir,
+            parts,
+            ...(keyframeStep !== undefined ? { keyframeStep } : {}),
+        });
     }
 
     const plannedTotalSegments = planned.reduce(

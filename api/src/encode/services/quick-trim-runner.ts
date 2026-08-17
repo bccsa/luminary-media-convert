@@ -2,16 +2,23 @@
  * Quick trim (smart cut) job runner — the executable half of
  * {@link ./quick-trim-plan.js}.
  *
- * A quick-trimmed stream is produced by one sequential ffmpeg job per planned
- * part, every job writing into that stream's `stream_<name>/` directory so
- * `SegmentPipelineService` picks the segments up live exactly as it does for a
- * normal encode. Chain membership, directory names and segment naming are the
- * ordinary conventions; only the numbering differs (`-start_number` per part,
- * `%07d`, stride {@link PART_NUMBER_STRIDE}) so parts cannot collide in one
- * directory.
+ * A quick-trimmed stream is produced by ffmpeg jobs writing into that stream's
+ * `stream_<name>/` directory, so `SegmentPipelineService` picks the segments up
+ * exactly as it does for a normal encode. Chain membership, directory names and
+ * segment naming are the ordinary conventions; only the numbering differs
+ * (`-start_number` per part, `%07d`, stride {@link PART_NUMBER_STRIDE}) so
+ * parts cannot collide in one directory.
  *
- * When every part of a stream is done its `part_<n>.m3u8` intermediates are
- * read back for the filenames the muxer actually wrote, spliced into one
+ * **A job is not a part.** What a quick trim costs is the *number of ffmpeg
+ * runs*, not the content they touch: on the reference source (22 streams, two
+ * kept ranges) 132 sequential jobs took 32.9 s, of which 3165 s of copied
+ * content accounted for 11.9 s and 28 bridges of ~0.3 s each for 20.6 s. So
+ * every copy part of one kept range is produced by **one** job spanning the
+ * whole copy span ({@link buildQuickTrimJobs}), and the jobs run through a pool
+ * of {@link QUICK_TRIM_JOB_CONCURRENCY}.
+ *
+ * When every job of a stream is done the `part_<n>.m3u8` intermediates are read
+ * back for the filenames the muxer actually wrote, spliced into one
  * `playlist.m3u8` with `#EXT-X-DISCONTINUITY` between parts, and deleted.
  *
  * The recipes below are measured, not derived — see the plan's "Empirical
@@ -35,6 +42,17 @@
  * first segment. The HLS fMP4 muxer writes each fragment's `tfdt` zero-based and
  * records the part's absolute start in the init's edit list, so a bare `.m4s`
  * reads as starting at 0 no matter where it was cut.
+ *
+ * That last sentence is also why {@link retimeJobToOutputTimeline} exists.
+ * Zero-based fragment timelines are fine for one run and wrong for a spliced
+ * output: the players this pipeline targets place samples by `tfdt` and ignore
+ * the edit list, so every part of every stream would claim to start at 0 and a
+ * boundary that fell one keyframe later on video than on audio would land
+ * straight on the audio's placement (measured: audio fully out of sync, wrong
+ * duration, unplayable tail). So once a stream's jobs are done and *after* the
+ * copy measurements that depend on the original edit lists, every segment is
+ * shifted onto the continuous output timeline and every init's edit list is
+ * neutralised — see {@link ./fmp4-timeline.js}.
  */
 
 import { execFile } from 'child_process';
@@ -54,6 +72,11 @@ import type {
 } from '../dto/encode-config.dto.js';
 import { ffprobeBin } from './ffbin.js';
 import {
+    neutralizeEditList,
+    readTrackTimescale,
+    shiftBaseMediaDecodeTime,
+} from './fmp4-timeline.js';
+import {
     PART_NUMBER_STRIDE,
     type QuickTrimPart,
     type QuickTrimPlan,
@@ -67,8 +90,28 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * How many ffmpeg jobs a quick trim runs at once.
+ *
+ * A quick trim is dominated by per-process overhead — every job spends its
+ * first moments opening and indexing a multi-stream source before it copies a
+ * byte — so the run is neither CPU- nor disk-bound at one job at a time. Four
+ * is the point past which the bridges (the only jobs that actually encode)
+ * start competing for the same cores.
+ */
+const QUICK_TRIM_JOB_CONCURRENCY = 4;
+
 /** How far before a bridge's cut the decode starts, seconds. */
 const BRIDGE_PREROLL_SECONDS = 2;
+/**
+ * A bridge is a couple of GOPs of decode and under a second of encode; wall
+ * time past this means the job read beyond its part (the regression this
+ * guards is the trim filter discarding to end-of-file with nothing stopping
+ * the input). Measured against a bridge sharing the machine with
+ * {@link QUICK_TRIM_JOB_CONCURRENCY} - 1 others, so the threshold has to clear
+ * that contention as well as the bridge itself.
+ */
+const BRIDGE_WALL_WARN_MS = 5000;
 
 /**
  * How far before an audio copy part's cut the demuxer seeks. The cut itself is
@@ -87,6 +130,9 @@ const BRIDGE_GOP_FRAMES = 9999;
 
 /** Frame rate assumed when the source will not say, for the seek tolerance. */
 const FALLBACK_FRAME_RATE = 30;
+
+/** Keeps a seek target strictly past a boundary the landing rule compares ≤. */
+const EPSILON_SECONDS = 0.001;
 
 /**
  * Emit an `#EXT-X-MAP` for every part rather than only for parts the planner
@@ -171,9 +217,91 @@ export interface QuickTrimRunnerDeps {
     ): Promise<void>;
     /** True once the host killed the active process. Checked between jobs. */
     isCancelled(): boolean;
+    /**
+     * Kill every quick-trim child running now, *without* marking the run
+     * cancelled — how the pool stops the jobs still running beside one that
+     * failed. Their output is already being thrown away; the answer to a
+     * failure is the precise path, not a cancelled session.
+     */
+    killRunningJobs?(): void;
     logger: QuickTrimLogger;
     /** See {@link MAP_EVERY_PART}; defaults to it. */
     mapEveryPart?: boolean;
+    /** See {@link QUICK_TRIM_JOB_CONCURRENCY}; defaults to it. */
+    concurrency?: number;
+}
+
+/**
+ * One ffmpeg run and the planned parts it produces.
+ *
+ * A bridge is always one part. Every copy part of one kept range is normally
+ * one run covering the whole copy span: a copy split inside a range exists only
+ * so the discontinuity *count* matches across the output's playlists (locked
+ * decision 3), never because the two sides need cutting apart — the content is
+ * continuous across the junction.
+ */
+export interface QuickTrimJob {
+    kind: 'bridge' | 'copy';
+    /** Contiguous, in order. `parts[0]` names the init, playlist and numbering. */
+    parts: QuickTrimPart[];
+    /** `parts[0].start` and the last part's end — what the job is asked for. */
+    start: number;
+    end: number;
+}
+
+function makeJob(parts: QuickTrimPart[]): QuickTrimJob {
+    return {
+        kind: parts[0].kind,
+        parts,
+        start: parts[0].start,
+        end: parts[parts.length - 1].end,
+    };
+}
+
+/**
+ * Group a stream's parts into the ffmpeg runs that produce them.
+ *
+ * Bridges stand alone. Copy parts collapse per kept range — `rangeIndex` is
+ * what separates a copy split inside a range (same run) from one range's tail
+ * meeting the next range's head (two runs, seeking to different places).
+ *
+ * A collapsed run has to give every part it covers at least one segment, and
+ * the muxer only makes as many segments as the span affords. Where it cannot,
+ * the parts are run one at a time — the shape this collapse replaced, reached
+ * only by a kept range shorter than a few target durations.
+ */
+export function buildQuickTrimJobs(
+    parts: readonly QuickTrimPart[],
+    segmentDuration: number
+): QuickTrimJob[] {
+    const jobs: QuickTrimJob[] = [];
+    let run: QuickTrimPart[] = [];
+
+    const flush = (): void => {
+        if (run.length === 0) return;
+        const span = run[run.length - 1].end - run[0].start;
+        const affordable = Math.ceil(span / segmentDuration) >= run.length;
+        if (affordable) jobs.push(makeJob(run));
+        else for (const part of run) jobs.push(makeJob([part]));
+        run = [];
+    };
+
+    for (const part of parts) {
+        if (part.kind === 'bridge') {
+            flush();
+            jobs.push(makeJob([part]));
+            continue;
+        }
+        if (
+            run.length > 0 &&
+            run[run.length - 1].rangeIndex !== part.rangeIndex
+        )
+            flush();
+        run.push(part);
+    }
+    flush();
+
+    return jobs;
 }
 
 /** What a bridge has to match so its segment decodes beside the copied ones. */
@@ -211,6 +339,13 @@ function hlsOutputArgs(
         'independent_segments',
         '-hls_segment_type',
         'fmp4',
+        // Mirrors the main encode's muxer flags. negative_cts_offsets is
+        // load-bearing at file start: a B-frame stream's first IDR has
+        // pts 0 / dts −(reorder delay), and without it the muxer shifts the
+        // whole part by that delay — the copy-0 measurement then reads
+        // 0.040s for a 0.000s target and the run falls back for nothing.
+        '-movflags',
+        '+negative_cts_offsets+default_base_moof',
         '-hls_fmp4_init_filename',
         partInitName(part),
         '-start_number',
@@ -229,7 +364,13 @@ export interface CopyPartArgsInput {
     streamDirPath: string;
     kind: 'video' | 'audio';
     sourceTrackIndex: number;
+    /** The job's first part: its start, its init, its playlist, its numbering. */
     part: QuickTrimPart;
+    /**
+     * Where the job stops — the last part it covers ends here. Defaults to
+     * `part.end`, which is the same thing for a job of one part.
+     */
+    end?: number;
     /** Where the demuxer is asked to seek — the retry moves this, not the part. */
     seekStart: number;
     segmentDuration: number;
@@ -237,6 +378,7 @@ export interface CopyPartArgsInput {
 
 export function buildCopyPartArgs(input: CopyPartArgsInput): string[] {
     const { part, sourceTrackIndex, seekStart } = input;
+    const end = input.end ?? part.end;
 
     if (input.kind === 'audio') {
         // Two seeks by design: the input one is coarse (it only has to land
@@ -257,7 +399,7 @@ export function buildCopyPartArgs(input: CopyPartArgsInput): string[] {
             '-ss',
             String(part.start),
             '-to',
-            String(part.end),
+            String(end),
             '-output_ts_offset',
             String(part.start),
             ...hlsOutputArgs(input.streamDirPath, part, input.segmentDuration),
@@ -278,7 +420,7 @@ export function buildCopyPartArgs(input: CopyPartArgsInput): string[] {
         'copy',
         '-copyts',
         '-to',
-        String(part.end),
+        String(end),
         ...hlsOutputArgs(input.streamDirPath, part, input.segmentDuration),
     ];
 }
@@ -412,6 +554,12 @@ export function buildBridgeArgs(input: BridgeArgsInput): string[] {
         // `-copyts` keeps the packets in.
         '-vf',
         `trim=start=${part.start}:end=${part.end}`,
+        // The filter only DISCARDS frames past the end — without a stop the
+        // decode runs to end-of-file and a head bridge pays for the whole
+        // remaining track. `-to` is absolute under -copyts and ends the run
+        // at the bridge, exactly as the copy jobs stop.
+        '-to',
+        String(part.end),
         ...bridgeEncoderArgs(input.rendition, input.params, accelMode, useGpu),
         ...hlsOutputArgs(input.streamDirPath, part, BRIDGE_SEGMENT_SECONDS)
     );
@@ -469,7 +617,9 @@ async function partSegmentNames(
  *
  * Probed from the init concatenated with the first segment: the muxer writes
  * fragment timestamps zero-based and puts the part's absolute start in the
- * init's edit list, which ffprobe applies — a bare segment reads as 0.
+ * init's edit list, which ffprobe applies — a bare segment reads as 0. Still
+ * true when this runs: {@link retimeJobToOutputTimeline} removes that edit list
+ * at assembly, which is after every measurement.
  */
 async function measureFirstPts(
     streamDirPath: string,
@@ -512,7 +662,12 @@ async function measureFirstPts(
     }
 }
 
-/** Everything a part wrote, so a retry starts from nothing. */
+/**
+ * Everything a job wrote, so a retry starts from nothing. Takes the job's first
+ * part, which is what named its files and where its numbering began; a
+ * collapsed job's segments stay inside that part's stride, since no part of any
+ * plannable range writes {@link PART_NUMBER_STRIDE} segments.
+ */
 async function deletePartOutput(
     streamDirPath: string,
     part: QuickTrimPart
@@ -704,53 +859,180 @@ export function buildQuickTrimMasterContent(
 }
 
 /**
- * Splice one stream's finished parts into its `playlist.m3u8`.
+ * Which segment of a collapsed copy job each planned junction falls on, as
+ * slice boundaries into the job's segment list — `[0, …, segments.length]`,
+ * one entry more than the job has parts.
  *
- * Segment filenames come from each part's own playlist — never from a directory
+ * The junction between two copy parts of one kept range is arbitrary by
+ * construction. The content is continuous across it; the split exists only so
+ * that the *count* of discontinuities matches in every playlist of the output
+ * (hls.js keys its timestamp alignment to the discontinuity counter, not to
+ * where the counter advanced). So a junction snaps to the nearest boundary
+ * between segments the muxer actually wrote, and the parts either side keep
+ * their exact planned outer edges.
+ *
+ * Junctions may therefore sit up to half a target duration from where the plan
+ * put them, and differ by that much between streams. That is harmless because
+ * every timestamp in the output is the source's own (`-copyts`): a player reads
+ * position from the timeline, never from where a discontinuity was placed.
+ */
+function snapJunctions(job: QuickTrimJob, durations: number[]): number[] {
+    const cumulative = [0];
+    for (const duration of durations) {
+        cumulative.push(cumulative[cumulative.length - 1] + duration);
+    }
+
+    const boundaries = [0];
+    let lowest = 1;
+    for (let i = 1; i < job.parts.length; i++) {
+        const target = job.parts[i].start - job.start;
+        // Every part still to come needs a segment of its own, so the search
+        // stops that many short of the end.
+        const highest = durations.length - (job.parts.length - i);
+        let best = lowest;
+        for (let index = lowest; index <= highest; index++) {
+            if (
+                Math.abs(cumulative[index] - target) <
+                Math.abs(cumulative[best] - target)
+            ) {
+                best = index;
+            }
+        }
+        boundaries.push(best);
+        lowest = best + 1;
+    }
+    boundaries.push(durations.length);
+
+    return boundaries;
+}
+
+/**
+ * Move one job's output onto the continuous output timeline.
+ *
+ * Every job is muxed on its own, so the HLS muxer gives each one a zero-based
+ * fragment timeline and records where it really started in the init's edit list.
+ * The players this output is for read `tfdt` and ignore `elst`, and they key
+ * their timestamp alignment to the discontinuity counter with the audio track
+ * borrowing the video track's anchor — so a zero-based part is read as starting
+ * wherever its *neighbouring stream's* part started, and the difference (a
+ * keyframe here, an AAC frame there — every stream splices on its own grid, by
+ * design) becomes A/V desync outright.
+ *
+ * So each segment's `baseMediaDecodeTime` gains the job's position in the
+ * finished playlist, which is the sum of the planned spans of every part before
+ * it, and the init's edit list is neutralised so nothing adds the source-
+ * relative shift on top. The job is the unit rather than the part because a
+ * collapsed copy job's parts share one muxer run: their fragments are already
+ * continuous with each other, and only the run as a whole has to be placed.
+ *
+ * Runs at assembly, which is after the copy measurements (which read the edit
+ * list this removes) and before the segment pipeline is started by the caller.
+ */
+async function retimeJobToOutputTimeline(
+    streamDirPath: string,
+    initName: string,
+    segmentUris: readonly string[],
+    outputStart: number
+): Promise<void> {
+    const initPath = join(streamDirPath, initName);
+    const init = await readFile(initPath);
+    const timescale = readTrackTimescale(init);
+    const offsetTicks = Math.round(outputStart * timescale);
+
+    for (const uri of segmentUris) {
+        const segmentPath = join(streamDirPath, uri);
+        const segment = await readFile(segmentPath);
+        shiftBaseMediaDecodeTime(segment, offsetTicks);
+        await writeFile(segmentPath, segment);
+    }
+
+    // Last: a failed shift above leaves the edit list in place, which is the
+    // state the measurement code and a re-run both expect.
+    await writeFile(initPath, neutralizeEditList(init));
+}
+
+/**
+ * Splice one stream's finished jobs into its `playlist.m3u8`.
+ *
+ * Segment filenames come from each job's own playlist — never from a directory
  * listing, whose order is the filesystem's business. Durations come from the
- * plan: only the last segment of a part is adjusted, because a copy part's
- * intermediate segments are as long as the muxer made them and only the tail is
- * free to absorb the spill past `-to` (a stream copy stops on DTS, so it
- * overshoots by a few frames by construction).
+ * plan: only the last segment of a *job* is adjusted, because the muxer's
+ * segments are as long as it made them and only the tail is free to absorb the
+ * spill past `-to` (a stream copy stops on DTS, so it overshoots by a few
+ * frames by construction). Clamping the job rather than each part is what keeps
+ * a collapsed job's authored durations summing to exactly the span its parts
+ * were planned to cover, wherever {@link snapJunctions} put the junctions
+ * inside it.
  */
 async function assembleStreamPlaylist(
     streamDirPath: string,
     streamPlan: QuickTrimStreamPlan,
+    jobs: readonly QuickTrimJob[],
     mapEveryPart: boolean,
     logger: QuickTrimLogger
 ): Promise<void> {
     const parts: SplicedPart[] = [];
+    /** Where the job about to be read starts in the finished playlist. */
+    let outputStart = 0;
 
-    for (const part of streamPlan.parts) {
+    for (const job of jobs) {
+        const first = job.parts[0];
         let parsed;
         try {
             parsed = parseMediaPlaylist(
                 await readFile(
-                    join(streamDirPath, partPlaylistName(part)),
+                    join(streamDirPath, partPlaylistName(first)),
                     'utf-8'
                 )
             );
         } catch (err) {
             throw new QuickTrimRunError(
-                `Part ${part.partIndex} of ${streamPlan.streamDir} wrote no ` +
+                `Part ${first.partIndex} of ${streamPlan.streamDir} wrote no ` +
                     `playlist: ${(err as Error).message}`,
                 streamPlan.streamDir,
-                part.partIndex
+                first.partIndex
             );
         }
         if (parsed.segments.length === 0) {
             throw new QuickTrimRunError(
-                `Part ${part.partIndex} of ${streamPlan.streamDir} produced ` +
+                `Part ${first.partIndex} of ${streamPlan.streamDir} produced ` +
                     `no segments`,
                 streamPlan.streamDir,
-                part.partIndex
+                first.partIndex
+            );
+        }
+        if (parsed.segments.length < job.parts.length) {
+            throw new QuickTrimRunError(
+                `Part ${first.partIndex} of ${streamPlan.streamDir} produced ` +
+                    `${parsed.segments.length} segment(s) for ` +
+                    `${job.parts.length} planned part(s) — the discontinuity ` +
+                    `structure cannot be authored from them`,
+                streamPlan.streamDir,
+                first.partIndex
             );
         }
 
-        const span = part.end - part.start;
-        const head = parsed.segments
-            .slice(0, -1)
-            .reduce((sum, s) => sum + s.duration, 0);
+        try {
+            await retimeJobToOutputTimeline(
+                streamDirPath,
+                partInitName(first),
+                parsed.segments.map((segment) => segment.uri),
+                outputStart
+            );
+        } catch (err) {
+            throw new QuickTrimRunError(
+                `Part ${first.partIndex} of ${streamPlan.streamDir} could ` +
+                    `not be moved onto the output timeline at ` +
+                    `${outputStart.toFixed(3)}s: ${(err as Error).message}`,
+                streamPlan.streamDir,
+                first.partIndex
+            );
+        }
+        outputStart += job.end - job.start;
+
+        const span = job.end - job.start;
+        const muxed = parsed.segments.map((segment) => segment.duration);
+        const head = muxed.slice(0, -1).reduce((sum, d) => sum + d, 0);
         // Rounded to the microsecond the assembler formats at: a raw float
         // difference (0.6200000000000001) no longer matches its own
         // six-decimal text, and the lossless builder then emits the noisy
@@ -758,24 +1040,33 @@ async function assembleStreamPlaylist(
         let tail = Math.round((span - head) * 1e6) / 1e6;
         if (!(tail > 0)) {
             logger.warn(
-                `Part ${part.partIndex} of ${streamPlan.streamDir} overran ` +
+                `Part ${first.partIndex} of ${streamPlan.streamDir} overran ` +
                     `its planned ${span.toFixed(3)}s by ` +
                     `${(head - span).toFixed(3)}s before its last segment`
             );
             tail = MIN_AUTHORED_EXTINF;
         }
+        const authored = muxed.map((duration, index) =>
+            index === muxed.length - 1 ? tail : duration
+        );
 
-        parts.push({
-            mapUri:
-                mapEveryPart || part.ownInit ? partInitName(part) : undefined,
-            segments: parsed.segments.map((segment, index) => ({
-                uri: segment.uri,
-                duration:
-                    index === parsed.segments.length - 1
-                        ? tail
-                        : segment.duration,
-            })),
-        });
+        const boundaries = snapJunctions(job, muxed);
+        for (const [index, part] of job.parts.entries()) {
+            parts.push({
+                // The job wrote one init, under its first part's name; a part
+                // split off inside the job continues it and emits no map.
+                mapUri:
+                    mapEveryPart || part.ownInit
+                        ? partInitName(first)
+                        : undefined,
+                segments: parsed.segments
+                    .slice(boundaries[index], boundaries[index + 1])
+                    .map((segment, offset) => ({
+                        uri: segment.uri,
+                        duration: authored[boundaries[index] + offset],
+                    })),
+            });
+        }
     }
 
     await writeFile(
@@ -785,6 +1076,8 @@ async function assembleStreamPlaylist(
     );
 
     for (const part of streamPlan.parts) {
+        // Parts collapsed into a neighbour's job wrote neither of these; the
+        // unlink is a no-op for them.
         await unlink(join(streamDirPath, partPlaylistName(part))).catch(
             () => {}
         );
@@ -798,11 +1091,37 @@ async function assembleStreamPlaylist(
     }
 }
 
+/** What a finished run says about itself; see the summary line at the end. */
+interface QuickTrimTally {
+    copyContent: number;
+    copyWallMs: number;
+    copyParts: number;
+    bridgeContent: number;
+    bridgeWallMs: number;
+    bridgeParts: number;
+}
+
+/** One stream's share of a run: what it writes and what is left to do. */
+interface StreamRun {
+    streamPlan: QuickTrimStreamPlan;
+    target: QuickTrimStreamTarget;
+    streamDirPath: string;
+    params: SourceVideoParams | null;
+    /** Seek tolerance for this stream's copy measurements, seconds. */
+    tolerance: number;
+    jobs: QuickTrimJob[];
+    /** Jobs still to finish; assembly runs when it reaches zero. */
+    remaining: number;
+}
+
 /**
- * Run every job of a plan, in order, and author what they produced.
+ * Run every job of a plan and author what they produced.
  *
- * Sequential on purpose: the jobs share the host's single process slot, which
- * is what makes cancellation a matter of one killed child and a flag.
+ * Jobs of one stream are independent of each other except for assembly, which
+ * needs all of them; jobs of different streams are independent outright. So the
+ * whole plan goes through one pool of {@link QUICK_TRIM_JOB_CONCURRENCY}
+ * workers, each stream's playlist is spliced as its last job lands, and the
+ * master is written when the pool drains.
  */
 export async function runQuickTrim(
     deps: QuickTrimRunnerDeps,
@@ -812,6 +1131,7 @@ export async function runQuickTrim(
     const { inputPath, outputDir, encodeConfig, onProgress } = opts;
     const segmentDuration = encodeConfig.segmentDuration ?? 6;
     const mapEveryPart = deps.mapEveryPart ?? MAP_EVERY_PART;
+    const runStartedAt = Date.now();
 
     await mkdir(outputDir, { recursive: true });
     if (encodeConfig.trimSegments?.length) {
@@ -832,18 +1152,39 @@ export async function runQuickTrim(
         0
     );
     let doneWeight = 0;
-    let lastPercent = 0;
+    // The high-water mark, not the last value: several jobs report at once and
+    // each knows only its own fraction, so a slower one following a faster one
+    // would otherwise walk the bar backwards.
+    let maxPercent = 0;
     const report = (fraction: number, weight: number): void => {
         if (totalWeight <= 0) return;
         const percent = Math.min(
             99.9,
             ((doneWeight + fraction * weight) / totalWeight) * 100
         );
-        if (percent - lastPercent < 0.5) return;
-        lastPercent = percent;
+        if (percent - maxPercent < 0.5) return;
+        maxPercent = percent;
         onProgress(Math.round(percent * 10) / 10);
     };
 
+    // The whole promise of a quick trim is that only the boundary GOPs are
+    // re-encoded, so the run accounts for itself: content seconds and wall
+    // time per kind, said out loud at the end. A bridge whose wall time is
+    // out of all proportion to its span means the job read past its part —
+    // the failure mode is silent (output identical, run merely slow), so it
+    // is watched for here rather than discovered by a stopwatch. The counts
+    // are of ffmpeg *runs*, which is what the wall times measure; one copy run
+    // covers all the copy parts of one kept range.
+    const tally: QuickTrimTally = {
+        copyContent: 0,
+        copyWallMs: 0,
+        copyParts: 0,
+        bridgeContent: 0,
+        bridgeWallMs: 0,
+        bridgeParts: 0,
+    };
+
+    const runs: StreamRun[] = [];
     for (const streamPlan of plan.streams) {
         const target = deps.targets.find(
             (t) => t.streamDir === streamPlan.streamDir
@@ -864,64 +1205,103 @@ export async function runQuickTrim(
             target.kind === 'video'
                 ? await probeVideoParams(inputPath, target.sourceTrackIndex)
                 : null;
-        // Half a frame: a copy part starts on a keyframe, so anything closer
-        // than that is the same frame reported through a rational timebase.
-        const tolerance = 0.5 / (params?.frameRate ?? FALLBACK_FRAME_RATE);
-
-        for (const part of streamPlan.parts) {
-            if (deps.isCancelled()) throw new QuickTrimCancelledError();
-
-            const weight = Math.max(part.end - part.start, 0);
-            const onTime = (seconds: number): void => {
-                const span = part.end - part.start;
-                if (span <= 0) return;
-                // `out_time` is the source clock under `-copyts` and the part's
-                // own clock when the muxer rebased it; accept either.
-                const absolute = (seconds - part.start) / span;
-                const fraction =
-                    absolute >= 0 && absolute <= 1.5
-                        ? absolute
-                        : seconds / span;
-                report(Math.min(1, Math.max(0, fraction)), weight);
-            };
-
-            if (part.kind === 'bridge') {
-                await runBridgePart(
-                    deps,
-                    { inputPath, streamDirPath, target, part, params },
-                    onTime
-                );
-            } else {
-                await runCopyPart(
-                    deps,
-                    {
-                        inputPath,
-                        streamDirPath,
-                        streamDir: streamPlan.streamDir,
-                        target,
-                        part,
-                        segmentDuration,
-                        tolerance,
-                    },
-                    onTime
-                );
-            }
-
-            doneWeight += weight;
-        }
-
-        await assembleStreamPlaylist(
-            streamDirPath,
+        const jobs = buildQuickTrimJobs(streamPlan.parts, segmentDuration);
+        runs.push({
             streamPlan,
-            mapEveryPart,
-            deps.logger
-        );
+            target,
+            streamDirPath,
+            params,
+            // Half a frame: a copy job starts on a keyframe, so anything closer
+            // than that is the same frame reported through a rational timebase.
+            tolerance: 0.5 / (params?.frameRate ?? FALLBACK_FRAME_RATE),
+            jobs,
+            remaining: jobs.length,
+        });
     }
+
+    const queue: { run: StreamRun; job: QuickTrimJob }[] = [];
+    for (const run of runs) {
+        for (const job of run.jobs) queue.push({ run, job });
+    }
+
+    let failure: Error | null = null;
+    let next = 0;
+    const fail = (err: unknown): void => {
+        if (failure) return;
+        // A cancelled run must not present as a run *error*: the caller answers
+        // an error with the precise path, and a cancel with nothing at all.
+        failure = deps.isCancelled()
+            ? new QuickTrimCancelledError()
+            : (err as Error);
+        // The jobs still running are producing output that is already being
+        // thrown away, and a bridge is a real encode.
+        deps.killRunningJobs?.();
+    };
+
+    const worker = async (): Promise<void> => {
+        while (failure === null) {
+            if (deps.isCancelled()) {
+                fail(new QuickTrimCancelledError());
+                return;
+            }
+            const index = next++;
+            if (index >= queue.length) return;
+            const { run, job } = queue[index];
+
+            try {
+                await runOneJob(deps, run, job, {
+                    inputPath,
+                    segmentDuration,
+                    report,
+                    tally,
+                });
+                doneWeight += Math.max(job.end - job.start, 0);
+                run.remaining -= 1;
+                if (run.remaining === 0) {
+                    await assembleStreamPlaylist(
+                        run.streamDirPath,
+                        run.streamPlan,
+                        run.jobs,
+                        mapEveryPart,
+                        deps.logger
+                    );
+                }
+            } catch (err) {
+                fail(err);
+                return;
+            }
+        }
+    };
+
+    await Promise.all(
+        Array.from(
+            { length: deps.concurrency ?? QUICK_TRIM_JOB_CONCURRENCY },
+            () => worker()
+        )
+    );
+    if (failure) throw failure;
 
     await writeFile(
         join(outputDir, 'master.m3u8'),
         buildQuickTrimMasterContent(encodeConfig, deps.targets),
         'utf-8'
+    );
+
+    const reEncodedShare =
+        tally.copyContent + tally.bridgeContent > 0
+            ? (tally.bridgeContent /
+                  (tally.copyContent + tally.bridgeContent)) *
+              100
+            : 0;
+    deps.logger.log(
+        `[quick-trim] copied ${tally.copyContent.toFixed(1)}s across ` +
+            `${tally.copyParts} part(s) in ${(tally.copyWallMs / 1000).toFixed(1)}s; ` +
+            `re-encoded ${tally.bridgeContent.toFixed(1)}s across ` +
+            `${tally.bridgeParts} bridge(s) in ${(tally.bridgeWallMs / 1000).toFixed(1)}s ` +
+            `(${reEncodedShare.toFixed(1)}% of output content re-encoded; ` +
+            // The per-kind figures above are summed job wall times, which now
+            // overlap; this is the run as a stopwatch sees it.
+            `${((Date.now() - runStartedAt) / 1000).toFixed(1)}s wall)`
     );
 
     onProgress(100);
@@ -935,6 +1315,84 @@ export async function runQuickTrim(
         // in-point and no head has to be removed from anything derived.
         alignmentOffset: 0,
     };
+}
+
+/**
+ * One job: run it, time it, and fold what it cost into the tally.
+ *
+ * Progress is reported against the job's own span, which for a collapsed copy
+ * job is every part it covers — the pool has no finer unit to report from, and
+ * the parts inside a job are not produced in sequence anyway.
+ */
+async function runOneJob(
+    deps: QuickTrimRunnerDeps,
+    run: StreamRun,
+    job: QuickTrimJob,
+    ctx: {
+        inputPath: string;
+        segmentDuration: number;
+        report: (fraction: number, weight: number) => void;
+        tally: QuickTrimTally;
+    }
+): Promise<void> {
+    const weight = Math.max(job.end - job.start, 0);
+    const span = job.end - job.start;
+    const onTime = (seconds: number): void => {
+        if (span <= 0) return;
+        // `out_time` is the source clock under `-copyts` and the job's own
+        // clock when the muxer rebased it; accept either.
+        const absolute = (seconds - job.start) / span;
+        const fraction =
+            absolute >= 0 && absolute <= 1.5 ? absolute : seconds / span;
+        ctx.report(Math.min(1, Math.max(0, fraction)), weight);
+    };
+
+    const jobStartedAt = Date.now();
+    if (job.kind === 'bridge') {
+        await runBridgePart(
+            deps,
+            {
+                inputPath: ctx.inputPath,
+                streamDirPath: run.streamDirPath,
+                target: run.target,
+                part: job.parts[0],
+                params: run.params,
+            },
+            onTime
+        );
+        const wallMs = Date.now() - jobStartedAt;
+        ctx.tally.bridgeContent += weight;
+        ctx.tally.bridgeWallMs += wallMs;
+        ctx.tally.bridgeParts += 1;
+        if (wallMs > BRIDGE_WALL_WARN_MS) {
+            deps.logger.warn(
+                `[quick-trim] bridge ${job.parts[0].partIndex} of ` +
+                    `${run.streamPlan.streamDir} took ` +
+                    `${(wallMs / 1000).toFixed(1)}s for ` +
+                    `${weight.toFixed(2)}s of content — the job is reading ` +
+                    `past its part`
+            );
+        }
+        return;
+    }
+
+    await runCopyPart(
+        deps,
+        {
+            inputPath: ctx.inputPath,
+            streamDirPath: run.streamDirPath,
+            streamDir: run.streamPlan.streamDir,
+            target: run.target,
+            job,
+            segmentDuration: ctx.segmentDuration,
+            tolerance: run.tolerance,
+            keyframeStep: run.streamPlan.keyframeStep,
+        },
+        onTime
+    );
+    ctx.tally.copyContent += weight;
+    ctx.tally.copyWallMs += Date.now() - jobStartedAt;
+    ctx.tally.copyParts += 1;
 }
 
 async function runBridgePart(
@@ -999,14 +1457,16 @@ async function runCopyPart(
         streamDirPath: string;
         streamDir: string;
         target: QuickTrimStreamTarget;
-        part: QuickTrimPart;
+        job: QuickTrimJob;
         segmentDuration: number;
         tolerance: number;
+        keyframeStep?: number;
     },
     onTime: (seconds: number) => void
 ): Promise<void> {
-    const { part, target } = ctx;
-    const label = `${ctx.streamDir} copy ${part.partIndex}`;
+    const { job, target } = ctx;
+    const first = job.parts[0];
+    const label = `${ctx.streamDir} copy ${first.partIndex}`;
 
     const run = async (seekStart: number): Promise<void> => {
         await deps.runJob(
@@ -1015,7 +1475,8 @@ async function runCopyPart(
                 streamDirPath: ctx.streamDirPath,
                 kind: target.kind,
                 sourceTrackIndex: target.sourceTrackIndex,
-                part,
+                part: first,
+                end: job.end,
                 seekStart,
                 segmentDuration: ctx.segmentDuration,
             }),
@@ -1024,38 +1485,54 @@ async function runCopyPart(
         );
     };
 
-    await run(part.start);
+    // The demuxer's landing rule, measured on both reference files (identical
+    // 1 s grids and mutually offset ones alike): an input seek lands on the
+    // largest keyframe at or before *target minus the stream's hop*, where
+    // the hop is one keyframe interval when the mapped stream is not the
+    // file's default (the cross-track positioning gives back a whole GOP)
+    // and zero when it is. Which stream is the default is not knowable
+    // cheaply, so the first attempt assumes the common case — aim one
+    // interval past the intended start — and the retry derives the hop the
+    // stream actually exhibited from where that attempt landed.
+    const aimTarget =
+        job.start +
+        (target.kind === 'video' && ctx.keyframeStep
+            ? ctx.keyframeStep + EPSILON_SECONDS
+            : 0);
+    await run(aimTarget);
 
     // Audio cuts on the output side, on the frame grid, and needs no check.
     if (target.kind === 'audio') return;
 
-    const landed = await measureFirstPts(ctx.streamDirPath, part, 'video');
+    const landed = await measureFirstPts(ctx.streamDirPath, first, 'video');
     if (landed === null) {
         throw new QuickTrimRunError(
             `Could not measure where ${label} started`,
             ctx.streamDir,
-            part.partIndex
+            first.partIndex
         );
     }
-    if (Math.abs(landed - part.start) <= ctx.tolerance) return;
+    if (Math.abs(landed - job.start) <= ctx.tolerance) return;
 
-    const bumped = Math.max(0, part.start + (part.start - landed));
+    // target − landed IS the stream's hop under the landing rule, whichever
+    // regime it is in — re-aiming with it is exact in one step for both.
+    const bumped = Math.max(0, job.start + (aimTarget - landed));
     deps.logger.warn(
-        `${label} landed at ${landed.toFixed(3)}s for ${part.start.toFixed(3)}s` +
+        `${label} landed at ${landed.toFixed(3)}s for ${job.start.toFixed(3)}s` +
             ` — retrying from ${bumped.toFixed(3)}s`
     );
-    await deletePartOutput(ctx.streamDirPath, part);
+    await deletePartOutput(ctx.streamDirPath, first);
     await run(bumped);
 
-    const second = await measureFirstPts(ctx.streamDirPath, part, 'video');
-    if (second !== null && Math.abs(second - part.start) <= ctx.tolerance) {
+    const second = await measureFirstPts(ctx.streamDirPath, first, 'video');
+    if (second !== null && Math.abs(second - job.start) <= ctx.tolerance) {
         return;
     }
     throw new QuickTrimRunError(
-        `${label} could not be seeked to ${part.start.toFixed(3)}s ` +
+        `${label} could not be seeked to ${job.start.toFixed(3)}s ` +
             `(landed at ${landed.toFixed(3)}s, then ` +
             `${second === null ? 'unmeasurable' : `${second.toFixed(3)}s`})`,
         ctx.streamDir,
-        part.partIndex
+        first.partIndex
     );
 }

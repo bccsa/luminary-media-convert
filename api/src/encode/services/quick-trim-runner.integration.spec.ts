@@ -124,45 +124,117 @@ async function scanGrid(tmpDir: string): Promise<number[]> {
     return grid;
 }
 
-/** First packet time of a part, measured from its init plus its first segment. */
-async function firstPts(
+/**
+ * One segment of an authored playlist, and where the playlist puts it.
+ *
+ * `partIndex` comes from the segment number rather than from the playlist's
+ * maps: a job numbers every segment it writes from its *first* part's stride
+ * (`partIndex * PART_NUMBER_STRIDE`), and that first part is exactly the one
+ * whose init the job wrote — so the number names the init to probe against.
+ */
+interface PlaylistSegment {
+    uri: string;
+    duration: number;
+    /** Cumulative position in the finished playlist, seconds. */
+    start: number;
+    partIndex: number;
+}
+
+function playlistSegments(streamDirPath: string): PlaylistSegment[] {
+    const playlist = parseMediaPlaylist(
+        readFileSync(join(streamDirPath, 'playlist.m3u8'), 'utf8')
+    );
+    let start = 0;
+    return playlist.segments.map((segment) => {
+        const entry: PlaylistSegment = {
+            uri: segment.uri,
+            duration: segment.duration,
+            start,
+            partIndex: Math.floor(
+                parseInt(segment.uri.slice('segment_'.length), 10) /
+                    PART_NUMBER_STRIDE
+            ),
+        };
+        start += segment.duration;
+        return entry;
+    });
+}
+
+/**
+ * Packet times of an init plus one or more of its segments.
+ *
+ * Both clocks are read: after the runner's retiming the edit lists are gone, so
+ * `dts` is the `tfdt` the players actually place samples by, and `pts` is that
+ * plus the stream's composition (B-frame reorder) delay.
+ */
+async function probeTimes(
     streamDirPath: string,
     partIndex: number,
+    segmentUris: string[],
     kind: 'video' | 'audio'
-): Promise<number> {
-    const first = partIndex * PART_NUMBER_STRIDE;
-    const segment = readdirSync(streamDirPath)
-        .filter((name) => /^segment_\d+\.m4s$/.test(name))
-        .filter((name) => {
-            const number = parseInt(name.slice('segment_'.length), 10);
-            return number >= first && number < first + PART_NUMBER_STRIDE;
-        })
-        .sort()[0];
-    expect(segment, `no segment for part ${partIndex}`).toBeDefined();
-
+): Promise<{ pts: number[]; dts: number[] }> {
     const probePath = join(streamDirPath, `probe_${partIndex}.mp4`);
     await writeFile(
         probePath,
         Buffer.concat([
             await readFile(join(streamDirPath, `init_${partIndex}.mp4`)),
-            await readFile(join(streamDirPath, segment)),
+            ...(await Promise.all(
+                segmentUris.map((uri) => readFile(join(streamDirPath, uri)))
+            )),
         ])
     );
-    const { stdout } = await execFileAsync('ffprobe', [
-        '-v',
-        'error',
-        '-select_streams',
-        kind === 'video' ? 'v:0' : 'a:0',
-        '-show_entries',
-        'packet=pts_time',
-        '-of',
-        'csv=p=0',
-        '-read_intervals',
-        '%+#1',
-        probePath,
-    ]);
-    await unlink(probePath);
-    return parseFloat(String(stdout).trim().split('\n')[0]);
+    try {
+        const { stdout } = await execFileAsync(
+            'ffprobe',
+            [
+                '-v',
+                'error',
+                '-select_streams',
+                kind === 'video' ? 'v:0' : 'a:0',
+                '-show_entries',
+                'packet=pts_time,dts_time',
+                '-of',
+                'csv=p=0',
+                probePath,
+            ],
+            { maxBuffer: 64 * 1024 * 1024 }
+        );
+        const pts: number[] = [];
+        const dts: number[] = [];
+        for (const line of String(stdout).trim().split('\n')) {
+            const [p, d] = line.split(',');
+            if (Number.isFinite(parseFloat(p))) pts.push(parseFloat(p));
+            if (Number.isFinite(parseFloat(d))) dts.push(parseFloat(d));
+        }
+        return { pts, dts };
+    } finally {
+        await unlink(probePath).catch(() => {});
+    }
+}
+
+/** Every segment of a stream, probed against the init of its own part. */
+async function probeStream(
+    streamDirPath: string,
+    kind: 'video' | 'audio'
+): Promise<(PlaylistSegment & { firstPts: number; firstDts: number })[]> {
+    const probed: (PlaylistSegment & {
+        firstPts: number;
+        firstDts: number;
+    })[] = [];
+    for (const segment of playlistSegments(streamDirPath)) {
+        const times = await probeTimes(
+            streamDirPath,
+            segment.partIndex,
+            [segment.uri],
+            kind
+        );
+        probed.push({
+            ...segment,
+            firstPts: Math.min(...times.pts),
+            firstDts: Math.min(...times.dts),
+        });
+    }
+    return probed;
 }
 
 const available = existsSync(REFERENCE);
@@ -213,32 +285,125 @@ describe.skipIf(!available)('quick trim runner (reference file)', () => {
         );
     }, 600_000);
 
-    it('starts every video part where the plan says', async () => {
-        const dir = join(outputDir, VIDEO_DIR);
-        const tolerance = 0.5 / FRAME_RATE;
-        for (const part of plan.streams[0].parts) {
-            if (!part.ownInit) continue;
-            const landed = await firstPts(dir, part.partIndex, 'video');
-            console.log(
-                `video part ${part.partIndex} (${part.kind}): planned ` +
-                    `${part.start.toFixed(3)}s, landed ${landed.toFixed(3)}s`
-            );
-            expect(Math.abs(landed - part.start)).toBeLessThanOrEqual(
-                tolerance
-            );
-        }
-    });
+    /**
+     * The property the whole output rests on: every stream reads as one
+     * continuous timeline starting at zero, whose instants are the playlist's
+     * own — not the source's, and not each part's private zero.
+     *
+     * Measured on `tfdt` (the packet's decode time, which is what the fragment
+     * carries and what a player anchors a discontinuity domain to) rather than
+     * on `pts`: presentation leads decode by the stream's B-frame reorder
+     * delay, which is a property of the bitstream and identical before and
+     * after the retiming. It is reported alongside, and pinned as *constant*
+     * below, because a delay that varied part to part would be A/V drift.
+     */
+    it.each([
+        { dir: VIDEO_DIR, kind: 'video' as const, tolerance: 0.5 / FRAME_RATE },
+        { dir: AUDIO_DIR, kind: 'audio' as const, tolerance: 1024 / 48000 },
+    ])(
+        'starts every $kind segment where the playlist says',
+        async ({ dir, kind, tolerance }) => {
+            const probed = await probeStream(join(outputDir, dir), kind);
+            expect(probed.length).toBeGreaterThan(plan.streams[0].parts.length);
 
-    it('starts the audio stream where the plan says', async () => {
-        const landed = await firstPts(join(outputDir, AUDIO_DIR), 0, 'audio');
-        console.log(
-            `audio part 0: planned ${plan.streams[1].parts[0].start.toFixed(3)}s, ` +
-                `landed ${landed.toFixed(3)}s`
-        );
-        // One AAC frame at 48 kHz.
-        expect(
-            Math.abs(landed - plan.streams[1].parts[0].start)
-        ).toBeLessThanOrEqual(1024 / 48000);
+            console.log(`\n${dir} (${kind})`);
+            console.log(
+                '  part  segment              playlist      dts      pts'
+            );
+            for (const segment of probed) {
+                console.log(
+                    `  ${String(segment.partIndex).padStart(4)}  ${segment.uri}  ` +
+                        `${segment.start.toFixed(3).padStart(8)} ` +
+                        `${segment.firstDts.toFixed(3).padStart(8)} ` +
+                        `${segment.firstPts.toFixed(3).padStart(8)}`
+                );
+            }
+
+            for (const segment of probed) {
+                expect(
+                    Math.abs(segment.firstDts - segment.start),
+                    `${dir}/${segment.uri} decodes at ${segment.firstDts}s where ` +
+                        `the playlist puts it at ${segment.start}s`
+                ).toBeLessThanOrEqual(tolerance);
+            }
+
+            // Presentation leads decode by the stream's reorder delay, and that
+            // delay may only vary by the one frame a re-encoded bridge is allowed
+            // to differ from the copied source by (measured: 0.060 s across the
+            // copy parts of the reference file, 0.040 s across its bridges).
+            // Anything larger would shift the picture against the sound at a part
+            // boundary.
+            const delays = probed.map((s) => s.firstPts - s.firstDts);
+            expect(
+                Math.max(...delays) - Math.min(...delays)
+            ).toBeLessThanOrEqual(2 * tolerance + 1e-6);
+        }
+    );
+
+    it('joins its parts without a hole in the timeline', async () => {
+        for (const [index, streamPlan] of plan.streams.entries()) {
+            const dir = join(outputDir, streamPlan.streamDir);
+            const kind = index === 0 ? 'video' : 'audio';
+            const tolerance = kind === 'video' ? 1 / FRAME_RATE : 1024 / 48000;
+            const segments = playlistSegments(dir);
+
+            // Each part probed whole, against its own init — parts do not
+            // share a timescale (a copied part keeps the source's, a bridge
+            // gets whatever its encoder chose), so one init cannot read them
+            // all. Measured on the decode clock, which is the one `tfdt`
+            // carries and the one this retiming sets.
+            const spans: {
+                partIndex: number;
+                start: number;
+                end: number;
+                pts: number;
+            }[] = [];
+            for (const partIndex of new Set(segments.map((s) => s.partIndex))) {
+                const own = segments.filter((s) => s.partIndex === partIndex);
+                const times = await probeTimes(
+                    dir,
+                    partIndex,
+                    own.map((s) => s.uri),
+                    kind
+                );
+                spans.push({
+                    partIndex,
+                    start: Math.min(...times.dts),
+                    end: Math.max(...times.dts),
+                    pts: Math.min(...times.pts),
+                });
+            }
+            spans.sort((a, b) => a.start - b.start);
+
+            console.log(
+                `\n${streamPlan.streamDir} parts (dts): ` +
+                    spans
+                        .map(
+                            (s) =>
+                                `${s.partIndex}:[${s.start.toFixed(3)},` +
+                                `${s.end.toFixed(3)}]`
+                        )
+                        .join(' ')
+            );
+
+            // The output's own zero, not the source's.
+            expect(spans[0].start).toBeLessThanOrEqual(tolerance);
+            for (let i = 1; i < spans.length; i++) {
+                // A part's `end` is its last frame's decode time, and that
+                // frame occupies one frame duration — so a join one frame
+                // along is contiguous, not a hole. Anything past that is one:
+                // nothing would fill it. (An *overlap* is expected wherever a
+                // copy job spilled past its planned end on a DTS stop; the
+                // authored EXTINF clamps it and the player overwrites by
+                // timeline.)
+                const gap = spans[i].start - spans[i - 1].end;
+                expect(
+                    gap,
+                    `${streamPlan.streamDir} has a ${gap.toFixed(3)}s hole ` +
+                        `before part ${spans[i].partIndex}`
+                ).toBeLessThanOrEqual(1.5 * tolerance);
+            }
+        }
     });
 
     it('authors one map per own-init part and a discontinuity between all', () => {

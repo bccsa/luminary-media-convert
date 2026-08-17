@@ -20,6 +20,7 @@ vi.mock('child_process', async (importOriginal) => {
 import {
     buildBridgeArgs,
     buildCopyPartArgs,
+    buildQuickTrimJobs,
     buildQuickTrimMasterContent,
     runQuickTrim,
     QuickTrimCancelledError,
@@ -48,21 +49,29 @@ function grid(count = 80): number[] {
 const VIDEO_DIR = 'stream_v';
 const AUDIO_DIR = 'stream_a';
 
-function makePlan(
+function makePlanFor(
+    ranges: { inSec: number; outSec: number }[],
     videoDir = VIDEO_DIR,
-    audioDir = AUDIO_DIR,
-    range = { inSec: 20, outSec: 40 }
+    audioDir = AUDIO_DIR
 ): QuickTrimPlan {
     const result = planQuickTrim({
         streams: [
             { streamDir: videoDir, kind: 'video', keyframes: grid() },
             { streamDir: audioDir, kind: 'audio', keyframes: null },
         ],
-        trimSegments: [range],
+        trimSegments: ranges,
         segmentDuration: 6,
     });
     if (isQuickTrimRejection(result)) throw new Error(result.reason);
     return result;
+}
+
+function makePlan(
+    videoDir = VIDEO_DIR,
+    audioDir = AUDIO_DIR,
+    range = { inSec: 20, outSec: 40 }
+): QuickTrimPlan {
+    return makePlanFor([range], videoDir, audioDir);
 }
 
 const RENDITION = {
@@ -103,13 +112,15 @@ function targets(): QuickTrimStreamTarget[] {
     ];
 }
 
-function encodeConfig(): EncodeConfigDto {
+function encodeConfig(
+    ranges: { inSec: number; outSec: number }[] = [{ inSec: 20, outSec: 40 }]
+): EncodeConfigDto {
     return {
         type: 'video',
         segmentDuration: 6,
         videoRenditions: [RENDITION],
         audioGroups: [GROUP],
-        trimSegments: [{ inSec: 20, outSec: 40 }],
+        trimSegments: ranges,
     } as EncodeConfigDto;
 }
 
@@ -118,11 +129,91 @@ interface JobCall {
     label: string;
 }
 
+// --- the least fMP4 the runner's retiming pass will accept ----------------
+//
+// The runner reads the timescale out of every init and rewrites the `tfdt` of
+// every segment, so the fake muxer below has to write boxes rather than
+// placeholder strings. Only the path those two functions walk is built:
+// `moov > trak > {edts > elst, mdia > mdhd}` in the init, and
+// `moof > traf > tfdt` in each segment.
+
+function box(type: string, ...content: Buffer[]): Buffer {
+    const body = Buffer.concat(content);
+    const header = Buffer.alloc(8);
+    header.writeUInt32BE(body.length + 8, 0);
+    header.write(type, 4, 4, 'latin1');
+    return Buffer.concat([header, body]);
+}
+
+function u32(...values: number[]): Buffer {
+    const buffer = Buffer.alloc(values.length * 4);
+    values.forEach((value, index) => buffer.writeUInt32BE(value, index * 4));
+    return buffer;
+}
+
+/** An init whose track counts in `timescale`, with an edit list to neutralise. */
+function fakeInit(timescale: number, sourceStartMs: number): Buffer {
+    return Buffer.concat([
+        box('ftyp', Buffer.from('iso6', 'latin1')),
+        box(
+            'moov',
+            box('mvhd', u32(0, 0, 1000, 0)),
+            box(
+                'trak',
+                box(
+                    'edts',
+                    box(
+                        'elst',
+                        u32(0, 2),
+                        u32(sourceStartMs, 0xffffffff),
+                        u32(0, 0)
+                    )
+                ),
+                box('mdia', box('mdhd', u32(0, 0, 0, timescale, 0)))
+            )
+        ),
+    ]);
+}
+
+/** A one-fragment segment whose `tfdt` is `ticks`, version 1 as ffmpeg writes. */
+function fakeSegment(ticks: number): Buffer {
+    const value = Buffer.alloc(8);
+    value.writeBigUInt64BE(BigInt(ticks));
+    return Buffer.concat([
+        box('styp', Buffer.from('msdh', 'latin1')),
+        box(
+            'moof',
+            box('mfhd', u32(0, 1)),
+            box(
+                'traf',
+                box('tfhd', u32(0, 1)),
+                box('tfdt', Buffer.from([1, 0, 0, 0]), value),
+                box('trun', u32(0, 1))
+            )
+        ),
+        box('mdat', Buffer.from('payload')),
+    ]);
+}
+
+/** The `baseMediaDecodeTime` of a written segment. */
+function readTfdt(path: string): number {
+    const buffer = readFileSync(path);
+    const at = buffer.indexOf(Buffer.from('tfdt', 'latin1'));
+    expect(at).toBeGreaterThan(0);
+    return Number(buffer.readBigUInt64BE(at + 8));
+}
+
+function initHasEditList(path: string): boolean {
+    return readFileSync(path).includes(Buffer.from('edts', 'latin1'));
+}
+
 /**
  * Stands in for the muxer: writes the init, the segments and the part playlist
  * the real job would have produced, reading the filenames out of the arguments
  * exactly as ffmpeg does. Segment durations are deliberately a flat 6s so the
- * assembly's final-segment clamp has something to correct.
+ * assembly's final-segment clamp has something to correct, and each segment's
+ * `tfdt` counts from zero within the run — the convention that makes the
+ * runner's retiming pass necessary.
  */
 function fakeMuxer(calls: JobCall[]) {
     return async (
@@ -139,10 +230,20 @@ function fakeMuxer(calls: JobCall[]) {
         const to = parseFloat(value('-to'));
         const from = parseFloat(args[args.indexOf('-ss') + 1]);
         const span = Number.isFinite(to) ? Math.max(to - from, 1) : 1;
-        const count = Math.max(1, Math.ceil(span / 6));
+        // How many segments the target duration buys — the durations written
+        // below stay a flat 6 s regardless, so the assembly's clamp has
+        // something to correct.
+        const target = parseFloat(value('-hls_time')) || 6;
+        const count = Math.max(1, Math.ceil(span / target));
+        // The audio recipe is the one carrying `-c:a`; 48 kHz against the
+        // video's 90 kHz, so a wrong timescale cannot pass unnoticed.
+        const timescale = args.includes('-c:a') ? 48000 : 90000;
 
         await mkdir(dir, { recursive: true });
-        await writeFile(join(dir, init), 'init');
+        await writeFile(
+            join(dir, init),
+            fakeInit(timescale, Math.round(from * 1000))
+        );
         const lines = [
             '#EXTM3U',
             '#EXT-X-VERSION:7',
@@ -154,7 +255,10 @@ function fakeMuxer(calls: JobCall[]) {
         ];
         for (let i = 0; i < count; i++) {
             const name = `segment_${String(start + i).padStart(7, '0')}.m4s`;
-            await writeFile(join(dir, name), `seg${i}`);
+            await writeFile(
+                join(dir, name),
+                fakeSegment(Math.round(i * 6 * timescale))
+            );
             lines.push('#EXTINF:6.000000,', name);
         }
         lines.push('#EXT-X-ENDLIST', '');
@@ -183,12 +287,15 @@ function deps(
     };
 }
 
-function options(outputDir: string): EncodeOptions {
+function options(
+    outputDir: string,
+    ranges?: { inSec: number; outSec: number }[]
+): EncodeOptions {
     return {
         sessionId: 'sess-1',
         inputPath: SOURCE,
         outputDir,
-        encodeConfig: encodeConfig(),
+        encodeConfig: encodeConfig(ranges),
         onProgress: vi.fn(),
     };
 }
@@ -277,6 +384,8 @@ describe('quick trim runner', () => {
                 'independent_segments',
                 '-hls_segment_type',
                 'fmp4',
+                '-movflags',
+                '+negative_cts_offsets+default_base_moof',
                 '-hls_fmp4_init_filename',
                 'init_1.mp4',
                 '-start_number',
@@ -359,6 +468,10 @@ describe('quick trim runner', () => {
                 '0:v:6',
                 '-vf',
                 'trim=start=20:end=20.62',
+                // Stops the decode at the bridge: the trim filter only
+                // discards, and without -to a head bridge reads to EOF.
+                '-to',
+                '20.62',
                 '-c:v',
                 'libx264',
                 '-preset',
@@ -389,6 +502,8 @@ describe('quick trim runner', () => {
                 'independent_segments',
                 '-hls_segment_type',
                 'fmp4',
+                '-movflags',
+                '+negative_cts_offsets+default_base_moof',
                 '-hls_fmp4_init_filename',
                 'init_0.mp4',
                 '-start_number',
@@ -444,9 +559,12 @@ describe('quick trim runner', () => {
                 (c) => c.label === `${VIDEO_DIR} copy 1`
             );
             expect(copyCalls).toHaveLength(2);
-            expect(copyCalls[0].args[1]).toBe('20.62');
-            // 20.62 + (20.62 - 19.62)
-            expect(parseFloat(copyCalls[1].args[1])).toBeCloseTo(21.62, 6);
+            // First attempt aims one keyframe interval past the intended
+            // start (the measured landing rule: largest keyframe at or
+            // before target minus one GOP).
+            expect(parseFloat(copyCalls[0].args[1])).toBeCloseTo(21.621, 3);
+            // Retry re-aims by the observed hop: 20.62 + (21.621 - 19.62)
+            expect(parseFloat(copyCalls[1].args[1])).toBeCloseTo(22.621, 3);
 
             // The retry's shorter seek means three segments where the first
             // attempt wrote four — so four left behind would show here.
@@ -482,10 +600,11 @@ describe('quick trim runner', () => {
                 makePlan()
             );
 
+            // The audio stream's three copy parts are one job.
             expect(
                 calls.filter((c) => c.label.startsWith(AUDIO_DIR))
-            ).toHaveLength(3);
-            // One measurement, for the single video copy part.
+            ).toHaveLength(1);
+            // One measurement, for the single video copy job.
             expect(ptsAnswers).toHaveLength(0);
         });
     });
@@ -581,7 +700,7 @@ describe('quick trim runner', () => {
             ]);
         });
 
-        it('keeps every init when maps are forced onto every part', async () => {
+        it('maps every part at the init its job wrote when forced to', async () => {
             ptsAnswers = [20.62];
             await runQuickTrim(
                 deps({ runJob: fakeMuxer([]), mapEveryPart: true }),
@@ -595,16 +714,276 @@ describe('quick trim runner', () => {
                     'utf8'
                 )
             );
+            // One job produced all three parts, so there is one init to point
+            // at — the map is repeated, not multiplied.
             expect(audio.maps.map((m) => m.uri)).toEqual([
                 'init_0.mp4',
-                'init_1.mp4',
-                'init_2.mp4',
+                'init_0.mp4',
+                'init_0.mp4',
             ]);
             expect(
                 readdirSync(join(outputDir, AUDIO_DIR)).filter((f) =>
                     f.startsWith('init_')
-                ).length
-            ).toBe(3);
+                )
+            ).toEqual(['init_0.mp4']);
+        });
+    });
+
+    describe('the output timeline', () => {
+        /**
+         * Every job is muxed on its own and so counts its fragments from zero.
+         * A player reading `tfdt` and ignoring the edit list — which is what
+         * the players this output is for do — would then stack every part at
+         * the same instant, and since video and audio parts end on different
+         * grids, the difference lands on the audio as desync. So the runner
+         * rewrites each segment onto the finished playlist's clock.
+         */
+        it('puts each part where the playlist puts it', async () => {
+            ptsAnswers = [20.62];
+            await runQuickTrim(
+                deps({ runJob: fakeMuxer([]) }),
+                options(outputDir),
+                makePlan()
+            );
+
+            const dir = join(outputDir, VIDEO_DIR);
+            const at = (name: string): number => readTfdt(join(dir, name));
+            const ticks = (seconds: number): number =>
+                Math.round(seconds * 90000);
+
+            // The head bridge is the output's own zero.
+            expect(at('segment_0000000.m4s')).toBe(0);
+            // The copy job starts after it, and its segments keep the 6 s
+            // spacing the muxer gave them.
+            expect(at('segment_0100000.m4s')).toBe(ticks(0.62));
+            expect(at('segment_0100001.m4s')).toBe(ticks(6.62));
+            expect(at('segment_0100002.m4s')).toBe(ticks(12.62));
+            // The tail bridge follows the copy span's *planned* 19 s, not the
+            // 24 s of segments the muxer happened to write.
+            expect(at('segment_0200000.m4s')).toBe(ticks(19.62));
+        });
+
+        it('counts in each stream’s own timescale', async () => {
+            ptsAnswers = [20.62, 60.62];
+            const ranges = [
+                { inSec: 20, outSec: 40 },
+                { inSec: 60, outSec: 80 },
+            ];
+            await runQuickTrim(
+                deps({ runJob: fakeMuxer([]), concurrency: 1 }),
+                options(outputDir, ranges),
+                makePlanFor(ranges)
+            );
+
+            const audio = join(outputDir, AUDIO_DIR);
+            // One job per kept range. The second starts 20 s into the output,
+            // and audio counts at 48 kHz where video counts at 90 kHz.
+            expect(readTfdt(join(audio, 'segment_0000000.m4s'))).toBe(0);
+            expect(readTfdt(join(audio, 'segment_0300000.m4s'))).toBe(
+                20 * 48000
+            );
+            expect(readTfdt(join(audio, 'segment_0300001.m4s'))).toBe(
+                26 * 48000
+            );
+
+            // The video stream's second range starts at the same instant.
+            const video = join(outputDir, VIDEO_DIR);
+            expect(readTfdt(join(video, 'segment_0300000.m4s'))).toBe(
+                Math.round(20 * 90000)
+            );
+        });
+
+        it('neutralises the edit list of every init it keeps', async () => {
+            ptsAnswers = [20.62];
+            await runQuickTrim(
+                deps({ runJob: fakeMuxer([]) }),
+                options(outputDir),
+                makePlan()
+            );
+
+            for (const dir of [VIDEO_DIR, AUDIO_DIR]) {
+                const streamDir = join(outputDir, dir);
+                for (const name of readdirSync(streamDir).filter((f) =>
+                    f.startsWith('init_')
+                )) {
+                    expect(
+                        initHasEditList(join(streamDir, name)),
+                        `${dir}/${name} still carries an edit list`
+                    ).toBe(false);
+                }
+            }
+        });
+
+        it('fails the run rather than ship an unreadable segment', async () => {
+            const muxer = fakeMuxer([]);
+            ptsAnswers = [20.62];
+
+            const error = await runQuickTrim(
+                deps({
+                    concurrency: 1,
+                    runJob: async (args, onTime, label) => {
+                        await muxer(args, onTime, label);
+                        if (!label.startsWith(AUDIO_DIR)) return;
+                        // What a truncated write leaves behind.
+                        const playlist = args[args.length - 1];
+                        const dir = playlist.slice(
+                            0,
+                            playlist.lastIndexOf('/')
+                        );
+                        await writeFile(
+                            join(dir, 'segment_0000000.m4s'),
+                            'not an fmp4 segment'
+                        );
+                    },
+                }),
+                options(outputDir),
+                makePlan()
+            ).catch((e) => e);
+
+            expect(error).toBeInstanceOf(QuickTrimRunError);
+            expect((error as Error).message).toContain(
+                'moved onto the output timeline'
+            );
+        });
+    });
+
+    describe('job grouping', () => {
+        function parts(
+            spec: [QuickTrimPart['kind'], number, number, number][]
+        ): QuickTrimPart[] {
+            return spec.map(([kind, rangeIndex, start, end], index) => ({
+                kind,
+                partIndex: index,
+                rangeIndex,
+                startNumber: index * 100000,
+                start,
+                end,
+                ownInit: true,
+            }));
+        }
+
+        it('collapses a range into one copy job and leaves bridges alone', () => {
+            const jobs = buildQuickTrimJobs(
+                parts([
+                    ['bridge', 0, 20, 20.62],
+                    ['copy', 0, 20.62, 39.62],
+                    ['copy', 0, 39.62, 40],
+                ]),
+                6
+            );
+
+            expect(
+                jobs.map((j) => [j.kind, j.start, j.end, j.parts.length])
+            ).toEqual([
+                ['bridge', 20, 20.62, 1],
+                ['copy', 20.62, 40, 2],
+            ]);
+        });
+
+        it('does not join one range to the next across a shared instant', () => {
+            const jobs = buildQuickTrimJobs(
+                parts([
+                    ['copy', 0, 20, 40],
+                    ['copy', 1, 40, 60],
+                ]),
+                6
+            );
+
+            expect(jobs.map((j) => [j.start, j.end])).toEqual([
+                [20, 40],
+                [40, 60],
+            ]);
+        });
+
+        it('runs the parts separately when one job cannot fill them all', () => {
+            // 10 s at a 6 s target duration is two segments, and three parts
+            // cannot be cut out of two segments.
+            const jobs = buildQuickTrimJobs(
+                parts([
+                    ['copy', 0, 0, 2],
+                    ['copy', 0, 2, 8],
+                    ['copy', 0, 8, 10],
+                ]),
+                6
+            );
+
+            expect(jobs.map((j) => [j.start, j.end])).toEqual([
+                [0, 2],
+                [2, 8],
+                [8, 10],
+            ]);
+        });
+    });
+
+    describe('collapsed copy jobs', () => {
+        it('distributes one job’s segments across its parts', async () => {
+            const calls: JobCall[] = [];
+            ptsAnswers = [20.62];
+            await runQuickTrim(
+                deps({ runJob: fakeMuxer(calls) }),
+                options(outputDir),
+                makePlan()
+            );
+
+            // One job for the audio stream's whole 20 s range...
+            const audioCalls = calls.filter((c) =>
+                c.label.startsWith(AUDIO_DIR)
+            );
+            expect(audioCalls).toHaveLength(1);
+            expect(
+                audioCalls[0].args[audioCalls[0].args.indexOf('-to') + 1]
+            ).toBe('40');
+
+            // ...whose four 6 s segments still author three parts. The planned
+            // junctions (0.62 s and 19.62 s into the range) snap to the nearest
+            // segment boundary: after the first, and after the third.
+            const text = readFileSync(
+                join(outputDir, AUDIO_DIR, 'playlist.m3u8'),
+                'utf8'
+            );
+            const counts = text
+                .split('#EXT-X-DISCONTINUITY')
+                .map((chunk) => (chunk.match(/#EXTINF/g) ?? []).length);
+            expect(counts).toEqual([1, 2, 1]);
+
+            const audio = parseMediaPlaylist(text);
+            expect(
+                audio.segments.reduce((sum, s) => sum + s.duration, 0)
+            ).toBeCloseTo(20, 6);
+            // Every segment is the job's own, numbered from its first part.
+            expect(audio.segments.map((s) => s.uri)).toEqual([
+                'segment_0000000.m4s',
+                'segment_0000001.m4s',
+                'segment_0000002.m4s',
+                'segment_0000003.m4s',
+            ]);
+        });
+
+        it('fails the run when a job wrote fewer segments than it has parts', async () => {
+            const muxer = fakeMuxer([]);
+            ptsAnswers = [20.62];
+
+            const error = await runQuickTrim(
+                deps({
+                    concurrency: 1,
+                    runJob: async (args, onTime, label) => {
+                        if (!label.startsWith(AUDIO_DIR))
+                            return muxer(args, onTime, label);
+                        // One segment where the plan needs three parts split
+                        // out of it.
+                        const to = args[args.indexOf('-to') + 1];
+                        const shortened = [...args];
+                        shortened[shortened.indexOf('-hls_time') + 1] = to;
+                        return muxer(shortened, onTime, label);
+                    },
+                }),
+                options(outputDir),
+                makePlan()
+            ).catch((e) => e);
+
+            expect(error).toBeInstanceOf(QuickTrimRunError);
+            expect((error as Error).message).toContain('1 segment(s)');
+            expect((error as Error).message).toContain('3 planned part(s)');
         });
     });
 
@@ -616,6 +995,7 @@ describe('quick trim runner', () => {
 
             const error = await runQuickTrim(
                 deps({
+                    concurrency: 1,
                     isCancelled: () => cancelled,
                     runJob: async (args, onTime, label) => {
                         await muxer(args, onTime, label);
@@ -628,6 +1008,90 @@ describe('quick trim runner', () => {
 
             expect(error).toBeInstanceOf(QuickTrimCancelledError);
             expect(calls).toHaveLength(1);
+            expect(
+                existsSync(join(outputDir, VIDEO_DIR, 'playlist.m3u8'))
+            ).toBe(false);
+        });
+
+        it('reports a cancel as a cancel even when the killed job errored', async () => {
+            let cancelled = false;
+
+            const error = await runQuickTrim(
+                deps({
+                    concurrency: 1,
+                    isCancelled: () => cancelled,
+                    runJob: async () => {
+                        cancelled = true;
+                        // What a SIGTERMed child looks like to the runner.
+                        throw new Error('FFmpeg exited with code 255');
+                    },
+                }),
+                options(outputDir),
+                makePlan()
+            ).catch((e) => e);
+
+            expect(error).toBeInstanceOf(QuickTrimCancelledError);
+        });
+    });
+
+    describe('the job pool', () => {
+        it('runs jobs from several streams at once', async () => {
+            let running = 0;
+            let peak = 0;
+            const muxer = fakeMuxer([]);
+            ptsAnswers = [20.62];
+
+            await runQuickTrim(
+                deps({
+                    runJob: async (args, onTime, label) => {
+                        running += 1;
+                        peak = Math.max(peak, running);
+                        await new Promise((resolve) => setTimeout(resolve, 5));
+                        await muxer(args, onTime, label);
+                        running -= 1;
+                    },
+                }),
+                options(outputDir),
+                makePlan()
+            );
+
+            // Three video jobs and one audio job, all four in flight together.
+            expect(peak).toBe(4);
+        });
+
+        it('stops at the first failure, killing the jobs beside it', async () => {
+            const started: string[] = [];
+            const abort = new Set<(reason: Error) => void>();
+            const killRunningJobs = vi.fn(() => {
+                for (const reject of abort) reject(new Error('killed'));
+                abort.clear();
+            });
+
+            const error = await runQuickTrim(
+                deps({
+                    killRunningJobs,
+                    runJob: async (_args, _onTime, label) => {
+                        started.push(label);
+                        if (label === `${VIDEO_DIR} copy 1`) {
+                            throw new Error('FFmpeg exited with code 1');
+                        }
+                        // The losers outlive the failure and end only because
+                        // the pool killed them — and none of them may leave an
+                        // unhandled rejection behind (vitest fails the run on
+                        // one).
+                        await new Promise<void>((_resolve, reject) =>
+                            abort.add(reject)
+                        );
+                    },
+                }),
+                options(outputDir),
+                makePlan()
+            ).catch((e) => e);
+
+            expect((error as Error).message).toContain('code 1');
+            expect(killRunningJobs).toHaveBeenCalledTimes(1);
+            expect(started).toHaveLength(4);
+            // Nothing was authored from a run that was abandoned.
             expect(
                 existsSync(join(outputDir, VIDEO_DIR, 'playlist.m3u8'))
             ).toBe(false);
@@ -776,7 +1240,7 @@ describe('quick trim runner', () => {
             return proc;
         }
 
-        it('runs every job through the single process slot', async () => {
+        it('runs every job as a child of its own', async () => {
             const service = new FfmpegService();
             const spawned: string[][] = [];
             const muxer = fakeMuxer([]);
@@ -807,8 +1271,9 @@ describe('quick trim runner', () => {
                 segmentFormat: 'fmp4',
                 alignmentOffset: 0,
             });
-            // Three parts per stream, two streams, no retries.
-            expect(spawned).toHaveLength(6);
+            // Two bridges and one copy job for the video stream, one collapsed
+            // copy job for the audio stream, no retries.
+            expect(spawned).toHaveLength(4);
             expect(spawned[0]).toContain('-copyts');
         });
 

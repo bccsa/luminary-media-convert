@@ -125,9 +125,16 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private unusableReason: string | null = null;
     private activeProcess: ChildProcess | null = null;
     /**
+     * A quick trim runs several ffmpeg children at once through its own job
+     * pool, so it cannot use the single slot above. Membership is what
+     * {@link killActiveProcess} and {@link onModuleDestroy} kill, and what
+     * {@link killQuickTrimJobs} kills when one job of a run has failed.
+     */
+    private readonly quickTrimProcesses = new Set<ChildProcess>();
+    /**
      * A quick trim in flight has been cancelled — set by
-     * {@link killActiveProcess}, which kills the job running now; this is what
-     * stops the *next* one from starting. Cleared when a run begins.
+     * {@link killActiveProcess}, which kills the jobs running now; this is what
+     * stops the *next* ones from starting. Cleared when a run begins.
      */
     private quickTrimCancelled = false;
     private readonly timeoutMs = process.env.FFMPEG_TIMEOUT_MS
@@ -205,6 +212,31 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     async onModuleDestroy(): Promise<void> {
+        if (this.quickTrimProcesses.size > 0) {
+            this.logger.log(
+                `Shutting down: killing ${this.quickTrimProcesses.size} ` +
+                    `quick-trim FFmpeg process(es)...`
+            );
+            const children = [...this.quickTrimProcesses];
+            this.killQuickTrimJobs();
+            await Promise.all(
+                children.map(
+                    (child) =>
+                        new Promise<void>((resolve) => {
+                            const forceKillTimer = setTimeout(() => {
+                                if (!child.killed) child.kill('SIGKILL');
+                                resolve();
+                            }, 5000);
+                            child.once('close', () => {
+                                clearTimeout(forceKillTimer);
+                                resolve();
+                            });
+                        })
+                )
+            );
+            this.quickTrimProcesses.clear();
+        }
+
         if (this.activeProcess && !this.activeProcess.killed) {
             this.logger.log('Shutting down: killing active FFmpeg process...');
             this.activeProcess.kill('SIGTERM');
@@ -1478,9 +1510,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
      * Encode a trim by copying whole GOPs and re-encoding only the cut points.
      *
      * The plan says what to produce; {@link runQuickTrim} produces it, through
-     * this service's own single process slot so a quick trim occupies the
-     * encoder exactly as an ordinary encode does — one child at a time, killed
-     * by the same `killActiveProcess`.
+     * a pool of this service's children — a quick trim is dominated by
+     * per-process overhead, so it runs several jobs at once. They are killed by
+     * the same `killActiveProcess`, which reaches all of them.
      *
      * Throws `QuickTrimRunError` when the source will not cut where the plan
      * says (the caller's answer is the precise path) and
@@ -1497,6 +1529,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 accelMode: this.accelMode,
                 targets: this.quickTrimStreamTargets(opts.encodeConfig),
                 isCancelled: () => this.quickTrimCancelled,
+                killRunningJobs: () => this.killQuickTrimJobs(),
                 logger: {
                     log: (m) => this.logger.log(m),
                     warn: (m) => this.logger.warn(m),
@@ -1554,11 +1587,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     /**
-     * One ffmpeg job, run to completion in the single process slot.
+     * One ffmpeg job of a quick trim, run to completion.
      *
      * The same spawn/settle/kill shape {@link encode} uses, minus the encode's
      * own progress arithmetic — a quick trim's caller knows which part of the
-     * whole plan this job covers and scales the reported time itself.
+     * whole plan this job covers and scales the reported time itself. It tracks
+     * its child in {@link quickTrimProcesses} rather than the single
+     * {@link activeProcess} slot, because a quick trim runs several at once;
+     * the slot stays the ordinary encode's alone.
      */
     private runFfmpegJob(
         args: string[],
@@ -1571,7 +1607,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             const proc = spawn(ffmpegBin(), args, {
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
-            this.activeProcess = proc;
+            this.quickTrimProcesses.add(proc);
 
             let stderrBuffer = '';
             proc.stderr?.on('data', (chunk: Buffer) => {
@@ -1595,7 +1631,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             const settle = (err?: Error) => {
                 if (settled) return;
                 settled = true;
-                this.activeProcess = null;
+                this.quickTrimProcesses.delete(proc);
                 if (timeoutTimer) clearTimeout(timeoutTimer);
                 if (err) reject(err);
                 else resolve();
@@ -1959,13 +1995,34 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     killActiveProcess(): void {
-        // Killing the child ends the job running now; a quick trim is a
-        // sequence of them, so the flag is what keeps the next one from
+        // Killing the children ends the jobs running now; a quick trim is a
+        // poolful of them, so the flag is what keeps the queued ones from
         // starting. Harmless for an ordinary encode, which reads it never.
         this.quickTrimCancelled = true;
         if (this.activeProcess && !this.activeProcess.killed) {
             this.logger.log('Killing active FFmpeg process (user cancel)');
             this.activeProcess.kill('SIGTERM');
+        }
+        if (this.quickTrimProcesses.size > 0) {
+            this.logger.log(
+                `Killing ${this.quickTrimProcesses.size} quick-trim FFmpeg ` +
+                    `process(es) (user cancel)`
+            );
+            this.killQuickTrimJobs();
+        }
+    }
+
+    /**
+     * SIGTERM every quick-trim child, without marking the run cancelled.
+     *
+     * This is how a *failed* run stops the jobs still running beside the one
+     * that failed: their output is already being discarded, and the answer to a
+     * failure is the precise path, not a cancelled session — which is exactly
+     * what setting {@link quickTrimCancelled} here would produce.
+     */
+    private killQuickTrimJobs(): void {
+        for (const child of this.quickTrimProcesses) {
+            if (!child.killed) child.kill('SIGTERM');
         }
     }
 

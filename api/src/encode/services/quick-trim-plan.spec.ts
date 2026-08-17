@@ -80,6 +80,7 @@ describe('planQuickTrim', () => {
                 {
                     kind: 'bridge',
                     partIndex: 0,
+                    rangeIndex: 0,
                     startNumber: 0,
                     start: 2.5,
                     end: 3.06,
@@ -88,6 +89,7 @@ describe('planQuickTrim', () => {
                 {
                     kind: 'copy',
                     partIndex: 1,
+                    rangeIndex: 0,
                     startNumber: 100000,
                     start: 3.06,
                     end: 7.06,
@@ -96,6 +98,7 @@ describe('planQuickTrim', () => {
                 {
                     kind: 'bridge',
                     partIndex: 2,
+                    rangeIndex: 0,
                     startNumber: 200000,
                     start: 7.06,
                     end: 7.5,
@@ -218,7 +221,7 @@ describe('planQuickTrim', () => {
     });
 
     describe('init ownership', () => {
-        it('gives part 0 its own init and lets copy runs share one', () => {
+        it('gives each range its first init and lets its copy split share it', () => {
             const result = plan(
                 [audioStream],
                 [
@@ -227,11 +230,13 @@ describe('planQuickTrim', () => {
                 ]
             );
 
+            // One ffmpeg run per range, so one init per range: the parts split
+            // off inside a range come out of that same run.
             expect(result.streams[0].parts.map((p) => p.ownInit)).toEqual([
                 true,
                 false,
                 false,
-                false,
+                true,
                 false,
                 false,
             ]);
@@ -268,6 +273,7 @@ describe('planQuickTrim', () => {
                 {
                     kind: 'copy',
                     partIndex: 0,
+                    rangeIndex: 0,
                     startNumber: 0,
                     start: 2.5,
                     end: 3.06,
@@ -276,6 +282,7 @@ describe('planQuickTrim', () => {
                 {
                     kind: 'copy',
                     partIndex: 1,
+                    rangeIndex: 0,
                     startNumber: 100000,
                     start: 3.06,
                     end: 7.06,
@@ -284,6 +291,7 @@ describe('planQuickTrim', () => {
                 {
                     kind: 'copy',
                     partIndex: 2,
+                    rangeIndex: 0,
                     startNumber: 200000,
                     start: 7.06,
                     end: 7.5,
@@ -302,6 +310,40 @@ describe('planQuickTrim', () => {
                 [3, 6],
                 [6, 9],
             ]);
+        });
+    });
+
+    describe('range membership', () => {
+        it('tags every part with the kept range it came from', () => {
+            const result = plan(referenceStreams(), [
+                { inSec: 2.5, outSec: 7.5 },
+                { inSec: 9.5, outSec: 14.5 },
+            ]);
+
+            for (const stream of result.streams) {
+                expect(stream.parts.map((p) => p.rangeIndex)).toEqual([
+                    0, 0, 0, 1, 1, 1,
+                ]);
+            }
+        });
+
+        it('separates a range tail from the next range head that follows it', () => {
+            // Two ranges meeting exactly, so the parts either side of the join
+            // are contiguous in time: only rangeIndex says they are two
+            // different seeks into the source.
+            const result = plan(
+                [audioStream],
+                [
+                    { inSec: 2, outSec: 8 },
+                    { inSec: 8, outSec: 14 },
+                ]
+            );
+
+            const parts = result.streams[0].parts;
+            expect(parts[2].end).toBe(parts[3].start);
+            expect(parts[2].rangeIndex).toBe(0);
+            expect(parts[3].rangeIndex).toBe(1);
+            expect(parts[3].ownInit).toBe(true);
         });
     });
 
@@ -470,5 +512,64 @@ describe('planQuickTrim', () => {
                 'No streams'
             );
         });
+    });
+});
+
+describe('planQuickTrim — streams that reorder at start', () => {
+    function plan(streams: StreamGrid[], ranges: { inSec: number; outSec: number }[]) {
+        const result = planQuickTrim({
+            streams,
+            trimSegments: ranges,
+            segmentDuration: 6,
+        });
+        if (isQuickTrimRejection(result)) throw new Error(result.reason);
+        return result;
+    }
+
+    it('bridges through the first GOP when the trim starts at the first keyframe', () => {
+        // Keyframes at 0,1,2,… and a cut at 0: without the flag the head is a
+        // copy of [0,1) starting at the file head, whose decode time is
+        // negative on a B-frame stream — the muxer would shift it and the
+        // runner refuse it. With the flag the head is a bridge instead.
+        const stream: StreamGrid = {
+            streamDir: 'stream_v0',
+            kind: 'video',
+            keyframes: grid(0),
+            reordersAtStart: true,
+        };
+        const parts = plan([stream], [{ inSec: 0, outSec: 12 }]).streams[0]
+            .parts;
+        expect(parts.map((p) => p.kind)).toEqual(['bridge', 'copy', 'copy']);
+        expect(parts[0].start).toBe(0);
+        expect(parts[0].end).toBe(1);
+        expect(parts[1].start).toBe(1);
+    });
+
+    it('skips the first keyframe as an in-point when the cut precedes it', () => {
+        const stream: StreamGrid = {
+            streamDir: 'stream_v0',
+            kind: 'video',
+            keyframes: grid(0.62),
+            reordersAtStart: true,
+        };
+        const parts = plan([stream], [{ inSec: 0, outSec: 12 }]).streams[0]
+            .parts;
+        expect(parts[0].kind).toBe('bridge');
+        // The bridge runs through the whole first GOP: the copy span may not
+        // begin at 0.62, the file's first keyframe.
+        expect(parts[1].start).toBeCloseTo(1.62, 6);
+    });
+
+    it('changes nothing for a mid-file trim', () => {
+        const flagged: StreamGrid = {
+            streamDir: 'stream_v0',
+            kind: 'video',
+            keyframes: grid(0, 60),
+            reordersAtStart: true,
+        };
+        const plain: StreamGrid = { ...flagged, reordersAtStart: false };
+        const a = plan([flagged], [{ inSec: 20.4, outSec: 40 }]).streams[0];
+        const b = plan([plain], [{ inSec: 20.4, outSec: 40 }]).streams[0];
+        expect(a.parts).toEqual(b.parts);
     });
 });

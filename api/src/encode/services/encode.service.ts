@@ -714,10 +714,16 @@ export class EncodeService {
                     );
                     grids.set(target.sourceTrackIndex, grid);
                 }
+                // Strict on unknowns, like the eligibility gate: a track the
+                // probe could not characterise is assumed to reorder, which
+                // only costs one bridged GOP on a trim that starts at zero.
+                const track =
+                    session.probeResult?.videoTracks[target.sourceTrackIndex];
                 streams.push({
                     streamDir: target.streamDir,
                     kind: 'video',
                     keyframes: grid,
+                    reordersAtStart: (track?.hasBFrames ?? 1) > 0,
                 });
             }
         } catch (err) {
