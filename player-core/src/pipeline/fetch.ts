@@ -154,9 +154,16 @@ export async function decodeMaybeEncrypted(
     }
 
     if (!matchesExpectation(bytes, expect)) {
+        // Say what arrived, not only that it was wrong: the URL alone cannot
+        // distinguish an error page, an empty body, and a stale cache entry,
+        // and each of those is a different bug.
+        const head = Array.from(bytes.subarray(0, 48))
+            .map((b) => (b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : `\\x${b.toString(16).padStart(2, '0')}`))
+            .join('');
         throw new PipelineError(
             'invalid-content',
-            `${url} is neither LMCENC nor a recognizable ${expect === 'vtt' ? 'WebVTT file' : 'playlist'}`,
+            `${url} is neither LMCENC nor a recognizable ${expect === 'vtt' ? 'WebVTT file' : 'playlist'} ` +
+                `(${bytes.length} bytes, starts: "${head}")`,
             { url },
         );
     }
