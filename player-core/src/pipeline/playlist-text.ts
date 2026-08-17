@@ -257,6 +257,20 @@ export function absolutize(uri: string, base: string): string {
     try {
         return new URL(uri, base).href;
     } catch {
+        // `base` was itself relative — a same-origin app hands over
+        // `/api/sessions/…/playlist.m3u8` with no scheme or host, and `new URL`
+        // refuses a relative base. Anchoring it to the document turns it into
+        // the absolute URL it was always meant to be. Left as-is, a rendition
+        // reference like `r0/playlist.m3u8` came back unchanged, the browser
+        // resolved it against the *page*, and the app's SPA fallback answered
+        // with index.html where a playlist should be.
+        if (typeof document !== 'undefined' && document.baseURI) {
+            try {
+                return new URL(uri, new URL(base, document.baseURI)).href;
+            } catch {
+                /* fall through */
+            }
+        }
         return uri;
     }
 }

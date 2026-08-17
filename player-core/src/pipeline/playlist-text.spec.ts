@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
     absolutize,
     collectMasterRefs,
@@ -189,5 +189,44 @@ describe('absolutize', () => {
         expect(absolutize('data:text/vtt,WEBVTT', base)).toBe(
             'data:text/vtt,WEBVTT',
         );
+    });
+
+    describe('with a relative base', () => {
+        // A same-origin app hands over `/api/…/playlist.m3u8` with no scheme or
+        // host. `new URL(uri, base)` refuses that, and returning `uri` unchanged
+        // let the browser resolve `r0/playlist.m3u8` against the page — the SPA
+        // fallback then answered with index.html where a playlist should be.
+        const relativeBase = '/api/sessions/abc/preview/playlist.m3u8?token=t';
+        const savedDocument = (globalThis as any).document;
+
+        afterEach(() => {
+            (globalThis as any).document = savedDocument;
+        });
+
+        it('anchors the base to the document when there is one', () => {
+            (globalThis as any).document = {
+                baseURI: 'http://127.0.0.1:31711/sessions/abc',
+            };
+            expect(absolutize('r0/playlist.m3u8?token=t', relativeBase)).toBe(
+                'http://127.0.0.1:31711/api/sessions/abc/preview/r0/playlist.m3u8?token=t',
+            );
+        });
+
+        it('never resolves against the page path itself', () => {
+            (globalThis as any).document = {
+                baseURI: 'http://127.0.0.1:31711/sessions/abc',
+            };
+            // The wrong answer this used to produce, by way of the browser.
+            expect(absolutize('r0/playlist.m3u8', relativeBase)).not.toContain(
+                '/sessions/abc/r0/',
+            );
+        });
+
+        it('returns the uri unchanged when there is no document to anchor to', () => {
+            (globalThis as any).document = undefined;
+            expect(absolutize('r0/playlist.m3u8', relativeBase)).toBe(
+                'r0/playlist.m3u8',
+            );
+        });
     });
 });

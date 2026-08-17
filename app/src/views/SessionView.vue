@@ -513,7 +513,15 @@ const previewPlaybackUrl = computed(() => {
     if (!sessionToken.value) return null;
     const s = currentStatus.value;
     if (!s || s === 'created' || s === 'uploading') return null;
-    let url = `${API_BASE}/api/sessions/${sessionId.value}/preview/playlist.m3u8?token=${sessionToken.value}`;
+    // Absolute, always. Packaged, API_BASE is '' (same origin), which would make
+    // this a bare path — and the player uses it as the base for resolving the
+    // rendition references inside the master. A relative base resolves nothing,
+    // so `r0/playlist.m3u8` fell through to the browser, which resolved it
+    // against the *page* URL, and the SPA fallback answered with index.html.
+    // Every packaged build failed the preview this way; browser dev never saw it
+    // because API_BASE is absolute there.
+    const origin = API_BASE || window.location.origin;
+    let url = `${origin}/api/sessions/${sessionId.value}/preview/playlist.m3u8?token=${sessionToken.value}`;
     if (previewAudioTracks.value.length > 1) {
         url += `&audio=${selectedAudioTrack.value}`;
     }
