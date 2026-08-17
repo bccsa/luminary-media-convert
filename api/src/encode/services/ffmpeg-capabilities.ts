@@ -158,9 +158,11 @@ export async function probeFfmpegCapabilities(): Promise<CapabilityReport> {
 
     for (const capability of REQUIRED_CAPABILITIES) {
         if (capability.probe === 'hls-muxer') {
-            if (hls && !hls.includes(capability.token)) missing.push(capability);
+            if (hls && !hls.includes(capability.token))
+                missing.push(capability);
         } else if (capability.probe === 'mp4-muxer') {
-            if (mp4 && !mp4.includes(capability.token)) missing.push(capability);
+            if (mp4 && !mp4.includes(capability.token))
+                missing.push(capability);
         } else {
             const accepted = await acceptsGlobalOption(capability.token);
             if (accepted === null) indeterminate = true;

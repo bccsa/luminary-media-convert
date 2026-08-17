@@ -280,10 +280,13 @@ describe('EncryptionService — encryptTextAssets (LMCENC01)', () => {
             'thumbnails/thumbnails.vtt',
         ]);
         expect(readFileSync(join(dir, 'waveform.json'), 'utf-8')).toBe(
-            '{"peaks":[]}',
+            '{"peaks":[]}'
         );
         expect(
-            decrypt(readFileSync(join(dir, 'thumbnails', 'thumbnails.vtt')), KEY),
+            decrypt(
+                readFileSync(join(dir, 'thumbnails', 'thumbnails.vtt')),
+                KEY
+            )
         ).toBe('WEBVTT\n');
     });
 
@@ -321,7 +324,7 @@ describe('EncryptionService — encryptTextAssets (LMCENC01)', () => {
         writeFileSync(join(dir, 'master.m3u8'), '#EXTM3U\n');
 
         await expect(
-            service.encryptTextAssets(dir, Buffer.alloc(32)),
+            service.encryptTextAssets(dir, Buffer.alloc(32))
         ).rejects.toThrow(/16-byte/);
     });
 });

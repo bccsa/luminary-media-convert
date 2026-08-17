@@ -80,12 +80,12 @@ export class EncryptionService {
             if (isLmcencPayload(content)) continue;
             await writeFile(filePath, encryptTextAsset(content, key));
             encrypted.push(
-                relative(outputDir, filePath).split(/[\\/]/).join('/'),
+                relative(outputDir, filePath).split(/[\\/]/).join('/')
             );
         }
 
         this.logger.log(
-            `Encrypted ${encrypted.length} playlist/VTT file(s) with the session key`,
+            `Encrypted ${encrypted.length} playlist/VTT file(s) with the session key`
         );
         return encrypted;
     }

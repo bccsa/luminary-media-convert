@@ -1,4 +1,12 @@
-import { ArrayMinSize, IsArray, IsNotEmpty, IsOptional, IsString, Matches, ValidateNested } from 'class-validator';
+import {
+    ArrayMinSize,
+    IsArray,
+    IsNotEmpty,
+    IsOptional,
+    IsString,
+    Matches,
+    ValidateNested,
+} from 'class-validator';
 import { Expose, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { S3ConfigDto } from '../../encode/dto/s3-config.dto.js';

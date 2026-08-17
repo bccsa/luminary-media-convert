@@ -3,7 +3,9 @@ import { DEV_API_TOKEN, applyDevDefaults } from './dev-defaults.js';
 
 /** A logger that records rather than prints. */
 function fakeLogger() {
-    return { warn: vi.fn() } as unknown as Parameters<typeof applyDevDefaults>[0];
+    return { warn: vi.fn() } as unknown as Parameters<
+        typeof applyDevDefaults
+    >[0];
 }
 
 const KEYS = [
@@ -36,8 +38,12 @@ describe('applyDevDefaults', () => {
         expect(process.env.LOCAL_API_TOKEN).toBe(DEV_API_TOKEN);
         // The Vite client and the CMS mock: an empty allowlist refuses both, and
         // standalone there is no approver to ask.
-        expect(process.env.CMS_ALLOWED_ORIGINS).toContain('http://localhost:5173');
-        expect(process.env.CMS_ALLOWED_ORIGINS).toContain('http://localhost:5199');
+        expect(process.env.CMS_ALLOWED_ORIGINS).toContain(
+            'http://localhost:5173'
+        );
+        expect(process.env.CMS_ALLOWED_ORIGINS).toContain(
+            'http://localhost:5199'
+        );
     });
 
     it('says so, rather than defaulting silently', () => {
@@ -47,9 +53,9 @@ describe('applyDevDefaults', () => {
         applyDevDefaults(logger);
 
         expect(logger.warn).toHaveBeenCalledTimes(1);
-        expect((logger.warn as ReturnType<typeof vi.fn>).mock.calls[0][0]).toContain(
-            'production'
-        );
+        expect(
+            (logger.warn as ReturnType<typeof vi.fn>).mock.calls[0][0]
+        ).toContain('production');
     });
 
     it('does nothing at all in production', () => {

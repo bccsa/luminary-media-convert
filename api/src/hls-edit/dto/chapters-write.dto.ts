@@ -39,7 +39,7 @@ export class HlsChaptersWriteRequestDto {
     @ApiPropertyOptional({
         description:
             'Hex-encoded AES-128 session key, for sessions created with ' +
-            '`encryption.encryptPlaylists`. Supplying it means this session\'s ' +
+            "`encryption.encryptPlaylists`. Supplying it means this session's " +
             'sidecars are encrypted: the body is stored as LMCENC01 with a ' +
             'fresh IV and Content-Type: application/octet-stream. `vtt` itself ' +
             'is always sent as plaintext WebVTT.',

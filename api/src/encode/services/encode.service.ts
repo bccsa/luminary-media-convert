@@ -210,7 +210,9 @@ export class EncodeService {
 
             const finishPhase = (): void => {
                 if (!phaseInProgress) return;
-                const seconds = ((Date.now() - phaseStartedAt) / 1000).toFixed(1);
+                const seconds = ((Date.now() - phaseStartedAt) / 1000).toFixed(
+                    1
+                );
                 this.logger.log(
                     `Session ${sessionId}: ${phaseInProgress} took ${seconds}s`
                 );

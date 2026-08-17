@@ -127,22 +127,22 @@ describe('ProbeService', () => {
             });
         });
 
-        it('does not rely on ffprobe\'s casing', async () => {
+        it("does not rely on ffprobe's casing", async () => {
             expect(await languagesFor({ language: 'UND' })).toEqual({
                 video: undefined,
                 audio: undefined,
             });
         });
 
-        it.each([['', 'empty'], ['   ', 'whitespace']])(
-            'treats an %s tag as no language (%s)',
-            async (value) => {
-                expect(await languagesFor({ language: value })).toEqual({
-                    video: undefined,
-                    audio: undefined,
-                });
-            }
-        );
+        it.each([
+            ['', 'empty'],
+            ['   ', 'whitespace'],
+        ])('treats an %s tag as no language (%s)', async (value) => {
+            expect(await languagesFor({ language: value })).toEqual({
+                video: undefined,
+                audio: undefined,
+            });
+        });
 
         it('leaves a real language alone', async () => {
             expect(await languagesFor({ language: 'nor' })).toEqual({
@@ -1004,7 +1004,9 @@ describe('ProbeService', () => {
         it('returns null when the window holds fewer than two keyframes', async () => {
             mockFrames(['I', 'P', 'P', 'P']);
 
-            expect(await service.probeGopInfo('/tmp/test.mp4', 0, 30)).toBeNull();
+            expect(
+                await service.probeGopInfo('/tmp/test.mp4', 0, 30)
+            ).toBeNull();
         });
 
         it('returns null when ffprobe fails', async () => {
@@ -1012,11 +1014,15 @@ describe('ProbeService', () => {
                 cb(new Error('ffprobe failed'), { stdout: '', stderr: '' });
             });
 
-            expect(await service.probeGopInfo('/tmp/test.mp4', 0, 30)).toBeNull();
+            expect(
+                await service.probeGopInfo('/tmp/test.mp4', 0, 30)
+            ).toBeNull();
         });
 
         it('returns null without asking anything when the frame rate is unknown', async () => {
-            expect(await service.probeGopInfo('/tmp/test.mp4', 0, 0)).toBeNull();
+            expect(
+                await service.probeGopInfo('/tmp/test.mp4', 0, 0)
+            ).toBeNull();
             expect(mockExecFile).not.toHaveBeenCalled();
         });
 
@@ -1053,9 +1059,13 @@ describe('ProbeService', () => {
                     'I',
                 ].join('\n') + '\n',
                 // Track 1: keyframes wherever it likes.
-                ['I', ...Array(29).fill('P'), 'I', ...Array(9).fill('P'), 'I'].join(
-                    '\n'
-                ) + '\n',
+                [
+                    'I',
+                    ...Array(29).fill('P'),
+                    'I',
+                    ...Array(9).fill('P'),
+                    'I',
+                ].join('\n') + '\n',
             ]);
 
             const result = await service.probe('/tmp/multi-angle.mp4');

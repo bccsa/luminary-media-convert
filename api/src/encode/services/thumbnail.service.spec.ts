@@ -1430,9 +1430,18 @@ describe('ThumbnailService', () => {
                 packList = [];
                 mockExecFile.mockReset();
                 mockFfmpeg({ thumbs: 12, sprites: 1, onPass: capturePackList });
-                mkdirSync(join(relRoot, 'relwork', SID, 'preview-thumbnails', 'thumbnails'), {
-                    recursive: true,
-                });
+                mkdirSync(
+                    join(
+                        relRoot,
+                        'relwork',
+                        SID,
+                        'preview-thumbnails',
+                        'thumbnails'
+                    ),
+                    {
+                        recursive: true,
+                    }
+                );
                 for (let i = 1; i <= 12; i++) {
                     writeFileSync(
                         join(
@@ -1441,9 +1450,9 @@ describe('ThumbnailService', () => {
                             SID,
                             'preview-thumbnails',
                             'thumbnails',
-                            `thumb_${String(i).padStart(6, '0')}.jpg`,
+                            `thumb_${String(i).padStart(6, '0')}.jpg`
                         ),
-                        'x',
+                        'x'
                     );
                 }
 
@@ -1451,7 +1460,7 @@ describe('ThumbnailService', () => {
 
                 expect(packList.length).toBeGreaterThan(0);
                 const paths = packList.map((line) =>
-                    line.replace(/^file '(.*)'$/, '$1'),
+                    line.replace(/^file '(.*)'$/, '$1')
                 );
                 expect(paths.every((path) => isAbsolute(path))).toBe(true);
             } finally {

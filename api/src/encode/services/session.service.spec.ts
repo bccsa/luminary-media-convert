@@ -682,9 +682,7 @@ describe('SessionService — events', () => {
 
             service.updateStoryboardProgress(session.id, 12, false);
 
-            expect(
-                service.get(session.id)?.storyboardComplete
-            ).toBeUndefined();
+            expect(service.get(session.id)?.storyboardComplete).toBeUndefined();
         });
 
         it('clears the flag again when a later pass re-primes the storyboard', () => {
@@ -697,9 +695,7 @@ describe('SessionService — events', () => {
 
             service.updateStoryboardProgress(session.id, 3);
 
-            expect(
-                service.get(session.id)?.storyboardComplete
-            ).toBeUndefined();
+            expect(service.get(session.id)?.storyboardComplete).toBeUndefined();
             expect(emit).toHaveBeenCalledWith(
                 expect.objectContaining({ storyboardComplete: undefined })
             );

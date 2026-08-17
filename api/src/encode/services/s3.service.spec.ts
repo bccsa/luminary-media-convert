@@ -223,7 +223,10 @@ describe('S3Service — Content-Type for encrypted text assets', () => {
         rmSync(dir, { recursive: true, force: true });
     });
 
-    async function contentTypeOf(name: string, body: Buffer | string): Promise<string> {
+    async function contentTypeOf(
+        name: string,
+        body: Buffer | string
+    ): Promise<string> {
         const path = join(dir, name);
         writeFileSync(path, body);
         return service.resolveContentType(path);
@@ -233,32 +236,34 @@ describe('S3Service — Content-Type for encrypted text assets', () => {
         // Anything that reads the extension and decides to transcode the
         // charset or gzip the body corrupts the ciphertext for every viewer.
         expect(await contentTypeOf('master.m3u8', LMCENC('cipher'))).toBe(
-            'application/octet-stream',
+            'application/octet-stream'
         );
     });
 
     it('stores an encrypted VTT as octet-stream', async () => {
         expect(await contentTypeOf('chapters.vtt', LMCENC('cipher'))).toBe(
-            'application/octet-stream',
+            'application/octet-stream'
         );
     });
 
     it('leaves plaintext playlists and VTTs as they were', async () => {
         expect(await contentTypeOf('master.m3u8', '#EXTM3U\n')).toBe(
-            'application/vnd.apple.mpegurl',
+            'application/vnd.apple.mpegurl'
         );
-        expect(await contentTypeOf('chapters.vtt', 'WEBVTT\n')).toBe('text/vtt');
+        expect(await contentTypeOf('chapters.vtt', 'WEBVTT\n')).toBe(
+            'text/vtt'
+        );
     });
 
     it('does not sniff files that were never text assets', async () => {
         expect(await contentTypeOf('segment_000.m4s', LMCENC('x'))).toBe(
-            'video/iso.segment',
+            'video/iso.segment'
         );
     });
 
     it('falls back to the extension when the file cannot be read', async () => {
         expect(
-            await service.resolveContentType(join(dir, 'missing.m3u8')),
+            await service.resolveContentType(join(dir, 'missing.m3u8'))
         ).toBe('application/vnd.apple.mpegurl');
     });
 
@@ -273,7 +278,7 @@ describe('S3Service — Content-Type for encrypted text assets', () => {
             'bucket',
             'out/master.m3u8',
             path,
-            { 'Content-Type': 'application/octet-stream' },
+            { 'Content-Type': 'application/octet-stream' }
         );
     });
 });

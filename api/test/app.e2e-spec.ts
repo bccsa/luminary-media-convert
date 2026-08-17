@@ -10,10 +10,9 @@ describe('Encode API (e2e)', () => {
         process.env.AUTH_USERNAME = 'testuser';
         process.env.AUTH_PASSWORD = 'testpass';
 
-        const moduleFixture: TestingModule =
-            await Test.createTestingModule({
-                imports: [AppModule.forRoot()],
-            }).compile();
+        const moduleFixture: TestingModule = await Test.createTestingModule({
+            imports: [AppModule.forRoot()],
+        }).compile();
 
         app = moduleFixture.createNestApplication();
         app.useGlobalPipes(
@@ -41,9 +40,7 @@ describe('Encode API (e2e)', () => {
     });
 
     it('GET /api/sessions/:id with unknown id should return 404', () => {
-        const basicAuth = Buffer.from('testuser:testpass').toString(
-            'base64'
-        );
+        const basicAuth = Buffer.from('testuser:testpass').toString('base64');
         return request(app.getHttpServer())
             .get('/api/sessions/nonexistent-id')
             .set('Authorization', `Basic ${basicAuth}`)

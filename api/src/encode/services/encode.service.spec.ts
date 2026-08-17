@@ -923,12 +923,16 @@ describe('EncodeService', () => {
      */
     describe('post-drain phase reporting', () => {
         async function phasesFor(probeResult?: Record<string, unknown>) {
-            const updateSpy = vi.spyOn(sessionService, 'updatePipelineProgress');
+            const updateSpy = vi.spyOn(
+                sessionService,
+                'updatePipelineProgress'
+            );
             const session = sessionService.create(makeConfig());
             sessionService.setFilePath(session.id, '/tmp/input.mp4');
             sessionService.setEncodeConfig(session.id, makeEncodeConfig());
             if (probeResult) {
-                (sessionService.get(session.id) as any).probeResult = probeResult;
+                (sessionService.get(session.id) as any).probeResult =
+                    probeResult;
             }
 
             await service.processSession(session.id);
@@ -972,7 +976,10 @@ describe('EncodeService', () => {
             // before the status changes: one event carrying the previous step's
             // phase would attribute the upload to whatever ran before it, which
             // is the thing this caption exists to prevent.
-            const updateSpy = vi.spyOn(sessionService, 'updatePipelineProgress');
+            const updateSpy = vi.spyOn(
+                sessionService,
+                'updatePipelineProgress'
+            );
             const statusSpy = vi.spyOn(sessionService, 'updateStatus');
             const session = sessionService.create(makeConfig());
             sessionService.setFilePath(session.id, '/tmp/input.mp4');
@@ -980,14 +987,17 @@ describe('EncodeService', () => {
 
             await service.processSession(session.id);
 
-            const flipOrder = statusSpy.mock.invocationCallOrder[
-                statusSpy.mock.calls.findIndex(
-                    ([, status]) => status === 'uploading_to_s3'
-                )
-            ];
+            const flipOrder =
+                statusSpy.mock.invocationCallOrder[
+                    statusSpy.mock.calls.findIndex(
+                        ([, status]) => status === 'uploading_to_s3'
+                    )
+                ];
             // The last caption emitted before the status flipped.
             const captionAtFlip = updateSpy.mock.calls
-                .filter((_, i) => updateSpy.mock.invocationCallOrder[i] < flipOrder)
+                .filter(
+                    (_, i) => updateSpy.mock.invocationCallOrder[i] < flipOrder
+                )
                 .map(([, progress]) => (progress as { phase?: string }).phase)
                 .at(-1);
 
@@ -1215,7 +1225,7 @@ describe('EncodeService — encrypting the text assets last', () => {
             thumbnailService,
             waveformService,
             {} as any,
-            { createPipeline: vi.fn().mockReturnValue(mockPipeline) } as any,
+            { createPipeline: vi.fn().mockReturnValue(mockPipeline) } as any
         );
     });
 
@@ -1252,7 +1262,7 @@ describe('EncodeService — encrypting the text assets last', () => {
 
         expect(encryptionService.encryptTextAssets).toHaveBeenCalledWith(
             expect.stringContaining('output'),
-            Buffer.alloc(16, 0xcd),
+            Buffer.alloc(16, 0xcd)
         );
     });
 
@@ -1285,9 +1295,7 @@ describe('EncodeService — naming the finalize phases', () => {
     let mockPipeline: SegmentPipeline;
     let emissions: PipelineProgress[];
     /** Whatever `uploadRemainingFiles` was handed to report per-file progress. */
-    let onFileProgress:
-        | ((done: number, total: number) => void)
-        | undefined;
+    let onFileProgress: ((done: number, total: number) => void) | undefined;
     let testWorkDir: string;
 
     /** An encode with every finalize step in play: video, audio, encryption. */
@@ -1502,9 +1510,7 @@ describe('EncodeService — naming the finalize phases', () => {
 
             expect(emissions.map((p) => p.uploading)).toEqual([25, 75, 100]);
             expect(
-                emissions.every(
-                    (p) => p.phase === 'uploading-playlists'
-                )
+                emissions.every((p) => p.phase === 'uploading-playlists')
             ).toBe(true);
         });
 
@@ -1696,9 +1702,7 @@ describe('EncodeService — the delivered waveform sidecar', () => {
         await service.processSession(session.id);
 
         expect(waveformService.generateWaveform).toHaveBeenCalledTimes(1);
-        expect(uploadedSidecar.version).toBe(
-            WAVEFORM_SIDECAR_VERSION
-        );
+        expect(uploadedSidecar.version).toBe(WAVEFORM_SIDECAR_VERSION);
     });
 
     it('removes the head the alignment seek removed, cache or no cache', async () => {
@@ -1744,8 +1748,6 @@ describe('EncodeService — the delivered waveform sidecar', () => {
                 durationSec: expect.closeTo(18.94, 5),
             })
         );
-        expect(uploadedSidecar.version).toBe(
-            WAVEFORM_SIDECAR_VERSION
-        );
+        expect(uploadedSidecar.version).toBe(WAVEFORM_SIDECAR_VERSION);
     });
 });

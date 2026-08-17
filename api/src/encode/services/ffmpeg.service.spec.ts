@@ -12,15 +12,21 @@ import { tmpdir } from 'os';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 
-const { mockSpawn, mockExecSync, mockExecFileSync, mockExecFile, MockWorker, useRealWorker } =
-    vi.hoisted(() => ({
-        mockSpawn: vi.fn(),
-        mockExecSync: vi.fn(),
-        mockExecFileSync: vi.fn(),
-        mockExecFile: vi.fn(),
-        MockWorker: vi.fn(),
-        useRealWorker: { value: true },
-    }));
+const {
+    mockSpawn,
+    mockExecSync,
+    mockExecFileSync,
+    mockExecFile,
+    MockWorker,
+    useRealWorker,
+} = vi.hoisted(() => ({
+    mockSpawn: vi.fn(),
+    mockExecSync: vi.fn(),
+    mockExecFileSync: vi.fn(),
+    mockExecFile: vi.fn(),
+    MockWorker: vi.fn(),
+    useRealWorker: { value: true },
+}));
 
 vi.mock('child_process', async (importOriginal) => {
     const actual = await importOriginal<typeof import('child_process')>();
@@ -4575,12 +4581,16 @@ describe('isHardwareEncoderFailure', () => {
     it('recognises the other hardware encoders too', () => {
         expect(
             isHardwareEncoderFailure(
-                new Error('[enc:h264_qsv @ 0x1] Error while opening encoder - maybe incorrect parameters')
+                new Error(
+                    '[enc:h264_qsv @ 0x1] Error while opening encoder - maybe incorrect parameters'
+                )
             )
         ).toBe(true);
         expect(
             isHardwareEncoderFailure(
-                new Error('[h264_videotoolbox @ 0x1] Error: cannot create compression session: -12903 Invalid argument')
+                new Error(
+                    '[h264_videotoolbox @ 0x1] Error: cannot create compression session: -12903 Invalid argument'
+                )
             )
         ).toBe(true);
     });
@@ -4589,13 +4599,21 @@ describe('isHardwareEncoderFailure', () => {
         // A bad source is a bad source; encoding it twice helps nobody.
         expect(
             isHardwareEncoderFailure(
-                new Error('[mov @ 0x1] moov atom not found\n/in.mp4: Invalid data found when processing input')
+                new Error(
+                    '[mov @ 0x1] moov atom not found\n/in.mp4: Invalid data found when processing input'
+                )
             )
         ).toBe(false);
         // libx264 is the CPU path — nothing to fall back to.
         expect(
-            isHardwareEncoderFailure(new Error('[libx264 @ 0x1] Invalid argument'))
+            isHardwareEncoderFailure(
+                new Error('[libx264 @ 0x1] Invalid argument')
+            )
         ).toBe(false);
-        expect(isHardwareEncoderFailure(new Error('FFmpeg timed out after 60000ms'))).toBe(false);
+        expect(
+            isHardwareEncoderFailure(
+                new Error('FFmpeg timed out after 60000ms')
+            )
+        ).toBe(false);
     });
 });

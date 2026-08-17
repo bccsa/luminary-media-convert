@@ -4,7 +4,13 @@ import {
     OnModuleInit,
     OnModuleDestroy,
 } from '@nestjs/common';
-import { spawn, execFile, execFileSync, execSync, type ChildProcess } from 'child_process';
+import {
+    spawn,
+    execFile,
+    execFileSync,
+    execSync,
+    type ChildProcess,
+} from 'child_process';
 import { mkdirSync, existsSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
@@ -665,9 +671,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                 const splitOutputs = entries
                     .map((e) => `[reencode${e.globalIndex}]`)
                     .join('');
-                const trimSelect = trimming
-                    ? 'select=concatdec_select,'
-                    : '';
+                const trimSelect = trimming ? 'select=concatdec_select,' : '';
                 filterParts.push(
                     `[0:v:${trackIdx}]${trimSelect}split=${entries.length}${splitOutputs}`
                 );
@@ -954,7 +958,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const varParts: string[] = [];
         for (const { rendition, outputIndex } of videoIndexMap) {
             const name = this.buildVideoStreamName(rendition, multiTrack);
-            let part = `v:${outputIndex},agroup:${rendition.audioGroupId},name:${name}`;
+            const part = `v:${outputIndex},agroup:${rendition.audioGroupId},name:${name}`;
             varParts.push(part);
         }
 

@@ -834,7 +834,10 @@ export class SegmentPipeline {
     async uploadRemainingFiles(
         outputDir: string,
         opts?: {
-            onFileProgress?: (uploadedCount: number, totalCount: number) => void;
+            onFileProgress?: (
+                uploadedCount: number,
+                totalCount: number
+            ) => void;
         }
     ): Promise<string[]> {
         const files = await this.walkDir(outputDir);
@@ -885,7 +888,12 @@ export class SegmentPipeline {
             };
 
             const workers = Array.from(
-                { length: Math.max(1, Math.min(this.uploadConcurrency, total)) },
+                {
+                    length: Math.max(
+                        1,
+                        Math.min(this.uploadConcurrency, total)
+                    ),
+                },
                 () => worker()
             );
             // A failing worker rejects here and the method rejects with it, as

@@ -1640,9 +1640,7 @@ describe('PreviewService', () => {
             const ffmpegArgs = mockExecFile.mock.calls[0][1] as string[];
             expect(ffmpegArgs).toContain('-copyts');
             expect(ffmpegArgs[ffmpegArgs.indexOf('-muxdelay') + 1]).toBe('0');
-            expect(ffmpegArgs[ffmpegArgs.indexOf('-muxpreload') + 1]).toBe(
-                '0'
-            );
+            expect(ffmpegArgs[ffmpegArgs.indexOf('-muxpreload') + 1]).toBe('0');
         });
     });
 

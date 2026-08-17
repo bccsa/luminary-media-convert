@@ -54,7 +54,9 @@ export async function readCachedWaveform(
             await readFile(path, 'utf-8')
         ) as WaveformSidecar;
         if (!Array.isArray(sidecar?.peaks)) {
-            logger.warn(`Cached waveform at ${path} has no peaks. Recomputing.`);
+            logger.warn(
+                `Cached waveform at ${path} has no peaks. Recomputing.`
+            );
             return null;
         }
         if (sidecar.version !== WAVEFORM_SIDECAR_VERSION) {
