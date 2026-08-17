@@ -999,6 +999,117 @@ describe('EncodeController', () => {
 
             expect(result.status).toBe('queued');
         });
+
+        /**
+         * How a trim is cut is inferred from the copy checkboxes, not from a
+         * field of its own: all-copy is the quick cut, all-re-encode is the
+         * sample-accurate path, and a mixture is neither. The matrix below is
+         * the whole of that contract as a caller can observe it.
+         */
+        describe('trim mode inference', () => {
+            const TRIMS = [{ inSec: 5, outSec: 30 }];
+
+            /** Every stream copied — the quick cut. */
+            function quickConfig(): EncodeConfigDto {
+                const config = copyConfig();
+                config.audioGroups![0].copyStream = true;
+                config.trimSegments = TRIMS;
+                return config;
+            }
+
+            it('accepts a quick cut when every stream is copied and the source qualifies', async () => {
+                const result = await controller.startEncode(
+                    uploadedSessionWith(makeCopyableProbeResult()),
+                    quickConfig(),
+                    makeRequest()
+                );
+
+                expect(result.status).toBe('queued');
+            });
+
+            it('refuses a quick cut on a source whose keyframes do not qualify, naming the track', async () => {
+                // Copy eligibility is the same question a quick cut asks: it
+                // remuxes whole GOPs, so the source still decides where the
+                // segments may be cut.
+                const probeResult = makeCopyableProbeResult({
+                    gopFrames: 75,
+                    gopSeconds: 2.5,
+                });
+
+                await expect(
+                    controller.startEncode(
+                        uploadedSessionWith(probeResult),
+                        quickConfig(),
+                        makeRequest()
+                    )
+                ).rejects.toThrow(
+                    /Video track 0's keyframe interval \(2.5s\) does not fit 6s segments.*Quick cut needs copy-eligible streams/s
+                );
+            });
+
+            it('refuses a mix of copied and re-encoded streams, naming the odd one out', async () => {
+                // Every playlist of one output has to splice at the same
+                // instants, and a copied stream splices on its own keyframe
+                // grid while a re-encoded one splices at the exact frame.
+                const config = quickConfig();
+                config.audioGroups![0].copyStream = false;
+
+                await expect(
+                    controller.startEncode(
+                        uploadedSessionWith(makeCopyableProbeResult()),
+                        config,
+                        makeRequest()
+                    )
+                ).rejects.toThrow(
+                    /audio group "hd" is set to re-encode while others are set to copy/
+                );
+            });
+
+            it('explains both valid shapes when refusing a mixed config', async () => {
+                const config = quickConfig();
+                config.videoRenditions![0].copyStream = false;
+
+                await expect(
+                    controller.startEncode(
+                        uploadedSessionWith(makeCopyableProbeResult()),
+                        config,
+                        makeRequest()
+                    )
+                ).rejects.toThrow(
+                    /Put every stream in copy mode for a quick cut, or take copy mode off every stream/
+                );
+            });
+
+            it('accepts a trim with nothing copied — the sample-accurate path', async () => {
+                const config = makeEncodeConfig();
+                config.trimSegments = TRIMS;
+
+                const result = await controller.startEncode(
+                    uploadedSessionWith(makeCopyableProbeResult()),
+                    config,
+                    makeRequest()
+                );
+
+                expect(result.status).toBe('queued');
+            });
+
+            it('says nothing about quick cuts when an untrimmed copy is refused', async () => {
+                // The copy-eligibility message is the same one it always was
+                // when there is no trim to explain.
+                const config = copyConfig();
+                config.audioGroups![0].copyStream = true;
+
+                await expect(
+                    controller.startEncode(
+                        uploadedSessionWith(
+                            makeCopyableProbeResult({ gopRegular: false })
+                        ),
+                        config,
+                        makeRequest()
+                    )
+                ).rejects.toThrow(/^(?!.*Quick cut).*keyframe structure/s);
+            });
+        });
     });
 
     describe('getWaveform', () => {

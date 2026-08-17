@@ -104,6 +104,17 @@ export interface Session {
     thumbnailsVtt?: string;
     encryptionKeyHex?: string;
     error?: string;
+    /**
+     * Something the encode had to do differently from what was asked, on a
+     * session that otherwise succeeded.
+     *
+     * Today that is only the quick-cut fallback: a source whose keyframe
+     * geometry turns out at encode time not to support a smart cut is
+     * re-encoded instead of failed, and this is how the user finds out why the
+     * fast path they picked took as long as a full encode. Distinct from
+     * `error`, which says the session produced nothing.
+     */
+    fallbackNote?: string;
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;
     /**
@@ -459,6 +470,7 @@ export class SessionService implements OnModuleInit {
             progress: session.progress || undefined,
             pipelineProgress: session.pipelineProgress,
             error: session.error,
+            fallbackNote: session.fallbackNote,
             files: session.files,
             masterPlaylist: session.masterPlaylist,
             thumbnailsVtt: session.thumbnailsVtt,
@@ -700,6 +712,22 @@ export class SessionService implements OnModuleInit {
         const session = this.sessions.get(id);
         if (session) {
             session.hlsUrl = hlsUrl;
+            this.persist(session);
+            this.emitEvent(session);
+        }
+    }
+
+    /**
+     * Record that the encode took a different route than the config asked for.
+     *
+     * Persisted and announced like any other visible change: the note has to
+     * outlive the event, because the session it explains is one the user comes
+     * back to after it has finished.
+     */
+    setFallbackNote(id: string, fallbackNote: string): void {
+        const session = this.sessions.get(id);
+        if (session) {
+            session.fallbackNote = fallbackNote;
             this.persist(session);
             this.emitEvent(session);
         }

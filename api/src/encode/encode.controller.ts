@@ -51,7 +51,11 @@ import { EncodeConfigDto } from './dto/encode-config.dto.js';
 import { LocalFileDto } from './dto/local-file.dto.js';
 import { ChaptersWriteDto } from './dto/chapters.dto.js';
 import { hasAllowedExtension } from './services/media-extensions.js';
-import { copyModeRejection } from './services/copy-mode-eligibility.js';
+import {
+    copyModeRejection,
+    quickTrimGateRejection,
+} from './services/copy-mode-eligibility.js';
+import { trimCopyMode } from './services/quick-trim-plan.js';
 import { IngestService } from './services/ingest.service.js';
 import { S3Service } from './services/s3.service.js';
 import { HlsEditService } from '../hls-edit/hls-edit.service.js';
@@ -74,6 +78,25 @@ interface MessageEvent {
     type?: string;
     id?: string;
     retry?: number;
+}
+
+/**
+ * The first stream of a mixed config that is *not* being copied, named the way
+ * the form names it — the person reading the refusal is looking at a row with a
+ * Copy tick box on it, and "a video rendition" is not enough to find which.
+ */
+function firstReEncodedStreamLabel(config: EncodeConfigDto): string {
+    if (config.type === 'video') {
+        const rendition = (config.videoRenditions ?? []).find(
+            (r) => !r.copyStream
+        );
+        if (rendition) {
+            return `video rendition "${rendition.label ?? `${rendition.height}p`}"`;
+        }
+    }
+    const group = (config.audioGroups ?? []).find((g) => !g.copyStream);
+    if (group) return `audio group "${group.label ?? group.id}"`;
+    return 'a stream';
 }
 
 @ApiTags('Encoding Sessions')
@@ -360,17 +383,6 @@ export class EncodeController {
                     );
                 }
             }
-
-            // Copy mode is not a preference, it is a privilege the source has
-            // to qualify for: a copied stream is cut at its own keyframes and
-            // seeked at its own keyframes, so the source decides whether the
-            // result can be segmented evenly and stay in sync. The form greys
-            // the option out for tracks that do not qualify, but the form is
-            // one client of an HTTP API — the encode is refused here, where
-            // every caller passes, rather than after the fact by a viewer
-            // noticing the audio has slid.
-            const copyProblem = copyModeRejection(session.probeResult, dto);
-            if (copyProblem) throw new BadRequestException(copyProblem);
         } else {
             if (!dto.audioGroups?.length) {
                 throw new BadRequestException(
@@ -379,24 +391,55 @@ export class EncodeController {
             }
         }
 
-        // A trim is cut sample-accurately in the filter graph
-        // (select/aselect=concatdec_select), and a copied stream never passes
-        // through a filter: its cuts would stay keyframe-granular, with each
-        // cut's seek pre-roll clamped at the splice and lip-sync slid by up to
-        // a GOP. Refused rather than approximated; Todo item 45 (quick trim)
-        // is the plan for fast keyframe-based cutting done honestly.
-        if (dto.trimSegments?.length) {
-            const copied = dto.videoRenditions?.some((r) => r.copyStream)
-                ? 'video rendition'
-                : dto.audioGroups?.some((g) => g.copyStream)
-                  ? 'audio group'
-                  : null;
-            if (copied) {
-                throw new BadRequestException(
-                    `Trimming re-encodes every stream, but a ${copied} has copy mode enabled. ` +
-                        'Disable copy mode on all streams or remove the trim.'
-                );
-            }
+        // How a trim is cut is inferred from the copy checkboxes, not asked for
+        // by a field of its own — the two are the same decision said twice.
+        //
+        //  - Every stream copied: the quick cut. Whole GOPs are remuxed and only
+        //    the partial GOP at each cut point is re-encoded as a bridge, so the
+        //    result is frame-exact at near-remux speed. It needs the source's
+        //    keyframe cadence to qualify, but not its streams to start
+        //    together — each stream splices on its own grid, which is the whole
+        //    reason mutually offset sources quick-cut at all.
+        //  - No stream copied: the sample-accurate path, which cuts in the
+        //    filter graph (select/aselect=concatdec_select). Always available.
+        //  - Some of each: refused. Every playlist of one output has to carry
+        //    the same discontinuity structure at the same instants, and a copied
+        //    stream splices on its own keyframe grid while a re-encoded one
+        //    splices at the exact frame. There is no correct output between the
+        //    two, only one that drifts.
+        const trimmed = (dto.trimSegments?.length ?? 0) > 0;
+        const copyMode = trimCopyMode(dto);
+
+        if (trimmed && copyMode === 'mixed') {
+            throw new BadRequestException(
+                `Trimming needs every stream in the same mode, but ${firstReEncodedStreamLabel(dto)} ` +
+                    'is set to re-encode while others are set to copy. Put every stream in copy ' +
+                    'mode for a quick cut, or take copy mode off every stream for a re-encoded ' +
+                    'trim with sample-accurate cuts.'
+            );
+        }
+
+        // Copy mode is not a preference, it is a privilege the source has to
+        // qualify for: a copied stream is cut at its own keyframes and seeked at
+        // its own keyframes, so the source decides whether the result can be
+        // segmented evenly and stay in sync. The form greys the option out for
+        // tracks that do not qualify, but the form is one client of an HTTP API
+        // — the encode is refused here, where every caller passes, rather than
+        // after the fact by a viewer noticing the audio has slid.
+        // The quick cut runs the relaxed gate: cadence rules, no alignment
+        // rule — a quick cut never seeks streams to a shared offset, so
+        // mutually offset start times are not a defect there.
+        const copyProblem =
+            trimmed && copyMode === 'quick'
+                ? quickTrimGateRejection(session.probeResult, dto)
+                : copyModeRejection(session.probeResult, dto);
+        if (copyProblem) {
+            throw new BadRequestException(
+                trimmed && copyMode === 'quick'
+                    ? `${copyProblem} Quick cut needs copy-eligible streams; ` +
+                          'disable copy mode to re-encode instead.'
+                    : copyProblem
+            );
         }
 
         this.sessionService.setEncodeConfig(sessionId, dto);
@@ -581,6 +624,12 @@ export class EncodeController {
 
         if (session.status === 'failed') {
             result.error = session.error;
+        }
+
+        // Not gated on status, unlike `error`: the note explains a session that
+        // succeeded, and it is read after the encode has finished.
+        if (session.fallbackNote) {
+            result.fallbackNote = session.fallbackNote;
         }
 
         return result;

@@ -10,7 +10,20 @@ import {
     SessionService,
     type Session,
 } from './session.service.js';
-import { FfmpegService } from './ffmpeg.service.js';
+import { FfmpegService, type EncodeResult } from './ffmpeg.service.js';
+import {
+    isQuickTrimConfig,
+    isQuickTrimRejection,
+    planQuickTrim,
+    type QuickTrimPlan,
+    type QuickTrimRejection,
+    type StreamGrid,
+} from './quick-trim-plan.js';
+import {
+    QuickTrimCancelledError,
+    QuickTrimRunError,
+} from './quick-trim-runner.js';
+import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 import { EncryptionService } from './encryption.service.js';
 import { ThumbnailService } from './thumbnail.service.js';
 import {
@@ -24,6 +37,25 @@ import {
     type PipelinePhase,
     type PipelineProgress,
 } from './segment-pipeline.service.js';
+
+/**
+ * The same config with every stream re-encoded — what a quick cut falls back to.
+ *
+ * Only the copy flags move. A copy rendition already carries the source's own
+ * width, height and bitrate (the form mirrors them from the track the moment
+ * copy is ticked), so flipping the flag yields a ladder that re-encodes to what
+ * would have been copied rather than to some default.
+ */
+function reEncodedConfig(config: EncodeConfigDto): EncodeConfigDto {
+    const copy = structuredClone(config);
+    for (const rendition of copy.videoRenditions ?? []) {
+        rendition.copyStream = false;
+    }
+    for (const group of copy.audioGroups ?? []) {
+        group.copyStream = false;
+    }
+    return copy;
+}
 
 @Injectable()
 export class EncodeService {
@@ -139,51 +171,70 @@ export class EncodeService {
                 uploading: 0,
             };
 
-            // Estimate total segments for progress calculation:
-            // numStreams * ceil(duration / segmentDuration)
             const segDur = session.encodeConfig.segmentDuration ?? 6;
             const duration = session.probeResult?.format?.duration ?? 0;
-            const numStreams =
-                (session.encodeConfig.videoRenditions?.length ?? 0) +
-                (session.encodeConfig.audioGroups?.length ?? 0);
-            const estimatedTotalSegments =
-                numStreams > 0 && duration > 0
+
+            /**
+             * The streaming segment pipeline, built once the config it has to
+             * describe is settled.
+             *
+             * Deferred rather than created here because a quick trim may fall
+             * back to a full re-encode, and the chunk-chain map and the segment
+             * estimate both come from the config that actually runs.
+             */
+            const createPipeline = (
+                config: EncodeConfigDto,
+                estimatedTotalSegments: number | undefined
+            ) =>
+                this.segmentPipelineService.createPipeline({
+                    outputDir,
+                    s3Config: session.config.s3,
+                    s3PathPrefix,
+                    encryptionKey,
+                    encryptionIV,
+                    byteRange: session.config.byteRange !== false,
+                    byteRangeMaxFileSizeBytes:
+                        (session.config.byteRangeMaxFileSizeMB ?? 500) *
+                        1024 *
+                        1024,
+                    // Which stream directories share a chunk chain, decided from
+                    // the config that names them rather than from the names
+                    // themselves.
+                    streamChains:
+                        this.ffmpegService.buildStreamChainMap(config),
+                    audioByteRangeMaxFileSizeBytes:
+                        (session.config.audioByteRangeMaxFileSizeMB ?? 50) *
+                        1024 *
+                        1024,
+                    segmentDurationSeconds: segDur,
+                    estimatedTotalSegments,
+                    onProgress: (pipelineUpdate) => {
+                        if (pipelineUpdate.encrypting != null)
+                            currentProgress.encrypting =
+                                pipelineUpdate.encrypting;
+                        if (pipelineUpdate.uploading != null)
+                            currentProgress.uploading =
+                                pipelineUpdate.uploading;
+                        this.sessionService.updatePipelineProgress(sessionId, {
+                            ...currentProgress,
+                        });
+                    },
+                });
+
+            /**
+             * Segments a full re-encode of this config is expected to produce:
+             * numStreams * ceil(duration / segmentDuration).
+             */
+            const estimateSegments = (
+                config: EncodeConfigDto
+            ): number | undefined => {
+                const numStreams =
+                    (config.videoRenditions?.length ?? 0) +
+                    (config.audioGroups?.length ?? 0);
+                return numStreams > 0 && duration > 0
                     ? numStreams * Math.ceil(duration / segDur)
                     : undefined;
-
-            // Create and start the streaming segment pipeline
-            const pipeline = this.segmentPipelineService.createPipeline({
-                outputDir,
-                s3Config: session.config.s3,
-                s3PathPrefix,
-                encryptionKey,
-                encryptionIV,
-                byteRange: session.config.byteRange !== false,
-                byteRangeMaxFileSizeBytes:
-                    (session.config.byteRangeMaxFileSizeMB ?? 500) *
-                    1024 *
-                    1024,
-                // Which stream directories share a chunk chain, decided from the
-                // config that names them rather than from the names themselves.
-                streamChains: this.ffmpegService.buildStreamChainMap(
-                    session.encodeConfig
-                ),
-                audioByteRangeMaxFileSizeBytes:
-                    (session.config.audioByteRangeMaxFileSizeMB ?? 50) *
-                    1024 *
-                    1024,
-                segmentDurationSeconds: segDur,
-                estimatedTotalSegments,
-                onProgress: (pipelineUpdate) => {
-                    if (pipelineUpdate.encrypting != null)
-                        currentProgress.encrypting = pipelineUpdate.encrypting;
-                    if (pipelineUpdate.uploading != null)
-                        currentProgress.uploading = pipelineUpdate.uploading;
-                    this.sessionService.updatePipelineProgress(sessionId, {
-                        ...currentProgress,
-                    });
-                },
-            });
+            };
 
             /**
              * Name the post-drain step the session is on.
@@ -229,21 +280,116 @@ export class EncodeService {
                 });
             };
 
+            const onEncodeProgress = (percent: number): void => {
+                currentProgress.encoding = percent;
+                this.sessionService.updatePipelineProgress(sessionId, {
+                    ...currentProgress,
+                });
+            };
+
+            // A trim whose every stream is in copy mode is a quick cut: whole
+            // GOPs are remuxed and only the partial GOP at each cut point is
+            // re-encoded. Inferred with the same function the controller gated
+            // on, so what was accepted is what runs.
+            let encodeConfig: EncodeConfigDto = session.encodeConfig;
+            let plan: QuickTrimPlan | null = null;
+            let fallbackReason: string | null = null;
+
+            if (isQuickTrimConfig(encodeConfig)) {
+                const planned = await this.buildQuickTrimPlan(
+                    session,
+                    encodeConfig,
+                    outputDir
+                );
+                if (isQuickTrimRejection(planned))
+                    fallbackReason = planned.reason;
+                else plan = planned;
+            }
+
+            let encodeResult: EncodeResult | undefined;
+
+            if (plan) {
+                /*
+                 * The pipeline is deliberately not running yet.
+                 *
+                 * A quick trim is a sequence of ffmpeg jobs, and a video copy
+                 * part that lands on the wrong keyframe is deleted and run
+                 * again — writing the same segment numbers a second time. A
+                 * pipeline polling alongside it would already have encrypted,
+                 * packed and uploaded the first attempt's bytes, and nothing
+                 * downstream would ever learn they were replaced. The runner is
+                 * near-remux speed (measured: ~2.4 s for a 40 s edit), so the
+                 * whole output is produced first and the pipeline then
+                 * discovers it in one pass — same drain, same packing, same
+                 * upload as always, just not concurrently.
+                 */
+                try {
+                    encodeResult = await this.ffmpegService.encodeQuickTrim(
+                        {
+                            sessionId,
+                            inputPath: session.filePath!,
+                            outputDir,
+                            encodeConfig,
+                            onProgress: onEncodeProgress,
+                        },
+                        plan
+                    );
+                } catch (err) {
+                    // A cancel propagates: falling back to a full re-encode is
+                    // the last thing someone who just pressed cancel wants.
+                    if (err instanceof QuickTrimCancelledError) throw err;
+                    if (!(err instanceof QuickTrimRunError)) throw err;
+                    fallbackReason = err.message;
+                }
+            }
+
+            if (!encodeResult && fallbackReason) {
+                // Never a failed session: a source whose geometry does not
+                // support a smart cut still has a perfectly good re-encode
+                // available, and every copy rendition already carries the
+                // source-mirrored width/height/bitrate the precise path needs.
+                this.logger.warn(
+                    `Session ${sessionId}: quick cut not possible (${fallbackReason}) — re-encoding instead`
+                );
+                encodeConfig = reEncodedConfig(encodeConfig);
+                this.sessionService.setFallbackNote(
+                    sessionId,
+                    `Quick cut was not possible for this source (${fallbackReason}); ` +
+                        'the streams were re-encoded instead.'
+                );
+                // The runner may have left parts of an output behind, and the
+                // precise path has to start from an empty directory for the
+                // same reason a retry does — the pipeline would otherwise pack
+                // the abandoned attempt's segments in with the new ones.
+                await rm(outputDir, { recursive: true, force: true }).catch(
+                    (err) => {
+                        this.logger.warn(
+                            `Could not clear partial quick-cut output for ${sessionId}: ${(err as Error).message}`
+                        );
+                    }
+                );
+                currentProgress.encoding = 0;
+            }
+
+            const pipeline = createPipeline(
+                encodeConfig,
+                encodeResult && plan
+                    ? plan.plannedTotalSegments
+                    : estimateSegments(encodeConfig)
+            );
+
             pipeline.start();
 
-            // Run FFmpeg — pipeline polls for segments in the background
-            const encodeResult = await this.ffmpegService.encode({
-                sessionId,
-                inputPath: session.filePath!,
-                outputDir,
-                encodeConfig: session.encodeConfig,
-                onProgress: (percent) => {
-                    currentProgress.encoding = percent;
-                    this.sessionService.updatePipelineProgress(sessionId, {
-                        ...currentProgress,
-                    });
-                },
-            });
+            if (!encodeResult) {
+                // Run FFmpeg — pipeline polls for segments in the background
+                encodeResult = await this.ffmpegService.encode({
+                    sessionId,
+                    inputPath: session.filePath!,
+                    outputDir,
+                    encodeConfig,
+                    onProgress: onEncodeProgress,
+                });
+            }
 
             // Check if pipeline encountered an error during encoding
             if (pipeline.error) {
@@ -522,6 +668,69 @@ export class EncodeService {
         } finally {
             await this.cleanupSessionFiles(sessionId);
         }
+    }
+
+    /**
+     * Scan the keyframe grids this config's streams will be cut on, and plan
+     * the parts.
+     *
+     * The grids come from the muxer rather than from the probe's head sample:
+     * the planner aims copy parts at exact keyframe times over the whole file,
+     * and a cadence that held for the first few seconds is not a promise about
+     * the last. One scan per source video track, reused by every rendition of
+     * it — the grid is a property of the track, not of the output stream.
+     *
+     * A scan that fails is a rejection rather than a throw, because the answer
+     * to both is the same: re-encode instead.
+     */
+    private async buildQuickTrimPlan(
+        session: Session,
+        encodeConfig: EncodeConfigDto,
+        outputDir: string
+    ): Promise<QuickTrimPlan | QuickTrimRejection> {
+        const targets = this.ffmpegService.quickTrimStreamTargets(encodeConfig);
+        const grids = new Map<number, number[]>();
+        const streams: StreamGrid[] = [];
+
+        try {
+            for (const target of targets) {
+                if (target.kind !== 'video') {
+                    // Audio has no grid: its junctions land on an AAC frame at
+                    // mux time, which is finer than anything worth planning.
+                    streams.push({
+                        streamDir: target.streamDir,
+                        kind: 'audio',
+                        keyframes: null,
+                    });
+                    continue;
+                }
+
+                let grid = grids.get(target.sourceTrackIndex);
+                if (!grid) {
+                    grid = await this.ffmpegService.scanKeyframeGrid(
+                        session.filePath!,
+                        target.sourceTrackIndex,
+                        join(outputDir, `kfscan-${target.streamDir}`)
+                    );
+                    grids.set(target.sourceTrackIndex, grid);
+                }
+                streams.push({
+                    streamDir: target.streamDir,
+                    kind: 'video',
+                    keyframes: grid,
+                });
+            }
+        } catch (err) {
+            return {
+                reason: `keyframe grid could not be scanned: ${(err as Error).message}`,
+            };
+        }
+
+        return planQuickTrim({
+            streams,
+            trimSegments: encodeConfig.trimSegments ?? [],
+            segmentDuration: encodeConfig.segmentDuration ?? 6,
+        });
     }
 
     /**

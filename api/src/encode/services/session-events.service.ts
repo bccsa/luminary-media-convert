@@ -10,6 +10,12 @@ export interface SessionEvent {
     pipelineProgress?: PipelineProgress;
     queuePosition?: number;
     error?: string;
+    /**
+     * Something the encode did differently from what was asked — today, that a
+     * quick cut fell back to a full re-encode. Travels with every event the way
+     * `error` does, so a client that joined the stream late still sees it.
+     */
+    fallbackNote?: string;
     files?: string[];
     masterPlaylist?: string;
     thumbnailsVtt?: string;
