@@ -51,6 +51,7 @@ vi.mock('fs/promises', async (importOriginal) => {
 });
 
 import { PreviewService } from './preview.service.js';
+import { FfmpegService } from './ffmpeg.service.js';
 import type { ProbeResult } from './probe.service.js';
 
 /* ------------------------------------------------------------------ */
@@ -65,7 +66,16 @@ function makeSessionService(session: any = null) {
 }
 
 function makeFfmpegService(accelMode: string = 'cpu') {
-    return { getAccelMode: vi.fn().mockReturnValue(accelMode) } as any;
+    // The keyframe scan itself is FfmpegService's, and it runs through the
+    // same child_process / fs mocks as everything else here — so the double
+    // delegates to the real method rather than restating what it returns.
+    const real = new FfmpegService();
+    return {
+        getAccelMode: vi.fn().mockReturnValue(accelMode),
+        scanKeyframeGrid: vi.fn((...args: [string, number, string]) =>
+            real.scanKeyframeGrid(...args)
+        ),
+    } as any;
 }
 
 function makeProbeService(probeResult?: ProbeResult) {
@@ -1090,9 +1100,10 @@ describe('PreviewService', () => {
         });
 
         it('should work with keyframe-scanned boundaries', async () => {
-            // Set up H.264 copy mode with custom boundaries
+            // H.264 copy mode over a keyframe grid at 0 / 4.5 / 9.3, which
+            // groups into segments of 4.5, 4.8 and 2.7 seconds.
             mockReadFile.mockResolvedValue(
-                'seg0.ts,0.000000,3.500000\nseg1.ts,3.500000,7.200000\nseg2.ts,7.200000,12.000000\n'
+                'seg0.ts,0.000000,4.500000\nseg1.ts,4.500000,9.300000\nseg2.ts,9.300000,12.000000\n'
             );
             const probe = makeProbe({
                 duration: 12,
@@ -1114,20 +1125,21 @@ describe('PreviewService', () => {
             service = new PreviewService(sessionService, makeFfmpegService());
             await service.init('s2');
 
-            // Trim 4-8 → overlaps seg 1 (3.5-7.2) and seg 2 (7.2-12)
-            service.setTrimSegments('s2', [{ inSec: 4, outSec: 8 }]);
+            // Trim 5-10 → overlaps seg 1 (4.5-9.3) and seg 2 (9.3-12)
+            service.setTrimSegments('s2', [{ inSec: 5, outSec: 10 }]);
             const media = service.getPlaylist('s2', 'tok', 0)!;
             expect(media).toContain('segment1.ts');
             expect(media).toContain('segment2.ts');
             expect(media).not.toContain('segment0.ts');
             // Durations from boundaries
-            expect(media).toContain('#EXTINF:3.700,'); // 7.2 - 3.5
-            expect(media).toContain('#EXTINF:4.800,'); // 12 - 7.2
+            expect(media).toContain('#EXTINF:4.800,'); // 9.3 - 4.5
+            expect(media).toContain('#EXTINF:2.700,'); // 12 - 9.3
         });
 
         it('should set correct EXT-X-TARGETDURATION for filtered segments', async () => {
             mockReadFile.mockResolvedValue(
-                'seg0.ts,0.000000,2.000000\nseg1.ts,2.000000,8.500000\nseg2.ts,8.500000,12.000000\n'
+                // Keyframe grid at 0 / 6.5 / 8.5 → segments of 6.5, 2 and 3.5
+                'seg0.ts,0.000000,6.500000\nseg1.ts,6.500000,8.500000\nseg2.ts,8.500000,12.000000\n'
             );
             const probe = makeProbe({
                 duration: 12,

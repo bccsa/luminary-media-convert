@@ -926,6 +926,59 @@ describe('ProbeService', () => {
         });
     });
 
+    describe('codec parameters', () => {
+        it('reports reorder depth, pixel format and level', async () => {
+            mockExecFileResult(
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: 1920,
+                            height: 1080,
+                            bit_rate: '5000000',
+                            avg_frame_rate: '30/1',
+                            has_b_frames: 2,
+                            pix_fmt: 'yuv420p',
+                            level: 40,
+                        },
+                    ],
+                })
+            );
+
+            const result = await service.probe('/tmp/test.mp4');
+
+            expect(result.videoTracks[0].hasBFrames).toBe(2);
+            expect(result.videoTracks[0].pixFmt).toBe('yuv420p');
+            expect(result.videoTracks[0].level).toBe(40);
+        });
+
+        it('leaves them absent when ffprobe does not report them', async () => {
+            mockExecFileResult(
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: 1920,
+                            height: 1080,
+                            bit_rate: '5000000',
+                            avg_frame_rate: '30/1',
+                        },
+                    ],
+                })
+            );
+
+            const result = await service.probe('/tmp/test.mp4');
+
+            expect(result.videoTracks[0].hasBFrames).toBeUndefined();
+            expect(result.videoTracks[0].pixFmt).toBeUndefined();
+            expect(result.videoTracks[0].level).toBeUndefined();
+        });
+    });
+
     describe('probeGopInfo', () => {
         function mockFrames(pictTypes: string[]) {
             mockExecFileResult(pictTypes.join('\n') + '\n');

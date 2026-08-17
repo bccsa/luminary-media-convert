@@ -12,7 +12,7 @@ import {
     type ChildProcess,
 } from 'child_process';
 import { mkdirSync, existsSync } from 'fs';
-import { readFile, writeFile } from 'fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { promisify } from 'util';
 import type {
@@ -295,6 +295,126 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         )
             return false;
         return this.ffmpegCapabilityList('-filters').includes('scale_vt');
+    }
+
+    /**
+     * Every keyframe on one video stream, in seconds, ascending.
+     *
+     * Asked of the segment muxer rather than of ffprobe: a stream copy through
+     * `-f segment` can only cut on a keyframe, so a segment time of
+     * effectively zero gives every keyframe a segment of its own and the CSV
+     * list becomes the grid. It reads the whole stream, which is what makes it
+     * a grid rather than the head sample `ProbeService.probeGopInfo` takes.
+     *
+     * `-avoid_negative_ts disabled` is load-bearing. Any source with B-frames
+     * opens on a negative DTS, and the default shifts the entire output
+     * timeline forward by that much on the way out — every timestamp in the
+     * list then comes back late by the reorder delay (measured: two frames,
+     * 67 ms at 30 fps), which is enough to plan a cut inside the wrong GOP.
+     *
+     * The segment files are waste; `tmpDir` is created and removed here, so
+     * the caller only has to name a directory nothing else is using.
+     */
+    async scanKeyframeGrid(
+        inputPath: string,
+        videoTrackIndex: number,
+        tmpDir: string
+    ): Promise<number[]> {
+        await mkdir(tmpDir, { recursive: true });
+        const csvPath = join(tmpDir, 'keyframes.csv');
+        try {
+            await execFileAsync(
+                ffmpegBin(),
+                [
+                    '-i',
+                    inputPath,
+                    '-map',
+                    `0:v:${videoTrackIndex}`,
+                    '-c:v',
+                    'copy',
+                    '-an',
+                    // -copyts with -avoid_negative_ts disabled: the grid must
+                    // be in the source's own presentation clock — the clock
+                    // trim cuts, copy-part seeks and bridge trim filters all
+                    // use. Without -copyts the segment muxer reports times
+                    // short by the container start time (0.06 s on the
+                    // reference source), and every planned cut targets a
+                    // non-keyframe; without the avoid_negative_ts override a
+                    // B-frame source shifts the whole list by its reorder
+                    // delay.
+                    '-copyts',
+                    '-avoid_negative_ts',
+                    'disabled',
+                    '-f',
+                    'segment',
+                    '-segment_time',
+                    '0.000001',
+                    '-segment_list',
+                    csvPath,
+                    '-segment_list_type',
+                    'csv',
+                    '-y',
+                    join(tmpDir, 'seg%d.ts'),
+                ],
+                { timeout: 120_000 }
+            );
+
+            const csv = await readFile(csvPath, 'utf8');
+            const grid: number[] = [];
+            for (const line of csv.trim().split('\n')) {
+                if (!line) continue;
+                const start = parseFloat(line.split(',')[1]);
+                if (Number.isFinite(start)) grid.push(start);
+            }
+
+            // The segment muxer reports the FIRST row's start as 0 regardless
+            // of the stream's real first keyframe (measured: a 0.62 s-start
+            // stream lists 0.000000, 1.62, 2.62, …). A phantom keyframe at 0
+            // would let the planner aim a copy part at a time the seek can
+            // never land on, and every trim touching the head would fall back
+            // to precise mode. The stream's first packet IS its first
+            // keyframe, so ask ffprobe for it and trust that instead.
+            if (grid.length > 0) {
+                const firstPts = await this.probeFirstPacketPts(
+                    inputPath,
+                    `v:${videoTrackIndex}`
+                );
+                if (firstPts !== null) grid[0] = firstPts;
+            }
+            return grid;
+        } finally {
+            await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+        }
+    }
+
+    /** First packet presentation time of a stream, or null when unreadable. */
+    private async probeFirstPacketPts(
+        inputPath: string,
+        streamSpecifier: string
+    ): Promise<number | null> {
+        try {
+            const { stdout } = await execFileAsync(
+                ffprobeBin(),
+                [
+                    '-v',
+                    'error',
+                    '-select_streams',
+                    streamSpecifier,
+                    '-show_entries',
+                    'packet=pts_time',
+                    '-of',
+                    'csv=p=0',
+                    '-read_intervals',
+                    '%+#1',
+                    inputPath,
+                ],
+                { timeout: 30_000 }
+            );
+            const value = parseFloat(stdout.trim().split(',')[0]);
+            return Number.isFinite(value) ? value : null;
+        } catch {
+            return null;
+        }
     }
 
     /**

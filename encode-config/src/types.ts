@@ -28,6 +28,18 @@ export interface VideoTrackInfo {
      * into.
      */
     gopRegular?: boolean;
+    /**
+     * Frames the decoder must hold to reorder this stream (ffprobe's
+     * `has_b_frames`) — a reorder depth, not a flag.
+     */
+    hasBFrames?: number;
+    /** Chroma format and bit depth, e.g. `yuv420p`. */
+    pixFmt?: string;
+    /**
+     * Codec level in the codec's own numbering (H.264 4.0 is 40). Negative or
+     * absent when the container does not say.
+     */
+    level?: number;
 }
 
 export interface AudioTrackInfo {
