@@ -535,67 +535,41 @@ three payoffs, and belongs in the same conversation as the GPL sign-off in item 
 
 ---
 
-## 45. Quick trim: smart cut — copy intact GOPs, re-encode only the boundary GOPs
+## 45. Quick trim: smart cut — implemented, player verification pending
 
-**What exists today.** Trimming always re-encodes every stream ("precise" mode, the
-only mode). The trim path feeds the concat demuxer with `-segment_time_metadata 1` and
-`-copyts`, and drops each cut's keyframe-inexact seek pre-roll in the filter graph
-(`select=concatdec_select` / `aselect=concatdec_select`) — cuts are sample-accurate and
-A/V stays in sync (verified by frame SSIM and audio cross-correlation to within one AAC
-frame on a 7-video-stream, mutually misaligned source). Copy mode with `trimSegments` is
-refused at encode submit: a copied stream never passes a filter, so its cuts would stay
-keyframe-granular with the pre-roll clamped at every splice — that clamping is exactly
-the lip-sync slide the current design fixed. The cost of precise mode is a full
-re-encode, which on long VOD is the whole encode time for what the user experiences as
-"just a cut".
+**Implemented** (branch `feat/lossless-cut`): a trim submitted with every stream in
+copy mode is cut as a smart cut — whole GOPs remuxed, only the partial boundary GOPs
+re-encoded as closed-GOP bridges, spliced per stream with `#EXT-X-DISCONTINUITY` +
+per-part `#EXT-X-MAP`, frame-exact on any source at near-remux speed. No config field:
+the copy checkboxes are the mode (all copy = quick cut, none = precise, mixed =
+refused). Eligibility is the relaxed cadence-only gate (`quickTrimGateRejection`) —
+the alignment rule does not apply, because each stream splices on its own keyframe
+grid; the mutually offset sources the full copy gate refuses are the case this exists
+for. Planner rejection or a runner failure falls back automatically to the precise
+re-encode with a `fallbackNote` on the session status. Mechanics, measured rules and
+switch points: [`docs/quick-trim.md`](docs/quick-trim.md).
 
-**What quick trim is.** Smart cut (the LosslessCut / VideoReDo approach): copy every
-GOP that lies wholly inside a kept range, re-encode only the partial GOPs at each cut
-boundary as short closed-GOP "bridge" segments, and splice per stream. Cuts are
-frame-exact on any source — including sources whose streams have mutually offset
-keyframe grids, because every stream is bridged on its *own* grid — at near-remux
-speed. This is why it replaced the earlier "keyframe cut mode" idea (snap cuts to
-keyframes, copy everything): a mode picker between "fast but moves your cuts" and
-"fast and exact" is a mode picker nobody should see.
+**Verified so far**: full unit/integration coverage (planner matrix, runner
+command-lines, measure-retry convergence, spliced-structure survival through the
+byte-range rewrite and key fencing); an end-to-end run on the misaligned reference
+source through the real API on the VideoToolbox path — per-grid bridges, four
+one-GOP-early seek landings each converged on the single retry, uniform six-part
+discontinuity structure across both video grids and audio, chunk chains packed.
 
-**The splice mechanics (settled in discussion, unimplemented).**
+**Still open, gated on a browser sitting** (`docs/stock-player-check/` cases 6–9,
+upload commands in the README): the hls.js + Safari verdict on the spliced shape, the
+`KEY:METHOD=NONE`/re-arm fence vs the encrypted-inits alternative (case 7 vs 8 — the
+code switches either way: the fence lives in `EncryptionService.injectKeyTag`,
+`MAP_EVERY_PART` in the runner), and whether a copy-split part may inherit the
+previous part's init given ffmpeg stores the part start in the init's `elst`
+(case 9; if not, the planner flips `ownInit` to always-true). Plus one full
+S3-backed session (LMCENC + key fencing on real spliced output) and the chunk-warming
+drift check across discontinuities noted in `docs/chunk-warming.md`.
 
-1. **Unequal segment durations are free in HLS** — `EXTINF` varies per segment,
-   `TARGETDURATION` is the max. A re-encoded partial GOP becomes its own short segment
-   starting at an IDR. No spec problem, no player problem.
-2. **Codec parameter continuity is the real constraint.** A bridge encoded by
-   x264/NVENC/VideoToolbox will not carry the source's SPS/PPS, and in fMP4 the decoder
-   config lives in the init segment. The standard answer is a `#EXT-X-DISCONTINUITY`
-   plus a new `#EXT-X-MAP` at every part boundary (bridge → copied run → bridge …),
-   i.e. per-part init segments — the ad-insertion mechanism, which hls.js handles.
-3. **The encode stops being one ffmpeg invocation.** Per stream: scan the keyframe grid
-   (the preview's `scanKeyframes` shape), plan parts, run small bridge encodes (decode
-   from the preceding keyframe, drop frames before the cut, encode one closed GOP —
-   rate-matched to the rendition config so the quality seam stays subtle), run copy
-   remuxes for the intact spans, then author the media playlists ourselves with the
-   lossless `hls/` builder instead of letting ffmpeg's HLS muxer do it.
-4. **Audio is copied and cut at AAC-frame granularity** (~21 ms at 48 kHz). Timestamps
-   keep sync; no bridge needed.
+**Known limitation, accepted**: ffmpeg's own HLS demuxer mishandles mid-playlist MAP
+switches; quick-trim output is for the supported players, precise mode remains the
+maximally portable output.
 
-**The audit surface — everything that assumes one init per stream.** The byte-range
-chunk-chain packer and the "the fMP4 init travels with the remaining files at the end"
-rule in `SegmentPipelineService`, chunk warming (`docs/chunk-warming.md` schedules), the
-LMCENC encryption pass, and `player-core`'s munging pipeline all need checking against
-playlists with multiple `EXT-X-MAP`s (inits inside chunk chains means `BYTERANGE`d MAP
-URIs). The `hls/` parser round-trips them losslessly already; it is the consumers that
-have never seen one. This mechanism getting exercised end-to-end for the first time is
-the bulk of the work — the bridge encodes themselves are a day.
-
-**Eligibility.** Quick trim requires copy-eligible streams by definition, so it sits
-behind the same source gating as copy mode (`copy-mode-eligibility.ts`), strict on
-unknowns, refused with a message naming the track. Sources that fail the gate fall back
-to precise mode — which stays the default and the fallback for everything.
-
-**Where.** `FfmpegService` (part planning, bridge/copy job runner), a playlist assembler
-on the `hls/` library, `SegmentPipelineService` + chunk-chain packer (multi-init),
-`encode.controller.ts` (mode selection on the encode config), `EncodeConfigForm` /
-trim workspace (mode choice and messaging), player verification against a multi-MAP
-master (stock-player check harness, `docs/stock-player-check/`).
 
 ---
 
