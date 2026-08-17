@@ -982,6 +982,44 @@ describe('SegmentEditor — segment drag & handle drag', () => {
         const second = segs.find((s) => s.outSec === 60)!;
         expect(second.inSec).toBeCloseTo(25, 1);
     });
+
+    it('does not stick a handle drag to the playhead riding the drag', async () => {
+        // During a handle drag the playhead follows the dragged edge (the
+        // editor seeks so the frame under the edge is visible). Snapping to it
+        // would glue the edge to wherever the player last landed and the drag
+        // would ratchet — so the playhead is not a snap candidate mid-drag.
+        const originalRaf = globalThis.requestAnimationFrame;
+        let fired = 0;
+        globalThis.requestAnimationFrame = ((cb: FrameRequestCallback): number => {
+            if (fired++ > 0) return 0;
+            queueMicrotask(() => cb(performance.now()));
+            return 1;
+        }) as typeof globalThis.requestAnimationFrame;
+        try {
+            const t = { value: 30 };
+            const w = mountEditor({
+                segments: [seg(1, 10, 60)],
+                currentTime: t,
+                props: { snapSec: 2 },
+            });
+            await flush();
+            await new Promise<void>((r) => queueMicrotask(r));
+            await flush();
+
+            const inHandle = w.findAll('.se-segment-handle')[0]
+                .element as HTMLElement;
+            mouseAt(inHandle, 'mousedown', 10);
+            mouseAt(document.body, 'mousemove', 29); // within 2s of the playhead (30)
+            await flush();
+            expect(w.find('.se-snap-guide').exists()).toBe(false);
+            mouseAt(document.body, 'mouseup', 29);
+            await flush();
+            expect(latestSegments(w)[0].inSec).toBeCloseTo(29, 1);
+            w.unmount();
+        } finally {
+            globalThis.requestAnimationFrame = originalRaf;
+        }
+    });
 });
 
 describe('SegmentEditor — inline editing', () => {

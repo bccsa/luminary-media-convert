@@ -388,9 +388,20 @@ const dragContext = ref<{
 
 const snapGuide = ref<number | null>(null);
 
-function snapTime(sec: number, ignoreId?: string): number {
+function snapTime(
+    sec: number,
+    ignoreId?: string,
+    opts?: { excludePlayhead?: boolean }
+): number {
     if (props.snapSec <= 0) return sec;
-    const candidates: number[] = [playheadSec.value];
+    // During handle and mark drags the playhead rides the dragged edge (the
+    // throttled seeks below), so snapping to it there is snapping to the
+    // drag's own trailing echo: the edge glues itself to wherever the player
+    // last landed — GOP positions, on a copy-mode preview — and the drag
+    // ratchets instead of following the pointer. Those drags exclude it.
+    const candidates: number[] = opts?.excludePlayhead
+        ? []
+        : [playheadSec.value];
     for (const s of segments.value) {
         if (s.id === ignoreId) continue;
         candidates.push(s.inSec, s.outSec);
@@ -551,7 +562,7 @@ function beginMarkDrag(e: MouseEvent) {
 
     const onMove = (ev: MouseEvent) => {
         const raw = clampTime(pxToTime(ev.clientX));
-        const edge = snapTime(raw);
+        const edge = snapTime(raw, undefined, { excludePlayhead: true });
         draftRange.value = { from: start, to: edge };
         // Show the frame under the moving edge, so in and out points are chosen
         // against the picture instead of guessed and checked afterwards. Throttled
@@ -640,7 +651,7 @@ function onHandleMouseDown(seg: Segment, field: 'inSec' | 'outSec', e: MouseEven
     const onMove = (ev: MouseEvent) => {
         if (!moved) { pushHistory(cloneSegments()); moved = true; }
         const raw = pxToTime(ev.clientX);
-        const snapped = snapTime(raw, seg.id);
+        const snapped = snapTime(raw, seg.id, { excludePlayhead: true });
         const applied = updateSegmentEdge(seg.id, field, snapped);
         if (applied != null) {
             lastEdge = applied;
