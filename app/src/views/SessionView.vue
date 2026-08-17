@@ -9,6 +9,7 @@ import type {
     ProbeResult,
     EncodeConfig,
     TrimSegment,
+    TrimCopyMode,
 } from '@luminary-media-converter/encode-config';
 import {
     SegmentEditor,
@@ -139,6 +140,13 @@ const outputPanelRef = ref<InstanceType<typeof SessionOutputPanel> | null>(
 );
 /** Ladder validity from EncodeConfigForm (for Trim tab Start Encoding). */
 const encodeConfigCanSubmit = ref(false);
+
+/**
+ * How a trim would be cut with the ladder as it currently stands, derived by
+ * the form from its copy checkboxes. Only meaningful once something has been
+ * cut, which is the same condition the API infers the mode under.
+ */
+const trimCopyMode = ref<TrimCopyMode>('precise');
 
 // Chapter editor — sidecar VTT in S3, autosaves to localStorage, explicit save to S3.
 const chapters = useChapters({
@@ -754,6 +762,24 @@ const deletedRanges = computed<TrimSegment[]>(() =>
         outSec: s.outSec,
     }))
 );
+
+/**
+ * What starting the encode will do to the cuts, in one line beside the button.
+ *
+ * Only shown once something has been cut: with no trim, the copy checkboxes
+ * mean what they have always meant and there is nothing to explain. There is no
+ * control here — the mode is the ladder's copy ticks read back, so the way to
+ * change it is to change them.
+ */
+const trimModeHint = computed<string | null>(() => {
+    if (!showProbeConfig.value || effectiveKeepRanges.value.length === 0)
+        return null;
+    if (trimCopyMode.value === 'quick')
+        return 'Quick cut — copies your streams, re-encodes only the cut points.';
+    if (trimCopyMode.value === 'precise')
+        return 'Re-encode — streams are re-encoded with sample-accurate cuts.';
+    return 'Mix of copy and re-encode streams — trimming needs all or none in copy mode.';
+});
 
 const timelineRanges = computed<TrimSegment[]>(() =>
     invertRanges(deletedRanges.value, sourceProbeDuration.value)
@@ -1431,6 +1457,10 @@ function onEncodeCanSubmitChange(valid: boolean) {
     encodeConfigCanSubmit.value = valid;
 }
 
+function onTrimModeChange(mode: TrimCopyMode) {
+    trimCopyMode.value = mode;
+}
+
 async function onStartEncodingFromTrim() {
     submissionError.value = null;
     const cfg =
@@ -2015,6 +2045,18 @@ onUnmounted(() => {
                                 >
                                     {{ submitting ? 'Starting…' : 'Start encoding' }}
                                 </button>
+                                <!--
+                                    Which of the two cutting paths the button is
+                                    about to take. Derived from the ladder's copy
+                                    ticks, not chosen here — see trimModeHint.
+                                -->
+                                <p
+                                    v-if="trimModeHint"
+                                    data-testid="trim-mode-hint"
+                                    class="mt-1 text-xs text-slate-500 dark:text-slate-400"
+                                >
+                                    {{ trimModeHint }}
+                                </p>
                             </template>
 
                             <!--
@@ -2241,10 +2283,14 @@ onUnmounted(() => {
                                         :byte-range-enabled="byteRangeEnabled"
                                         encode-primary-action="start-encoding"
                                         appearance="session"
+                                        :trim-active="
+                                            effectiveKeepRanges.length > 0
+                                        "
                                         @submit="onEncodeSubmit"
                                         @can-submit-change="
                                             onEncodeCanSubmitChange
                                         "
+                                        @trim-mode-change="onTrimModeChange"
                                     />
                                 </div>
 
@@ -2663,6 +2709,10 @@ onUnmounted(() => {
                                     "
                                     :probe-loading="probeLoading"
                                     :session-error="session?.error"
+                                    :fallback-note="
+                                        poller.fallbackNote.value ??
+                                        session?.fallbackNote
+                                    "
                                     :encoder-label="displayEncoderLabel"
                                     :display-segment-format="
                                         displaySegmentFormat

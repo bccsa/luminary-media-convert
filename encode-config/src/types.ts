@@ -91,6 +91,17 @@ export interface AudioGroup {
     vbr?: boolean;
 }
 
+/**
+ * How a trim would be cut, derived from the copy checkboxes rather than chosen.
+ *
+ * `quick` — every stream copied: whole GOPs are remuxed and only the partial
+ * GOP at each cut point is re-encoded. `precise` — nothing copied: every stream
+ * is re-encoded and cut at the exact frame. `mixed` — some of each, which the
+ * API refuses, because every playlist of one output has to splice at the same
+ * instants and a copied stream splices on its own keyframe grid.
+ */
+export type TrimCopyMode = 'mixed' | 'precise' | 'quick';
+
 export interface TrimSegment {
     /** In-point in seconds */
     inSec: number;

@@ -3,9 +3,10 @@ import type { ProbeResult, VideoTrackInfo } from './types';
 /**
  * Whether a video track may be copied rather than re-encoded.
  *
- * A courtesy, not the rule. The rule is `copyModeRejection` in
- * `api/src/encode/services/copy-mode-eligibility.ts`, which refuses the encode
- * outright and is the source of truth; this exists so the form can grey the
+ * A courtesy, not the rule. The rules are `copyModeRejection` and, once a trim
+ * is in play, `quickTrimGateRejection` in
+ * `api/src/encode/services/copy-mode-eligibility.ts`, which refuse the encode
+ * outright and are the source of truth; this exists so the form can grey the
  * Copy tick box out with the same sentence rather than letting someone choose
  * something the API will then reject. The two are deliberately separate copies
  * — the API cannot import a Vue library — and deliberately tiny, so keeping
@@ -61,6 +62,34 @@ export function copyModeBlockedReason(
         }
     }
 
+    return cadenceBlockedReason(track, segmentDuration);
+}
+
+/**
+ * Why this track cannot be copied *for a quick cut*, or null when it can.
+ *
+ * Mirrors `quickTrimGateRejection` on the API side: the same cadence
+ * guarantees, none of the alignment rule. A quick cut splices each stream on
+ * its own keyframe grid at exact presentation times, so nothing is ever seeked
+ * to a shared offset and mutually offset start times stay in sync by
+ * construction — which is precisely the source `copyModeBlockedReason` has to
+ * refuse and this one may allow.
+ */
+export function quickTrimBlockedReason(
+    track: VideoTrackInfo,
+    segmentDuration: number
+): string | null {
+    return cadenceBlockedReason(track, segmentDuration);
+}
+
+/**
+ * The keyframe half of the verdict, shared by both rules because both cut a
+ * copied stream at source keyframes whatever else they do with the head.
+ */
+function cadenceBlockedReason(
+    track: VideoTrackInfo,
+    segmentDuration: number
+): string | null {
     const fps = track.frameRate ?? 0;
     const gopFrames = track.gopFrames ?? 0;
     if (track.gopRegular !== true || gopFrames <= 0 || fps <= 0) {
