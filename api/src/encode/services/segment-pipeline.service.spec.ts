@@ -335,6 +335,85 @@ describe('SegmentPipeline — shared chunk chains', () => {
             'prefix/stream_720p/init_1.mp4',
         ]);
     });
+
+    it('preserves spliced smart-cut structure through the byte-range rewrite', async () => {
+        // A quick-trim playlist: three parts joined by discontinuities, the
+        // first two opening their own init, the third continuing part two's.
+        // The rewrite must byte-range the segments without touching any of it.
+        const dir = join(tmpDir, 'stream_480p');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'init_0.mp4'), 'ftyp');
+        writeFileSync(join(dir, 'init_100000.mp4'), 'ftyp');
+        const sizes: Record<string, number> = {
+            'segment_0000000.m4s': 4,
+            'segment_0100000.m4s': 10,
+            'segment_0100001.m4s': 20,
+            'segment_0200000.m4s': 6,
+        };
+        for (const [name, size] of Object.entries(sizes)) {
+            writeFileSync(join(dir, name), Buffer.alloc(size, 'q'));
+        }
+        writeFileSync(
+            join(dir, 'playlist.m3u8'),
+            [
+                '#EXTM3U',
+                '#EXT-X-VERSION:7',
+                '#EXT-X-TARGETDURATION:6',
+                '#EXT-X-MEDIA-SEQUENCE:0',
+                '#EXT-X-PLAYLIST-TYPE:VOD',
+                '#EXT-X-MAP:URI="init_0.mp4"',
+                '#EXTINF:0.250000,',
+                'segment_0000000.m4s',
+                '#EXT-X-DISCONTINUITY',
+                '#EXT-X-MAP:URI="init_100000.mp4"',
+                '#EXTINF:6.000000,',
+                'segment_0100000.m4s',
+                '#EXTINF:2.060000,',
+                'segment_0100001.m4s',
+                '#EXT-X-DISCONTINUITY',
+                '#EXTINF:0.880000,',
+                'segment_0200000.m4s',
+                '#EXT-X-ENDLIST',
+                '',
+            ].join('\n')
+        );
+
+        const pipeline = makePipeline(tmpDir, {
+            byteRange: true,
+            streamChains: { stream_480p: 'v0' },
+            segmentDurationSeconds: 6,
+        });
+        captureUploads(pipeline);
+
+        await (pipeline as any).poll();
+        await pipeline.drain();
+
+        expect(readPlaylist('stream_480p')).toEqual([
+            '#EXTM3U',
+            '#EXT-X-VERSION:7',
+            '#EXT-X-TARGETDURATION:6',
+            '#EXT-X-MEDIA-SEQUENCE:0',
+            '#EXT-X-PLAYLIST-TYPE:VOD',
+            '#EXT-X-MAP:URI="init_0.mp4"',
+            '#EXTINF:0.250000,',
+            '#EXT-X-BYTERANGE:4@0',
+            '../media/v0_0.m4s',
+            '#EXT-X-DISCONTINUITY',
+            '#EXT-X-MAP:URI="init_100000.mp4"',
+            '#EXTINF:6.000000,',
+            '#EXT-X-BYTERANGE:10@4',
+            '../media/v0_0.m4s',
+            '#EXTINF:2.060000,',
+            '#EXT-X-BYTERANGE:20@14',
+            '../media/v0_0.m4s',
+            '#EXT-X-DISCONTINUITY',
+            '#EXTINF:0.880000,',
+            '#EXT-X-BYTERANGE:6@34',
+            '../media/v0_0.m4s',
+            '#EXT-X-ENDLIST',
+            '',
+        ]);
+    });
 });
 
 describe('SegmentPipeline', () => {
