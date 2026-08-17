@@ -93,15 +93,51 @@ A dev-only app that drives the real handshake against the running encoder: healt
 
 ## Packaging
 
+Each command builds the encoder it ships first, then the workspaces, then the app —
+so a clean clone produces a complete artifact with no separate steps.
+
 ```bash
-npm -w electron run dist:mac    # dmg + zip, arm64
-npm -w electron run dist:win    # NSIS installer, x64
-npm -w electron run pack        # unpacked directory, for inspection
+npm -w electron run dist:mac            # dmg + zip, arm64 and x64
+npm -w electron run dist:win            # NSIS installer, x64 — needs a Windows machine
+npm -w electron run dist:win-portable   # portable zip, x64 — builds on macOS too
+npm -w electron run pack                # unpacked directory, for inspection
+npm -w electron run verify-package      # assert every packaged app can actually encode
 ```
 
-Put `ffmpeg` / `ffprobe` in `electron/bin/<platform>-<arch>/` first — they are not in the repository. See [electron/bin/README.md](electron/bin/README.md) for sourcing, verification and licensing.
+Artifacts land in `electron/release/`, named `<product>-<version>-<mac|win>-<arch>.<ext>`.
+Neither the artifacts nor the ffmpeg binaries are in the repository.
 
-Builds are currently **unsigned**: macOS Gatekeeper needs a right-click → Open on first launch, and there is no auto-update. The Windows configuration exists but has never been built or tested. See [Todo.md](Todo.md).
+### What each build needs
+
+| Target | Host | Prerequisites |
+|---|---|---|
+| macOS dmg/zip | macOS | `brew install nasm pkg-config gnupg` (plus the Xcode CLT) |
+| Windows portable zip | macOS or Linux | the above, plus `brew install mingw-w64 cmake llvm` |
+| Windows NSIS installer | Windows | a Windows machine, or Wine — which is why the portable target exists |
+
+**LLVM is not optional for the Windows build.** `--enable-cuda-llvm` gives `scale_cuda`
+for the NVIDIA path and needs a clang with the NVPTX backend, which Apple's clang does
+not have. Put it first on `PATH`:
+
+```bash
+PATH="/opt/homebrew/opt/llvm/bin:$PATH" npm -w electron run dist:win-portable
+```
+
+The ffmpeg build itself is [`ffmpeg-build/README.md`](ffmpeg-build/README.md) — why we
+build rather than download, what goes in, and the GPL position. `electron/bin/README.md`
+covers where the binaries land and their licences.
+
+### What is signed, and what a user sees
+
+Builds are **unsigned** — there is no Developer ID and no Authenticode certificate, so
+there is no auto-update either. macOS bundles are still *ad-hoc* signed by
+`electron/build/after-pack.cjs`, without which a downloaded copy is refused outright as
+"damaged". On macOS 15 and later, opening an unsigned app takes System Settings →
+Privacy & Security → **Open Anyway**; right-click → Open no longer works, Apple removed
+it. Windows shows a SmartScreen warning. The portable Windows build additionally carries
+the stock Electron icon, because stamping it needs Wine.
+
+See [Todo.md](Todo.md) for signing, notarization and auto-update.
 
 ## Scripts
 
@@ -114,7 +150,8 @@ Builds are currently **unsigned**: macOS Gatekeeper needs a right-click → Open
 | `npm -w app run dev` / `build` / `test` | Web client |
 | `npm -w cms-mock run dev` | CMS mock on port 5199 |
 | `npm -w electron run dev` / `dist:mac` / `dist:win` / `pack` | Desktop shell |
-| `npm -w {hls,encode-config,segment-editor} run build` / `dev` / `test` | Shared libraries |
+| `npm -w electron run dist:win-portable` | Portable Windows zip, buildable on macOS |
+| `npm -w {hls,encode-config,segment-editor,player-core,player-web} run build` / `dev` / `test` | Shared libraries |
 
 ## Documentation
 
