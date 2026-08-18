@@ -1576,11 +1576,31 @@ describe('PreviewService', () => {
             await service.getSegmentStream('s1', 0, 1);
 
             const ffmpegArgs = mockExecFile.mock.calls[0][1] as string[];
-            // Should use boundary start (4.17) and duration (4.33)
+            // The copy path aims one keyframe interval past the boundary
+            // (start 4.17 + step 4.17 + epsilon): the demuxer lands on the
+            // largest keyframe at or before target minus the stream's hop, so
+            // a bare boundary target starts a whole GOP early — the
+            // jump-back-at-every-boundary regression.
             const ssIdx = ffmpegArgs.indexOf('-ss');
-            expect(ffmpegArgs[ssIdx + 1]).toBe('4.17');
-            const tIdx = ffmpegArgs.indexOf('-t');
-            expect(parseFloat(ffmpegArgs[tIdx + 1])).toBeCloseTo(4.33, 1);
+            expect(parseFloat(ffmpegArgs[ssIdx + 1])).toBeCloseTo(8.341, 3);
+            // And the segment ends at its absolute boundary end, not at
+            // aim + duration: `-to`, never `-t`, on the copy path.
+            const toIdx = ffmpegArgs.indexOf('-to');
+            expect(parseFloat(ffmpegArgs[toIdx + 1])).toBeCloseTo(8.5, 2);
+            expect(ffmpegArgs).not.toContain('-t');
+            // Audio rides a second input seeked to the boundary itself: it is
+            // transcoded, and an accurate seek at the video's aimed target
+            // would drop its first keyframe interval — an audio hole at every
+            // segment head that plays as a stall.
+            const secondSs = ffmpegArgs.indexOf(
+                '-ss',
+                ffmpegArgs.indexOf('-ss') + 1
+            );
+            expect(parseFloat(ffmpegArgs[secondSs + 1])).toBeCloseTo(4.17, 3);
+            expect(
+                ffmpegArgs.filter((a) => a === '-i')
+            ).toHaveLength(2);
+            expect(ffmpegArgs.some((a) => /^1:a:/.test(a))).toBe(true);
         });
 
         it('should use calculated start/duration when no boundaries', async () => {
@@ -2687,5 +2707,135 @@ describe('PreviewService', () => {
             const inputIdx = args.indexOf('-i');
             expect(hwaccelIdx).toBeLessThan(inputIdx);
         });
+    });
+});
+
+/**
+ * The seek-hop learning that keeps copy segments starting exactly on their
+ * boundaries. Regression guard for the jump-back-at-every-boundary defect:
+ * a copy extraction that lands a whole GOP before its boundary ships a
+ * segment whose head repeats already-played content, and on sources with
+ * identical keyframe grids the overlap grew to a full GOP — past what the
+ * player's timestamp handling absorbs.
+ */
+describe('PreviewService — copy seek hop', () => {
+    /** ffprobe landings consumed in call order by probeFirstVideoPts. */
+    let landings: (number | null)[] = [];
+
+    function setupExtractionMocks() {
+        mockExecFile.mockReset();
+        mockExecFile.mockImplementation((...args: any[]) => {
+            const argv: string[] = args[1] ?? [];
+            const cb = args[args.length - 1];
+            if (argv.includes('packet=pts_time')) {
+                const next = landings.shift();
+                cb(null, {
+                    stdout: next == null ? '' : `${next}\n`,
+                    stderr: '',
+                });
+                return;
+            }
+            cb(null, { stdout: Buffer.from('segment-data'), stderr: '' });
+        });
+    }
+
+    async function makeCopyService() {
+        // H.264 480p → single copy rendition; boundaries from CSV_KEYFRAMES
+        // (keyframes at 0, 4.17, 8.34, …, median step 4.17).
+        const probe = makeProbe({
+            duration: 20,
+            videoTracks: [
+                {
+                    index: 0,
+                    codec: 'h264',
+                    width: 854,
+                    height: 480,
+                    bitrateKbps: 2000,
+                    frameRate: 30,
+                },
+            ],
+        });
+        const sessionService = makeSessionService({
+            filePath: '/tmp/video.mp4',
+            probeResult: probe,
+        });
+        const service = new PreviewService(
+            sessionService,
+            makeFfmpegService()
+        );
+        setupExtractionMocks();
+        mockReadFile.mockResolvedValue(CSV_KEYFRAMES);
+        await service.init('s1');
+        mockExecFile.mockClear();
+        mockExistsSync.mockReturnValue(false);
+        mockStat.mockResolvedValue({ size: 2048 });
+        mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+        return service;
+    }
+
+    const ffmpegCalls = () =>
+        (mockExecFile.mock.calls as unknown[][]).filter(
+            (c) => !(c[1] as string[]).includes('packet=pts_time')
+        );
+
+    beforeEach(() => {
+        landings = [];
+    });
+
+    it('keeps the aimed hop when the first extraction lands on the boundary', async () => {
+        const service = await makeCopyService();
+        landings = [4.17]; // segment 1's boundary — the aim landed exactly
+
+        await service.getSegmentStream('s1', 0, 1);
+        expect(ffmpegCalls()).toHaveLength(1);
+
+        // Second segment: hop is cached, no probe, still aimed a step ahead.
+        mockExistsSync.mockReturnValue(false);
+        await service.getSegmentStream('s1', 0, 2);
+        const calls = ffmpegCalls();
+        expect(calls).toHaveLength(2);
+        const args = calls[1][1] as string[];
+        // boundary 8.34 + step 4.17 + epsilon
+        expect(parseFloat(args[args.indexOf('-ss') + 1])).toBeCloseTo(
+            12.511,
+            3
+        );
+    });
+
+    it('relearns a zero hop when the aimed extraction lands late', async () => {
+        const service = await makeCopyService();
+        // The default-stream case: aiming a step ahead landed a step late.
+        landings = [8.34];
+
+        await service.getSegmentStream('s1', 0, 1);
+        const calls = ffmpegCalls();
+        // Re-extracted once with the corrected (zero) hop.
+        expect(calls).toHaveLength(2);
+        const retryArgs = calls[1][1] as string[];
+        expect(
+            parseFloat(retryArgs[retryArgs.indexOf('-ss') + 1])
+        ).toBeCloseTo(4.171, 3);
+
+        // The corrected hop is cached: the next segment extracts once.
+        mockExistsSync.mockReturnValue(false);
+        await service.getSegmentStream('s1', 0, 2);
+        const after = ffmpegCalls();
+        expect(after).toHaveLength(3);
+        const nextArgs = after[2][1] as string[];
+        expect(parseFloat(nextArgs[nextArgs.indexOf('-ss') + 1])).toBeCloseTo(
+            8.341,
+            3
+        );
+    });
+
+    it('tolerates the file-head segment landing late by a reorder delay', async () => {
+        const service = await makeCopyService();
+        // Segment 0 on a B-frame source: content genuinely starts a couple
+        // of frames past 0 — within tolerance, so the hop is kept, not
+        // relearned.
+        landings = [0.04];
+
+        await service.getSegmentStream('s1', 0, 0);
+        expect(ffmpegCalls()).toHaveLength(1);
     });
 });

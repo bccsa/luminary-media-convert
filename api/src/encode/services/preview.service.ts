@@ -8,7 +8,7 @@ import type { ReadStream } from 'fs';
 import { SessionService } from './session.service.js';
 import type { ProbeResult, AudioTrackInfo } from './probe.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
-import { ffmpegBin } from './ffbin.js';
+import { ffmpegBin, ffprobeBin } from './ffbin.js';
 
 const MAX_AUDIO_BITRATE_KBPS = 150;
 
@@ -59,9 +59,27 @@ interface PreviewState {
     mediaPlaylists: string[];
     /** When set, media playlists are filtered to only include overlapping segments */
     trimSegments?: { inSec: number; outSec: number }[];
+    /** Median keyframe spacing of the scanned stream's grid, seconds. */
+    keyframeStep?: number;
+    /**
+     * Measured seek hop per rendition index — see {@link extractSegment}. A
+     * rendition learns its hop on its first extraction and every later
+     * segment starts exactly on its boundary, first try.
+     */
+    seekHops: Map<number, number>;
 }
 
 const MAX_CONCURRENT = 3;
+
+/** Keeps a seek target strictly past a boundary the landing rule compares ≤. */
+const SEEK_AIM_EPSILON_SECONDS = 0.001;
+
+/**
+ * How far a measured landing may sit from its boundary and still count as on
+ * it. Generous because misses are whole keyframe intervals, and the segment
+ * holding the file head is legitimately late by the stream's reorder delay.
+ */
+const LANDING_TOLERANCE_SECONDS = 0.1;
 
 @Injectable()
 export class PreviewService {
@@ -122,14 +140,15 @@ export class PreviewService {
 
         // Keyframe scan for copy-mode renditions (skipped for audio-only)
         const copyRendition = renditions.find((r) => r.canCopy);
-        const boundaries = copyRendition
+        const scan = copyRendition
             ? await this.scanKeyframes(
                   sessionId,
                   filePath,
                   copyRendition.videoIndex,
                   duration
               )
-            : [];
+            : { boundaries: [], keyframeStep: undefined };
+        const boundaries = scan.boundaries;
 
         // Generate playlists
         const mediaPlaylists = renditions.map((_, i) =>
@@ -146,6 +165,8 @@ export class PreviewService {
             previewDir,
             masterPlaylist,
             mediaPlaylists,
+            keyframeStep: scan.keyframeStep,
+            seekHops: new Map(),
         });
 
         const renditionSummary = renditions
@@ -490,17 +511,28 @@ export class PreviewService {
         filePath: string,
         videoStreamIndex: number,
         duration: number
-    ): Promise<SegmentBoundary[]> {
+    ): Promise<{ boundaries: SegmentBoundary[]; keyframeStep?: number }> {
         try {
             const keyframes = await this.ffmpegService.scanKeyframeGrid(
                 filePath,
                 videoStreamIndex,
                 join(this.workDir, sessionId, 'kfscan')
             );
-            return this.groupKeyframes(keyframes, duration);
+            let keyframeStep: number | undefined;
+            if (keyframes.length >= 2) {
+                const gaps = keyframes
+                    .slice(1)
+                    .map((k, i) => k - keyframes[i])
+                    .sort((a, b) => a - b);
+                keyframeStep = gaps[Math.floor(gaps.length / 2)];
+            }
+            return {
+                boundaries: this.groupKeyframes(keyframes, duration),
+                keyframeStep,
+            };
         } catch (e) {
             this.logger.warn(`Keyframe scan failed: ${e}`);
-            return [];
+            return { boundaries: [] };
         }
     }
 
@@ -697,20 +729,23 @@ export class PreviewService {
         audioMap: string | null,
         rendition: Rendition,
         accelMode: string,
-        useGpu: boolean
+        useGpu: boolean,
+        /**
+         * Where the copy path asks the demuxer to seek — ahead of `start` by
+         * the rendition's seek hop, so the landing IS the boundary. See
+         * {@link extractSegment}; ignored by the transcode and audio paths,
+         * whose accurate seek has no hop.
+         */
+        copySeekStart = start
     ): string[] {
         const args: string[] = [];
 
         // Every segment keeps the source's own timestamps (-copyts, with the
         // mpegts muxer's fixed 1.4 s preload/delay offset zeroed). The media
         // playlists declare no per-segment discontinuities, so this is what
-        // stitches independently extracted segments together: `-ss` with
-        // stream copy starts wherever the demuxer seek lands — on multi-stream
-        // sources up to a full GOP before the requested boundary (the seek is
-        // positioned on the file's default stream by DTS, and other tracks
-        // land at a sample at or before that) — and the resulting overlap is
-        // resolved by the player's buffer by timestamp instead of being
-        // replayed at every boundary.
+        // stitches independently extracted segments together: content is
+        // placed by timestamp, and a segment that starts exactly on its
+        // boundary needs no placing at all.
         const TS_OUTPUT = [
             '-copyts',
             '-muxdelay',
@@ -760,6 +795,34 @@ export class PreviewService {
             args.push('-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv');
         }
 
+        if (rendition.canCopy) {
+            // The demuxer lands on the largest keyframe at or before the seek
+            // target minus the stream's hop, so the copy path aims past the
+            // boundary by that hop, and `-to` (absolute under -copyts) ends
+            // the segment exactly where the playlist says it does — the aim
+            // must not stretch the tail the way `-t` from the target would.
+            //
+            // Audio gets the same file as a second input, seeked to the
+            // boundary itself: it is transcoded, and a transcode's accurate
+            // seek drops everything before its target — fed the video's
+            // aimed seek it would start a whole keyframe interval late, an
+            // audio hole at the head of every segment that plays as a stall.
+            args.push(
+                '-ss',
+                String(copySeekStart),
+                '-i',
+                filePath,
+                ...(audioMap ? ['-ss', String(start), '-i', filePath] : []),
+                '-map',
+                videoMap
+            );
+            if (audioMap) args.push('-map', audioMap.replace(/^0:/, '1:'));
+            args.push('-c:v', 'copy', '-to', String(start + segDur));
+            if (audioMap) args.push('-c:a', 'aac', '-b:a', '128k');
+            args.push(...TS_OUTPUT);
+            return args;
+        }
+
         args.push(
             '-ss',
             String(start),
@@ -772,9 +835,7 @@ export class PreviewService {
         );
         if (audioMap) args.push('-map', audioMap);
 
-        if (rendition.canCopy) {
-            args.push('-c:v', 'copy');
-        } else if (useGpu && accelMode === 'nvidia') {
+        if (useGpu && accelMode === 'nvidia') {
             args.push('-c:v', 'h264_nvenc', '-preset', 'p1');
             if (rendition.scaleFilter) {
                 args.push('-vf', `scale_cuda=${rendition.scaleFilter}`);
@@ -854,25 +915,22 @@ export class PreviewService {
         const useGpu =
             !rendition.canCopy && !rendition.audioOnly && accelMode !== 'cpu';
 
-        const args = this.buildSegmentArgs(
-            state.filePath,
-            start,
-            segDur,
-            videoMap,
-            audioMap,
-            rendition,
-            accelMode,
-            useGpu
-        );
-
         this.logger.debug(
             `Segment r${renditionIndex}/s${segmentIndex} (${useGpu ? accelMode : rendition.canCopy ? 'copy' : 'cpu'})`
         );
 
-        // Wait for a concurrency slot
-        await this.acquireSlot();
-
-        try {
+        const runOnce = async (copySeekStart: number): Promise<void> => {
+            const args = this.buildSegmentArgs(
+                state.filePath,
+                start,
+                segDur,
+                videoMap,
+                audioMap,
+                rendition,
+                accelMode,
+                useGpu,
+                copySeekStart
+            );
             const timeout = rendition.canCopy ? 30_000 : 120_000;
             const opts = {
                 timeout,
@@ -897,13 +955,56 @@ export class PreviewService {
                     audioMap,
                     rendition,
                     'cpu',
-                    false
+                    false,
+                    copySeekStart
                 );
                 result = await execFileAsync(ffmpegBin(), cpuArgs, opts);
             }
 
             // Write segment data ourselves — guaranteed flushed via writeFile
             await writeFile(outputPath, result.stdout);
+        };
+
+        // Wait for a concurrency slot
+        await this.acquireSlot();
+
+        try {
+            if (!rendition.canCopy || !state.keyframeStep) {
+                await runOnce(start);
+                return outputPath;
+            }
+
+            // The copy path aims past the boundary by the rendition's seek
+            // hop — the demuxer lands on the largest keyframe at or before
+            // target minus hop, one keyframe interval for streams other than
+            // the file's default and zero for it. A segment that starts a
+            // whole GOP before its boundary played as a jump-back at every
+            // boundary once the overlap grew past what the player's
+            // timestamp handling absorbs. The hop is learned from the first
+            // extraction of each rendition and every later segment starts on
+            // its boundary, first try.
+            const known = state.seekHops.get(renditionIndex);
+            const hop = known ?? state.keyframeStep;
+            await runOnce(start + hop + SEEK_AIM_EPSILON_SECONDS);
+
+            if (known === undefined) {
+                const landed = await this.probeFirstVideoPts(outputPath);
+                if (
+                    landed === null ||
+                    Math.abs(landed - start) <= LANDING_TOLERANCE_SECONDS
+                ) {
+                    state.seekHops.set(renditionIndex, hop);
+                } else {
+                    const corrected = Math.max(0, hop + (start - landed));
+                    this.logger.warn(
+                        `Segment r${renditionIndex}/s${segmentIndex} landed at ` +
+                            `${landed.toFixed(3)}s for ${start.toFixed(3)}s — ` +
+                            `re-extracting with a ${corrected.toFixed(3)}s seek hop`
+                    );
+                    state.seekHops.set(renditionIndex, corrected);
+                    await runOnce(start + corrected + SEEK_AIM_EPSILON_SECONDS);
+                }
+            }
         } catch (e: any) {
             this.logger.error(
                 `Segment r${renditionIndex}/s${segmentIndex} failed: ${e.message}`
@@ -914,5 +1015,28 @@ export class PreviewService {
         }
 
         return outputPath;
+    }
+
+    /** First video packet presentation time of a segment, or null. */
+    private async probeFirstVideoPts(path: string): Promise<number | null> {
+        try {
+            const { stdout } = await execFileAsync(ffprobeBin(), [
+                '-v',
+                'error',
+                '-select_streams',
+                'v:0',
+                '-show_entries',
+                'packet=pts_time',
+                '-of',
+                'csv=p=0',
+                '-read_intervals',
+                '%+#1',
+                path,
+            ]);
+            const value = parseFloat(String(stdout).trim().split(',')[0]);
+            return Number.isFinite(value) ? value : null;
+        } catch {
+            return null;
+        }
     }
 }
