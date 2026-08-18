@@ -18,8 +18,8 @@ import {
     type HlsMediaLayoutItem,
     type HlsParsedMediaPlaylist,
     type HlsSegment,
-} from './media-playlist';
-import { setNumericText } from './metadata';
+} from './media-playlist.js';
+import { setNumericText } from './metadata.js';
 
 export interface SplicedPartSegment {
     uri: string;

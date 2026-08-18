@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { getMasterLayout, parseMasterPlaylist, parseResolution } from './parse';
-import { MULTI_ANGLE_MASTER } from './fixtures';
+import { getMasterLayout, parseMasterPlaylist, parseResolution } from './parse.js';
+import { MULTI_ANGLE_MASTER } from './fixtures.js';
 
 describe('parseMasterPlaylist', () => {
     it('parses variants with BANDWIDTH, RESOLUTION, CODECS', () => {

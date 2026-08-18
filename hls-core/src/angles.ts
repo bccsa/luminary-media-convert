@@ -21,8 +21,8 @@
  *   differ per function.
  */
 
-import { buildMasterPlaylist } from './build';
-import { copyAttributeSource } from './metadata';
+import { buildMasterPlaylist } from './build.js';
+import { copyAttributeSource } from './metadata.js';
 import {
     getMasterLayout,
     parseMasterPlaylist,
@@ -32,7 +32,7 @@ import {
     type HlsMedia,
     type HlsParsedMaster,
     type HlsVariant,
-} from './parse';
+} from './parse.js';
 
 export interface VideoAngle {
     /** `GROUP-ID` of the video rendition group — pass to `extractAnglePlaylist`. */

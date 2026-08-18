@@ -16,7 +16,7 @@ import {
     parseAttributeList,
     preferOriginalNumber,
     type HlsAttribute,
-} from './attributes';
+} from './attributes.js';
 import {
     getAttributeSource,
     getLayout,
@@ -26,7 +26,7 @@ import {
     setHeaderOrder,
     setLayout,
     setNumericText,
-} from './metadata';
+} from './metadata.js';
 
 /** `#EXT-X-BYTERANGE:<length>[@<offset>]`. */
 export interface HlsByteRange {

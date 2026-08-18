@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { parseMasterPlaylist } from './parse';
-import { buildMasterPlaylist } from './build';
+import { parseMasterPlaylist } from './parse.js';
+import { buildMasterPlaylist } from './build.js';
 import {
     MULTI_ANGLE_MASTER,
     SINGLE_ANGLE_MASTER,
     AUDIO_ONLY_MASTER,
     MULTI_ANGLE_WITH_SUBTITLES_MASTER,
     MULTI_TIER_AUDIO_MASTER,
-} from './fixtures';
+} from './fixtures.js';
 
 const FIXTURES: [name: string, text: string][] = [
     ['multi-angle master', MULTI_ANGLE_MASTER],

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseMasterPlaylist, type HlsParsedMaster } from './parse';
-import { buildMasterPlaylist } from './build';
+import { parseMasterPlaylist, type HlsParsedMaster } from './parse.js';
+import { buildMasterPlaylist } from './build.js';
 
 const EMPTY: HlsParsedMaster = {
     variants: [],

@@ -5,15 +5,15 @@ import {
     extractAudioOnlyPlaylist,
     listAngles,
     listVideoAngles,
-} from './angles';
-import { buildMasterPlaylist } from './build';
-import { parseMasterPlaylist } from './parse';
+} from './angles.js';
+import { buildMasterPlaylist } from './build.js';
+import { parseMasterPlaylist } from './parse.js';
 import {
     AUDIO_ONLY_MASTER,
     MULTI_ANGLE_MASTER,
     MULTI_ANGLE_WITH_SUBTITLES_MASTER,
     SINGLE_ANGLE_MASTER,
-} from './fixtures';
+} from './fixtures.js';
 
 describe('listVideoAngles', () => {
     it('lists the video rendition groups of a multi-angle master', () => {

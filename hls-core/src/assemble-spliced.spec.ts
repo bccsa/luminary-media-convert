@@ -3,8 +3,8 @@ import {
     assembleSplicedMediaPlaylist,
     buildSplicedMediaPlaylist,
     type SplicedPart,
-} from './assemble-spliced';
-import { buildMediaPlaylist, parseMediaPlaylist } from './media-playlist';
+} from './assemble-spliced.js';
+import { buildMediaPlaylist, parseMediaPlaylist } from './media-playlist.js';
 
 const THREE_PARTS: SplicedPart[] = [
     // head bridge: own init, one short segment

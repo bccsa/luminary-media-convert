@@ -22,7 +22,7 @@
         "dist:win-portable": "../ffmpeg-build/build.sh win32-x64 && npm run package:win-portable"
     },
     "dependencies": {
-        "@luminary-media-converter/api": "*"
+        "@luminary-media-converter/api": "file:../api"
     },
     "devDependencies": {
         "electron": "33.4.11",

@@ -16,14 +16,14 @@ import {
     listVideoAngles,
     extractAnglePlaylist,
     extractAudioOnlyPlaylist,
-} from './angles';
+} from './angles.js';
 import {
     MULTI_ANGLE_MASTER,
     SINGLE_ANGLE_MASTER,
     AUDIO_ONLY_MASTER,
     MULTI_ANGLE_WITH_SUBTITLES_MASTER,
     MULTI_TIER_AUDIO_MASTER,
-} from './fixtures';
+} from './fixtures.js';
 
 // ---------------------------------------------------------------------------
 // The pre-rewrite implementation, copied verbatim from git history.

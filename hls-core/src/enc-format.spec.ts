@@ -7,7 +7,7 @@ import {
     LMCENC_CIPHERTEXT_OFFSET,
     LMCENC_IV_LENGTH,
     LMCENC_MAGIC,
-} from './enc-format';
+} from './enc-format.js';
 
 const encoder = new TextEncoder();
 

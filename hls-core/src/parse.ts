@@ -1,13 +1,13 @@
 import {
     parseAttributeList,
     type HlsAttribute,
-} from './attributes';
+} from './attributes.js';
 import {
     getLayout,
     setAttributeSource,
     setHeaderOrder,
     setLayout,
-} from './metadata';
+} from './metadata.js';
 
 /** Structured form of a `RESOLUTION=<width>x<height>` attribute. */
 export interface HlsResolution {

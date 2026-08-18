@@ -18,7 +18,7 @@
         "dist"
     ],
     "scripts": {
-        "build": "tsc -b tsconfig.json tsconfig.esm.json",
+        "build": "tsc -b tsconfig.json tsconfig.esm.json && node -e \"require('fs').writeFileSync('dist/esm/package.json', JSON.stringify({type:'module'}) + '\\n')\"",
         "dev": "tsc -b tsconfig.json tsconfig.esm.json --watch",
         "test": "vitest run",
         "test:watch": "vitest"

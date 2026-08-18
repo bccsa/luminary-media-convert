@@ -21,7 +21,7 @@
  * Internal module — not part of the package's public surface.
  */
 
-import type { HlsAttribute } from './attributes';
+import type { HlsAttribute } from './attributes.js';
 
 /** What a source line carried, for entries built from an attribute list. */
 const attributeSources = new WeakMap<object, HlsAttribute[]>();

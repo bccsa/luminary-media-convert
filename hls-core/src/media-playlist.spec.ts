@@ -5,8 +5,8 @@ import {
     getMediaPlaylistLayout,
     parseByteRange,
     parseMediaPlaylist,
-} from './media-playlist';
-import { BYTE_RANGE_MEDIA_PLAYLIST, PLAIN_MEDIA_PLAYLIST } from './fixtures';
+} from './media-playlist.js';
+import { BYTE_RANGE_MEDIA_PLAYLIST, PLAIN_MEDIA_PLAYLIST } from './fixtures.js';
 
 describe('parseMediaPlaylist', () => {
     it('reads the header of a byte-range fMP4 playlist', () => {

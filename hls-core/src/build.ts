@@ -3,8 +3,8 @@ import {
     formatAttributeList,
     mergeAttributes,
     type HlsAttribute,
-} from './attributes';
-import { getAttributeSource, orderedHeaderNames } from './metadata';
+} from './attributes.js';
+import { getAttributeSource, orderedHeaderNames } from './metadata.js';
 import {
     formatResolution,
     getMasterLayout,
@@ -15,7 +15,7 @@ import {
     type HlsMedia,
     type HlsParsedMaster,
     type HlsVariant,
-} from './parse';
+} from './parse.js';
 
 /**
  * Serialize a parsed master playlist back to HLS text.
