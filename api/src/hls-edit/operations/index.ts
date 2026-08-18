@@ -1,5 +1,5 @@
 import { BadRequestException, NotImplementedException } from '@nestjs/common';
-import type { HlsParsedMaster } from '@luminary-media-converter/hls';
+import type { HlsParsedMaster } from '@luminary-media-converter/hls-core';
 import type { HlsOperationDto } from '../dto/mutate.dto.js';
 import type { S3ConfigDto } from '../../encode/dto/s3-config.dto.js';
 import type { S3EtagService } from '../s3-etag.service.js';

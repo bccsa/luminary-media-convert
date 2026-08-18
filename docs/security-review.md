@@ -90,7 +90,7 @@ it was always sound.
 
 Removing the exemption was verified safe before it was done: the packaged
 renderer is served from the API's own origin (auto-approved after binding), and
-there is no `file://` load anywhere in `electron/src` — the only mentions of
+there is no `file://` load anywhere in `app-electron/src` — the only mentions of
 `file://` in the repository were the two comments justifying the branch.
 
 ### 2.2 — LOW: `documentId` reuse leaked a read token between approved sites — **fixed**
@@ -199,7 +199,7 @@ disagree with the reasoning rather than rediscover the fact.
   launch; there is no notarization and no auto-update. Tracked as Todo item 2.
 - **A GPL ffmpeg is shipped.** It runs as a separate process and is never linked,
   so the obligation travels with ffmpeg, not with this Apache-2.0 codebase. A
-  technical reading, not legal advice — see `electron/bin/README.md`.
+  technical reading, not legal advice — see `app-electron/bin/README.md`.
 - **Running the API as a remote service would invalidate this review.** The
   deploy workflows and Dockerfile that still described that mode have since been
   removed, which is why this is now a note rather than an open

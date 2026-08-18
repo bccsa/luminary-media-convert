@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # The pinned sources. Sourced by build.sh.
 #
 # These lines *are* the corresponding source the GPL asks us to offer: this file

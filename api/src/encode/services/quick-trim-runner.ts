@@ -63,7 +63,7 @@ import {
     buildSplicedMediaPlaylist,
     type SplicedPart,
     parseMediaPlaylist,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 import type {
     AudioGroupDto,
     EncodeConfigDto,

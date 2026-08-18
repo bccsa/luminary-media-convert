@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { BAR_BUTTON, EDITOR_ICON_BUTTON } from './segment-editor/buttonStyles';
 import { useTheme, type ThemePreference } from '../composables/useTheme';
 
 /**
@@ -19,9 +20,9 @@ const props = withDefaults(
         /**
          * `editor` borrows the segment editor's own button styling, for the
          * instance that sits in the timeline's controls bar next to the
-         * keyboard-shortcuts button. Those classes are injected globally by the
-         * library, and `.se-controls-bar .se-btn` sizes them to match, so the
-         * two buttons come out identical rather than merely similar.
+         * keyboard-shortcuts button. The utilities are copied from there and the
+         * `se-btn` hooks are kept, so `.se-controls-bar .se-btn` still sizes both
+         * to match and the two come out identical rather than merely similar.
          */
         variant?: 'default' | 'editor';
     }>(),
@@ -41,7 +42,7 @@ const panelPositionClass = computed(() =>
 
 const triggerClass = computed(() =>
     props.variant === 'editor'
-        ? 'se-btn se-btn--icon cursor-pointer'
+        ? `se-btn se-btn--icon ${EDITOR_ICON_BUTTON} ${BAR_BUTTON}`
         : 'flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-slate-700 shadow-sm ring-slate-900/5 transition-colors hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:ring-white/10'
 );
 
@@ -142,7 +143,11 @@ function pickTheme(p: ThemePreference) {
             @click.stop="toggle"
         >
             <svg
-                :class="variant === 'editor' ? 'se-icon' : 'h-5 w-5'"
+                :class="
+                    variant === 'editor'
+                        ? 'inline-block h-[1.125rem] w-[1.125rem] shrink-0 align-middle text-[inherit]'
+                        : 'h-5 w-5'
+                "
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"

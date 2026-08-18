@@ -1,0 +1,30 @@
+{
+    "name": "@luminary-media-converter/hls-core",
+    "version": "0.0.1",
+    "private": true,
+    "license": "Apache-2.0",
+    "main": "./dist/index.js",
+    "module": "./dist/esm/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/esm/index.js",
+            "require": "./dist/index.js",
+            "default": "./dist/index.js"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc -b tsconfig.json tsconfig.esm.json && node -e \"require('fs').writeFileSync('dist/esm/package.json', JSON.stringify({type:'module'}) + '\\n')\"",
+        "dev": "tsc -b tsconfig.json tsconfig.esm.json --watch",
+        "test": "vitest run",
+        "test:watch": "vitest"
+    },
+    "devDependencies": {
+        "typescript": "~5.7.0",
+        "vitest": "^3.0.0"
+    }
+}

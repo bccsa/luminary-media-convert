@@ -1,5 +1,5 @@
 import { ref, watch, type Ref } from 'vue';
-import type { Segment } from '@luminary-media-converter/segment-editor';
+import type { Segment } from '../components/segment-editor';
 
 interface ChapterTrimSyncDeps {
     /** Segments shown on the bottom timeline. */

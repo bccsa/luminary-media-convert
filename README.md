@@ -31,16 +31,15 @@ The API binds to `127.0.0.1` only. The renderer authenticates with a token minte
 |---|---|---|
 | `api/` | Encoding API — NestJS, embeddable via `createServer()` | [api/README.md](api/README.md) |
 | `app/` | Vue 3 renderer UI | [app/README.md](app/README.md) |
-| `electron/` | Desktop shell, hosts the API in-process, packaging | [electron/bin/README.md](electron/bin/README.md) (ffmpeg binaries) |
+| `app-electron/` | Desktop shell, hosts the API in-process, packaging | [app-electron/bin/README.md](app-electron/bin/README.md) (ffmpeg binaries) |
 | `cms-mock/` | Dev-only stand-in for the Luminary CMS | [cms-mock/README.md](cms-mock/README.md) |
 | `encode-config/` | Shared encode-config form + types | [encode-config/README.md](encode-config/README.md) |
-| `segment-editor/` | Shared timeline editor (trim / chapters / subtitles) | [segment-editor/README.md](segment-editor/README.md) |
-| `hls/` | Shared HLS parsing, key utilities, angle extraction | — |
+| `hls-core/` | Shared HLS parsing, key utilities, angle extraction | — |
 
 ## Prerequisites
 
 - **Node.js** ≥ 18
-- **FFmpeg + ffprobe** on `PATH` for development (with `libx264` and `aac`; `h264_nvenc` for NVIDIA, `h264_videotoolbox` + `scale_vt` for Apple Silicon). Packaged builds ship their own — see [electron/bin/README.md](electron/bin/README.md)
+- **FFmpeg + ffprobe** on `PATH` for development (with `libx264` and `aac`; `h264_nvenc` for NVIDIA, `h264_videotoolbox` + `scale_vt` for Apple Silicon). Packaged builds ship their own — see [app-electron/bin/README.md](app-electron/bin/README.md)
 - An **S3-compatible bucket** to write output to (MinIO, R2, AWS S3, B2, Spaces…)
 
 ## Quick start
@@ -97,14 +96,14 @@ Each command builds the encoder it ships first, then the workspaces, then the ap
 so a clean clone produces a complete artifact with no separate steps.
 
 ```bash
-npm -w electron run dist:mac            # dmg + zip, arm64 and x64
-npm -w electron run dist:win            # NSIS installer, x64 — needs a Windows machine
-npm -w electron run dist:win-portable   # portable zip, x64 — builds on macOS too
-npm -w electron run pack                # unpacked directory, for inspection
-npm -w electron run verify-package      # assert every packaged app can actually encode
+npm -w app-electron run dist:mac            # dmg + zip, arm64 and x64
+npm -w app-electron run dist:win            # NSIS installer, x64 — needs a Windows machine
+npm -w app-electron run dist:win-portable   # portable zip, x64 — builds on macOS too
+npm -w app-electron run pack                # unpacked directory, for inspection
+npm -w app-electron run verify-package      # assert every packaged app can actually encode
 ```
 
-Artifacts land in `electron/release/`, named `<product>-<version>-<mac|win>-<arch>.<ext>`.
+Artifacts land in `app-electron/release/`, named `<product>-<version>-<mac|win>-<arch>.<ext>`.
 Neither the artifacts nor the ffmpeg binaries are in the repository.
 
 ### What each build needs
@@ -120,18 +119,18 @@ for the NVIDIA path and needs a clang with the NVPTX backend, which Apple's clan
 not have. Put it first on `PATH`:
 
 ```bash
-PATH="/opt/homebrew/opt/llvm/bin:$PATH" npm -w electron run dist:win-portable
+PATH="/opt/homebrew/opt/llvm/bin:$PATH" npm -w app-electron run dist:win-portable
 ```
 
 The ffmpeg build itself is [`ffmpeg-build/README.md`](ffmpeg-build/README.md) — why we
-build rather than download, what goes in, and the GPL position. `electron/bin/README.md`
+build rather than download, what goes in, and the GPL position. `app-electron/bin/README.md`
 covers where the binaries land and their licences.
 
 ### What is signed, and what a user sees
 
 Builds are **unsigned** — there is no Developer ID and no Authenticode certificate, so
 there is no auto-update either. macOS bundles are still *ad-hoc* signed by
-`electron/build/after-pack.cjs`, without which a downloaded copy is refused outright as
+`app-electron/build/after-pack.cjs`, without which a downloaded copy is refused outright as
 "damaged". On macOS 15 and later, opening an unsigned app takes System Settings →
 Privacy & Security → **Open Anyway**; right-click → Open no longer works, Apple removed
 it. Windows shows a SmartScreen warning. The portable Windows build additionally carries
@@ -149,9 +148,9 @@ See [Todo.md](Todo.md) for signing, notarization and auto-update.
 | `npm -w api run build` / `test` / `test:e2e` | Build and test the API |
 | `npm -w app run dev` / `build` / `test` | Web client |
 | `npm -w cms-mock run dev` | CMS mock on port 5199 |
-| `npm -w electron run dev` / `dist:mac` / `dist:win` / `pack` | Desktop shell |
-| `npm -w electron run dist:win-portable` | Portable Windows zip, buildable on macOS |
-| `npm -w {hls,encode-config,segment-editor,player-core,player-web} run build` / `dev` / `test` | Shared libraries |
+| `npm -w app-electron run dev` / `dist:mac` / `dist:win` / `pack` | Desktop shell |
+| `npm -w app-electron run dist:win-portable` | Portable Windows zip, buildable on macOS |
+| `npm -w {hls-core,encode-config,player-core,player-web} run build` / `dev` / `test` | Shared libraries |
 
 ## Documentation
 
@@ -159,3 +158,39 @@ See [Todo.md](Todo.md) for signing, notarization and auto-update.
 - [api/README.md](api/README.md) — API reference, authentication, environment, encoding workflow, output layout
 - [app/README.md](app/README.md) — renderer structure and environment
 - [Todo.md](Todo.md) — known gaps and follow-up work
+
+## Licensing
+
+Licensed per directory rather than repository-wide, because the pieces are not
+all destined for the same audience: the shared libraries are meant to be consumed
+by other applications, while the desktop shell is a distributed product that
+ships a GPL binary alongside it.
+
+| | Licence | |
+| --- | --- | --- |
+| `api/`, `app/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `cms-mock/` | Apache-2.0 | each carries its own `LICENSE` |
+| `app-electron/`, `ffmpeg-build/` | GPL-3.0-or-later | each carries its own `LICENSE`; the build scripts also carry an SPDX header |
+| everything else — `docs/`, `test-media/`, the root files | Apache-2.0 | declared by the root `package.json` |
+
+There is deliberately no repository-level `LICENSE` file: with two licences in
+play, a single one at the root would contradict whichever directory it did not
+describe.
+
+**Why the shell is GPL and the libraries are not.** The app spawns FFmpeg as a
+child process and reads its output; it never links FFmpeg's libraries. On that
+basis [docs/ffmpeg-licensing.md](docs/ffmpeg-licensing.md) — quoting the FSF's own
+FAQ — concludes the bundle is an *aggregate*, and Apache-2.0 code alongside it is
+not a derivative work. So the GPL on `app-electron` and `ffmpeg-build` is a
+**deliberate choice rather than an obligation**: those two are what actually get
+distributed with a GPL encoder inside, and licensing them to match removes any
+question about the combination. The libraries stay Apache-2.0 precisely because
+nothing about FFmpeg reaches them.
+
+`-or-later` rather than `GPL-3.0`: the bare identifier is deprecated in SPDX, and
+"or any later version" is the FSF's own recommendation for new code. It also
+matches the binaries, which are built **GPL v2-or-later** (no `--enable-version3`)
+and whose licence texts ship beside them, as the GPL requires.
+
+One thing this does not settle: `docs/ffmpeg-licensing.md` records that the GPL
+position still needs BCC sign-off, and that remains true. It is a release gate,
+not a code one.

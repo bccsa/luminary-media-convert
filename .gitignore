@@ -16,14 +16,14 @@ dispatchQueue.json
 jobQueue.json
 tusd/bin/
 # Desktop build output, and the ffmpeg binaries that are built rather than
-# committed (see electron/bin/README.md).
-electron/release/
-electron/bin/*/
+# committed (see app-electron/bin/README.md).
+app-electron/release/
+app-electron/bin/*/
 # …except the licence texts, which are a few KB of text and must ship whether or
 # not anyone reruns a build. The GPL obliges a *copy* of the licence to travel
 # with the binary; a URL in a notice is not a copy.
-!electron/bin/licenses/
-!electron/bin/licenses/*
+!app-electron/bin/licenses/
+!app-electron/bin/licenses/*
 *.tsbuildinfo
 docs/todo.md
 

@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
-import { parseMediaPlaylist } from '@luminary-media-converter/hls';
+import { parseMediaPlaylist } from '@luminary-media-converter/hls-core';
 
 const { mockSpawn, mockExecFile } = vi.hoisted(() => ({
     mockSpawn: vi.fn(),

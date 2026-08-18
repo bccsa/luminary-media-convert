@@ -88,5 +88,5 @@ Some specs were intentionally left broken during the local-only migration (`api.
 - Vite 6, Tailwind CSS v4, TypeScript
 - Vue Router 4 (history mode)
 - `@luminary-media-converter/player-web` (hls.js on a plain `<video>`) — Video.js is gone
-- `@luminary-media-converter/{player-core,encode-config,segment-editor,hls}`
+- `@luminary-media-converter/{player-core,encode-config,hls-core}`, and the segment editor at `src/components/segment-editor/`
 - Vitest + `@vue/test-utils` + jsdom

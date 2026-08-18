@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Build the ffmpeg/ffprobe pair the packaged app ships, from FFmpeg's own signed
 # source. See README.md for why, and what goes in.
 #
 #     ffmpeg-build/build.sh darwin-arm64
 #
-# Output lands in electron/bin/<target>/, where electron-builder's extraResources
+# Output lands in app-electron/bin/<target>/, where electron-builder's extraResources
 # picks it up, together with the licence texts a GPL binary must carry.
 #
 set -euo pipefail
@@ -53,7 +54,7 @@ fi
 
 work="$here/.work/$target"
 prefix="$work/deps"     # x264 installs here; ffmpeg links against it
-out="$repo/electron/bin/$target"
+out="$repo/app-electron/bin/$target"
 
 log() { printf '\n  \033[1m%s\033[0m\n' "$1"; }
 fail() {
@@ -522,8 +523,8 @@ if [ "$os" = "mingw32" ]; then
 fi
 
 for licence in "${gpl_texts[@]}"; do
-    from="$repo/electron/bin/licenses/$licence"
-    [ -f "$from" ] || fail "$licence is missing from electron/bin/licenses/"
+    from="$repo/app-electron/bin/licenses/$licence"
+    [ -f "$from" ] || fail "$licence is missing from app-electron/bin/licenses/"
     # A v2-or-later work offers v3 as well, so both travel. (A v3-only build would
     # ship v3 alone.)
     cp "$from" "$out/$licence"

@@ -51,7 +51,7 @@ jobs:
             # this is the only place its TypeScript is compiled on an ordinary pull
             # request.
             - name: Compile the Electron main process
-              run: npm -w electron run build
+              run: npm -w app-electron run build
 
             # Declarations are what consumers type-check against; a library that
             # emits JS but no .d.ts breaks its consumers rather than itself.

@@ -3,7 +3,7 @@ import {
     type Segment,
     parseVtt,
     exportChaptersVtt,
-} from '@luminary-media-converter/segment-editor';
+} from '../components/segment-editor';
 import { getChapters, putChapters } from '../api';
 import { errorMessage } from '../utils/errors';
 

@@ -1,4 +1,4 @@
-import type { Segment } from '@luminary-media-converter/segment-editor';
+import type { Segment } from '../components/segment-editor';
 import type { TrimSegment } from '../types';
 
 /**

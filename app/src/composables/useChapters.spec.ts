@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { nextTick } from 'vue';
 import { useChapters } from './useChapters';
-import { exportChaptersVtt } from '@luminary-media-converter/segment-editor';
+import { exportChaptersVtt } from '../components/segment-editor';
 
 const STORAGE_PREFIX = 'luminary_chapters_';
 

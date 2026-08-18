@@ -19,9 +19,9 @@ export default defineConfig({
                 __dirname,
                 '../player-core/src/index.ts'
             ),
-            '@luminary-media-converter/hls': resolve(
+            '@luminary-media-converter/hls-core': resolve(
                 __dirname,
-                '../hls/src/index.ts'
+                '../hls-core/src/index.ts'
             ),
         },
         dedupe: ['vue'],

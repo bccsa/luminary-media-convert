@@ -4,7 +4,7 @@
  */
 
 import { createCipheriv } from 'node:crypto';
-import { LMCENC_MAGIC } from '@luminary-media-converter/hls';
+import { LMCENC_MAGIC } from '@luminary-media-converter/hls-core';
 import type {
     AdapterAudioTrack,
     AdapterEventMap,
