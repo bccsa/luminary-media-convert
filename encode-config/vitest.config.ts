@@ -7,6 +7,8 @@ export default defineConfig({
     plugins: [vue()],
     test: {
         environment: 'jsdom',
+        // Node's own storage globals shadow jsdom's; see vitest.setup.ts.
+        setupFiles: ['./vitest.setup.ts'],
         globals: false,
     },
 });

@@ -250,9 +250,7 @@ describe('quickTrimGateRejection', () => {
         );
         const config = makeConfig();
 
-        expect(copyModeRejection(probeResult, config)).toMatch(
-            /out of sync/
-        );
+        expect(copyModeRejection(probeResult, config)).toMatch(/out of sync/);
         expect(quickTrimGateRejection(probeResult, config)).toBeNull();
     });
 
@@ -263,9 +261,9 @@ describe('quickTrimGateRejection', () => {
                 makeConfig()
             )
         ).toMatch(/keyframe structure could not be determined/);
-        expect(
-            quickTrimGateRejection(undefined, makeConfig())
-        ).toMatch(/keyframe structure could not be determined/);
+        expect(quickTrimGateRejection(undefined, makeConfig())).toMatch(
+            /keyframe structure could not be determined/
+        );
     });
 
     it('still refuses a cadence that does not fit the segment length', () => {

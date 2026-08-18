@@ -1,4 +1,5 @@
 import { type MockedFunction } from 'vitest';
+import { ffmpegBin } from './ffbin.js';
 
 /* ------------------------------------------------------------------ */
 /*  Hoisted mocks                                                     */
@@ -492,7 +493,10 @@ describe('PreviewService', () => {
             // execFile should have been called for keyframe scan (ffmpeg -i ... -f segment ...)
             expect(mockExecFile).toHaveBeenCalled();
             const firstCallArgs = mockExecFile.mock.calls[0];
-            expect(firstCallArgs[0]).toBe('ffmpeg');
+            // Resolved through ffbin, not assumed to be a PATH lookup: a dev
+            // environment that sets FFMPEG_PATH — as api/.env does — gets an
+            // absolute path here, and asserting the bare name fails on it.
+            expect(firstCallArgs[0]).toBe(ffmpegBin());
             expect(firstCallArgs[1]).toContain('-f');
             expect(firstCallArgs[1]).toContain('segment');
         });

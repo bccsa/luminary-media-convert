@@ -361,13 +361,24 @@ export class EncodeService {
                 // precise path has to start from an empty directory for the
                 // same reason a retry does — the pipeline would otherwise pack
                 // the abandoned attempt's segments in with the new ones.
-                await rm(outputDir, { recursive: true, force: true }).catch(
-                    (err) => {
-                        this.logger.warn(
-                            `Could not clear partial quick-cut output for ${sessionId}: ${(err as Error).message}`
-                        );
-                    }
-                );
+                //
+                // A clear that fails therefore ends the session rather than
+                // being logged and stepped over: continuing produces one output
+                // spliced from two attempts, uploaded and delivered, with
+                // nothing downstream able to tell. Windows makes this reachable
+                // rather than theoretical — a file still held by an ffmpeg that
+                // has not finished exiting gives EPERM or EBUSY. A failed
+                // session can be retried; a corrupt one is not noticed.
+                try {
+                    await rm(outputDir, { recursive: true, force: true });
+                } catch (err) {
+                    throw new Error(
+                        `Could not clear the partial quick-cut output for session ` +
+                            `${sessionId} (${(err as Error).message}), so the re-encode ` +
+                            'was not started — its output would have been mixed with the ' +
+                            'abandoned attempt. Retry the encode.'
+                    );
+                }
                 currentProgress.encoding = 0;
             }
 

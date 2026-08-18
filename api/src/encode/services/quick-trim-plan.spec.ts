@@ -516,7 +516,10 @@ describe('planQuickTrim', () => {
 });
 
 describe('planQuickTrim — streams that reorder at start', () => {
-    function plan(streams: StreamGrid[], ranges: { inSec: number; outSec: number }[]) {
+    function plan(
+        streams: StreamGrid[],
+        ranges: { inSec: number; outSec: number }[]
+    ) {
         const result = planQuickTrim({
             streams,
             trimSegments: ranges,
