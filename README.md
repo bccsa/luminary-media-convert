@@ -158,3 +158,30 @@ See [Todo.md](Todo.md) for signing, notarization and auto-update.
 - [api/README.md](api/README.md) — API reference, authentication, environment, encoding workflow, output layout
 - [app/README.md](app/README.md) — renderer structure and environment
 - [Todo.md](Todo.md) — known gaps and follow-up work
+
+## Licensing
+
+Licensed per workspace rather than repository-wide, because the pieces are not
+all destined for the same audience: the shared libraries are meant to be
+consumed by other applications, while the desktop shell is a distributed
+product that ships a GPL binary alongside it.
+
+| | |
+| --- | --- |
+| `api/`, `app/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `cms-mock/` | Apache-2.0, each with its own `LICENSE` |
+| `app-electron/`, `ffmpeg-build/` | **Pending** — see below |
+
+**FFmpeg is a separate program, not a library we link.** The app spawns it as a
+child process and reads its output, so [docs/ffmpeg-licensing.md](docs/ffmpeg-licensing.md)
+concludes — quoting the FSF's own FAQ on the point — that the bundle is an
+*aggregate* and our Apache-2.0 code is not a derivative work of it. The binaries
+themselves are **GPL v2-or-later** (built without `--enable-version3`), and their
+licence texts ship beside them, which is what the GPL obliges.
+
+That leaves one open question rather than an oversight: whether `app-electron`
+and `ffmpeg-build` should nonetheless be released under the GPL as a deliberate
+position, which is stricter than the analysis requires and needs BCC sign-off
+(tracked in bccsa/luminary-media-convert#185). Until that is settled they keep
+`Apache-2.0` in their `package.json` and carry no separate `LICENSE`, and the
+repository-level `LICENSE` remains as the fallback for anything not covered
+above.
