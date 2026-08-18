@@ -1814,6 +1814,7 @@ const listSectionSpacing = computed(() =>
                         :max="maxZoom"
                         step="0.1"
                         :value="zoom"
+                        class="w-24 accent-sky-600 dark:accent-sky-400"
                         @input="(e) => setZoom(parseFloat((e.target as HTMLInputElement).value), playheadSec)"
                     />
                     <span>{{ zoom.toFixed(1) }}×</span>
@@ -1895,7 +1896,13 @@ const listSectionSpacing = computed(() =>
                         class="se-thumb-tile absolute top-0 bottom-0 overflow-hidden"
                         :style="{ left: `${tile.left}px`, width: `${tile.width}px` }"
                     >
-                        <img :src="tile.src" :style="tile.imgStyle" alt="" draggable="false" />
+                        <img
+                            :src="tile.src"
+                            :style="tile.imgStyle"
+                            alt=""
+                            draggable="false"
+                            class="absolute top-0 left-0 max-w-none select-none [-webkit-user-drag:none]"
+                        />
                     </div>
                 </div>
 
@@ -1970,7 +1977,7 @@ const listSectionSpacing = computed(() =>
                         @click.stop="removeSegment(seg.id)"
                     >
                         <svg
-                            class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]"
+                            class="se-icon inline-block shrink-0 w-3 h-3 align-middle text-[inherit]"
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
@@ -2438,7 +2445,7 @@ const listSectionSpacing = computed(() =>
                             @click.stop="removeSegment(seg.id)"
                         >
                             <svg
-                                class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]"
+                                class="se-icon inline-block shrink-0 w-4 h-4 align-middle text-[inherit]"
                                 viewBox="0 0 24 24"
                                 fill="none"
                                 stroke="currentColor"
@@ -2495,32 +2502,32 @@ const listSectionSpacing = computed(() =>
                 @click.self="helpOpen = false"
             >
                 <div class="se-help-panel bg-white border border-sky-200 rounded-[10px] p-6 max-w-[min(36rem,calc(100vw-2rem))] w-full max-h-[min(85vh,42rem)] overflow-y-auto overscroll-contain text-zinc-900 text-[0.8125rem] shadow-[0_1px_2px_rgb(9_9_11/0.04),0_0_0_1px_rgb(9_9_11/0.06)]">
-                    <h4 id="se-help-heading">Keyboard shortcuts</h4>
-                    <dl>
-                        <dt>Space / K</dt><dd>Play / pause</dd>
-                        <dt>← / →</dt><dd>Step 1 second back / forward</dd>
-                        <dt>1 / 2 / 3 + arrow</dt><dd>Step 10s / 30s / 60s</dd>
-                        <dt>J / L</dt><dd>Step 10s back / forward</dd>
-                        <dt>Home / End</dt><dd>Jump to start / end</dd>
+                    <h4 class="m-0 mb-3 text-base" id="se-help-heading">Keyboard shortcuts</h4>
+                    <dl class="grid grid-cols-[auto_1fr] gap-y-1 gap-x-3 m-0">
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">Space / K</dt><dd class="m-0 text-slate-500">Play / pause</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">← / →</dt><dd class="m-0 text-slate-500">Step 1 second back / forward</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">1 / 2 / 3 + arrow</dt><dd class="m-0 text-slate-500">Step 10s / 30s / 60s</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">J / L</dt><dd class="m-0 text-slate-500">Step 10s back / forward</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">Home / End</dt><dd class="m-0 text-slate-500">Jump to start / end</dd>
                         <dt v-if="fps > 0">, / .</dt><dd v-if="fps > 0">Step one frame ({{ fps }} fps)</dd>
-                        <dt>I</dt><dd>Mark In at playhead (Resolve-style)</dd>
-                        <dt>O</dt><dd>Mark Out at playhead</dd>
-                        <dt>[ / ]</dt><dd>Mark In / Mark Out (alternate)</dd>
-                        <dt>Alt + ← / →</dt><dd>Nudge nearest edge of selected segment</dd>
-                        <dt>Delete / ⌘ / Ctrl + X</dt><dd>Remove selected segment(s)</dd>
-                        <dt>⌘ / Ctrl + Z</dt><dd>Undo</dd>
-                        <dt>⌘ / Ctrl + Shift + Z</dt><dd>Redo</dd>
-                        <dt>+ / −</dt><dd>Zoom in / out (0 resets)</dd>
-                        <dt>Ctrl / ⌘ + wheel</dt><dd>Zoom at cursor</dd>
-                        <dt>Double-click + drag</dt>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">I</dt><dd class="m-0 text-slate-500">Mark In at playhead (Resolve-style)</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">O</dt><dd class="m-0 text-slate-500">Mark Out at playhead</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">[ / ]</dt><dd class="m-0 text-slate-500">Mark In / Mark Out (alternate)</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">Alt + ← / →</dt><dd class="m-0 text-slate-500">Nudge nearest edge of selected segment</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">Delete / ⌘ / Ctrl + X</dt><dd class="m-0 text-slate-500">Remove selected segment(s)</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">⌘ / Ctrl + Z</dt><dd class="m-0 text-slate-500">Undo</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">⌘ / Ctrl + Shift + Z</dt><dd class="m-0 text-slate-500">Redo</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">+ / −</dt><dd class="m-0 text-slate-500">Zoom in / out (0 resets)</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">Ctrl / ⌘ + wheel</dt><dd class="m-0 text-slate-500">Zoom at cursor</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">Double-click + drag</dt>
                         <dd v-if="mode === 'trim'">Drag out a cut on the timeline</dd>
                         <dd v-else-if="mode === 'chapters'">Drag out a chapter on the timeline</dd>
                         <dd v-else>Drag out a cue on the timeline</dd>
-                        <dt>Shift + drag</dt>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">Shift + drag</dt>
                         <dd v-if="mode === 'trim'">Drag out a cut on the timeline</dd>
                         <dd v-else>Marquee-select segments</dd>
-                        <dt>Esc</dt><dd>Clear selection / close</dd>
-                        <dt>?</dt><dd>Toggle this help</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">Esc</dt><dd class="m-0 text-slate-500">Clear selection / close</dd>
+                        <dt class="font-mono text-sky-600 whitespace-nowrap">?</dt><dd class="m-0 text-slate-500">Toggle this help</dd>
                     </dl>
                 </div>
             </div>

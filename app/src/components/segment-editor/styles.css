@@ -160,20 +160,6 @@ html.dark .se-root {
     flex-wrap: wrap;
 }
 
-.se-zoom input[type='range'] {
-    width: 96px;
-    accent-color: var(--se-accent);
-}
-
-.se-thumb-tile img {
-    position: absolute;
-    top: 0;
-    left: 0;
-    max-width: none;
-    user-select: none;
-    -webkit-user-drag: none;
-}
-
 .se-segment--selected .se-segment-handle {
     background: var(--se-selected);
 }
@@ -270,11 +256,6 @@ html.dark .se-root {
     vertical-align: unset;
 }
 
-.se-remove .se-icon {
-    width: 1rem;
-    height: 1rem;
-}
-
 html.dark .se-help {
     --se-text: #e2e8f0;
     --se-text-dim: #94a3b8;
@@ -284,29 +265,6 @@ html.dark .se-help {
     --se-help-backdrop: rgb(0 0 0 / 0.75);
     --se-help-surface: #18181b;
     --se-help-surface-border: rgb(63 63 70 / 0.75);
-}
-
-.se-help-panel h4 {
-    margin: 0 0 0.75rem 0;
-    font-size: 1rem;
-}
-
-.se-help-panel dl {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0.25rem 0.75rem;
-    margin: 0;
-}
-
-.se-help-panel dt {
-    font-family: var(--se-font-mono);
-    color: var(--se-accent);
-    white-space: nowrap;
-}
-
-.se-help-panel dd {
-    margin: 0;
-    color: var(--se-text-dim);
 }
 
 html.dark .se-confirm {
@@ -488,9 +446,4 @@ html.dark .se-confirm {
     border: 1px solid var(--se-kbd-border);
     color: var(--se-text-dim);
     text-align: center;
-}
-
-.se-segment-delete .se-icon {
-    width: 12px;
-    height: 12px;
 }
