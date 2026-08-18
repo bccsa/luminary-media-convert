@@ -11,7 +11,7 @@
         "player-core",
         "player-web",
         "cms-mock",
-        "electron"
+        "app-electron"
     ],
     "scripts": {
         "build:libs": "npm -w hls-core run build && npm -w encode-config run build && npm -w segment-editor run build && npm -w player-core run build && npm -w player-web run build",
@@ -19,7 +19,7 @@
         "predev": "npm run build:libs",
         "dev": "npm run predev && concurrently -k -n ecfg,segd,hls,pcor,plyw,api,app -c green,gray,white,cyan,red,blue,magenta \"npm -w encode-config run dev\" \"npm -w segment-editor run dev\" \"npm -w hls-core run dev\" \"npm -w player-core run dev\" \"npm -w player-web run dev\" \"npm -w api run dev\" \"npm -w app run dev\"",
         "predev:electron": "npm run build:libs && npm -w api run build",
-        "dev:electron": "concurrently -k -n ecfg,segd,hls,pcor,plyw,app,elec -c green,gray,white,cyan,red,magenta,yellow \"npm -w encode-config run dev\" \"npm -w segment-editor run dev\" \"npm -w hls-core run dev\" \"npm -w player-core run dev\" \"npm -w player-web run dev\" \"npm -w app run dev\" \"npm -w electron run dev\""
+        "dev:electron": "concurrently -k -n ecfg,segd,hls,pcor,plyw,app,elec -c green,gray,white,cyan,red,magenta,yellow \"npm -w encode-config run dev\" \"npm -w segment-editor run dev\" \"npm -w hls-core run dev\" \"npm -w player-core run dev\" \"npm -w player-web run dev\" \"npm -w app run dev\" \"npm -w app-electron run dev\""
     },
     "devDependencies": {
         "concurrently": "^9.2.1"

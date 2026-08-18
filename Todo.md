@@ -127,7 +127,7 @@ The encoder's half of the contract is done and documented (CLAUDE.md "CMS contra
 
 **Today.** There is none, and every update is a manual re-download.
 
-Builds carry an **ad-hoc** signature (`electron/build/after-pack.cjs`) but no Developer ID and no notarization, so macOS 15+ blocks a downloaded copy until the user goes through System Settings → Privacy & Security → Open Anyway → a second confirmation → authentication. Right-click → Open no longer works; Apple removed it. Verified on macOS 26.5.2.
+Builds carry an **ad-hoc** signature (`app-electron/build/after-pack.cjs`) but no Developer ID and no notarization, so macOS 15+ blocks a downloaded copy until the user goes through System Settings → Privacy & Security → Open Anyway → a second confirmation → authentication. Right-click → Open no longer works; Apple removed it. Verified on macOS 26.5.2.
 
 **Wanted.** `electron-updater` with a published feed, which requires the whole signing story first:
 
@@ -140,11 +140,11 @@ Builds carry an **ad-hoc** signature (`electron/build/after-pack.cjs`) but no De
 
 ## 3. Linux build
 
-**Today.** No Linux target in `electron-builder.yml`, and no `electron/bin/linux-x64/` binaries.
+**Today.** No Linux target in `electron-builder.yml`, and no `app-electron/bin/linux-x64/` binaries.
 
 **Wanted.** AppImage and/or deb, plus NVENC-capable ffmpeg builds for the platform.
 
-**The known caveat.** `safeStorage.isEncryptionAvailable()` is false on a desktop with no keyring (or a headless session), and `buildCipher()` in `electron/src/main.ts` deliberately returns `undefined` rather than a cipher that quietly stores plaintext. The API then keeps S3 credentials in memory only and logs it once — so on such a system every session is stranded by a restart, which surfaces as "Credentials unavailable after restart — create the session again from the CMS". That fallback works and is honest; a Linux release should decide whether it is acceptable, or whether to prompt the user to set up a keyring (`gnome-keyring` / `kwallet`) as part of onboarding.
+**The known caveat.** `safeStorage.isEncryptionAvailable()` is false on a desktop with no keyring (or a headless session), and `buildCipher()` in `app-electron/src/main.ts` deliberately returns `undefined` rather than a cipher that quietly stores plaintext. The API then keeps S3 credentials in memory only and logs it once — so on such a system every session is stranded by a restart, which surfaces as "Credentials unavailable after restart — create the session again from the CMS". That fallback works and is honest; a Linux release should decide whether it is acceptable, or whether to prompt the user to set up a keyring (`gnome-keyring` / `kwallet`) as part of onboarding.
 
 ---
 
@@ -343,11 +343,11 @@ So the install prompt is a fallback. **Wanted: make that true of every user, on 
 | How the app is run | Where FFmpeg comes from | Checked |
 |---|---|---|
 | Installed (packaged) | `Contents/Resources/` | launched with `PATH=/usr/bin:/bin`, found FFmpeg 8.1 + VideoToolbox |
-| From source (`dev:electron`) | `electron/bin/<platform>-<arch>/` | same, same result |
+| From source (`dev:electron`) | `app-electron/bin/<platform>-<arch>/` | same, same result |
 | `pack` on a clean clone | fetched, then packaged | 0 missing-source warnings; app then ran with PATH scrubbed |
 | `dist:mac` / `dist:win` | fetched, then packaged | the fetch fails hard rather than shipping without |
 
-**The from-source case is new and was the interesting one.** `bundledBinary()` used to return early when `!app.isPackaged`, reasoning that "a developer running from source has neither, and their own install is the right one". That was true when the repository carried no binaries and wrong once it does — it left the one person able to notice a problem testing against a different FFmpeg from every user. It now resolves `electron/bin/<platform>-<arch>/` in development, so a developer who has run the fetch once gets the shipped build.
+**The from-source case is new and was the interesting one.** `bundledBinary()` used to return early when `!app.isPackaged`, reasoning that "a developer running from source has neither, and their own install is the right one". That was true when the repository carried no binaries and wrong once it does — it left the one person able to notice a problem testing against a different FFmpeg from every user. It now resolves `app-electron/bin/<platform>-<arch>/` in development, so a developer who has run the fetch once gets the shipped build.
 
 What remains between here and "no user, anywhere, ever" is Windows, below.
 
@@ -371,7 +371,7 @@ Triggered manually, and automatically when the pinned URL, digest or packaging c
 
 **The old claim that most published Windows builds lack NVENC is settled, and it was false.** `strings` could not settle it — `h264_nvenc` and `scale_cuda` appear in the binary, but so does `videotoolbox`, which cannot work on Windows, so those come from name tables rather than proving compiled-in support. The runner answered it properly: `cuda` in `-hwaccels`, `h264_nvenc` / `hevc_nvenc` / `av1_nvenc` / `libx264` in `-encoders`, `scale_cuda` in `-filters`.
 
-**The runner also earned its keep immediately by finding a Windows-only defect on its first run.** `fs.rename` cannot cross volumes, and there the temp directory is on `C:` while the checkout is on `D:` — `EXDEV`. No macOS run can reproduce that, because everything is one filesystem. Staging now sits inside `electron/bin/` so the move stays on one volume. That is the second Windows-only fault this work has surfaced, after `unzip`, `mv` and `file` not existing there — which is the argument for the runner in one line.
+**The runner also earned its keep immediately by finding a Windows-only defect on its first run.** `fs.rename` cannot cross volumes, and there the temp directory is on `C:` while the checkout is on `D:` — `EXDEV`. No macOS run can reproduce that, because everything is one filesystem. Staging now sits inside `app-electron/bin/` so the move stays on one volume. That is the second Windows-only fault this work has surfaced, after `unzip`, `mv` and `file` not existing there — which is the argument for the runner in one line.
 
 **`dist:win` now runs, and its output installs.** The installer step was gated behind the `package` input, which only `workflow_dispatch` supplies — and that needs the workflow on the default branch. A push to `ci/windows-pack-*` now asks for it too, which produced the first `.exe` (156 MB, unsigned); Johan installed it successfully on a Windows PC on 12 Aug 2026. What the install does *not* establish is that the app launches or encodes there — see item 5.
 
@@ -379,7 +379,7 @@ Triggered manually, and automatically when the pinned URL, digest or packaging c
 
 ### 2. `pack` produced an app with no encoder, silently — fixed
 
-`pack` skipped `fetch-binaries` on the reasoning that a `--dir` smoke test should not pull 100 MB, and electron-builder treats a missing `extraResources` source as a *warning* rather than an error. The result started, served the UI and showed the install prompt: fine for a developer who knew, a trap for anyone handed that directory. It fetches now, like `dist:mac` and `dist:win`, so no packaging path can produce an app without an encoder. Verified by deleting `electron/bin/darwin-arm64/` and packing: it fetched, packaged with zero missing-source warnings, and the resulting app found FFmpeg with `PATH` scrubbed to `/usr/bin:/bin`.
+`pack` skipped `fetch-binaries` on the reasoning that a `--dir` smoke test should not pull 100 MB, and electron-builder treats a missing `extraResources` source as a *warning* rather than an error. The result started, served the UI and showed the install prompt: fine for a developer who knew, a trap for anyone handed that directory. It fetches now, like `dist:mac` and `dist:win`, so no packaging path can produce an app without an encoder. Verified by deleting `app-electron/bin/darwin-arm64/` and packing: it fetched, packaged with zero missing-source warnings, and the resulting app found FFmpeg with `PATH` scrubbed to `/usr/bin:/bin`.
 
 ### 3. The binaries come from one third-party host
 
@@ -510,7 +510,7 @@ not as "unsigned", and refuses a downloaded copy outright:
 Move to Bin or Cancel. No way through. Every user downloading the dmg would have got
 this.
 
-**Fixed** by `electron/build/after-pack.cjs`: ad-hoc sign after packing, before the
+**Fixed** by `app-electron/build/after-pack.cjs`: ad-hoc sign after packing, before the
 installer is built, then verify — so an inconsistent signature fails the build instead
 of reaching someone's screen. Runs once per architecture; confirmed for arm64 and x64.
 

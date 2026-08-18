@@ -1,5 +1,5 @@
 {
-    "name": "@luminary-media-converter/electron",
+    "name": "@luminary-media-converter/app-electron",
     "version": "0.0.1",
     "productName": "Luminary Media Convert",
     "private": true,

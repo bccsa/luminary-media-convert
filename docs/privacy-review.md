@@ -25,7 +25,7 @@ places where a decision was made rather than defaulted.
 That last row is the whole change. Previously an operator held S3 credentials,
 session history and user identities for every customer.
 
-**Verified, not assumed:** grepping `api/src`, `app/src` and `electron/src` for
+**Verified, not assumed:** grepping `api/src`, `app/src` and `app-electron/src` for
 analytics, telemetry, Sentry, PostHog, Mixpanel and `crashReporter` returns
 nothing, and there is no hardcoded outbound URL anywhere in the app or the
 desktop shell. The only network destinations are the S3 endpoint the CMS supplied

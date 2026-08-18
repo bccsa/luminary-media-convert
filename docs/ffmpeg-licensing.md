@@ -4,7 +4,7 @@
 from the binary and from the licensors' own documents, so that whoever at BCC
 signs off a public release is deciding from evidence rather than from
 recollection. Everything below was checked against the binaries actually shipped —
-built by `ffmpeg-build/build.sh` into `electron/bin/<target>/` — with the Windows one
+built by `ffmpeg-build/build.sh` into `app-electron/bin/<target>/` — with the Windows one
 run on a Windows CI runner rather than inspected from a Mac.
 
 ---
@@ -102,7 +102,7 @@ and until 12 Aug 2026 a link was all we shipped: a 642-byte `LICENSE-ffmpeg.txt`
 pointing at gnu.org.
 
 The full texts of **GPL-2.0** and **GPL-3.0** are vendored in
-`electron/bin/licenses/`, copied beside the binaries by `ffmpeg-build/build.sh`, and
+`app-electron/bin/licenses/`, copied beside the binaries by `ffmpeg-build/build.sh`, and
 carried into the app by `extraResources`. The builds are v2-or-later, so both texts
 travel: "or later" genuinely offers v3, and a recipient taking that option should not
 have to go looking for the text. libwebp is statically linked and BSD-3-Clause, so its
@@ -112,7 +112,7 @@ libvpl (Intel's Quick Sync dispatcher), which is MIT and asks the same, so
 
 They are committed rather than downloaded at build time — 53 KB of text that
 never changes, which has to ship whether or not anyone reruns a build. The
-`electron/bin/*/` ignore rule needed a negation for exactly that reason.
+`app-electron/bin/*/` ignore rule needed a negation for exactly that reason.
 
 ## 5. Corresponding source: what the obligation is, and how it is met
 

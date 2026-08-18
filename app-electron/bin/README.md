@@ -1,4 +1,4 @@
-# `electron/bin/` — where the encoder lands
+# `app-electron/bin/` — where the encoder lands
 
 Nothing in here is committed except the licence texts. The `ffmpeg`/`ffprobe` pair
 for each target is **built from source** and dropped here by
@@ -10,7 +10,7 @@ ffmpeg-build/build.sh darwin-arm64      # or darwin-x64, win32-x64
 
 `electron-builder.yml` copies `bin/${platform}-${arch}/` into the packaged app
 through `extraResources`, and `bundledBinary()` in the main process resolves it at
-runtime. `npm -w electron run dist:mac` / `dist:win` build the encoder first, so a
+runtime. `npm -w app-electron run dist:mac` / `dist:win` build the encoder first, so a
 packaging run cannot produce an app without one.
 
 ## Why there is no download step any more

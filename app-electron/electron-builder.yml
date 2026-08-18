@@ -114,7 +114,7 @@ mac:
     # of binaries where each machine needs 100 — and the two macOS ffmpeg builds
     # are separate downloads at different versions, not a lipo'd pair. Two dmgs
     # keep each user's download to what their Mac can run. extraResources picks
-    # the matching electron/bin/${platform}-${arch} directory per build.
+    # the matching app-electron/bin/${platform}-${arch} directory per build.
     target:
         - target: dmg
           arch:
