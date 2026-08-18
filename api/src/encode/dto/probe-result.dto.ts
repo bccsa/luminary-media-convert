@@ -77,6 +77,31 @@ export class VideoTrackInfoDto {
     })
     @Expose()
     gopRegular?: boolean;
+
+    @ApiPropertyOptional({
+        example: 2,
+        description:
+            "Frames the decoder must hold to reorder this stream (ffprobe's " +
+            '`has_b_frames`) — a reorder depth, not a flag.',
+    })
+    @Expose()
+    hasBFrames?: number;
+
+    @ApiPropertyOptional({
+        example: 'yuv420p',
+        description: 'Chroma format and bit depth.',
+    })
+    @Expose()
+    pixFmt?: string;
+
+    @ApiPropertyOptional({
+        example: 40,
+        description:
+            "Codec level in the codec's own numbering (H.264 4.0 is 40). " +
+            'Negative or absent when the container does not say.',
+    })
+    @Expose()
+    level?: number;
 }
 
 export class AudioTrackInfoDto {

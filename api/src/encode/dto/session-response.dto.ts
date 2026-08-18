@@ -263,6 +263,20 @@ export class SessionStatusDto {
 
     @ApiPropertyOptional({
         description:
+            'Something the encode had to do differently from what was submitted, ' +
+            'on a session that is otherwise fine. Today only the quick-cut fallback: ' +
+            'a source whose keyframe geometry does not support a smart cut is ' +
+            're-encoded rather than failed.',
+        example:
+            'Quick cut was not possible for this source (Stream stream_720p_1280x720 ' +
+            'has no whole keyframe interval inside the kept range 1.000–2.000s); ' +
+            'the streams were re-encoded instead.',
+    })
+    @Expose()
+    fallbackNote?: string;
+
+    @ApiPropertyOptional({
+        description:
             'Hardware acceleration mode used by the server for video encoding.',
         enum: ['cpu', 'nvidia', 'apple', 'intel'],
         example: 'cpu',

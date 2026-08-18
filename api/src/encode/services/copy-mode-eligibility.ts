@@ -91,6 +91,47 @@ export function copyModeRejection(
 }
 
 /**
+ * Why the config's copy streams cannot be quick-cut, or null when they can.
+ *
+ * The quick cut (smart cut) needs the same *cadence* guarantees as an
+ * untrimmed copy — segments still cut on source keyframes — but not the
+ * alignment rule: nothing seeks every stream to one shared offset. Each part
+ * is cut at exact presentation times on its own stream's keyframe grid, so
+ * mutually offset start times stay in sync by construction, and a stream that
+ * starts later than the trim-in simply gets a shorter head bridge — the same
+ * head geometry the source itself plays with. That distinction is the point:
+ * the misaligned multi-stream sources that motivated quick trim are exactly
+ * the ones {@link copyModeRejection} refuses.
+ */
+export function quickTrimGateRejection(
+    probeResult: ProbeResult | undefined,
+    encodeConfig: EncodeConfigDto
+): string | null {
+    if (encodeConfig.type !== 'video') return null;
+
+    const renditions = encodeConfig.videoRenditions ?? [];
+    const copyRenditions = renditions.filter((r) => r.copyStream);
+    if (copyRenditions.length === 0) return null;
+
+    const videoTracks = probeResult?.videoTracks ?? [];
+    const segmentDuration = encodeConfig.segmentDuration ?? 6;
+
+    for (const r of copyRenditions) {
+        const index = r.sourceTrackIndex ?? 0;
+        // latestStart 0 skips the alignment rule by construction.
+        const reason = copyModeTrackRejection(
+            index,
+            videoTracks[index],
+            0,
+            segmentDuration
+        );
+        if (reason) return reason;
+    }
+
+    return null;
+}
+
+/**
  * The start time every stream will be seeked to, or 0 when they already agree
  * closely enough to be left alone.
  *

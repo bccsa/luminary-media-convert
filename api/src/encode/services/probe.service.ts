@@ -34,6 +34,18 @@ export interface VideoTrackInfo {
      * made to divide into.
      */
     gopRegular?: boolean;
+    /**
+     * Frames the decoder must hold to reorder this stream — ffprobe's
+     * `has_b_frames`, which is a reorder depth rather than a flag.
+     */
+    hasBFrames?: number;
+    /** Chroma format and bit depth, e.g. `yuv420p`. */
+    pixFmt?: string;
+    /**
+     * Codec level, in the codec's own numbering (H.264 4.0 reports 40).
+     * Negative or absent when the container does not say.
+     */
+    level?: number;
 }
 
 export interface AudioTrackInfo {
@@ -76,6 +88,9 @@ interface FfprobeStream {
     r_frame_rate?: string;
     avg_frame_rate?: string;
     profile?: string;
+    has_b_frames?: number;
+    pix_fmt?: string;
+    level?: number;
     channels?: number;
     sample_rate?: string;
     tags?: Record<string, string>;
@@ -163,6 +178,9 @@ export class ProbeService {
                     language: normalizeLanguage(s.tags?.language),
                     name: s.tags?.title,
                     startTime: parseStartTime(s.start_time),
+                    hasBFrames: s.has_b_frames,
+                    pixFmt: s.pix_fmt,
+                    level: s.level,
                 });
             } else if (s.codec_type === 'audio') {
                 audioTracks.push({

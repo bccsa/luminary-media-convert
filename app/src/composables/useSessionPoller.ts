@@ -28,6 +28,13 @@ export function useSessionPoller() {
     const files = ref<string[] | undefined>();
     const masterPlaylist = ref<string | undefined>();
     const error = ref<string | undefined>();
+    /**
+     * A note about work the encode did differently from what was asked, on a
+     * session that is otherwise fine. Carried through rather than overwritten
+     * by the events that follow it: it is set once, mid-encode, and still has
+     * to be readable on the finished session.
+     */
+    const fallbackNote = ref<string | undefined>();
     const encoder = ref<AccelMode | undefined>();
     const segmentFormat = ref<SegmentFormat | undefined>();
     const thumbnailsVtt = ref<string | undefined>();
@@ -58,6 +65,7 @@ export function useSessionPoller() {
         files.value = data.files;
         masterPlaylist.value = data.masterPlaylist;
         error.value = data.error;
+        if (data.fallbackNote != null) fallbackNote.value = data.fallbackNote;
         encoder.value = data.encoder;
         segmentFormat.value = data.segmentFormat;
         thumbnailsVtt.value = data.thumbnailsVtt;
@@ -180,6 +188,7 @@ export function useSessionPoller() {
         files: readonly(files),
         masterPlaylist: readonly(masterPlaylist),
         error: readonly(error),
+        fallbackNote: readonly(fallbackNote),
         encoder: readonly(encoder),
         segmentFormat: readonly(segmentFormat),
         thumbnailsVtt: readonly(thumbnailsVtt),

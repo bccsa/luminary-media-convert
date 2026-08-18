@@ -7,6 +7,7 @@ import type {
     AudioGroup,
     AudioTrackInfo,
     VideoTrackInfo,
+    TrimCopyMode,
 } from './types';
 import { computeLayoutKey, getStoredConfig } from './layoutStorage';
 import { fpsAdjustedBitrateKbps } from './ladder';
@@ -21,7 +22,11 @@ import {
     languageName,
     normalizeLanguageInput,
 } from './language-codes';
-import { copyModeBlockedReason, latestStreamStart } from './copyMode';
+import {
+    copyModeBlockedReason,
+    latestStreamStart,
+    quickTrimBlockedReason,
+} from './copyMode';
 
 /**
  * Keep a language field to something a player can act on.
@@ -59,8 +64,20 @@ const props = withDefaults(
         encodePrimaryAction?: 'start-encoding' | 'next-to-trim';
         /** `session` — light slate panels for embedding in the web app session card. */
         appearance?: 'default' | 'session';
+        /**
+         * Something has been cut, so a submitted encode would take the quick
+         * (smart cut) path rather than a straight copy. The API gates that path
+         * on cadence alone — no alignment rule — so the Copy tick boxes relax
+         * with it, or a mutually offset multi-stream source could never reach
+         * the very path built for it.
+         */
+        trimActive?: boolean;
     }>(),
-    { encodePrimaryAction: 'start-encoding', appearance: 'default' }
+    {
+        encodePrimaryAction: 'start-encoding',
+        appearance: 'default',
+        trimActive: false,
+    }
 );
 
 const emit = defineEmits<{
@@ -68,6 +85,13 @@ const emit = defineEmits<{
     back: [];
     'next-to-trim': [];
     'can-submit-change': [valid: boolean];
+    /**
+     * How a trim submitted with this ladder would be cut. Derived from the copy
+     * checkboxes — the form has no trim-mode control, because the copy ticks
+     * already are one — so the host can say which of the two paths the Start
+     * button is about to take.
+     */
+    'trim-mode-change': [mode: TrimCopyMode];
 }>();
 
 const encodingType = reactive<{ value: 'video' | 'audio' }>({
@@ -112,17 +136,51 @@ const alignmentStart = computed(() => latestStreamStart(props.probeResult));
  *
  * A courtesy so nobody ticks a box the API refuses — see `copyMode.ts`. It is
  * asked of the track the rendition is currently pointed at, so changing the
- * source picker changes the answer.
+ * source picker changes the answer, and it follows whichever of the API's two
+ * gates the submit would meet: the quick cut's cadence-only rule while
+ * something is trimmed, the full rule otherwise.
  */
 function copyBlockedReason(rendition: VideoRendition): string | null {
     const track = editableVideoTracks[rendition.sourceTrackIndex ?? 0];
     if (!track) return null;
-    return copyModeBlockedReason(
-        track,
-        alignmentStart.value,
-        effectiveSegmentDuration.value
-    );
+    return props.trimActive
+        ? quickTrimBlockedReason(track, effectiveSegmentDuration.value)
+        : copyModeBlockedReason(
+              track,
+              alignmentStart.value,
+              effectiveSegmentDuration.value
+          );
 }
+
+/**
+ * Un-tick any Copy the tightening rule no longer allows.
+ *
+ * Clearing the last cut takes the quick path away with it, and a rendition left
+ * copying under the relaxed rule would sit greyed out and still ticked, with no
+ * way back — the same dead end `onCopySourceChange` avoids when a copy
+ * rendition is pointed at a track that does not qualify, handled the same way.
+ */
+watch(
+    () => props.trimActive,
+    (active, wasActive) => {
+        if (active || !wasActive) return;
+        for (const rendition of videoRenditions) {
+            if (rendition.copyStream && copyBlockedReason(rendition) != null) {
+                rendition.copyStream = false;
+                continue;
+            }
+            if (rendition.copyStream && rendition.sourceTrackIndex != null) {
+                const track = editableVideoTracks[rendition.sourceTrackIndex];
+                if (track) {
+                    rendition.width = track.width;
+                    rendition.height = track.height;
+                    rendition.videoBitrateKbps =
+                        track.bitrateKbps || rendition.videoBitrateKbps;
+                }
+            }
+        }
+    }
+);
 
 const ABR_LADDER = [
     { height: 2160, width: 3840, bitrateKbps: 15000, label: '4K' },
@@ -482,6 +540,34 @@ watch(
     canSubmit,
     (valid) => {
         emit('can-submit-change', valid);
+    },
+    { immediate: true }
+);
+
+/**
+ * Which streams this ladder copies, in the same terms the API infers a trim
+ * mode from — video renditions count only for a video encode, exactly as
+ * `quickTrimStreamTargets` counts them, or the label would promise a quick cut
+ * the encoder refuses.
+ */
+const trimCopyMode = computed<TrimCopyMode>(() => {
+    const flags: boolean[] = [];
+    if (encodingType.value === 'video') {
+        for (const rendition of videoRenditions)
+            flags.push(rendition.copyStream === true);
+    }
+    for (const group of audioGroups) flags.push(group.copyStream === true);
+
+    if (flags.length === 0) return 'precise';
+    if (flags.every((copied) => copied)) return 'quick';
+    if (flags.every((copied) => !copied)) return 'precise';
+    return 'mixed';
+});
+
+watch(
+    trimCopyMode,
+    (mode) => {
+        emit('trim-mode-change', mode);
     },
     { immediate: true }
 );

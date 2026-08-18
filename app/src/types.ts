@@ -96,6 +96,12 @@ export interface SessionStatusResponse {
     /** The CMS document this session's output belongs to. */
     documentId?: string;
     error?: string;
+    /**
+     * Something the encode did differently from what was submitted, on a
+     * session that is otherwise fine — today, that a quick cut was not possible
+     * for this source and the streams were re-encoded instead.
+     */
+    fallbackNote?: string;
     encoder?: AccelMode;
     segmentFormat?: SegmentFormat;
     ingestTotalBytes?: number;

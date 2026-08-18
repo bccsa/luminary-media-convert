@@ -18,6 +18,14 @@ const props = withDefaults(
         pollerIngestTotalBytes: number | null | undefined;
         probeLoading: boolean;
         sessionError?: string;
+        /**
+         * Work the encode did differently from what was asked, on a session
+         * that is otherwise fine — today, a quick cut that fell back to a full
+         * re-encode. Shown beside the failure banner's place because it answers
+         * the same question ("why did that not go as I asked"), in the case
+         * where there is still an output to show for it.
+         */
+        fallbackNote?: string;
         encoderLabel?: string;
         displaySegmentFormat?: string;
         encodingType: 'video' | 'audio';
@@ -135,6 +143,14 @@ const emit = defineEmits<{ cancelEncode: [] }>();
             </div>
 
             <div v-else class="space-y-3">
+                <div
+                    v-if="fallbackNote"
+                    data-testid="fallback-note"
+                    class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-300"
+                >
+                    {{ fallbackNote }}
+                </div>
+
                 <!-- Header row -->
                 <div class="flex flex-wrap items-start justify-between gap-2">
                     <div>

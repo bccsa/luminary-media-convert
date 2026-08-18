@@ -3,6 +3,10 @@ import { createReadStream, createWriteStream, type WriteStream } from 'fs';
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'fs/promises';
 import { pipeline } from 'stream/promises';
 import { join, relative, posix } from 'path';
+import {
+    buildMediaPlaylist,
+    parseMediaPlaylist,
+} from '@luminary-media-converter/hls';
 import type * as Minio from 'minio';
 import type { S3ConfigDto } from '../dto/s3-config.dto.js';
 import { EncryptionService } from './encryption.service.js';
@@ -91,7 +95,8 @@ export interface SegmentPipelineConfig {
 }
 
 interface ByteRangeEntry {
-    extinfLine: string;
+    /** The original segment filename this entry replaces in the playlist. */
+    segmentFile: string;
     length: number;
     offset: number;
     mediaFile: string;
@@ -120,9 +125,8 @@ interface ChainState {
 interface StreamState {
     processedSegments: Set<string>;
     /**
-     * This stream's own view of the chain: playlist-ordered, so the positional
-     * `#EXTINF` backfill still lines up even though the chunk these point into
-     * is shared with other streams.
+     * This stream's own view of the chain, keyed by original segment
+     * filename — matching into the playlist is exact, never positional.
      */
     byteRangeEntries: ByteRangeEntry[];
     chain: ChainState;
@@ -261,9 +265,7 @@ export class SegmentPipeline {
 
         // Rewrite playlists with byte-range entries
         if (this.config.byteRange) {
-            // Backfill #EXTINF lines from the now-complete playlist
             for (const [streamDir, state] of this.streamStates) {
-                await this.backfillExtinfLines(streamDir, state);
                 await this.rewritePlaylistWithByteRanges(streamDir, state);
             }
         }
@@ -395,11 +397,7 @@ export class SegmentPipeline {
             }
 
             if (this.config.byteRange) {
-                await this.appendToByteRangeChunk(
-                    state,
-                    { extinfLine: '', filename },
-                    segPath
-                );
+                await this.appendToByteRangeChunk(state, filename, segPath);
             } else {
                 // Upload individual segment
                 const objectKey = this.objectKey(streamDirName, filename);
@@ -479,7 +477,7 @@ export class SegmentPipeline {
 
     private async appendToByteRangeChunk(
         state: StreamState,
-        seg: { extinfLine: string; filename: string },
+        segmentFile: string,
         segPath: string
     ): Promise<void> {
         const chain = state.chain;
@@ -495,7 +493,7 @@ export class SegmentPipeline {
             // cacheable maximum is not cached at all. Nothing errors, playback
             // works, and every request goes to origin for good.
             this.logger.warn(
-                `[pipeline] chain ${chain.id}: segment ${seg.filename} is ${segSize} bytes, ` +
+                `[pipeline] chain ${chain.id}: segment ${segmentFile} is ${segSize} bytes, ` +
                     `over the ${chain.capBytes}-byte chunk cap on its own — its chunk will exceed the cap`
             );
         }
@@ -524,7 +522,7 @@ export class SegmentPipeline {
         });
 
         state.byteRangeEntries.push({
-            extinfLine: seg.extinfLine,
+            segmentFile,
             length: segSize,
             offset: chain.currentChunkOffset,
             mediaFile: chain.currentChunkFile,
@@ -582,55 +580,17 @@ export class SegmentPipeline {
     }
 
     /**
-     * Read the now-complete playlist and fill in empty extinfLine values
-     * in byteRangeEntries. During encoding, segments are discovered from
-     * disk before the playlist exists, so extinfLine is stored as ''.
+     * Substitute each packed segment's playlist entry with its chunk-chain
+     * location: the URI becomes `../media/<chunk>` (the playlist stays in its
+     * own stream directory; the chunk it points into is shared, so it lives
+     * one level up) and an `#EXT-X-BYTERANGE` carries the ciphertext offsets.
+     *
+     * A model-level pass, not a line rewrite: everything the encoder did not
+     * pack — `#EXT-X-MAP` entries (one, or several in spliced smart-cut
+     * output), `#EXT-X-DISCONTINUITY`, any tag it does not know — survives in
+     * place. Matching is exact by original segment filename; nothing here
+     * depends on disk-discovery order agreeing with playlist order.
      */
-    private async backfillExtinfLines(
-        streamDir: string,
-        state: StreamState
-    ): Promise<void> {
-        const playlistPath = join(streamDir, 'playlist.m3u8');
-        let content: string;
-        try {
-            content = await readFile(playlistPath, 'utf-8');
-        } catch {
-            return;
-        }
-
-        // Build a map: segment filename → #EXTINF line
-        const extinfMap = new Map<string, string>();
-        const lines = content.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('#EXTINF:')) {
-                const filename = lines[i + 1]?.trim();
-                if (filename && !filename.startsWith('#')) {
-                    extinfMap.set(filename, lines[i]);
-                }
-            }
-        }
-
-        for (const entry of state.byteRangeEntries) {
-            if (!entry.extinfLine) {
-                entry.extinfLine = extinfMap.get(entry.mediaFile) ?? '';
-                // mediaFile is the chunk name, but the playlist has the
-                // original segment filename. Match by index instead.
-            }
-        }
-
-        // The above won't match because mediaFile is a chunk name ('v0_0.m4s')
-        // not 'segment_00000.m4s'. Match by order: entries are in the same
-        // order as segments in the playlist — which stays true with a shared
-        // chain, because these entries are this stream's alone.
-        const playlistSegments = this.parseSegments(content);
-        for (let i = 0; i < state.byteRangeEntries.length; i++) {
-            if (!state.byteRangeEntries[i].extinfLine && playlistSegments[i]) {
-                state.byteRangeEntries[i].extinfLine =
-                    playlistSegments[i].extinfLine;
-            }
-        }
-    }
-
     private async rewritePlaylistWithByteRanges(
         streamDir: string,
         state: StreamState
@@ -645,61 +605,31 @@ export class SegmentPipeline {
             return;
         }
 
-        const lines = content.split('\n');
-        const headerLines: string[] = [];
-        let footerLine = '';
+        const playlist = parseMediaPlaylist(content);
+        const entriesByFile = new Map(
+            state.byteRangeEntries.map((e) => [e.segmentFile, e])
+        );
 
-        for (const line of lines) {
-            if (line.startsWith('#EXTINF:')) break;
-            if (line.startsWith('#EXT-X-ENDLIST')) {
-                footerLine = line;
-            } else {
-                headerLines.push(line);
-            }
+        let matched = 0;
+        for (const segment of playlist.segments) {
+            const entry = entriesByFile.get(segment.uri);
+            if (!entry) continue;
+            segment.uri = `../media/${entry.mediaFile}`;
+            segment.byteRange = { length: entry.length, offset: entry.offset };
+            matched++;
         }
 
-        // Check for ENDLIST at the end if not already captured
-        if (!footerLine) {
-            const lastLine = lines[lines.length - 1]?.trim();
-            const secondLastLine = lines[lines.length - 2]?.trim();
-            if (lastLine === '#EXT-X-ENDLIST') footerLine = lastLine;
-            else if (secondLastLine === '#EXT-X-ENDLIST')
-                footerLine = secondLastLine;
+        if (matched !== state.byteRangeEntries.length) {
+            // Packed segments the playlist never mentions mean the played
+            // output and the packed bytes have diverged — say so rather than
+            // shipping a playlist that silently omits content.
+            this.logger.warn(
+                `[pipeline] ${streamDir}: ${state.byteRangeEntries.length} packed segment(s) ` +
+                    `but only ${matched} matched the playlist`
+            );
         }
 
-        const newLines: string[] = [...headerLines];
-        for (const br of state.byteRangeEntries) {
-            newLines.push(br.extinfLine);
-            newLines.push(`#EXT-X-BYTERANGE:${br.length}@${br.offset}`);
-            // The playlist stays in its own stream directory; the chunk it
-            // points into is shared, so it lives one level up under `media/`.
-            // `#EXT-X-MAP` is untouched — the init is per stream and stays put.
-            newLines.push(`../media/${br.mediaFile}`);
-        }
-        if (footerLine) newLines.push(footerLine);
-        newLines.push('');
-
-        await writeFile(playlistPath, newLines.join('\n'), 'utf-8');
-    }
-
-    private parseSegments(
-        content: string
-    ): { extinfLine: string; filename: string }[] {
-        const segments: { extinfLine: string; filename: string }[] = [];
-        const lines = content.split('\n');
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (line.startsWith('#EXTINF:')) {
-                const filename = lines[i + 1]?.trim();
-                if (filename && !filename.startsWith('#')) {
-                    segments.push({ extinfLine: line, filename });
-                    i++;
-                }
-            }
-        }
-
-        return segments;
+        await writeFile(playlistPath, buildMediaPlaylist(playlist), 'utf-8');
     }
 
     private objectKey(streamDirName: string, filename: string): string {

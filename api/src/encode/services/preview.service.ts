@@ -3,7 +3,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
 import { createReadStream, existsSync } from 'fs';
-import { mkdir, rm, readFile, writeFile, stat } from 'fs/promises';
+import { mkdir, rm, writeFile, stat } from 'fs/promises';
 import type { ReadStream } from 'fs';
 import { SessionService } from './session.service.js';
 import type { ProbeResult, AudioTrackInfo } from './probe.service.js';
@@ -126,7 +126,8 @@ export class PreviewService {
             ? await this.scanKeyframes(
                   sessionId,
                   filePath,
-                  copyRendition.videoIndex
+                  copyRendition.videoIndex,
+                  duration
               )
             : [];
 
@@ -487,55 +488,45 @@ export class PreviewService {
     private async scanKeyframes(
         sessionId: string,
         filePath: string,
-        videoStreamIndex: number
+        videoStreamIndex: number,
+        duration: number
     ): Promise<SegmentBoundary[]> {
-        const tmpDir = join(this.workDir, sessionId, 'kfscan');
-        await mkdir(tmpDir, { recursive: true });
-        const csvPath = join(tmpDir, 'segments.csv');
-
         try {
-            await execFileAsync(
-                ffmpegBin(),
-                [
-                    '-i',
-                    filePath,
-                    '-map',
-                    `0:v:${videoStreamIndex}`,
-                    '-c:v',
-                    'copy',
-                    '-an',
-                    '-f',
-                    'segment',
-                    '-segment_time',
-                    String(SEGMENT_DURATION),
-                    '-segment_list',
-                    csvPath,
-                    '-segment_list_type',
-                    'csv',
-                    '-y',
-                    join(tmpDir, 'seg%d.ts'),
-                ],
-                { timeout: 120_000 }
+            const keyframes = await this.ffmpegService.scanKeyframeGrid(
+                filePath,
+                videoStreamIndex,
+                join(this.workDir, sessionId, 'kfscan')
             );
-
-            const csv = await readFile(csvPath, 'utf8');
-            return csv
-                .trim()
-                .split('\n')
-                .filter((line) => line.length > 0)
-                .map((line) => {
-                    const parts = line.split(',');
-                    return {
-                        start: parseFloat(parts[1]),
-                        duration: parseFloat(parts[2]) - parseFloat(parts[1]),
-                    };
-                });
+            return this.groupKeyframes(keyframes, duration);
         } catch (e) {
             this.logger.warn(`Keyframe scan failed: ${e}`);
             return [];
-        } finally {
-            await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
         }
+    }
+
+    /**
+     * Keyframes grouped into preview segments, the way a segment muxer asked
+     * for {@link SEGMENT_DURATION} would have cut them: a segment ends at the
+     * first keyframe at or past the next whole multiple of the target, so a
+     * keyframe that arrives late does not push every later boundary with it.
+     *
+     * The last segment runs to the source duration — a keyframe grid says
+     * where keyframes are, not where the file ends.
+     */
+    private groupKeyframes(
+        keyframes: number[],
+        duration: number
+    ): SegmentBoundary[] {
+        if (keyframes.length === 0) return [];
+        const boundaries: SegmentBoundary[] = [];
+        let start = keyframes[0];
+        for (const keyframe of keyframes.slice(1)) {
+            if (keyframe < SEGMENT_DURATION * (boundaries.length + 1)) continue;
+            boundaries.push({ start, duration: keyframe - start });
+            start = keyframe;
+        }
+        boundaries.push({ start, duration: Math.max(0, duration - start) });
+        return boundaries;
     }
 
     private generateMasterPlaylist(renditions: Rendition[]): string {

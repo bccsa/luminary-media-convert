@@ -28,6 +28,18 @@ export interface VideoTrackInfo {
      * into.
      */
     gopRegular?: boolean;
+    /**
+     * Frames the decoder must hold to reorder this stream (ffprobe's
+     * `has_b_frames`) — a reorder depth, not a flag.
+     */
+    hasBFrames?: number;
+    /** Chroma format and bit depth, e.g. `yuv420p`. */
+    pixFmt?: string;
+    /**
+     * Codec level in the codec's own numbering (H.264 4.0 is 40). Negative or
+     * absent when the container does not say.
+     */
+    level?: number;
 }
 
 export interface AudioTrackInfo {
@@ -78,6 +90,17 @@ export interface AudioGroup {
     copyStream?: boolean;
     vbr?: boolean;
 }
+
+/**
+ * How a trim would be cut, derived from the copy checkboxes rather than chosen.
+ *
+ * `quick` — every stream copied: whole GOPs are remuxed and only the partial
+ * GOP at each cut point is re-encoded. `precise` — nothing copied: every stream
+ * is re-encoded and cut at the exact frame. `mixed` — some of each, which the
+ * API refuses, because every playlist of one output has to splice at the same
+ * instants and a copied stream splices on its own keyframe grid.
+ */
+export type TrimCopyMode = 'mixed' | 'precise' | 'quick';
 
 export interface TrimSegment {
     /** In-point in seconds */

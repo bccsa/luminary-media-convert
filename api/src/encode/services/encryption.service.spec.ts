@@ -23,6 +23,13 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
 });
 
+function write(relPath: string, body: string): string {
+    const full = join(dir, relPath);
+    mkdirSync(join(full, '..'), { recursive: true });
+    writeFileSync(full, body);
+    return full;
+}
+
 describe('EncryptionService — key material', () => {
     it('produces a 16-byte AES-128 key and IV', () => {
         expect(service.generateKey()).toHaveLength(16);
@@ -114,13 +121,6 @@ describe('EncryptionService — injecting key tags', () => {
         'media_1.ts',
         '#EXT-X-ENDLIST',
     ].join('\n');
-
-    function write(relPath: string, body: string): string {
-        const full = join(dir, relPath);
-        mkdirSync(join(full, '..'), { recursive: true });
-        writeFileSync(full, body);
-        return full;
-    }
 
     it('puts the key tag before the first segment', async () => {
         const path = write('stream_720p/playlist.m3u8', MEDIA);
@@ -221,6 +221,150 @@ describe('EncryptionService — injecting key tags', () => {
         expect(readFileSync(path, 'utf-8')).toContain(
             'URI="https://keys.example.com/s1.key"'
         );
+    });
+});
+
+describe('EncryptionService — key tags around mid-list #EXT-X-MAP', () => {
+    const IV = Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex');
+    const KEY_TAG =
+        '#EXT-X-KEY:METHOD=AES-128,URI="luminary://key",IV=0x000102030405060708090a0b0c0d0e0f';
+
+    /** What ffmpeg writes for a single-input fMP4 encode: one header MAP. */
+    const SINGLE_MAP = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:7',
+        '#EXT-X-TARGETDURATION:6',
+        '#EXT-X-MEDIA-SEQUENCE:0',
+        '#EXT-X-PLAYLIST-TYPE:VOD',
+        '#EXT-X-INDEPENDENT-SEGMENTS',
+        '#EXT-X-MAP:URI="init.mp4"',
+        '#EXTINF:6.000000,',
+        'segment_0000000.m4s',
+        '#EXTINF:5.960000,',
+        'segment_0000001.m4s',
+        '#EXT-X-ENDLIST',
+        '',
+    ].join('\n');
+
+    /**
+     * A smart-cut splice: three parts, the middle one starting on its own init,
+     * the last continuing on the previous one (a copy-span split needs no new
+     * MAP, only the discontinuity).
+     */
+    const SPLICED = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:7',
+        '#EXT-X-TARGETDURATION:6',
+        '#EXT-X-MEDIA-SEQUENCE:0',
+        '#EXT-X-PLAYLIST-TYPE:VOD',
+        '#EXT-X-MAP:URI="init_0.mp4"',
+        '#EXTINF:6.000000,',
+        'segment_0000000.m4s',
+        '#EXTINF:2.000000,',
+        'segment_0000001.m4s',
+        '#EXT-X-DISCONTINUITY',
+        '#EXT-X-MAP:URI="init_1.mp4"',
+        '#EXTINF:1.500000,',
+        'segment_0100000.m4s',
+        '#EXT-X-DISCONTINUITY',
+        '#EXTINF:4.000000,',
+        'segment_0200000.m4s',
+        '#EXT-X-ENDLIST',
+        '',
+    ].join('\n');
+
+    it('arms a single-MAP playlist after the MAP and changes nothing else', async () => {
+        const path = write('stream_0/playlist.m3u8', SINGLE_MAP);
+
+        await service.injectKeyTagsIntoPlaylists(dir, 'luminary://key', IV);
+
+        expect(readFileSync(path, 'utf-8')).toBe(
+            [
+                '#EXTM3U',
+                '#EXT-X-VERSION:7',
+                '#EXT-X-TARGETDURATION:6',
+                '#EXT-X-MEDIA-SEQUENCE:0',
+                '#EXT-X-PLAYLIST-TYPE:VOD',
+                '#EXT-X-INDEPENDENT-SEGMENTS',
+                '#EXT-X-MAP:URI="init.mp4"',
+                KEY_TAG,
+                '#EXTINF:6.000000,',
+                'segment_0000000.m4s',
+                '#EXTINF:5.960000,',
+                'segment_0000001.m4s',
+                '#EXT-X-ENDLIST',
+                '',
+            ].join('\n')
+        );
+    });
+
+    it('fences every mid-list MAP and re-arms before that part first segment', async () => {
+        // RFC 8216: a key governs every MAP that follows it, and this
+        // pipeline's inits are plaintext on disk. A part that carries no MAP
+        // needs no tags — the armed key still governs it.
+        const path = write('stream_0/playlist.m3u8', SPLICED);
+
+        await service.injectKeyTagsIntoPlaylists(dir, 'luminary://key', IV);
+
+        expect(readFileSync(path, 'utf-8')).toBe(
+            [
+                '#EXTM3U',
+                '#EXT-X-VERSION:7',
+                '#EXT-X-TARGETDURATION:6',
+                '#EXT-X-MEDIA-SEQUENCE:0',
+                '#EXT-X-PLAYLIST-TYPE:VOD',
+                '#EXT-X-MAP:URI="init_0.mp4"',
+                KEY_TAG,
+                '#EXTINF:6.000000,',
+                'segment_0000000.m4s',
+                '#EXTINF:2.000000,',
+                'segment_0000001.m4s',
+                '#EXT-X-DISCONTINUITY',
+                '#EXT-X-KEY:METHOD=NONE',
+                '#EXT-X-MAP:URI="init_1.mp4"',
+                KEY_TAG,
+                '#EXTINF:1.500000,',
+                'segment_0100000.m4s',
+                '#EXT-X-DISCONTINUITY',
+                '#EXTINF:4.000000,',
+                'segment_0200000.m4s',
+                '#EXT-X-ENDLIST',
+                '',
+            ].join('\n')
+        );
+    });
+
+    it('is idempotent — a second pass changes nothing', async () => {
+        // A retry re-runs injection over output that is already armed;
+        // fencing it again would leave the part behind a stray METHOD=NONE.
+        const single = write('stream_0/playlist.m3u8', SINGLE_MAP);
+        const spliced = write('stream_1/playlist.m3u8', SPLICED);
+
+        await service.injectKeyTagsIntoPlaylists(dir, 'luminary://key', IV);
+        const first = [single, spliced].map((p) => readFileSync(p, 'utf-8'));
+
+        await service.injectKeyTagsIntoPlaylists(dir, 'luminary://key', IV);
+
+        expect([single, spliced].map((p) => readFileSync(p, 'utf-8'))).toEqual(
+            first
+        );
+    });
+
+    it('leaves the master alone while arming the spliced playlists beside it', async () => {
+        const master = [
+            '#EXTM3U',
+            '#EXT-X-VERSION:7',
+            '#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=1280x720',
+            'stream_0/playlist.m3u8',
+            '',
+        ].join('\n');
+        const masterPath = write('master.m3u8', master);
+        const mediaPath = write('stream_0/playlist.m3u8', SPLICED);
+
+        await service.injectKeyTagsIntoPlaylists(dir, 'luminary://key', IV);
+
+        expect(readFileSync(masterPath, 'utf-8')).toBe(master);
+        expect(readFileSync(mediaPath, 'utf-8')).toContain(KEY_TAG);
     });
 });
 

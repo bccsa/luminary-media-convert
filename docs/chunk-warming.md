@@ -52,6 +52,24 @@ no `#EXT-X-BYTERANGE` produce nothing: there are no shared objects to warm, so
 warming disables itself on anything but byte-range output rather than issuing
 pointless requests.
 
+### Init segments and spliced (quick-trim) playlists
+
+Init segments are never part of a chunk chain: they are standalone objects in
+the stream's own directory, whatever their count — a quick-trim output carries
+one `#EXT-X-MAP` per spliced part. Schedules ignore MAPs entirely; inits are
+small, fetched once by the engine, and not worth warming.
+
+A spliced playlist also carries `#EXT-X-DISCONTINUITY` between parts. Boundary
+`start`/`end` times remain the cumulative `#EXTINF` sum across the whole
+playlist — the playlist timeline — with no reset at a discontinuity. The loop
+compares those times against the engine's buffered media time, so the contract
+assumes the engine maps playlist positions onto the media timeline 1:1 across
+discontinuities (hls.js does; it re-anchors each discontinuity at the running
+EXTINF total). An engine that restamps discontinuities differently would drift
+the comparison; warming degrades to firing early or late, never to a wrong
+request, because the boundary URL list is unaffected. Verify against a spliced
+output when porting an adapter.
+
 ## Normative loop semantics
 
 An implementation of `warmChunks` must:

@@ -1,4 +1,7 @@
-import { copyModeRejection } from './copy-mode-eligibility.js';
+import {
+    copyModeRejection,
+    quickTrimGateRejection,
+} from './copy-mode-eligibility.js';
 import type { ProbeResult } from './probe.service.js';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 
@@ -233,5 +236,54 @@ describe('copyModeRejection', () => {
         expect(copyModeRejection(probeResult, config)).toMatch(
             /^Video track 1/
         );
+    });
+});
+
+describe('quickTrimGateRejection', () => {
+    it('accepts a mutually offset source the full copy gate refuses', () => {
+        // Streams starting 0.9 s apart: copyModeRejection refuses this (the
+        // alignment rule), but a quick cut splices each stream on its own
+        // grid and never seeks to a shared offset.
+        const probeResult = makeProbeResult(
+            { startTime: 0.06 },
+            { startTime: 0.98 }
+        );
+        const config = makeConfig();
+
+        expect(copyModeRejection(probeResult, config)).toMatch(/out of sync/);
+        expect(quickTrimGateRejection(probeResult, config)).toBeNull();
+    });
+
+    it('still refuses an unknown or irregular keyframe cadence', () => {
+        expect(
+            quickTrimGateRejection(
+                makeProbeResult({ gopRegular: false }),
+                makeConfig()
+            )
+        ).toMatch(/keyframe structure could not be determined/);
+        expect(quickTrimGateRejection(undefined, makeConfig())).toMatch(
+            /keyframe structure could not be determined/
+        );
+    });
+
+    it('still refuses a cadence that does not fit the segment length', () => {
+        expect(
+            quickTrimGateRejection(
+                makeProbeResult({ gopFrames: 75, gopSeconds: 2.5 }),
+                makeConfig()
+            )
+        ).toMatch(/does not fit/);
+    });
+
+    it('has nothing to say without copy renditions or for audio type', () => {
+        const noCopy = makeConfig();
+        noCopy.videoRenditions![0].copyStream = false;
+        expect(quickTrimGateRejection(makeProbeResult(), noCopy)).toBeNull();
+        expect(
+            quickTrimGateRejection(
+                makeProbeResult(),
+                makeConfig({ type: 'audio', videoRenditions: undefined })
+            )
+        ).toBeNull();
     });
 });

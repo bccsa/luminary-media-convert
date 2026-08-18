@@ -1,4 +1,5 @@
 export * from './angles';
+export * from './assemble-spliced';
 export * from './enc-format';
 export * from './parse';
 export * from './build';

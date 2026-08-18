@@ -44,6 +44,18 @@ const CASES = [
     desc: 'encryptPlaylists:false, no keyUrl. Playlists parse; the key URI is our sentinel.', expect: 'fails at key load' },
   { id: 5, prefix: '5-keyurl', name: 'Encrypted, readable playlists, real keyUrl',
     desc: 'encryptPlaylists:false + a fetchable AES-128 key URL. TEST ONLY — see the write-up.', expect: 'plays' },
+
+  // Cases 6-9: the quick-trim (smart cut) spike. Hand-assembled from cut parts
+  // of the reference file, before any encode code exists — see the README.
+  { id: 6, prefix: 'spike/plain', name: 'Spike — spliced multi-MAP, plaintext',
+    desc: '3 video parts, each with its own #EXT-X-MAP, joined by #EXT-X-DISCONTINUITY; audio spliced at the same junctions with one shared MAP. Baseline for the whole spike.', expect: 'plays, 3 parts, A/V in sync across both joins' },
+  { id: 7, prefix: 'spike/enc-none-rearm', name: 'Spike — encrypted, METHOD=NONE fenced MAPs',
+    desc: 'Segments AES-128, inits plaintext. Each mid-list MAP is fenced METHOD=NONE … MAP … re-armed AES-128 — the scheme EncryptionService emits today.', expect: 'plays, identical to case 6' },
+  { id: 8, prefix: 'spike/enc-init', name: 'Spike — encrypted, inits encrypted too',
+    desc: 'Alternative scheme: one key tag before the first MAP, so inits are ciphertext as well and no fencing is needed.', expect: 'plays, identical to case 6' },
+  { id: 9, prefix: 'spike/plain', master: 'master-audio-3map.m3u8',
+    name: 'Spike — plaintext, one MAP per audio part',
+    desc: 'Case 6 with the audio playlist carrying its own MAP per part. Run only if case 6\'s audio is offset or silent: ffmpeg writes fragment tfdt zero-based and puts the part start time in the init\'s edit list, so a shared audio init is only safe for a player that ignores edits.', expect: 'plays; tells us whether the shared-MAP audio shape is legal' },
 ];
 
 document.getElementById('ver').textContent = window.Hls ? Hls.version : '(missing)';
@@ -128,7 +140,7 @@ function runHls(c) {
   teardown(c.id);
   const log = logger(c.id);
   const video = document.getElementById('v' + c.id);
-  const url = `${BASE}/${c.prefix}/master.m3u8`;
+  const url = `${BASE}/${c.prefix}/${c.master || 'master.m3u8'}`;
   log('load ' + url);
   if (!window.Hls || !Hls.isSupported()) { log('hls.js unsupported here'); return; }
   const hls = new Hls();            // default config, deliberately
@@ -163,7 +175,7 @@ function runNative(c) {
   teardown(c.id);
   const log = logger(c.id);
   const video = document.getElementById('v' + c.id);
-  const url = `${BASE}/${c.prefix}/master.m3u8`;
+  const url = `${BASE}/${c.prefix}/${c.master || 'master.m3u8'}`;
   log('native src = ' + url);
   video.addEventListener('playing', () => verdict(c.id, true, 'native HLS is decoding frames', 'native'), { once: true });
   video.addEventListener('error', () => {
