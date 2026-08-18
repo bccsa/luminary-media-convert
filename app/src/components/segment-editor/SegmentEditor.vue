@@ -9,7 +9,6 @@ import {
     parseThumbnailVtt,
     type ThumbnailSpriteCue,
 } from './thumbnailVtt';
-import './styles.css';
 import {
     BAR_BUTTON,
     BAR_JOG,
@@ -1940,18 +1939,74 @@ const listIndexSpacing = computed(() =>
 );
 const listCellSpacing = computed(() => (labelled.value ? 'pt-0' : 'pt-0.5'));
 const warningSpacing = computed(() => (labelled.value ? 'mt-3' : 'mt-2'));
+/**
+ * The editor's own frame, which three arrangements each remove or resize.
+ * Embedded and split-list drop it entirely — the host draws the surface — and
+ * the two remaining layouts differ only in how much room they take.
+ */
+const rootFrame = computed(() => {
+    // Embedded and split-list draw no surface of their own: the host owns it.
+    if (props.embedded || props.splitListPanel) return 'border-none p-0 bg-transparent shadow-none';
+    return (
+        'border border-sky-200 dark:border-sky-400/12 bg-white/96 dark:bg-[rgba(30,41,55,0.82)] '
+        + 'rounded-[10px] '
+        + 'shadow-[0_1px_2px_rgb(9_9_11/0.04),0_0_0_1px_rgb(9_9_11/0.06)] '
+        + 'dark:shadow-[0_0_0_1px_rgb(255_255_255/0.06),0_8px_30px_rgb(0_0_0/0.25)] '
+        + (labelled.value ? 'px-6 py-5.5' : 'px-4 pt-3.5 pb-2')
+    );
+});
+
+/** The split arrangement stacks a main pane above the list, both scrolling on their own. */
+const splitMainFrame = computed(
+    () =>
+        `border border-sky-200 dark:border-sky-400/12 bg-white/96 dark:bg-[rgba(30,41,55,0.82)] rounded-[10px] shadow-[0_1px_2px_rgb(9_9_11/0.04),0_0_0_1px_rgb(9_9_11/0.06)] dark:shadow-[0_0_0_1px_rgb(255_255_255/0.06),0_8px_30px_rgb(0_0_0/0.25)] box-border min-h-0 ` +
+        `max-h-[min(85vh,56rem)] overflow-x-hidden overflow-y-auto ` +
+        (labelled.value ? 'px-6 py-5.5' : 'px-5 py-4.5'),
+);
+
+/** Inside the split panel the list owns the remaining height; inline it is capped. */
+const listFrame = computed(() => {
+    if (props.splitListPanel) return 'flex-1 min-h-0 max-h-none overflow-y-auto gap-0 px-0';
+    return labelled.value
+        ? 'gap-2 max-h-[min(50vh,22rem)] pl-0 pr-1 py-0.5'
+        : 'gap-1 max-h-60';
+});
+
+/** Chapters in the split panel show rows as separated cards with a numbered pill. */
+const splitChapters = computed(() => props.splitListPanel && props.mode === 'chapters');
+const listIndexChip = computed(() =>
+    splitChapters.value
+        ? `shrink-0 rounded-full text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 w-6 h-6 p-0 inline-flex items-center justify-center text-[0.625rem] font-semibold`
+        : '',
+);
+const listDurationChip = computed(() =>
+    splitChapters.value
+        ? `shrink-0 rounded-full text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 px-2 py-[0.2rem] min-w-0 text-[0.6875rem] font-medium text-center`
+        : '',
+);
+
+/** Rows become separated cards inside the split chapters panel. */
+const splitRowFrame = computed(() =>
+    splitChapters.value
+        ? 'gap-2 px-2 py-2.5 m-0 rounded-md items-center border-b border-sky-200 dark:border-sky-400/12 last:border-b-0'
+        : '',
+);
+
 </script>
 
 <template>
     <div
         ref="rootElRef"
-        class="se-root"
+        class="se-root text-zinc-900 dark:text-slate-200 font-[inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400"
         :data-mode="mode"
-        :class="{
-            'se-root--split-list': splitListPanel,
-            'se-root--embedded': embedded,
-            'se-root--combined-controls': combinedControlsBar,
-        }"
+        :class="[
+            rootFrame,
+            splitListPanel ? 'se-root--split-list flex flex-col gap-0 min-h-0' : '',
+            {
+                'se-root--embedded': embedded,
+                'se-root--combined-controls': combinedControlsBar,
+            },
+        ]"
         :tabindex="keyboardRootTabindex"
         @keydown="onKeyboardRootKeyDown"
         @keyup="onKeyboardRootKeyUp"
@@ -1959,8 +2014,8 @@ const warningSpacing = computed(() => (labelled.value ? 'mt-3' : 'mt-2'));
         <div
             :class="
                 splitListPanel && !listOnlySplitPanel
-                    ? 'se-split-main'
-                    : 'se-split-main--contents'
+                    ? `se-split-main ${splitMainFrame}`
+                    : 'se-split-main--contents contents'
             "
         >
             <div
@@ -3085,7 +3140,7 @@ const warningSpacing = computed(() => (labelled.value ? 'mt-3' : 'mt-2'));
                     labelsVisible &&
                     (mode === 'chapters' || mode === 'subtitles')
                 "
-                class="se-list-split-header flex items-center justify-between gap-x-4 gap-y-2 flex-wrap m-0 mb-2.5 pt-0.5 pb-2 border-b border-sky-200 dark:border-sky-400/12"
+                class="se-list-split-header flex items-center justify-between gap-x-4 gap-y-2 flex-wrap m-0 mb-2.5 pt-0.5 pb-2 border-b border-sky-200 dark:border-sky-400/12 shrink-0"
             >
                 <!--
                     Count and duration read as part of the heading, so they sit
@@ -3131,14 +3186,15 @@ const warningSpacing = computed(() => (labelled.value ? 'mt-3' : 'mt-2'));
             </p>
             <div
                 v-if="segments.length > 0"
-                class="se-list flex flex-col gap-1 max-h-60 overflow-y-auto"
+                class="se-list flex flex-col overflow-y-auto"
+                :class="listFrame"
             >
                 <div
                     v-for="(seg, i) in segments"
                     :key="seg.id"
                     class="se-list-row flex text-xs rounded-md cursor-pointer transition-[background] duration-[120ms] ease-[ease] hover:bg-sky-500/8 dark:hover:bg-sky-400/8"
                     :class="[
-                        listRowSpacing,
+                        splitRowFrame || listRowSpacing,
                         isSelected(seg.id)
                             ? 'se-list-row--selected ' + LIST_ROW_SELECTED
                             : '',
@@ -3146,8 +3202,8 @@ const warningSpacing = computed(() => (labelled.value ? 'mt-3' : 'mt-2'));
                     @click="onListRowActivate(seg)"
                 >
                     <span
-                        class="se-list-index w-5 text-center font-medium text-slate-500 dark:text-slate-400"
-                        :class="listIndexSpacing"
+                        class="se-list-index font-medium text-slate-500 dark:text-slate-400"
+                        :class="[listIndexChip || 'w-5 text-center', listIndexSpacing]"
                         >{{ i + 1 }}</span
                     >
                     <input
@@ -3201,8 +3257,8 @@ const warningSpacing = computed(() => (labelled.value ? 'mt-3' : 'mt-2'));
                         class="se-list-end ml-auto inline-flex items-center gap-1.5 shrink-0"
                     >
                         <span
-                            class="se-list-duration text-slate-500 dark:text-slate-400 font-mono min-w-14"
-                            :class="listCellSpacing"
+                            class="se-list-duration text-slate-500 dark:text-slate-400 font-mono"
+                            :class="[listDurationChip || 'min-w-14', listCellSpacing]"
                             >{{ formatDuration(seg.outSec - seg.inSec) }}</span
                         >
                         <button
