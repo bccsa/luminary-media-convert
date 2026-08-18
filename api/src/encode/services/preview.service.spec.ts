@@ -1597,9 +1597,7 @@ describe('PreviewService', () => {
                 ffmpegArgs.indexOf('-ss') + 1
             );
             expect(parseFloat(ffmpegArgs[secondSs + 1])).toBeCloseTo(4.17, 3);
-            expect(
-                ffmpegArgs.filter((a) => a === '-i')
-            ).toHaveLength(2);
+            expect(ffmpegArgs.filter((a) => a === '-i')).toHaveLength(2);
             expect(ffmpegArgs.some((a) => /^1:a:/.test(a))).toBe(true);
         });
 
@@ -2759,10 +2757,7 @@ describe('PreviewService — copy seek hop', () => {
             filePath: '/tmp/video.mp4',
             probeResult: probe,
         });
-        const service = new PreviewService(
-            sessionService,
-            makeFfmpegService()
-        );
+        const service = new PreviewService(sessionService, makeFfmpegService());
         setupExtractionMocks();
         mockReadFile.mockResolvedValue(CSV_KEYFRAMES);
         await service.init('s1');
@@ -2812,9 +2807,10 @@ describe('PreviewService — copy seek hop', () => {
         // Re-extracted once with the corrected (zero) hop.
         expect(calls).toHaveLength(2);
         const retryArgs = calls[1][1] as string[];
-        expect(
-            parseFloat(retryArgs[retryArgs.indexOf('-ss') + 1])
-        ).toBeCloseTo(4.171, 3);
+        expect(parseFloat(retryArgs[retryArgs.indexOf('-ss') + 1])).toBeCloseTo(
+            4.171,
+            3
+        );
 
         // The corrected hop is cached: the next segment extracts once.
         mockExistsSync.mockReturnValue(false);
@@ -2826,6 +2822,27 @@ describe('PreviewService — copy seek hop', () => {
             8.341,
             3
         );
+    });
+
+    it('learns the hop once when several segments start together', async () => {
+        // Prefetch starts several segments of one rendition at a time. Without
+        // a shared learner each would probe and the last write would win, and
+        // the writers disagree: a file-head landing keeps the aimed hop while a
+        // real miss corrects it.
+        const service = await makeCopyService();
+        landings = [4.17, 4.17];
+
+        mockExistsSync.mockReturnValue(false);
+        await Promise.all([
+            service.getSegmentStream('s1', 0, 1),
+            service.getSegmentStream('s1', 0, 2),
+        ]);
+
+        const probes = (mockExecFile.mock.calls as unknown[][]).filter((c) =>
+            (c[1] as string[]).includes('packet=pts_time')
+        );
+        expect(probes).toHaveLength(1);
+        expect(landings).toHaveLength(1); // only one landing consumed
     });
 
     it('tolerates the file-head segment landing late by a reorder delay', async () => {

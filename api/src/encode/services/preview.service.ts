@@ -67,9 +67,22 @@ interface PreviewState {
      * segment starts exactly on its boundary, first try.
      */
     seekHops: Map<number, number>;
+    /**
+     * The in-flight learning for a rendition that has no hop yet.
+     *
+     * Prefetch starts several segments of one rendition at once, so without
+     * this they would all find `seekHops` empty, all probe, and the last write
+     * would win — and the writers disagree, because the segment holding the
+     * file head lands within tolerance and keeps the aimed hop while a real
+     * miss corrects it. One learns; the rest wait for it.
+     */
+    seekHopLearners: Map<number, Promise<number>>;
 }
 
 const MAX_CONCURRENT = 3;
+
+/** Thrown when a measured hop is not trustworthy enough to cache. */
+class UnlearnedHop extends Error {}
 
 /** Keeps a seek target strictly past a boundary the landing rule compares ≤. */
 const SEEK_AIM_EPSILON_SECONDS = 0.001;
@@ -167,6 +180,7 @@ export class PreviewService {
             mediaPlaylists,
             keyframeStep: scan.keyframeStep,
             seekHops: new Map(),
+            seekHopLearners: new Map(),
         });
 
         const renditionSummary = renditions
@@ -984,26 +998,69 @@ export class PreviewService {
             // extraction of each rendition and every later segment starts on
             // its boundary, first try.
             const known = state.seekHops.get(renditionIndex);
-            const hop = known ?? state.keyframeStep;
-            await runOnce(start + hop + SEEK_AIM_EPSILON_SECONDS);
+            if (known !== undefined) {
+                await runOnce(start + known + SEEK_AIM_EPSILON_SECONDS);
+                return outputPath;
+            }
 
-            if (known === undefined) {
+            const learning = state.seekHopLearners.get(renditionIndex);
+            if (learning) {
+                // Another segment of this rendition is measuring the hop.
+                // Waiting costs a slot but saves a probe and a re-extraction,
+                // and avoids two learners writing different answers.
+                const learned = await learning;
+                await runOnce(start + learned + SEEK_AIM_EPSILON_SECONDS);
+                return outputPath;
+            }
+
+            const learn = (async (): Promise<number> => {
+                let hop = state.keyframeStep as number;
+                await runOnce(start + hop + SEEK_AIM_EPSILON_SECONDS);
+
                 const landed = await this.probeFirstVideoPts(outputPath);
                 if (
-                    landed === null ||
-                    Math.abs(landed - start) <= LANDING_TOLERANCE_SECONDS
+                    landed !== null &&
+                    Math.abs(landed - start) > LANDING_TOLERANCE_SECONDS
                 ) {
-                    state.seekHops.set(renditionIndex, hop);
-                } else {
                     const corrected = Math.max(0, hop + (start - landed));
                     this.logger.warn(
                         `Segment r${renditionIndex}/s${segmentIndex} landed at ` +
                             `${landed.toFixed(3)}s for ${start.toFixed(3)}s — ` +
                             `re-extracting with a ${corrected.toFixed(3)}s seek hop`
                     );
-                    state.seekHops.set(renditionIndex, corrected);
                     await runOnce(start + corrected + SEEK_AIM_EPSILON_SECONDS);
+                    hop = corrected;
+
+                    // The correction is checked rather than assumed: a hop is
+                    // cached for the session's remaining segments, and one that
+                    // is wrong mis-starts every one of them with no further
+                    // probe to notice.
+                    const after = await this.probeFirstVideoPts(outputPath);
+                    if (
+                        after !== null &&
+                        Math.abs(after - start) > LANDING_TOLERANCE_SECONDS
+                    ) {
+                        this.logger.warn(
+                            `Segment r${renditionIndex}/s${segmentIndex} still ` +
+                                `landed at ${after.toFixed(3)}s — leaving the ` +
+                                'hop unlearned so the next segment measures again'
+                        );
+                        throw new UnlearnedHop();
+                    }
                 }
+                state.seekHops.set(renditionIndex, hop);
+                return hop;
+            })();
+
+            state.seekHopLearners.set(renditionIndex, learn);
+            try {
+                await learn;
+            } catch (e) {
+                // An unlearned hop is not a failed segment: the extraction ran
+                // and its output is on disk, just not from a hop worth caching.
+                if (!(e instanceof UnlearnedHop)) throw e;
+            } finally {
+                state.seekHopLearners.delete(renditionIndex);
             }
         } catch (e: any) {
             this.logger.error(
