@@ -94,6 +94,14 @@ describe('buildVideoJsOptions', () => {
         expect(children).toContain('playToggle');
     });
 
+    it('drops the subtitle menu when the host has never had one', () => {
+        const children = buildVideoJsOptions(mergeControls({ subtitlesMenu: false })).controlBar
+            .children;
+
+        expect(children).not.toContain('subsCapsButton');
+        expect(children).toContain('audioTrackButton');
+    });
+
     it('keeps the subtitle and PiP buttons in the fixed child list', () => {
         // Control-bar children are fixed at construction: a source's text tracks
         // are not known then, and the player may switch to YouTube and back.

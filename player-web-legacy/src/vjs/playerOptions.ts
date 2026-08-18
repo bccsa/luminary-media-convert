@@ -96,12 +96,11 @@ export function buildVideoJsOptions(controls: PlayerControlsOptions): VideoJsOpt
         'liveDisplay',
         'fullscreenToggle',
         'pictureInPictureToggle',
-        // Subtitles. Unconditional, like the rest of the list, because
-        // control-bar children are fixed at construction and a source's text
-        // tracks are not known then — video.js hides this button itself while
-        // there are none, so Luminary content, which carries no sidecar
-        // subtitles today, looks exactly as it did.
-        'subsCapsButton',
+        // Subtitles. video.js hides this itself while a source has no text
+        // tracks, so leaving it in costs nothing visually — but an app that has
+        // never had the control can drop it outright rather than have one appear
+        // the first time a stream ships captions.
+        ...(controls.subtitlesMenu ? ['subsCapsButton'] : []),
         'playbackRateMenuButton',
         'volumePanel',
         // The app's list also carries `skipBackwardButton`, which is not a

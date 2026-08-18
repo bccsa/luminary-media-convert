@@ -29,6 +29,16 @@ export interface PlayerControlsOptions {
      */
     audioVideoToggle: boolean;
     /**
+     * Show the subtitles / captions menu.
+     *
+     * Only ever visible when the source carries text tracks, whatever this says
+     * — video.js hides the button itself while there are none. It is an option
+     * regardless, because "invisible in today's content" is not the same promise
+     * as "absent": an app that has never had this control does not want one
+     * appearing the first time a stream ships a caption track.
+     */
+    subtitlesMenu: boolean;
+    /**
      * Seconds the skip-back button moves. `0` removes the button, which is the
      * honest way to say "this player does not skip" — a button that moves
      * nowhere is worse than no button.
@@ -50,6 +60,7 @@ export interface PlayerControlsOptions {
 export const DEFAULT_CONTROLS: PlayerControlsOptions = {
     audioMenu: true,
     audioVideoToggle: true,
+    subtitlesMenu: true,
     skipBackSeconds: 10,
     skipForwardSeconds: 10,
 };
@@ -71,7 +82,7 @@ export function mergeControls(
     const merged = { ...DEFAULT_CONTROLS };
     if (!partial) return merged;
 
-    for (const key of ['audioMenu', 'audioVideoToggle'] as const) {
+    for (const key of ['audioMenu', 'audioVideoToggle', 'subtitlesMenu'] as const) {
         const value = partial[key];
         if (typeof value === 'boolean') {
             merged[key] = value;
