@@ -121,6 +121,35 @@ describe('LuminaryPlayer media surface, in YouTube mode', () => {
         wrapper.unmount();
     });
 
+    it('starts playback for a host that was asked to autoplay', async () => {
+        // The component never autoplays on its own, so an embed with
+        // ?autoplay=true has to start it — in YouTube mode too.
+        const wrapper = await mountPlayer();
+
+        await expect((wrapper.vm as any).play()).resolves.toBe(true);
+        expect(player.current.play).toHaveBeenCalled();
+        wrapper.unmount();
+    });
+
+    it('reports a refused autoplay rather than throwing', async () => {
+        // No user gesture is the expected outcome, not an error: the caller
+        // usually wants to leave the poster up.
+        const wrapper = await mountPlayer();
+        player.current.play = vi.fn(() => Promise.reject(new Error('NotAllowedError')));
+
+        await expect((wrapper.vm as any).play()).resolves.toBe(false);
+        wrapper.unmount();
+    });
+
+    it('pauses', async () => {
+        const wrapper = await mountPlayer();
+
+        (wrapper.vm as any).pause();
+
+        expect(player.current.pause).toHaveBeenCalled();
+        wrapper.unmount();
+    });
+
     it('drops a seek to a time that is not a time', async () => {
         // NaN strands the element with no way back; video.js clamps a real
         // out-of-range number itself, so only the unreal ones are refused.

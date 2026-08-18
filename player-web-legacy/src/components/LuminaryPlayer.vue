@@ -633,6 +633,32 @@ function seek(seconds: number): void {
     player.value?.currentTime(seconds);
 }
 
+/**
+ * Starts playback, and reports whether it was allowed to.
+ *
+ * A host embedding the player with autoplay asked for has to start it itself:
+ * the component sets video.js's `autoplay` to `false` unconditionally, because
+ * a library that autoplays cannot be talked out of it. Like `seek`, this goes
+ * through the player rather than the controller so that it also works in
+ * YouTube mode, where there is no controller.
+ *
+ * A browser refusing autoplay without a gesture is the expected outcome, not an
+ * error, so the rejection is swallowed and reported as `false` — the caller
+ * usually wants to leave the poster up rather than handle an exception.
+ */
+async function play(): Promise<boolean> {
+    try {
+        await player.value?.play();
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function pause(): void {
+    player.value?.pause();
+}
+
 function onTimeUpdate(): void {
     const instance = player.value;
     if (!instance) return;
@@ -667,7 +693,7 @@ const showAudioVideoToggle = computed(() => {
     return !inAudioOnly || snapshot.angles.some((angle) => angle.id !== AUDIO_ONLY_ANGLE_ID);
 });
 
-defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek });
+defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, pause });
 </script>
 
 <template>
