@@ -121,12 +121,6 @@ html.dark .se-root {
     --se-pending-bracket-shadow: 0 1px 2px rgb(0 0 0 / 0.8);
 }
 
-.se-root *,
-.se-root *::before,
-.se-root *::after {
-    box-sizing: border-box;
-}
-
 .se-root:focus-visible {
     outline: 2px solid var(--se-accent);
     outline-offset: 2px;
@@ -168,22 +162,6 @@ html.dark .se-root {
    bottom padding so the controls bar has breathing room above the page edge. */
 .se-root[data-mode='trim']:not(.se-root--embedded) {
     padding: 0.875rem 1rem 0.5rem;
-}
-
-html.dark .se-help {
-    --se-text: #e2e8f0;
-    --se-text-dim: #94a3b8;
-    --se-accent: #7dd3fc;
-    --se-shadow:
-        0 0 0 1px rgb(255 255 255 / 0.06), 0 8px 30px rgb(0 0 0 / 0.25);
-    --se-help-backdrop: rgb(0 0 0 / 0.75);
-    --se-help-surface: #18181b;
-    --se-help-surface-border: rgb(63 63 70 / 0.75);
-}
-
-html.dark .se-confirm {
-    --se-kbd-bg: rgb(15 23 42 / 0.45);
-    --se-kbd-border: rgb(71 85 105 / 0.55);
 }
 
 /* Chapters & subtitles: more breathing room, clearer hierarchy */

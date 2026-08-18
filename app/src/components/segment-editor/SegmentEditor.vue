@@ -3305,92 +3305,92 @@ const warningSpacing = computed(() => (labelled.value ? 'mt-3' : 'mt-2'));
         <Teleport to="body">
             <div
                 v-if="helpOpen"
-                class="se-help fixed inset-0 box-border bg-[rgba(9,9,11,0.55)] backdrop-blur-[4px] flex items-center justify-center z-[10050] p-4 font-[inherit]"
+                class="se-help fixed inset-0 box-border bg-[rgba(9,9,11,0.55)] dark:bg-black/75 backdrop-blur-[4px] flex items-center justify-center z-[10050] p-4 font-[inherit]"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="se-help-heading"
                 @click.self="helpOpen = false"
             >
                 <div
-                    class="se-help-panel bg-white border border-sky-200 rounded-[10px] p-6 max-w-[min(36rem,calc(100vw-2rem))] w-full max-h-[min(85vh,42rem)] overflow-y-auto overscroll-contain text-zinc-900 text-[0.8125rem] shadow-[0_1px_2px_rgb(9_9_11/0.04),0_0_0_1px_rgb(9_9_11/0.06)]"
+                    class="se-help-panel bg-white dark:bg-zinc-900 border border-sky-200 dark:border-zinc-700/75 rounded-[10px] p-6 max-w-[min(36rem,calc(100vw-2rem))] w-full max-h-[min(85vh,42rem)] overflow-y-auto overscroll-contain text-zinc-900 dark:text-slate-200 text-[0.8125rem] shadow-[0_1px_2px_rgb(9_9_11/0.04),0_0_0_1px_rgb(9_9_11/0.06)] dark:shadow-[0_0_0_1px_rgb(255_255_255/0.06),0_8px_30px_rgb(0_0_0/0.25)]"
                 >
                     <h4 class="m-0 mb-3 text-base" id="se-help-heading">
                         Keyboard shortcuts
                     </h4>
                     <dl class="grid grid-cols-[auto_1fr] gap-y-1 gap-x-3 m-0">
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             Space / K
                         </dt>
-                        <dd class="m-0 text-slate-500">Play / pause</dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">Play / pause</dd>
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             ← / →
                         </dt>
-                        <dd class="m-0 text-slate-500">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">
                             Step 1 second back / forward
                         </dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             1 / 2 / 3 + arrow
                         </dt>
-                        <dd class="m-0 text-slate-500">Step 10s / 30s / 60s</dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">Step 10s / 30s / 60s</dd>
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             J / L
                         </dt>
-                        <dd class="m-0 text-slate-500">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">
                             Step 10s back / forward
                         </dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             Home / End
                         </dt>
-                        <dd class="m-0 text-slate-500">Jump to start / end</dd>
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">Jump to start / end</dd>
                         <dt v-if="fps > 0">, / .</dt>
                         <dd v-if="fps > 0">Step one frame ({{ fps }} fps)</dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             I
                         </dt>
-                        <dd class="m-0 text-slate-500">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">
                             Mark In at playhead (Resolve-style)
                         </dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             O
                         </dt>
-                        <dd class="m-0 text-slate-500">Mark Out at playhead</dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">Mark Out at playhead</dd>
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             [ / ]
                         </dt>
-                        <dd class="m-0 text-slate-500">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">
                             Mark In / Mark Out (alternate)
                         </dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             Alt + ← / →
                         </dt>
-                        <dd class="m-0 text-slate-500">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">
                             Nudge nearest edge of selected segment
                         </dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             Delete / ⌘ / Ctrl + X
                         </dt>
-                        <dd class="m-0 text-slate-500">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">
                             Remove selected segment(s)
                         </dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             ⌘ / Ctrl + Z
                         </dt>
-                        <dd class="m-0 text-slate-500">Undo</dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">Undo</dd>
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             ⌘ / Ctrl + Shift + Z
                         </dt>
-                        <dd class="m-0 text-slate-500">Redo</dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">Redo</dd>
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             + / −
                         </dt>
-                        <dd class="m-0 text-slate-500">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">
                             Zoom in / out (0 resets)
                         </dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             Ctrl / ⌘ + wheel
                         </dt>
-                        <dd class="m-0 text-slate-500">Zoom at cursor</dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">Zoom at cursor</dd>
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             Double-click + drag
                         </dt>
                         <dd v-if="mode === 'trim'">
@@ -3400,23 +3400,23 @@ const warningSpacing = computed(() => (labelled.value ? 'mt-3' : 'mt-2'));
                             Drag out a chapter on the timeline
                         </dd>
                         <dd v-else>Drag out a cue on the timeline</dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             Shift + drag
                         </dt>
                         <dd v-if="mode === 'trim'">
                             Drag out a cut on the timeline
                         </dd>
                         <dd v-else>Marquee-select segments</dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             Esc
                         </dt>
-                        <dd class="m-0 text-slate-500">
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">
                             Clear selection / close
                         </dd>
-                        <dt class="font-mono text-sky-600 whitespace-nowrap">
+                        <dt class="font-mono text-sky-600 dark:text-sky-300 whitespace-nowrap">
                             ?
                         </dt>
-                        <dd class="m-0 text-slate-500">Toggle this help</dd>
+                        <dd class="m-0 text-slate-500 dark:text-slate-400">Toggle this help</dd>
                     </dl>
                 </div>
             </div>
@@ -3425,18 +3425,18 @@ const warningSpacing = computed(() => (labelled.value ? 'mt-3' : 'mt-2'));
         <Teleport to="body">
             <div
                 v-if="confirmClearOpen"
-                class="se-help se-confirm fixed inset-0 box-border bg-[rgba(9,9,11,0.55)] backdrop-blur-[4px] flex items-center justify-center z-[10050] p-4 font-[inherit]"
+                class="se-help se-confirm fixed inset-0 box-border bg-[rgba(9,9,11,0.55)] dark:bg-black/75 backdrop-blur-[4px] flex items-center justify-center z-[10050] p-4 font-[inherit]"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="se-confirm-heading"
                 @click.self="confirmClearOpen = false"
             >
                 <div
-                    class="se-help-panel se-confirm-panel bg-white border border-sky-200 rounded-[10px] p-6 max-w-[min(36rem,calc(100vw-2rem))] w-full max-h-[min(85vh,42rem)] overflow-y-auto overscroll-contain text-zinc-900 text-[0.8125rem] shadow-[0_1px_2px_rgb(9_9_11/0.04),0_0_0_1px_rgb(9_9_11/0.06)] max-w-[min(26rem,calc(100vw-2rem))]"
+                    class="se-help-panel se-confirm-panel bg-white dark:bg-zinc-900 border border-sky-200 dark:border-zinc-700/75 rounded-[10px] p-6 max-w-[min(36rem,calc(100vw-2rem))] w-full max-h-[min(85vh,42rem)] overflow-y-auto overscroll-contain text-zinc-900 dark:text-slate-200 text-[0.8125rem] shadow-[0_1px_2px_rgb(9_9_11/0.04),0_0_0_1px_rgb(9_9_11/0.06)] dark:shadow-[0_0_0_1px_rgb(255_255_255/0.06),0_8px_30px_rgb(0_0_0/0.25)] max-w-[min(26rem,calc(100vw-2rem))]"
                 >
                     <h4 id="se-confirm-heading">Clear all {{ clearNoun }}?</h4>
                     <p
-                        class="se-confirm-text m-0 mb-5 text-slate-500 leading-[1.5]"
+                        class="se-confirm-text m-0 mb-5 text-slate-500 dark:text-slate-400 leading-[1.5]"
                     >
                         This removes all {{ segments.length }}
                         {{ clearNoun }} from the timeline. You can undo with
@@ -3453,14 +3453,14 @@ const warningSpacing = computed(() => (labelled.value ? 'mt-3' : 'mt-2'));
                     <div class="se-confirm-actions flex justify-end gap-2">
                         <button
                             type="button"
-                            class="se-confirm-btn appearance-none px-[0.9rem] py-[0.4rem] text-[0.8125rem] font-medium font-[inherit] text-zinc-900 bg-transparent border border-sky-200 rounded-md cursor-pointer transition-[background,color,border-color] duration-[120ms] ease-[ease] hover:bg-slate-400/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                            class="se-confirm-btn appearance-none px-[0.9rem] py-[0.4rem] text-[0.8125rem] font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-transparent border border-sky-200 dark:border-zinc-700/75 rounded-md cursor-pointer transition-[background,color,border-color] duration-[120ms] ease-[ease] hover:bg-slate-400/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-300"
                             @click="confirmClearOpen = false"
                         >
                             Cancel
                         </button>
                         <button
                             type="button"
-                            class="se-confirm-btn se-confirm-btn--danger appearance-none px-[0.9rem] py-[0.4rem] text-[0.8125rem] font-medium font-[inherit] text-white bg-red-600 border border-red-600 rounded-md cursor-pointer transition-[background,color,border-color] duration-[120ms] ease-[ease] hover:bg-red-700 hover:border-red-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600"
+                            class="se-confirm-btn se-confirm-btn--danger appearance-none px-[0.9rem] py-[0.4rem] text-[0.8125rem] font-medium font-[inherit] text-white bg-red-600 border border-red-600 rounded-md cursor-pointer transition-[background,color,border-color] duration-[120ms] ease-[ease] hover:bg-red-700 hover:border-red-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-300"
                             @click="performClearAll"
                         >
                             Clear All
