@@ -227,16 +227,6 @@ html.dark .se-root {
     gap: 0.35rem 0.5rem;
 }
 
-/* Inline SVG glyphs for toolbar / playback (currentColor stroke) */
-.se-icon {
-    display: inline-block;
-    flex-shrink: 0;
-    width: 1.125rem;
-    height: 1.125rem;
-    vertical-align: middle;
-    color: inherit;
-}
-
 .se-zoom {
     display: inline-flex;
     align-items: center;
@@ -541,10 +531,6 @@ html.dark .se-root {
 .se-scrollbar-thumb:hover,
 .se-scrollbar-thumb--active {
     background: var(--se-scrollbar-thumb-hover);
-}
-
-.se-kbd--inline {
-    margin-left: 0.2rem;
 }
 
 .se-shortcuts-strip {
@@ -928,55 +914,6 @@ html.dark .se-root {
     padding-top: 2px;
 }
 
-.se-input {
-    appearance: none;
-    font-family: var(--se-font-mono);
-    font-size: 0.75rem;
-    padding: 2px 6px;
-    text-align: center;
-    color: var(--se-text);
-    background: var(--se-bg);
-    border: 1px solid var(--se-border);
-    border-radius: var(--se-radius-sm);
-    outline: none;
-    transition: border-color 0.12s ease;
-}
-
-.se-input:focus {
-    border-color: var(--se-accent);
-}
-
-.se-input--time {
-    width: 5rem;
-}
-
-.se-label-field {
-    flex: 1 1 auto;
-    min-width: 0;
-    font-family: inherit;
-    font-size: 0.75rem;
-    padding: 2px 6px;
-    color: var(--se-text);
-    background: var(--se-bg);
-    border: 1px solid var(--se-border);
-    border-radius: var(--se-radius-sm);
-    outline: none;
-    resize: none;
-    overflow-x: hidden;
-    overflow-y: hidden;
-    min-height: 1.5rem;
-    max-height: 4.5rem;
-    height: 1.5rem;
-    line-height: 1.25rem;
-    transition: border-color 0.12s ease;
-    white-space: nowrap;
-}
-
-.se-label-field:focus {
-    border-color: var(--se-accent);
-    white-space: pre-wrap;
-}
-
 .se-list-sep {
     color: var(--se-text-dim);
     padding-top: 2px;
@@ -1103,19 +1040,6 @@ html.dark .se-help {
 .se-help-panel dd {
     margin: 0;
     color: var(--se-text-dim);
-}
-
-.se-kbd {
-    font-family: var(--se-font-mono);
-    font-size: 0.625rem;
-    font-weight: 500;
-    padding: 2px 5px;
-    margin-left: 4px;
-    color: var(--se-text-dim);
-    background: var(--se-kbd-bg);
-    border: 1px solid var(--se-kbd-border);
-    border-radius: 4px;
-    vertical-align: middle;
 }
 
 /* Confirm dialog — portaled to body, so it must define its own tokens. */

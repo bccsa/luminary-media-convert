@@ -1657,7 +1657,7 @@ defineExpose({
                     class="se-btn se-btn--icon appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Keyboard shortcuts (?)"
                     @click="helpOpen = !helpOpen"
-                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
+                ><svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
             </div>
         </div>
 
@@ -1681,7 +1681,7 @@ defineExpose({
                     :title="hasSelection ? 'Cut the selected range · Delete or ⌘/Ctrl + X — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
                     @click="deleteSelected"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+                    <svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
                     Cut
                 </button>
                 <button
@@ -1690,7 +1690,7 @@ defineExpose({
                     class="se-btn se-btn--danger appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-red-600 dark:text-red-400 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-red-500/10 dark:enabled:hover:bg-red-500/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     @click="confirmClearOpen = true"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
+                    <svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
                     Clear All
                 </button>
                 <button
@@ -1699,14 +1699,14 @@ defineExpose({
                     :disabled="history.length === 0"
                     @click="undo"
                     title="Undo"
-                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                ><svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
                 <button
                     type="button"
                     class="se-btn se-btn--squish appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="redoStack.length === 0"
                     @click="redo"
                     title="Redo"
-                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
+                ><svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
                 <slot name="toolbar-before-clear" />
                 <label v-if="showTimeline" class="se-zoom">
                     Zoom
@@ -1868,7 +1868,7 @@ defineExpose({
                         @click.stop="removeSegment(seg.id)"
                     >
                         <svg
-                            class="se-icon"
+                            class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]"
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
@@ -1945,7 +1945,7 @@ defineExpose({
                     aria-label="Back 1 second"
                     @click="stepSeek(-1)"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
+                    <svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
                 </button>
                 <button
                     v-if="onSeek"
@@ -1956,7 +1956,7 @@ defineExpose({
                     aria-label="Back 10 seconds (J)"
                     @click="stepSeek(-1, 10)"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 7 13 12 18 17" /><polyline points="11 7 6 12 11 17" /></svg>
+                    <svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 7 13 12 18 17" /><polyline points="11 7 6 12 11 17" /></svg>
                 </button>
                 <button
                     v-if="onPlayPause"
@@ -1969,14 +1969,14 @@ defineExpose({
                 >
                     <svg
                         v-if="!isPlaying"
-                        class="se-icon"
+                        class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]"
                         viewBox="0 0 24 24"
                         fill="currentColor"
                         aria-hidden="true"
                     ><path d="M9 7.5L9 16.5L18 12L9 7.5z" /></svg>
                     <svg
                         v-else
-                        class="se-icon"
+                        class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]"
                         viewBox="0 0 24 24"
                         fill="currentColor"
                         aria-hidden="true"
@@ -1991,7 +1991,7 @@ defineExpose({
                     aria-label="Forward 10 seconds (L)"
                     @click="stepSeek(1, 10)"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 7 11 12 6 17" /><polyline points="13 7 18 12 13 17" /></svg>
+                    <svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 7 11 12 6 17" /><polyline points="13 7 18 12 13 17" /></svg>
                 </button>
                 <button
                     v-if="onSeek"
@@ -2002,7 +2002,7 @@ defineExpose({
                     aria-label="Forward 1 second"
                     @click="stepSeek(1)"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>
+                    <svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>
                 </button>
             </div>
         </div>
@@ -2035,7 +2035,7 @@ defineExpose({
                     aria-label="Back 1 second"
                     @click="stepSeek(-1)"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
+                    <svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6" /></svg>
                 </button>
                 <button
                     v-if="onSeek"
@@ -2046,7 +2046,7 @@ defineExpose({
                     aria-label="Back 10 seconds (J)"
                     @click="stepSeek(-1, 10)"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 7 13 12 18 17" /><polyline points="11 7 6 12 11 17" /></svg>
+                    <svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="18 7 13 12 18 17" /><polyline points="11 7 6 12 11 17" /></svg>
                 </button>
                 <button
                     v-if="onPlayPause"
@@ -2059,14 +2059,14 @@ defineExpose({
                 >
                     <svg
                         v-if="!isPlaying"
-                        class="se-icon"
+                        class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]"
                         viewBox="0 0 24 24"
                         fill="currentColor"
                         aria-hidden="true"
                     ><path d="M9 7.5L9 16.5L18 12L9 7.5z" /></svg>
                     <svg
                         v-else
-                        class="se-icon"
+                        class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]"
                         viewBox="0 0 24 24"
                         fill="currentColor"
                         aria-hidden="true"
@@ -2081,7 +2081,7 @@ defineExpose({
                     aria-label="Forward 10 seconds (L)"
                     @click="stepSeek(1, 10)"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 7 11 12 6 17" /><polyline points="13 7 18 12 13 17" /></svg>
+                    <svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 7 11 12 6 17" /><polyline points="13 7 18 12 13 17" /></svg>
                 </button>
                 <button
                     v-if="onSeek"
@@ -2092,7 +2092,7 @@ defineExpose({
                     aria-label="Forward 1 second"
                     @click="stepSeek(1)"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>
+                    <svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6" /></svg>
                 </button>
             </div>
 
@@ -2111,7 +2111,7 @@ defineExpose({
                     :title="hasSelection ? 'Cut the selected range · Delete or ⌘/Ctrl + X — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
                     @click="deleteSelected"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+                    <svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
                     Cut
                 </button>
                 <button
@@ -2120,7 +2120,7 @@ defineExpose({
                     class="se-btn se-btn--danger appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-red-600 dark:text-red-400 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-red-500/10 dark:enabled:hover:bg-red-500/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     @click="confirmClearOpen = true"
                 >
-                    <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
+                    <svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
                     Clear All
                 </button>
                 <button
@@ -2129,14 +2129,14 @@ defineExpose({
                     :disabled="history.length === 0"
                     @click="undo"
                     title="Undo"
-                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
+                ><svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
                 <button
                     type="button"
                     class="se-btn se-btn--squish appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="redoStack.length === 0"
                     @click="redo"
                     title="Redo"
-                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
+                ><svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
                 <!--
                     No textual "In … — Mark Out …" hint here: the pending
                     in-point is already drawn on the track itself, and the ?
@@ -2205,7 +2205,7 @@ defineExpose({
                     class="se-btn se-btn--icon se-controls-bar__help appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Keyboard shortcuts (?)"
                     @click="helpOpen = !helpOpen"
-                ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
+                ><svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
             </div>
         </div>
 
@@ -2217,32 +2217,32 @@ defineExpose({
         >
             <span class="se-shortcuts-strip__group">
                 <strong class="se-shortcuts-strip__title">In / Out</strong>
-                <span class="se-kbd">I</span><span class="se-kbd">[</span>
+                <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">I</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">[</span>
                 <span class="se-shortcuts-strip__sep">·</span>
-                <span class="se-kbd">O</span><span class="se-kbd">]</span>
+                <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">O</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">]</span>
             </span>
             <span class="se-shortcuts-strip__group">
                 <strong class="se-shortcuts-strip__title">Play</strong>
-                <span class="se-kbd">Space</span><span class="se-kbd">K</span>
+                <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">Space</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">K</span>
             </span>
             <span class="se-shortcuts-strip__group">
                 <strong class="se-shortcuts-strip__title">Jog</strong>
-                <span class="se-kbd">←</span><span class="se-kbd">→</span>
+                <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">←</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">→</span>
                 <span class="se-shortcuts-strip__dim">1 s</span>
                 <span class="se-shortcuts-strip__sep">·</span>
-                <span class="se-kbd">J</span><span class="se-kbd">L</span>
+                <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">J</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">L</span>
                 <span class="se-shortcuts-strip__dim">10 s</span>
                 <span v-if="fps > 0" class="se-shortcuts-strip__frame-hint">
                     <span class="se-shortcuts-strip__sep">·</span>
-                    <span class="se-kbd">,</span><span class="se-kbd">.</span>
+                    <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">,</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">.</span>
                     <span class="se-shortcuts-strip__dim">frame ({{ fps }}&nbsp;fps)</span>
                 </span>
             </span>
             <span class="se-shortcuts-strip__group">
                 <strong class="se-shortcuts-strip__title">Zoom</strong>
-                <span class="se-kbd">+</span><span class="se-kbd">−</span>
+                <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">+</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">−</span>
                 <span class="se-shortcuts-strip__sep">·</span>
-                <span class="se-kbd">0</span>
+                <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">0</span>
                 <span class="se-shortcuts-strip__dim">fit</span>
             </span>
             <span class="se-shortcuts-strip__more">
@@ -2299,7 +2299,7 @@ defineExpose({
                     <span class="se-list-index">{{ i + 1 }}</span>
                     <input
                         type="text"
-                        class="se-input se-input--time"
+                        class="se-input se-input--time appearance-none font-mono text-xs px-1.5 py-0.5 text-center text-zinc-900 dark:text-slate-200 bg-white dark:bg-[#0c1222] border border-sky-200 dark:border-sky-400/12 rounded-md outline-none transition-[border-color] duration-[120ms] ease-[ease] focus:border-sky-600 dark:focus:border-sky-400 w-20"
                         :value="formatTime(seg.inSec)"
                         @change="updateTimeInput(seg.id, 'inSec', ($event.target as HTMLInputElement).value)"
                         @click.stop
@@ -2307,14 +2307,14 @@ defineExpose({
                     <span class="se-list-sep">—</span>
                     <input
                         type="text"
-                        class="se-input se-input--time"
+                        class="se-input se-input--time appearance-none font-mono text-xs px-1.5 py-0.5 text-center text-zinc-900 dark:text-slate-200 bg-white dark:bg-[#0c1222] border border-sky-200 dark:border-sky-400/12 rounded-md outline-none transition-[border-color] duration-[120ms] ease-[ease] focus:border-sky-600 dark:focus:border-sky-400 w-20"
                         :value="formatTime(seg.outSec)"
                         @change="updateTimeInput(seg.id, 'outSec', ($event.target as HTMLInputElement).value)"
                         @click.stop
                     />
                     <textarea
                         v-if="labelsVisible && !readOnly"
-                        class="se-label-field"
+                        class="se-label-field flex-auto min-w-0 font-[inherit] text-xs px-1.5 py-0.5 text-zinc-900 dark:text-slate-200 bg-white dark:bg-[#0c1222] border border-sky-200 dark:border-sky-400/12 rounded-md outline-none resize-none overflow-hidden min-h-6 max-h-18 h-6 leading-5 transition-[border-color] duration-[120ms] ease-[ease] whitespace-nowrap focus:whitespace-pre-wrap focus:border-sky-600 dark:focus:border-sky-400"
                         :value="seg.label || ''"
                         :placeholder="mode === 'chapters' ? 'Chapter title…' : 'Subtitle text…'"
                         rows="1"
@@ -2333,7 +2333,7 @@ defineExpose({
                             @click.stop="removeSegment(seg.id)"
                         >
                             <svg
-                                class="se-icon"
+                                class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]"
                                 viewBox="0 0 24 24"
                                 fill="none"
                                 stroke="currentColor"
@@ -2433,7 +2433,7 @@ defineExpose({
                 <div class="se-help-panel se-confirm-panel">
                     <h4 id="se-confirm-heading">Clear all {{ clearNoun }}?</h4>
                     <p class="se-confirm-text">
-                        This removes all {{ segments.length }} {{ clearNoun }} from the timeline. You can undo with <span class="se-kbd">⌘/Ctrl</span> + <span class="se-kbd">Z</span>.
+                        This removes all {{ segments.length }} {{ clearNoun }} from the timeline. You can undo with <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">⌘/Ctrl</span> + <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">Z</span>.
                     </p>
                     <div class="se-confirm-actions">
                         <button type="button" class="se-confirm-btn" @click="confirmClearOpen = false">Cancel</button>
