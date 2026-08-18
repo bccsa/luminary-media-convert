@@ -1672,10 +1672,17 @@ const LIST_ROW_SELECTED =
 
         <div
             v-if="showToolbar && !combinedControlsBar"
-            class="se-toolbar"
-            :class="{ 'se-toolbar--no-timeline': !showTimeline }"
+            class="se-toolbar flex flex-wrap gap-y-2 gap-x-3 mb-3.5 pb-3 border-b border-sky-200 dark:border-sky-400/12"
+            :class="
+                showTimeline
+                    ? 'items-center'
+                    : 'se-toolbar--no-timeline flex-col items-stretch'
+            "
         >
-            <div v-if="showTimeline" class="se-toolbar__marks">
+            <div
+                v-if="showTimeline"
+                class="se-toolbar__marks flex flex-wrap items-center gap-y-[0.4rem] gap-x-[0.6rem] flex-auto min-w-0"
+            >
                 <button type="button" class="se-btn se-btn--squish appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed" @click="markIn" title="Mark In at playhead ( I or [ )">
                     <span aria-hidden="true">[</span>
                 </button>
@@ -1733,7 +1740,7 @@ const LIST_ROW_SELECTED =
             </div>
             <div
                 v-if="$slots['playback-start'] || $slots['playback-end']"
-                class="se-toolbar__playback-options"
+                class="se-toolbar__playback-options inline-flex flex-nowrap items-center justify-end gap-y-3 gap-x-4 flex-[0_1_auto] ml-auto min-w-0"
                 :class="{ 'se-toolbar__playback-options--stacked': !showTimeline }"
             >
                 <div
@@ -1749,7 +1756,10 @@ const LIST_ROW_SELECTED =
                     <slot name="playback-end" />
                 </div>
             </div>
-            <div v-if="!showTimeline" class="se-toolbar__marks se-toolbar__marks--list-only">
+            <div
+                v-if="!showTimeline"
+                class="se-toolbar__marks se-toolbar__marks--list-only flex flex-wrap items-center min-w-0 flex-[0_1_auto] justify-end gap-y-[0.35rem] gap-x-2"
+            >
                 <slot name="toolbar-end" />
             </div>
         </div>

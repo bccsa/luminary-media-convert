@@ -166,36 +166,6 @@ html.dark .se-root {
     color: var(--se-text-dim);
 }
 
-.se-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem 0.75rem;
-    margin-bottom: 0.875rem;
-    padding-bottom: 0.75rem;
-    border-bottom: 1px solid var(--se-border);
-}
-
-.se-toolbar__marks {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.4rem 0.6rem;
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.se-toolbar__playback-options {
-    display: inline-flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0.75rem 1rem;
-    flex: 0 1 auto;
-    margin-left: auto;
-    min-width: 0;
-}
-
 .se-toolbar__playback-options .se-playback-controls__slot {
     flex: 1 1 12rem;
     justify-content: flex-end;
@@ -208,23 +178,11 @@ html.dark .se-root {
     max-width: min(28rem, calc(100vw - 4rem));
 }
 
-.se-toolbar--no-timeline {
-    flex-direction: column;
-    align-items: stretch;
-}
-
 .se-toolbar--no-timeline .se-toolbar__playback-options--stacked {
     margin-left: 0;
     width: 100%;
     justify-content: flex-start;
     flex-wrap: wrap;
-}
-
-.se-toolbar__marks--list-only {
-    flex: 0 1 auto;
-    min-width: 0;
-    justify-content: flex-end;
-    gap: 0.35rem 0.5rem;
 }
 
 .se-zoom {
