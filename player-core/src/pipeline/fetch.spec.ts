@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isEncryptedPayload } from '@luminary-media-converter/hls';
+import { isEncryptedPayload } from '@luminary-media-converter/hls-core';
 import { PipelineError, fetchMaybeEncrypted, isMissing } from './fetch.js';
 import { bytesToHex, decryptLmcenc, hexToBytes } from './decrypt.js';
 import {

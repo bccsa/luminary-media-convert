@@ -21,7 +21,7 @@ Ordered roughly by value, not by effort.
 Still outstanding:
 
 - [x] Multi-angle source: single `master.m3u8` with `#EXT-X-MEDIA:TYPE=VIDEO` groups in S3; angle switching + audio-only in the app player (client-side extraction). **Verified** against S3 output with #162 — angle, audio-track and quality selection all confirmed working.
-- [x] **Stock-player check (flagged risk, never tested):** confirm plain video.js/hls.js plays the _default angle_ of a raw multi-angle master without the extraction helpers — Luminary clients that have not adopted `hls/` helpers depend on this. **Now has a second half:** with #162 an encrypted session also encrypts its playlists (LMCENC), which no stock player can read at all — such a client needs `encryption.encryptPlaylists: false` until it moves to `player-core`. Worth testing both, since the answer decides whether that opt-out is a transitional courtesy or a permanent mode. **Answered — §0a**, across ffmpeg, hls.js and Safari's native HLS. Both halves came back worse than the item assumed: the opt-out is not sufficient on its own, and a stock player does not stay on one angle.
+- [x] **Stock-player check (flagged risk, never tested):** confirm plain video.js/hls.js plays the _default angle_ of a raw multi-angle master without the extraction helpers — Luminary clients that have not adopted `hls-core/` helpers depend on this. **Now has a second half:** with #162 an encrypted session also encrypts its playlists (LMCENC), which no stock player can read at all — such a client needs `encryption.encryptPlaylists: false` until it moves to `player-core`. Worth testing both, since the answer decides whether that opt-out is a transitional courtesy or a permanent mode. **Answered — §0a**, across ffmpeg, hls.js and Safari's native HLS. Both halves came back worse than the item assumed: the opt-out is not sufficient on its own, and a stock player does not stay on one angle.
 
 ### 0a. Stock-player check — results
 
@@ -56,7 +56,7 @@ Case 5 is not clean even where it passes: hls.js emitted a transient `keyLoadErr
 
 Which angle a stock client shows is therefore **whichever bitrate its ABR lands on**, and it is free to move between them as the network changes. On localhost hls.js took the top level, which here happens to be Wide (453 kbps) — the `DEFAULT=YES` angle — but only because the close crop encoded smaller (150 kbps). A tighter shot with more motion would have been the larger file, and the same player would have opened on Close by default. The apparent "it picks the default angle" is a coincidence of bitrate, not a rule to rely on.
 
-So `extractAnglePlaylist` is not a nicety for these clients: **a Luminary client that will not adopt the `hls/` helpers should be sent single-angle output.**
+So `extractAnglePlaylist` is not a nicety for these clients: **a Luminary client that will not adopt the `hls-core/` helpers should be sent single-angle output.**
 
 Two things observed and dismissed:
 
@@ -82,7 +82,7 @@ The encoder's half of the contract is done and documented (CLAUDE.md "CMS contra
 
 - The "upload / edit media" button: health-check `GET /api/cms/health` on `http://127.0.0.1:31711`, `luminary-convert://` launch fallback, then `POST /api/cms/sessions` (Chrome LNA; Chrome-only at time of writing).
 - SSE consumer on `eventsUrl`: on the first `encoding` event, save `MediaDto { hlsUrl, hlsKey }` — the post can be saved before encoding completes. **Changed by #162:** the key no longer rides on the event. Fetch it from `GET /api/sessions/:id/key?token=read_…` and unmask it (XOR with `SHA-256(sessionId)[0..16]`, self-inverse); `cms-mock/src/store.ts` (`captureHlsKey`) is the reference. A CMS still reading `encryptionKeyHex` off the frame will silently get `undefined`.
-- Player-side: **adopt `@luminary-media-converter/player-web`** (or `player-core` with an adapter) rather than wiring the `hls/` helpers by hand — it already does angle extraction, the `luminary://key` swap from memory, quality capping, chapters, subtitles, recovery, and the "not available yet" state as a `coming-soon` slot that polls until the playlist appears. Since #162 an encrypted session also encrypts its playlists and VTTs, which only these packages can read.
+- Player-side: **adopt `@luminary-media-converter/player-web`** (or `player-core` with an adapter) rather than wiring the `hls-core/` helpers by hand — it already does angle extraction, the `luminary://key` swap from memory, quality capping, chapters, subtitles, recovery, and the "not available yet" state as a `coming-soon` slot that polls until the playlist appears. Since #162 an encrypted session also encrypts its playlists and VTTs, which only these packages can read.
 - Passing `existingMedia { hlsUrl, hlsKey }` for edit mode once item 1 lands (the DTO already accepts it).
 
 **If any Luminary surface will play this output with something other than `player-core`** — plain hls.js, Video.js, an iOS `<video>` — then two rules are not optional, per the measurements in §0a:
@@ -110,7 +110,7 @@ The encoder's half of the contract is done and documented (CLAUDE.md "CMS contra
 
 **Wanted.** When the CMS sends `existingMedia`, the app should open the collection instead of starting from a blank session:
 
-- **Import** — resolve `hlsUrl` back to a bucket/prefix and use `POST /api/hls/discover` + `POST /api/hls/read` to enumerate what is there: video angles, audio renditions, subtitle tracks, chapters, thumbnails, waveform sidecar. `deriveAngleName` and `normalizeS3Key` in `hls/src/keys.ts` already exist for this.
+- **Import** — resolve `hlsUrl` back to a bucket/prefix and use `POST /api/hls/discover` + `POST /api/hls/read` to enumerate what is there: video angles, audio renditions, subtitle tracks, chapters, thumbnails, waveform sidecar. `deriveAngleName` and `normalizeS3Key` in `hls-core/src/keys.ts` already exist for this.
 - **Playback with the supplied key** — **done by #162.** `PlayerSource.keyHex` is an input to the player, with no opinion about where it came from, so a key handed over by the CMS works exactly like one from a session the app ran itself.
 - **Chapter editing on an imported collection** — the session-scoped chapter routes resolve the prefix from the session's own S3 config; an imported collection needs the same against a discovered prefix (the stateless `/api/hls/chapters/{read,write}` routes already do exactly this).
 - **Track management** — add / remove / replace an individual audio track or video angle without touching the rest:
@@ -375,7 +375,7 @@ Triggered manually, and automatically when the pinned URL, digest or packaging c
 
 **`dist:win` now runs, and its output installs.** The installer step was gated behind the `package` input, which only `workflow_dispatch` supplies — and that needs the workflow on the default branch. A push to `ci/windows-pack-*` now asks for it too, which produced the first `.exe` (156 MB, unsigned); Johan installed it successfully on a Windows PC on 12 Aug 2026. What the install does *not* establish is that the app launches or encodes there — see item 5.
 
-**The first `dist:win` attempt failed, and the bug was not Windows-specific.** `build:libs` compiled `segment-editor` before `hls`, which it imports from, so `vue-tsc` had no declarations: `TS2307 Cannot find module '@luminary-media-converter/hls'`, and `TS7006` on a callback parameter as a consequence of the unresolved type. Invisible on a development machine, where `hls/dist` is left over from an earlier build. **Any clean clone could not build** — the runner was simply the first thing to try. Order now follows the dependency direction.
+**The first `dist:win` attempt failed, and the bug was not Windows-specific.** `build:libs` compiled `segment-editor` before `hls`, which it imports from, so `vue-tsc` had no declarations: `TS2307 Cannot find module '@luminary-media-converter/hls-core'`, and `TS7006` on a callback parameter as a consequence of the unresolved type. Invisible on a development machine, where `hls/dist` is left over from an earlier build. **Any clean clone could not build** — the runner was simply the first thing to try. Order now follows the dependency direction.
 
 ### 2. `pack` produced an app with no encoder, silently — fixed
 

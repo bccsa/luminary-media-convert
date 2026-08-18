@@ -43,6 +43,6 @@
         "vue-tsc": "^2.2.0"
     },
     "dependencies": {
-        "@luminary-media-converter/hls": "*"
+        "@luminary-media-converter/hls-core": "*"
     }
 }

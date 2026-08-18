@@ -10,7 +10,7 @@ A local-only desktop media encoder. A folder-based npm workspaces monorepo conta
 - **`cms-mock/`** — Dev-only Vue 3 app standing in for the Luminary CMS, so the whole CMS → encoder flow (origin gating, `documentId` reuse, `hlsUrl`/key delivery, `luminary://key` substitution, angle extraction) can be exercised locally. Not shipped; nothing depends on it.
 - **`encode-config/`** — Shared Vue 3 component library providing the `EncodeConfigForm` component, encoding/probe type definitions, and layout-based config persistence. Published as `@luminary-media-converter/encode-config`.
 - **`segment-editor/`** — Shared Vue 3 component library providing a player-agnostic timeline `SegmentEditor` for trim / chapters / subtitles authoring, plus WebVTT helpers (`exportChaptersVtt`, `exportSubtitlesVtt`, `parseVtt`). Published as `@luminary-media-converter/segment-editor`.
-- **`hls/`** — Shared TypeScript library providing **lossless** HLS master/media playlist parsing and building (round-trips real FFmpeg output byte-faithfully, unknown tags/attributes preserved via WeakMap-backed metadata), the LMCENC encrypted-text-asset format helpers (`enc-format.ts`), S3-key utilities, sidecar path conventions, the `LUMINARY_KEY_PLACEHOLDER_URI` constant, and angle/audio-only extraction (text helpers + model-level `extractAngle`). Published as `@luminary-media-converter/hls`; consumed by `api/`, `app/`, `cms-mock/` and `player-core/`.
+- **`hls-core/`** — Shared TypeScript library providing **lossless** HLS master/media playlist parsing and building (round-trips real FFmpeg output byte-faithfully, unknown tags/attributes preserved via WeakMap-backed metadata), the LMCENC encrypted-text-asset format helpers (`enc-format.ts`), S3-key utilities, sidecar path conventions, the `LUMINARY_KEY_PLACEHOLDER_URI` constant, and angle/audio-only extraction (text helpers + model-level `extractAngle`). Published as `@luminary-media-converter/hls-core`; consumed by `api/`, `app/`, `cms-mock/` and `player-core/`.
 - **`player-core/`** — Framework-agnostic, headless player wrapper: HLS munging pipeline (client-side angle extraction, quality capping, key handling, LMCENC decryption), `PlayerController` state store, recovery/stall/coming-soon policy, and the `PlayerAdapter` contract for pluggable engines (hls.js today; AVPlayer/ExoPlayer adapters later in a Capacitor shell). Published as `@luminary-media-converter/player-core`. See `player-core/src/types.ts` for the full contract.
 - **`player-web/`** — Web reference implementation of the player: `HlsJsAdapter` (hls.js on a plain `<video>`, in-memory AES key delivery via a custom key loader — no key blob URLs), `LuminaryPlayer.vue`, iOS-style fullscreen controls with orientation lock, and `PlayerMessages` i18n (every user-facing string overridable; scoped slots for full custom UI). It draws no chrome over the picture outside fullscreen: entering is a double-click / double-tap on the video, or `enterFullscreen()` from the host — which is where the button belongs (the encoder puts it beside its angle / audio / quality selectors). Inside fullscreen the controls, exit button included, are the player's. Also home to the **chunk-warming loop** (`ChunkPrefetcher` in `adapter/chunkWarming.ts`, driven through the optional `PlayerAdapter.warmChunks` contract — see `docs/chunk-warming.md`) and a dev-only test harness (`npm -w player-web run demo`: plays any master URL + optional key through the real player, with warming console instrumentation). Published as `@luminary-media-converter/player-web`; consumed by `app/`.
 
@@ -59,7 +59,7 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 - **Auth**: no sign-in. The UI's credential is the instance API token, taken from the preload bridge in the desktop app and from `VITE_API_TOKEN` in browser development (`src/auth-token.ts`)
 - **API base**: same-origin by default (the packaged app is served by the API); `VITE_API_URL` for browser development
 - **Media playback**: `LuminaryPlayer` from `@luminary-media-converter/player-web` (hls.js on a plain `<video>`, driven by the `player-core` controller). Angle switching, quality selection, audio tracks and encrypted playback all go through the controller; the AES key is fetched masked from `GET /api/sessions/:id/key`, unmasked in memory (`utils/keyMask.ts`) and handed to the player, which serves it to hls.js from memory — no key blob URLs
-- **Shared packages**: `@luminary-media-converter/encode-config`, `@luminary-media-converter/segment-editor`, `@luminary-media-converter/hls`, `@luminary-media-converter/player-core`, `@luminary-media-converter/player-web`
+- **Shared packages**: `@luminary-media-converter/encode-config`, `@luminary-media-converter/segment-editor`, `@luminary-media-converter/hls-core`, `@luminary-media-converter/player-core`, `@luminary-media-converter/player-web`
 - **Real-time updates**: SSE via `GET /api/sessions/:id/events`, with a polling fallback in `useSessionPoller`
 - **Testing**: Vitest + `@vue/test-utils` + jsdom
 
@@ -77,7 +77,7 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 - Player-agnostic: consumers pass `getCurrentTime()` and optional `onSeek` / `onPlayPause`
 - Testing: Vitest with `@vue/test-utils` and jsdom
 
-### Shared HLS Library (`hls/`)
+### Shared HLS Library (`hls-core/`)
 
 - Pure TypeScript, built with `tsc`
 - Exports master/media playlist parsers and builders, AES-128 key/IV utilities, `LUMINARY_KEY_PLACEHOLDER_URI`, `normalizeS3Key`, `deriveAngleName`, sidecar path conventions (`sidecarPath`), and the angle helpers `listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist`
@@ -201,7 +201,7 @@ cms-mock/
 ├── README.md
 └── vite.config.ts                       # Port 5199
 
-hls/src/{index,parse,build,keys,sidecar,angles}.ts
+hls-core/src/{index,parse,build,keys,sidecar,angles}.ts
 encode-config/src/{index,types,EncodeConfigForm.vue,layoutStorage,styles.css}
 segment-editor/src/{index,SegmentEditor.vue,types,time,vtt,styles.css}
 ```
@@ -288,7 +288,7 @@ A public web app reaching `127.0.0.1` is a private-network request. Chrome sends
 
 ### `luminary://key` and the client-side player contract
 
-Encryption keys are generated locally (`randomBytes(16)`) and never leave the machine, so there is nothing to serve them over HTTP. When no explicit `keyUrl` is configured, `#EXT-X-KEY` is written with the sentinel URI `luminary://key` (`LUMINARY_KEY_PLACEHOLDER_URI`, exported from `@luminary-media-converter/hls`).
+Encryption keys are generated locally (`randomBytes(16)`) and never leave the machine, so there is nothing to serve them over HTTP. When no explicit `keyUrl` is configured, `#EXT-X-KEY` is written with the sentinel URI `luminary://key` (`LUMINARY_KEY_PLACEHOLDER_URI`, exported from `@luminary-media-converter/hls-core`).
 
 A Luminary player is therefore expected to:
 
@@ -296,7 +296,7 @@ A Luminary player is therefore expected to:
 2. Supply the key for `luminary://key` (and any other AES-128 key URI — a locally supplied key always wins). The wrapper normalizes key URIs to the sentinel and the engine adapter serves the raw bytes **from memory** (hls.js custom key loader; `AVAssetResourceLoaderDelegate` / ExoPlayer `DataSource` later) — a key blob URL is only the fallback for adapters without a key hook.
 3. Feed the munged playlists to the engine. **`player-core` (`PlayerController` + pipeline) is the reference implementation**, with `player-web`'s `HlsJsAdapter`/`LuminaryPlayer` as the web engine binding; the media encoder app consumes exactly these.
 
-The encoder writes **one** spec-correct multi-angle `master.m3u8`: each camera angle is an `#EXT-X-MEDIA:TYPE=VIDEO` rendition group and every `#EXT-X-STREAM-INF` carries `VIDEO="<group>"`. Most players ignore video rendition groups and simply play whichever variant their ABR logic picks, so narrowing happens client-side with the `hls/` helpers — this is the contract, not an implementation detail:
+The encoder writes **one** spec-correct multi-angle `master.m3u8`: each camera angle is an `#EXT-X-MEDIA:TYPE=VIDEO` rendition group and every `#EXT-X-STREAM-INF` carries `VIDEO="<group>"`. Most players ignore video rendition groups and simply play whichever variant their ABR logic picks, so narrowing happens client-side with the `hls-core/` helpers — this is the contract, not an implementation detail:
 
 - `listVideoAngles(masterText)` → `{ id, name, isDefault }[]` (empty for a single-angle master)
 - `extractAnglePlaylist(masterText, angleId)` → a master pinned to one angle; returns the input unchanged when there is nothing to narrow, so it is safe to apply unconditionally

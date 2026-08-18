@@ -1,5 +1,5 @@
 /**
- * Re-exported from `@luminary-media-converter/hls`, which owns this parse now.
+ * Re-exported from `@luminary-media-converter/hls-core`, which owns this parse now.
  *
  * The player needs the identical thing for its scrub preview, and `thumbnails.vtt`
  * is a format neither library defines — so it lives with the other sidecar
@@ -11,4 +11,4 @@ export {
     parseThumbnailVttTime,
     findThumbnailCue,
     type ThumbnailSpriteCue,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';

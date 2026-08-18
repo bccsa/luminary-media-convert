@@ -67,7 +67,7 @@ partIndex * 100000`: jobs mux independently into one directory, the segment
   collide (no plannable part writes 100 000 segments) and cannot reorder (the
   largest number in play is 98 × 100 000 + n, still seven digits).
 - **Playlists are authored, not muxer-written** (`assembleSplicedMediaPlaylist`
-  in `@luminary-media-converter/hls`): EXTINF comes from the plan (the copy
+  in `@luminary-media-converter/hls-core`): EXTINF comes from the plan (the copy
   tail spills 3–5 frames past `-to` — DTS-based stop — and exact authored
   EXTINF makes players overwrite the spill by timeline). The clamp is per
   _job_, so a collapsed job's authored durations sum to exactly the span its

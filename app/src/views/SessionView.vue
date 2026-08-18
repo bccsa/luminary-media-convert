@@ -992,7 +992,7 @@ const deliveryBaseUrl = computed<string | null>(() => {
  * The folder the master playlist sits in, which is what every sidecar is
  * addressed relative to — `<masterFolder>/chapters/<lang>.vtt`,
  * `<masterFolder>/subtitles/…`, `<masterFolder>/waveform.json`. The same
- * convention `sidecarPath()` in `@luminary-media-converter/hls` encodes.
+ * convention `sidecarPath()` in `@luminary-media-converter/hls-core` encodes.
  *
  * Derived from the delivered URL rather than from the base plus the session id,
  * because the URL is the one thing that is certainly right: the encoder built

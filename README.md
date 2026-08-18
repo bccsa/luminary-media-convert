@@ -35,7 +35,7 @@ The API binds to `127.0.0.1` only. The renderer authenticates with a token minte
 | `cms-mock/` | Dev-only stand-in for the Luminary CMS | [cms-mock/README.md](cms-mock/README.md) |
 | `encode-config/` | Shared encode-config form + types | [encode-config/README.md](encode-config/README.md) |
 | `segment-editor/` | Shared timeline editor (trim / chapters / subtitles) | [segment-editor/README.md](segment-editor/README.md) |
-| `hls/` | Shared HLS parsing, key utilities, angle extraction | — |
+| `hls-core/` | Shared HLS parsing, key utilities, angle extraction | — |
 
 ## Prerequisites
 
