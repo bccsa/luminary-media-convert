@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Build the ffmpeg/ffprobe pair the packaged app ships, from FFmpeg's own signed
 # source. See README.md for why, and what goes in.

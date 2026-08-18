@@ -4,7 +4,7 @@
     "productName": "Luminary Media Convert",
     "private": true,
     "description": "Desktop shell: hosts the Encoding API in the main process and the web client as its renderer",
-    "license": "Apache-2.0",
+    "license": "GPL-3.0-or-later",
     "main": "dist/main.js",
     "scripts": {
         "build": "tsc -p tsconfig.json",
