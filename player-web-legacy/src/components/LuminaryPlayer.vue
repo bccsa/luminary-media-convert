@@ -693,6 +693,43 @@ const showAudioVideoToggle = computed(() => {
     return !inAudioOnly || snapshot.angles.some((angle) => angle.id !== AUDIO_ONLY_ANGLE_ID);
 });
 
+/**
+ * Whether the picture is off — the audio-only rendering is what is playing.
+ *
+ * Read from the controller rather than from an assignment, so it stays true
+ * across a recovery or a reload that re-selects the same angle.
+ */
+const isAudioOnly = computed(
+    () =>
+        controller.value !== null &&
+        (state.value.isAudioOnly || state.value.activeAngleId === AUDIO_ONLY_ANGLE_ID),
+);
+
+/**
+ * Tells video.js the picture is off, as well as the pipeline.
+ *
+ * Switching to the audio-only angle decides *what* is played; it says nothing
+ * about what is drawn. Without this the engine is still an ordinary video
+ * player that happens to have been handed a stream with no video track, so the
+ * `<video>` element stays laid out and paints its own surface — a coloured
+ * rectangle over the host's artwork, sized to the stream rather than the frame.
+ *
+ * `audioOnlyMode` is what hides the tech (`vjs-audio-only-mode .vjs-tech` is
+ * `display: none` in video.js's own stylesheet) and `audioPosterMode` is what
+ * puts the artwork in its place. Both, because either alone leaves half of the
+ * swap done.
+ *
+ * Failures are swallowed: video.js rejects these before the player is ready,
+ * and the watcher runs again on the next state change, which is sooner than
+ * anything a viewer would notice.
+ */
+watch(isAudioOnly, (audioOnly) => {
+    const instance = player.value;
+    if (!instance) return;
+    void Promise.resolve(instance.audioOnlyMode(audioOnly)).catch(() => {});
+    void Promise.resolve(instance.audioPosterMode(audioOnly)).catch(() => {});
+});
+
 defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, pause });
 </script>
 

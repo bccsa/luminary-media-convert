@@ -70,6 +70,10 @@ export function fakePlayer(overrides: Record<string, unknown> = {}) {
         // The surface the component drives that the adapter does not.
         el: vi.fn(() => document.createElement('div')),
         poster: vi.fn(),
+        // Audio-only: video.js hides the tech and swaps in the poster. Both
+        // return promises on the real player.
+        audioOnlyMode: vi.fn(() => Promise.resolve()),
+        audioPosterMode: vi.fn(() => Promise.resolve()),
         dispose: vi.fn(),
         requestFullscreen: vi.fn(() => Promise.resolve()),
         exitFullscreen: vi.fn(),
