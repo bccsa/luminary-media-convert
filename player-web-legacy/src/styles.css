@@ -249,6 +249,29 @@
     display: none !important;
 }
 
+/* --- Audio-only ----------------------------------------------------------- */
+
+/*
+ * video.js does two things in audio-only mode: it hides the tech, which is
+ * exactly right — there are no frames, and a visible `<video>` paints its own
+ * surface over the host's artwork — and it collapses the player to the height of
+ * a stock control bar, which is wrong here. This skin's control bar *is* the
+ * frame, drawn over the whole picture, so the height goes back.
+ */
+.lmpl-root .lmpl-video-player .video-js.vjs-audio-only-mode {
+    height: 100% !important;
+    width: 100% !important;
+}
+
+/*
+ * With no picture behind it, the progress bar reads as a bar rather than as an
+ * overlay, and square ends look like a rendering fault.
+ */
+.lmpl-root .lmpl-video-player .vjs-audio-only-mode .vjs-play-progress,
+.lmpl-root .lmpl-video-player .vjs-audio-only-mode .vjs-load-progress {
+    border-radius: 9999px !important;
+}
+
 /* --- Progress, live readout, fullscreen ---------------------------------- */
 
 .lmpl-root .lmpl-video-player .vjs-progress-control,
