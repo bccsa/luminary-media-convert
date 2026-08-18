@@ -12,8 +12,8 @@ import {
     latestSegments,
     setSegments,
 } from './helpers';
-import SegmentEditor from '../src/SegmentEditor.vue';
-import type { Segment } from '../src/types';
+import SegmentEditor from '../SegmentEditor.vue';
+import type { Segment } from '../types';
 
 const id = (i: number) => `seg-${i}`;
 const seg = (i: number, inSec: number, outSec: number, label?: string): Segment => ({

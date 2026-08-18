@@ -5,8 +5,8 @@ import {
     formatVttTimestamp,
     parseVtt,
     parseVttTimestamp,
-} from '../src/vtt';
-import type { Segment } from '../src/types';
+} from '../vtt';
+import type { Segment } from '../types';
 
 const mkSeg = (inSec: number, outSec: number, label?: string): Segment => ({
     id: `seg-${inSec}-${outSec}`,

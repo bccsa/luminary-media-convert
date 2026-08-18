@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createSegmentId } from '../src/types';
+import { createSegmentId } from '../types';
 
 describe('createSegmentId', () => {
     it('uses crypto.randomUUID when available', () => {

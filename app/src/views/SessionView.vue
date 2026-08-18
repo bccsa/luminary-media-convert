@@ -14,8 +14,8 @@ import type {
 import {
     SegmentEditor,
     formatTime,
-} from '@luminary-media-converter/segment-editor';
-import type { Segment } from '@luminary-media-converter/segment-editor';
+} from '../components/segment-editor';
+import type { Segment } from '../components/segment-editor';
 import type { PlayerSource } from '@luminary-media-converter/player-core';
 import {
     useChapters,

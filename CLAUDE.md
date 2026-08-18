@@ -9,7 +9,6 @@ A local-only desktop media encoder. A folder-based npm workspaces monorepo conta
 - **`app-electron/`** — Electron shell. Starts the Encoding API in the main process, serves the built `app/dist` through it, mints the UI's API token per launch, supplies a `safeStorage` credential cipher, shows the trust-on-first-use origin dialogs, registers the `luminary-convert://` protocol, and packages mac (dmg/zip) and Windows (NSIS) builds via electron-builder.
 - **`cms-mock/`** — Dev-only Vue 3 app standing in for the Luminary CMS, so the whole CMS → encoder flow (origin gating, `documentId` reuse, `hlsUrl`/key delivery, `luminary://key` substitution, angle extraction) can be exercised locally. Not shipped; nothing depends on it.
 - **`encode-config/`** — Shared Vue 3 component library providing the `EncodeConfigForm` component, encoding/probe type definitions, and layout-based config persistence. Published as `@luminary-media-converter/encode-config`.
-- **`segment-editor/`** — Shared Vue 3 component library providing a player-agnostic timeline `SegmentEditor` for trim / chapters / subtitles authoring, plus WebVTT helpers (`exportChaptersVtt`, `exportSubtitlesVtt`, `parseVtt`). Published as `@luminary-media-converter/segment-editor`.
 - **`hls-core/`** — Shared TypeScript library providing **lossless** HLS master/media playlist parsing and building (round-trips real FFmpeg output byte-faithfully, unknown tags/attributes preserved via WeakMap-backed metadata), the LMCENC encrypted-text-asset format helpers (`enc-format.ts`), S3-key utilities, sidecar path conventions, the `LUMINARY_KEY_PLACEHOLDER_URI` constant, and angle/audio-only extraction (text helpers + model-level `extractAngle`). Published as `@luminary-media-converter/hls-core`; consumed by `api/`, `app/`, `cms-mock/` and `player-core/`.
 - **`player-core/`** — Framework-agnostic, headless player wrapper: HLS munging pipeline (client-side angle extraction, quality capping, key handling, LMCENC decryption), `PlayerController` state store, recovery/stall/coming-soon policy, and the `PlayerAdapter` contract for pluggable engines (hls.js today; AVPlayer/ExoPlayer adapters later in a Capacitor shell). Published as `@luminary-media-converter/player-core`. See `player-core/src/types.ts` for the full contract.
 - **`player-web/`** — Web reference implementation of the player: `HlsJsAdapter` (hls.js on a plain `<video>`, in-memory AES key delivery via a custom key loader — no key blob URLs), `LuminaryPlayer.vue`, iOS-style fullscreen controls with orientation lock, and `PlayerMessages` i18n (every user-facing string overridable; scoped slots for full custom UI). It draws no chrome over the picture outside fullscreen: entering is a double-click / double-tap on the video, or `enterFullscreen()` from the host — which is where the button belongs (the encoder puts it beside its angle / audio / quality selectors). Inside fullscreen the controls, exit button included, are the player's. Also home to the **chunk-warming loop** (`ChunkPrefetcher` in `adapter/chunkWarming.ts`, driven through the optional `PlayerAdapter.warmChunks` contract — see `docs/chunk-warming.md`) and a dev-only test harness (`npm -w player-web run demo`: plays any master URL + optional key through the real player, with warming console instrumentation). Published as `@luminary-media-converter/player-web`; consumed by `app/`.
@@ -18,7 +17,7 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 
 ## Monorepo Structure
 
-- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls", "segment-editor", "player-core", "player-web", "cms-mock", "electron"]`)
+- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls-core", "player-core", "player-web", "cms-mock", "app-electron"]`)
 - Dependencies are hoisted to the root `node_modules/`
 - Run workspace scripts from root: `npm -w api run <script>` or `npm -w app run <script>`
 - Root `npm run dev` — browser development: builds the shared libraries, then runs their watch builds (each Vue library watches JS and `.d.ts` side by side, so a type-check during dev is not left staring at a `dist` with no declarations), the API dev server and the Vite web client concurrently
@@ -59,7 +58,7 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 - **Auth**: no sign-in. The UI's credential is the instance API token, taken from the preload bridge in the desktop app and from `VITE_API_TOKEN` in browser development (`src/auth-token.ts`)
 - **API base**: same-origin by default (the packaged app is served by the API); `VITE_API_URL` for browser development
 - **Media playback**: `LuminaryPlayer` from `@luminary-media-converter/player-web` (hls.js on a plain `<video>`, driven by the `player-core` controller). Angle switching, quality selection, audio tracks and encrypted playback all go through the controller; the AES key is fetched masked from `GET /api/sessions/:id/key`, unmasked in memory (`utils/keyMask.ts`) and handed to the player, which serves it to hls.js from memory — no key blob URLs
-- **Shared packages**: `@luminary-media-converter/encode-config`, `@luminary-media-converter/segment-editor`, `@luminary-media-converter/hls-core`, `@luminary-media-converter/player-core`, `@luminary-media-converter/player-web`
+- **Shared packages**: `@luminary-media-converter/encode-config`, `@luminary-media-converter/hls-core`, `@luminary-media-converter/player-core`, `@luminary-media-converter/player-web`
 - **Real-time updates**: SSE via `GET /api/sessions/:id/events`, with a polling fallback in `useSessionPoller`
 - **Testing**: Vitest + `@vue/test-utils` + jsdom
 
@@ -69,13 +68,14 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 - Exports `EncodeConfigForm`, probe/encode config types, `layoutStorage` (config persistence keyed by a media-layout fingerprint)
 - Peer dependency: Vue 3
 
-### Shared Segment Editor (`segment-editor/`)
+### Segment Editor (`app/src/components/segment-editor/`)
 
-- Vue 3 library, Vite 6 library mode with `vite-plugin-css-injected-by-js`, `vue-tsc` for type emit
+- A folder inside the web client, not a workspace. It was a published library while it might have had other hosts; `app` is its only consumer, so it is source now and imported by relative path through its `index.ts`
 - Exports `SegmentEditor`, `Segment` / `SegmentEditorMode` types, WebVTT helpers and time helpers
 - Modes: `trim` (no labels, no overlap), `chapters` (labels, no overlap, ripple edit), `subtitles` (labels, overlap allowed)
 - Player-agnostic: consumers pass `getCurrentTime()` and optional `onSeek` / `onPlayPause`
-- Testing: Vitest with `@vue/test-utils` and jsdom
+- Carries its own `styles.css`, imported by the component itself
+- Testing: its 225 specs moved with it and run in `app`'s suite. The library's own coverage thresholds (100% lines) did not survive the move — `app` has no per-directory thresholds
 
 ### Shared HLS Library (`hls-core/`)
 
@@ -203,7 +203,7 @@ cms-mock/
 
 hls-core/src/{index,parse,build,keys,sidecar,angles}.ts
 encode-config/src/{index,types,EncodeConfigForm.vue,layoutStorage,styles.css}
-segment-editor/src/{index,SegmentEditor.vue,types,time,vtt,styles.css}
+app/src/components/segment-editor/{index,SegmentEditor.vue,types,time,vtt,thumbnailVtt,styles.css}
 ```
 
 ## Architecture

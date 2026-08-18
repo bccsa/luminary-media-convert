@@ -3,7 +3,7 @@ import {
     findThumbnailCue,
     parseThumbnailVtt,
     parseThumbnailVttTime,
-} from '../src/thumbnailVtt';
+} from '../thumbnailVtt';
 
 describe('parseThumbnailVttTime', () => {
     it('parses HH:MM:SS.mmm', () => {

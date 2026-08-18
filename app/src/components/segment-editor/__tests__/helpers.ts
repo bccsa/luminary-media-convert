@@ -1,7 +1,7 @@
 import { mount, type VueWrapper } from '@vue/test-utils';
 import { nextTick } from 'vue';
-import SegmentEditor from '../src/SegmentEditor.vue';
-import type { Segment } from '../src/types';
+import SegmentEditor from '../SegmentEditor.vue';
+import type { Segment } from '../types';
 
 /** Stable HTMLElement.getBoundingClientRect stub keyed off element class. */
 function stubRect(el: Element): DOMRect {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ref } from 'vue';
 import { useTrimDeletions } from './useTrimDeletions';
-import type { Segment } from '@luminary-media-converter/segment-editor';
+import type { Segment } from '../components/segment-editor';
 
 const seg = (id: string, inSec: number, outSec: number, label = ''): Segment => ({
     id,

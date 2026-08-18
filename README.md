@@ -34,7 +34,6 @@ The API binds to `127.0.0.1` only. The renderer authenticates with a token minte
 | `app-electron/` | Desktop shell, hosts the API in-process, packaging | [app-electron/bin/README.md](app-electron/bin/README.md) (ffmpeg binaries) |
 | `cms-mock/` | Dev-only stand-in for the Luminary CMS | [cms-mock/README.md](cms-mock/README.md) |
 | `encode-config/` | Shared encode-config form + types | [encode-config/README.md](encode-config/README.md) |
-| `segment-editor/` | Shared timeline editor (trim / chapters / subtitles) | [segment-editor/README.md](segment-editor/README.md) |
 | `hls-core/` | Shared HLS parsing, key utilities, angle extraction | — |
 
 ## Prerequisites
@@ -151,7 +150,7 @@ See [Todo.md](Todo.md) for signing, notarization and auto-update.
 | `npm -w cms-mock run dev` | CMS mock on port 5199 |
 | `npm -w app-electron run dev` / `dist:mac` / `dist:win` / `pack` | Desktop shell |
 | `npm -w app-electron run dist:win-portable` | Portable Windows zip, buildable on macOS |
-| `npm -w {hls,encode-config,segment-editor,player-core,player-web} run build` / `dev` / `test` | Shared libraries |
+| `npm -w {hls-core,encode-config,player-core,player-web} run build` / `dev` / `test` | Shared libraries |
 
 ## Documentation
 

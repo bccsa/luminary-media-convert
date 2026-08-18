@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { SegmentEditor } from '@luminary-media-converter/segment-editor';
-import type { Segment } from '@luminary-media-converter/segment-editor';
+import { SegmentEditor } from '../segment-editor';
+import type { Segment } from '../segment-editor';
 
 const props = withDefaults(
     defineProps<{

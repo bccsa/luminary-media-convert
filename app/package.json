@@ -5,7 +5,7 @@
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "build:libs": "(cd .. && npm -w hls-core run build && npm -w encode-config run build && npm -w segment-editor run build && npm -w player-core run build && npm -w player-web run build)",
+        "build:libs": "(cd .. && npm -w hls-core run build && npm -w encode-config run build && npm -w player-core run build && npm -w player-web run build)",
         "build": "npm run build:libs && vue-tsc -b && vite build",
         "preview": "npm run build && vite preview",
         "test": "vitest run"
@@ -15,7 +15,6 @@
         "@luminary-media-converter/hls-core": "file:../hls-core",
         "@luminary-media-converter/player-core": "file:../player-core",
         "@luminary-media-converter/player-web": "file:../player-web",
-        "@luminary-media-converter/segment-editor": "file:../segment-editor",
         "vue": "^3.5.0",
         "vue-router": "^4.6.4"
     },

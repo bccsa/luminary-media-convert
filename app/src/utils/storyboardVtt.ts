@@ -1,7 +1,7 @@
 import {
     formatVttTimestamp,
     parseThumbnailVtt,
-} from '@luminary-media-converter/segment-editor';
+} from '../components/segment-editor';
 import type { TrimSegment } from '../types';
 import { sourceToOutput } from './trimTimeline';
 

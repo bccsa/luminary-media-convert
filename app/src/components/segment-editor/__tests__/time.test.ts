@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDuration, formatTime, parseTime } from '../src/time';
+import { formatDuration, formatTime, parseTime } from '../time';
 
 describe('formatTime', () => {
     it('formats seconds under one minute as M:SS.mmm', () => {
