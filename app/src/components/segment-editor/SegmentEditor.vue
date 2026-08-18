@@ -1703,7 +1703,7 @@ function segmentStateClass(seg: Segment): string {
         <div
             :class="splitListPanel && !listOnlySplitPanel ? 'se-split-main' : 'se-split-main--contents'"
         >
-            <div v-if="!listOnlySplitPanel && showHeader" class="se-header">
+            <div v-if="!listOnlySplitPanel && showHeader" class="se-header flex items-center justify-between gap-2 mb-3 flex-wrap">
             <h3 class="se-title">{{ modeTitle }}</h3>
             <div class="se-meta">
                 <span v-if="segments.length > 0">
@@ -1796,13 +1796,13 @@ function segmentStateClass(seg: Segment): string {
             >
                 <div
                     v-if="$slots['playback-start']"
-                    class="se-playback-controls__slot se-playback-controls__slot--start"
+                    class="se-playback-controls__slot se-playback-controls__slot--start inline-flex items-center gap-1 min-w-0"
                 >
                     <slot name="playback-start" />
                 </div>
                 <div
                     v-if="$slots['playback-end']"
-                    class="se-playback-controls__slot se-playback-controls__slot--end"
+                    class="se-playback-controls__slot se-playback-controls__slot--end inline-flex items-center gap-1 min-w-0"
                 >
                     <slot name="playback-end" />
                 </div>
@@ -1815,7 +1815,7 @@ function segmentStateClass(seg: Segment): string {
             </div>
         </div>
 
-        <div v-if="showPlaybackControls && !combinedControlsBar" class="se-time-above">
+        <div v-if="showPlaybackControls && !combinedControlsBar" class="se-time-above font-mono text-[0.8125rem] font-medium tracking-[0.02em] text-zinc-900 dark:text-slate-200 mb-1.5 text-center">
             {{ formatTime(playheadSec) }} / {{ formatTime(duration) }}
         </div>
 
@@ -2000,9 +2000,9 @@ function segmentStateClass(seg: Segment): string {
 
         <div
             v-if="showPlaybackControls && (onPlayPause || onSeek) && !combinedControlsBar"
-            class="se-playback-controls"
+            class="se-playback-controls flex justify-center items-center mt-1.5 mb-2.5 pt-2.5 border-t border-sky-200 dark:border-sky-400/12 text-xs text-slate-500 dark:text-slate-400"
         >
-            <div class="se-playback-controls__center">
+            <div class="se-playback-controls__center inline-flex gap-[0.35rem] items-center flex-wrap justify-center">
                 <button
                     v-if="onSeek"
                     type="button"
@@ -2080,18 +2080,18 @@ function segmentStateClass(seg: Segment): string {
         -->
         <div
             v-if="combinedControlsBar"
-            class="se-controls-bar"
+            class="se-controls-bar grid grid-cols-[1fr_auto_1fr] items-center justify-center gap-y-[0.4rem] gap-x-3.5 m-0 pt-1 border-t-0"
         >
-            <div class="se-controls-bar__lead">
-                <div v-if="showPlaybackControls" class="se-controls-bar__time">
+            <div class="se-controls-bar__lead justify-self-start min-w-0">
+                <div v-if="showPlaybackControls" class="se-controls-bar__time font-mono text-[0.8125rem] font-medium tracking-[0.02em] text-zinc-900 dark:text-slate-200 shrink-0">
                     {{ formatTime(playheadSec) }} / {{ formatTime(duration) }}
                 </div>
             </div>
 
-            <div class="se-controls-bar__main">
+            <div class="se-controls-bar__main flex flex-wrap items-center justify-center gap-y-[0.4rem] gap-x-3.5 min-w-0">
             <div
                 v-if="showPlaybackControls && (onPlayPause || onSeek)"
-                class="se-controls-bar__playback"
+                class="se-controls-bar__playback order-2 inline-flex items-center gap-[0.35rem] flex-nowrap shrink-0"
             >
                 <button
                     v-if="onSeek"
@@ -2163,7 +2163,7 @@ function segmentStateClass(seg: Segment): string {
                 </button>
             </div>
 
-            <div v-if="showToolbar" class="se-controls-bar__marks">
+            <div v-if="showToolbar" class="se-controls-bar__marks order-1 inline-flex flex-wrap items-center gap-y-[0.4rem] gap-x-[0.6rem] flex-[0_1_auto] min-w-0">
                 <button type="button" class="se-btn se-btn--squish appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed" @click="markIn" title="Mark In at playhead ( I or [ )">
                     <span aria-hidden="true">[</span>
                 </button>
@@ -2212,7 +2212,7 @@ function segmentStateClass(seg: Segment): string {
                 -->
             </div>
 
-            <div v-if="showToolbar" class="se-controls-bar__zoom">
+            <div v-if="showToolbar" class="se-controls-bar__zoom order-3 inline-flex items-center gap-y-[0.4rem] gap-x-[0.6rem] flex-[0_0_auto]">
                 <label class="se-zoom">
                     Zoom
                     <input
@@ -2230,24 +2230,24 @@ function segmentStateClass(seg: Segment): string {
 
             <div
                 v-if="showToolbar && $slots['toolbar-before-clear']"
-                class="se-controls-bar__actions"
+                class="se-controls-bar__actions order-4 inline-flex flex-wrap items-center gap-y-[0.4rem] gap-x-2 flex-[0_1_auto] min-w-0"
             >
                 <slot name="toolbar-before-clear" />
             </div>
 
             <div
                 v-if="$slots['playback-start'] || $slots['playback-end']"
-                class="se-controls-bar__options"
+                class="se-controls-bar__options inline-flex flex-nowrap items-center justify-end gap-y-3 gap-x-4 flex-[0_1_auto] ml-auto min-w-0"
             >
                 <div
                     v-if="$slots['playback-start']"
-                    class="se-playback-controls__slot se-playback-controls__slot--start"
+                    class="se-playback-controls__slot se-playback-controls__slot--start inline-flex items-center gap-1 min-w-0"
                 >
                     <slot name="playback-start" />
                 </div>
                 <div
                     v-if="$slots['playback-end']"
-                    class="se-playback-controls__slot se-playback-controls__slot--end"
+                    class="se-playback-controls__slot se-playback-controls__slot--end inline-flex items-center gap-1 min-w-0"
                 >
                     <slot name="playback-end" />
                 </div>
@@ -2263,13 +2263,13 @@ function segmentStateClass(seg: Segment): string {
                  grouped with it. -->
             <div
                 v-if="(showHelp && !showHeader) || $slots['controls-end']"
-                class="se-controls-bar__end"
+                class="se-controls-bar__end inline-flex items-center gap-1.5 shrink-0 justify-self-end"
             >
                 <slot name="controls-end" />
                 <button
                     v-if="showHelp && !showHeader"
                     type="button"
-                    class="se-btn se-btn--icon se-controls-bar__help appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                    class="se-btn se-btn--icon se-controls-bar__help appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
                     title="Keyboard shortcuts (?)"
                     @click="helpOpen = !helpOpen"
                 ><svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
