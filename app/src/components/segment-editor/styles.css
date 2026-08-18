@@ -170,92 +170,6 @@ html.dark .se-root {
     padding: 0.875rem 1rem 0.5rem;
 }
 
-.se-controls-bar .se-btn {
-    min-height: 2.25rem;
-    min-width: 2.25rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    box-sizing: border-box;
-}
-
-.se-controls-bar__playback .se-btn {
-    line-height: 0;
-}
-
-.se-controls-bar__playback .se-btn--playback {
-    min-width: 2.25rem;
-    min-height: 2.25rem;
-    padding: 0;
-}
-
-.se-controls-bar__playback .se-btn--playback-icon {
-    padding: 0;
-    gap: 0;
-}
-
-.se-controls-bar__playback .se-btn--playback-icon .se-icon {
-    width: 1.25rem;
-    height: 1.25rem;
-    display: block;
-    vertical-align: unset;
-}
-
-.se-controls-bar__playback .se-btn--playback .se-icon {
-    width: 1.75rem;
-    height: 1.75rem;
-    display: block;
-    vertical-align: unset;
-}
-
-.se-controls-bar__options .se-playback-controls__slot {
-    flex: 1 1 12rem;
-    justify-content: flex-end;
-    max-width: min(28rem, calc(50vw - 1rem));
-    min-width: 0;
-}
-
-.se-controls-bar__options .se-playback-controls__slot:only-child {
-    flex: 0 1 auto;
-    max-width: min(28rem, calc(100vw - 4rem));
-}
-
-.se-playback-controls .se-btn {
-    min-height: 2.75rem;
-    min-width: 2.75rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    box-sizing: border-box;
-    line-height: 0;
-}
-
-.se-playback-controls .se-btn--playback {
-    /* Same outer size as jog buttons; large glyph via .se-icon only */
-    min-width: 2.75rem;
-    min-height: 2.75rem;
-    padding: 0;
-}
-
-.se-playback-controls .se-btn--playback-icon {
-    padding: 0;
-    gap: 0;
-}
-
-.se-playback-controls .se-btn--playback-icon .se-icon {
-    width: 1.5rem;
-    height: 1.5rem;
-    display: block;
-    vertical-align: unset;
-}
-
-.se-playback-controls .se-btn--playback .se-icon {
-    width: 2.5rem;
-    height: 2.5rem;
-    display: block;
-    vertical-align: unset;
-}
-
 html.dark .se-help {
     --se-text: #e2e8f0;
     --se-text-dim: #94a3b8;
@@ -278,18 +192,6 @@ html.dark .se-confirm {
     padding: 1.375rem 1.5rem;
 }
 
-.se-root[data-mode='chapters'] .se-meta,
-.se-root[data-mode='subtitles'] .se-meta {
-    gap: 0.625rem;
-}
-
-.se-root[data-mode='chapters'] .se-shortcuts-strip,
-.se-root[data-mode='subtitles'] .se-shortcuts-strip {
-    gap: 0.5rem 1.125rem;
-    padding: 0.625rem 0.875rem;
-    margin-bottom: 0;
-}
-
 /* Full editor: list sits below timeline — separate with a border. Split panel: list is its own card; no extra top margin. */
 .se-root[data-mode='chapters']:not(.se-root--split-list) .se-list-section,
 .se-root[data-mode='subtitles']:not(.se-root--split-list) .se-list-section {
@@ -304,41 +206,6 @@ html.dark .se-confirm {
     gap: 0.5rem;
     max-height: min(50vh, 22rem);
     padding: 0.125rem 0.25rem 0.125rem 0;
-}
-
-.se-root[data-mode='chapters'] .se-list-row,
-.se-root[data-mode='subtitles'] .se-list-row {
-    gap: 0.625rem;
-    padding: 0.5rem 0.625rem;
-    align-items: center;
-}
-
-.se-root[data-mode='chapters'] .se-label-field,
-.se-root[data-mode='subtitles'] .se-label-field {
-    padding: 6px 10px;
-    min-height: 1.75rem;
-    height: 1.75rem;
-}
-
-.se-root[data-mode='chapters'] .se-list-index,
-.se-root[data-mode='subtitles'] .se-list-index {
-    padding-top: 0;
-    align-self: center;
-}
-
-.se-root[data-mode='chapters'] .se-list-sep,
-.se-root[data-mode='subtitles'] .se-list-sep {
-    padding-top: 0;
-}
-
-.se-root[data-mode='chapters'] .se-list-duration,
-.se-root[data-mode='subtitles'] .se-list-duration {
-    padding-top: 0;
-}
-
-.se-root[data-mode='chapters'] .se-warning,
-.se-root[data-mode='subtitles'] .se-warning {
-    margin-top: 0.75rem;
 }
 
 /* --------------------------------------------------------------------------

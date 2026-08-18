@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { BAR_BUTTON, EDITOR_ICON_BUTTON } from './segment-editor/buttonStyles';
 import { useTheme, type ThemePreference } from '../composables/useTheme';
 
 /**
@@ -39,18 +40,9 @@ const panelPositionClass = computed(() =>
         : 'top-full mt-2 origin-top-right'
 );
 
-/**
- * The editor's own icon-button styling, copied verbatim so this button and the
- * keyboard-shortcuts button beside it are identical rather than merely similar.
- * The `se-btn` classes are kept as hooks: `.se-controls-bar .se-btn` still sizes
- * both to match the row they sit in.
- */
-const EDITOR_BUTTON =
-    'appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed';
-
 const triggerClass = computed(() =>
     props.variant === 'editor'
-        ? `se-btn se-btn--icon ${EDITOR_BUTTON}`
+        ? `se-btn se-btn--icon ${EDITOR_ICON_BUTTON} ${BAR_BUTTON}`
         : 'flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-slate-300 bg-slate-100 text-slate-700 shadow-sm ring-slate-900/5 transition-colors hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:ring-white/10'
 );
 
