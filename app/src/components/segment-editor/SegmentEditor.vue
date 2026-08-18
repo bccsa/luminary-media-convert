@@ -1002,6 +1002,44 @@ const stepMultiplier = ref(1);
 const helpOpen = ref(false);
 const confirmClearOpen = ref(false);
 
+/**
+ * What Escape does, wherever it arrives from.
+ *
+ * It leaves the field first when one is focused: the inputs commit as they are
+ * typed, so blurring discards nothing, and stopping there would cost a second
+ * press for the one key that has any way of clearing a selection.
+ */
+function handleEscape(e: KeyboardEvent) {
+    const target = e.target as HTMLElement | null;
+    if (
+        target
+        && (target.tagName === 'INPUT'
+            || target.tagName === 'TEXTAREA'
+            || target.tagName === 'SELECT'
+            || target.isContentEditable)
+    ) {
+        target.blur();
+    }
+    clearSelection();
+    pendingInSec.value = null;
+    helpOpen.value = false;
+    confirmClearOpen.value = false;
+}
+
+/**
+ * Escape ignores `keyboardScope`, unlike every other key.
+ *
+ * It is the only way to clear a selection — nothing else does, not clicking the
+ * empty timeline — and a selection is routinely made from the list, which never
+ * focuses the timeline the focus-scoped handler is bound to. Scoping the one key
+ * that undoes a state to the one place that cannot reach it left that state
+ * stuck. Skipped when the scope is already global, where `onKeyDown` sees it.
+ */
+function onWindowEscape(e: KeyboardEvent) {
+    if (e.key !== 'Escape' || props.keyboardScope === 'global') return;
+    handleEscape(e);
+}
+
 function onKeyDown(e: KeyboardEvent) {
     const target = e.target as HTMLElement | null;
     const isTyping =
@@ -1012,7 +1050,7 @@ function onKeyDown(e: KeyboardEvent) {
             || target.isContentEditable);
     if (isTyping) {
         // Allow Cmd+Z / Esc even when typing; otherwise let the input handle it.
-        if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) { /* fall through */ } else if (e.key === 'Escape') { (target as HTMLElement).blur(); return; } else return;
+        if ((e.metaKey || e.ctrlKey) && (e.key === 'z' || e.key === 'Z')) { /* fall through */ } else if (e.key === 'Escape') { handleEscape(e); return; } else return;
     }
 
     // Numeric modifiers for step size.
@@ -1086,10 +1124,7 @@ function onKeyDown(e: KeyboardEvent) {
             return;
         }
         case 'Escape': {
-            clearSelection();
-            pendingInSec.value = null;
-            helpOpen.value = false;
-            confirmClearOpen.value = false;
+            handleEscape(e);
             return;
         }
         case '?': { helpOpen.value = !helpOpen.value; return; }
@@ -1551,6 +1586,10 @@ onMounted(() => {
     rafId = requestAnimationFrame(tick);
     measureTrackWidth();
 
+    // Escape is bound for the component's whole life, whatever the scope: see
+    // onWindowEscape.
+    window.addEventListener('keydown', onWindowEscape);
+
     // Observe the track whether or not there are peaks: the thumbnail filmstrip
     // needs the measured width to decide how many tiles to lay down.
     const container = timelineMetricsEl();
@@ -1570,6 +1609,7 @@ onBeforeUnmount(() => {
     if (waveformFrame != null) cancelAnimationFrame(waveformFrame);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('keyup', onKeyUp);
+    window.removeEventListener('keydown', onWindowEscape);
 
     if (waveformResizeObserver) {
         waveformResizeObserver.disconnect();

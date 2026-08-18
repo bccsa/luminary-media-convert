@@ -733,10 +733,55 @@ describe('SegmentEditor — keyboard navigation', () => {
         input.focus();
         input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
         expect(onSeek).not.toHaveBeenCalled();
-        // Escape in an input blurs it without doing anything else.
+        // Escape in an input leaves the field *and* clears — one press, because it
+        // is the only way to clear a selection at all.
         input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         await flush();
         expect(document.activeElement).not.toBe(input);
+    });
+
+    it('Escape clears the selection from an input, in one press', async () => {
+        const w = mountEditor({
+            segments: [seg(1, 0, 5)],
+            props: { keyboardScope: 'global' },
+        });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+
+        const input = w.find('.se-input').element as HTMLInputElement;
+        input.focus();
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await flush();
+
+        expect(document.activeElement).not.toBe(input);
+        const emitted = w.emitted('select')!;
+        expect(emitted[emitted.length - 1][0]).toEqual([]);
+    });
+
+    it('Escape deselects however focus got away from the timeline', async () => {
+        // A chapter is normally selected from the list, which never focuses the
+        // timeline the focus-scoped handler is bound to. Escape is bound to the
+        // window regardless of scope for exactly this reason.
+        const w = mountEditor({
+            segments: [seg(1, 0, 5)],
+            props: { keyboardScope: 'focus' },
+        });
+        await flush();
+        const segEl = w.find('.se-segment').element as HTMLElement;
+        mouseAt(segEl, 'mousedown', 2);
+        mouseAt(document.body, 'mouseup', 2);
+        await flush();
+        expect(w.emitted('select')).toBeTruthy();
+
+        document.body.focus();
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await flush();
+
+        const emitted = w.emitted('select')!;
+        expect(emitted[emitted.length - 1][0]).toEqual([]);
     });
 });
 
