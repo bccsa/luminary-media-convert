@@ -1654,7 +1654,7 @@ defineExpose({
                 <button
                     v-if="showHelp"
                     type="button"
-                    class="se-btn se-btn--icon"
+                    class="se-btn se-btn--icon appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Keyboard shortcuts (?)"
                     @click="helpOpen = !helpOpen"
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>
@@ -1667,16 +1667,16 @@ defineExpose({
             :class="{ 'se-toolbar--no-timeline': !showTimeline }"
         >
             <div v-if="showTimeline" class="se-toolbar__marks">
-                <button type="button" class="se-btn se-btn--squish" @click="markIn" title="Mark In at playhead ( I or [ )">
+                <button type="button" class="se-btn se-btn--squish appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed" @click="markIn" title="Mark In at playhead ( I or [ )">
                     <span aria-hidden="true">[</span>
                 </button>
-                <button type="button" class="se-btn se-btn--squish" @click="markOut" title="Mark Out at playhead ( O or ] )">
+                <button type="button" class="se-btn se-btn--squish appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed" @click="markOut" title="Mark Out at playhead ( O or ] )">
                     <span aria-hidden="true">]</span>
                 </button>
                 <button
                     v-if="mode === 'trim'"
                     type="button"
-                    class="se-btn se-btn--danger"
+                    class="se-btn se-btn--danger appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-red-600 dark:text-red-400 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-red-500/10 dark:enabled:hover:bg-red-500/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="!hasSelection"
                     :title="hasSelection ? 'Cut the selected range · Delete or ⌘/Ctrl + X — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
                     @click="deleteSelected"
@@ -1687,7 +1687,7 @@ defineExpose({
                 <button
                     v-else-if="showClearAll && segments.length > 0"
                     type="button"
-                    class="se-btn se-btn--danger"
+                    class="se-btn se-btn--danger appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-red-600 dark:text-red-400 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-red-500/10 dark:enabled:hover:bg-red-500/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     @click="confirmClearOpen = true"
                 >
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
@@ -1695,14 +1695,14 @@ defineExpose({
                 </button>
                 <button
                     type="button"
-                    class="se-btn se-btn--squish"
+                    class="se-btn se-btn--squish appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="history.length === 0"
                     @click="undo"
                     title="Undo"
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
                 <button
                     type="button"
-                    class="se-btn se-btn--squish"
+                    class="se-btn se-btn--squish appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="redoStack.length === 0"
                     @click="redo"
                     title="Redo"
@@ -1939,7 +1939,7 @@ defineExpose({
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn se-btn--playback-icon"
+                    class="se-btn se-btn--playback-icon appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="!canSeekPlayback"
                     title="Back 1 second · Left Arrow — Hold 1, 2, or 3 before ← for 10s, 30s, or 60s steps"
                     aria-label="Back 1 second"
@@ -1950,7 +1950,7 @@ defineExpose({
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn se-btn--playback-icon"
+                    class="se-btn se-btn--playback-icon appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="!canSeekPlayback"
                     title="Back 10 seconds · J"
                     aria-label="Back 10 seconds (J)"
@@ -1961,7 +1961,7 @@ defineExpose({
                 <button
                     v-if="onPlayPause"
                     type="button"
-                    class="se-btn se-btn--playback"
+                    class="se-btn se-btn--playback appearance-none inline-flex items-center gap-1 px-3.5 py-1.5 text-base font-medium font-[inherit] text-white dark:text-slate-950 bg-sky-600 dark:bg-sky-400 border border-sky-600 dark:border-sky-400 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-sky-700 enabled:hover:border-sky-700 dark:enabled:hover:bg-sky-300 dark:enabled:hover:border-sky-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed min-w-12 justify-center"
                     title="Play or pause · Space — Also K"
                     :aria-label="isPlaying ? 'Pause' : 'Play'"
                     :aria-pressed="isPlaying"
@@ -1985,7 +1985,7 @@ defineExpose({
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn se-btn--playback-icon"
+                    class="se-btn se-btn--playback-icon appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="!canSeekPlayback"
                     title="Forward 10 seconds · L"
                     aria-label="Forward 10 seconds (L)"
@@ -1996,7 +1996,7 @@ defineExpose({
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn se-btn--playback-icon"
+                    class="se-btn se-btn--playback-icon appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="!canSeekPlayback"
                     title="Forward 1 second · Right Arrow — Hold 1, 2, or 3 before → for 10s, 30s, or 60s steps"
                     aria-label="Forward 1 second"
@@ -2029,7 +2029,7 @@ defineExpose({
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn se-btn--playback-icon"
+                    class="se-btn se-btn--playback-icon appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="!canSeekPlayback"
                     title="Back 1 second · Left Arrow — Hold 1, 2, or 3 before ← for 10s, 30s, or 60s steps"
                     aria-label="Back 1 second"
@@ -2040,7 +2040,7 @@ defineExpose({
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn se-btn--playback-icon"
+                    class="se-btn se-btn--playback-icon appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="!canSeekPlayback"
                     title="Back 10 seconds · J"
                     aria-label="Back 10 seconds (J)"
@@ -2051,7 +2051,7 @@ defineExpose({
                 <button
                     v-if="onPlayPause"
                     type="button"
-                    class="se-btn se-btn--playback"
+                    class="se-btn se-btn--playback appearance-none inline-flex items-center gap-1 px-3.5 py-1.5 text-base font-medium font-[inherit] text-white dark:text-slate-950 bg-sky-600 dark:bg-sky-400 border border-sky-600 dark:border-sky-400 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-sky-700 enabled:hover:border-sky-700 dark:enabled:hover:bg-sky-300 dark:enabled:hover:border-sky-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed min-w-12 justify-center"
                     title="Play or pause · Space — Also K"
                     :aria-label="isPlaying ? 'Pause' : 'Play'"
                     :aria-pressed="isPlaying"
@@ -2075,7 +2075,7 @@ defineExpose({
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn se-btn--playback-icon"
+                    class="se-btn se-btn--playback-icon appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="!canSeekPlayback"
                     title="Forward 10 seconds · L"
                     aria-label="Forward 10 seconds (L)"
@@ -2086,7 +2086,7 @@ defineExpose({
                 <button
                     v-if="onSeek"
                     type="button"
-                    class="se-btn se-btn--playback-icon"
+                    class="se-btn se-btn--playback-icon appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="!canSeekPlayback"
                     title="Forward 1 second · Right Arrow — Hold 1, 2, or 3 before → for 10s, 30s, or 60s steps"
                     aria-label="Forward 1 second"
@@ -2097,16 +2097,16 @@ defineExpose({
             </div>
 
             <div v-if="showToolbar" class="se-controls-bar__marks">
-                <button type="button" class="se-btn se-btn--squish" @click="markIn" title="Mark In at playhead ( I or [ )">
+                <button type="button" class="se-btn se-btn--squish appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed" @click="markIn" title="Mark In at playhead ( I or [ )">
                     <span aria-hidden="true">[</span>
                 </button>
-                <button type="button" class="se-btn se-btn--squish" @click="markOut" title="Mark Out at playhead ( O or ] )">
+                <button type="button" class="se-btn se-btn--squish appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed" @click="markOut" title="Mark Out at playhead ( O or ] )">
                     <span aria-hidden="true">]</span>
                 </button>
                 <button
                     v-if="mode === 'trim'"
                     type="button"
-                    class="se-btn se-btn--danger"
+                    class="se-btn se-btn--danger appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-red-600 dark:text-red-400 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-red-500/10 dark:enabled:hover:bg-red-500/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="!hasSelection"
                     :title="hasSelection ? 'Cut the selected range · Delete or ⌘/Ctrl + X — undo with ⌘/Ctrl + Z' : 'Select a range on the timeline to cut it'"
                     @click="deleteSelected"
@@ -2117,7 +2117,7 @@ defineExpose({
                 <button
                     v-else-if="showClearAll && segments.length > 0"
                     type="button"
-                    class="se-btn se-btn--danger"
+                    class="se-btn se-btn--danger appearance-none inline-flex items-center gap-1 px-3 py-1 text-xs font-medium font-[inherit] text-red-600 dark:text-red-400 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-red-500/10 dark:enabled:hover:bg-red-500/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     @click="confirmClearOpen = true"
                 >
                     <svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M10 6V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v1"/></svg>
@@ -2125,14 +2125,14 @@ defineExpose({
                 </button>
                 <button
                     type="button"
-                    class="se-btn se-btn--squish"
+                    class="se-btn se-btn--squish appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="history.length === 0"
                     @click="undo"
                     title="Undo"
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>
                 <button
                     type="button"
-                    class="se-btn se-btn--squish"
+                    class="se-btn se-btn--squish appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     :disabled="redoStack.length === 0"
                     @click="redo"
                     title="Redo"
@@ -2202,7 +2202,7 @@ defineExpose({
                 <button
                     v-if="showHelp && !showHeader"
                     type="button"
-                    class="se-btn se-btn--icon se-controls-bar__help"
+                    class="se-btn se-btn--icon se-controls-bar__help appearance-none inline-flex items-center gap-1 px-2 py-1 text-xs font-medium font-[inherit] text-zinc-900 dark:text-slate-200 bg-slate-50 dark:bg-slate-800 border border-sky-200 dark:border-sky-400/12 rounded-md cursor-pointer transition-colors duration-[120ms] ease-[ease] enabled:hover:bg-slate-100 dark:enabled:hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400 disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Keyboard shortcuts (?)"
                     @click="helpOpen = !helpOpen"
                 ><svg class="se-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.09 9a3 3 0 1 1 5.83 1c0 2-3 2-3 4M12 17h.01"/></svg></button>

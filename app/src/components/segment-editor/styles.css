@@ -237,67 +237,6 @@ html.dark .se-root {
     color: inherit;
 }
 
-.se-btn--squish {
-    padding-left: 0.5rem;
-    padding-right: 0.5rem;
-}
-
-.se-btn .se-btn__gfx {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-}
-
-.se-btn {
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 0.25rem 0.75rem;
-    font-size: 0.75rem;
-    font-weight: 500;
-    font-family: inherit;
-    color: var(--se-text);
-    background: var(--se-btn-bg);
-    border: 1px solid var(--se-border);
-    border-radius: var(--se-radius-sm);
-    cursor: pointer;
-    transition:
-        background 0.12s ease,
-        color 0.12s ease;
-}
-
-.se-btn:hover:not(:disabled) {
-    background: var(--se-btn-bg-hover);
-    border-color: var(--se-border);
-}
-
-.se-btn:focus-visible {
-    outline: 2px solid var(--se-accent);
-    outline-offset: 2px;
-}
-
-.se-btn:focus:not(:focus-visible) {
-    outline: none;
-}
-
-.se-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.se-btn--danger {
-    color: var(--se-text-danger);
-}
-
-.se-btn--danger:hover:not(:disabled) {
-    background: var(--se-danger-hover);
-}
-
-.se-btn--icon {
-    padding: 0.25rem 0.5rem;
-}
-
 .se-zoom {
     display: inline-flex;
     align-items: center;
@@ -602,38 +541,6 @@ html.dark .se-root {
 .se-scrollbar-thumb:hover,
 .se-scrollbar-thumb--active {
     background: var(--se-scrollbar-thumb-hover);
-}
-
-/*
- * Play/pause is the one control in this bar that leads, so it is filled rather
- * than outlined.
- *
- * It used to be an accent border over an accent wash, which is this library's
- * own vocabulary for a *toggled-on* state — and play/pause is not a toggle, it
- * is the primary action. That read as ambiguous against the old navy buttons and
- * would read as more ambiguous against slate ones, where an outline is the
- * quietest thing in the row rather than the loudest.
- */
-.se-btn--playback {
-    min-width: 3rem;
-    padding: 0.375rem 0.875rem;
-    justify-content: center;
-    font-size: 1rem;
-    border-color: var(--se-accent);
-    background: var(--se-accent);
-    color: var(--se-btn-accent-fg);
-}
-
-.se-btn--playback .se-icon {
-    width: 1.375rem;
-    height: 1.375rem;
-}
-
-/* Own hover, because the generic `.se-btn:hover` would drop it back to a plain
-   button surface mid-press. */
-.se-btn--playback:hover:not(:disabled) {
-    background: var(--se-btn-accent-hover);
-    border-color: var(--se-btn-accent-hover);
 }
 
 .se-kbd--inline {
