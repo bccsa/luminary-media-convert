@@ -1684,6 +1684,35 @@ function segmentStateClass(seg: Segment): string {
     return 'bg-sky-500/14 dark:bg-sky-400/20 border-sky-600 dark:border-sky-400';
 }
 
+/**
+ * Chapters and subtitles are one layout wearing two names: both show labels and
+ * a list, and the stylesheet said so by repeating every rule for the pair. Trim
+ * shows neither, and is tighter throughout. Naming the distinction once is what
+ * lets the spacing below read as a decision rather than a table of modes.
+ */
+const labelled = computed(() => props.mode === 'chapters' || props.mode === 'subtitles');
+
+/** Spacing that differs between the trim layout and the labelled one. */
+const headerSpacing = computed(() => (labelled.value ? 'mb-3.5 gap-3' : 'mb-2 gap-2'));
+const toolbarSpacing = computed(() =>
+    labelled.value ? 'gap-2 mb-4 pb-3.5' : 'gap-y-2 gap-x-3 mb-2 pb-2',
+);
+const timeAboveSpacing = computed(() => (labelled.value ? 'mb-2' : 'mb-1'));
+const timelineWrapSpacing = computed(() => (labelled.value ? 'mb-2.5' : 'mb-1.5'));
+const playbackControlsSpacing = computed(() =>
+    labelled.value
+        ? 'border-t mt-2 mb-3.5 pt-3.5 pb-1.5'
+        : 'border-t-0 mt-1 mb-1.5 pt-1',
+);
+const playbackCenterGap = computed(() => (labelled.value ? 'gap-1.5' : 'gap-[0.35rem]'));
+const playbackSlotGap = computed(() => (labelled.value ? 'gap-2' : 'gap-1'));
+const playbackOptionsGap = computed(() =>
+    labelled.value ? 'gap-y-2 gap-x-[1.125rem]' : 'gap-y-3 gap-x-4',
+);
+const listSectionSpacing = computed(() =>
+    labelled.value ? 'mt-4 pt-4 border-t border-sky-200 dark:border-sky-400/12' : 'mt-3',
+);
+
 </script>
 
 <template>
@@ -1703,7 +1732,8 @@ function segmentStateClass(seg: Segment): string {
         <div
             :class="splitListPanel && !listOnlySplitPanel ? 'se-split-main' : 'se-split-main--contents'"
         >
-            <div v-if="!listOnlySplitPanel && showHeader" class="se-header flex items-center justify-between gap-2 mb-3 flex-wrap">
+            <div v-if="!listOnlySplitPanel && showHeader" class="se-header flex items-center justify-between flex-wrap"
+            :class="headerSpacing">
             <h3 class="se-title">{{ modeTitle }}</h3>
             <div class="se-meta">
                 <span v-if="segments.length > 0">
@@ -1723,12 +1753,13 @@ function segmentStateClass(seg: Segment): string {
 
         <div
             v-if="showToolbar && !combinedControlsBar"
-            class="se-toolbar flex flex-wrap gap-y-2 gap-x-3 mb-3.5 pb-3 border-b border-sky-200 dark:border-sky-400/12"
-            :class="
+            class="se-toolbar flex flex-wrap border-b border-sky-200 dark:border-sky-400/12"
+            :class="[
+                toolbarSpacing,
                 showTimeline
                     ? 'items-center'
-                    : 'se-toolbar--no-timeline flex-col items-stretch'
-            "
+                    : 'se-toolbar--no-timeline flex-col items-stretch',
+            ]"
         >
             <div
                 v-if="showTimeline"
@@ -1791,18 +1822,21 @@ function segmentStateClass(seg: Segment): string {
             </div>
             <div
                 v-if="$slots['playback-start'] || $slots['playback-end']"
-                class="se-toolbar__playback-options inline-flex flex-nowrap items-center justify-end gap-y-3 gap-x-4 flex-[0_1_auto] ml-auto min-w-0"
-                :class="{ 'se-toolbar__playback-options--stacked': !showTimeline }"
+                class="se-toolbar__playback-options inline-flex flex-nowrap items-center justify-end flex-[0_1_auto] ml-auto min-w-0"
+                :class="[
+                    playbackOptionsGap,
+                    { 'se-toolbar__playback-options--stacked': !showTimeline },
+                ]"
             >
                 <div
                     v-if="$slots['playback-start']"
-                    class="se-playback-controls__slot se-playback-controls__slot--start inline-flex items-center gap-1 min-w-0"
+                    class="se-playback-controls__slot se-playback-controls__slot--start inline-flex items-center min-w-0" :class="playbackSlotGap"
                 >
                     <slot name="playback-start" />
                 </div>
                 <div
                     v-if="$slots['playback-end']"
-                    class="se-playback-controls__slot se-playback-controls__slot--end inline-flex items-center gap-1 min-w-0"
+                    class="se-playback-controls__slot se-playback-controls__slot--end inline-flex items-center min-w-0" :class="playbackSlotGap"
                 >
                     <slot name="playback-end" />
                 </div>
@@ -1815,14 +1849,15 @@ function segmentStateClass(seg: Segment): string {
             </div>
         </div>
 
-        <div v-if="showPlaybackControls && !combinedControlsBar" class="se-time-above font-mono text-[0.8125rem] font-medium tracking-[0.02em] text-zinc-900 dark:text-slate-200 mb-1.5 text-center">
+        <div v-if="showPlaybackControls && !combinedControlsBar" class="se-time-above font-mono text-[0.8125rem] font-medium tracking-[0.02em] text-zinc-900 dark:text-slate-200 text-center" :class="timeAboveSpacing">
             {{ formatTime(playheadSec) }} / {{ formatTime(duration) }}
         </div>
 
         <div
             v-if="showTimeline"
             ref="timelineRef"
-            class="se-timeline-wrap relative mb-2 outline-none focus-visible:outline-none"
+            class="se-timeline-wrap relative outline-none focus-visible:outline-none"
+            :class="timelineWrapSpacing"
             :tabindex="keyboardScope === 'off' ? -1 : 0"
             @keydown="keyboardScope === 'focus' ? onKeyDown($event) : undefined"
             @keyup="keyboardScope === 'focus' ? onKeyUp($event) : undefined"
@@ -1835,7 +1870,7 @@ function segmentStateClass(seg: Segment): string {
             <div
                 ref="timelineTrackRef"
                 class="se-timeline relative cursor-crosshair overflow-hidden rounded-md bg-slate-100 dark:bg-blue-950 select-none touch-pan-x"
-                :class="mode === 'subtitles' ? 'se-timeline--subtitles h-13' : 'h-12'"
+                :class="labelled ? 'se-timeline--subtitles h-13' : 'h-12'"
                 @mousedown="onTimelineMouseDown"
                 @mousemove="onTimelineHoverMove"
                 @mouseleave="onTimelineHoverLeave"
@@ -2000,9 +2035,9 @@ function segmentStateClass(seg: Segment): string {
 
         <div
             v-if="showPlaybackControls && (onPlayPause || onSeek) && !combinedControlsBar"
-            class="se-playback-controls flex justify-center items-center mt-1.5 mb-2.5 pt-2.5 border-t border-sky-200 dark:border-sky-400/12 text-xs text-slate-500 dark:text-slate-400"
+            class="se-playback-controls flex justify-center items-center text-xs text-slate-500 dark:text-slate-400" :class="playbackControlsSpacing"
         >
-            <div class="se-playback-controls__center inline-flex gap-[0.35rem] items-center flex-wrap justify-center">
+            <div class="se-playback-controls__center inline-flex items-center flex-wrap justify-center" :class="playbackCenterGap">
                 <button
                     v-if="onSeek"
                     type="button"
@@ -2241,13 +2276,13 @@ function segmentStateClass(seg: Segment): string {
             >
                 <div
                     v-if="$slots['playback-start']"
-                    class="se-playback-controls__slot se-playback-controls__slot--start inline-flex items-center gap-1 min-w-0"
+                    class="se-playback-controls__slot se-playback-controls__slot--start inline-flex items-center min-w-0" :class="playbackSlotGap"
                 >
                     <slot name="playback-start" />
                 </div>
                 <div
                     v-if="$slots['playback-end']"
-                    class="se-playback-controls__slot se-playback-controls__slot--end inline-flex items-center gap-1 min-w-0"
+                    class="se-playback-controls__slot se-playback-controls__slot--end inline-flex items-center min-w-0" :class="playbackSlotGap"
                 >
                     <slot name="playback-end" />
                 </div>
@@ -2321,8 +2356,11 @@ function segmentStateClass(seg: Segment): string {
 
         <div
             v-if="showList && (segments.length > 0 || listOnlySplitPanel)"
-            class="se-list-section mt-3"
-            :class="splitListPanel ? 'se-list-section--split ' + SPLIT_PANEL : ''"
+            class="se-list-section"
+            :class="[
+                listSectionSpacing,
+                splitListPanel ? 'se-list-section--split ' + SPLIT_PANEL : '',
+            ]"
         >
             <div
                 v-if="
