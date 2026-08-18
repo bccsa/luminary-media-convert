@@ -1822,7 +1822,7 @@ function segmentStateClass(seg: Segment): string {
         <div
             v-if="showTimeline"
             ref="timelineRef"
-            class="se-timeline-wrap relative mb-2 outline-none"
+            class="se-timeline-wrap relative mb-2 outline-none focus-visible:outline-none"
             :tabindex="keyboardScope === 'off' ? -1 : 0"
             @keydown="keyboardScope === 'focus' ? onKeyDown($event) : undefined"
             @keyup="keyboardScope === 'focus' ? onKeyUp($event) : undefined"
@@ -1899,7 +1899,7 @@ function segmentStateClass(seg: Segment): string {
                 <div
                     v-for="seg in segments"
                     :key="seg.id"
-                    class="se-segment absolute top-0 h-full border-l-2 border-r-2 flex items-center justify-center overflow-hidden transition-[background] duration-[120ms] ease-[ease]"
+                    class="se-segment group absolute top-0 h-full border-l-2 border-r-2 flex items-center justify-center overflow-hidden transition-[background] duration-[120ms] ease-[ease]"
                     :class="segmentStateClass(seg)"
                     :style="{
                         left: `${timeToPercent(seg.inSec)}%`,
@@ -1908,11 +1908,11 @@ function segmentStateClass(seg: Segment): string {
                     @mousedown="onSegmentMouseDown(seg, $event)"
                 >
                     <div
-                        class="se-segment-handle se-segment-handle--in absolute top-0 h-full w-1.5 bg-sky-600 dark:bg-sky-400 opacity-60 cursor-ew-resize transition-opacity duration-[120ms] ease-[ease] -left-0.5"
+                        class="se-segment-handle se-segment-handle--in absolute top-0 h-full w-1.5 bg-sky-600 dark:bg-sky-400 opacity-60 cursor-ew-resize transition-opacity duration-[120ms] ease-[ease] -left-0.5 hover:opacity-100"
                         @mousedown="onHandleMouseDown(seg, 'inSec', $event)"
                     />
                     <div
-                        class="se-segment-handle se-segment-handle--out absolute top-0 h-full w-1.5 bg-sky-600 dark:bg-sky-400 opacity-60 cursor-ew-resize transition-opacity duration-[120ms] ease-[ease] -right-0.5"
+                        class="se-segment-handle se-segment-handle--out absolute top-0 h-full w-1.5 bg-sky-600 dark:bg-sky-400 opacity-60 cursor-ew-resize transition-opacity duration-[120ms] ease-[ease] -right-0.5 hover:opacity-100"
                         @mousedown="onHandleMouseDown(seg, 'outSec', $event)"
                     />
                     <span
@@ -1928,7 +1928,7 @@ function segmentStateClass(seg: Segment): string {
                     <button
                         v-if="mode !== 'trim' && ((seg.outSec - seg.inSec) / visibleSpan) * 100 > 6"
                         type="button"
-                        class="se-segment-delete absolute top-0.5 right-2 z-[4] opacity-0 pointer-events-none transition-opacity duration-[120ms] ease-[ease] inline-flex items-center justify-center w-[18px] h-[18px] p-0 border-none rounded-md bg-slate-900/55 text-white/92 cursor-pointer leading-none"
+                        class="se-segment-delete absolute top-0.5 right-2 z-[4] opacity-0 pointer-events-none transition-opacity duration-[120ms] ease-[ease] inline-flex items-center justify-center w-[18px] h-[18px] p-0 border-none rounded-md bg-slate-900/55 text-white/92 cursor-pointer leading-none group-hover:opacity-100 group-hover:pointer-events-auto group-[.se-segment--selected]:opacity-100 group-[.se-segment--selected]:pointer-events-auto hover:bg-[rgba(190,18,60,0.9)] focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-sky-600 dark:focus-visible:outline-sky-400"
                         title="Remove segment"
                         aria-label="Remove segment"
                         @mousedown.stop

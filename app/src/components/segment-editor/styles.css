@@ -200,12 +200,6 @@ html.dark .se-root {
     box-sizing: content-box;
 }
 
-/* No focus ring on the track. It is a canvas you point at rather than a
-   control you tab to, and the ring reads as a border drawn around the video. */
-.se-timeline-wrap:focus-visible {
-    outline: none;
-}
-
 /* Thumbnail filmstrip: sits behind everything in the track, shown as the frames
    actually look. Legibility for the waveform comes from the gradient below rather
    than from dimming the picture, which washed the frames out to a flat grey. */
@@ -296,11 +290,6 @@ html.dark .se-root {
 
 .se-segment--selected .se-segment-handle {
     background: var(--se-selected);
-}
-
-.se-segment-handle:hover,
-.se-segment-handle--active {
-    opacity: 1;
 }
 
 .se-playhead {
@@ -974,23 +963,6 @@ html.dark .se-confirm {
     border: 1px solid var(--se-kbd-border);
     color: var(--se-text-dim);
     text-align: center;
-}
-
-.se-segment:hover .se-segment-delete,
-.se-segment--selected .se-segment-delete {
-    opacity: 1;
-    pointer-events: auto;
-}
-
-.se-segment-delete:focus-visible {
-    opacity: 1;
-    pointer-events: auto;
-    outline: 2px solid var(--se-accent);
-    outline-offset: 1px;
-}
-
-.se-segment-delete:hover {
-    background: var(--se-segment-delete-hover, rgba(190, 18, 60, 0.9));
 }
 
 .se-segment-delete .se-icon {
