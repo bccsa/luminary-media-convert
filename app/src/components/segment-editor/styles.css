@@ -141,22 +141,6 @@ html.dark .se-root {
     border-radius: 0;
 }
 
-.se-title {
-    margin: 0;
-    font-size: 0.9375rem;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: var(--se-text);
-}
-
-.se-meta {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.75rem;
-    color: var(--se-text-dim);
-}
-
 .se-toolbar__playback-options .se-playback-controls__slot {
     flex: 1 1 12rem;
     justify-content: flex-end;
@@ -176,14 +160,6 @@ html.dark .se-root {
     flex-wrap: wrap;
 }
 
-.se-zoom {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    font-size: 0.75rem;
-    color: var(--se-text-dim);
-}
-
 .se-zoom input[type='range'] {
     width: 96px;
     accent-color: var(--se-accent);
@@ -200,73 +176,6 @@ html.dark .se-root {
 
 .se-segment--selected .se-segment-handle {
     background: var(--se-selected);
-}
-
-.se-shortcuts-strip {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.4rem 0.875rem;
-    padding: 0.5rem 0.75rem;
-    margin-bottom: 0.75rem;
-    font-size: 0.6875rem;
-    line-height: 1.45;
-    color: var(--se-text-dim);
-    background: var(--se-strip-bg);
-    border: 1px solid var(--se-border);
-    border-radius: var(--se-radius-sm);
-}
-
-.se-shortcuts-strip__group {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.2rem;
-}
-
-.se-shortcuts-strip__title {
-    font-weight: 600;
-    color: var(--se-text);
-    margin-right: 0.15rem;
-}
-
-.se-shortcuts-strip__sep {
-    margin: 0 0.05rem;
-    opacity: 0.5;
-    user-select: none;
-}
-
-.se-shortcuts-strip__dim {
-    opacity: 0.75;
-    margin-left: -0.05rem;
-}
-
-.se-shortcuts-strip__frame-hint {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.2rem;
-}
-
-.se-shortcuts-strip__more {
-    margin-left: auto;
-}
-
-.se-shortcuts-strip__help-link {
-    appearance: none;
-    padding: 0;
-    border: none;
-    background: none;
-    font: inherit;
-    font-size: inherit;
-    color: var(--se-accent);
-    cursor: pointer;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-}
-
-.se-shortcuts-strip__help-link:hover {
-    color: var(--se-accent);
-    opacity: 0.9;
 }
 
 /* Trim timeline: tighter vertical rhythm in session view; slightly more
@@ -361,63 +270,9 @@ html.dark .se-root {
     vertical-align: unset;
 }
 
-.se-remove {
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 1.75rem;
-    min-height: 1.75rem;
-    margin-left: auto;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: var(--se-radius-sm);
-    color: var(--se-text-dim);
-    cursor: pointer;
-    transition:
-        color 0.12s ease,
-        background 0.12s ease;
-}
-
-.se-remove:hover {
-    color: var(--se-text-danger);
-    background: var(--se-danger-hover);
-}
-
 .se-remove .se-icon {
     width: 1rem;
     height: 1rem;
-}
-
-.se-warning {
-    margin-top: 0.5rem;
-    font-size: 0.75rem;
-    color: var(--se-text-danger);
-}
-
-.se-help {
-    /* Portaled to body — must define tokens here (outside .se-root). */
-    --se-text: rgb(24 24 27);
-    --se-text-dim: rgb(100 116 139);
-    --se-accent: rgb(2 132 199);
-    --se-shadow: 0 1px 2px rgb(9 9 11 / 0.04), 0 0 0 1px rgb(9 9 11 / 0.06);
-    --se-help-backdrop: rgba(9, 9, 11, 0.55);
-    --se-help-surface: #ffffff;
-    --se-help-surface-border: rgb(186 230 253);
-
-    position: fixed;
-    inset: 0;
-    box-sizing: border-box;
-    background: var(--se-help-backdrop);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10050;
-    padding: 1rem;
-    font-family: inherit;
 }
 
 html.dark .se-help {
@@ -429,21 +284,6 @@ html.dark .se-help {
     --se-help-backdrop: rgb(0 0 0 / 0.75);
     --se-help-surface: #18181b;
     --se-help-surface-border: rgb(63 63 70 / 0.75);
-}
-
-.se-help-panel {
-    background: var(--se-help-surface);
-    border: 1px solid var(--se-help-surface-border);
-    border-radius: var(--se-radius, 10px);
-    padding: 1.5rem;
-    max-width: min(36rem, calc(100vw - 2rem));
-    width: 100%;
-    max-height: min(85vh, 42rem);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    color: var(--se-text);
-    font-size: 0.8125rem;
-    box-shadow: var(--se-shadow);
 }
 
 .se-help-panel h4 {
@@ -469,69 +309,9 @@ html.dark .se-help {
     color: var(--se-text-dim);
 }
 
-/* Confirm dialog — portaled to body, so it must define its own tokens. */
-.se-confirm {
-    --se-kbd-bg: rgb(250 250 250);
-    --se-kbd-border: rgb(228 228 231);
-    --se-radius: 10px;
-}
-
 html.dark .se-confirm {
     --se-kbd-bg: rgb(15 23 42 / 0.45);
     --se-kbd-border: rgb(71 85 105 / 0.55);
-}
-
-.se-confirm-panel {
-    max-width: min(26rem, calc(100vw - 2rem));
-}
-
-.se-confirm-text {
-    margin: 0 0 1.25rem 0;
-    color: var(--se-text-dim);
-    line-height: 1.5;
-}
-
-.se-confirm-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
-}
-
-.se-confirm-btn {
-    appearance: none;
-    padding: 0.4rem 0.9rem;
-    font-size: 0.8125rem;
-    font-weight: 500;
-    font-family: inherit;
-    color: var(--se-text);
-    background: transparent;
-    border: 1px solid var(--se-help-surface-border);
-    border-radius: var(--se-radius-sm, 6px);
-    cursor: pointer;
-    transition:
-        background 0.12s ease,
-        color 0.12s ease,
-        border-color 0.12s ease;
-}
-
-.se-confirm-btn:hover {
-    background: rgb(148 163 184 / 0.15);
-}
-
-.se-confirm-btn:focus-visible {
-    outline: 2px solid var(--se-accent);
-    outline-offset: 2px;
-}
-
-.se-confirm-btn--danger {
-    color: #fff;
-    background: rgb(220 38 38);
-    border-color: rgb(220 38 38);
-}
-
-.se-confirm-btn--danger:hover {
-    background: rgb(185 28 28);
-    border-color: rgb(185 28 28);
 }
 
 /* Chapters & subtitles: more breathing room, clearer hierarchy */

@@ -1734,8 +1734,8 @@ const listSectionSpacing = computed(() =>
         >
             <div v-if="!listOnlySplitPanel && showHeader" class="se-header flex items-center justify-between flex-wrap"
             :class="headerSpacing">
-            <h3 class="se-title">{{ modeTitle }}</h3>
-            <div class="se-meta">
+            <h3 class="se-title m-0 text-[0.9375rem] font-semibold tracking-[-0.02em] text-zinc-900 dark:text-slate-200">{{ modeTitle }}</h3>
+            <div class="se-meta flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                 <span v-if="segments.length > 0">
                     {{ segments.length }} segment{{ segments.length !== 1 ? 's' : '' }}
                     · {{ formatDuration(totalSelectedDuration) }}
@@ -1806,7 +1806,7 @@ const listSectionSpacing = computed(() =>
                     title="Redo"
                 ><svg class="se-icon inline-block shrink-0 w-[1.125rem] h-[1.125rem] align-middle text-[inherit]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
                 <slot name="toolbar-before-clear" />
-                <label v-if="showTimeline" class="se-zoom">
+                <label v-if="showTimeline" class="se-zoom inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                     Zoom
                     <input
                         type="range"
@@ -2248,7 +2248,7 @@ const listSectionSpacing = computed(() =>
             </div>
 
             <div v-if="showToolbar" class="se-controls-bar__zoom order-3 inline-flex items-center gap-y-[0.4rem] gap-x-[0.6rem] flex-[0_0_auto]">
-                <label class="se-zoom">
+                <label class="se-zoom inline-flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
                     Zoom
                     <input
                         type="range"
@@ -2313,42 +2313,42 @@ const listSectionSpacing = computed(() =>
 
         <div
             v-if="shortcutsStripVisible && showPlaybackControls && (onPlayPause || onSeek)"
-            class="se-shortcuts-strip"
+            class="se-shortcuts-strip flex flex-wrap items-center gap-y-[0.4rem] gap-x-3.5 px-3 py-2 mb-3 text-[0.6875rem] leading-[1.45] text-slate-500 dark:text-slate-400 bg-sky-50 dark:bg-sky-900/22 border border-sky-200 dark:border-sky-400/12 rounded-md"
             role="note"
             aria-label="Keyboard shortcuts"
         >
-            <span class="se-shortcuts-strip__group">
-                <strong class="se-shortcuts-strip__title">In / Out</strong>
+            <span class="se-shortcuts-strip__group inline-flex flex-wrap items-center gap-[0.2rem]">
+                <strong class="se-shortcuts-strip__title font-semibold text-zinc-900 dark:text-slate-200 mr-[0.15rem]">In / Out</strong>
                 <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">I</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">[</span>
-                <span class="se-shortcuts-strip__sep">·</span>
+                <span class="se-shortcuts-strip__sep mx-[0.05rem] opacity-50 select-none">·</span>
                 <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">O</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">]</span>
             </span>
-            <span class="se-shortcuts-strip__group">
-                <strong class="se-shortcuts-strip__title">Play</strong>
+            <span class="se-shortcuts-strip__group inline-flex flex-wrap items-center gap-[0.2rem]">
+                <strong class="se-shortcuts-strip__title font-semibold text-zinc-900 dark:text-slate-200 mr-[0.15rem]">Play</strong>
                 <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">Space</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">K</span>
             </span>
-            <span class="se-shortcuts-strip__group">
-                <strong class="se-shortcuts-strip__title">Jog</strong>
+            <span class="se-shortcuts-strip__group inline-flex flex-wrap items-center gap-[0.2rem]">
+                <strong class="se-shortcuts-strip__title font-semibold text-zinc-900 dark:text-slate-200 mr-[0.15rem]">Jog</strong>
                 <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">←</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">→</span>
-                <span class="se-shortcuts-strip__dim">1 s</span>
-                <span class="se-shortcuts-strip__sep">·</span>
+                <span class="se-shortcuts-strip__dim opacity-75 -ml-[0.05rem]">1 s</span>
+                <span class="se-shortcuts-strip__sep mx-[0.05rem] opacity-50 select-none">·</span>
                 <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">J</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">L</span>
-                <span class="se-shortcuts-strip__dim">10 s</span>
-                <span v-if="fps > 0" class="se-shortcuts-strip__frame-hint">
-                    <span class="se-shortcuts-strip__sep">·</span>
+                <span class="se-shortcuts-strip__dim opacity-75 -ml-[0.05rem]">10 s</span>
+                <span v-if="fps > 0" class="se-shortcuts-strip__frame-hint inline-flex items-center gap-[0.2rem]">
+                    <span class="se-shortcuts-strip__sep mx-[0.05rem] opacity-50 select-none">·</span>
                     <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">,</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">.</span>
-                    <span class="se-shortcuts-strip__dim">frame ({{ fps }}&nbsp;fps)</span>
+                    <span class="se-shortcuts-strip__dim opacity-75 -ml-[0.05rem]">frame ({{ fps }}&nbsp;fps)</span>
                 </span>
             </span>
-            <span class="se-shortcuts-strip__group">
-                <strong class="se-shortcuts-strip__title">Zoom</strong>
+            <span class="se-shortcuts-strip__group inline-flex flex-wrap items-center gap-[0.2rem]">
+                <strong class="se-shortcuts-strip__title font-semibold text-zinc-900 dark:text-slate-200 mr-[0.15rem]">Zoom</strong>
                 <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">+</span><span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">−</span>
-                <span class="se-shortcuts-strip__sep">·</span>
+                <span class="se-shortcuts-strip__sep mx-[0.05rem] opacity-50 select-none">·</span>
                 <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">0</span>
-                <span class="se-shortcuts-strip__dim">fit</span>
+                <span class="se-shortcuts-strip__dim opacity-75 -ml-[0.05rem]">fit</span>
             </span>
-            <span class="se-shortcuts-strip__more">
-                <button type="button" class="se-shortcuts-strip__help-link" @click="helpOpen = true">All shortcuts (?)</button>
+            <span class="se-shortcuts-strip__more ml-auto">
+                <button type="button" class="se-shortcuts-strip__help-link appearance-none p-0 border-none bg-none font-[inherit] text-[length:inherit] text-sky-600 dark:text-sky-400 cursor-pointer underline underline-offset-2 hover:opacity-90" @click="helpOpen = true">All shortcuts (?)</button>
             </span>
         </div>
 
@@ -2374,8 +2374,8 @@ const listSectionSpacing = computed(() =>
                     there — saving, for the app.
                 -->
                 <div class="se-list-split-header__lead flex items-baseline gap-2 min-w-0 flex-wrap">
-                    <h3 class="se-title">{{ modeTitle }}</h3>
-                    <div class="se-meta">
+                    <h3 class="se-title m-0 text-[0.9375rem] font-semibold tracking-[-0.02em] text-zinc-900 dark:text-slate-200">{{ modeTitle }}</h3>
+                    <div class="se-meta flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                         <span v-if="segments.length > 0">
                             {{ segments.length }} segment{{ segments.length !== 1 ? 's' : '' }}
                             · {{ formatDuration(totalSelectedDuration) }}
@@ -2432,7 +2432,7 @@ const listSectionSpacing = computed(() =>
                         <span class="se-list-duration text-slate-500 dark:text-slate-400 font-mono pt-0.5 min-w-14">{{ formatDuration(seg.outSec - seg.inSec) }}</span>
                         <button
                             type="button"
-                            class="se-remove"
+                            class="se-remove appearance-none inline-flex items-center justify-center min-w-7 min-h-7 ml-auto p-0 bg-transparent border-none rounded-md text-slate-500 dark:text-slate-400 cursor-pointer transition-[color,background] duration-[120ms] ease-[ease] hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 dark:hover:bg-red-500/15"
                             title="Remove segment"
                             aria-label="Remove segment"
                             @click.stop="removeSegment(seg.id)"
@@ -2481,20 +2481,20 @@ const listSectionSpacing = computed(() =>
             </div>
         </div>
 
-        <div v-if="hasOverlap" class="se-warning">
+        <div v-if="hasOverlap" class="se-warning mt-2 text-xs text-red-600 dark:text-red-400">
             Segments overlap — adjust the in/out points.
         </div>
 
         <Teleport to="body">
             <div
                 v-if="helpOpen"
-                class="se-help"
+                class="se-help fixed inset-0 box-border bg-[rgba(9,9,11,0.55)] backdrop-blur-[4px] flex items-center justify-center z-[10050] p-4 font-[inherit]"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="se-help-heading"
                 @click.self="helpOpen = false"
             >
-                <div class="se-help-panel">
+                <div class="se-help-panel bg-white border border-sky-200 rounded-[10px] p-6 max-w-[min(36rem,calc(100vw-2rem))] w-full max-h-[min(85vh,42rem)] overflow-y-auto overscroll-contain text-zinc-900 text-[0.8125rem] shadow-[0_1px_2px_rgb(9_9_11/0.04),0_0_0_1px_rgb(9_9_11/0.06)]">
                     <h4 id="se-help-heading">Keyboard shortcuts</h4>
                     <dl>
                         <dt>Space / K</dt><dd>Play / pause</dd>
@@ -2529,20 +2529,20 @@ const listSectionSpacing = computed(() =>
         <Teleport to="body">
             <div
                 v-if="confirmClearOpen"
-                class="se-help se-confirm"
+                class="se-help se-confirm fixed inset-0 box-border bg-[rgba(9,9,11,0.55)] backdrop-blur-[4px] flex items-center justify-center z-[10050] p-4 font-[inherit]"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="se-confirm-heading"
                 @click.self="confirmClearOpen = false"
             >
-                <div class="se-help-panel se-confirm-panel">
+                <div class="se-help-panel se-confirm-panel bg-white border border-sky-200 rounded-[10px] p-6 max-w-[min(36rem,calc(100vw-2rem))] w-full max-h-[min(85vh,42rem)] overflow-y-auto overscroll-contain text-zinc-900 text-[0.8125rem] shadow-[0_1px_2px_rgb(9_9_11/0.04),0_0_0_1px_rgb(9_9_11/0.06)] max-w-[min(26rem,calc(100vw-2rem))]">
                     <h4 id="se-confirm-heading">Clear all {{ clearNoun }}?</h4>
-                    <p class="se-confirm-text">
+                    <p class="se-confirm-text m-0 mb-5 text-slate-500 leading-[1.5]">
                         This removes all {{ segments.length }} {{ clearNoun }} from the timeline. You can undo with <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">⌘/Ctrl</span> + <span class="se-kbd font-mono text-[0.625rem] font-medium px-[5px] py-[2px] ml-1 text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55 rounded align-middle">Z</span>.
                     </p>
-                    <div class="se-confirm-actions">
-                        <button type="button" class="se-confirm-btn" @click="confirmClearOpen = false">Cancel</button>
-                        <button type="button" class="se-confirm-btn se-confirm-btn--danger" @click="performClearAll">Clear All</button>
+                    <div class="se-confirm-actions flex justify-end gap-2">
+                        <button type="button" class="se-confirm-btn appearance-none px-[0.9rem] py-[0.4rem] text-[0.8125rem] font-medium font-[inherit] text-zinc-900 bg-transparent border border-sky-200 rounded-md cursor-pointer transition-[background,color,border-color] duration-[120ms] ease-[ease] hover:bg-slate-400/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600" @click="confirmClearOpen = false">Cancel</button>
+                        <button type="button" class="se-confirm-btn se-confirm-btn--danger appearance-none px-[0.9rem] py-[0.4rem] text-[0.8125rem] font-medium font-[inherit] text-white bg-red-600 border border-red-600 rounded-md cursor-pointer transition-[background,color,border-color] duration-[120ms] ease-[ease] hover:bg-red-700 hover:border-red-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600" @click="performClearAll">Clear All</button>
                     </div>
                 </div>
             </div>
