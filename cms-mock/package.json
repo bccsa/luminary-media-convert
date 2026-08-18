@@ -1,16 +1,17 @@
 {
     "name": "@luminary-media-converter/cms-mock",
     "version": "0.0.1",
+    "license": "Apache-2.0",
     "private": true,
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "build:libs": "(cd .. && npm -w hls run build)",
+        "build:libs": "(cd .. && npm -w hls-core run build)",
         "build": "npm run build:libs && vue-tsc -b && vite build",
         "preview": "vite preview"
     },
     "dependencies": {
-        "@luminary-media-converter/hls": "file:../hls",
+        "@luminary-media-converter/hls-core": "file:../hls-core",
         "vue": "^3.5.0"
     },
     "devDependencies": {

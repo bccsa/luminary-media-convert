@@ -1,7 +1,7 @@
 import { IsBoolean, IsOptional, IsString } from 'class-validator';
 import { Expose } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls';
+import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls-core';
 
 export class EncryptionConfigDto {
     @ApiPropertyOptional({

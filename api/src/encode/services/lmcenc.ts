@@ -4,7 +4,7 @@ import {
     LMCENC_IV_LENGTH,
     isEncryptedPayload,
     splitEncryptedPayload,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 
 /**
  * LMCENC01 — the on-disk / in-bucket wrapper for encrypted text assets.
@@ -16,7 +16,7 @@ import {
  *   bytes 24..   AES-128-CBC / PKCS#7 ciphertext of the UTF-8 plaintext
  *
  * Node-side implementation. The constants and the detection helpers live in
- * `@luminary-media-converter/hls` so the player (WebCrypto) and the encoder
+ * `@luminary-media-converter/hls-core` so the player (WebCrypto) and the encoder
  * (node crypto) cannot drift apart on the format.
  */
 

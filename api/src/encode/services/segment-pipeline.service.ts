@@ -6,7 +6,7 @@ import { join, relative, posix } from 'path';
 import {
     buildMediaPlaylist,
     parseMediaPlaylist,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 import type * as Minio from 'minio';
 import type { S3ConfigDto } from '../dto/s3-config.dto.js';
 import { EncryptionService } from './encryption.service.js';

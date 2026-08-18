@@ -1,5 +1,5 @@
 import { ref, type Ref } from 'vue';
-import type { Segment } from '@luminary-media-converter/segment-editor';
+import type { Segment } from '../components/segment-editor';
 
 /**
  * Tracks trim ranges removed from the timeline so they can be brought back.

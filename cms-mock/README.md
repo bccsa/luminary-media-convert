@@ -42,7 +42,7 @@ behaviour the real CMS has when the desktop app is not running.
 4. **Playback check** — fetches the reported `hlsUrl`. While it 404s it shows
    "not available yet" (what the real player does mid-encode). Once it resolves,
    it lists the video angles and renders the extracted single-angle and
-   audio-only playlists via `@luminary-media-converter/hls`
+   audio-only playlists via `@luminary-media-converter/hls-core`
    (`listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist`),
    then locates the `#EXT-X-KEY` line and previews the `luminary://key`
    substitution the real player performs with the reported `hlsKey`.

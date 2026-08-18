@@ -39,7 +39,7 @@ jobs:
             - uses: actions/upload-artifact@v4
               with:
                   name: ffmpeg-win32-x64-for-installer
-                  path: electron/bin/win32-x64/
+                  path: app-electron/bin/win32-x64/
                   retention-days: 1
                   if-no-files-found: error
 
@@ -62,10 +62,10 @@ jobs:
             - uses: actions/download-artifact@v4
               with:
                   name: ffmpeg-win32-x64-for-installer
-                  path: electron/bin/win32-x64
+                  path: app-electron/bin/win32-x64
 
             - name: Build the installer
-              run: npm -w electron run package:win
+              run: npm -w app-electron run package:win
 
             - uses: actions/upload-artifact@v4
               with:

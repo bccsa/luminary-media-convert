@@ -5,7 +5,7 @@ import {
     extractAudioOnlyPlaylist,
     listVideoAngles,
     type VideoAngle,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 import type {
     CreateSessionResponse,
     LoggedEvent,

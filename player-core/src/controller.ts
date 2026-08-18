@@ -36,7 +36,7 @@ import { SidecarLoader, pickDefaultChapterTrack } from './sidecars.js';
 import {
     findThumbnailCue,
     type ThumbnailSpriteCue,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 import { StateStore, createInitialState } from './store.js';
 import {
     AUDIO_ONLY_ANGLE_ID,

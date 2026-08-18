@@ -2,11 +2,11 @@
  * LMCENC decryption (WebCrypto AES-128-CBC / PKCS#7).
  *
  * The format is specified in docs/encrypted-sidecar-format.md and its
- * constants/sniffers live in `@luminary-media-converter/hls` (`enc-format.ts`)
+ * constants/sniffers live in `@luminary-media-converter/hls-core` (`enc-format.ts`)
  * so the API encryptor (node crypto) and this decryptor cannot drift.
  */
 
-import { splitEncryptedPayload } from '@luminary-media-converter/hls';
+import { splitEncryptedPayload } from '@luminary-media-converter/hls-core';
 
 /** The `SubtleCrypto` surface this module needs; injectable for tests. */
 export type SubtleLike = Pick<SubtleCrypto, 'importKey' | 'decrypt'>;

@@ -64,7 +64,7 @@ Applied to the raw response bytes, in order:
 
 ## Reference implementations
 
-- Detection constants/helpers: `hls/src/enc-format.ts` (isomorphic).
+- Detection constants/helpers: `hls-core/src/enc-format.ts` (isomorphic).
 - Encryptor: `api/src/encode/services/encryption.service.ts` (node crypto),
   run as the **final** step before S3 upload — after key-tag injection,
   byte-range packing, and thumbnail VTT generation.

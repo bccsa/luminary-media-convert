@@ -357,7 +357,7 @@ S3 credentials arrive per session and must survive a restart without ever sittin
 
 ## Encrypted HLS and the `luminary://key` contract
 
-Keys are generated locally (`randomBytes(16)`) and never leave the machine, so there is nothing to serve them over HTTP. With no explicit `keyUrl`, `#EXT-X-KEY` carries the sentinel `luminary://key` (`LUMINARY_KEY_PLACEHOLDER_URI`, exported from `@luminary-media-converter/hls`). A player is expected to recognise it and swap in the key it already holds — the hex reported as `encryptionKeyHex` on the session and on the SSE stream — typically by rewriting the playlist and pointing the URI at a blob URL of the raw bytes. `app/src/components/HlsPlayer.vue` is the reference implementation.
+Keys are generated locally (`randomBytes(16)`) and never leave the machine, so there is nothing to serve them over HTTP. With no explicit `keyUrl`, `#EXT-X-KEY` carries the sentinel `luminary://key` (`LUMINARY_KEY_PLACEHOLDER_URI`, exported from `@luminary-media-converter/hls-core`). A player is expected to recognise it and swap in the key it already holds — the hex reported as `encryptionKeyHex` on the session and on the SSE stream — typically by rewriting the playlist and pointing the URI at a blob URL of the raw bytes. `app/src/components/HlsPlayer.vue` is the reference implementation.
 
 Multi-angle output is a single spec-correct master: each angle is an `#EXT-X-MEDIA:TYPE=VIDEO` group and every `#EXT-X-STREAM-INF` carries `VIDEO="<group>"`. Players that want to pin one angle, or drop video entirely, narrow the playlist client-side with `listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist` from the same package.
 

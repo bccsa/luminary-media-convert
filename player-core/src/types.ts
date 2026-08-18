@@ -129,7 +129,7 @@ export interface PlayerSource {
 // Imported for use below and re-exported, so a consumer can type a preview
 // without also depending on `hls/` — `player-web` draws these and has no other
 // reason to know that package exists.
-import type { ThumbnailSpriteCue } from '@luminary-media-converter/hls';
+import type { ThumbnailSpriteCue } from '@luminary-media-converter/hls-core';
 export type { ThumbnailSpriteCue };
 
 export type Lifecycle =

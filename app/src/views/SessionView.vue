@@ -14,8 +14,8 @@ import type {
 import {
     SegmentEditor,
     formatTime,
-} from '@luminary-media-converter/segment-editor';
-import type { Segment } from '@luminary-media-converter/segment-editor';
+} from '../components/segment-editor';
+import type { Segment } from '../components/segment-editor';
 import type { PlayerSource } from '@luminary-media-converter/player-core';
 import {
     useChapters,
@@ -992,7 +992,7 @@ const deliveryBaseUrl = computed<string | null>(() => {
  * The folder the master playlist sits in, which is what every sidecar is
  * addressed relative to — `<masterFolder>/chapters/<lang>.vtt`,
  * `<masterFolder>/subtitles/…`, `<masterFolder>/waveform.json`. The same
- * convention `sidecarPath()` in `@luminary-media-converter/hls` encodes.
+ * convention `sidecarPath()` in `@luminary-media-converter/hls-core` encodes.
  *
  * Derived from the delivered URL rather than from the base plus the session id,
  * because the URL is the one thing that is certainly right: the encoder built

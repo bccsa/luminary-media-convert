@@ -77,7 +77,7 @@ ffmpeg-build/build.sh darwin-arm64      # or darwin-x64
 
 Needs `nasm`, `pkg-config` and `gnupg` (`brew install nasm pkg-config gnupg`);
 the rest — `make`, `git`, `curl`, `clang`, `shasum` — come with the Xcode CLT.
-Output goes to `electron/bin/<target>/`, where `extraResources` picks it up, so
+Output goes to `app-electron/bin/<target>/`, where `extraResources` picks it up, so
 packaging needs to know nothing about how it got there.
 
 The script verifies FFmpeg's GPG signature before it builds anything. The release

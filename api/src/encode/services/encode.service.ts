@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls';
+import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls-core';
 import { existsSync } from 'fs';
 import { readdir, rm, writeFile } from 'fs/promises';
 import { join, posix } from 'path';

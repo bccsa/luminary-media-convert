@@ -6,7 +6,7 @@ import { Transform } from 'stream';
 import {
     LMCENC_CIPHERTEXT_OFFSET,
     isEncryptedPayload,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 import type { S3ConfigDto } from '../dto/s3-config.dto.js';
 
 @Injectable()

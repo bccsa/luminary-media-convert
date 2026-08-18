@@ -2,7 +2,7 @@
  * Playlist introspection for the munging pipeline.
  *
  * Every function here is a pure view over the lossless model in
- * `@luminary-media-converter/hls`: parse → inspect (or edit the model) →
+ * `@luminary-media-converter/hls-core`: parse → inspect (or edit the model) →
  * build. Nothing in this package reads a playlist line by line any more, so
  * unknown tags, unknown attributes, attribute order and the exact numeric
  * spelling of a duration all survive a munge untouched.
@@ -22,7 +22,7 @@ import {
     type HlsMedia,
     type HlsParsedMaster,
     type HlsVariant,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 
 // ---------------------------------------------------------------------------
 // Attribute helpers

@@ -1,5 +1,5 @@
 import { ref, watch, onScopeDispose, type Ref } from 'vue';
-import { isEncryptedPayload } from '@luminary-media-converter/hls';
+import { isEncryptedPayload } from '@luminary-media-converter/hls-core';
 import { decryptLmcenc } from '@luminary-media-converter/player-core';
 
 import {
