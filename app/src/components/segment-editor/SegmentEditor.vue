@@ -1864,7 +1864,7 @@ const listSectionSpacing = computed(() =>
         >
             <div
                 v-if="thumbnailVttUrl"
-                class="se-thumb-preview"
+                class="se-thumb-preview absolute pointer-events-none z-40 border-2 border-white/90 rounded-md shadow-[0_2px_8px_rgba(0,0,0,0.45)] box-content"
                 :style="thumbPreviewStyle"
             />
             <div
@@ -1886,13 +1886,13 @@ const listSectionSpacing = computed(() =>
             >
                 <div
                     v-if="thumbnailStripTiles.length"
-                    class="se-thumb-strip"
+                    class="se-thumb-strip absolute inset-0 overflow-hidden pointer-events-none after:content-[''] after:absolute after:inset-0 after:pointer-events-none after:bg-[linear-gradient(to_bottom,transparent_40%,rgba(0,0,0,0.45)_70%,rgba(0,0,0,0.8)_100%)]"
                     aria-hidden="true"
                 >
                     <div
                         v-for="tile in thumbnailStripTiles"
                         :key="tile.key"
-                        class="se-thumb-tile"
+                        class="se-thumb-tile absolute top-0 bottom-0 overflow-hidden"
                         :style="{ left: `${tile.left}px`, width: `${tile.width}px` }"
                     >
                         <img :src="tile.src" :style="tile.imgStyle" alt="" draggable="false" />
@@ -1902,18 +1902,18 @@ const listSectionSpacing = computed(() =>
                 <canvas
                     v-if="waveformPeaks?.length"
                     ref="waveformCanvas"
-                    class="se-waveform-canvas"
+                    class="se-waveform-canvas absolute inset-0 w-full h-full pointer-events-none opacity-90"
                 />
 
-                <div class="se-ruler">
+                <div class="se-ruler absolute inset-0 pointer-events-none">
                     <template v-for="tick in rulerTicks" :key="tick.sec">
                         <div
-                            class="se-ruler-tick"
+                            class="se-ruler-tick absolute top-0 bottom-0 w-px bg-slate-500/28 dark:bg-slate-400/22"
                             :style="{ left: `${timeToPercent(tick.sec)}%`, opacity: tick.major ? 0.6 : 0.25 }"
                         />
                         <div
                             v-if="tick.label"
-                            class="se-ruler-label"
+                            class="se-ruler-label absolute bottom-0.5 text-[9px] text-slate-500 dark:text-slate-400 translate-x-[3px] font-mono pointer-events-none"
                             :style="{ left: `${timeToPercent(tick.sec)}%` }"
                         >{{ tick.label }}</div>
                     </template>
@@ -1927,7 +1927,7 @@ const listSectionSpacing = computed(() =>
                 <div
                     v-for="(gap, i) in discardedRanges"
                     :key="`discarded-${i}`"
-                    class="se-discarded"
+                    class="se-discarded absolute top-0 bottom-0 bg-black/62 pointer-events-none z-[1]"
                     :style="gap"
                 />
 
@@ -1986,7 +1986,7 @@ const listSectionSpacing = computed(() =>
                 <!-- The range being dragged out, before it becomes a clip. -->
                 <div
                     v-if="draftRangeStyle"
-                    class="se-draft-range"
+                    class="se-draft-range absolute top-0 h-full bg-sky-400/28 border-l border-r border-dashed border-sky-400/90 pointer-events-none z-[3]"
                     :style="draftRangeStyle"
                     aria-hidden="true"
                 />
@@ -2000,7 +2000,7 @@ const listSectionSpacing = computed(() =>
                 -->
                 <div
                     v-if="playheadPercent >= 0 && playheadPercent <= 100"
-                    class="se-playhead"
+                    class="se-playhead absolute top-0 h-full w-0.5 bg-sky-700 dark:bg-white/95 pointer-events-none shadow-[0_0_0_1px_rgba(14,116,144,0.28)] dark:shadow-[0_0_0_1px_rgba(0,0,0,0.65)] z-[2]"
                     :style="{
                         left: `${playheadPercent}%`,
                         transform: `translateX(-${playheadPercent}%)`,
@@ -2008,12 +2008,12 @@ const listSectionSpacing = computed(() =>
                 />
                 <div
                     v-if="snapGuide !== null"
-                    class="se-snap-guide"
+                    class="se-snap-guide absolute top-0 h-full w-px bg-[#fcd34d] pointer-events-none z-[3]"
                     :style="{ left: `${timeToPercent(snapGuide)}%` }"
                 />
                 <div
                     v-if="pendingInSec !== null"
-                    class="se-pending-marker"
+                    class="se-pending-marker absolute top-0 h-full w-0.5 bg-amber-700 dark:bg-amber-400 pointer-events-none z-[2] shadow-[0_0_0_1px_rgba(0,0,0,0.5)] before:content-['['] before:absolute before:-top-0.5 before:-left-1.5 before:font-mono before:text-[11px] before:font-bold before:text-amber-700 dark:before:text-amber-400 dark:before:[text-shadow:0_1px_2px_rgb(0_0_0/0.8)]"
                     :style="{ left: `${timeToPercent(pendingInSec)}%` }"
                     :title="`In at ${formatTime(pendingInSec)} — Mark Out with O or ]`"
                 />
@@ -2021,13 +2021,13 @@ const listSectionSpacing = computed(() =>
 
             <div
                 ref="scrollbarRef"
-                class="se-scrollbar"
-                :class="{ 'se-scrollbar--idle': zoom <= 1 }"
+                class="se-scrollbar relative h-2.5 mb-2 bg-slate-100 dark:bg-blue-950 rounded-full cursor-pointer"
+                :class="zoom <= 1 ? 'se-scrollbar--idle invisible' : ''"
                 @mousedown="onScrollbarMouseDown"
             >
                 <div
                     v-if="zoom > 1"
-                    class="se-scrollbar-thumb"
+                    class="se-scrollbar-thumb absolute top-0 h-full bg-sky-100 dark:bg-[#1e3a5f] rounded-full cursor-grab transition-[background] duration-[120ms] ease-[ease] hover:bg-zinc-300 dark:hover:bg-slate-500"
                     :style="scrollbarThumbStyle"
                 />
             </div>
