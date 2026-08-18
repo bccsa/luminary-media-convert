@@ -4,8 +4,9 @@
  * chrome.
  *
  * Same contract as `player-web`'s `LuminaryPlayer` — same props, same slots,
- * same `defineExpose` surface — so an app can swap one for the other. What
- * differs is who draws the controls: here video.js owns the whole chrome, in
+ * same `defineExpose` surface, plus the legacy-only additions each marked as
+ * such — so an app can swap one for the other. What differs is who draws the
+ * controls: here video.js owns the whole chrome, in
  * every mode, and this component's CSS repositions its stock components into
  * the Luminary skin. There is no custom fullscreen overlay and no double-tap
  * gesture, because video.js already has both.
@@ -20,6 +21,12 @@
  *   bypassed: no controller is built, the exposed `controller` stays null and
  *   `state` stays at its initial snapshot. This mirrors the Luminary app, where
  *   YouTube playback is likewise a different animal wearing the same chrome.
+ *
+ * Because `state` is the controller's, it says nothing in YouTube mode — so the
+ * position, the metadata point and the end of the source are raised as events
+ * instead, and `seek` is exposed to move to a saved one. That surface is the
+ * same in both modes, which is what lets a host persist a resume point without
+ * caring which engine is behind the picture. Legacy-only.
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import videojs from 'video.js';
@@ -122,6 +129,45 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+
+/**
+ * Playback events, raised in **both** source modes.
+ *
+ * They exist because YouTube mode has no controller: it is destroyed on the way
+ * in, `state` stays at its initial snapshot, and a host watching `state` for the
+ * position would see a video that never starts. A consumer that persists
+ * progress — Luminary saves a resume point and clears it on completion — needs
+ * the same three facts whichever engine is behind the picture, so they come off
+ * the video.js player rather than off the controller.
+ *
+ * Deliberately thin. What a host does with a position is its own policy, and
+ * this component has no opinion on it.
+ */
+const emit = defineEmits<{
+    /**
+     * The position advanced. `duration` is `Infinity` on a live stream and `0`
+     * before the engine knows it — both reported as they are, because a host
+     * that saves a resume point has to be able to tell those apart.
+     */
+    timeupdate: [currentTime: number, duration: number];
+    /**
+     * Duration and the seekable range are known: the earliest point at which
+     * seeking to a saved position lands where it was asked to.
+     *
+     * `ready` is too early for that, and it is too early in a way that only
+     * shows up on YouTube, where the iframe is still coming up.
+     */
+    loadedmetadata: [];
+    /**
+     * The engine reached the end.
+     *
+     * Not reliable on YouTube — the tech is known to drop it — which is why the
+     * position is emitted continuously rather than only here: a host that clears
+     * its resume point on completion needs a near-end fallback, and `timeupdate`
+     * is what it builds one from.
+     */
+    ended: [];
+}>();
 
 const videoEl = ref<HTMLVideoElement | null>(null);
 const keepAliveEl = ref<HTMLAudioElement | null>(null);
@@ -440,6 +486,10 @@ onMounted(() => {
     instance.on(['play', 'playing'], onPlaybackStarted);
     instance.on(['pause', 'ended'], onPlaybackStopped);
 
+    instance.on('timeupdate', onTimeUpdate);
+    instance.on('loadedmetadata', () => emit('loadedmetadata'));
+    instance.on('ended', () => emit('ended'));
+
     instance.on('loadeddata', applyPreferredLanguage);
     instance.on('fullscreenchange', applyPreferredLanguage);
     instance.on('texttrackchange', onEngineTextTrackChange);
@@ -562,6 +612,35 @@ function exitFullscreen(): void {
     void player.value?.exitFullscreen();
 }
 
+// --- media surface --------------------------------------------------------
+
+/** A time video.js can be handed: real, and not before the start of the media. */
+function isSeekableTime(seconds: number): boolean {
+    return Number.isFinite(seconds) && seconds >= 0;
+}
+
+/**
+ * Moves playback to `seconds`.
+ *
+ * The one write in this surface, and it is here rather than on the controller
+ * for the same reason the events are: restoring a resume point has to work in
+ * YouTube mode too. video.js clamps to the seekable range itself; what it does
+ * not survive is `NaN`, which strands the element with no way back, so a time
+ * that is not a time is dropped rather than passed on.
+ */
+function seek(seconds: number): void {
+    if (!isSeekableTime(seconds)) return;
+    player.value?.currentTime(seconds);
+}
+
+function onTimeUpdate(): void {
+    const instance = player.value;
+    if (!instance) return;
+    // `currentTime()` is NaN before the first frame and `duration()` is NaN
+    // until metadata lands; 0 is the honest reading of both.
+    emit('timeupdate', instance.currentTime() ?? 0, instance.duration() ?? 0);
+}
+
 // --- audio / video toggle -------------------------------------------------
 
 /**
@@ -588,7 +667,7 @@ const showAudioVideoToggle = computed(() => {
     return !inAudioOnly || snapshot.angles.some((angle) => angle.id !== AUDIO_ONLY_ANGLE_ID);
 });
 
-defineExpose({ controller, state, enterFullscreen, exitFullscreen });
+defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek });
 </script>
 
 <template>

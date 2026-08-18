@@ -55,11 +55,24 @@ export function fakePlayer(overrides: Record<string, unknown> = {}) {
         removeRemoteTextTrack: vi.fn(),
         qualityLevels: vi.fn(() => levels),
         tech: vi.fn(() => ({ vhs: {} })),
-        on: (name: string, fn: (e?: unknown) => void) =>
-            handlers.set(name, [...(handlers.get(name) ?? []), fn]),
-        one: (name: string, fn: (e?: unknown) => void) =>
-            handlers.set(name, [...(handlers.get(name) ?? []), fn]),
+        // video.js takes a name or a list of them, and the component uses both
+        // forms; a fake that only understood one silently dropped half the
+        // subscriptions.
+        on: (name: string | string[], fn: (e?: unknown) => void) =>
+            (Array.isArray(name) ? name : [name]).forEach((n) =>
+                handlers.set(n, [...(handlers.get(n) ?? []), fn]),
+            ),
+        one: (name: string | string[], fn: (e?: unknown) => void) =>
+            (Array.isArray(name) ? name : [name]).forEach((n) =>
+                handlers.set(n, [...(handlers.get(n) ?? []), fn]),
+            ),
         off: vi.fn(),
+        // The surface the component drives that the adapter does not.
+        el: vi.fn(() => document.createElement('div')),
+        poster: vi.fn(),
+        dispose: vi.fn(),
+        requestFullscreen: vi.fn(() => Promise.resolve()),
+        exitFullscreen: vi.fn(),
         fire: (name: string, payload?: unknown) =>
             (handlers.get(name) ?? []).forEach((f) => f(payload)),
         handlers,
