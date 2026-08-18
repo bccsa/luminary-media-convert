@@ -878,62 +878,6 @@ html.dark .se-root {
     text-align: center;
 }
 
-.se-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    max-height: 240px;
-    overflow-y: auto;
-}
-
-.se-list-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
-    border-radius: var(--se-radius-sm);
-    cursor: pointer;
-    transition: background 0.12s ease;
-}
-
-.se-list-row:hover {
-    background: var(--se-list-hover);
-}
-
-.se-list-row--selected {
-    background: var(--se-list-selected);
-    box-shadow: inset 2px 0 0 var(--se-accent);
-}
-
-.se-list-index {
-    width: 1.25rem;
-    text-align: center;
-    font-weight: 500;
-    color: var(--se-text-dim);
-    padding-top: 2px;
-}
-
-.se-list-sep {
-    color: var(--se-text-dim);
-    padding-top: 2px;
-}
-
-.se-list-end {
-    margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-    flex-shrink: 0;
-}
-
-.se-list-duration {
-    color: var(--se-text-dim);
-    font-family: var(--se-font-mono);
-    padding-top: 2px;
-    min-width: 3.5rem;
-}
-
 .se-remove {
     appearance: none;
     display: inline-flex;
@@ -1107,51 +1051,6 @@ html.dark .se-confirm {
     border-color: rgb(185 28 28);
 }
 
-/* --------------------------------------------------------------------------
-   List block (trim / chapters / subtitles) — heading + scroll area
-   -------------------------------------------------------------------------- */
-.se-list-section {
-    margin-top: 0.75rem;
-}
-
-.se-list-heading {
-    margin: 0 0 0.625rem;
-    font-size: 0.6875rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--se-text-dim);
-}
-
-/* List-only split panel: title row tight to the top of the card */
-.se-list-split-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem 1rem;
-    flex-wrap: wrap;
-    margin: 0 0 0.625rem;
-    padding-top: 0.125rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--se-border);
-}
-
-/* Title and its count/duration read as one unit, against the left edge. */
-.se-list-split-header__lead {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-    min-width: 0;
-    flex-wrap: wrap;
-}
-
-.se-list-split-header__actions {
-    display: flex;
-    align-items: center;
-    gap: 0.375rem;
-    margin-left: auto;
-}
-
 /* Chapters & subtitles: more breathing room, clearer hierarchy */
 .se-root[data-mode='chapters']:not(.se-root--split-list),
 .se-root[data-mode='subtitles']:not(.se-root--split-list) {
@@ -1308,86 +1207,9 @@ html.dark .se-confirm {
     padding: 1.375rem 1.5rem;
 }
 
-.se-list-section--split {
-    margin-top: 0;
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: min(85vh, 56rem);
-    display: flex;
-    flex-direction: column;
-    overflow-x: hidden;
-    overflow: hidden;
-    border: 1px solid var(--se-border);
-    background: var(--se-panel);
-    border-radius: var(--se-radius);
-    padding: 0.5rem 1.25rem 1rem;
-    box-shadow: var(--se-shadow);
-    box-sizing: border-box;
-}
-
 .se-root--split-list[data-mode='chapters'] .se-list-section--split,
 .se-root--split-list[data-mode='subtitles'] .se-list-section--split {
     padding: 0.5rem 1.5rem 1rem;
-}
-
-/* Split-panel list: empty state + chapter row scanability (beside player) */
-.se-list-empty {
-    margin-top: 0.375rem;
-    max-width: 28rem;
-}
-
-.se-list-empty--split {
-    margin-top: 0;
-    max-width: none;
-    flex: 1 1 auto;
-    min-height: 0;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.75rem 0.5rem 1rem;
-    box-sizing: border-box;
-}
-
-.se-list-empty__stack {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    gap: 0.5rem;
-    max-width: 20rem;
-}
-
-.se-list-empty__visual {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 2.75rem;
-    height: 2.75rem;
-    margin-bottom: 0;
-    border-radius: 9999px;
-    color: var(--se-text-dim);
-    background: var(--se-kbd-bg);
-    border: 1px solid var(--se-kbd-border);
-}
-
-.se-list-empty__icon {
-    width: 1.25rem;
-    height: 1.25rem;
-}
-
-.se-list-empty__title {
-    margin: 0;
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--se-text);
-}
-
-.se-list-empty__hint {
-    margin: 0;
-    font-size: 0.75rem;
-    line-height: 1.45;
-    color: var(--se-text-dim);
 }
 
 .se-list-section--split > .se-list-split-header,

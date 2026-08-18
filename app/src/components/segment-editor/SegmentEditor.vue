@@ -1624,6 +1624,15 @@ defineExpose({
         }
     },
 });
+/**
+ * Styling for the two states applied conditionally in the template. Kept as
+ * constants rather than inline strings so the class attribute stays readable.
+ */
+const SPLIT_PANEL =
+    'mt-0 flex-auto min-h-0 max-h-[min(85vh,56rem)] flex flex-col overflow-hidden border border-sky-200 dark:border-sky-400/12 bg-white/96 dark:bg-[rgba(30,41,55,0.82)] rounded-[10px] px-5 pt-2 pb-4 box-border shadow-[0_1px_2px_rgb(9_9_11/0.04),0_0_0_1px_rgb(9_9_11/0.06)] dark:shadow-[0_0_0_1px_rgb(255_255_255/0.06),0_8px_30px_rgb(0_0_0/0.25)]';
+const LIST_ROW_SELECTED =
+    'bg-sky-500/12 dark:bg-sky-400/14 shadow-[inset_2px_0_0_var(--color-sky-600)] dark:shadow-[inset_2px_0_0_var(--color-sky-400)]';
+
 </script>
 
 <template>
@@ -2254,21 +2263,21 @@ defineExpose({
 
         <div
             v-if="showList && (segments.length > 0 || listOnlySplitPanel)"
-            class="se-list-section"
-            :class="{ 'se-list-section--split': splitListPanel }"
+            class="se-list-section mt-3"
+            :class="splitListPanel ? 'se-list-section--split ' + SPLIT_PANEL : ''"
         >
             <div
                 v-if="
                     listOnlySplitPanel && labelsVisible && (mode === 'chapters' || mode === 'subtitles')
                 "
-                class="se-list-split-header"
+                class="se-list-split-header flex items-center justify-between gap-x-4 gap-y-2 flex-wrap m-0 mb-2.5 pt-0.5 pb-2 border-b border-sky-200 dark:border-sky-400/12"
             >
                 <!--
                     Count and duration read as part of the heading, so they sit
                     with it. The right edge is left for whatever the host puts
                     there — saving, for the app.
                 -->
-                <div class="se-list-split-header__lead">
+                <div class="se-list-split-header__lead flex items-baseline gap-2 min-w-0 flex-wrap">
                     <h3 class="se-title">{{ modeTitle }}</h3>
                     <div class="se-meta">
                         <span v-if="segments.length > 0">
@@ -2278,25 +2287,25 @@ defineExpose({
                         <span v-else>No segments</span>
                     </div>
                 </div>
-                <div v-if="$slots['list-actions']" class="se-list-split-header__actions">
+                <div v-if="$slots['list-actions']" class="se-list-split-header__actions flex items-center gap-1.5 ml-auto">
                     <slot name="list-actions" />
                 </div>
             </div>
             <p
                 v-else-if="labelsVisible && (mode === 'chapters' || mode === 'subtitles')"
-                class="se-list-heading"
+                class="se-list-heading m-0 mb-2.5 text-[0.6875rem] font-semibold tracking-[0.08em] uppercase text-slate-500 dark:text-slate-400"
             >
                 {{ mode === 'chapters' ? 'Chapter list' : 'Subtitle cues' }}
             </p>
-            <div v-if="segments.length > 0" class="se-list">
+            <div v-if="segments.length > 0" class="se-list flex flex-col gap-1 max-h-60 overflow-y-auto">
                 <div
                     v-for="(seg, i) in segments"
                     :key="seg.id"
-                    class="se-list-row"
-                    :class="{ 'se-list-row--selected': isSelected(seg.id) }"
+                    class="se-list-row flex items-start gap-2 px-2 py-1 text-xs rounded-md cursor-pointer transition-[background] duration-[120ms] ease-[ease] hover:bg-sky-500/8 dark:hover:bg-sky-400/8"
+                    :class="isSelected(seg.id) ? 'se-list-row--selected ' + LIST_ROW_SELECTED : ''"
                     @click="onListRowActivate(seg)"
                 >
-                    <span class="se-list-index">{{ i + 1 }}</span>
+                    <span class="se-list-index w-5 text-center font-medium text-slate-500 dark:text-slate-400 pt-0.5">{{ i + 1 }}</span>
                     <input
                         type="text"
                         class="se-input se-input--time appearance-none font-mono text-xs px-1.5 py-0.5 text-center text-zinc-900 dark:text-slate-200 bg-white dark:bg-[#0c1222] border border-sky-200 dark:border-sky-400/12 rounded-md outline-none transition-[border-color] duration-[120ms] ease-[ease] focus:border-sky-600 dark:focus:border-sky-400 w-20"
@@ -2304,7 +2313,7 @@ defineExpose({
                         @change="updateTimeInput(seg.id, 'inSec', ($event.target as HTMLInputElement).value)"
                         @click.stop
                     />
-                    <span class="se-list-sep">—</span>
+                    <span class="se-list-sep text-slate-500 dark:text-slate-400 pt-0.5">—</span>
                     <input
                         type="text"
                         class="se-input se-input--time appearance-none font-mono text-xs px-1.5 py-0.5 text-center text-zinc-900 dark:text-slate-200 bg-white dark:bg-[#0c1222] border border-sky-200 dark:border-sky-400/12 rounded-md outline-none transition-[border-color] duration-[120ms] ease-[ease] focus:border-sky-600 dark:focus:border-sky-400 w-20"
@@ -2323,8 +2332,8 @@ defineExpose({
                         @blur="onLabelBlur"
                         @click.stop
                     />
-                    <span class="se-list-end">
-                        <span class="se-list-duration">{{ formatDuration(seg.outSec - seg.inSec) }}</span>
+                    <span class="se-list-end ml-auto inline-flex items-center gap-1.5 shrink-0">
+                        <span class="se-list-duration text-slate-500 dark:text-slate-400 font-mono pt-0.5 min-w-14">{{ formatDuration(seg.outSec - seg.inSec) }}</span>
                         <button
                             type="button"
                             class="se-remove"
@@ -2347,29 +2356,29 @@ defineExpose({
             </div>
             <div
                 v-else-if="listOnlySplitPanel && labelsVisible && mode === 'chapters'"
-                class="se-list-empty se-list-empty--split"
+                class="se-list-empty se-list-empty--split mt-0 max-w-none flex-auto min-h-0 w-full flex items-center justify-center px-2 pt-3 pb-4 box-border"
             >
-                <div class="se-list-empty__stack">
-                    <div class="se-list-empty__visual" aria-hidden="true">
-                        <svg class="se-list-empty__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <div class="se-list-empty__stack flex flex-col items-center text-center gap-2 max-w-80">
+                    <div class="se-list-empty__visual flex items-center justify-center w-11 h-11 mb-0 rounded-full text-slate-500 dark:text-slate-400 bg-neutral-50 dark:bg-slate-900/45 border border-neutral-200 dark:border-slate-600/55" aria-hidden="true">
+                        <svg class="se-list-empty__icon w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
                             <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
                             <path d="M8 7h8M8 11h5" />
                         </svg>
                     </div>
-                    <p class="se-list-empty__title">{{ emptyTitle ?? 'No chapters yet' }}</p>
-                    <p class="se-list-empty__hint">
+                    <p class="se-list-empty__title m-0 text-[0.8125rem] font-semibold text-zinc-900 dark:text-slate-200">{{ emptyTitle ?? 'No chapters yet' }}</p>
+                    <p class="se-list-empty__hint m-0 text-xs leading-[1.45] text-slate-500 dark:text-slate-400">
                         {{ emptyHint ?? 'Use the trim timeline below to add in/out marks, or load chapters from a VTT sidecar.' }}
                     </p>
                 </div>
             </div>
             <div
                 v-else-if="listOnlySplitPanel && labelsVisible && mode === 'subtitles'"
-                class="se-list-empty se-list-empty--split"
+                class="se-list-empty se-list-empty--split mt-0 max-w-none flex-auto min-h-0 w-full flex items-center justify-center px-2 pt-3 pb-4 box-border"
             >
-                <div class="se-list-empty__stack">
-                    <p class="se-list-empty__title">No subtitle cues yet</p>
-                    <p class="se-list-empty__hint">
+                <div class="se-list-empty__stack flex flex-col items-center text-center gap-2 max-w-80">
+                    <p class="se-list-empty__title m-0 text-[0.8125rem] font-semibold text-zinc-900 dark:text-slate-200">No subtitle cues yet</p>
+                    <p class="se-list-empty__hint m-0 text-xs leading-[1.45] text-slate-500 dark:text-slate-400">
                         Add cues using the timeline below.
                     </p>
                 </div>
