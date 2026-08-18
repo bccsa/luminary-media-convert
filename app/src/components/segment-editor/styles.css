@@ -198,12 +198,6 @@ html.dark .se-root {
     accent-color: var(--se-accent);
 }
 
-.se-timeline-wrap {
-    position: relative;
-    margin-bottom: 0.5rem;
-    outline: none;
-}
-
 .se-thumb-preview {
     position: absolute;
     pointer-events: none;
@@ -219,22 +213,6 @@ html.dark .se-root {
    control you tab to, and the ring reads as a border drawn around the video. */
 .se-timeline-wrap:focus-visible {
     outline: none;
-}
-
-.se-timeline {
-    position: relative;
-    height: 3rem;
-    cursor: crosshair;
-    overflow: hidden;
-    border-radius: var(--se-radius-sm);
-    background: var(--se-track);
-    -webkit-user-select: none;
-    user-select: none;
-    touch-action: pan-x;
-}
-
-.se-timeline--subtitles {
-    height: 3.25rem;
 }
 
 /* Thumbnail filmstrip: sits behind everything in the track, shown as the frames
@@ -325,80 +303,13 @@ html.dark .se-root {
     z-index: 1;
 }
 
-.se-segment {
-    position: absolute;
-    top: 0;
-    height: 100%;
-    background: var(--se-accent-soft);
-    border-left: 2px solid var(--se-accent);
-    border-right: 2px solid var(--se-accent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    transition: background 0.12s ease;
-}
-
-.se-segment--selected {
-    background: var(--se-selected-soft);
-    border-color: var(--se-selected);
-}
-
 .se-segment--selected .se-segment-handle {
     background: var(--se-selected);
-}
-
-.se-segment--invalid {
-    background: var(--se-danger);
-    border-color: #ef4444;
-}
-
-.se-segment-handle {
-    position: absolute;
-    top: 0;
-    height: 100%;
-    width: 6px;
-    background: var(--se-accent);
-    opacity: 0.6;
-    cursor: ew-resize;
-    transition: opacity 0.12s ease;
 }
 
 .se-segment-handle:hover,
 .se-segment-handle--active {
     opacity: 1;
-}
-
-.se-segment-handle--in {
-    left: -2px;
-}
-
-.se-segment-handle--out {
-    right: -2px;
-}
-
-/*
- * The label sits on the filmstrip, and chapters are no longer dimmed, so it
- * competes with full-colour frames. As plain text it disappeared — in the light
- * theme it was dark with no shadow at all, so any busy frame swallowed it. A
- * chip of its own gives it a constant background whatever is underneath, which
- * a shadow cannot: a shadow only helps where the frame is lighter than the text.
- *
- * Capped at the segment width so a long chapter name on a short chapter
- * ellipsises rather than pushing against the edges.
- */
-.se-segment-label {
-    max-width: calc(100% - 8px);
-    padding: 1px 5px;
-    border-radius: 4px;
-    background: var(--se-segment-label-bg);
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--se-segment-label);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    pointer-events: none;
 }
 
 .se-playhead {
@@ -1234,35 +1145,6 @@ html.dark .se-confirm {
     border: 1px solid var(--se-kbd-border);
     color: var(--se-text-dim);
     text-align: center;
-}
-
-/* Delete control on a selected segment. Sits on the block itself so a range can
-   be removed where it is, rather than only from the list. */
-.se-segment-delete {
-    position: absolute;
-    top: 2px;
-    /* Clear of the out handle, which is 6px wide at right: -2px and would otherwise
-       take the press. */
-    right: 8px;
-    /* Above the handles, so the hit area is the button all the way to its edge. */
-    z-index: 4;
-    /* Revealed on hover or while selected — a control on every block at all times
-       would clutter a timeline that can hold dozens. */
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.12s ease;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    padding: 0;
-    border: none;
-    border-radius: var(--se-radius-sm);
-    background: var(--se-segment-delete-bg, rgba(15, 23, 42, 0.55));
-    color: rgb(255 255 255 / 0.92);
-    cursor: pointer;
-    line-height: 0;
 }
 
 .se-segment:hover .se-segment-delete,

@@ -1633,6 +1633,17 @@ const SPLIT_PANEL =
 const LIST_ROW_SELECTED =
     'bg-sky-500/12 dark:bg-sky-400/14 shadow-[inset_2px_0_0_var(--color-sky-600)] dark:shadow-[inset_2px_0_0_var(--color-sky-400)]';
 
+/**
+ * A segment's fill and border, which the state replaces rather than adds to.
+ * Invalid wins over selected — the old stylesheet said so by source order.
+ */
+function segmentStateClass(seg: Segment): string {
+    if (hasOverlap.value) return 'se-segment--invalid bg-red-500/12 dark:bg-red-500/28 border-[#ef4444]';
+    if (isSelected(seg.id))
+        return 'se-segment--selected bg-green-500/14 dark:bg-green-500/32 border-green-700 dark:border-green-400';
+    return 'bg-sky-500/14 dark:bg-sky-400/20 border-sky-600 dark:border-sky-400';
+}
+
 </script>
 
 <template>
@@ -1771,7 +1782,7 @@ const LIST_ROW_SELECTED =
         <div
             v-if="showTimeline"
             ref="timelineRef"
-            class="se-timeline-wrap"
+            class="se-timeline-wrap relative mb-2 outline-none"
             :tabindex="keyboardScope === 'off' ? -1 : 0"
             @keydown="keyboardScope === 'focus' ? onKeyDown($event) : undefined"
             @keyup="keyboardScope === 'focus' ? onKeyUp($event) : undefined"
@@ -1783,8 +1794,8 @@ const LIST_ROW_SELECTED =
             />
             <div
                 ref="timelineTrackRef"
-                class="se-timeline"
-                :class="{ 'se-timeline--subtitles': mode === 'subtitles' }"
+                class="se-timeline relative cursor-crosshair overflow-hidden rounded-md bg-slate-100 dark:bg-blue-950 select-none touch-pan-x"
+                :class="mode === 'subtitles' ? 'se-timeline--subtitles h-13' : 'h-12'"
                 @mousedown="onTimelineMouseDown"
                 @mousemove="onTimelineHoverMove"
                 @mouseleave="onTimelineHoverLeave"
@@ -1848,11 +1859,8 @@ const LIST_ROW_SELECTED =
                 <div
                     v-for="seg in segments"
                     :key="seg.id"
-                    class="se-segment"
-                    :class="{
-                        'se-segment--selected': isSelected(seg.id),
-                        'se-segment--invalid': hasOverlap,
-                    }"
+                    class="se-segment absolute top-0 h-full border-l-2 border-r-2 flex items-center justify-center overflow-hidden transition-[background] duration-[120ms] ease-[ease]"
+                    :class="segmentStateClass(seg)"
                     :style="{
                         left: `${timeToPercent(seg.inSec)}%`,
                         width: `${((seg.outSec - seg.inSec) / visibleSpan) * 100}%`,
@@ -1860,16 +1868,16 @@ const LIST_ROW_SELECTED =
                     @mousedown="onSegmentMouseDown(seg, $event)"
                 >
                     <div
-                        class="se-segment-handle se-segment-handle--in"
+                        class="se-segment-handle se-segment-handle--in absolute top-0 h-full w-1.5 bg-sky-600 dark:bg-sky-400 opacity-60 cursor-ew-resize transition-opacity duration-[120ms] ease-[ease] -left-0.5"
                         @mousedown="onHandleMouseDown(seg, 'inSec', $event)"
                     />
                     <div
-                        class="se-segment-handle se-segment-handle--out"
+                        class="se-segment-handle se-segment-handle--out absolute top-0 h-full w-1.5 bg-sky-600 dark:bg-sky-400 opacity-60 cursor-ew-resize transition-opacity duration-[120ms] ease-[ease] -right-0.5"
                         @mousedown="onHandleMouseDown(seg, 'outSec', $event)"
                     />
                     <span
                         v-if="labelsVisible && ((seg.outSec - seg.inSec) / visibleSpan) * 100 > 4"
-                        class="se-segment-label"
+                        class="se-segment-label max-w-[calc(100%-8px)] px-[5px] py-px rounded bg-slate-900/78 dark:bg-slate-950/82 text-[10px] font-semibold text-white dark:text-white/95 whitespace-nowrap overflow-hidden text-ellipsis pointer-events-none"
                     >{{ seg.label || `#${segments.indexOf(seg) + 1}` }}</span>
                     <!--
                         Not in trim: the controls bar carries a Cut button that
@@ -1880,7 +1888,7 @@ const LIST_ROW_SELECTED =
                     <button
                         v-if="mode !== 'trim' && ((seg.outSec - seg.inSec) / visibleSpan) * 100 > 6"
                         type="button"
-                        class="se-segment-delete"
+                        class="se-segment-delete absolute top-0.5 right-2 z-[4] opacity-0 pointer-events-none transition-opacity duration-[120ms] ease-[ease] inline-flex items-center justify-center w-[18px] h-[18px] p-0 border-none rounded-md bg-slate-900/55 text-white/92 cursor-pointer leading-none"
                         title="Remove segment"
                         aria-label="Remove segment"
                         @mousedown.stop
