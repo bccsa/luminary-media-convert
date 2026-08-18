@@ -133,7 +133,12 @@ export class ChunkPrefetcher {
                 `Range: bytes=0-${this.warmBytes - 1}`,
         );
 
-        void this.fetchImpl(url, {
+        // Called off a local, never as `this.fetchImpl(...)`: hosts hand us a
+        // bare `window.fetch`, and invoking it as a method of this object makes
+        // the prefetcher its receiver — which the browser rejects outright with
+        // "Illegal invocation".
+        const fetchImpl = this.fetchImpl;
+        void fetchImpl(url, {
             headers: { Range: `bytes=0-${this.warmBytes - 1}` },
         })
             .then((response) => response.arrayBuffer())
