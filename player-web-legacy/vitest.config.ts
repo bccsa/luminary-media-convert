@@ -6,8 +6,5 @@ export default defineConfig({
     test: {
         environment: 'jsdom',
         include: ['__tests__/**/*.test.ts'],
-        // The suite lands after the player has been verified by hand; until
-        // then `__tests__/` does not exist and an empty run is not a failure.
-        passWithNoTests: true,
     },
 });
