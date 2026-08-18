@@ -60,8 +60,17 @@ export function isMissing(error: unknown): boolean {
 /** Normalize any thrown value into a presentable {@link PlayerError}. */
 export function toPlayerError(error: unknown): PlayerError {
     if (error instanceof PipelineError) return error.toPlayerError();
+    // Adapters throw their own "this browser cannot play munged HLS" error and
+    // cannot import PipelineError (it is pipeline-internal), so they mark it
+    // with the code instead. Without this the error arrives as 'unknown' and
+    // `errorUnsupportedBrowser` is a message no player can ever show.
+    const code =
+        error instanceof Error &&
+        (error as { code?: unknown }).code === 'unsupported-browser'
+            ? 'unsupported-browser'
+            : 'unknown';
     return {
-        code: 'unknown',
+        code,
         fatal: true,
         message: error instanceof Error ? error.message : String(error),
         cause: error,

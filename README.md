@@ -168,7 +168,7 @@ ships a GPL binary alongside it.
 
 | | Licence | |
 | --- | --- | --- |
-| `api/`, `app/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `cms-mock/` | Apache-2.0 | each carries its own `LICENSE` |
+| `api/`, `app/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `player-web-legacy/`, `cms-mock/` | Apache-2.0 | each carries its own `LICENSE` |
 | `app-electron/`, `ffmpeg-build/` | GPL-3.0-or-later | each carries its own `LICENSE`; the build scripts also carry an SPDX header |
 | everything else — `docs/`, `test-media/`, the root files | Apache-2.0 | declared by the root `package.json` |
 
