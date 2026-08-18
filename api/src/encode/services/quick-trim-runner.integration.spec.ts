@@ -18,7 +18,7 @@ import { Logger } from '@nestjs/common';
 import {
     parseMasterPlaylist,
     parseMediaPlaylist,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import {

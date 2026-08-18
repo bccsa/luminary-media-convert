@@ -15,7 +15,7 @@ import {
     normalizeS3Key,
     deriveAngleName,
     type HlsParsedMaster,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 import { S3EtagService } from './s3-etag.service.js';
 import {
     encryptTextAsset,

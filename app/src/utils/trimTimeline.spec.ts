@@ -11,7 +11,7 @@ import {
     toOutputSegments,
     trimmedDuration,
 } from './trimTimeline';
-import type { Segment } from '@luminary-media-converter/segment-editor';
+import type { Segment } from '../components/segment-editor';
 import type { TrimSegment } from '../types';
 
 const trim = (inSec: number, outSec: number): TrimSegment => ({

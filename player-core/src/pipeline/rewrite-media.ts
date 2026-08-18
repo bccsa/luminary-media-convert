@@ -16,7 +16,7 @@ import {
     getMediaPlaylistLayout,
     parseMediaPlaylist,
     setMediaPlaylistLayout,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 import { absolutize } from './playlist-text.js';
 
 export { LUMINARY_KEY_PLACEHOLDER_URI };

@@ -23,7 +23,7 @@
  * `docs/chunk-warming.md` is the porting guide.
  */
 
-import { parseMediaPlaylist } from '@luminary-media-converter/hls';
+import { parseMediaPlaylist } from '@luminary-media-converter/hls-core';
 import { absolutize } from './pipeline/playlist-text.js';
 import type { MungeResult } from './pipeline/pipeline.js';
 

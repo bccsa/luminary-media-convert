@@ -11,7 +11,7 @@ import {
     setMediaPlaylistLayout,
     type HlsKey,
     type HlsMediaLayoutItem,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 import { encryptTextAsset, isLmcencPayload } from './lmcenc.js';
 
 @Injectable()

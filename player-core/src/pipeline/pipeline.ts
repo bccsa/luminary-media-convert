@@ -14,7 +14,7 @@ import {
     extractAnglePlaylist,
     isEncryptedPayload,
     listVideoAngles,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 import {
     AUDIO_ONLY_ANGLE_ID,
     type AdapterSource,

@@ -6,11 +6,10 @@ A local-only desktop media encoder. A folder-based npm workspaces monorepo conta
 
 - **`api/`** — NestJS REST API service (the "Encoding API") that encodes media files into HLS/ABR format using FFmpeg (with optional NVIDIA or Apple Silicon GPU acceleration), uploads output to S3-compatible storage, and delivers status updates via SSE or polling. Also provides on-demand HLS preview streaming before/during encoding, a source storyboard and waveform for the trim timeline, a CMS handshake API, and a stateless HLS-edit API for mutating master playlists and reading/writing chapter and waveform sidecars in S3. Exposed as a library (`createServer()` in `api/src/bootstrap.ts`) so the desktop shell can host it in-process; `api/src/main.ts` is the same code path run standalone from the environment.
 - **`app/`** — Vue 3 single-page client, the renderer of the desktop app: session list, local file pick, probe → encode config, trim/chapters authoring, preview and encoded playback. Served by the API itself in a packaged build, by Vite in development.
-- **`electron/`** — Electron shell. Starts the Encoding API in the main process, serves the built `app/dist` through it, mints the UI's API token per launch, supplies a `safeStorage` credential cipher, shows the trust-on-first-use origin dialogs, registers the `luminary-convert://` protocol, and packages mac (dmg/zip) and Windows (NSIS) builds via electron-builder.
+- **`app-electron/`** — Electron shell. Starts the Encoding API in the main process, serves the built `app/dist` through it, mints the UI's API token per launch, supplies a `safeStorage` credential cipher, shows the trust-on-first-use origin dialogs, registers the `luminary-convert://` protocol, and packages mac (dmg/zip) and Windows (NSIS) builds via electron-builder.
 - **`cms-mock/`** — Dev-only Vue 3 app standing in for the Luminary CMS, so the whole CMS → encoder flow (origin gating, `documentId` reuse, `hlsUrl`/key delivery, `luminary://key` substitution, angle extraction) can be exercised locally. Not shipped; nothing depends on it.
 - **`encode-config/`** — Shared Vue 3 component library providing the `EncodeConfigForm` component, encoding/probe type definitions, and layout-based config persistence. Published as `@luminary-media-converter/encode-config`.
-- **`segment-editor/`** — Shared Vue 3 component library providing a player-agnostic timeline `SegmentEditor` for trim / chapters / subtitles authoring, plus WebVTT helpers (`exportChaptersVtt`, `exportSubtitlesVtt`, `parseVtt`). Published as `@luminary-media-converter/segment-editor`.
-- **`hls/`** — Shared TypeScript library providing **lossless** HLS master/media playlist parsing and building (round-trips real FFmpeg output byte-faithfully, unknown tags/attributes preserved via WeakMap-backed metadata), the LMCENC encrypted-text-asset format helpers (`enc-format.ts`), S3-key utilities, sidecar path conventions, the `LUMINARY_KEY_PLACEHOLDER_URI` constant, and angle/audio-only extraction (text helpers + model-level `extractAngle`). Published as `@luminary-media-converter/hls`; consumed by `api/`, `app/`, `cms-mock/` and `player-core/`.
+- **`hls-core/`** — Shared TypeScript library providing **lossless** HLS master/media playlist parsing and building (round-trips real FFmpeg output byte-faithfully, unknown tags/attributes preserved via WeakMap-backed metadata), the LMCENC encrypted-text-asset format helpers (`enc-format.ts`), S3-key utilities, sidecar path conventions, the `LUMINARY_KEY_PLACEHOLDER_URI` constant, and angle/audio-only extraction (text helpers + model-level `extractAngle`). Published as `@luminary-media-converter/hls-core`; consumed by `api/`, `app/`, `cms-mock/` and `player-core/`.
 - **`player-core/`** — Framework-agnostic, headless player wrapper: HLS munging pipeline (client-side angle extraction, quality capping, key handling, LMCENC decryption), `PlayerController` state store, recovery/stall/coming-soon policy, and the `PlayerAdapter` contract for pluggable engines (hls.js today; AVPlayer/ExoPlayer adapters later in a Capacitor shell). Published as `@luminary-media-converter/player-core`. See `player-core/src/types.ts` for the full contract.
 - **`player-web/`** — Web reference implementation of the player: `HlsJsAdapter` (hls.js on a plain `<video>`, in-memory AES key delivery via a custom key loader — no key blob URLs), `LuminaryPlayer.vue`, iOS-style fullscreen controls with orientation lock, and `PlayerMessages` i18n (every user-facing string overridable; scoped slots for full custom UI). It draws no chrome over the picture outside fullscreen: entering is a double-click / double-tap on the video, or `enterFullscreen()` from the host — which is where the button belongs (the encoder puts it beside its angle / audio / quality selectors). Inside fullscreen the controls, exit button included, are the player's. Also home to the **chunk-warming loop** (`ChunkPrefetcher` in `adapter/chunkWarming.ts`, driven through the optional `PlayerAdapter.warmChunks` contract — see `docs/chunk-warming.md`) and a dev-only test harness (`npm -w player-web run demo`: plays any master URL + optional key through the real player, with warming console instrumentation). Published as `@luminary-media-converter/player-web`; consumed by `app/`.
 - **`player-web-legacy/`** — Second web implementation of the same player, on Video.js 8 (VHS 3.17.5) instead of hls.js: `VideoJsAdapter` over `player-core`'s `PlayerAdapter` contract, and a `LuminaryPlayer.vue` with the same props, slots and `defineExpose` surface as `player-web`'s, so an app can swap one for the other. It exists to replicate the [bccsa/luminary](https://github.com/bccsa/luminary) app's video.js skin — video.js owns the whole chrome, in every mode, and `styles.css` repositions its stock components. In-memory `luminary://key` delivery comes from wrapping VHS's per-handler xhr factory (`vhsKeyInterceptor.ts`) rather than from an hls.js key loader; an optional YouTube mode plays a YouTube URL through `videojs-youtube`, bypassing the LMC pipeline entirely with a null controller. Same dev harness (`npm -w player-web-legacy run demo`). Published as `@luminary-media-converter/player-web-legacy`; consumed by the Luminary app via a git-submodule checkout plus a file-reference install, not by anything in this repo.
@@ -19,7 +18,7 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 
 ## Monorepo Structure
 
-- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls", "segment-editor", "player-core", "player-web", "player-web-legacy", "cms-mock", "electron"]`)
+- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls-core", "player-core", "player-web", "player-web-legacy", "cms-mock", "app-electron"]`)
 - Dependencies are hoisted to the root `node_modules/`
 - Run workspace scripts from root: `npm -w api run <script>` or `npm -w app run <script>`
 - Root `npm run dev` — browser development: builds the shared libraries, then runs their watch builds (each Vue library watches JS and `.d.ts` side by side, so a type-check during dev is not left staring at a `dist` with no declarations), the API dev server and the Vite web client concurrently
@@ -44,7 +43,7 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 - **API docs**: `@nestjs/swagger` — published at `/api/docs` only when `enableSwagger` is passed (standalone `main.ts` does; the Electron host does not)
 - **Testing**: Vitest (`*.spec.ts` colocated in `api/src/`, e2e in `api/test/`). Note: many specs were intentionally left broken during the migration — see `Todo.md`
 
-### Desktop Shell (`electron/`)
+### Desktop Shell (`app-electron/`)
 
 - **Package**: `@luminary-media-converter/electron` (private), main `dist/main.js`, Electron 33, electron-builder 26
 - **Main process** (`src/main.ts`): single-instance lock, `luminary-convert://` protocol client, settings persisted in `app.getPath('userData')/settings.json`, TOFU origin dialogs (serialized through a queue), `safeStorage`-backed credential cipher, bundled ffmpeg/ffprobe resolution, static web client resolution, graceful shutdown that waits for Nest's hooks before quitting
@@ -60,7 +59,7 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 - **Auth**: no sign-in. The UI's credential is the instance API token, taken from the preload bridge in the desktop app and from `VITE_API_TOKEN` in browser development (`src/auth-token.ts`)
 - **API base**: same-origin by default (the packaged app is served by the API); `VITE_API_URL` for browser development
 - **Media playback**: `LuminaryPlayer` from `@luminary-media-converter/player-web` (hls.js on a plain `<video>`, driven by the `player-core` controller). Angle switching, quality selection, audio tracks and encrypted playback all go through the controller; the AES key is fetched masked from `GET /api/sessions/:id/key`, unmasked in memory (`utils/keyMask.ts`) and handed to the player, which serves it to hls.js from memory — no key blob URLs
-- **Shared packages**: `@luminary-media-converter/encode-config`, `@luminary-media-converter/segment-editor`, `@luminary-media-converter/hls`, `@luminary-media-converter/player-core`, `@luminary-media-converter/player-web`
+- **Shared packages**: `@luminary-media-converter/encode-config`, `@luminary-media-converter/hls-core`, `@luminary-media-converter/player-core`, `@luminary-media-converter/player-web`
 - **Real-time updates**: SSE via `GET /api/sessions/:id/events`, with a polling fallback in `useSessionPoller`
 - **Testing**: Vitest + `@vue/test-utils` + jsdom
 
@@ -70,15 +69,16 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 - Exports `EncodeConfigForm`, probe/encode config types, `layoutStorage` (config persistence keyed by a media-layout fingerprint)
 - Peer dependency: Vue 3
 
-### Shared Segment Editor (`segment-editor/`)
+### Segment Editor (`app/src/components/segment-editor/`)
 
-- Vue 3 library, Vite 6 library mode with `vite-plugin-css-injected-by-js`, `vue-tsc` for type emit
+- A folder inside the web client, not a workspace. It was a published library while it might have had other hosts; `app` is its only consumer, so it is source now and imported by relative path through its `index.ts`
 - Exports `SegmentEditor`, `Segment` / `SegmentEditorMode` types, WebVTT helpers and time helpers
 - Modes: `trim` (no labels, no overlap), `chapters` (labels, no overlap, ripple edit), `subtitles` (labels, overlap allowed)
 - Player-agnostic: consumers pass `getCurrentTime()` and optional `onSeek` / `onPlayPause`
-- Testing: Vitest with `@vue/test-utils` and jsdom
+- Carries its own `styles.css`, imported by the component itself
+- Testing: its 225 specs moved with it and run in `app`'s suite. The library's own coverage thresholds (100% lines) did not survive the move — `app` has no per-directory thresholds
 
-### Shared HLS Library (`hls/`)
+### Shared HLS Library (`hls-core/`)
 
 - Pure TypeScript, built with `tsc`
 - Exports master/media playlist parsers and builders, AES-128 key/IV utilities, `LUMINARY_KEY_PLACEHOLDER_URI`, `normalizeS3Key`, `deriveAngleName`, sidecar path conventions (`sidecarPath`), and the angle helpers `listVideoAngles` / `extractAnglePlaylist` / `extractAudioOnlyPlaylist`
@@ -154,7 +154,7 @@ api/
 │       ├── dto/                         # read, mutate, discover, chapters-read, chapters-write, waveform-read
 │       └── operations/index.ts          # upsertSubtitle, removeSubtitle, upsertChapters, removeChapters
 
-electron/
+app-electron/
 ├── src/
 │   ├── main.ts                          # App lifecycle, API host, settings, TOFU dialogs, cipher, IPC, protocol, shutdown
 │   └── preload.ts                       # window.luminary: getApiToken, getPathForFile, showOpenDialog
@@ -202,9 +202,9 @@ cms-mock/
 ├── README.md
 └── vite.config.ts                       # Port 5199
 
-hls/src/{index,parse,build,keys,sidecar,angles}.ts
+hls-core/src/{index,parse,build,keys,sidecar,angles}.ts
 encode-config/src/{index,types,EncodeConfigForm.vue,layoutStorage,styles.css}
-segment-editor/src/{index,SegmentEditor.vue,types,time,vtt,styles.css}
+app/src/components/segment-editor/{index,SegmentEditor.vue,types,time,vtt,thumbnailVtt,styles.css}
 player-web-legacy/src/{index,controls,messages,youtube,audioTrackLanguage,styles.css}
 player-web-legacy/src/{adapter/{VideoJsAdapter,vhsKeyInterceptor,chunkWarming},components/{LuminaryPlayer.vue,AudioVideoToggle.vue},vjs/{playerOptions,autoHide,keepAlive,poster}}
 ```
@@ -291,7 +291,7 @@ A public web app reaching `127.0.0.1` is a private-network request. Chrome sends
 
 ### `luminary://key` and the client-side player contract
 
-Encryption keys are generated locally (`randomBytes(16)`) and never leave the machine, so there is nothing to serve them over HTTP. When no explicit `keyUrl` is configured, `#EXT-X-KEY` is written with the sentinel URI `luminary://key` (`LUMINARY_KEY_PLACEHOLDER_URI`, exported from `@luminary-media-converter/hls`).
+Encryption keys are generated locally (`randomBytes(16)`) and never leave the machine, so there is nothing to serve them over HTTP. When no explicit `keyUrl` is configured, `#EXT-X-KEY` is written with the sentinel URI `luminary://key` (`LUMINARY_KEY_PLACEHOLDER_URI`, exported from `@luminary-media-converter/hls-core`).
 
 A Luminary player is therefore expected to:
 
@@ -299,7 +299,7 @@ A Luminary player is therefore expected to:
 2. Supply the key for `luminary://key` (and any other AES-128 key URI — a locally supplied key always wins). The wrapper normalizes key URIs to the sentinel and the engine adapter serves the raw bytes **from memory** (hls.js custom key loader; `AVAssetResourceLoaderDelegate` / ExoPlayer `DataSource` later) — a key blob URL is only the fallback for adapters without a key hook.
 3. Feed the munged playlists to the engine. **`player-core` (`PlayerController` + pipeline) is the reference implementation**, with `player-web`'s `HlsJsAdapter`/`LuminaryPlayer` as the web engine binding; the media encoder app consumes exactly these.
 
-The encoder writes **one** spec-correct multi-angle `master.m3u8`: each camera angle is an `#EXT-X-MEDIA:TYPE=VIDEO` rendition group and every `#EXT-X-STREAM-INF` carries `VIDEO="<group>"`. Most players ignore video rendition groups and simply play whichever variant their ABR logic picks, so narrowing happens client-side with the `hls/` helpers — this is the contract, not an implementation detail:
+The encoder writes **one** spec-correct multi-angle `master.m3u8`: each camera angle is an `#EXT-X-MEDIA:TYPE=VIDEO` rendition group and every `#EXT-X-STREAM-INF` carries `VIDEO="<group>"`. Most players ignore video rendition groups and simply play whichever variant their ABR logic picks, so narrowing happens client-side with the `hls-core/` helpers — this is the contract, not an implementation detail:
 
 - `listVideoAngles(masterText)` → `{ id, name, isDefault }[]` (empty for a single-angle master)
 - `extractAnglePlaylist(masterText, angleId)` → a master pinned to one angle; returns the input unchanged when there is nothing to narrow, so it is safe to apply unconditionally
@@ -540,19 +540,19 @@ Run it against a running API (default `http://127.0.0.1:31711`, editable in the 
 
 ## Packaging
 
-`electron/electron-builder.yml`:
+`app-electron/electron-builder.yml`:
 
-- **Targets**: macOS `dmg` + `zip` (arm64), Windows `nsis` (x64). Run `npm -w electron run dist:mac` / `dist:win`, or `pack` for an unpacked directory
-- **Windows can be built from a Mac**, which is what `dist:win-portable` is for: it produces a portable `zip` rather than the NSIS installer, because NSIS needs Wine and a portable zip needs nothing. `-c.win.signAndEditExecutable=false` is what avoids Wine entirely — the cost is that the `.exe` carries the stock Electron icon, since stamping the icon is itself a Wine job. Prerequisites are `brew install mingw-w64 cmake llvm`, and **LLVM is not optional**: `--enable-cuda-llvm` gives `scale_cuda` for the NVIDIA path and needs a clang with the NVPTX backend, which Apple's clang does not have. Put it first on `PATH` when building ffmpeg: `PATH="/opt/homebrew/opt/llvm/bin:$PATH" npm -w electron run dist:win-portable`
+- **Targets**: macOS `dmg` + `zip` (arm64), Windows `nsis` (x64). Run `npm -w app-electron run dist:mac` / `dist:win`, or `pack` for an unpacked directory
+- **Windows can be built from a Mac**, which is what `dist:win-portable` is for: it produces a portable `zip` rather than the NSIS installer, because NSIS needs Wine and a portable zip needs nothing. `-c.win.signAndEditExecutable=false` is what avoids Wine entirely — the cost is that the `.exe` carries the stock Electron icon, since stamping the icon is itself a Wine job. Prerequisites are `brew install mingw-w64 cmake llvm`, and **LLVM is not optional**: `--enable-cuda-llvm` gives `scale_cuda` for the NVIDIA path and needs a clang with the NVPTX backend, which Apple's clang does not have. Put it first on `PATH` when building ffmpeg: `PATH="/opt/homebrew/opt/llvm/bin:$PATH" npm -w app-electron run dist:win-portable`
 - **The ffmpeg binaries are declared per platform, not by macro.** `${platform}` expands to the _host_, so `bin/${platform}-${arch}` quietly packaged macOS binaries inside a Windows app when cross-building — an app that installs, opens, and cannot encode. It was invisible while packaging only ever ran on a matching runner. `mac.extraResources` and `win.extraResources` now name `bin/darwin-${arch}` and `bin/win32-${arch}` outright, sharing one filter list through a YAML anchor. `${arch}` is safe because electron-builder runs one pass per architecture. `verify-package.mjs` reads the Mach-O/PE header and fails the build on a mismatch, which is how this was caught
-- **All three build what they ship.** Each runs `build:workspaces` → the root's `build:bundled` → `build:libs` (the six shared libraries — `hls`, `encode-config`, `segment-editor`, `player-core`, `player-web`, `player-web-legacy`), then the API, then the web client, before `electron-builder`. `player-web-legacy` is in that chain although nothing packaged consumes it: it is a workspace with a `build` script, and a library the repo does not build is a library nobody notices breaking. They used to compile only Electron's own TypeScript and package whatever `app/dist` and `api/dist` happened to contain — the last build anyone ran, or nothing at all on a clean clone, since both are gitignored. `npm -w` does not work from inside a workspace directory, hence the `cd ..` hop
+- **All three build what they ship.** Each runs `build:workspaces` → the root's `build:bundled` → `build:libs` (the five shared libraries — `hls-core`, `encode-config`, `player-core`, `player-web`, `player-web-legacy`), then the API, then the web client, before `electron-builder`. `player-web-legacy` is in that chain although nothing packaged consumes it: it is a workspace with a `build` script, and a library the repo does not build is a library nobody notices breaking. They used to compile only Electron's own TypeScript and package whatever `app/dist` and `api/dist` happened to contain — the last build anyone ran, or nothing at all on a clean clone, since both are gitignored. `npm -w` does not work from inside a workspace directory, hence the `cd ..` hop
 - **A `VITE_*` value cannot follow a developer's `.env` into a build.** Vite bakes every one it finds into every bundle, so `app/src/api.ts` and `auth-token.ts` read theirs strictly inside `import.meta.env.DEV`, which no `vite build` sets. `API_BASE` compiles to `""` — same-origin, which is the only correct answer once the API is serving the client. Pinned by tests that assert `DEV: false` _with_ the variables set, not merely absent
 - **`asar: true`** — verified rather than assumed: the packaged app was launched from outside the repository (so nothing could resolve upwards into the development `node_modules`) and the API started, served the client and answered requests from inside the archive
 - **electron-builder 26 is required.** Version 25 collected the hoisted workspace dependencies incompletely — `call-bind-apply-helpers` ended up only nested under `call-bind`, express failed to load, and Nest reported it as "No driver (HTTP) has been selected", which points nowhere near the real cause. Symptom if this regresses: the packaged app exits or logs a missing-driver error while the same code runs fine unpackaged
 - **`npmRebuild: false`** — electron-builder would otherwise run its own production `npm install` inside the workspace, which in a hoisted monorepo prunes the root `node_modules` out from under the running build. Nothing here is a native module
-- **`extraResources`**: `app/dist` → `app/` (served at `/` by the API via `bundledWebClient()`), and `electron/bin/${platform}-${arch}/{ffmpeg,ffprobe}` → the resources root (found by `bundledBinary()`)
-- **ffmpeg binaries are not in the repository** — tens of megabytes each and separately licensed. See `electron/bin/README.md` for where to get builds with VideoToolbox (macOS arm64) and NVENC (Windows x64), how to verify them, and the GPL/LGPL consequences of shipping them. Without them the packaged app falls back to whatever `ffmpeg` is on PATH: runnable on a developer machine, not shippable
-- **Ad-hoc signed, not notarized.** There is no Developer ID certificate, so `mac.identity: null` — but the bundle is still signed, by `electron/build/after-pack.cjs`. Electron ships already signed, and copying `extraResources` in afterwards invalidates that signature; macOS reads a broken signature as corruption and refuses a downloaded copy outright with "is damaged and can't be opened", offering only the Bin. Ad-hoc re-signing restores a valid seal, which turns that into the ordinary "Apple could not verify" prompt a user can accept
+- **`extraResources`**: `app/dist` → `app/` (served at `/` by the API via `bundledWebClient()`), and `app-electron/bin/${platform}-${arch}/{ffmpeg,ffprobe}` → the resources root (found by `bundledBinary()`)
+- **ffmpeg binaries are not in the repository** — tens of megabytes each and separately licensed. See `app-electron/bin/README.md` for where to get builds with VideoToolbox (macOS arm64) and NVENC (Windows x64), how to verify them, and the GPL/LGPL consequences of shipping them. Without them the packaged app falls back to whatever `ffmpeg` is on PATH: runnable on a developer machine, not shippable
+- **Ad-hoc signed, not notarized.** There is no Developer ID certificate, so `mac.identity: null` — but the bundle is still signed, by `app-electron/build/after-pack.cjs`. Electron ships already signed, and copying `extraResources` in afterwards invalidates that signature; macOS reads a broken signature as corruption and refuses a downloaded copy outright with "is damaged and can't be opened", offering only the Bin. Ad-hoc re-signing restores a valid seal, which turns that into the ordinary "Apple could not verify" prompt a user can accept
 - **Opening it on macOS 15 and later takes seven steps, and right-click → Open is not one of them.** Apple removed that bypass: the path is dismiss the warning → System Settings → Privacy & Security → **Open Anyway** → a second warning → Open Anyway → authenticate. "Move to Bin" is the highlighted default throughout. Notarization is what removes this, and needs the same certificate as auto-update
 - **Only downloaded copies are checked.** Gatekeeper assesses a bundle only when it carries `com.apple.quarantine`, which a locally built one does not — so a signing defect is invisible on the machine that produced it. Test with `xattr -w com.apple.quarantine "0081;0;Safari;$(uuidgen)" <dmg>` before shipping
 - Windows builds are unsigned (no Authenticode certificate) but install and open without a SmartScreen warning in testing

@@ -28,7 +28,7 @@
         "demo": "vite --config vite.demo.config.ts"
     },
     "dependencies": {
-        "@luminary-media-converter/player-core": "*",
+        "@luminary-media-converter/player-core": "file:../player-core",
         "hls.js": "^1.6.0"
     },
     "peerDependencies": {

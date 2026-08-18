@@ -28,7 +28,7 @@
         "demo": "vite --config vite.demo.config.ts"
     },
     "dependencies": {
-        "@luminary-media-converter/player-core": "*",
+        "@luminary-media-converter/player-core": "file:../player-core",
         "iso-639-2": "^3.0.2",
         "video.js": "8.23.4",
         "videojs-mobile-ui": "1.1.1",

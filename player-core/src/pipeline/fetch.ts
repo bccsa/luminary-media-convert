@@ -9,7 +9,7 @@ import {
     isEncryptedPayload,
     isPlaylistText,
     isVttText,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 import type { PlayerError } from '../types.js';
 import { decryptLmcenc, type SubtleLike } from './decrypt.js';
 

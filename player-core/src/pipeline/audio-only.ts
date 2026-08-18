@@ -11,7 +11,7 @@
 import {
     extractAudioOnlyPlaylist,
     parseMasterPlaylist,
-} from '@luminary-media-converter/hls';
+} from '@luminary-media-converter/hls-core';
 import { hasVideoVariants } from './playlist-text.js';
 
 /**

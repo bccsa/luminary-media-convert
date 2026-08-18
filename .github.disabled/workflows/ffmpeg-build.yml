@@ -74,7 +74,7 @@ jobs:
             - name: What the build supports
               if: steps.runnable.outputs.runnable == 'true'
               run: |
-                  FF=electron/bin/${{ matrix.target }}/ffmpeg
+                  FF=app-electron/bin/${{ matrix.target }}/ffmpeg
                   "$FF" -hide_banner -version | head -1
                   "$FF" -hide_banner -L | sed -n '2,4p'
                   "$FF" -hide_banner -hwaccels
@@ -97,7 +97,7 @@ jobs:
               shell: bash
               run: |
                   set -euo pipefail
-                  FF="electron/bin/${{ matrix.target }}/ffmpeg"
+                  FF="app-electron/bin/${{ matrix.target }}/ffmpeg"
                   head -c 5760000 /dev/zero > raw.yuv     # 320x240 yuv420p, 50 frames
                   head -c 64000 /dev/zero > raw.pcm       # 2s of 16-bit mono @ 16 kHz
                   "$FF" -hide_banner -loglevel error \
@@ -123,7 +123,7 @@ jobs:
             - uses: actions/upload-artifact@v4
               with:
                   name: ffmpeg-${{ matrix.target }}
-                  path: electron/bin/${{ matrix.target }}/
+                  path: app-electron/bin/${{ matrix.target }}/
                   retention-days: 7
                   if-no-files-found: error
 
@@ -144,7 +144,7 @@ jobs:
             - uses: actions/upload-artifact@v4
               with:
                   name: ffmpeg-win32-x64
-                  path: electron/bin/win32-x64/
+                  path: app-electron/bin/win32-x64/
                   retention-days: 7
                   if-no-files-found: error
 
