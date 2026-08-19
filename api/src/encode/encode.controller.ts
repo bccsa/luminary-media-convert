@@ -391,6 +391,46 @@ export class EncodeController {
             }
         }
 
+        // Track indices are relative to their own kind — `sourceTrackIndex: 2` on
+        // an audio group means the third *audio* track, not the third stream. Out
+        // of range, ffmpeg is handed a map like `0:a:4` for a file with four
+        // audio tracks and fails while parsing its options, so what reaches the
+        // user is a wall of ffmpeg banner output ending in "Stream map '' matches
+        // no streams" — an error about the encoder's command line, for a mistake
+        // in their request. The probe already knows how many tracks there are.
+        const probe = session.probeResult;
+        if (probe) {
+            const audioCount = probe.audioTracks?.length ?? 0;
+            const videoCount = probe.videoTracks?.length ?? 0;
+
+            for (const group of dto.audioGroups ?? []) {
+                if (group.sourceTrackIndex >= audioCount) {
+                    throw new BadRequestException(
+                        `Audio group "${group.id}" asks for audio track ` +
+                            `${group.sourceTrackIndex}, but the source has ` +
+                            `${audioCount} audio track${audioCount === 1 ? '' : 's'} ` +
+                            `(0–${Math.max(audioCount - 1, 0)}). The index counts ` +
+                            'audio tracks, not streams.'
+                    );
+                }
+            }
+
+            for (const rendition of dto.videoRenditions ?? []) {
+                if (
+                    rendition.sourceTrackIndex != null &&
+                    rendition.sourceTrackIndex >= videoCount
+                ) {
+                    throw new BadRequestException(
+                        `Video rendition asks for video track ` +
+                            `${rendition.sourceTrackIndex}, but the source has ` +
+                            `${videoCount} video track${videoCount === 1 ? '' : 's'} ` +
+                            `(0–${Math.max(videoCount - 1, 0)}). The index counts ` +
+                            'video tracks, not streams.'
+                    );
+                }
+            }
+        }
+
         // How a trim is cut is inferred from the copy checkboxes, not asked for
         // by a field of its own — the two are the same decision said twice.
         //

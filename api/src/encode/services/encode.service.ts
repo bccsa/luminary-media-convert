@@ -113,6 +113,11 @@ export class EncodeService {
             );
         });
 
+        // Declared outside the try so the failure path can stop it. A pipeline
+        // polls on an interval, and nothing below is guaranteed to reach the
+        // drain that clears it.
+        let pipeline: ReturnType<typeof createPipeline> | undefined;
+
         try {
             const encryptionEnabled =
                 session.config.encryption != null &&
@@ -382,7 +387,7 @@ export class EncodeService {
                 currentProgress.encoding = 0;
             }
 
-            const pipeline = createPipeline(
+            pipeline = createPipeline(
                 encodeConfig,
                 encodeResult && plan
                     ? plan.plannedTotalSegments
@@ -677,6 +682,18 @@ export class EncodeService {
             this.logger.error(`Session ${sessionId} failed: ${errorMsg}`);
             this.sessionService.setFailed(sessionId, errorMsg);
         } finally {
+            // A drain stops the poll timer on its way out; every other exit from
+            // this method — an ffmpeg failure, a refused config, a throw from any
+            // step between — leaves it running against a directory the session
+            // has finished with.
+            //
+            // Left running it is not merely a leaked interval. A retry starts a
+            // second pipeline over the same output directory, both enqueue each
+            // new segment, and whichever uploads second finds the file already
+            // deleted by the first — a retry that fails on ENOENT for a segment
+            // the encode produced correctly. Aborting an already-drained
+            // pipeline is a no-op, so this is unconditional.
+            pipeline?.abort();
             await this.cleanupSessionFiles(sessionId);
         }
     }

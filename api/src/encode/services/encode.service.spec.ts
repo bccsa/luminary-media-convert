@@ -225,6 +225,73 @@ describe('EncodeService', () => {
      * turned out to have no callers, and a prefix typed with a leading slash
      * still reached storage; that method has since been removed.
      */
+    /**
+     * A pipeline polls on an interval. Only the success path reaches the drain
+     * that clears it, so every other exit used to leave one running against a
+     * directory the session had finished with — and a retry then started a
+     * second over the same directory. Both enqueued each new segment, and
+     * whichever uploaded second found the file already deleted by the first: a
+     * retry that failed on ENOENT for a segment the encode had produced
+     * correctly.
+     */
+    describe('stopping the pipeline when the encode does not finish', () => {
+        it('aborts it when ffmpeg fails', async () => {
+            ffmpegService.encode.mockRejectedValue(new Error('ffmpeg exited 1'));
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+            await service.processSession(session.id);
+
+            expect(sessionService.get(session.id)!.status).toBe('failed');
+            expect(mockPipeline.abort).toHaveBeenCalled();
+        });
+
+        it('aborts it when the pipeline itself errored', async () => {
+            const failing = makeMockPipeline();
+            Object.defineProperty(failing, 'error', {
+                get: () => new Error('S3 upload failed'),
+            });
+            (
+                segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>
+            ).mockReturnValue(failing);
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+            await service.processSession(session.id);
+
+            expect(sessionService.get(session.id)!.status).toBe('failed');
+            expect(failing.abort).toHaveBeenCalled();
+        });
+
+        it('aborts it when the drain throws', async () => {
+            (mockPipeline.drain as ReturnType<typeof vi.fn>).mockRejectedValue(
+                new Error('drain failed')
+            );
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+            await service.processSession(session.id);
+
+            expect(mockPipeline.abort).toHaveBeenCalled();
+        });
+
+        it('aborts it on the way out of a successful encode too', async () => {
+            // Abort after a drain is a no-op, and making it unconditional is
+            // what stops the next exit path from being the one that forgets.
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+            await service.processSession(session.id);
+
+            expect(sessionService.get(session.id)!.status).toBe('completed');
+            expect(mockPipeline.abort).toHaveBeenCalled();
+        });
+    });
+
     describe('s3 path prefix given to the pipeline', () => {
         const prefixPassedToPipeline = () =>
             (segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>)
