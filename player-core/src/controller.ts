@@ -167,14 +167,20 @@ export class PlayerController implements PlayerControllerApi {
             maxHeight: source.maxHeight,
         });
 
-        this.sidecarLoader = new SidecarLoader({
-            fetchImpl: this.fetchImpl,
-            serveStrategy: this.serve(),
-            keyHex: source.keyHex,
-            subtle: this.subtle,
-        });
-
         try {
+            // Inside the try, not above it: `serve()` throws synchronously in an
+            // environment with no way to serve blobs (no Blob/createObjectURL —
+            // jsdom, some SSR runtimes). Every host calls `load()` fire-and-forget
+            // on the promise, because the contract is that failures surface
+            // through state — a throw here escaped as an unhandled rejection
+            // instead of rendering the error panel.
+            this.sidecarLoader = new SidecarLoader({
+                fetchImpl: this.fetchImpl,
+                serveStrategy: this.serve(),
+                keyHex: source.keyHex,
+                subtle: this.subtle,
+            });
+
             const info = await loadMaster(source.masterUrl, this.context());
             if (generation !== this.generation) return;
             await this.applyMaster(generation, info);
