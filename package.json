@@ -14,6 +14,7 @@
         "app-electron"
     ],
     "scripts": {
+        "ci:libs": "npm ci --include-workspace-root -w hls-core -w encode-config -w player-core -w player-web -w player-web-legacy",
         "build:libs": "npm -w hls-core run build && npm -w encode-config run build && npm -w player-core run build && npm -w player-web run build && npm -w player-web-legacy run build",
         "build:bundled": "npm run build:libs && npm -w api run build && npm -w app run build",
         "predev": "npm run build:libs",
