@@ -48,6 +48,7 @@ import { TRANSPARENT_POSTER } from '../vjs/poster';
 import { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from '../vjs/keepAlive';
 import { findPreferredTrack } from '../audioTrackLanguage';
 import { isYouTubeUrl, toVideoJsYouTubeUrl } from '../youtube';
+import { singleFlight } from '../singleFlight';
 import AudioVideoToggle from './AudioVideoToggle.vue';
 
 interface Props {
@@ -221,8 +222,14 @@ function defaultCreateController(video: HTMLVideoElement): PlayerControllerApi {
 const YOUTUBE_TECH_POLL_MS = 10;
 const YOUTUBE_TECH_TIMEOUT_MS = 1_000;
 
-/** The in-flight (or settled) `videojs-youtube` import; single-flight. */
-let youTubeTechImport: Promise<unknown> | null = null;
+/**
+ * The `videojs-youtube` import, at most one attempt at a time.
+ *
+ * `singleFlight` rather than a plain cached promise because only a success is
+ * worth keeping: see its own comment for why the obvious `??=` disables YouTube
+ * permanently after one failed fetch.
+ */
+const importYouTubeTech = singleFlight(() => import('videojs-youtube'));
 
 /**
  * The YouTube tech, imported the first time a YouTube URL is played.
@@ -241,8 +248,17 @@ let youTubeTechImport: Promise<unknown> | null = null;
  * video.js report an unplayable source, which is the honest outcome.
  */
 async function ensureYouTubeTech(): Promise<void> {
-    youTubeTechImport ??= import('videojs-youtube');
-    await youTubeTechImport;
+    try {
+        await importYouTubeTech();
+    } catch {
+        // Not rethrown, for the same reason the registration wait below is
+        // bounded rather than infinite: proceeding lets video.js declare the
+        // source unplayable, which is a state the player already renders and a
+        // host can already see. Rethrowing here escapes `loadSource` as an
+        // unhandled rejection instead — no error surface, and nothing on screen
+        // to explain why the video never started.
+        return;
+    }
 
     const deadline = Date.now() + YOUTUBE_TECH_TIMEOUT_MS;
     while (!videojs.getTech('Youtube') && Date.now() < deadline) {

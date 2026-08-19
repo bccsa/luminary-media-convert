@@ -60,6 +60,7 @@ export { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from './vjs/ke
 // need to make before it has a player (which source goes to which component,
 // which language it will ask for).
 export { isYouTubeUrl, extractYouTubeId, toVideoJsYouTubeUrl } from './youtube';
+export { singleFlight } from './singleFlight';
 export {
     findPreferredTrack,
     matchesPreferredLanguage,
