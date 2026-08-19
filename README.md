@@ -159,6 +159,26 @@ See [Todo.md](Todo.md) for signing, notarization and auto-update.
 - [app/README.md](app/README.md) — renderer structure and environment
 - [Todo.md](Todo.md) — known gaps and follow-up work
 
+## Consuming the player libraries
+
+An app that embeds `player-web` or `player-web-legacy` needs the five library
+workspaces built — they ship only `dist/` — and needs none of the desktop app to
+do it. `npm run ci:libs` installs exactly that subset, and `npm run build:libs`
+builds it:
+
+```bash
+npm run ci:libs      # ~180 MB, no electron
+npm run build:libs
+```
+
+A plain `npm ci` installs every workspace, which pulls in `electron` and
+`electron-builder` and downloads the Electron binary — around 500 MB and a
+lengthy download, to produce five small libraries. That is the right thing when
+working on the encoder and the wrong thing in a consumer's image build.
+
+The workspace list in `ci:libs` is the one in `build:libs`. Adding a library
+means adding it to both, which is why they sit next to each other.
+
 ## Licensing
 
 Licensed per directory rather than repository-wide, because the pieces are not
