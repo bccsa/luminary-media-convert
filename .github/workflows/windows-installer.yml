@@ -1,0 +1,77 @@
+name: Windows installer
+
+# Builds the NSIS installer, which needs two machines: the encoder is
+# cross-compiled for Windows on Linux (mingw-w64, as BtbN does it), and
+# electron-builder then packages it on Windows.
+#
+# `ffmpeg-build.yml` covers whether the encoder itself is sound. This covers the
+# installer: that electron-builder produces one, and that the encoder reaches the
+# packaged app inside it.
+#
+# Manual, plus a branch trigger: these are Windows minutes on a private repository,
+# and an installer is wanted at a release rather than on every commit.
+
+on:
+    workflow_dispatch:
+    push:
+        branches:
+            - 'ci/windows-pack-*'
+
+permissions:
+    contents: read
+
+concurrency:
+    group: windows-installer-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    ffmpeg:
+        name: Cross-compile the encoder on Linux
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - name: Install mingw-w64 and build tools
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y mingw-w64 nasm pkg-config gnupg clang
+            - name: Build
+              run: ./ffmpeg-build/build.sh win32-x64
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: ffmpeg-win32-x64-for-installer
+                  path: app-electron/bin/win32-x64/
+                  retention-days: 1
+                  if-no-files-found: error
+
+    installer:
+        name: Package on Windows
+        needs: ffmpeg
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v6
+              with:
+                  node-version-file: api/.node-version
+                  cache: 'npm'
+                  cache-dependency-path: package-lock.json
+            - run: npm ci
+
+            # The encoder built by the job above, dropped where extraResources
+            # expects it. `package:win` exists precisely so packaging can run
+            # without rebuilding ffmpeg — a Windows runner has no mingw toolchain.
+            - uses: actions/download-artifact@v4
+              with:
+                  name: ffmpeg-win32-x64-for-installer
+                  path: app-electron/bin/win32-x64
+
+            - name: Build the installer
+              run: npm -w app-electron run package:win
+
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: luminary-media-convert-win-unsigned
+                  # Unsigned: there is no Authenticode certificate in this project,
+                  # so SmartScreen may warn. Fine for verification, not for release.
+                  path: app-electron/release/*.exe
+                  retention-days: 7
+                  if-no-files-found: error
