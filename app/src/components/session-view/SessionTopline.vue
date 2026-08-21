@@ -121,7 +121,7 @@ function createdLabel(createdAt: number | null | undefined): string {
         >
 
         <span
-            class="min-w-20 truncate text-base font-semibold text-slate-800 dark:text-slate-100"
+            class="min-w-28 truncate text-base font-semibold text-slate-800 dark:text-slate-100"
             :title="props.sessionName || props.sessionId"
         >
             {{ props.sessionName || 'Untitled session' }}
@@ -148,7 +148,9 @@ function createdLabel(createdAt: number | null | undefined): string {
                     aria-hidden="true"
                     >·</span
                 >
-                <span class="min-w-0 truncate text-xs text-slate-500 dark:text-slate-400">
+                <span
+                    class="min-w-0 truncate text-xs text-slate-500 dark:text-slate-400"
+                >
                     {{ createdLabel(props.createdAt) }}
                 </span>
             </div>
