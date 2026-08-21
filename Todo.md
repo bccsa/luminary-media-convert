@@ -326,11 +326,15 @@ That is worth settling before reaching for **I-frame playlists** (`#EXT-X-I-FRAM
 
 **`encryptPlaylists` has no UI.** It follows `encryption.enabled` and can only be overridden through a direct `POST /api/sessions` — neither the CMS handshake nor the app offers the opt-out. That is the right default; the question is whether anything needs to reach the escape hatch, which the stock-player check in item 0 decides.
 
-## 19. Split divider between the player and the side pane is too bright in dark mode
+## 19. Split divider between the player and the side pane is too bright in dark mode — fixed
 
 **Today.** The vertical rule is `.session-split-handle__bar` in `app/src/components/session-view/SessionPlayerStrip.vue` (styles from line 543). Its rest colour is `slate-200` with a `:global(html.dark)` override to `slate-700/60` — but on screen in the dark theme it reads as a near-white line running the full height of the view, far louder than anything else on the page.
 
 **Worth checking first whether the dark override is applying at all**, since `slate-200` is exactly what a failed override would look like. If it is applying, then `slate-700/60` is simply too bright against this background and wants to come down. The hover / focus / active states (sky, 2px) are doing their job and should stay — the rest state is the problem.
+
+**Already fixed by the time this was picked back up, and it left a regression behind.** Commit `02d2db2` ("the topline moves into the player column…") replaced the bar's `.session-split-handle__bar` class with inline Tailwind utilities (`bg-slate-200 dark:bg-slate-700/60`) directly on the `<span>` — a real Tailwind `dark:` variant, guaranteed to apply, so the too-bright rest colour was already gone. But that commit dropped the class name from the `<span>` without updating the scoped `<style>` rules that still targeted `.session-split-handle:hover .session-split-handle__bar` / `:focus-visible …` / `--active …` for the sky/2px treatment — dead selectors matching nothing, so hovering, focusing or dragging the divider stopped doing anything visually. The code comment above the dead rules still described the old behaviour.
+
+**Fixed properly, and converted to Tailwind while at it** (per item 41 — new app-side UI stays Tailwind, no retrofit risk): the whole resize handle (bar, grip pill, six dots) is now inline Tailwind utility classes on the template, using `group`/`group-hover:`/`group-focus-visible:` on the handle for the hover/focus states and a direct `:class="isResizing ? … : ''"` binding for the mid-drag state (not a CSS pseudo-class, so nothing native covers it). The corresponding scoped `<style>` block (`.session-split-handle`, `__bar`, `__grip` and all their `:global(html.dark)` variants) was deleted outright rather than left dead a second time. Verified: full `app` test suite (248/248) and `app` build both pass.
 
 ---
 
@@ -441,7 +445,7 @@ It holds less well for `segment-editor` and `encode-config`. Both are `private: 
 
 ---
 
-## 42. Discard belongs beside Start encoding, and the player controls should wrap under them
+## 42. Discard belongs beside Start encoding, and the player controls should wrap under them — fixed
 
 **Asked for.** Two changes to the row under the player:
 
@@ -465,9 +469,25 @@ places — inside the player column and standalone before there is a player — 
 paths need checking, and `SessionView.spec.ts` asserts on `discard-session` /
 `delete-session` test ids.
 
+**Fixed.** The player-attached `SessionTopline` (inside `#player-top`) no longer renders
+discard/delete at all (`can-discard`/`can-delete` forced `false` there) — the standalone
+instance, shown before there is a player, is untouched and keeps its own. `SessionView.vue`'s
+`#below-player` slot now renders whenever `showProbeConfig` **or** the session can be
+discarded/deleted — not only when `Start encoding` is visible, since Cancel/Delete have to
+stay reachable mid-encode and once completed, where there is no `Start encoding` button —
+and puts `Start encoding` next to `Discard session` / `Cancel encoding` / `Delete session`
+(plus the inline cancel-error) in one row. `SessionPlayerStrip.vue`'s row under the player
+switched from one horizontal row (playback selects pushed right via `ml-auto`) to a
+vertical stack: actions on the first line, `Angle` / `Audio` / `Quality` / fullscreen
+wrapped onto their own line below, and both now flush with the player's own left edge
+(the row's `px-4` inset — which never matched the player or topline's left edge — is gone).
+Verified: full `app` test suite (248/248) and `app` build both pass; existing
+`discard-session` / `delete-session` test-id assertions in `SessionView.spec.ts` still
+pass unchanged.
+
 ---
 
-## 43. The session topline overflows its column and drops the title
+## 43. The session topline overflows its column and drops the title — fixed
 
 **A visual bug, seen when the encode-config panel is open** and the player column
 narrows: the session name disappears entirely, and `Discard session` is clipped by the
@@ -486,14 +506,24 @@ panel — the row runs underneath it.
    `Created just now`, which nobody needs at that moment, keeps its full width.
 
 **The ranking is upside down.** In a cramped row the useful order is: back arrow,
-title, status, then the timestamp as the first thing to go. Options: let the row shrink
-and give `Created just now` a `min-w-0 truncate` or hide it below a breakpoint; and give
-the title a sensible `min-w` so it degrades to a few characters plus an ellipsis rather
-than vanishing.
+title, status, then the timestamp as the first thing to go.
 
-**Worth a test.** The suite renders this component; a case at a narrow width asserting
-the title is still present would pin the behaviour, since this is the sort of regression
-that only shows up when someone opens a side panel.
+**Fixed**, both in `SessionTopline.vue`:
+
+- The row lost its own `shrink-0` (now just `flex min-w-0 …`), so it conforms to the
+  column instead of overflowing it — which is also what keeps `Discard session` inside
+  the column rather than sliding under the neighbouring panel.
+- The title gained a `min-w-20` floor alongside its `truncate`, so it degrades to a few
+  characters plus an ellipsis instead of collapsing to nothing.
+- `Created just now` (the `·` and the timestamp) is now wrapped in its own `flex
+  min-w-0` group with `min-w-0 truncate` on the text, and gave up its `shrink-0`. With
+  the title now floored and the timestamp not, flexbox's proportional shrink hands the
+  timestamp the squeeze first — it is the thing that gives way, ahead of the title.
+
+No jsdom test was added: this is a flex/box-metrics bug, and jsdom lays out nothing, so
+a test could only assert the class names that already encode the fix rather than the
+behaviour itself. Verified by reading the computed shrink priority rather than by
+screenshot.
 
 ---
 
