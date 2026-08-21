@@ -116,7 +116,9 @@ export class EncodeService {
         // Declared outside the try so the failure path can stop it. A pipeline
         // polls on an interval, and nothing below is guaranteed to reach the
         // drain that clears it.
-        let pipeline: ReturnType<typeof createPipeline> | undefined;
+        let pipeline:
+            | ReturnType<SegmentPipelineService['createPipeline']>
+            | undefined;
 
         try {
             const encryptionEnabled =
