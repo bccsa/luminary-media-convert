@@ -3,6 +3,7 @@ import {
     BrowserWindow,
     dialog,
     ipcMain,
+    Menu,
     safeStorage,
     shell,
 } from 'electron';
@@ -19,6 +20,7 @@ import {
     MIN_FFMPEG_VERSION,
     type RunningServer,
 } from '@luminary-media-converter/api';
+import { showLicences } from './licences';
 
 const PROTOCOL = 'luminary-convert';
 
@@ -251,6 +253,55 @@ function focusSession(sessionId: string): void {
     pendingSessionId = null;
 }
 
+/**
+ * The application menu.
+ *
+ * Built rather than left to Electron's default because the default has no way
+ * to reach the licence texts, and the GPL/LGPL both want them in front of the
+ * user rather than buried in the app bundle. Everything else here is a standard
+ * role: replacing the default menu without them would take copy, paste and the
+ * window controls with it.
+ */
+function buildMenu(): void {
+    const isMac = process.platform === 'darwin';
+    const licences = {
+        label: 'Licences…',
+        click: () => showLicences(mainWindow),
+    };
+
+    Menu.setApplicationMenu(
+        Menu.buildFromTemplate([
+            ...(isMac
+                ? ([
+                      {
+                          label: app.name,
+                          submenu: [
+                              { role: 'about' },
+                              licences,
+                              { type: 'separator' },
+                              { role: 'services' },
+                              { type: 'separator' },
+                              { role: 'hide' },
+                              { role: 'hideOthers' },
+                              { role: 'unhide' },
+                              { type: 'separator' },
+                              { role: 'quit' },
+                          ],
+                      },
+                  ] as Electron.MenuItemConstructorOptions[])
+                : []),
+            { role: 'fileMenu' },
+            { role: 'editMenu' },
+            { role: 'viewMenu' },
+            { role: 'windowMenu' },
+            {
+                role: 'help',
+                submenu: isMac ? [licences] : [licences, { role: 'about' }],
+            },
+        ] as Electron.MenuItemConstructorOptions[])
+    );
+}
+
 function createWindow(): void {
     if (mainWindow && !mainWindow.isDestroyed()) {
         focusWindow();
@@ -427,6 +478,7 @@ async function start(): Promise<void> {
     // that something can be done with it.
     if (!(await encoderPresent())) return;
 
+    buildMenu();
     createWindow();
 
     app.on('activate', () => {
