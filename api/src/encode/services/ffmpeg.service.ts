@@ -694,7 +694,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         const hasReencode = renditions.some((r) => !r.copyStream);
 
-        args.push(...decodeArgs(this.accelMode, hasReencode));
+        args.push(...decodeArgs(this.accelMode, 'ladder', hasReencode));
 
         if (trimming) {
             const concatPath = await this.buildConcatFile(

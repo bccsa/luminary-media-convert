@@ -56,6 +56,7 @@
  */
 
 import { execFile } from 'child_process';
+import { bridgeVideoArgs } from './encoder-selection';
 import { mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { promisify } from 'util';
@@ -459,60 +460,11 @@ function bridgeEncoderArgs(
     // One keyframe, at the start: a bridge is a single closed GOP.
     const gop = ['-g', String(BRIDGE_GOP_FRAMES)];
 
-    if (useGpu && accelMode === 'nvidia') {
-        return [
-            '-c:v',
-            'h264_nvenc',
-            '-preset',
-            'p4',
-            ...profileArgs,
-            ...rate,
-            ...gop,
-        ];
-    }
-    if (useGpu && accelMode === 'apple') {
-        return [
-            '-c:v',
-            'h264_videotoolbox',
-            '-allow_sw',
-            '1',
-            '-realtime',
-            '0',
-            ...profileArgs,
-            ...rate,
-            ...gop,
-        ];
-    }
-    if (useGpu && accelMode === 'intel') {
-        return [
-            '-c:v',
-            'h264_qsv',
-            '-preset',
-            'medium',
-            ...profileArgs,
-            ...rate,
-            ...gop,
-        ];
-    }
-    return [
-        '-c:v',
-        'libx264',
-        // A bridge is under a second of video; the ladder's height-based preset
-        // table is about throughput over a whole file.
-        '-preset',
-        'veryfast',
-        // Pinned only here: the hardware encoders take their pixel format from
-        // the frames they are handed, and refuse most of what could be named.
-        '-pix_fmt',
-        params?.pixFmt ?? 'yuv420p',
-        ...profileArgs,
-        ...rate,
-        ...gop,
-        '-keyint_min',
-        String(BRIDGE_GOP_FRAMES),
-        '-sc_threshold',
-        '0',
-    ];
+    const { head, tail } = bridgeVideoArgs(accelMode, useGpu, {
+        pixFmt: params?.pixFmt,
+        gopFrames: BRIDGE_GOP_FRAMES,
+    });
+    return [...head, ...profileArgs, ...rate, ...gop, ...tail];
 }
 
 export interface BridgeArgsInput {

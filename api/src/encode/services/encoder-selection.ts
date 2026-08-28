@@ -62,25 +62,30 @@ export const EXTRA_HW_FRAMES = 8;
  * stream-copy ladder never decodes, so asking for a hardware decoder would set
  * up a device for no reason.
  */
-export function decodeArgs(mode: AccelMode, hasReencode: boolean): string[] {
+export function decodeArgs(
+    mode: AccelMode,
+    purpose: EncodePurpose,
+    hasReencode: boolean
+): string[] {
     if (!hasReencode) return [];
     switch (mode) {
-        case 'nvidia':
-            // Every rendition branch holds references to decoded surfaces, so a
-            // ladder drains NVDEC's pool: it then stops handing back frames and
-            // reports "No decoder surfaces left". The decoder does not fail
-            // cleanly — downstream this arrives as "Invalid data found when
-            // processing input", which either kills the encode or, when the pool
-            // recovers between frames, yields structurally valid H.264 built from
-            // frames that were never decoded properly. Ask for surfaces to spare.
+        case 'nvidia': {
+            // Only the ladder needs spare surfaces: it splits one decode across
+            // every rendition, and each branch holds frames. A preview or a
+            // bridge decodes for a single encoder, so the pool is never drained
+            // and asking for extra would take surfaces from nothing.
+            const spare =
+                purpose === 'ladder'
+                    ? ['-extra_hw_frames', String(EXTRA_HW_FRAMES)]
+                    : [];
             return [
-                '-extra_hw_frames',
-                String(EXTRA_HW_FRAMES),
+                ...spare,
                 '-hwaccel',
                 'cuda',
                 '-hwaccel_output_format',
                 'cuda',
             ];
+        }
         case 'apple':
             return [
                 '-hwaccel',
@@ -159,6 +164,131 @@ export function bitrateToVideoCrf(
     const bpp = (bitrateKbps * 1000) / (width * height * (fps > 0 ? fps : 30));
     const crf = 23 - Math.log2(bpp / 0.1) * 3;
     return Math.max(16, Math.min(34, Math.round(crf)));
+}
+
+/**
+ * Encoder and scaler for one preview segment.
+ *
+ * Presets are the fastest each encoder offers, because a preview is generated
+ * while somebody waits for it — the opposite of the ladder's tradeoff.
+ *
+ * `scaleFilter` is a `w:h` pair. Note VideoToolbox takes only the width and
+ * derives the height: it is the one path that scales by aspect rather than to
+ * exact dimensions, which is fine for a preview and would not be for a ladder
+ * rung that has to match its playlist.
+ */
+export function previewVideoArgs(
+    mode: AccelMode,
+    useGpu: boolean,
+    scaleFilter?: string
+): string[] {
+    const scale = (expr: string) => (scaleFilter ? ['-vf', expr] : []);
+    if (!useGpu) mode = 'cpu';
+
+    switch (mode) {
+        case 'nvidia':
+            return [
+                '-c:v',
+                'h264_nvenc',
+                '-preset',
+                'p1',
+                ...scale(`scale_cuda=${scaleFilter}`),
+            ];
+        case 'intel': {
+            // veryfast for the same reason NVENC gets p1 here.
+            const [w, h] = (scaleFilter ?? '').split(':');
+            return [
+                '-c:v',
+                'h264_qsv',
+                '-preset',
+                'veryfast',
+                ...scale(`vpp_qsv=w=${w}:h=${h}`),
+            ];
+        }
+        case 'apple':
+            return [
+                '-c:v',
+                'h264_videotoolbox',
+                '-allow_sw',
+                '1',
+                '-realtime',
+                '0',
+                '-b:v',
+                '1500k',
+                ...scale(
+                    `scale_vt=w=${(scaleFilter ?? '').split(':')[0]}:h=-2`
+                ),
+            ];
+        default:
+            return [
+                '-c:v',
+                'libx264',
+                '-preset',
+                'ultrafast',
+                '-crf',
+                '28',
+                '-tune',
+                'zerolatency',
+                ...scale(`scale=${scaleFilter}`),
+            ];
+    }
+}
+
+/**
+ * Encoder arguments for a quick-trim bridge, split around the caller's own
+ * profile/rate/GOP flags so their order is unchanged.
+ *
+ * A bridge is under a second of video, so the ladder's height-based preset
+ * table — which is about throughput over a whole file — does not apply.
+ */
+export function bridgeVideoArgs(
+    mode: AccelMode,
+    useGpu: boolean,
+    opts: { pixFmt?: string; gopFrames: number }
+): { head: string[]; tail: string[] } {
+    if (!useGpu) mode = 'cpu';
+
+    switch (mode) {
+        case 'nvidia':
+            return { head: ['-c:v', 'h264_nvenc', '-preset', 'p4'], tail: [] };
+        case 'apple':
+            return {
+                head: [
+                    '-c:v',
+                    'h264_videotoolbox',
+                    '-allow_sw',
+                    '1',
+                    '-realtime',
+                    '0',
+                ],
+                tail: [],
+            };
+        case 'intel':
+            return {
+                head: ['-c:v', 'h264_qsv', '-preset', 'medium'],
+                tail: [],
+            };
+        default:
+            return {
+                head: [
+                    '-c:v',
+                    'libx264',
+                    '-preset',
+                    'veryfast',
+                    // Pinned only here: the hardware encoders take their pixel
+                    // format from the frames they are handed, and refuse most
+                    // of what could be named.
+                    '-pix_fmt',
+                    opts.pixFmt ?? 'yuv420p',
+                ],
+                tail: [
+                    '-keyint_min',
+                    String(opts.gopFrames),
+                    '-sc_threshold',
+                    '0',
+                ],
+            };
+    }
 }
 
 export interface LadderRendition {

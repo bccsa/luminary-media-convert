@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
     bitrateToVideoCrf,
+    bridgeVideoArgs,
     decodeArgs,
     ladderVideoArgs,
+    previewVideoArgs,
     nvencPreset,
     scalerExpr,
     x264Preset,
@@ -95,16 +97,16 @@ describe('bitrateToVideoCrf', () => {
 describe('decodeArgs', () => {
     it('asks for no hardware decoder when nothing is re-encoded', () => {
         for (const mode of MODES) {
-            expect(decodeArgs(mode, false)).toEqual([]);
+            expect(decodeArgs(mode, 'ladder', false)).toEqual([]);
         }
     });
 
     it('is empty on the CPU path', () => {
-        expect(decodeArgs('cpu', true)).toEqual([]);
+        expect(decodeArgs('cpu', 'ladder', true)).toEqual([]);
     });
 
     it('keeps CUDA frames on the device, with surfaces to spare', () => {
-        expect(decodeArgs('nvidia', true)).toEqual([
+        expect(decodeArgs('nvidia', 'ladder', true)).toEqual([
             '-extra_hw_frames',
             '8',
             '-hwaccel',
@@ -114,19 +116,110 @@ describe('decodeArgs', () => {
         ]);
     });
 
+    // Only the ladder splits one decode across many encoders, so only the ladder
+    // drains NVDEC's surface pool. Asking for spares elsewhere would reserve
+    // surfaces for a branch that never exists.
+    it('reserves spare NVDEC surfaces for the ladder alone', () => {
+        for (const purpose of ['preview', 'bridge'] as const) {
+            expect(decodeArgs('nvidia', purpose, true)).toEqual([
+                '-hwaccel',
+                'cuda',
+                '-hwaccel_output_format',
+                'cuda',
+            ]);
+        }
+    });
+
     it('selects videotoolbox and qsv output formats', () => {
-        expect(decodeArgs('apple', true)).toEqual([
+        expect(decodeArgs('apple', 'ladder', true)).toEqual([
             '-hwaccel',
             'videotoolbox',
             '-hwaccel_output_format',
             'videotoolbox_vld',
         ]);
-        expect(decodeArgs('intel', true)).toEqual([
+        expect(decodeArgs('intel', 'ladder', true)).toEqual([
             '-hwaccel',
             'qsv',
             '-hwaccel_output_format',
             'qsv',
         ]);
+    });
+});
+
+describe('previewVideoArgs', () => {
+    const encoderOf = (args: string[]) => args[args.indexOf('-c:v') + 1];
+
+    it('selects the right encoder per mode', () => {
+        expect(encoderOf(previewVideoArgs('nvidia', true))).toBe('h264_nvenc');
+        expect(encoderOf(previewVideoArgs('intel', true))).toBe('h264_qsv');
+        expect(encoderOf(previewVideoArgs('apple', true))).toBe(
+            'h264_videotoolbox'
+        );
+        expect(encoderOf(previewVideoArgs('cpu', true))).toBe('libx264');
+    });
+
+    // The GPU flag is what the caller uses to force software, so a hardware mode
+    // with useGpu false has to land on libx264 rather than half-configuring.
+    it('falls back to libx264 when the GPU is not in use', () => {
+        for (const mode of MODES) {
+            expect(encoderOf(previewVideoArgs(mode, false))).toBe('libx264');
+        }
+    });
+
+    it('emits no filter when there is nothing to scale', () => {
+        for (const mode of MODES) {
+            expect(previewVideoArgs(mode, true)).not.toContain('-vf');
+        }
+    });
+
+    it('uses the scaler belonging to each mode', () => {
+        const filterOf = (mode: AccelMode) => {
+            const args = previewVideoArgs(mode, true, '640:360');
+            return args[args.indexOf('-vf') + 1];
+        };
+        expect(filterOf('nvidia')).toBe('scale_cuda=640:360');
+        expect(filterOf('intel')).toBe('vpp_qsv=w=640:h=360');
+        expect(filterOf('cpu')).toBe('scale=640:360');
+        // VideoToolbox takes the width and derives the height, which is fine for
+        // a preview and would not be for a ladder rung bound to its playlist.
+        expect(filterOf('apple')).toBe('scale_vt=w=640:h=-2');
+    });
+});
+
+describe('bridgeVideoArgs', () => {
+    const opts = { gopFrames: 48 };
+
+    it('selects the right encoder per mode', () => {
+        const encoderOf = (mode: AccelMode) => {
+            const { head } = bridgeVideoArgs(mode, true, opts);
+            return head[head.indexOf('-c:v') + 1];
+        };
+        expect(encoderOf('nvidia')).toBe('h264_nvenc');
+        expect(encoderOf('intel')).toBe('h264_qsv');
+        expect(encoderOf('apple')).toBe('h264_videotoolbox');
+        expect(encoderOf('cpu')).toBe('libx264');
+    });
+
+    // Only the software path needs these, and they must follow the caller's own
+    // rate and GOP flags — hence the split return rather than one array.
+    it('pins pixel format and keyframe behaviour on the CPU path only', () => {
+        const cpu = bridgeVideoArgs('cpu', true, opts);
+        expect(cpu.head).toContain('-pix_fmt');
+        expect(cpu.tail).toEqual(['-keyint_min', '48', '-sc_threshold', '0']);
+
+        for (const mode of ['nvidia', 'intel', 'apple'] as AccelMode[]) {
+            const hw = bridgeVideoArgs(mode, true, opts);
+            expect(hw.head).not.toContain('-pix_fmt');
+            expect(hw.tail).toEqual([]);
+        }
+    });
+
+    it('honours an explicit pixel format', () => {
+        const { head } = bridgeVideoArgs('cpu', true, {
+            ...opts,
+            pixFmt: 'yuv422p',
+        });
+        expect(head[head.indexOf('-pix_fmt') + 1]).toBe('yuv422p');
     });
 });
 

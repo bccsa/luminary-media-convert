@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { decodeArgs, previewVideoArgs } from './encoder-selection';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
@@ -796,18 +797,7 @@ export class PreviewService {
         // auto_scale_0"), so every segment failed over to CPU. Copy-mode
         // renditions never reach the filter, which is why this only showed on
         // sources that have to be transcoded — HEVC and the like.
-        if (useGpu && accelMode === 'nvidia') {
-            args.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda');
-        } else if (useGpu && accelMode === 'apple') {
-            args.push(
-                '-hwaccel',
-                'videotoolbox',
-                '-hwaccel_output_format',
-                'videotoolbox_vld'
-            );
-        } else if (useGpu && accelMode === 'intel') {
-            args.push('-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv');
-        }
+        args.push(...decodeArgs(accelMode, 'preview', useGpu));
 
         if (rendition.canCopy) {
             // The demuxer lands on the largest keyframe at or before the seek
@@ -849,52 +839,9 @@ export class PreviewService {
         );
         if (audioMap) args.push('-map', audioMap);
 
-        if (useGpu && accelMode === 'nvidia') {
-            args.push('-c:v', 'h264_nvenc', '-preset', 'p1');
-            if (rendition.scaleFilter) {
-                args.push('-vf', `scale_cuda=${rendition.scaleFilter}`);
-            }
-        } else if (useGpu && accelMode === 'intel') {
-            // veryfast for the same reason NVENC gets p1 here: a preview segment
-            // is generated on demand while someone waits for it.
-            args.push('-c:v', 'h264_qsv', '-preset', 'veryfast');
-            if (rendition.scaleFilter) {
-                const [w, h] = rendition.scaleFilter.split(':');
-                args.push('-vf', `vpp_qsv=w=${w}:h=${h}`);
-            }
-        } else if (useGpu && accelMode === 'apple') {
-            args.push(
-                '-c:v',
-                'h264_videotoolbox',
-                '-allow_sw',
-                '1',
-                '-realtime',
-                '0',
-                '-b:v',
-                '1500k'
-            );
-            if (rendition.scaleFilter) {
-                args.push(
-                    '-vf',
-                    `scale_vt=w=${rendition.scaleFilter.split(':')[0]}:h=-2`
-                );
-            }
-        } else {
-            // CPU fallback
-            args.push(
-                '-c:v',
-                'libx264',
-                '-preset',
-                'ultrafast',
-                '-crf',
-                '28',
-                '-tune',
-                'zerolatency'
-            );
-            if (rendition.scaleFilter) {
-                args.push('-vf', `scale=${rendition.scaleFilter}`);
-            }
-        }
+        args.push(
+            ...previewVideoArgs(accelMode, useGpu, rendition.scaleFilter)
+        );
 
         if (audioMap) args.push('-c:a', 'aac', '-b:a', '128k');
         args.push(...TS_OUTPUT);
