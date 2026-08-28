@@ -103,6 +103,10 @@ mac:
               # from the macOS builds, and a filter that matches nothing is not an error.
               - LICENSE-libvpl.txt
               - GPL-*.txt
+              # What the shipped ffmpeg was actually configured with. The licence
+              # gate in scripts/verify-package.mjs reads it, because a cross-built
+              # Windows binary cannot be run on the machine that packages it.
+              - BUILDCONF.txt
     category: public.app-category.video
     # build/icon.icns, carrying every size from 16px to 1024px. Named
     # explicitly rather than left to electron-builder's filename convention, so

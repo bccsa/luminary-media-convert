@@ -565,6 +565,24 @@ notices="LICENSE-ffmpeg.txt (GPL-$licence_version.0-or-later), ${gpl_texts[*]}, 
 [ "$os" = "mingw32" ] && notices="$notices, LICENSE-libvpl.txt"
 echo "    ✓ $notices"
 
+# ── Build configuration, recorded beside the binary ──────────────────────────
+# The licence gate in app-electron/scripts/verify-package.mjs reads this file.
+# It has to be a file rather than a live `-buildconf`, because the Windows
+# binary cannot be executed on the macOS machine that packages it, and a gate
+# that quietly skips the cross-built target is not a gate.
+log "Build configuration"
+if [ "$native" = true ]; then
+    "$out/ffmpeg$exe" -hide_banner -buildconf > "$out/BUILDCONF.txt"
+else
+    # Cross-built: the flags this script passed are the only evidence available.
+    # Same shape configure echoes back, so the gate parses one format.
+    {
+        echo "  configuration:"
+        printf '    %s\n' "${configure_flags[@]}"
+    } > "$out/BUILDCONF.txt"
+fi
+echo "    ✓ BUILDCONF.txt"
+
 log "Built $target"
 for b in "ffmpeg$exe" "ffprobe$exe"; do
     printf '    %s  %s MB  %s\n' "$b" \
