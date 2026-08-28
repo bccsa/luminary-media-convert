@@ -309,66 +309,6 @@ describe('FfmpegService', () => {
         });
     });
 
-    describe('getX264Preset (private, tested via reflection)', () => {
-        const getX264Preset = (height: number): string => {
-            return (service as any).getX264Preset(height);
-        };
-
-        it('should return veryfast for 1080p and above', () => {
-            expect(getX264Preset(1080)).toBe('veryfast');
-            expect(getX264Preset(1440)).toBe('veryfast');
-            expect(getX264Preset(2160)).toBe('veryfast');
-        });
-
-        it('should return faster for 720p', () => {
-            expect(getX264Preset(720)).toBe('faster');
-            expect(getX264Preset(900)).toBe('faster');
-        });
-
-        it('should return fast for 480p', () => {
-            expect(getX264Preset(480)).toBe('fast');
-            expect(getX264Preset(576)).toBe('fast');
-        });
-
-        it('should return medium for 360p', () => {
-            expect(getX264Preset(360)).toBe('medium');
-        });
-
-        it('should return slow for below 360p', () => {
-            expect(getX264Preset(240)).toBe('slow');
-            expect(getX264Preset(144)).toBe('slow');
-        });
-    });
-
-    describe('getNvencPreset (private, tested via reflection)', () => {
-        const getNvencPreset = (height: number): string => {
-            return (service as any).getNvencPreset(height);
-        };
-
-        it('should return p4 for 1080p and above', () => {
-            expect(getNvencPreset(1080)).toBe('p4');
-            expect(getNvencPreset(1440)).toBe('p4');
-            expect(getNvencPreset(2160)).toBe('p4');
-        });
-
-        it('should return p5 for 720p', () => {
-            expect(getNvencPreset(720)).toBe('p5');
-        });
-
-        it('should return p5 for 480p', () => {
-            expect(getNvencPreset(480)).toBe('p5');
-        });
-
-        it('should return p6 for 360p', () => {
-            expect(getNvencPreset(360)).toBe('p6');
-        });
-
-        it('should return p7 for below 360p', () => {
-            expect(getNvencPreset(240)).toBe('p7');
-            expect(getNvencPreset(144)).toBe('p7');
-        });
-    });
-
     describe('buildVideoArgs (private, tested via reflection)', () => {
         const buildVideoArgs = (opts: any): Promise<string[]> => {
             return (service as any).buildVideoArgs(opts);
@@ -3879,36 +3819,6 @@ describe('FfmpegService', () => {
 
         it('should clamp to maximum 2.0', () => {
             expect(bitrateToVbrQuality(512)).toBe('2.0');
-        });
-    });
-
-    describe('bitrateToVideoCrf (private, tested via reflection)', () => {
-        const bitrateToVideoCrf = (
-            bitrateKbps: number,
-            width: number,
-            height: number
-        ): number => {
-            return (service as any).bitrateToVideoCrf(
-                bitrateKbps,
-                width,
-                height
-            );
-        };
-
-        it('should return a CRF value for standard parameters', () => {
-            const crf = bitrateToVideoCrf(2500, 1280, 720);
-            expect(crf).toBeGreaterThanOrEqual(16);
-            expect(crf).toBeLessThanOrEqual(34);
-        });
-
-        it('should clamp to minimum 16 for high bitrate', () => {
-            const crf = bitrateToVideoCrf(50000, 640, 360);
-            expect(crf).toBe(16);
-        });
-
-        it('should clamp to maximum 34 for very low bitrate', () => {
-            const crf = bitrateToVideoCrf(10, 3840, 2160);
-            expect(crf).toBe(34);
         });
     });
 

@@ -11,6 +11,12 @@ import {
     execSync,
     type ChildProcess,
 } from 'child_process';
+import {
+    decodeArgs,
+    ladderVideoArgs,
+    scalerExpr,
+    type AccelMode,
+} from './encoder-selection';
 import { mkdirSync, existsSync } from 'fs';
 import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
@@ -88,7 +94,9 @@ export function hlsOutputPath(...parts: string[]): string {
     return join(...parts).replace(/\\/g, '/');
 }
 
-export type AccelMode = 'cpu' | 'nvidia' | 'apple' | 'intel';
+// Defined with the encoder tables it selects between. Re-exported because
+// callers have always imported it from here.
+export type { AccelMode };
 
 /**
  * Whether an ffmpeg failure is the hardware encoder refusing to start, as
@@ -662,55 +670,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return concatPath;
     }
 
-    private getX264Preset(height: number): string {
-        if (height >= 1080) return 'veryfast';
-        if (height >= 720) return 'faster';
-        if (height >= 480) return 'fast';
-        if (height >= 360) return 'medium';
-        return 'slow';
-    }
-
-    /**
-     * Spare NVDEC decode surfaces.
-     *
-     * Measured on the GTX 1050 with a six-rendition ladder, identical for direct
-     * and concat inputs: 0-4 extra exhausts the pool mid-decode, 6-12 works, and
-     * 16 or more makes cuvidCreateDecoder refuse to initialise at all
-     * (CUDA_ERROR_INVALID_VALUE) because NVDEC caps total surfaces.
-     *
-     * So this is a fixed budget, not a per-rendition one: the ceiling belongs to
-     * the decoder, not the ladder. Scaling it by rendition count reached 20 on a
-     * six-rung ladder and broke every encode outright.
-     */
-    private static readonly EXTRA_HW_FRAMES = 8;
-
-    private getNvencPreset(height: number): string {
-        if (height >= 1080) return 'p4';
-        if (height >= 720) return 'p5';
-        if (height >= 480) return 'p5';
-        if (height >= 360) return 'p6';
-        return 'p7';
-    }
-
     private bitrateToVbrQuality(bitrateKbps: number): string {
         const q = Math.max(0.1, Math.min(2.0, bitrateKbps / 128));
         return q.toFixed(1);
-    }
-
-    private bitrateToVideoCrf(
-        bitrateKbps: number,
-        width: number,
-        height: number,
-        fps: number
-    ): number {
-        // Bits per pixel must use the real frame rate: this assumed 30 fps, so a
-        // 50 fps source was treated as having 66% more bits per pixel than it
-        // does, and the quality target it derived demanded more than the rate cap
-        // could pay for — the encoder rode the cap and motion fell apart.
-        const bpp =
-            (bitrateKbps * 1000) / (width * height * (fps > 0 ? fps : 30));
-        const crf = 23 - Math.log2(bpp / 0.1) * 3;
-        return Math.max(16, Math.min(34, Math.round(crf)));
     }
 
     private async buildVideoArgs(
@@ -732,33 +694,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         const hasReencode = renditions.some((r) => !r.copyStream);
 
-        if (hasReencode && this.accelMode === 'nvidia') {
-            // Every rendition branch holds references to decoded surfaces, so a
-            // ladder drains NVDEC's pool: it then stops handing back frames and
-            // reports "No decoder surfaces left". The decoder does not fail
-            // cleanly — downstream this arrives as "Invalid data found when
-            // processing input", which either kills the encode or, when the pool
-            // recovers between frames, yields structurally valid H.264 built from
-            // frames that were never decoded properly. That is the corruption in
-            // #93. Ask for surfaces to spare, scaled to the ladder.
-            args.push(
-                '-extra_hw_frames',
-                String(FfmpegService.EXTRA_HW_FRAMES),
-                '-hwaccel',
-                'cuda',
-                '-hwaccel_output_format',
-                'cuda'
-            );
-        } else if (hasReencode && this.accelMode === 'apple') {
-            args.push(
-                '-hwaccel',
-                'videotoolbox',
-                '-hwaccel_output_format',
-                'videotoolbox_vld'
-            );
-        } else if (hasReencode && this.accelMode === 'intel') {
-            args.push('-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv');
-        }
+        args.push(...decodeArgs(this.accelMode, hasReencode));
 
         if (trimming) {
             const concatPath = await this.buildConcatFile(
@@ -839,22 +775,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     `[0:v:${trackIdx}]${trimSelect}split=${entries.length}${splitOutputs}`
                 );
                 for (const e of entries) {
-                    let scalerExpr: string;
-                    if (this.accelMode === 'nvidia') {
-                        scalerExpr = `scale_cuda=${e.rendition.width}:${e.rendition.height}`;
-                    } else if (this.accelMode === 'apple') {
-                        scalerExpr = `scale_vt=w=${e.rendition.width}:h=${e.rendition.height}`;
-                    } else if (this.accelMode === 'intel') {
-                        // vpp_qsv, not scale_qsv: the VPP filter is what current
-                        // FFmpeg builds carry, and it keeps the frame in QSV
-                        // memory so no download/upload round trip appears
-                        // between decode and encode.
-                        scalerExpr = `vpp_qsv=w=${e.rendition.width}:h=${e.rendition.height}`;
-                    } else {
-                        scalerExpr = `scale=${e.rendition.width}:${e.rendition.height}`;
-                    }
                     filterParts.push(
-                        `[reencode${e.globalIndex}]${scalerExpr}[vout${e.globalIndex}]`
+                        `[reencode${e.globalIndex}]${scalerExpr(
+                            this.accelMode,
+                            e.rendition.width,
+                            e.rendition.height
+                        )}[vout${e.globalIndex}]`
                     );
                 }
             }
@@ -872,146 +798,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             const r = reencodeRenditions[i];
             args.push('-map', `[vout${i}]`);
 
-            if (this.accelMode === 'nvidia') {
-                args.push(
-                    `-c:v:${videoOutputIndex}`,
-                    'h264_nvenc',
-                    `-profile:v:${videoOutputIndex}`,
-                    'high',
-                    `-preset:v:${videoOutputIndex}`,
-                    this.getNvencPreset(r.height),
-                    `-tune:v:${videoOutputIndex}`,
-                    'hq',
-                    `-rc:v:${videoOutputIndex}`,
-                    'vbr'
-                );
-                if (r.vbr) {
-                    const cq = this.bitrateToVideoCrf(
-                        r.videoBitrateKbps,
-                        r.width,
-                        r.height,
-                        sourceFrameRate
-                    );
-                    args.push(
-                        `-cq:v:${videoOutputIndex}`,
-                        `${cq}`,
-                        `-b:v:${videoOutputIndex}`,
-                        '0',
-                        `-maxrate:v:${videoOutputIndex}`,
-                        `${r.videoBitrateKbps}k`,
-                        `-bufsize:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
-                    );
-                } else {
-                    args.push(
-                        `-b:v:${videoOutputIndex}`,
-                        `${r.videoBitrateKbps}k`,
-                        `-maxrate:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.07)}k`,
-                        `-bufsize:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
-                    );
-                }
-            } else if (this.accelMode === 'intel') {
-                // Quick Sync. `-global_quality` with `-look_ahead 0` is QSV's
-                // constant-quality mode, the counterpart of NVENC's `-cq`; the
-                // scale is the same 0-51 range as x264's CRF, so the existing
-                // bitrate-to-CRF mapping applies unchanged.
-                args.push(
-                    `-c:v:${videoOutputIndex}`,
-                    'h264_qsv',
-                    `-profile:v:${videoOutputIndex}`,
-                    'high',
-                    `-preset:v:${videoOutputIndex}`,
-                    'medium'
-                );
-                if (r.vbr) {
-                    const quality = this.bitrateToVideoCrf(
-                        r.videoBitrateKbps,
-                        r.width,
-                        r.height,
-                        sourceFrameRate
-                    );
-                    args.push(
-                        `-global_quality:v:${videoOutputIndex}`,
-                        `${quality}`,
-                        `-look_ahead:v:${videoOutputIndex}`,
-                        '0',
-                        `-maxrate:v:${videoOutputIndex}`,
-                        `${r.videoBitrateKbps}k`,
-                        `-bufsize:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
-                    );
-                } else {
-                    args.push(
-                        `-b:v:${videoOutputIndex}`,
-                        `${r.videoBitrateKbps}k`,
-                        `-maxrate:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.07)}k`,
-                        `-bufsize:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
-                    );
-                }
-            } else if (this.accelMode === 'apple') {
-                args.push(
-                    `-c:v:${videoOutputIndex}`,
-                    'h264_videotoolbox',
-                    `-allow_sw:v:${videoOutputIndex}`,
-                    '1',
-                    `-realtime:v:${videoOutputIndex}`,
-                    '0',
-                    `-profile:v:${videoOutputIndex}`,
-                    'high'
-                );
-                args.push(
-                    `-b:v:${videoOutputIndex}`,
-                    `${r.videoBitrateKbps}k`,
-                    `-maxrate:v:${videoOutputIndex}`,
-                    `${Math.round(r.videoBitrateKbps * (r.vbr ? 1.5 : 1.07))}k`,
-                    `-bufsize:v:${videoOutputIndex}`,
-                    `${Math.round(r.videoBitrateKbps * (r.vbr ? 2 : 1.5))}k`
-                );
-            } else {
-                args.push(
-                    `-c:v:${videoOutputIndex}`,
-                    'libx264',
-                    `-preset:v:${videoOutputIndex}`,
-                    this.getX264Preset(r.height)
-                );
-                if (r.vbr) {
-                    const crf = this.bitrateToVideoCrf(
-                        r.videoBitrateKbps,
-                        r.width,
-                        r.height,
-                        sourceFrameRate
-                    );
-                    args.push(
-                        `-crf:v:${videoOutputIndex}`,
-                        `${crf}`,
-                        `-maxrate:v:${videoOutputIndex}`,
-                        `${r.videoBitrateKbps}k`,
-                        `-bufsize:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
-                    );
-                } else {
-                    args.push(
-                        `-b:v:${videoOutputIndex}`,
-                        `${r.videoBitrateKbps}k`,
-                        `-maxrate:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.07)}k`,
-                        `-bufsize:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
-                    );
-                }
-                // x264 puts a keyframe wherever it detects a cut, which lands
-                // off the `-g` cadence below and takes the segment boundary
-                // with it — the HLS muxer closes a chunk at the first keyframe
-                // past `-hls_time`, so a scene change two seconds early yields
-                // a short segment and the chain stops being uniform. NVENC and
-                // VideoToolbox do not scene-cut unless asked, so this is the
-                // CPU path's problem alone.
-                args.push(`-sc_threshold:v:${videoOutputIndex}`, '0');
-            }
+            args.push(
+                ...ladderVideoArgs(
+                    this.accelMode,
+                    r,
+                    videoOutputIndex,
+                    sourceFrameRate
+                )
+            );
             args.push(
                 `-g:v:${videoOutputIndex}`,
                 `${gopFrames}`,
