@@ -214,3 +214,6 @@ and whose licence texts ship beside them, as the GPL requires.
 One thing this does not settle: `docs/ffmpeg-licensing.md` records that the GPL
 position still needs BCC sign-off, and that remains true. It is a release gate,
 not a code one.
+
+**Patents are a separate question entirely**, which no copyright licence
+addresses. See [PATENTS.md](PATENTS.md).
