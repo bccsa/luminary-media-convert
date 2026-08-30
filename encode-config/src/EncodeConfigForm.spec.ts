@@ -166,3 +166,155 @@ describe('EncodeConfigForm copy eligibility', () => {
         }
     });
 });
+
+/**
+ * The user-visible end of the anamorphic fix: what the form actually opens on
+ * for a 720x576 PAL broadcast carrying 16:9. Before, it suggested 600x480 and
+ * down — every rung a 5:4 squash of a 16:9 picture, and the source's own
+ * 1024x576 never offered at all.
+ */
+describe('EncodeConfigForm non-square pixels', () => {
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
+    function palProbe(overrides: Partial<VideoTrackInfo> = {}): ProbeResult {
+        return {
+            format: { duration: 120, bitrateKbps: 4000, formatName: 'mxf' },
+            videoTracks: [
+                videoTrack({
+                    index: 0,
+                    width: 720,
+                    height: 576,
+                    displayWidth: 1024,
+                    displayHeight: 576,
+                    bitrateKbps: 4000,
+                    ...overrides,
+                }),
+            ],
+            audioTracks: [
+                {
+                    index: 0,
+                    codec: 'pcm_s16le',
+                    bitrateKbps: 1536,
+                    channels: 2,
+                    sampleRate: 48000,
+                    startTime: 0,
+                },
+            ],
+        };
+    }
+
+    function renditions(wrapper: ReturnType<typeof mount>): string[] {
+        const config = (
+            wrapper.vm as unknown as {
+                buildEncodeConfig: () => {
+                    videoRenditions?: { width: number; height: number }[];
+                } | null;
+            }
+        ).buildEncodeConfig();
+        return (config?.videoRenditions ?? []).map(
+            (r) => `${r.width}x${r.height}`
+        );
+    }
+
+    it('opens on a square-pixel ladder at the source display size', () => {
+        const wrapper = mount(EncodeConfigForm, {
+            props: { probeResult: palProbe(), byteRange: false },
+        });
+
+        expect(renditions(wrapper)).toEqual([
+            '1024x576',
+            '854x480',
+            '640x360',
+            '426x240',
+            '256x144',
+        ]);
+    });
+
+    it('greys the Copy box out with the reason it cannot be squared', () => {
+        const wrapper = mount(EncodeConfigForm, {
+            props: { probeResult: palProbe(), byteRange: false },
+        });
+
+        // One box per rung, and every one of them refused: the reason is the
+        // source's, so no rendition of it can escape by being smaller.
+        const boxes = copyBoxes(wrapper);
+        expect(boxes).toHaveLength(5);
+        for (const box of boxes) {
+            expect(box.attributes('disabled')).toBeDefined();
+            expect(box.element.closest('label')?.getAttribute('title')).toMatch(
+                /non-square pixels/
+            );
+        }
+        expect(copyFlags(wrapper)).toEqual([
+            false,
+            false,
+            false,
+            false,
+            false,
+        ]);
+    });
+
+    it('keeps Copy out of reach under a trim as well', () => {
+        // The alignment rule is the one a quick cut relaxes. This one it does
+        // not: a lossless cut of an anamorphic source is anamorphic output.
+        const wrapper = mount(EncodeConfigForm, {
+            props: {
+                probeResult: palProbe(),
+                byteRange: false,
+                trimActive: true,
+            },
+        });
+
+        expect(copyBoxes(wrapper)[0].attributes('disabled')).toBeDefined();
+    });
+
+    it('offers each angle of a multi-angle source at its display size', () => {
+        const probe = palProbe();
+        probe.videoTracks.push(
+            videoTrack({
+                index: 1,
+                width: 720,
+                height: 576,
+                displayWidth: 1024,
+                displayHeight: 576,
+                bitrateKbps: 4000,
+                name: 'Close',
+            })
+        );
+
+        const wrapper = mount(EncodeConfigForm, {
+            props: { probeResult: probe, byteRange: false },
+        });
+
+        // Multi-angle defaults to copying each angle; anamorphic takes that
+        // away, so both open re-encoded at the display size instead.
+        expect(renditions(wrapper)).toEqual(['1024x576', '1024x576']);
+        expect(copyFlags(wrapper)).toEqual([false, false]);
+    });
+
+    it('leaves a square-pixel source exactly as it was', () => {
+        const square = palProbe({
+            width: 1920,
+            height: 1080,
+            displayWidth: 1920,
+            displayHeight: 1080,
+            bitrateKbps: 8000,
+        });
+
+        const wrapper = mount(EncodeConfigForm, {
+            props: { probeResult: square, byteRange: false },
+        });
+
+        expect(renditions(wrapper)).toEqual([
+            '1920x1080',
+            '1280x720',
+            '854x480',
+            '640x360',
+            '426x240',
+            '256x144',
+        ]);
+        expect(copyBoxes(wrapper)[0].attributes('disabled')).toBeUndefined();
+    });
+});

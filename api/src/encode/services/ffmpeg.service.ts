@@ -825,12 +825,33 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     `[0:v:${trackIdx}]${trimSelect}split=${entries.length}${splitOutputs}`
                 );
                 for (const e of entries) {
+                    // Square pixels, always — the output contract, not an
+                    // adjustment. The widths above are *display* widths (see
+                    // `aspectWidthForHeight` in encode-config's ladder), so the
+                    // frame only has to stop claiming otherwise.
+                    //
+                    // Unconditional because the scalers disagree and there is
+                    // no reason to care which one ran: `scale` and `scale_vt`
+                    // rewrite SAR to preserve the input's display aspect
+                    // (720x576 SAR 64:45 scaled to 1024x576 comes out SAR 1:1),
+                    // while a scaler that inherits its input link's ratio hands
+                    // the encoder 1024x576 still tagged 64:45 — a 2.53:1 smear
+                    // of a 16:9 picture.
+                    //
+                    // Metadata only: setsar writes frame->sample_aspect_ratio
+                    // and forwards the frame, which is why it is safe on a
+                    // CUDA/QSV/VideoToolbox surface and costs no download or
+                    // upload. Appended here rather than inside `scalerExpr`
+                    // because it is a statement about the frame, not about the
+                    // scaler — and it must come after it, since a scale filter
+                    // derives its output link's ratio from its input and would
+                    // overwrite an earlier one.
                     filterParts.push(
                         `[reencode${e.globalIndex}]${scalerExpr(
                             this.accelMode,
                             e.rendition.width,
                             e.rendition.height
-                        )}[vout${e.globalIndex}]`
+                        )},setsar=1[vout${e.globalIndex}]`
                     );
                 }
             }

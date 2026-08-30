@@ -10,6 +10,22 @@ export interface VideoTrackInfo {
     codec: string;
     width: number;
     height: number;
+    /**
+     * The dimensions this picture is meant to be shown at, in square pixels.
+     *
+     * A 720x576 PAL broadcast carrying 16:9 stores non-square samples and its
+     * coded size says nothing about its shape; it is shown 1024x576. Equal to
+     * {@link width} / {@link height} for the overwhelmingly common square-pixel
+     * source, which is what makes the inequality the whole of the question "is
+     * this track anamorphic" — see `isAnamorphic` in `aspect.ts`.
+     *
+     * Absent on a session restored from before the API reported it, like the
+     * other optional fields here. Read it through `displayDimensionsOf` rather
+     * than directly, so the fallback to the coded size happens in one place.
+     */
+    displayWidth?: number;
+    /** See {@link displayWidth}. */
+    displayHeight?: number;
     bitrateKbps: number;
     frameRate: number;
     profile?: string;
@@ -83,6 +99,7 @@ interface FfprobeStream {
     codec_name?: string;
     width?: number;
     height?: number;
+    sample_aspect_ratio?: string;
     bit_rate?: string;
     start_time?: string;
     r_frame_rate?: string;
@@ -149,6 +166,42 @@ function parseStartTime(raw?: string): number {
     return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/**
+ * The dimensions a track's picture is meant to be shown at, in square pixels,
+ * with an unstated, unknown (`0:1`) or `N/A` sample aspect ratio all reading as
+ * square.
+ *
+ * Definite rather than undefined, for {@link parseStartTime}'s reason:
+ * everything that reads this is about to build a rendition or a thumbnail out
+ * of it, and a third case would have to be answered at every one of those
+ * places. A container that does not say what shape its samples are is saying
+ * they are square, and for all but broadcast SD it is telling the truth.
+ *
+ * **Never downscales.** The correction scales the short axis up and leaves the
+ * long one alone, so no sample the source actually carries is thrown away:
+ * 720x576 at 64:45 widens to 1024x576, and 720x480 at 8:9 heightens to 720x540
+ * rather than narrowing to 640x480 and discarding eighty columns of real
+ * detail.
+ *
+ * Rounded even because these are dimensions an H.264/yuv420p encoder will be
+ * asked for. The common ratios land exactly anyway — 720 at 64:45 is 1024, 704
+ * at 12:11 is 768 — but nothing guarantees the next source is that tidy.
+ */
+function displayDimensions(
+    codedWidth: number,
+    codedHeight: number,
+    sar?: string
+): { width: number; height: number } {
+    const [num, den] = (sar ?? '').split(':').map(Number);
+    if (!(num > 0) || !(den > 0) || num === den)
+        return { width: codedWidth, height: codedHeight };
+
+    const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+    return num > den
+        ? { width: even((codedWidth * num) / den), height: even(codedHeight) }
+        : { width: even(codedWidth), height: even((codedHeight * den) / num) };
+}
+
 @Injectable()
 export class ProbeService {
     private readonly logger = new Logger(ProbeService.name);
@@ -165,11 +218,18 @@ export class ProbeService {
         for (const s of data.streams) {
             if (s.codec_type === 'video') {
                 if (s.disposition?.attached_pic === 1) continue;
+                const display = displayDimensions(
+                    s.width ?? 0,
+                    s.height ?? 0,
+                    s.sample_aspect_ratio
+                );
                 videoTracks.push({
                     index: videoStreamIndex++,
                     codec: s.codec_name ?? 'unknown',
                     width: s.width ?? 0,
                     height: s.height ?? 0,
+                    displayWidth: display.width,
+                    displayHeight: display.height,
                     bitrateKbps: this.extractBitrateKbps(s),
                     frameRate: this.parseFrameRate(
                         s.avg_frame_rate ?? s.r_frame_rate ?? '0/1'

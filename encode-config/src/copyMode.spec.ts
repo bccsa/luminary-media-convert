@@ -132,3 +132,78 @@ describe('copy mode and H.265', () => {
         ).toBeNull();
     });
 });
+
+/**
+ * The form's mirror of the API's shape rule. The two are deliberately separate
+ * copies — the API cannot import a Vue library — so the point of these is that
+ * the form greys the Copy box out for exactly the tracks the API would refuse,
+ * rather than letting someone pick a configuration the submit then rejects.
+ */
+describe('non-square pixels', () => {
+    const anamorphic = goodCadenceTrack({
+        width: 720,
+        height: 576,
+        displayWidth: 1024,
+        displayHeight: 576,
+        startTime: 0,
+    });
+
+    it('blocks copy on a PAL SD track carrying 16:9', () => {
+        expect(copyModeBlockedReason(anamorphic, 0, 6)).toBe(
+            'This track stores non-square pixels (720x576 shown 1024x576); ' +
+                "copy mode hands the source's own bytes to the muxer, which " +
+                'cannot square them — re-encode this rendition instead.'
+        );
+    });
+
+    it('blocks the quick cut too, unlike every other reason it relaxes', () => {
+        // The alignment rule is the one a quick cut is allowed to ignore. This
+        // one it is not: splicing the same bitstream inherits the same ratio.
+        expect(quickTrimBlockedReason(anamorphic, 6)).toMatch(
+            /non-square pixels/
+        );
+    });
+
+    it('wins over the cadence and alignment reasons', () => {
+        const alsoBroken = goodCadenceTrack({
+            ...anamorphic,
+            gopRegular: false,
+        });
+        expect(copyModeBlockedReason(alsoBroken, 0.98, 6)).toMatch(
+            /non-square pixels/
+        );
+        expect(quickTrimBlockedReason(alsoBroken, 6)).toMatch(
+            /non-square pixels/
+        );
+    });
+
+    it('names the other axis for a source that corrects on height', () => {
+        const ntsc = goodCadenceTrack({
+            width: 720,
+            height: 480,
+            displayWidth: 720,
+            displayHeight: 540,
+            startTime: 0,
+        });
+        expect(copyModeBlockedReason(ntsc, 0, 6)).toMatch(
+            /\(720x480 shown 720x540\)/
+        );
+    });
+
+    it('leaves a square-pixel track alone', () => {
+        const square = goodCadenceTrack({
+            displayWidth: 1920,
+            displayHeight: 1080,
+            startTime: 0,
+        });
+        expect(copyModeBlockedReason(square, 0, 6)).toBeNull();
+        expect(quickTrimBlockedReason(square, 6)).toBeNull();
+    });
+
+    it('leaves a probe from before the fields existed alone', () => {
+        const legacy = goodCadenceTrack({ startTime: 0 });
+        expect(legacy.displayWidth).toBeUndefined();
+        expect(copyModeBlockedReason(legacy, 0, 6)).toBeNull();
+        expect(quickTrimBlockedReason(legacy, 6)).toBeNull();
+    });
+});

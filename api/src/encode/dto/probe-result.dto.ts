@@ -18,6 +18,29 @@ export class VideoTrackInfoDto {
     @Expose()
     height: number;
 
+    @ApiPropertyOptional({
+        example: 1024,
+        description:
+            'The width this picture is meant to be shown at, in square pixels. ' +
+            'Equal to `width` for a square-pixel source; different when the ' +
+            'track stores non-square samples, as broadcast SD does (720x576 ' +
+            'at SAR 64:45 is shown 1024x576). HLS output is always encoded ' +
+            'square, so this is the width the ladder is built from. Absent on ' +
+            'a session restored from before the API reported it.',
+    })
+    @Expose()
+    displayWidth?: number;
+
+    @ApiPropertyOptional({
+        example: 576,
+        description:
+            'The height this picture is meant to be shown at, in square ' +
+            'pixels. See `displayWidth`; a source with tall samples (NTSC DV ' +
+            'at SAR 8:9) corrects on this axis instead.',
+    })
+    @Expose()
+    displayHeight?: number;
+
     @ApiProperty({ example: 5000 })
     @Expose()
     bitrateKbps: number;
