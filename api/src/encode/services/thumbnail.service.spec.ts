@@ -147,6 +147,57 @@ describe('selectStoryboardTrack', () => {
             null
         );
     });
+
+    /**
+     * The returned dimensions are the track's *display* size, because the
+     * thumbnail is a picture of the picture. Selection stays on the coded
+     * width: that asks how much real detail there is to downscale from and how
+     * much the decode costs, and both are questions about stored samples.
+     */
+    it('reports the display size for an anamorphic track', () => {
+        expect(
+            selectStoryboardTrack([
+                {
+                    index: 0,
+                    width: 720,
+                    height: 576,
+                    displayWidth: 1024,
+                    displayHeight: 576,
+                },
+            ])
+        ).toEqual({ index: 0, width: 1024, height: 576 });
+    });
+
+    it('still chooses by coded width, not by how wide it is shown', () => {
+        // The anamorphic track carries 720 samples across and the other 800, so
+        // it is the cheaper decode — even though it is shown the wider of the
+        // two. Choosing on display width would pick the 800 and pay more for
+        // frames nobody sees above 160px.
+        const track = selectStoryboardTrack([
+            {
+                index: 0,
+                width: 800,
+                height: 600,
+                displayWidth: 800,
+                displayHeight: 600,
+            },
+            {
+                index: 1,
+                width: 720,
+                height: 576,
+                displayWidth: 1024,
+                displayHeight: 576,
+            },
+        ]);
+
+        expect(track).toEqual({ index: 1, width: 1024, height: 576 });
+    });
+
+    it('falls back to the coded size on a probe with no display fields', () => {
+        expect(
+            selectStoryboardTrack([{ index: 0, width: 1280, height: 720 }])
+        ).toEqual({ index: 0, width: 1280, height: 720 });
+    });
 });
 
 describe('ThumbnailService', () => {
@@ -783,6 +834,30 @@ describe('ThumbnailService', () => {
 
             const args = passArgs(THUMBS);
             expect(args[args.indexOf('-vf') + 1]).toContain('scale=160:90');
+        });
+
+        it('cuts a 16:9 tile from an anamorphic source, not a squashed one', async () => {
+            mockFfmpeg({ thumbs: 1 });
+
+            // The reported bug, at storyboard scale: fed the coded 720x576 this
+            // produced 160x128 — a 5:4 squash of a 16:9 picture, reproduced
+            // faithfully by every client that renders the cue. The caller now
+            // passes the display size, which `selectStoryboardTrack` supplies.
+            await sample({ sourceWidth: 1024, sourceHeight: 576 });
+
+            const args = passArgs(THUMBS);
+            expect(args[args.indexOf('-vf') + 1]).toContain('scale=160:90');
+        });
+
+        it('cuts a 4:3 tile from a source that corrects on height', async () => {
+            mockFfmpeg({ thumbs: 1 });
+
+            // NTSC DV: 720x480 shown 720x540. Sized from the coded frame it was
+            // 160x108, which is neither 4:3 nor anything else the source is.
+            await sample({ sourceWidth: 720, sourceHeight: 540 });
+
+            const args = passArgs(THUMBS);
+            expect(args[args.indexOf('-vf') + 1]).toContain('scale=160:120');
         });
 
         it('should produce even height for non-standard aspect ratio', async () => {
