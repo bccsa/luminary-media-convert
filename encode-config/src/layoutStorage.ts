@@ -1,9 +1,31 @@
+import { displayDimensionsOf } from './aspect';
 import type { ProbeResult, EncodeConfig } from './types';
 
 const STORAGE_KEY = 'luminary_encode_configs';
 
-function videoTrackSegment(track: { width: number; height: number; codec: string }): string {
-    return `${track.width}x${track.height}:${track.codec}`;
+/**
+ * One video track's contribution to the layout fingerprint.
+ *
+ * The display size is appended only when it differs from the coded size, so
+ * every key ever written for a square-pixel source stays byte-identical and
+ * nothing already saved is orphaned — which is all but broadcast SD. It has to
+ * be there at all because a 4:3 PAL SD and a 16:9 PAL SD are both `720x576` and
+ * shared one slot: the track names and languages saved against one came back on
+ * the other.
+ */
+function videoTrackSegment(track: {
+    width: number;
+    height: number;
+    codec: string;
+    displayWidth?: number;
+    displayHeight?: number;
+}): string {
+    const display = displayDimensionsOf(track);
+    const shown =
+        display.width !== track.width || display.height !== track.height
+            ? `@${display.width}x${display.height}`
+            : '';
+    return `${track.width}x${track.height}${shown}:${track.codec}`;
 }
 
 function audioTrackSegment(track: { codec: string; channels: number; sampleRate: number }): string {
