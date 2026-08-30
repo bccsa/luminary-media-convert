@@ -286,7 +286,16 @@ export function previewVideoArgs(
     scaleFilter?: string
 ): string[] {
     assertEncodable(mode);
-    const scale = (expr: string) => (scaleFilter ? ['-vf', expr] : []);
+    // `,setsar=1` on every scaled path, and inside this helper rather than at
+    // the six call sites below so a mode added later cannot forget it. The
+    // widths in `scaleFilter` are display widths, so the frame has only to stop
+    // claiming a ratio of its own; a preview segment is H.264 in MPEG-TS played
+    // by a plain <video>, and an inherited 64:45 on an 854-wide frame would
+    // stretch a picture that is already the right shape. Metadata only, so it
+    // costs nothing on a hardware surface — and it goes after the scaler, since
+    // a scale filter derives its output link's ratio from its input.
+    const scale = (expr: string) =>
+        scaleFilter ? ['-vf', `${expr},setsar=1`] : [];
     if (!useGpu) mode = 'cpu';
 
     switch (mode) {
@@ -331,8 +340,13 @@ export function previewVideoArgs(
                 '0',
                 '-b:v',
                 '1500k',
+                // Both dimensions, never `-2`: that derives the height from
+                // the input's *storage* ratio, so `scale_vt=w=854:h=-2` on a
+                // 720x576 source gives 683, not 480.
                 ...scale(
-                    `scale_vt=w=${(scaleFilter ?? '').split(':')[0]}:h=-2`
+                    `scale_vt=w=${(scaleFilter ?? '').split(':')[0]}:h=${
+                        (scaleFilter ?? '').split(':')[1]
+                    }`
                 ),
             ];
         default:
