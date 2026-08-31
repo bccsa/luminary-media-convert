@@ -391,8 +391,11 @@ async function chooseFfmpegDirectory(): Promise<void> {
  */
 function buildMenu(): void {
     const isMac = process.platform === 'darwin';
+    // No ellipsis. Apple's convention reserves it for an item that needs more
+    // input before it can act; this opens a window and asks for nothing. The
+    // FFmpeg picker below keeps its ellipsis for exactly that reason.
     const licences = {
-        label: 'Licences…',
+        label: 'Licences',
         click: () => showLicences(mainWindow),
     };
     // Deliberately a plain item rather than anything prominent: the licence
@@ -414,7 +417,6 @@ function buildMenu(): void {
                           label: app.name,
                           submenu: [
                               { role: 'about' },
-                              licences,
                               { type: 'separator' },
                               ...ffmpegItems,
                               { type: 'separator' },
