@@ -1,5 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { aacArgs, decodeArgs, previewVideoArgs } from './encoder-selection';
+import {
+    aacArgs,
+    decodeArgs,
+    previewVideoArgs,
+    type AccelMode,
+} from './encoder-selection';
+import { acquireEncoderSession } from './encoder-sessions';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
@@ -743,7 +749,7 @@ export class PreviewService {
         videoMap: string,
         audioMap: string | null,
         rendition: Rendition,
-        accelMode: string,
+        accelMode: AccelMode,
         useGpu: boolean,
         /**
          * Where the copy path asks the demuxer to seek — ahead of `start` by
@@ -929,7 +935,21 @@ export class PreviewService {
         // Wait for a concurrency slot
         await this.acquireSlot();
 
+        // Two separate limits. The slot above bounds ffmpeg *processes*, which
+        // is about this service's own load. This one bounds hardware encode
+        // *sessions*, whose cap belongs to the graphics driver and is shared
+        // with the ladder — previews staying under three on their own is no
+        // help while a six-rung ladder is running beside them.
+        //
+        // Only a transcoding segment opens an encoder. Copy mode hands bytes
+        // to the muxer and takes no session.
+        let releaseEncoderSession: () => void = () => {};
+
         try {
+            if (!rendition.canCopy) {
+                releaseEncoderSession = await acquireEncoderSession();
+            }
+
             if (!rendition.canCopy || !state.keyframeStep) {
                 await runOnce(start);
                 return outputPath;
@@ -1015,6 +1035,7 @@ export class PreviewService {
             );
             throw e;
         } finally {
+            releaseEncoderSession();
             this.releaseSlot();
         }
 
