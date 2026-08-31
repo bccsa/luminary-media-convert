@@ -95,11 +95,49 @@ export const EXTRA_HW_FRAMES = 8;
  * default would do — produces an ffmpeg command that fails with "Unknown
  * encoder" on the build we ship, several layers from the actual problem.
  */
+export const USE_YOUR_OWN_FFMPEG =
+    'You can point this app at your own FFmpeg instead: ' +
+    'Luminary Media Convert \u2192 Choose FFmpeg\u2026 in the menu, or set ' +
+    'FFMPEG_PATH in the environment.';
+
+/**
+ * The Media Foundation encoder's practical ceiling, in lines.
+ *
+ * Microsoft's H.264 MFT does not reliably encode above 1080p, and 1088 is
+ * 1080 rounded up to the macroblock grid, which is what the encoder actually
+ * measures. Accepted as a known limit rather than worked around — but a user
+ * who hits it deserves to be told which rendition is the problem, not a codec
+ * error from ffmpeg several minutes into a job.
+ */
+export const MEDIA_FOUNDATION_MAX_HEIGHT = 1088;
+
 function assertEncodable(mode: AccelMode): void {
     if (mode === 'none') {
         throw new Error(
-            'No usable encoder on this machine: this ffmpeg has no software ' +
-                'H.264 encoder and no hardware encoder is available.'
+            'This machine has no encoder this app can use. It needs a graphics ' +
+                'card or an operating system encoder, and this FFmpeg has no ' +
+                'software encoder to fall back on.\n\n' +
+                USE_YOUR_OWN_FFMPEG
+        );
+    }
+}
+
+/**
+ * Refuse a rendition Media Foundation cannot produce, before the encode starts.
+ *
+ * Left to ffmpeg this surfaces as an encoder that will not open, part-way
+ * through a job, naming nothing the person chose. Said here it names the
+ * rendition and offers the two ways out.
+ */
+function assertWithinEncoderLimits(mode: AccelMode, height: number): void {
+    if (mode === 'mediafoundation' && height > MEDIA_FOUNDATION_MAX_HEIGHT) {
+        throw new Error(
+            `This machine has no graphics-card encoder, so it is using Windows' ` +
+                `built-in one, which cannot encode above ${MEDIA_FOUNDATION_MAX_HEIGHT}p. ` +
+                `The ${height}p rendition will not work here.\n\n` +
+                'Either remove that rendition and encode up to 1080p, or use a ' +
+                'machine with a graphics card.\n\n' +
+                USE_YOUR_OWN_FFMPEG
         );
     }
 }
@@ -406,6 +444,7 @@ export function ladderVideoArgs(
     fps: number
 ): string[] {
     assertEncodable(mode);
+    assertWithinEncoderLimits(mode, r.height);
     const t = `:v:${streamIndex}`;
     const args: string[] = [];
     const cap = Math.round(r.videoBitrateKbps * 1.07);

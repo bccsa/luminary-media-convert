@@ -346,6 +346,12 @@ configure_flags=(
     # unredistributable; and no version3, which keeps this v2.1-or-later.
     --enable-libwebp
 
+    # Static, against the letter of the licensing policy, which asks for
+    # --enable-shared. That flag belongs to the linked-library mode; this app
+    # spawns ffmpeg as a separate process, where the policy's own text says no
+    # linking obligations apply. Shared would gain nothing legally and would
+    # break the dependency audit below, which is what keeps the binary
+    # relocatable. Raised with the product owner and agreed, 31 Aug 2026.
     --enable-static
     --disable-shared
 

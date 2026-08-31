@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     aacArgs,
     bitrateToVideoCrf,
+    MEDIA_FOUNDATION_MAX_HEIGHT,
     bridgeVideoArgs,
     ENCODER_FOR,
     WINDOWS_CHAIN,
@@ -389,6 +390,74 @@ describe('the Windows fallback chain', () => {
             expect(args).not.toContain('-crf:v:0');
             expect(args).not.toContain('-global_quality:v:0');
             expect(args).toContain('-b:v:0');
+        }
+    });
+});
+
+describe('what a user is told when encoding is not possible', () => {
+    const r = { width: 1280, height: 720, videoBitrateKbps: 2500 };
+
+    // The substitution path exists but nothing used to mention it, so the
+    // message named a dead end. Agreed with the product owner: when there is no
+    // encoder, say so and offer the way out.
+    it('names the way out when there is no encoder at all', () => {
+        let message = '';
+        try {
+            ladderVideoArgs('none', r, 0, 30);
+        } catch (e) {
+            message = (e as Error).message;
+        }
+        expect(message).toMatch(/no encoder this app can use/i);
+        expect(message).toMatch(/Choose FFmpeg/);
+        expect(message).toMatch(/FFMPEG_PATH/);
+    });
+
+    // Media Foundation's ceiling is accepted rather than worked around, so the
+    // message has to name the rendition that will not work and what to do.
+    it('names the rendition Media Foundation cannot encode', () => {
+        let message = '';
+        try {
+            ladderVideoArgs(
+                'mediafoundation',
+                { width: 3840, height: 2160, videoBitrateKbps: 12000 },
+                0,
+                30
+            );
+        } catch (e) {
+            message = (e as Error).message;
+        }
+        expect(message).toContain('2160p');
+        expect(message).toMatch(/cannot encode above/i);
+        expect(message).toMatch(/Choose FFmpeg/);
+    });
+
+    it('allows Media Foundation up to its ceiling', () => {
+        expect(() =>
+            ladderVideoArgs(
+                'mediafoundation',
+                {
+                    width: 1920,
+                    height: MEDIA_FOUNDATION_MAX_HEIGHT,
+                    videoBitrateKbps: 6000,
+                },
+                0,
+                30
+            )
+        ).not.toThrow();
+    });
+
+    // The ceiling belongs to that encoder alone. A GPU machine must not be
+    // refused a 4K rendition because of a limit that does not apply to it.
+    it('does not apply the ceiling to any other encoder', () => {
+        for (const mode of ['nvidia', 'intel', 'amd', 'apple'] as AccelMode[]) {
+            expect(() =>
+                ladderVideoArgs(
+                    mode,
+                    { width: 3840, height: 2160, videoBitrateKbps: 12000 },
+                    0,
+                    30
+                )
+            ).not.toThrow();
         }
     });
 });

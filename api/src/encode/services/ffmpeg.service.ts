@@ -14,6 +14,7 @@ import {
 import {
     aacArgs,
     decodeArgs,
+    USE_YOUR_OWN_FFMPEG,
     ladderVideoArgs,
     scalerExpr,
     type AccelMode,
@@ -296,7 +297,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         // surface as a codec error several screens into a session.
         this.logger.error(
             'No usable encoder found. This ffmpeg has no software H.264 ' +
-                'encoder, and no hardware encoder could be used on this machine.'
+                'encoder, and no hardware encoder could be used on this ' +
+                `machine. ${USE_YOUR_OWN_FFMPEG}`
         );
         return 'none';
     }
