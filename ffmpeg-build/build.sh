@@ -314,6 +314,22 @@ case "$target" in
     # h264_amf for Radeon, h264_mf for everything else: the Media Foundation
     # encoder ships with every Windows install, so a machine with no usable GPU
     # at all still has an encoder that is not ours.
+    #
+    # NOT TESTED ON HARDWARE. All four are confirmed compiled into the binary,
+    # and the build itself is verified LGPL — but no Windows machine has been
+    # available to run them on, so nobody has seen h264_amf or h264_mf open a
+    # single frame. Two things follow from that, and both matter now that this
+    # build carries no libx264 to fall back on:
+    #
+    #   - The argument sets for both (encoder-selection.ts) are reasoned from
+    #     documentation, not from a machine that accepted them. An option an
+    #     encoder rejects is a failure to open, not a worse picture.
+    #   - h264_mf is reported to stop somewhere near 1080p. If that is true, a
+    #     GPU-less Windows box asked for a 4K rendition fails outright — for
+    #     exactly the users the fallback exists to serve.
+    #
+    # scripts/probe-encoders.mjs answers both in a few seconds on any Windows
+    # machine with Node. Until someone runs it, treat Windows as unshipped.
     win32-*) encoders="$encoders,h264_nvenc,h264_qsv,h264_amf,h264_mf" ;;
 esac
 

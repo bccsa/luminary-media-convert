@@ -90,11 +90,15 @@ LIBVPL_COMMIT="d77f9195cf495b937631607333288fd917ae8939"
 # They are recorded in the corresponding-source list because they are an input to
 # the build.
 #
-# The floor is NOT verified. FFmpeg raises its required AMF_VERSION between
-# releases and this pin has never been through a build here; if configure reports
-# "amf requested, but not all dependencies are satisfied", the answer is a newer
-# tag, not a workaround. Read the version check in FFmpeg's configure rather than
-# guessing, the way the nv-codec-headers ceiling above was found.
+# The floor is verified: FFmpeg 8.1 requires AMF >= 1.4.36 (configure checks
+# AMF_VERSION >= 0x0001000400240000) and this is exactly that, so the pin is the
+# minimum rather than a comfortable margin. There is no ceiling to find, because
+# 1.4.36 is also the newest tag published.
+#
+# Note the compile-time catch that goes with it: FFmpeg 8.1's vsrc_amf.c is C
+# and includes AMF's DisplayCapture.h, which is C++ only. build.sh disables the
+# amf_capture filter for that reason. If a later AMF or FFmpeg fixes the header,
+# that --disable-filter can go.
 AMF_REPO="https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git"
 AMF_TAG="v1.4.36"
 # Annotated tag, so this is the peeled SHA — see the nv-codec-headers note above.
