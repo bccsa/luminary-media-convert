@@ -22,12 +22,20 @@
  * Which encoder family is in use. Named for the acceleration rather than the
  * encoder because that is what the probe answers and what the UI reports.
  */
-export type AccelMode = 'cpu' | 'nvidia' | 'apple' | 'intel';
+export type AccelMode =
+    | 'cpu'
+    | 'nvidia'
+    | 'apple'
+    | 'intel'
+    | 'amd'
+    | 'mediafoundation';
 
 /** The ffmpeg encoder each mode selects. */
 export type EncoderId =
     | 'h264_nvenc'
     | 'h264_qsv'
+    | 'h264_amf'
+    | 'h264_mf'
     | 'h264_videotoolbox'
     | 'libx264';
 
@@ -37,9 +45,32 @@ export type EncodePurpose = 'ladder' | 'preview' | 'bridge';
 export const ENCODER_FOR: Record<AccelMode, EncoderId> = {
     nvidia: 'h264_nvenc',
     intel: 'h264_qsv',
+    amd: 'h264_amf',
+    mediafoundation: 'h264_mf',
     apple: 'h264_videotoolbox',
     cpu: 'libx264',
 };
+
+/**
+ * The order the Windows chain is tried in, fastest and best first.
+ *
+ * `h264_mf` is last for a reason beyond speed: it is Microsoft's own encoder,
+ * present on every Windows install, so it is the one that answers for a machine
+ * with no usable GPU at all. It is a "produces output" tier rather than a
+ * "produces good output" one — thin rate control, and reportedly capped near
+ * 1080p — but the alternative for those machines is not encoding.
+ *
+ * macOS has a chain of one. VideoToolbox is a framework rather than a hardware
+ * API: on a Mac with no hardware encoder it falls back to Apple's own software
+ * encoder behind `-allow_sw`, so the coverage is already total.
+ */
+export const WINDOWS_CHAIN: AccelMode[] = [
+    'nvidia',
+    'intel',
+    'amd',
+    'mediafoundation',
+];
+export const MACOS_CHAIN: AccelMode[] = ['apple'];
 
 /**
  * Spare NVDEC decode surfaces.
@@ -222,6 +253,18 @@ export function previewVideoArgs(
                 ...scale(`vpp_qsv=w=${w}:h=${h}`),
             ];
         }
+        case 'amd':
+            return [
+                '-c:v',
+                'h264_amf',
+                '-usage',
+                'transcoding',
+                '-quality',
+                'speed',
+                ...scale(`scale=${scaleFilter}`),
+            ];
+        case 'mediafoundation':
+            return ['-c:v', 'h264_mf', ...scale(`scale=${scaleFilter}`)];
         case 'apple':
             return [
                 '-c:v',
@@ -285,6 +328,20 @@ export function bridgeVideoArgs(
                 head: ['-c:v', 'h264_qsv', '-preset', 'medium'],
                 tail: [],
             };
+        case 'amd':
+            return {
+                head: [
+                    '-c:v',
+                    'h264_amf',
+                    '-usage',
+                    'transcoding',
+                    '-quality',
+                    'balanced',
+                ],
+                tail: [],
+            };
+        case 'mediafoundation':
+            return { head: ['-c:v', 'h264_mf'], tail: [] };
         default:
             return {
                 head: [
@@ -401,6 +458,31 @@ export function ladderVideoArgs(
             } else {
                 args.push(...cbr());
             }
+            break;
+
+        // Conservative on purpose: plain rate control, no quality-targeted mode.
+        // Neither of these has been run here, and an option an encoder rejects
+        // is not a worse picture, it is a failure to open. Quality tuning for
+        // them belongs with the measurement work, not with adding them.
+        case 'amd':
+            args.push(
+                `-c${t}`,
+                'h264_amf',
+                `-usage${t}`,
+                'transcoding',
+                `-quality${t}`,
+                'balanced',
+                `-profile${t}`,
+                'high'
+            );
+            args.push(...cbr());
+            break;
+
+        case 'mediafoundation':
+            // Microsoft's encoder takes almost no options worth setting. Bitrate
+            // and nothing else is the whole vocabulary we can rely on.
+            args.push(`-c${t}`, 'h264_mf');
+            args.push(...cbr());
             break;
 
         case 'apple':

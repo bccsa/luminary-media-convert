@@ -238,6 +238,32 @@ if [ "$os" = "mingw32" ]; then
     echo "    ✓ ffnvcodec.pc"
 fi
 
+# ── AMF headers, for h264_amf (Windows only) ─────────────────────────────────
+# AMD's equivalent of nv-codec-headers: headers only, no library, no AMD hardware
+# needed. `--enable-amf` compiles against them and the runtime comes out of the
+# user's Radeon driver.
+#
+# This is what gives a Radeon machine a hardware encoder. Without it such a
+# machine has no hardware path at all — which is survivable only while libx264 is
+# still compiled in.
+if [ "$os" = "mingw32" ]; then
+    log "AMF headers $AMF_TAG"
+    amfsrc="$work/amf"
+    [ -d "$amfsrc/.git" ] || git clone -q "$AMF_REPO" "$amfsrc"
+    git -C "$amfsrc" fetch -q --tags --force origin
+    tagged="$(git -C "$amfsrc" rev-list -n1 "$AMF_TAG" 2>/dev/null || true)"
+    [ "$tagged" = "$AMF_COMMIT" ] ||
+        fail "AMF $AMF_TAG points at ${tagged:-nothing},\n    expected $AMF_COMMIT"
+    git -C "$amfsrc" checkout -q "$AMF_COMMIT"
+    # No build system to run: FFmpeg looks for AMF/core/Version.h on the include
+    # path, so the headers are copied into the prefix directly.
+    mkdir -p "$prefix/include/AMF"
+    cp -R "$amfsrc/amf/public/include/." "$prefix/include/AMF/"
+    [ -f "$prefix/include/AMF/core/Version.h" ] ||
+        fail "AMF headers did not land at $prefix/include/AMF/core/Version.h"
+    echo "    ✓ AMF/core/Version.h"
+fi
+
 # ── libvpl, the Quick Sync dispatcher (Windows only) ─────────────────────────
 # Quick Sync is reached through Intel's oneVPL dispatcher, which is what
 # --enable-libvpl links against. The dispatcher is a loader: it finds the real Media
@@ -323,7 +349,10 @@ case "$target" in
     # machine has: NVENC for NVIDIA, h264_qsv for Intel Quick Sync. Both are
     # loaded from the user's driver at run time, so carrying both costs a
     # compiled-in encoder each and nothing at all on a machine without them.
-    win32-*) encoders="$encoders,h264_nvenc,h264_qsv" ;;
+    # h264_amf for Radeon, h264_mf for everything else: the Media Foundation
+    # encoder ships with every Windows install, so a machine with no usable GPU
+    # at all still has an encoder that is not ours.
+    win32-*) encoders="$encoders,h264_nvenc,h264_qsv,h264_amf,h264_mf" ;;
 esac
 
 configure_flags=(
@@ -383,6 +412,12 @@ if [ "$os" = "mingw32" ]; then
         --enable-nvenc
         --enable-cuda-llvm
         --enable-ffnvcodec
+        --enable-amf
+        # Microsoft's own H.264 encoder, present on every Windows install. It is
+        # the last resort in the fallback chain: slower and weaker than the GPU
+        # encoders, and reportedly capped near 1080p, but it is the difference
+        # between a GPU-less machine encoding badly and not encoding at all.
+        --enable-mediafoundation
 
         # Intel Quick Sync, through the oneVPL dispatcher built above. libmfx is
         # the older route to the same encoders and FFmpeg refuses to have both;
@@ -511,7 +546,9 @@ vpl_static_line=""
 if [ "$os" = "mingw32" ]; then
     nv_pin_line="
   nv-codec-headers $NV_CODEC_HEADERS_TAG ($NV_CODEC_HEADERS_COMMIT)
-    $NV_CODEC_HEADERS_REPO"
+    $NV_CODEC_HEADERS_REPO
+  AMF $AMF_TAG ($AMF_COMMIT)
+    $AMF_REPO"
     vpl_pin_line="
   libvpl $LIBVPL_TAG ($LIBVPL_COMMIT)
     $LIBVPL_REPO"

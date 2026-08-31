@@ -3,6 +3,8 @@ import {
     aacArgs,
     bitrateToVideoCrf,
     bridgeVideoArgs,
+    ENCODER_FOR,
+    WINDOWS_CHAIN,
     decodeArgs,
     ladderVideoArgs,
     previewVideoArgs,
@@ -12,7 +14,14 @@ import {
     type AccelMode,
 } from './encoder-selection';
 
-const MODES: AccelMode[] = ['nvidia', 'intel', 'apple', 'cpu'];
+const MODES: AccelMode[] = [
+    'nvidia',
+    'intel',
+    'amd',
+    'mediafoundation',
+    'apple',
+    'cpu',
+];
 
 describe('x264Preset', () => {
     it('returns veryfast for 1080p and above', () => {
@@ -313,6 +322,73 @@ describe('aacArgs', () => {
     it('names no profile other than LC', () => {
         for (const args of [aacArgs(), aacArgs(0)]) {
             expect(args.join(' ')).not.toMatch(/aac_he|libfdk/i);
+        }
+    });
+});
+
+describe('the Windows fallback chain', () => {
+    it('is ordered best-first and ends at the encoder every install has', () => {
+        expect(WINDOWS_CHAIN).toEqual([
+            'nvidia',
+            'intel',
+            'amd',
+            'mediafoundation',
+        ]);
+    });
+
+    // The failure this guards against is silent: a mode with no case of its own
+    // falls to the switch default, which is libx264. An AMD machine would then
+    // encode in software while reporting that it was using AMF — and after
+    // libx264 goes, it would simply fail.
+    it('gives every mode an encoder of its own, never the software default', () => {
+        for (const mode of MODES) {
+            const ladder = ladderVideoArgs(
+                mode,
+                { width: 1280, height: 720, videoBitrateKbps: 2500 },
+                0,
+                30
+            );
+            const preview = previewVideoArgs(mode, true);
+            const bridge = bridgeVideoArgs(mode, true, { gopFrames: 48 });
+
+            const expected = ENCODER_FOR[mode];
+            expect(ladder[ladder.indexOf('-c:v:0') + 1]).toBe(expected);
+            expect(preview[preview.indexOf('-c:v') + 1]).toBe(expected);
+            expect(bridge.head[bridge.head.indexOf('-c:v') + 1]).toBe(expected);
+
+            if (mode !== 'cpu') {
+                expect(ladder).not.toContain('libx264');
+                expect(preview).not.toContain('libx264');
+                expect(bridge.head).not.toContain('libx264');
+            }
+        }
+    });
+
+    // Both take software frames, so no hardware decode or device-side scaler.
+    // Asking for one would build a filter graph ffmpeg refuses to assemble.
+    it('keeps the new encoders on software frames', () => {
+        for (const mode of ['amd', 'mediafoundation'] as AccelMode[]) {
+            expect(decodeArgs(mode, 'ladder', true)).toEqual([]);
+            expect(scalerExpr(mode, 640, 360)).toBe('scale=640:360');
+        }
+    });
+
+    // h264_mf's rate control is thin and AMF has not been run here. Emitting a
+    // quality-targeted option an encoder rejects is a failure to open, not a
+    // worse picture — so neither gets one until someone has measured them.
+    it('asks neither new encoder for a quality target', () => {
+        const r = {
+            width: 1280,
+            height: 720,
+            videoBitrateKbps: 2500,
+            vbr: true,
+        };
+        for (const mode of ['amd', 'mediafoundation'] as AccelMode[]) {
+            const args = ladderVideoArgs(mode, r, 0, 30);
+            expect(args).not.toContain('-cq:v:0');
+            expect(args).not.toContain('-crf:v:0');
+            expect(args).not.toContain('-global_quality:v:0');
+            expect(args).toContain('-b:v:0');
         }
     });
 });

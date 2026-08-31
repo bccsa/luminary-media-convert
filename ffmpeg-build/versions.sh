@@ -77,6 +77,28 @@ LIBVPL_TAG="v2.17.0"
 # alongside the tag all the same: the tag is mutable, the commit is not.
 LIBVPL_COMMIT="d77f9195cf495b937631607333288fd917ae8939"
 
+# AMF — AMD's encoder headers, for the Windows target only. What `--enable-amf`
+# compiles against, giving the build `h264_amf`.
+#
+# Headers only, like nv-codec-headers: no library is linked and no AMD hardware is
+# needed to build. The runtime lives in the user's Radeon driver, so a GPU-less
+# runner produces a binary with working AMF exactly as it does for NVENC.
+#
+# Being headers, they add nothing to the conveyed work, so no notice ships for
+# them — the same treatment nv-codec-headers gets above, and for the same reason.
+# They are recorded in the corresponding-source list because they are an input to
+# the build.
+#
+# The floor is NOT verified. FFmpeg raises its required AMF_VERSION between
+# releases and this pin has never been through a build here; if configure reports
+# "amf requested, but not all dependencies are satisfied", the answer is a newer
+# tag, not a workaround. Read the version check in FFmpeg's configure rather than
+# guessing, the way the nv-codec-headers ceiling above was found.
+AMF_REPO="https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git"
+AMF_TAG="v1.4.36"
+# Annotated tag, so this is the peeled SHA — see the nv-codec-headers note above.
+AMF_COMMIT="16f7d73e0b45c473e903e46981ed0b91efc4c091"
+
 # No x265. The encoder only ever writes H.264 — every variant in the master
 # playlist is avc1 — so HEVC support is weight we would carry and never use, plus
 # a second GPL dependency to account for in the corresponding source.
