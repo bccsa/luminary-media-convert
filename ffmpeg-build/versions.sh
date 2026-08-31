@@ -16,11 +16,12 @@ FFMPEG_SHA256="b072aed6871998cce9b36e7774033105ca29e33632be5b6347f3206898e0756a"
 # FFmpeg's release signing key, fingerprint as published on ffmpeg.org/download.html.
 FFMPEG_SIGNING_KEY="FCF986EA15E6E293A5644F10B4322F04D67658D8"
 
-# x264 from VideoLAN's own repository, pinned to a commit rather than a branch —
-# "stable" moves, and a moving source cannot be corresponding source for anything.
-# x264 publishes no signed releases, so the pin is the integrity control.
-X264_REPO="https://code.videolan.org/videolan/x264.git"
-X264_COMMIT="b35605ace3ddf7c1a5d67a2eb553f034aef41d55"  # stable @ 2025-06-08
+# No x264, and that is the licensing decision rather than a technical one.
+# --enable-gpl exists to gate libx264 and friends; without it FFmpeg builds
+# LGPL-2.1, which is what lets this application ship it as a separate program
+# without the combined-work question a GPL encoder would raise. The cost is that
+# there is no software H.264 encoder in the binary at all — encoding uses the one
+# already on the user's machine.
 
 # libwebp, built from Google's own release tarball rather than taken from the system.
 # A system libwebp makes the binary depend on a path that does not exist on a user's

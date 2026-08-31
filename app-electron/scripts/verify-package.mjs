@@ -321,14 +321,20 @@ function verifyApp(appDir, appDirName) {
         }
         notices.push('LICENSE-libvpl.txt');
     }
-    const gpl = readdirSync(res).filter((f) => /^GPL-[\d.]+\.txt$/.test(f));
-    if (gpl.length === 0) {
+    // The licence the binary is actually under has to travel with it: LGPL-2.1
+    // s.6 asks for a copy exactly as GPLv2 §1 and GPLv3 §4 did. Either text
+    // satisfies this — an LGPL build ships COPYING.LGPLv2.1, and a build made
+    // before the switch still carries its GPL texts.
+    const licences = readdirSync(res).filter(
+        (f) => /^GPL-[\d.]+\.txt$/.test(f) || f === 'COPYING.LGPLv2.1'
+    );
+    if (licences.length === 0) {
         problems.push(
-            `${appDirName}: no GPL licence text shipped. GPLv2 §1 and GPLv3 §4 both ` +
-                'require a *copy* of the licence to travel with the binary; a link is not one.'
+            `${appDirName}: no licence text shipped for ffmpeg. LGPL-2.1 §6, GPLv2 §1 ` +
+                'and GPLv3 §4 all require a *copy* to travel with the binary; a link is not one.'
         );
     } else {
-        console.log(`    ✓ ${[...notices, ...gpl].join(', ')}`);
+        console.log(`    ✓ ${[...notices, ...licences].join(', ')}`);
     }
 
     verifyEncoderLicence(res, appDirName, exe, runnable);

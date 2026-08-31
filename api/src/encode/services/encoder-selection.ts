@@ -23,6 +23,7 @@
  * encoder because that is what the probe answers and what the UI reports.
  */
 export type AccelMode =
+    | 'none'
     | 'cpu'
     | 'nvidia'
     | 'apple'
@@ -42,7 +43,7 @@ export type EncoderId =
 /** What the encode is for. Governs preset choice, not encoder choice. */
 export type EncodePurpose = 'ladder' | 'preview' | 'bridge';
 
-export const ENCODER_FOR: Record<AccelMode, EncoderId> = {
+export const ENCODER_FOR: Record<Exclude<AccelMode, 'none'>, EncoderId> = {
     nvidia: 'h264_nvenc',
     intel: 'h264_qsv',
     amd: 'h264_amf',
@@ -85,6 +86,23 @@ export const MACOS_CHAIN: AccelMode[] = ['apple'];
  * six-rung ladder and broke every encode outright.
  */
 export const EXTRA_HW_FRAMES = 8;
+
+/**
+ * Refuse to build arguments when there is no encoder to name.
+ *
+ * `'none'` reaching an argument builder means detection found nothing usable and
+ * something asked for an encode anyway. Naming libx264 here — which the switch
+ * default would do — produces an ffmpeg command that fails with "Unknown
+ * encoder" on the build we ship, several layers from the actual problem.
+ */
+function assertEncodable(mode: AccelMode): void {
+    if (mode === 'none') {
+        throw new Error(
+            'No usable encoder on this machine: this ffmpeg has no software ' +
+                'H.264 encoder and no hardware encoder is available.'
+        );
+    }
+}
 
 /**
  * Audio encoder arguments: FFmpeg's native AAC encoder, Low Complexity profile.
@@ -230,6 +248,7 @@ export function previewVideoArgs(
     useGpu: boolean,
     scaleFilter?: string
 ): string[] {
+    assertEncodable(mode);
     const scale = (expr: string) => (scaleFilter ? ['-vf', expr] : []);
     if (!useGpu) mode = 'cpu';
 
@@ -306,6 +325,7 @@ export function bridgeVideoArgs(
     useGpu: boolean,
     opts: { pixFmt?: string; gopFrames: number }
 ): { head: string[]; tail: string[] } {
+    assertEncodable(mode);
     if (!useGpu) mode = 'cpu';
 
     switch (mode) {
@@ -385,6 +405,7 @@ export function ladderVideoArgs(
     streamIndex: number,
     fps: number
 ): string[] {
+    assertEncodable(mode);
     const t = `:v:${streamIndex}`;
     const args: string[] = [];
     const cap = Math.round(r.videoBitrateKbps * 1.07);

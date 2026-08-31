@@ -102,6 +102,10 @@ mac:
               # Windows binaries and MIT-licensed, which asks the same of us. Absent
               # from the macOS builds, and a filter that matches nothing is not an error.
               - LICENSE-libvpl.txt
+              # LGPL-2.1 s.6 asks for a copy of the licence to travel with the
+              # binary, exactly as the GPL did. GPL-*.txt is kept so a build
+              # made before the LGPL switch still carries its own notice.
+              - COPYING.LGPLv2.1
               - GPL-*.txt
               # What the shipped ffmpeg was actually configured with. The licence
               # gate in scripts/verify-package.mjs reads it, because a cross-built

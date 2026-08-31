@@ -125,7 +125,9 @@ export function isHardwareEncoderFailure(err: unknown): boolean {
 @Injectable()
 export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(FfmpegService.name);
-    private accelMode: AccelMode = 'cpu';
+    // 'none' until detection has run: before that nothing is known, and the
+    // old default of 'cpu' asserted a software encoder this build does not have.
+    private accelMode: AccelMode = 'none';
     /**
      * Why FFmpeg cannot be used here, or null when it can. Set once by
      * {@link onModuleInit}; null before it runs, which is before Nest serves
@@ -171,8 +173,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             // check unexpectedly.
             if (detail) this.logger.error(detail);
             // The probes below would only spawn an absent or too-old binary
-            // several more times to reach the same conclusion.
-            this.accelMode = 'cpu';
+            // several more times to reach the same conclusion. 'none' rather
+            // than 'cpu': there is no binary to have a software encoder in.
+            this.accelMode = 'none';
             return;
         }
 
@@ -275,7 +278,27 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         if (this.detectNvidiaGpu()) return 'nvidia';
         if (this.detectAppleGpu()) return 'apple';
         if (this.detectIntelQsv()) return 'intel';
-        return 'cpu';
+
+        // The software path is only offered when the binary actually has it.
+        // The ffmpeg we ship is LGPL and carries no libx264, so naming it would
+        // fail at ffmpeg with "Unknown encoder" — but a user who has pointed
+        // the app at their own GPL build does have it, and there is no reason
+        // to refuse theirs. Asked of the binary rather than assumed.
+        if (this.ffmpegCapabilityList('-encoders').includes('libx264')) {
+            this.logger.warn(
+                'No hardware encoder found; falling back to libx264 in the ' +
+                    'ffmpeg currently in use.'
+            );
+            return 'cpu';
+        }
+
+        // Neither hardware nor software. Said here, once, rather than left to
+        // surface as a codec error several screens into a session.
+        this.logger.error(
+            'No usable encoder found. This ffmpeg has no software H.264 ' +
+                'encoder, and no hardware encoder could be used on this machine.'
+        );
+        return 'none';
     }
 
     /**
@@ -335,7 +358,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     private detectAppleGpu(): boolean {
-        if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+        // Every Mac, not only Apple Silicon. VideoToolbox is a framework rather
+        // than a hardware API — on a Mac with no hardware encoder it uses
+        // Apple's own software H.264 encoder, which `-allow_sw 1` asks for. The
+        // arm64 gate that used to be here sent Intel Macs to libx264, and with
+        // no libx264 in the build that is now a machine that cannot encode.
+        if (process.platform !== 'darwin') {
             return false;
         }
         if (!this.ffmpegCapabilityList('-hwaccels').includes('videotoolbox'))
@@ -1157,7 +1185,11 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             // Invalid argument", and the whole encode with it. The preview has
             // retried on CPU for this exact reason since it was written; the
             // encode never did.
-            if (this.accelMode === 'cpu' || !isHardwareEncoderFailure(err)) {
+            if (
+                this.accelMode === 'cpu' ||
+                this.accelMode === 'none' ||
+                !isHardwareEncoderFailure(err)
+            ) {
                 throw err;
             }
             this.logger.warn(
@@ -1822,7 +1854,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     isGpuAvailable(): boolean {
-        return this.accelMode !== 'cpu';
+        return this.accelMode !== 'cpu' && this.accelMode !== 'none';
     }
 
     getAccelMode(): AccelMode {

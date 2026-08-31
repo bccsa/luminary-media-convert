@@ -1359,7 +1359,7 @@ async function runBridgePart(
     onTime: (seconds: number) => void
 ): Promise<void> {
     const { part, target } = ctx;
-    const useGpu = deps.accelMode !== 'cpu';
+    const useGpu = deps.accelMode !== 'cpu' && deps.accelMode !== 'none';
     const label = `${target.streamDir} bridge ${part.partIndex}`;
 
     const args = buildBridgeArgs({

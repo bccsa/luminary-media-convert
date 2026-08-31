@@ -1242,6 +1242,9 @@ describe('quick trim runner', () => {
 
         it('runs every job as a child of its own', async () => {
             const service = new FfmpegService();
+            // Detection has not run here; without a mode the encoder module
+            // refuses to name one, which is the point of it.
+            (service as any).accelMode = 'cpu';
             const spawned: string[][] = [];
             const muxer = fakeMuxer([]);
 
@@ -1279,6 +1282,9 @@ describe('quick trim runner', () => {
 
         it('derives the stream directories the plan is keyed by', () => {
             const service = new FfmpegService();
+            // Detection has not run here; without a mode the encoder module
+            // refuses to name one, which is the point of it.
+            (service as any).accelMode = 'cpu';
             expect(
                 service
                     .quickTrimStreamTargets(encodeConfig())

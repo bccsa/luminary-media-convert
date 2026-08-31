@@ -128,6 +128,11 @@ describe('FfmpegService', () => {
         });
 
         service = new FfmpegService();
+        // Argument-building tests need a mode. They used to inherit 'cpu' as the
+        // field's default; the default is now 'none', because before detection
+        // runs nothing is known and the shipped LGPL ffmpeg has no software
+        // encoder to assume. The detection tests below set their own.
+        (service as any).accelMode = 'cpu';
     });
 
     afterEach(() => {
@@ -138,9 +143,13 @@ describe('FfmpegService', () => {
     });
 
     describe('GPU detection', () => {
-        it('should default to CPU mode', () => {
-            expect(service.isGpuAvailable()).toBe(false);
-            expect(service.getAccelMode()).toBe('cpu');
+        it('reports no encoder until detection has run', () => {
+            // A fresh instance: the suite's setup assigns a mode so the
+            // argument-building tests have one, and this is about the state
+            // before anything has been detected.
+            const fresh = new FfmpegService();
+            expect(fresh.isGpuAvailable()).toBe(false);
+            expect(fresh.getAccelMode()).toBe('none');
         });
 
         it('should report GPU available for nvidia mode', () => {
@@ -3407,7 +3416,7 @@ describe('FfmpegService', () => {
             expect(service.isGpuAvailable()).toBe(true);
         });
 
-        it('should fall through when nvidia-smi fails', async () => {
+        it('reports no encoder when nvidia-smi fails and ffmpeg has no libx264', async () => {
             mockExecSync.mockImplementation(() => {
                 throw new Error('not available');
             });
@@ -3416,7 +3425,7 @@ describe('FfmpegService', () => {
             });
 
             await service.onModuleInit();
-            expect(service.getAccelMode()).toBe('cpu');
+            expect(service.getAccelMode()).toBe('none');
         });
 
         it('should detect Apple GPU on darwin/arm64 with correct ffmpeg capabilities', async () => {
@@ -3461,7 +3470,7 @@ describe('FfmpegService', () => {
             }
         });
 
-        it('should fall back to CPU when neither GPU is detected', async () => {
+        it('reports no encoder when neither GPU nor libx264 is available', async () => {
             mockExecSync.mockImplementation(() => {
                 throw new Error('not available');
             });
@@ -3470,11 +3479,11 @@ describe('FfmpegService', () => {
             });
 
             await service.onModuleInit();
-            expect(service.getAccelMode()).toBe('cpu');
+            expect(service.getAccelMode()).toBe('none');
             expect(service.isGpuAvailable()).toBe(false);
         });
 
-        it('should fall back to CPU when Apple platform but missing videotoolbox encoder', async () => {
+        it('reports no encoder on a Mac without videotoolbox or libx264', async () => {
             const origPlatform = process.platform;
             const origArch = process.arch;
             Object.defineProperty(process, 'platform', {
@@ -3501,7 +3510,7 @@ describe('FfmpegService', () => {
                 );
 
                 await service.onModuleInit();
-                expect(service.getAccelMode()).toBe('cpu');
+                expect(service.getAccelMode()).toBe('none');
             } finally {
                 Object.defineProperty(process, 'platform', {
                     value: origPlatform,

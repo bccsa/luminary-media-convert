@@ -880,7 +880,10 @@ export class PreviewService {
 
         const accelMode = this.ffmpegService.getAccelMode();
         const useGpu =
-            !rendition.canCopy && !rendition.audioOnly && accelMode !== 'cpu';
+            !rendition.canCopy &&
+            !rendition.audioOnly &&
+            accelMode !== 'cpu' &&
+            accelMode !== 'none';
 
         this.logger.debug(
             `Segment r${renditionIndex}/s${segmentIndex} (${useGpu ? accelMode : rendition.canCopy ? 'copy' : 'cpu'})`
