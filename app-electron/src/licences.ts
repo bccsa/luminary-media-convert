@@ -1,5 +1,5 @@
 import { app, BrowserWindow, shell } from 'electron';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -23,8 +23,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
  * build/after-pack.cjs.
  *
  * `link` means the text is offered as a file to open rather than shown inline —
- * Chromium's runs to megabytes, which this window would have to carry in its own
- * data: URL.
+ * Chromium's runs to nine megabytes, which is past what is reasonable to render
+ * and scroll in this window.
  */
 const NOTICES: {
     file: string;
@@ -210,7 +210,14 @@ export function showLicences(parent?: BrowserWindow): void {
         openOutside(url);
     });
 
-    void licenceWindow.loadURL(
-        'data:text/html;charset=utf-8,' + encodeURIComponent(buildHtml())
+    // Written to a file and loaded from there rather than served as a data: URL.
+    // Chromium refuses to navigate away from a data: document, and refuses
+    // silently — neither the window-open handler nor will-navigate is reached, so
+    // the link to Chromium's own notice did nothing at all when clicked.
+    const page = join(
+        app.getPath('temp'),
+        'luminary-media-convert-licences.html'
     );
+    writeFileSync(page, buildHtml(), 'utf8');
+    void licenceWindow.loadFile(page);
 }
