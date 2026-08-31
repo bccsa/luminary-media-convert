@@ -375,6 +375,13 @@ if [ "$os" = "mingw32" ]; then
         --enable-cuda-llvm
         --enable-ffnvcodec
         --enable-amf
+        # AMF's display-capture source filter, which we do not want and which
+        # does not compile: FFmpeg 8.1's vsrc_amf.c is C and includes AMF's
+        # DisplayCapture.h, whose `extern "C"` is unguarded and whose signatures
+        # use `amf::` — a C++-only header. AMF 1.4.36 is both FFmpeg's stated
+        # minimum and the newest tag, so no version satisfies both. Disabling
+        # the filter costs nothing here: what we want from AMF is h264_amf.
+        --disable-filter=amf_capture
         # Microsoft's own H.264 encoder, present on every Windows install. It is
         # the last resort in the fallback chain: slower and weaker than the GPU
         # encoders, and reportedly capped near 1080p, but it is the difference
