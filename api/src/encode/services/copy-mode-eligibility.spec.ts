@@ -287,3 +287,50 @@ describe('quickTrimGateRejection', () => {
         ).toBeNull();
     });
 });
+
+describe('copy mode and H.265', () => {
+    // A copy hands the source's bytes straight to the muxer, so a copied HEVC
+    // track is H.265 in the output of a build that has no H.265 encoder.
+    it('refuses to copy an HEVC track', () => {
+        const reason = copyModeRejection(
+            makeProbeResult({ codec: 'hevc' }),
+            makeConfig()
+        );
+        expect(reason).toMatch(/HEVC/);
+        expect(reason).toMatch(/re-encode/);
+    });
+
+    it('refuses it on the quick-cut path too', () => {
+        expect(
+            quickTrimGateRejection(
+                makeProbeResult({ codec: 'hevc' }),
+                makeConfig()
+            )
+        ).toMatch(/HEVC/);
+    });
+
+    it('recognises the codec however it is spelled', () => {
+        for (const codec of ['hevc', 'h265', 'H.265', 'X265']) {
+            expect(
+                copyModeRejection(makeProbeResult({ codec }), makeConfig())
+            ).toMatch(/cannot be copied/);
+        }
+    });
+
+    // The refusal is about passthrough alone. Reading an HEVC source in order
+    // to transcode it to H.264 stays supported, so a config that re-encodes
+    // must not be blocked.
+    it('allows an HEVC source that is being re-encoded', () => {
+        const config = makeConfig();
+        config.videoRenditions![0].copyStream = false;
+        expect(
+            copyModeRejection(makeProbeResult({ codec: 'hevc' }), config)
+        ).toBeNull();
+    });
+
+    it('still allows H.264 to be copied', () => {
+        expect(
+            copyModeRejection(makeProbeResult({ codec: 'h264' }), makeConfig())
+        ).toBeNull();
+    });
+});

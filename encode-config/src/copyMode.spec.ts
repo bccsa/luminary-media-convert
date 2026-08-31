@@ -98,3 +98,37 @@ describe('latestStreamStart', () => {
         ).toBeCloseTo(0.98);
     });
 });
+
+describe('copy mode and H.265', () => {
+    // Mirrors the API's own refusal. Enforced there; refused here so the form
+    // says no before a job is submitted rather than after.
+    it('refuses to copy an HEVC track', () => {
+        const reason = copyModeBlockedReason(
+            goodCadenceTrack({ codec: 'hevc' }),
+            0,
+            6
+        );
+        expect(reason).toMatch(/HEVC/);
+        expect(reason).toMatch(/re-encode/);
+    });
+
+    it('refuses it on the quick-cut path too', () => {
+        expect(
+            quickTrimBlockedReason(goodCadenceTrack({ codec: 'hevc' }), 6)
+        ).toMatch(/HEVC/);
+    });
+
+    it('recognises the codec however it is spelled', () => {
+        for (const codec of ['hevc', 'h265', 'H.265', 'X265']) {
+            expect(
+                copyModeBlockedReason(goodCadenceTrack({ codec }), 0, 6)
+            ).toMatch(/cannot be copied/);
+        }
+    });
+
+    it('still allows H.264 to be copied', () => {
+        expect(
+            copyModeBlockedReason(goodCadenceTrack({ codec: 'h264' }), 0, 6)
+        ).toBeNull();
+    });
+});

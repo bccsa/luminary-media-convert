@@ -56,6 +56,23 @@ export const ENCODER_FOR: Record<AccelMode, EncoderId> = {
 export const EXTRA_HW_FRAMES = 8;
 
 /**
+ * Audio encoder arguments: FFmpeg's native AAC encoder, Low Complexity profile.
+ *
+ * The profile is stated rather than left to the default. The native encoder
+ * does produce LC today, so this changes no output — but "AAC-LC only" then
+ * rests on a default rather than on anything in the command line, and HE-AAC
+ * and HE-AACv2 carry patents running years past AAC-LC's. A constraint nothing
+ * expresses is a constraint a future change can lift without noticing.
+ *
+ * `streamIndex` is omitted where one output is being written and given where
+ * the ladder writes several from one invocation.
+ */
+export function aacArgs(streamIndex?: number): string[] {
+    const t = streamIndex === undefined ? ':a' : `:a:${streamIndex}`;
+    return [`-c${t}`, 'aac', `-profile${t}`, 'aac_low'];
+}
+
+/**
  * Flags that go before `-i`, to decode on the same device that will encode.
  *
  * Empty for the CPU path, and empty when nothing is being re-encoded: a

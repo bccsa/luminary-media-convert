@@ -17,6 +17,15 @@ import type { ProbeResult, VideoTrackInfo } from './types';
 export const ALIGNMENT_TOLERANCE_SECONDS = 0.02;
 
 /**
+ * Source codecs that may be decoded but never copied to the output.
+ *
+ * Mirrors `FORBIDDEN_COPY_CODECS` in the API's copy-mode-eligibility.ts —
+ * the API is the one that enforces it; this is so the form says no before a
+ * job is submitted rather than after.
+ */
+export const FORBIDDEN_COPY_CODECS = new Set(['hevc', 'h265', 'h.265', 'x265']);
+
+/**
  * The start time every stream will be seeked to, or 0 when they already agree
  * closely enough to be left alone.
  *
@@ -90,6 +99,19 @@ function cadenceBlockedReason(
     track: VideoTrackInfo,
     segmentDuration: number
 ): string | null {
+    // A copy hands the source's own bytes through, so the output carries the
+    // source's codec. This encoder writes H.264 only, and a copied H.265 stream
+    // would be the one way past that — the API refuses it too, in
+    // copy-mode-eligibility.ts. Decoding HEVC in order to transcode it is
+    // unaffected.
+    const codec = track.codec?.toLowerCase();
+    if (codec && FORBIDDEN_COPY_CODECS.has(codec)) {
+        return (
+            `This track is ${codec.toUpperCase()}, which cannot be copied — ` +
+            `re-encode this rendition instead.`
+        );
+    }
+
     const fps = track.frameRate ?? 0;
     const gopFrames = track.gopFrames ?? 0;
     if (track.gopRegular !== true || gopFrames <= 0 || fps <= 0) {

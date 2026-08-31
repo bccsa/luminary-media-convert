@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { decodeArgs, previewVideoArgs } from './encoder-selection';
+import { aacArgs, decodeArgs, previewVideoArgs } from './encoder-selection';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
@@ -783,7 +783,7 @@ export class PreviewService {
                 '-vn'
             );
             if (audioMap) args.push('-map', audioMap);
-            args.push('-c:a', 'aac', '-b:a', '128k', ...TS_OUTPUT);
+            args.push(...aacArgs(), '-b:a', '128k', ...TS_OUTPUT);
             return args;
         }
 
@@ -822,7 +822,7 @@ export class PreviewService {
             );
             if (audioMap) args.push('-map', audioMap.replace(/^0:/, '1:'));
             args.push('-c:v', 'copy', '-to', String(start + segDur));
-            if (audioMap) args.push('-c:a', 'aac', '-b:a', '128k');
+            if (audioMap) args.push(...aacArgs(), '-b:a', '128k');
             args.push(...TS_OUTPUT);
             return args;
         }
@@ -843,7 +843,7 @@ export class PreviewService {
             ...previewVideoArgs(accelMode, useGpu, rendition.scaleFilter)
         );
 
-        if (audioMap) args.push('-c:a', 'aac', '-b:a', '128k');
+        if (audioMap) args.push(...aacArgs(), '-b:a', '128k');
         args.push(...TS_OUTPUT);
 
         return args;

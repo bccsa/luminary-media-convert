@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+    aacArgs,
     bitrateToVideoCrf,
     bridgeVideoArgs,
     decodeArgs,
@@ -288,5 +289,30 @@ describe('ladderVideoArgs', () => {
 
     it('allows the software fallback inside videotoolbox', () => {
         expect(ladderVideoArgs('apple', r, 0, 30)).toContain('-allow_sw:v:0');
+    });
+});
+
+describe('aacArgs', () => {
+    it('states the LC profile rather than relying on the default', () => {
+        expect(aacArgs()).toEqual(['-c:a', 'aac', '-profile:a', 'aac_low']);
+    });
+
+    // The ladder writes several outputs from one invocation, so an unsuffixed
+    // flag would apply to all of them.
+    it('carries the output index when given one', () => {
+        expect(aacArgs(2)).toEqual([
+            '-c:a:2',
+            'aac',
+            '-profile:a:2',
+            'aac_low',
+        ]);
+    });
+
+    // HE-AAC and HE-AACv2 carry patents running years past AAC-LC's, and
+    // fdk-aac cannot be distributed at all. None may appear here.
+    it('names no profile other than LC', () => {
+        for (const args of [aacArgs(), aacArgs(0)]) {
+            expect(args.join(' ')).not.toMatch(/aac_he|libfdk/i);
+        }
     });
 });

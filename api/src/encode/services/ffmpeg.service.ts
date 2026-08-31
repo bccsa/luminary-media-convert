@@ -12,6 +12,7 @@ import {
     type ChildProcess,
 } from 'child_process';
 import {
+    aacArgs,
     decodeArgs,
     ladderVideoArgs,
     scalerExpr,
@@ -863,7 +864,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             if (group.copyStream) {
                 args.push(`-c:a:${audioOutputIndex}`, 'copy');
             } else {
-                args.push(`-c:a:${audioOutputIndex}`, 'aac');
+                args.push(...aacArgs(audioOutputIndex));
                 if (group.vbr) {
                     args.push(
                         `-q:a:${audioOutputIndex}`,
@@ -1013,7 +1014,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             if (group.copyStream) {
                 args.push(`-c:a:${i}`, 'copy');
             } else {
-                args.push(`-c:a:${i}`, 'aac');
+                args.push(...aacArgs(i));
                 if (group.vbr) {
                     args.push(
                         `-q:a:${i}`,

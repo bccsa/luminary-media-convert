@@ -15,6 +15,20 @@ import type { ProbeResult } from './probe.service.js';
 export const ALIGNMENT_TOLERANCE_SECONDS = 0.02;
 
 /**
+ * Source codecs that may be decoded but never copied to the output.
+ *
+ * The encoder writes H.264 and nothing else, but a copied stream bypasses the
+ * encoder entirely — so without this a ticked Copy box is a way to publish
+ * H.265 from a build that has no H.265 encoder in it. Decoding HEVC to
+ * transcode it is unaffected and stays supported; this refuses only the
+ * passthrough.
+ *
+ * ffprobe reports `hevc` for H.265; the aliases are here because a source's
+ * `codec_name` is not something we control.
+ */
+export const FORBIDDEN_COPY_CODECS = new Set(['hevc', 'h265', 'h.265', 'x265']);
+
+/**
  * Why the submitted config's copy-mode renditions cannot be copied, or null
  * when every one of them can.
  *
@@ -153,6 +167,18 @@ function copyModeTrackRejection(
     latestStart: number,
     segmentDuration: number
 ): string | null {
+    // Before anything technical: a copy hands the source's own bytes to the
+    // muxer, so the output carries whatever codec the source was in. This is
+    // the one path by which a codec we do not encode can still leave here, and
+    // H.265 must not — re-encoding turns it into H.264 on the way out.
+    const codec = track?.codec?.toLowerCase();
+    if (codec && FORBIDDEN_COPY_CODECS.has(codec)) {
+        return (
+            `Video track ${index} is ${codec.toUpperCase()}, which cannot be copied — ` +
+            `re-encode this rendition instead.`
+        );
+    }
+
     if (latestStart > 0 && track?.startTime != null) {
         const behind = latestStart - track.startTime;
         if (behind >= ALIGNMENT_TOLERANCE_SECONDS) {
