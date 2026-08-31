@@ -21,6 +21,7 @@ import {
     type RunningServer,
 } from '@luminary-media-converter/api';
 import { showLicences } from './licences';
+import { candidateBinaries, resolveFfmpegBinary } from './ffmpeg-location';
 
 const PROTOCOL = 'luminary-convert';
 
@@ -189,23 +190,14 @@ function buildCipher():
  * condition attached to distributing it that way.
  */
 function resolveBinary(name: 'ffmpeg' | 'ffprobe'): string | undefined {
-    const fromEnv =
-        name === 'ffmpeg' ? process.env.FFMPEG_PATH : process.env.FFPROBE_PATH;
-    if (fromEnv) return fromEnv;
-
-    if (settings.ffmpegDir) {
-        const filename = process.platform === 'win32' ? `${name}.exe` : name;
-        const candidate = join(settings.ffmpegDir, filename);
-        // A directory the user chose and then deleted, renamed or unmounted
-        // falls back rather than failing to start. Their setting is kept: the
-        // external drive they picked it from may well be plugged back in.
-        if (existsSync(candidate)) return candidate;
-        console.warn(
-            `Chosen ffmpeg directory has no ${filename}, using the bundled one: ${settings.ffmpegDir}`
-        );
-    }
-
-    return bundledBinary(name);
+    return resolveFfmpegBinary(name, {
+        env: process.env,
+        ffmpegDir: settings.ffmpegDir,
+        bundled: bundledBinary,
+        platform: process.platform,
+        exists: existsSync,
+        warn: (message) => console.warn(message),
+    });
 }
 
 /**
@@ -351,7 +343,7 @@ async function chooseFfmpegDirectory(): Promise<void> {
     if (canceled || !filePaths[0]) return;
 
     const dir = filePaths[0];
-    const exe = process.platform === 'win32' ? '.exe' : '';
+    const candidate = candidateBinaries(dir, process.platform);
     const before = {
         ffmpeg: process.env.FFMPEG_PATH,
         ffprobe: process.env.FFPROBE_PATH,
@@ -360,8 +352,8 @@ async function chooseFfmpegDirectory(): Promise<void> {
     let reason: string | null | undefined;
     let detail: string | null | undefined;
     try {
-        process.env.FFMPEG_PATH = join(dir, `ffmpeg${exe}`);
-        process.env.FFPROBE_PATH = join(dir, `ffprobe${exe}`);
+        process.env.FFMPEG_PATH = candidate.ffmpeg;
+        process.env.FFPROBE_PATH = candidate.ffprobe;
         ({ reason, detail } = await checkFfmpeg());
     } finally {
         // Restore whatever was there, including nothing: leaving the candidate

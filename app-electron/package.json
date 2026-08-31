@@ -8,6 +8,7 @@
     "main": "dist/main.js",
     "scripts": {
         "build": "tsc -p tsconfig.json",
+        "test": "vitest run",
         "build:workspaces": "cd .. && npm run build:bundled",
         "dev": "npm run build && electron .",
         "dist:mac": "../ffmpeg-build/build.sh darwin-arm64 && ../ffmpeg-build/build.sh darwin-x64 && npm run package:mac",
