@@ -672,3 +672,39 @@ waveform sidecar was just cured of (item 46):
 `encodeResult.alignmentOffset` is already in scope. The pre-encode source storyboard
 (trim UI filmstrip) draws on the source timeline and should be unaffected — verify
 rather than assume.
+
+## 49. How should the app display open-source licence texts?
+
+**Asked for by the product owner, 31 August 2026** — *"Guess we need to do a round of
+research on how we should display the open source license texts."* Research first,
+then a decision; this is not a defect with an obvious fix.
+
+**Where it stands.** The Licences window shows a full text per shipped binary
+component — FFmpeg, libwebp, libvpl on Windows, the LGPL, and now Electron and
+Chromium — read from `resourcesPath` at runtime, so it describes the build that
+actually shipped rather than a list someone remembered to update.
+
+**The gap.** Nothing covers the npm dependency tree. Around 277 licence files ride
+along inside `app.asar` with their packages, which arguably satisfies the letter of
+the permissive licences that ask for a notice to travel with the distribution, but
+nothing surfaces them and nobody has curated them. `LICENSES-chromium.html` is the
+same shape of problem already met once: 9 MB is past what a window can show, so it
+is offered as a file to open instead.
+
+**What the research has to settle.**
+
+- Whether a generated manifest (`license-checker`, `oss-attribution-generator`) is
+  worth adding to the build, and whether it runs against the packaged dependency
+  set rather than the whole dev tree — the two differ by a lot.
+- What a person is actually meant to do with several hundred notices. Chrome's
+  answer is one long `chrome://credits` page; a searchable list and a single
+  concatenated text are both defensible, and the choice should be made rather than
+  fallen into.
+- Whether the copyleft-adjacent cases in the tree need separate treatment from the
+  MIT/BSD/ISC bulk. Worth an actual audit of what licences are present, not an
+  assumption that it is all permissive.
+- Whether this belongs in the app at all or in a `NOTICE` file beside the build.
+
+**Related.** `app-electron/src/licences.ts` builds the window; the notices it reads
+are written by `ffmpeg-build/build.sh` and `app-electron/build/after-pack.cjs`, and
+`app-electron/scripts/verify-package.mjs` fails the build when one is missing.
