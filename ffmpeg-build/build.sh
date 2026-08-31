@@ -559,6 +559,12 @@ ffmpeg-build/versions.sh:
 
 That script and versions file are the complete instructions for rebuilding this
 binary. No x265: this build writes H.264 only.
+
+Substituting your own build: the application does not require the ffmpeg shipped
+beside it. Choose FFmpeg… in the application menu points it at any directory
+holding an ffmpeg and ffprobe, and it will use those instead after a restart.
+Setting FFMPEG_PATH and FFPROBE_PATH in the environment does the same thing and
+takes precedence over both.
 EOF
 cp "$webpsrc/COPYING" "$out/LICENSE-libwebp.txt"
 notices="LICENSE-ffmpeg.txt (GPL-$licence_version.0-or-later), ${gpl_texts[*]}, LICENSE-libwebp.txt"

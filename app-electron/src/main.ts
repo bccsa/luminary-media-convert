@@ -51,6 +51,15 @@ interface Settings {
      * button.
      */
     deniedOrigins: string[];
+    /**
+     * A directory holding an ffmpeg the user would rather we used than the one
+     * we ship. Unset for everybody who has never opened the menu item.
+     *
+     * A directory rather than two file paths, so ffmpeg and ffprobe cannot be
+     * chosen from different builds — a pair that disagree fail in ways that
+     * look like a broken source file.
+     */
+    ffmpegDir?: string | null;
 }
 
 const settingsPath = (): string =>
@@ -65,6 +74,7 @@ async function loadSettings(): Promise<void> {
         settings = {
             allowedOrigins: parsed.allowedOrigins ?? [],
             deniedOrigins: parsed.deniedOrigins ?? [],
+            ffmpegDir: parsed.ffmpegDir ?? null,
         };
     } catch {
         // No settings yet, or unreadable: start from "trust nothing", which is
@@ -166,6 +176,39 @@ function buildCipher():
 }
 
 /**
+ * The ffmpeg or ffprobe to run: the environment, then the user's chosen
+ * directory, then the one we ship.
+ *
+ * The order matters and used not to hold. The bundled path was passed
+ * unconditionally, which overwrote FFMPEG_PATH in the environment — so the
+ * documented developer escape hatch silently did nothing in a packaged build,
+ * and there was no way at all for a user to substitute their own build.
+ *
+ * That substitutability is not a convenience. We ship an LGPL ffmpeg as a
+ * separate program, and being able to replace it with your own copy is the
+ * condition attached to distributing it that way.
+ */
+function resolveBinary(name: 'ffmpeg' | 'ffprobe'): string | undefined {
+    const fromEnv =
+        name === 'ffmpeg' ? process.env.FFMPEG_PATH : process.env.FFPROBE_PATH;
+    if (fromEnv) return fromEnv;
+
+    if (settings.ffmpegDir) {
+        const filename = process.platform === 'win32' ? `${name}.exe` : name;
+        const candidate = join(settings.ffmpegDir, filename);
+        // A directory the user chose and then deleted, renamed or unmounted
+        // falls back rather than failing to start. Their setting is kept: the
+        // external drive they picked it from may well be plugged back in.
+        if (existsSync(candidate)) return candidate;
+        console.warn(
+            `Chosen ffmpeg directory has no ${filename}, using the bundled one: ${settings.ffmpegDir}`
+        );
+    }
+
+    return bundledBinary(name);
+}
+
+/**
  * The ffmpeg or ffprobe this app should use, in the order they are trusted.
  *
  * 1. **Packaged**: the copy beside the app's own resources, which packaging put
@@ -254,6 +297,98 @@ function focusSession(sessionId: string): void {
 }
 
 /**
+ * Restart, because the encoder is inspected once at startup and cached.
+ *
+ * `FfmpegService` probes acceleration on init and holds the answer for the
+ * process's life. Swapping the binary underneath it would leave the app
+ * encoding with one ffmpeg and reporting the capabilities of another, so the
+ * honest options are relaunch or refuse — and refusing would make the setting
+ * useless.
+ */
+async function applyFfmpegDirectory(dir: string | null): Promise<void> {
+    settings.ffmpegDir = dir;
+    await saveSettings();
+    // The menu is built once at startup and reads this to enable "Use the
+    // bundled FFmpeg". Someone who defers the restart would otherwise be
+    // looking at a stale item until they do.
+    buildMenu();
+
+    const { response } = await dialog.showMessageBox({
+        type: 'info',
+        title: 'Restart required',
+        message: dir
+            ? 'Luminary Media Convert will use the FFmpeg you chose.'
+            : 'Luminary Media Convert will use the FFmpeg it ships with.',
+        detail: 'The encoder is inspected when the app starts, so this takes effect after a restart.',
+        buttons: ['Restart now', 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+    });
+    if (response === 0) {
+        app.relaunch();
+        app.exit(0);
+    }
+}
+
+/**
+ * Let the user point the app at their own FFmpeg build.
+ *
+ * We ship an LGPL ffmpeg and run it as a separate program; being able to
+ * replace it with your own copy is the condition attached to distributing it
+ * that way. A folder is asked for rather than a file so ffmpeg and ffprobe
+ * always come from the same build.
+ *
+ * Nothing is scanned. Only the directory the user chose is looked at, and only
+ * to confirm it holds an ffmpeg new enough to use — the same check the app runs
+ * against its own binary at startup, pointed somewhere else.
+ */
+async function chooseFfmpegDirectory(): Promise<void> {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+        title: 'Choose an FFmpeg folder',
+        message: 'Select a folder containing ffmpeg and ffprobe.',
+        properties: ['openDirectory'],
+    });
+    if (canceled || !filePaths[0]) return;
+
+    const dir = filePaths[0];
+    const exe = process.platform === 'win32' ? '.exe' : '';
+    const before = {
+        ffmpeg: process.env.FFMPEG_PATH,
+        ffprobe: process.env.FFPROBE_PATH,
+    };
+
+    let reason: string | null | undefined;
+    let detail: string | null | undefined;
+    try {
+        process.env.FFMPEG_PATH = join(dir, `ffmpeg${exe}`);
+        process.env.FFPROBE_PATH = join(dir, `ffprobe${exe}`);
+        ({ reason, detail } = await checkFfmpeg());
+    } finally {
+        // Restore whatever was there, including nothing: leaving the candidate
+        // in the environment would point the running API at a binary the user
+        // may have just been told is unusable.
+        for (const [key, value] of [
+            ['FFMPEG_PATH', before.ffmpeg],
+            ['FFPROBE_PATH', before.ffprobe],
+        ] as const) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    }
+
+    if (reason) {
+        if (detail) console.error(detail);
+        dialog.showErrorBox(
+            'That folder cannot be used',
+            `${reason}\n\nLuminary Media Convert will keep using the FFmpeg it ships with.`
+        );
+        return;
+    }
+
+    await applyFfmpegDirectory(dir);
+}
+
+/**
  * The application menu.
  *
  * Built rather than left to Electron's default because the default has no way
@@ -268,6 +403,16 @@ function buildMenu(): void {
         label: 'Licences…',
         click: () => showLicences(mainWindow),
     };
+    // Deliberately a plain item rather than anything prominent: the licence
+    // asks that substitution be possible, not that we recommend it.
+    const ffmpegItems: Electron.MenuItemConstructorOptions[] = [
+        { label: 'Choose FFmpeg…', click: () => void chooseFfmpegDirectory() },
+        {
+            label: 'Use the bundled FFmpeg',
+            enabled: !!settings.ffmpegDir,
+            click: () => void applyFfmpegDirectory(null),
+        },
+    ];
 
     Menu.setApplicationMenu(
         Menu.buildFromTemplate([
@@ -278,6 +423,8 @@ function buildMenu(): void {
                           submenu: [
                               { role: 'about' },
                               licences,
+                              { type: 'separator' },
+                              ...ffmpegItems,
                               { type: 'separator' },
                               { role: 'services' },
                               { type: 'separator' },
@@ -296,7 +443,15 @@ function buildMenu(): void {
             { role: 'windowMenu' },
             {
                 role: 'help',
-                submenu: isMac ? [licences] : [licences, { role: 'about' }],
+                submenu: isMac
+                    ? [licences]
+                    : [
+                          licences,
+                          { type: 'separator' },
+                          ...ffmpegItems,
+                          { type: 'separator' },
+                          { role: 'about' },
+                      ],
             },
         ] as Electron.MenuItemConstructorOptions[])
     );
@@ -458,8 +613,8 @@ async function start(): Promise<void> {
             },
             credentialCipher: buildCipher(),
             onCmsSessionCreated: (sessionId) => focusSession(sessionId),
-            ffmpegPath: bundledBinary('ffmpeg'),
-            ffprobePath: bundledBinary('ffprobe'),
+            ffmpegPath: resolveBinary('ffmpeg'),
+            ffprobePath: resolveBinary('ffprobe'),
             staticAppDir: bundledWebClient(),
         });
         console.log(`Encoding API listening on ${server.url}`);
