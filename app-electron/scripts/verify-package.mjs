@@ -192,7 +192,8 @@ function verifyEncoderLicence(res, appDirName, exe, runnable) {
     }
 
     if (!runnable) {
-        if (!flags.length) console.log('    ✓ BUILDCONF.txt: no forbidden flags');
+        if (!flags.length)
+            console.log('    ✓ BUILDCONF.txt: no forbidden flags');
         return;
     }
 
@@ -201,7 +202,9 @@ function verifyEncoderLicence(res, appDirName, exe, runnable) {
 
     const ask = (flag) => {
         try {
-            return execFileSync(ff, ['-hide_banner', flag], { encoding: 'utf8' });
+            return execFileSync(ff, ['-hide_banner', flag], {
+                encoding: 'utf8',
+            });
         } catch {
             return '';
         }
@@ -321,6 +324,21 @@ function verifyApp(appDir, appDirName) {
         }
         notices.push('LICENSE-libvpl.txt');
     }
+    // Electron is MIT and the Chromium it embeds is BSD-3-Clause: both ask for
+    // their notice to travel with a binary distribution, on the same footing as
+    // libwebp above. Both sit outside Electron.app in the distribution, so
+    // packaging leaves them behind unless build/after-pack.cjs collects them.
+    for (const [file, why] of [
+        ['LICENSE-electron.txt', 'Electron is MIT'],
+        ['LICENSES-chromium.html', 'Electron embeds Chromium (BSD-3-Clause)'],
+    ]) {
+        if (!existsSync(join(res, file))) {
+            problems.push(`${appDirName}: ${file} is missing — ${why}`);
+        } else {
+            notices.push(file);
+        }
+    }
+
     // The licence the binary is actually under has to travel with it: LGPL-2.1
     // s.6 asks for a copy exactly as GPLv2 §1 and GPLv3 §4 did. Either text
     // satisfies this — an LGPL build ships COPYING.LGPLv2.1, and a build made

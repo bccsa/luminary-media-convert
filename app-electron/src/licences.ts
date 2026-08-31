@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /**
  * The licences window.
@@ -16,8 +17,21 @@ import { join } from 'node:path';
  * having to remember to update a list.
  */
 
-/** Licence files build.sh writes beside the binary, with what each one covers. */
-const NOTICES: { file: string; heading: string; note?: string }[] = [
+/**
+ * Licence files shipped beside the binary, with what each one covers. Most are
+ * written by build.sh; the two Electron ones are collected at packaging time by
+ * build/after-pack.cjs.
+ *
+ * `link` means the text is offered as a file to open rather than shown inline —
+ * Chromium's runs to megabytes, which this window would have to carry in its own
+ * data: URL.
+ */
+const NOTICES: {
+    file: string;
+    heading: string;
+    note?: string;
+    link?: boolean;
+}[] = [
     {
         file: 'LICENSE-ffmpeg.txt',
         heading: 'FFmpeg',
@@ -33,9 +47,23 @@ const NOTICES: { file: string; heading: string; note?: string }[] = [
         heading: 'libvpl',
         note: "Statically linked into the Windows encoder — Intel's Quick Sync dispatcher (MIT).",
     },
+    {
+        file: 'LICENSE-electron.txt',
+        heading: 'Electron',
+        note: 'The application runs on Electron (MIT).',
+    },
+    {
+        file: 'LICENSES-chromium.html',
+        heading: 'Chromium and its components',
+        note: 'Electron embeds Chromium, whose own components carry several hundred licences — BSD-3-Clause, MIT and others. Too long to show here.',
+        link: true,
+    },
     { file: 'GPL-2.0.txt', heading: 'GNU General Public License v2.0' },
     { file: 'GPL-3.0.txt', heading: 'GNU General Public License v3.0' },
-    { file: 'COPYING.LGPLv2.1', heading: 'GNU Lesser General Public License v2.1' },
+    {
+        file: 'COPYING.LGPLv2.1',
+        heading: 'GNU Lesser General Public License v2.1',
+    },
 ];
 
 /**
@@ -60,15 +88,22 @@ function buildHtml(): string {
 
     const sections = NOTICES.filter((n) => existsSync(join(dir, n.file))).map(
         (n) => {
+            const head = `<h2>${escape(n.heading)}</h2>
+                ${n.note ? `<p class="note">${escape(n.note)}</p>` : ''}`;
+
+            if (n.link)
+                return `<section>${head}
+                    <p><a href="${escape(pathToFileURL(join(dir, n.file)).href)}"
+                       target="_blank">Open ${escape(n.file)}</a></p>
+                </section>`;
+
             let body: string;
             try {
                 body = readFileSync(join(dir, n.file), 'utf8');
             } catch (err) {
                 body = `This licence text could not be read: ${String(err)}`;
             }
-            return `<section>
-                <h2>${escape(n.heading)}</h2>
-                ${n.note ? `<p class="note">${escape(n.note)}</p>` : ''}
+            return `<section>${head}
                 <pre>${escape(body)}</pre>
             </section>`;
         }
@@ -91,7 +126,10 @@ function buildHtml(): string {
         ['Chromium', process.versions.chrome],
         ['Node', process.versions.node],
     ]
-        .map(([k, v]) => `<tr><td>${escape(k)}</td><td>${escape(v ?? '')}</td></tr>`)
+        .map(
+            ([k, v]) =>
+                `<tr><td>${escape(k)}</td><td>${escape(v ?? '')}</td></tr>`
+        )
         .join('');
 
     return `<!doctype html>
@@ -152,9 +190,24 @@ export function showLicences(parent?: BrowserWindow): void {
         licenceWindow = undefined;
     });
 
+    // Chromium's notice is a local file, which openExternal does not reliably
+    // hand to a browser; openPath is what opens it in the default viewer.
+    const openOutside = (url: string): void => {
+        if (url.startsWith('file:')) void shell.openPath(fileURLToPath(url));
+        else void shell.openExternal(url);
+    };
+
     licenceWindow.webContents.setWindowOpenHandler(({ url }) => {
-        void shell.openExternal(url);
+        openOutside(url);
         return { action: 'deny' };
+    });
+
+    // Both handlers, because which one fires depends on whether Chromium treats
+    // the link as a new window or as navigation away from this data: URL. Either
+    // way the window itself must stay where it is.
+    licenceWindow.webContents.on('will-navigate', (event, url) => {
+        event.preventDefault();
+        openOutside(url);
     });
 
     void licenceWindow.loadURL(
