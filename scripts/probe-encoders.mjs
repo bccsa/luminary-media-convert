@@ -120,6 +120,25 @@ function tryEncode(encoder, width, height) {
 }
 
 console.log(`\n  ffmpeg: ${ffmpeg}`);
+
+// Establish the binary runs here at all, before believing anything it does not
+// say. Without this the probe cannot tell "this encoder is absent" from "no
+// process ever started": a win32 binary on macOS answers nothing, and every
+// check reads as a negative — 0 encoders, and a licence reported as GPL purely
+// because the banner was empty. A confident wrong answer is worse than none.
+const version = spawnSync(ffmpeg, ['-hide_banner', '-version'], {
+    encoding: 'utf8',
+});
+if (version.status !== 0 || !/ffmpeg version/.test(version.stdout ?? '')) {
+    console.error(
+        '\n  This ffmpeg cannot be executed here, so nothing below could be\n' +
+            '  tested. A win32-x64 build has to be probed on Windows, and a\n' +
+            '  macOS build on a Mac.\n' +
+            (version.error ? `\n  ${version.error.message}\n` : '\n')
+    );
+    process.exit(2);
+}
+
 const banner =
     spawnSync(ffmpeg, ['-hide_banner', '-L'], { encoding: 'utf8' }).stdout ??
     '';
