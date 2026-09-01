@@ -30,6 +30,7 @@ import {
     closeSync,
     existsSync,
     openSync,
+    readFileSync,
     readSync,
     readdirSync,
     statSync,
@@ -150,6 +151,89 @@ function canRun(appDirName) {
     }
 }
 
+// `--enable-gpl` is what gates libx264 and makes the build GPL; `--enable-nonfree`
+// produces a binary FFmpeg itself describes as unredistributable; `--enable-version3`
+// moves the result to v3 with its anti-tivoization and patent-termination terms.
+const FORBIDDEN_FLAGS = /--enable-(?:gpl|nonfree|version3)\b/g;
+
+// Present in the encoder list, these prove a GPL build whatever the flags say.
+const FORBIDDEN_ENCODERS = /\blibx26[45]\b/;
+
+/**
+ * Assert the shipped encoder is an LGPL build with no software H.264 encoder.
+ *
+ * Read from BUILDCONF.txt rather than a live `-buildconf` so the cross-built
+ * Windows binary is covered too: it cannot be executed on the macOS machine that
+ * packages it, and a gate that skips the target it cannot run is not a gate.
+ * Where the host *can* run the binary both are asserted — the file records what
+ * the build script configured, the binary records what actually shipped.
+ *
+ * Never grep for `GPL` here: `LGPL` contains it, and the LGPL text itself spells
+ * out "General Public License". Match the distinguishing word instead.
+ */
+function verifyEncoderLicence(res, appDirName, exe, runnable) {
+    const conf = join(res, 'BUILDCONF.txt');
+    if (!existsSync(conf)) {
+        problems.push(
+            `${appDirName}: BUILDCONF.txt is missing — there is no record of how the ` +
+                'shipped ffmpeg was configured, so its licence cannot be verified'
+        );
+        return;
+    }
+
+    const flags = [
+        ...new Set(readFileSync(conf, 'utf8').match(FORBIDDEN_FLAGS) ?? []),
+    ];
+    if (flags.length) {
+        problems.push(
+            `${appDirName}: ffmpeg is configured with ${flags.join(', ')}. The licensing ` +
+                'policy requires an LGPL build — no gpl, no nonfree, no version3.'
+        );
+    }
+
+    if (!runnable) {
+        if (!flags.length)
+            console.log('    ✓ BUILDCONF.txt: no forbidden flags');
+        return;
+    }
+
+    const ff = join(res, `ffmpeg${exe}`);
+    if (!existsSync(ff)) return;
+
+    const ask = (flag) => {
+        try {
+            return execFileSync(ff, ['-hide_banner', flag], {
+                encoding: 'utf8',
+            });
+        } catch {
+            return '';
+        }
+    };
+
+    // FFmpeg's own banner is the authority on what the binary is.
+    const banner = ask('-L');
+    if (banner && !banner.includes('Lesser')) {
+        const version = banner.match(/either version (\d)/)?.[1];
+        problems.push(
+            `${appDirName}: the shipped ffmpeg reports GPL${version ? `-${version}.0-or-later` : ''}, ` +
+                'not LGPL. The binary is the authority here, not the configure line.'
+        );
+    }
+
+    const encoders = ask('-encoders');
+    const bad = encoders.match(FORBIDDEN_ENCODERS);
+    if (bad) {
+        problems.push(
+            `${appDirName}: the shipped ffmpeg still carries ${bad[0]}. The policy ` +
+                'bundles no software H.264 encoder — OS and GPU encoders only.'
+        );
+    }
+
+    if (!flags.length && banner.includes('Lesser') && !bad) {
+        console.log('    ✓ encoder licence: LGPL, no software H.264 encoder');
+    }
+}
+
 function verifyApp(appDir, appDirName) {
     const res = resourcesDir(appDir);
     if (!res) {
@@ -240,15 +324,38 @@ function verifyApp(appDir, appDirName) {
         }
         notices.push('LICENSE-libvpl.txt');
     }
-    const gpl = readdirSync(res).filter((f) => /^GPL-[\d.]+\.txt$/.test(f));
-    if (gpl.length === 0) {
+    // Electron is MIT and the Chromium it embeds is BSD-3-Clause: both ask for
+    // their notice to travel with a binary distribution, on the same footing as
+    // libwebp above. Both sit outside Electron.app in the distribution, so
+    // packaging leaves them behind unless build/after-pack.cjs collects them.
+    for (const [file, why] of [
+        ['LICENSE-electron.txt', 'Electron is MIT'],
+        ['LICENSES-chromium.html', 'Electron embeds Chromium (BSD-3-Clause)'],
+    ]) {
+        if (!existsSync(join(res, file))) {
+            problems.push(`${appDirName}: ${file} is missing — ${why}`);
+        } else {
+            notices.push(file);
+        }
+    }
+
+    // The licence the binary is actually under has to travel with it: LGPL-2.1
+    // s.6 asks for a copy exactly as GPLv2 §1 and GPLv3 §4 did. Either text
+    // satisfies this — an LGPL build ships COPYING.LGPLv2.1, and a build made
+    // before the switch still carries its GPL texts.
+    const licences = readdirSync(res).filter(
+        (f) => /^GPL-[\d.]+\.txt$/.test(f) || f === 'COPYING.LGPLv2.1'
+    );
+    if (licences.length === 0) {
         problems.push(
-            `${appDirName}: no GPL licence text shipped. GPLv2 §1 and GPLv3 §4 both ` +
-                'require a *copy* of the licence to travel with the binary; a link is not one.'
+            `${appDirName}: no licence text shipped for ffmpeg. LGPL-2.1 §6, GPLv2 §1 ` +
+                'and GPLv3 §4 all require a *copy* to travel with the binary; a link is not one.'
         );
     } else {
-        console.log(`    ✓ ${[...notices, ...gpl].join(', ')}`);
+        console.log(`    ✓ ${[...notices, ...licences].join(', ')}`);
     }
+
+    verifyEncoderLicence(res, appDirName, exe, runnable);
 
     // The API serves this at / in a packaged build; without it the window is blank.
     if (!existsSync(join(res, 'app', 'index.html'))) {

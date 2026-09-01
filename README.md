@@ -183,34 +183,29 @@ means adding it to both, which is why they sit next to each other.
 
 Licensed per directory rather than repository-wide, because the pieces are not
 all destined for the same audience: the shared libraries are meant to be consumed
-by other applications, while the desktop shell is a distributed product that
-ships a GPL binary alongside it.
+by other applications, while the build scripts are a separate concern.
 
 | | Licence | |
 | --- | --- | --- |
-| `api/`, `app/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `player-web-legacy/`, `cms-mock/` | Apache-2.0 | each carries its own `LICENSE` |
-| `app-electron/`, `ffmpeg-build/` | GPL-3.0-or-later | each carries its own `LICENSE`; the build scripts also carry an SPDX header |
-| everything else — `docs/`, `test-media/`, the root files | Apache-2.0 | declared by the root `package.json` |
+| every workspace — `api/`, `app/`, `app-electron/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `player-web-legacy/`, `cms-mock/` | Apache-2.0 | each carries its own `LICENSE` |
+| `ffmpeg-build/` | GPL-3.0-or-later | carries its own `LICENSE`; the build scripts also carry an SPDX header |
+| everything else — `docs/`, `test-media/`, the root files | Apache-2.0 | the root `LICENSE` |
 
-There is deliberately no repository-level `LICENSE` file: with two licences in
-play, a single one at the root would contradict whichever directory it did not
-describe.
+**`app-electron` was GPL-3.0-or-later until 31 August 2026**, and the reason it
+no longer is, is worth keeping: it was licensed to match the encoder it shipped.
+The encoder was a GPL FFmpeg with libx264 compiled in, so licensing the shell to
+match removed any question about the combination. It was a deliberate choice
+rather than an obligation — the app spawns FFmpeg as a child process and never
+links its libraries, which
+[docs/ffmpeg-licensing.md](docs/ffmpeg-licensing.md) argues makes the bundle an
+*aggregate* rather than a derivative work.
 
-**Why the shell is GPL and the libraries are not.** The app spawns FFmpeg as a
-child process and reads its output; it never links FFmpeg's libraries. On that
-basis [docs/ffmpeg-licensing.md](docs/ffmpeg-licensing.md) — quoting the FSF's own
-FAQ — concludes the bundle is an *aggregate*, and Apache-2.0 code alongside it is
-not a derivative work. So the GPL on `app-electron` and `ffmpeg-build` is a
-**deliberate choice rather than an obligation**: those two are what actually get
-distributed with a GPL encoder inside, and licensing them to match removes any
-question about the combination. The libraries stay Apache-2.0 precisely because
-nothing about FFmpeg reaches them.
+The encoder is now built **LGPL-2.1** with no libx264 in it, so the reason has
+gone and the shell moves to Apache-2.0 with the rest. Approved by the product
+owner.
 
-`-or-later` rather than `GPL-3.0`: the bare identifier is deprecated in SPDX, and
-"or any later version" is the FSF's own recommendation for new code. It also
-matches the binaries, which are built **GPL v2-or-later** (no `--enable-version3`)
-and whose licence texts ship beside them, as the GPL requires.
+`ffmpeg-build/` stays GPL-3.0-or-later for now. It is the build script rather
+than anything shipped to a user, and moving it was not part of that decision.
 
-One thing this does not settle: `docs/ffmpeg-licensing.md` records that the GPL
-position still needs BCC sign-off, and that remains true. It is a release gate,
-not a code one.
+**Patents are a separate question entirely**, which no copyright licence
+addresses. See [PATENTS.md](PATENTS.md).

@@ -236,7 +236,9 @@ describe('EncodeService', () => {
      */
     describe('stopping the pipeline when the encode does not finish', () => {
         it('aborts it when ffmpeg fails', async () => {
-            ffmpegService.encode.mockRejectedValue(new Error('ffmpeg exited 1'));
+            ffmpegService.encode.mockRejectedValue(
+                new Error('ffmpeg exited 1')
+            );
             const session = sessionService.create(makeConfig());
             sessionService.setFilePath(session.id, '/tmp/input.mp4');
             sessionService.setEncodeConfig(session.id, makeEncodeConfig());
@@ -253,7 +255,9 @@ describe('EncodeService', () => {
                 get: () => new Error('S3 upload failed'),
             });
             (
-                segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>
+                segmentPipelineService.createPipeline as ReturnType<
+                    typeof vi.fn
+                >
             ).mockReturnValue(failing);
             const session = sessionService.create(makeConfig());
             sessionService.setFilePath(session.id, '/tmp/input.mp4');

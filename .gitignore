@@ -31,3 +31,8 @@ DESIGN.md
 
 test-media/*
 ffmpeg-build/.work/
+
+# Internal licensing and patent analysis, shared privately. Not for public
+# distribution, so it stays out of the repository.
+luminary-media-convert-licensing.md
+luminary-media-convert-legal-memo.md

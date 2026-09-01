@@ -11,6 +11,23 @@ import {
     execSync,
     type ChildProcess,
 } from 'child_process';
+import {
+    aacArgs,
+    decodeArgs,
+    USE_YOUR_OWN_FFMPEG,
+    ladderVideoArgs,
+    scalerExpr,
+    type AccelMode,
+} from './encoder-selection';
+import {
+    mergeWaveMasters,
+    planLadderWaves,
+    type LadderWave,
+} from './ladder-waves';
+import {
+    acquireEncoderSessions,
+    MAX_HARDWARE_SESSIONS,
+} from './encoder-sessions';
 import { mkdirSync, existsSync } from 'fs';
 import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
@@ -88,11 +105,20 @@ export function hlsOutputPath(...parts: string[]): string {
     return join(...parts).replace(/\\/g, '/');
 }
 
-export type AccelMode = 'cpu' | 'nvidia' | 'apple' | 'intel';
+// Defined with the encoder tables it selects between. Re-exported because
+// callers have always imported it from here.
+export type { AccelMode };
 
 /**
  * Whether an ffmpeg failure is the hardware encoder refusing to start, as
  * opposed to a bad source or a bad configuration that CPU would fail on too.
+ *
+ * Nothing calls this at the moment. It classified failures for a retry on
+ * libx264, and this FFmpeg has no software encoder to retry on; the session cap
+ * that the retry mostly caught is kept away by the wave planner instead. Kept
+ * because the signatures below are the hard part of the fallback chain that will
+ * pick the next hardware encoder rather than a software one — but until then, no
+ * fallback is wired to it.
  *
  * Matched on what the encoders actually say. NVENC over its session cap:
  * "Could not open encoder before EOF" with `-22 (Invalid argument)`; NVENC/QSV/
@@ -116,7 +142,9 @@ export function isHardwareEncoderFailure(err: unknown): boolean {
 @Injectable()
 export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(FfmpegService.name);
-    private accelMode: AccelMode = 'cpu';
+    // 'none' until detection has run: before that nothing is known, and the
+    // old default of 'cpu' asserted a software encoder this build does not have.
+    private accelMode: AccelMode = 'none';
     /**
      * Why FFmpeg cannot be used here, or null when it can. Set once by
      * {@link onModuleInit}; null before it runs, which is before Nest serves
@@ -162,8 +190,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             // check unexpectedly.
             if (detail) this.logger.error(detail);
             // The probes below would only spawn an absent or too-old binary
-            // several more times to reach the same conclusion.
-            this.accelMode = 'cpu';
+            // several more times to reach the same conclusion. 'none' rather
+            // than 'cpu': there is no binary to have a software encoder in.
+            this.accelMode = 'none';
             return;
         }
 
@@ -266,7 +295,28 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         if (this.detectNvidiaGpu()) return 'nvidia';
         if (this.detectAppleGpu()) return 'apple';
         if (this.detectIntelQsv()) return 'intel';
-        return 'cpu';
+
+        // The software path is only offered when the binary actually has it.
+        // The ffmpeg we ship is LGPL and carries no libx264, so naming it would
+        // fail at ffmpeg with "Unknown encoder" — but a user who has pointed
+        // the app at their own GPL build does have it, and there is no reason
+        // to refuse theirs. Asked of the binary rather than assumed.
+        if (this.ffmpegCapabilityList('-encoders').includes('libx264')) {
+            this.logger.warn(
+                'No hardware encoder found; falling back to libx264 in the ' +
+                    'ffmpeg currently in use.'
+            );
+            return 'cpu';
+        }
+
+        // Neither hardware nor software. Said here, once, rather than left to
+        // surface as a codec error several screens into a session.
+        this.logger.error(
+            'No usable encoder found. This ffmpeg has no software H.264 ' +
+                'encoder, and no hardware encoder could be used on this ' +
+                `machine. ${USE_YOUR_OWN_FFMPEG}`
+        );
+        return 'none';
     }
 
     /**
@@ -326,7 +376,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     private detectAppleGpu(): boolean {
-        if (process.platform !== 'darwin' || process.arch !== 'arm64') {
+        // Every Mac, not only Apple Silicon. VideoToolbox is a framework rather
+        // than a hardware API — on a Mac with no hardware encoder it uses
+        // Apple's own software H.264 encoder, which `-allow_sw 1` asks for. The
+        // arm64 gate that used to be here sent Intel Macs to libx264, and with
+        // no libx264 in the build that is now a machine that cannot encode.
+        if (process.platform !== 'darwin') {
             return false;
         }
         if (!this.ffmpegCapabilityList('-hwaccels').includes('videotoolbox'))
@@ -662,64 +717,23 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         return concatPath;
     }
 
-    private getX264Preset(height: number): string {
-        if (height >= 1080) return 'veryfast';
-        if (height >= 720) return 'faster';
-        if (height >= 480) return 'fast';
-        if (height >= 360) return 'medium';
-        return 'slow';
-    }
-
-    /**
-     * Spare NVDEC decode surfaces.
-     *
-     * Measured on the GTX 1050 with a six-rendition ladder, identical for direct
-     * and concat inputs: 0-4 extra exhausts the pool mid-decode, 6-12 works, and
-     * 16 or more makes cuvidCreateDecoder refuse to initialise at all
-     * (CUDA_ERROR_INVALID_VALUE) because NVDEC caps total surfaces.
-     *
-     * So this is a fixed budget, not a per-rendition one: the ceiling belongs to
-     * the decoder, not the ladder. Scaling it by rendition count reached 20 on a
-     * six-rung ladder and broke every encode outright.
-     */
-    private static readonly EXTRA_HW_FRAMES = 8;
-
-    private getNvencPreset(height: number): string {
-        if (height >= 1080) return 'p4';
-        if (height >= 720) return 'p5';
-        if (height >= 480) return 'p5';
-        if (height >= 360) return 'p6';
-        return 'p7';
-    }
-
     private bitrateToVbrQuality(bitrateKbps: number): string {
         const q = Math.max(0.1, Math.min(2.0, bitrateKbps / 128));
         return q.toFixed(1);
     }
 
-    private bitrateToVideoCrf(
-        bitrateKbps: number,
-        width: number,
-        height: number,
-        fps: number
-    ): number {
-        // Bits per pixel must use the real frame rate: this assumed 30 fps, so a
-        // 50 fps source was treated as having 66% more bits per pixel than it
-        // does, and the quality target it derived demanded more than the rate cap
-        // could pay for — the encoder rode the cap and motion fell apart.
-        const bpp =
-            (bitrateKbps * 1000) / (width * height * (fps > 0 ? fps : 30));
-        const crf = 23 - Math.log2(bpp / 0.1) * 3;
-        return Math.max(16, Math.min(34, Math.round(crf)));
-    }
-
     private async buildVideoArgs(
         opts: EncodeOptions,
-        alignmentOffset = 0
+        alignmentOffset = 0,
+        wave?: LadderWave
     ): Promise<string[]> {
         const { inputPath, outputDir, encodeConfig } = opts;
-        const renditions = encodeConfig.videoRenditions!;
-        const audioGroups = encodeConfig.audioGroups!;
+        const allRenditions = encodeConfig.videoRenditions!;
+        // What this run encodes, which is the whole ladder unless it was split
+        // to stay under the session cap.
+        const renditions = wave?.renditions ?? allRenditions;
+        const audioGroups =
+            wave && !wave.includeAudio ? [] : encodeConfig.audioGroups!;
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
         const sourceFrameRate = await this.probeFrameRate(inputPath);
         const gopFrames = Math.round(segmentDuration * sourceFrameRate);
@@ -732,33 +746,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         const hasReencode = renditions.some((r) => !r.copyStream);
 
-        if (hasReencode && this.accelMode === 'nvidia') {
-            // Every rendition branch holds references to decoded surfaces, so a
-            // ladder drains NVDEC's pool: it then stops handing back frames and
-            // reports "No decoder surfaces left". The decoder does not fail
-            // cleanly — downstream this arrives as "Invalid data found when
-            // processing input", which either kills the encode or, when the pool
-            // recovers between frames, yields structurally valid H.264 built from
-            // frames that were never decoded properly. That is the corruption in
-            // #93. Ask for surfaces to spare, scaled to the ladder.
-            args.push(
-                '-extra_hw_frames',
-                String(FfmpegService.EXTRA_HW_FRAMES),
-                '-hwaccel',
-                'cuda',
-                '-hwaccel_output_format',
-                'cuda'
-            );
-        } else if (hasReencode && this.accelMode === 'apple') {
-            args.push(
-                '-hwaccel',
-                'videotoolbox',
-                '-hwaccel_output_format',
-                'videotoolbox_vld'
-            );
-        } else if (hasReencode && this.accelMode === 'intel') {
-            args.push('-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv');
-        }
+        args.push(...decodeArgs(this.accelMode, 'ladder', hasReencode));
 
         if (trimming) {
             const concatPath = await this.buildConcatFile(
@@ -839,22 +827,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     `[0:v:${trackIdx}]${trimSelect}split=${entries.length}${splitOutputs}`
                 );
                 for (const e of entries) {
-                    let scalerExpr: string;
-                    if (this.accelMode === 'nvidia') {
-                        scalerExpr = `scale_cuda=${e.rendition.width}:${e.rendition.height}`;
-                    } else if (this.accelMode === 'apple') {
-                        scalerExpr = `scale_vt=w=${e.rendition.width}:h=${e.rendition.height}`;
-                    } else if (this.accelMode === 'intel') {
-                        // vpp_qsv, not scale_qsv: the VPP filter is what current
-                        // FFmpeg builds carry, and it keeps the frame in QSV
-                        // memory so no download/upload round trip appears
-                        // between decode and encode.
-                        scalerExpr = `vpp_qsv=w=${e.rendition.width}:h=${e.rendition.height}`;
-                    } else {
-                        scalerExpr = `scale=${e.rendition.width}:${e.rendition.height}`;
-                    }
                     filterParts.push(
-                        `[reencode${e.globalIndex}]${scalerExpr}[vout${e.globalIndex}]`
+                        `[reencode${e.globalIndex}]${scalerExpr(
+                            this.accelMode,
+                            e.rendition.width,
+                            e.rendition.height
+                        )}[vout${e.globalIndex}]`
                     );
                 }
             }
@@ -872,146 +850,14 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             const r = reencodeRenditions[i];
             args.push('-map', `[vout${i}]`);
 
-            if (this.accelMode === 'nvidia') {
-                args.push(
-                    `-c:v:${videoOutputIndex}`,
-                    'h264_nvenc',
-                    `-profile:v:${videoOutputIndex}`,
-                    'high',
-                    `-preset:v:${videoOutputIndex}`,
-                    this.getNvencPreset(r.height),
-                    `-tune:v:${videoOutputIndex}`,
-                    'hq',
-                    `-rc:v:${videoOutputIndex}`,
-                    'vbr'
-                );
-                if (r.vbr) {
-                    const cq = this.bitrateToVideoCrf(
-                        r.videoBitrateKbps,
-                        r.width,
-                        r.height,
-                        sourceFrameRate
-                    );
-                    args.push(
-                        `-cq:v:${videoOutputIndex}`,
-                        `${cq}`,
-                        `-b:v:${videoOutputIndex}`,
-                        '0',
-                        `-maxrate:v:${videoOutputIndex}`,
-                        `${r.videoBitrateKbps}k`,
-                        `-bufsize:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
-                    );
-                } else {
-                    args.push(
-                        `-b:v:${videoOutputIndex}`,
-                        `${r.videoBitrateKbps}k`,
-                        `-maxrate:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.07)}k`,
-                        `-bufsize:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
-                    );
-                }
-            } else if (this.accelMode === 'intel') {
-                // Quick Sync. `-global_quality` with `-look_ahead 0` is QSV's
-                // constant-quality mode, the counterpart of NVENC's `-cq`; the
-                // scale is the same 0-51 range as x264's CRF, so the existing
-                // bitrate-to-CRF mapping applies unchanged.
-                args.push(
-                    `-c:v:${videoOutputIndex}`,
-                    'h264_qsv',
-                    `-profile:v:${videoOutputIndex}`,
-                    'high',
-                    `-preset:v:${videoOutputIndex}`,
-                    'medium'
-                );
-                if (r.vbr) {
-                    const quality = this.bitrateToVideoCrf(
-                        r.videoBitrateKbps,
-                        r.width,
-                        r.height,
-                        sourceFrameRate
-                    );
-                    args.push(
-                        `-global_quality:v:${videoOutputIndex}`,
-                        `${quality}`,
-                        `-look_ahead:v:${videoOutputIndex}`,
-                        '0',
-                        `-maxrate:v:${videoOutputIndex}`,
-                        `${r.videoBitrateKbps}k`,
-                        `-bufsize:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
-                    );
-                } else {
-                    args.push(
-                        `-b:v:${videoOutputIndex}`,
-                        `${r.videoBitrateKbps}k`,
-                        `-maxrate:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.07)}k`,
-                        `-bufsize:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
-                    );
-                }
-            } else if (this.accelMode === 'apple') {
-                args.push(
-                    `-c:v:${videoOutputIndex}`,
-                    'h264_videotoolbox',
-                    `-allow_sw:v:${videoOutputIndex}`,
-                    '1',
-                    `-realtime:v:${videoOutputIndex}`,
-                    '0',
-                    `-profile:v:${videoOutputIndex}`,
-                    'high'
-                );
-                args.push(
-                    `-b:v:${videoOutputIndex}`,
-                    `${r.videoBitrateKbps}k`,
-                    `-maxrate:v:${videoOutputIndex}`,
-                    `${Math.round(r.videoBitrateKbps * (r.vbr ? 1.5 : 1.07))}k`,
-                    `-bufsize:v:${videoOutputIndex}`,
-                    `${Math.round(r.videoBitrateKbps * (r.vbr ? 2 : 1.5))}k`
-                );
-            } else {
-                args.push(
-                    `-c:v:${videoOutputIndex}`,
-                    'libx264',
-                    `-preset:v:${videoOutputIndex}`,
-                    this.getX264Preset(r.height)
-                );
-                if (r.vbr) {
-                    const crf = this.bitrateToVideoCrf(
-                        r.videoBitrateKbps,
-                        r.width,
-                        r.height,
-                        sourceFrameRate
-                    );
-                    args.push(
-                        `-crf:v:${videoOutputIndex}`,
-                        `${crf}`,
-                        `-maxrate:v:${videoOutputIndex}`,
-                        `${r.videoBitrateKbps}k`,
-                        `-bufsize:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
-                    );
-                } else {
-                    args.push(
-                        `-b:v:${videoOutputIndex}`,
-                        `${r.videoBitrateKbps}k`,
-                        `-maxrate:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.07)}k`,
-                        `-bufsize:v:${videoOutputIndex}`,
-                        `${Math.round(r.videoBitrateKbps * 1.5)}k`
-                    );
-                }
-                // x264 puts a keyframe wherever it detects a cut, which lands
-                // off the `-g` cadence below and takes the segment boundary
-                // with it — the HLS muxer closes a chunk at the first keyframe
-                // past `-hls_time`, so a scene change two seconds early yields
-                // a short segment and the chain stops being uniform. NVENC and
-                // VideoToolbox do not scene-cut unless asked, so this is the
-                // CPU path's problem alone.
-                args.push(`-sc_threshold:v:${videoOutputIndex}`, '0');
-            }
+            args.push(
+                ...ladderVideoArgs(
+                    this.accelMode,
+                    r,
+                    videoOutputIndex,
+                    sourceFrameRate
+                )
+            );
             args.push(
                 `-g:v:${videoOutputIndex}`,
                 `${gopFrames}`,
@@ -1069,7 +915,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             if (group.copyStream) {
                 args.push(`-c:a:${audioOutputIndex}`, 'copy');
             } else {
-                args.push(`-c:a:${audioOutputIndex}`, 'aac');
+                args.push(...aacArgs(audioOutputIndex));
                 if (group.vbr) {
                     args.push(
                         `-q:a:${audioOutputIndex}`,
@@ -1108,19 +954,27 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             '-hls_segment_type',
             'fmp4',
             '-master_pl_name',
-            'master.m3u8',
+            wave?.masterName ?? 'master.m3u8',
             '-hls_fmp4_init_filename',
             'init.mp4',
             '-movflags',
             '+negative_cts_offsets+default_base_moof'
         );
 
+        // The whole ladder, never this wave's share of it: the name decides the
+        // output directory, and buildStreamChainMap applies the same test over
+        // the full set. Deciding it per wave would rename a rendition purely
+        // because it landed in a run with fewer tracks.
         const multiTrack =
-            new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
+            new Set(allRenditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
 
         const varParts: string[] = [];
         for (const { rendition, outputIndex } of videoIndexMap) {
             const name = this.buildVideoStreamName(rendition, multiTrack);
+            // In a wave without audio the agroup names streams absent from this
+            // run. Verified harmless against the shipped ffmpeg: the muxer
+            // simply writes no AUDIO attribute, and the merge restores it from
+            // the wave that did encode the audio.
             const part = `v:${outputIndex},agroup:${rendition.audioGroupId},name:${name}`;
             varParts.push(part);
         }
@@ -1219,7 +1073,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             if (group.copyStream) {
                 args.push(`-c:a:${i}`, 'copy');
             } else {
-                args.push(`-c:a:${i}`, 'aac');
+                args.push(...aacArgs(i));
                 if (group.vbr) {
                     args.push(
                         `-q:a:${i}`,
@@ -1341,58 +1195,175 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                   0,
                   (await this.probeDuration(opts.inputPath)) - alignmentOffset
               );
-        const buildArgs = () =>
+        // A ladder that would open more encoder sessions than the driver allows
+        // is encoded in waves instead. One that already fits stays a single
+        // invocation writing master.m3u8 directly, with no merge step.
+        const waves =
             type === 'video'
-                ? this.buildVideoArgs(opts, alignmentOffset)
-                : this.buildAudioArgs(opts, alignmentOffset);
+                ? planLadderWaves(
+                      encodeConfig.videoRenditions!,
+                      MAX_HARDWARE_SESSIONS
+                  )
+                : [];
 
-        try {
-            return await this.runEncode(
-                await buildArgs(),
+        if (waves.length > 1) {
+            return await this.runLadderWaves(
+                waves,
                 opts,
                 totalDuration,
                 alignmentOffset
             );
-        } catch (err) {
-            // A hardware encoder that will not open is not a reason to fail the
-            // job when libx264 is right there. The case that surfaced this: a
-            // GeForce driver caps concurrent NVENC sessions (2, 3, 5 or 8 by
-            // generation) and a six-rendition ladder opens six — every session
-            // past the cap fails with "Could not open encoder before EOF /
-            // Invalid argument", and the whole encode with it. The preview has
-            // retried on CPU for this exact reason since it was written; the
-            // encode never did.
-            if (this.accelMode === 'cpu' || !isHardwareEncoderFailure(err)) {
-                throw err;
-            }
-            this.logger.warn(
-                `${this.accelMode} encoder failed to open, retrying this encode on CPU: ` +
-                    `${(err as Error).message.split('\n')[0]}`
+        }
+
+        const args =
+            type === 'video'
+                ? await this.buildVideoArgs(opts, alignmentOffset, waves[0])
+                : await this.buildAudioArgs(opts, alignmentOffset);
+
+        // Held across the whole run: the sessions belong to the ffmpeg process,
+        // so a preview must not open one beside them.
+        const release = await acquireEncoderSessions(
+            waves[0]?.sessionCount ?? 0
+        );
+        try {
+            return await this.runEncode(
+                args,
+                opts,
+                totalDuration,
+                alignmentOffset
             );
-            const previous = this.accelMode;
-            this.accelMode = 'cpu';
-            try {
-                return await this.runEncode(
-                    await buildArgs(),
-                    opts,
-                    totalDuration,
-                    alignmentOffset
-                );
-            } finally {
-                // Per encode, not for good: the next job may be a single
-                // rendition the GPU handles fine, and the acceleration mode is
-                // what the UI reports as the machine's capability.
-                this.accelMode = previous;
-            }
+        } finally {
+            release();
         }
     }
 
-    /** Spawn one ffmpeg run for {@link encode} and wait for it. */
+    /**
+     * Encode a ladder in waves, each staying within the session cap.
+     *
+     * Every wave decodes the source again, which is the price of not exceeding
+     * the cap — six rungs in waves of three cost two decodes rather than six.
+     * Stream directories are named after the rendition, so each wave writes
+     * straight to its final output and only the master playlists are merged.
+     */
+    private async runLadderWaves(
+        waves: LadderWave[],
+        opts: EncodeOptions,
+        totalDuration: number,
+        alignmentOffset: number
+    ): Promise<EncodeResult> {
+        const { outputDir, encodeConfig, onProgress } = opts;
+
+        this.logger.log(
+            `Ladder of ${waves.reduce((n, w) => n + w.sessionCount, 0)} encoded ` +
+                `renditions split into ${waves.length} waves of at most ` +
+                `${MAX_HARDWARE_SESSIONS}: ` +
+                waves
+                    .map((w) =>
+                        w.renditions
+                            .map((r) => r.label ?? `${r.height}p`)
+                            .join('+')
+                    )
+                    .join(', ')
+        );
+
+        for (const [index, wave] of waves.entries()) {
+            const args = await this.buildVideoArgs(opts, alignmentOffset, wave);
+
+            // Each wave reports 0-100 for its own run, so the job's bar advances
+            // through an equal share per wave. Every wave decodes the whole
+            // source and decoding dominates, so equal shares track the work
+            // closely enough to keep the bar honest.
+            const span = 100 / waves.length;
+            const base = span * index;
+            const waveOpts: EncodeOptions = {
+                ...opts,
+                onProgress: (percent) =>
+                    onProgress(Math.min(99.9, base + (percent * span) / 100)),
+            };
+
+            const release = await acquireEncoderSessions(wave.sessionCount);
+            try {
+                await this.runEncode(
+                    args,
+                    waveOpts,
+                    totalDuration,
+                    alignmentOffset,
+                    false
+                );
+            } finally {
+                release();
+            }
+        }
+
+        await this.mergeWaveMasterPlaylists(outputDir, waves, encodeConfig);
+        await this.fixMasterPlaylist(outputDir, encodeConfig);
+        onProgress(100);
+
+        return {
+            outputDir,
+            masterPlaylist: 'master.m3u8',
+            segmentFormat: 'fmp4',
+            alignmentOffset,
+        };
+    }
+
+    /**
+     * Fold the waves' master playlists into the single master.m3u8 the rest of
+     * the pipeline expects, then delete them.
+     */
+    private async mergeWaveMasterPlaylists(
+        outputDir: string,
+        waves: LadderWave[],
+        encodeConfig: EncodeConfigDto
+    ): Promise<void> {
+        const contents = await Promise.all(
+            waves.map((wave) =>
+                readFile(join(outputDir, wave.masterName), 'utf8')
+            )
+        );
+
+        // A variant's URI names its stream directory, the directory is named
+        // after the rendition, and the rendition carries the audio group that
+        // every wave after the first had to omit.
+        const renditions = encodeConfig.videoRenditions ?? [];
+        const multiTrack =
+            new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
+        const groupByDir = new Map<string, string>();
+        for (const rendition of renditions) {
+            groupByDir.set(
+                `stream_${this.buildVideoStreamName(rendition, multiTrack)}`,
+                rendition.audioGroupId
+            );
+        }
+
+        await writeFile(
+            join(outputDir, 'master.m3u8'),
+            mergeWaveMasters(contents, (uri) =>
+                groupByDir.get(uri.split('/')[0])
+            ),
+            'utf8'
+        );
+
+        await Promise.all(
+            waves.map((wave) =>
+                rm(join(outputDir, wave.masterName), { force: true })
+            )
+        );
+    }
+
+    /**
+     * Spawn one ffmpeg run for {@link encode} and wait for it.
+     *
+     * `postProcess` is false for a wave that is not the last: master.m3u8 does
+     * not exist yet — each wave writes its own — so there is nothing to rewrite
+     * until they have been merged.
+     */
     private runEncode(
         args: string[],
         opts: EncodeOptions,
         totalDuration: number,
-        alignmentOffset: number
+        alignmentOffset: number,
+        postProcess = true
     ): Promise<EncodeResult> {
         const { outputDir, encodeConfig, onProgress } = opts;
         const type = encodeConfig.type;
@@ -1452,7 +1423,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     // One spec-correct master, angles and all. Splitting it per
                     // angle is the player's job now (see the hls package's
                     // extractAnglePlaylist / extractAudioOnlyPlaylist).
-                    if (type === 'video') {
+                    if (!postProcess) {
+                        // A wave: its caller merges the masters and rewrites the
+                        // result once every wave has run.
+                    } else if (type === 'video') {
                         await this.fixMasterPlaylist(outputDir, encodeConfig);
                     } else {
                         await this.fixAudioOnlyMasterPlaylist(
@@ -2027,7 +2001,7 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     isGpuAvailable(): boolean {
-        return this.accelMode !== 'cpu';
+        return this.accelMode !== 'cpu' && this.accelMode !== 'none';
     }
 
     getAccelMode(): AccelMode {

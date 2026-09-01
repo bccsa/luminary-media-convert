@@ -56,6 +56,8 @@
  */
 
 import { execFile } from 'child_process';
+import { bridgeVideoArgs } from './encoder-selection';
+import { acquireEncoderSession } from './encoder-sessions';
 import { mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { promisify } from 'util';
@@ -459,60 +461,11 @@ function bridgeEncoderArgs(
     // One keyframe, at the start: a bridge is a single closed GOP.
     const gop = ['-g', String(BRIDGE_GOP_FRAMES)];
 
-    if (useGpu && accelMode === 'nvidia') {
-        return [
-            '-c:v',
-            'h264_nvenc',
-            '-preset',
-            'p4',
-            ...profileArgs,
-            ...rate,
-            ...gop,
-        ];
-    }
-    if (useGpu && accelMode === 'apple') {
-        return [
-            '-c:v',
-            'h264_videotoolbox',
-            '-allow_sw',
-            '1',
-            '-realtime',
-            '0',
-            ...profileArgs,
-            ...rate,
-            ...gop,
-        ];
-    }
-    if (useGpu && accelMode === 'intel') {
-        return [
-            '-c:v',
-            'h264_qsv',
-            '-preset',
-            'medium',
-            ...profileArgs,
-            ...rate,
-            ...gop,
-        ];
-    }
-    return [
-        '-c:v',
-        'libx264',
-        // A bridge is under a second of video; the ladder's height-based preset
-        // table is about throughput over a whole file.
-        '-preset',
-        'veryfast',
-        // Pinned only here: the hardware encoders take their pixel format from
-        // the frames they are handed, and refuse most of what could be named.
-        '-pix_fmt',
-        params?.pixFmt ?? 'yuv420p',
-        ...profileArgs,
-        ...rate,
-        ...gop,
-        '-keyint_min',
-        String(BRIDGE_GOP_FRAMES),
-        '-sc_threshold',
-        '0',
-    ];
+    const { head, tail } = bridgeVideoArgs(accelMode, useGpu, {
+        pixFmt: params?.pixFmt,
+        gopFrames: BRIDGE_GOP_FRAMES,
+    });
+    return [...head, ...profileArgs, ...rate, ...gop, ...tail];
 }
 
 export interface BridgeArgsInput {
@@ -1349,18 +1302,33 @@ async function runOneJob(
 
     const jobStartedAt = Date.now();
     if (job.kind === 'bridge') {
-        await runBridgePart(
-            deps,
-            {
-                inputPath: ctx.inputPath,
-                streamDirPath: run.streamDirPath,
-                target: run.target,
-                part: job.parts[0],
-                params: run.params,
-            },
-            onTime
-        );
-        const wallMs = Date.now() - jobStartedAt;
+        // A video bridge opens a hardware encoder, and the driver's session
+        // cap is one process-wide number shared with the ladder and previews —
+        // four concurrent bridges would exceed it on their own. Audio bridges
+        // encode AAC and copy jobs hand bytes to the muxer; neither takes a
+        // session.
+        const releaseSession =
+            run.target.kind === 'video' ? await acquireEncoderSession() : null;
+        // Stamped after the wait: the stopwatch below warns about a bridge
+        // reading past its part, and time spent queued for a session is not
+        // that.
+        const bridgeStartedAt = Date.now();
+        try {
+            await runBridgePart(
+                deps,
+                {
+                    inputPath: ctx.inputPath,
+                    streamDirPath: run.streamDirPath,
+                    target: run.target,
+                    part: job.parts[0],
+                    params: run.params,
+                },
+                onTime
+            );
+        } finally {
+            releaseSession?.();
+        }
+        const wallMs = Date.now() - bridgeStartedAt;
         ctx.tally.bridgeContent += weight;
         ctx.tally.bridgeWallMs += wallMs;
         ctx.tally.bridgeParts += 1;
@@ -1407,7 +1375,7 @@ async function runBridgePart(
     onTime: (seconds: number) => void
 ): Promise<void> {
     const { part, target } = ctx;
-    const useGpu = deps.accelMode !== 'cpu';
+    const useGpu = deps.accelMode !== 'cpu' && deps.accelMode !== 'none';
     const label = `${target.streamDir} bridge ${part.partIndex}`;
 
     const args = buildBridgeArgs({
