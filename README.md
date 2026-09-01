@@ -189,7 +189,7 @@ by other applications, while the build scripts are a separate concern.
 | --- | --- | --- |
 | every workspace — `api/`, `app/`, `app-electron/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `player-web-legacy/`, `cms-mock/` | Apache-2.0 | each carries its own `LICENSE` |
 | `ffmpeg-build/` | GPL-3.0-or-later | carries its own `LICENSE`; the build scripts also carry an SPDX header |
-| everything else — `docs/`, `test-media/`, the root files | Apache-2.0 | declared by the root `package.json` |
+| everything else — `docs/`, `test-media/`, the root files | Apache-2.0 | the root `LICENSE` |
 
 **`app-electron` was GPL-3.0-or-later until 31 August 2026**, and the reason it
 no longer is, is worth keeping: it was licensed to match the encoder it shipped.
