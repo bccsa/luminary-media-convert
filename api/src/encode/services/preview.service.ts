@@ -919,10 +919,20 @@ export class PreviewService {
                 args,
                 opts
             ).catch((err: any) => {
+                const via = useGpu
+                    ? accelMode
+                    : rendition.canCopy
+                      ? 'stream copy'
+                      : 'cpu';
+                // The substitution hint belongs to encoder failures: a copied
+                // segment never opened an encoder, so a different FFmpeg is not
+                // the remedy for whatever stopped it.
+                const hint = rendition.canCopy
+                    ? ''
+                    : `\n\n${USE_YOUR_OWN_FFMPEG}`;
                 throw new Error(
                     `Preview segment r${renditionIndex}/s${segmentIndex} failed on ` +
-                        `${useGpu ? accelMode : 'stream copy'}: ${err.message}\n\n` +
-                        USE_YOUR_OWN_FFMPEG
+                        `${via}: ${err.message}${hint}`
                 );
             });
 

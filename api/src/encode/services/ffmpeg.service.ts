@@ -971,6 +971,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         const varParts: string[] = [];
         for (const { rendition, outputIndex } of videoIndexMap) {
             const name = this.buildVideoStreamName(rendition, multiTrack);
+            // In a wave without audio the agroup names streams absent from this
+            // run. Verified harmless against the shipped ffmpeg: the muxer
+            // simply writes no AUDIO attribute, and the merge restores it from
+            // the wave that did encode the audio.
             const part = `v:${outputIndex},agroup:${rendition.audioGroupId},name:${name}`;
             varParts.push(part);
         }

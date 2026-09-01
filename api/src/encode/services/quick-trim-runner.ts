@@ -57,6 +57,7 @@
 
 import { execFile } from 'child_process';
 import { bridgeVideoArgs } from './encoder-selection';
+import { acquireEncoderSession } from './encoder-sessions';
 import { mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { promisify } from 'util';
@@ -1301,18 +1302,33 @@ async function runOneJob(
 
     const jobStartedAt = Date.now();
     if (job.kind === 'bridge') {
-        await runBridgePart(
-            deps,
-            {
-                inputPath: ctx.inputPath,
-                streamDirPath: run.streamDirPath,
-                target: run.target,
-                part: job.parts[0],
-                params: run.params,
-            },
-            onTime
-        );
-        const wallMs = Date.now() - jobStartedAt;
+        // A video bridge opens a hardware encoder, and the driver's session
+        // cap is one process-wide number shared with the ladder and previews —
+        // four concurrent bridges would exceed it on their own. Audio bridges
+        // encode AAC and copy jobs hand bytes to the muxer; neither takes a
+        // session.
+        const releaseSession =
+            run.target.kind === 'video' ? await acquireEncoderSession() : null;
+        // Stamped after the wait: the stopwatch below warns about a bridge
+        // reading past its part, and time spent queued for a session is not
+        // that.
+        const bridgeStartedAt = Date.now();
+        try {
+            await runBridgePart(
+                deps,
+                {
+                    inputPath: ctx.inputPath,
+                    streamDirPath: run.streamDirPath,
+                    target: run.target,
+                    part: job.parts[0],
+                    params: run.params,
+                },
+                onTime
+            );
+        } finally {
+            releaseSession?.();
+        }
+        const wallMs = Date.now() - bridgeStartedAt;
         ctx.tally.bridgeContent += weight;
         ctx.tally.bridgeWallMs += wallMs;
         ctx.tally.bridgeParts += 1;
