@@ -3,6 +3,7 @@ import {
     aacArgs,
     decodeArgs,
     previewVideoArgs,
+    USE_YOUR_OWN_FFMPEG,
     type AccelMode,
 } from './encoder-selection';
 import { acquireEncoderSession } from './encoder-sessions';
@@ -908,28 +909,22 @@ export class PreviewService {
                 encoding: 'buffer' as BufferEncoding,
             };
 
-            let result: { stdout: any };
-            try {
-                result = await execFileAsync(ffmpegBin(), args, opts);
-            } catch (gpuErr: any) {
-                if (!useGpu) throw gpuErr;
-                // GPU failed (e.g. NVENC session limit) — retry with CPU
-                this.logger.warn(
-                    `GPU encode failed for r${renditionIndex}/s${segmentIndex}, falling back to CPU: ${gpuErr.message}`
+            // No CPU retry: this FFmpeg has no software H.264 encoder to retry
+            // with, so one would fail on a missing encoder and report that
+            // instead of the hardware error that actually stopped the preview.
+            // The session limit that motivated the retry is now kept away by the
+            // shared session budget above.
+            const result: { stdout: any } = await execFileAsync(
+                ffmpegBin(),
+                args,
+                opts
+            ).catch((err: any) => {
+                throw new Error(
+                    `Preview segment r${renditionIndex}/s${segmentIndex} failed on ` +
+                        `${useGpu ? accelMode : 'stream copy'}: ${err.message}\n\n` +
+                        USE_YOUR_OWN_FFMPEG
                 );
-                const cpuArgs = this.buildSegmentArgs(
-                    state.filePath,
-                    start,
-                    segDur,
-                    videoMap,
-                    audioMap,
-                    rendition,
-                    'cpu',
-                    false,
-                    copySeekStart
-                );
-                result = await execFileAsync(ffmpegBin(), cpuArgs, opts);
-            }
+            });
 
             // Write segment data ourselves — guaranteed flushed via writeFile
             await writeFile(outputPath, result.stdout);

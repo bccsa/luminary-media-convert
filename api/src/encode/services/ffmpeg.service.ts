@@ -19,6 +19,15 @@ import {
     scalerExpr,
     type AccelMode,
 } from './encoder-selection';
+import {
+    mergeWaveMasters,
+    planLadderWaves,
+    type LadderWave,
+} from './ladder-waves';
+import {
+    acquireEncoderSessions,
+    MAX_HARDWARE_SESSIONS,
+} from './encoder-sessions';
 import { mkdirSync, existsSync } from 'fs';
 import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
@@ -103,6 +112,13 @@ export type { AccelMode };
 /**
  * Whether an ffmpeg failure is the hardware encoder refusing to start, as
  * opposed to a bad source or a bad configuration that CPU would fail on too.
+ *
+ * Nothing calls this at the moment. It classified failures for a retry on
+ * libx264, and this FFmpeg has no software encoder to retry on; the session cap
+ * that the retry mostly caught is kept away by the wave planner instead. Kept
+ * because the signatures below are the hard part of the fallback chain that will
+ * pick the next hardware encoder rather than a software one — but until then, no
+ * fallback is wired to it.
  *
  * Matched on what the encoders actually say. NVENC over its session cap:
  * "Could not open encoder before EOF" with `-22 (Invalid argument)`; NVENC/QSV/
@@ -708,11 +724,16 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
     private async buildVideoArgs(
         opts: EncodeOptions,
-        alignmentOffset = 0
+        alignmentOffset = 0,
+        wave?: LadderWave
     ): Promise<string[]> {
         const { inputPath, outputDir, encodeConfig } = opts;
-        const renditions = encodeConfig.videoRenditions!;
-        const audioGroups = encodeConfig.audioGroups!;
+        const allRenditions = encodeConfig.videoRenditions!;
+        // What this run encodes, which is the whole ladder unless it was split
+        // to stay under the session cap.
+        const renditions = wave?.renditions ?? allRenditions;
+        const audioGroups =
+            wave && !wave.includeAudio ? [] : encodeConfig.audioGroups!;
         const segmentDuration = encodeConfig.segmentDuration ?? 6;
         const sourceFrameRate = await this.probeFrameRate(inputPath);
         const gopFrames = Math.round(segmentDuration * sourceFrameRate);
@@ -933,15 +954,19 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             '-hls_segment_type',
             'fmp4',
             '-master_pl_name',
-            'master.m3u8',
+            wave?.masterName ?? 'master.m3u8',
             '-hls_fmp4_init_filename',
             'init.mp4',
             '-movflags',
             '+negative_cts_offsets+default_base_moof'
         );
 
+        // The whole ladder, never this wave's share of it: the name decides the
+        // output directory, and buildStreamChainMap applies the same test over
+        // the full set. Deciding it per wave would rename a rendition purely
+        // because it landed in a run with fewer tracks.
         const multiTrack =
-            new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
+            new Set(allRenditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
 
         const varParts: string[] = [];
         for (const { rendition, outputIndex } of videoIndexMap) {
@@ -1166,62 +1191,175 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                   0,
                   (await this.probeDuration(opts.inputPath)) - alignmentOffset
               );
-        const buildArgs = () =>
+        // A ladder that would open more encoder sessions than the driver allows
+        // is encoded in waves instead. One that already fits stays a single
+        // invocation writing master.m3u8 directly, with no merge step.
+        const waves =
             type === 'video'
-                ? this.buildVideoArgs(opts, alignmentOffset)
-                : this.buildAudioArgs(opts, alignmentOffset);
+                ? planLadderWaves(
+                      encodeConfig.videoRenditions!,
+                      MAX_HARDWARE_SESSIONS
+                  )
+                : [];
 
-        try {
-            return await this.runEncode(
-                await buildArgs(),
+        if (waves.length > 1) {
+            return await this.runLadderWaves(
+                waves,
                 opts,
                 totalDuration,
                 alignmentOffset
             );
-        } catch (err) {
-            // A hardware encoder that will not open is not a reason to fail the
-            // job when libx264 is right there. The case that surfaced this: a
-            // GeForce driver caps concurrent NVENC sessions (2, 3, 5 or 8 by
-            // generation) and a six-rendition ladder opens six — every session
-            // past the cap fails with "Could not open encoder before EOF /
-            // Invalid argument", and the whole encode with it. The preview has
-            // retried on CPU for this exact reason since it was written; the
-            // encode never did.
-            if (
-                this.accelMode === 'cpu' ||
-                this.accelMode === 'none' ||
-                !isHardwareEncoderFailure(err)
-            ) {
-                throw err;
-            }
-            this.logger.warn(
-                `${this.accelMode} encoder failed to open, retrying this encode on CPU: ` +
-                    `${(err as Error).message.split('\n')[0]}`
+        }
+
+        const args =
+            type === 'video'
+                ? await this.buildVideoArgs(opts, alignmentOffset, waves[0])
+                : await this.buildAudioArgs(opts, alignmentOffset);
+
+        // Held across the whole run: the sessions belong to the ffmpeg process,
+        // so a preview must not open one beside them.
+        const release = await acquireEncoderSessions(
+            waves[0]?.sessionCount ?? 0
+        );
+        try {
+            return await this.runEncode(
+                args,
+                opts,
+                totalDuration,
+                alignmentOffset
             );
-            const previous = this.accelMode;
-            this.accelMode = 'cpu';
-            try {
-                return await this.runEncode(
-                    await buildArgs(),
-                    opts,
-                    totalDuration,
-                    alignmentOffset
-                );
-            } finally {
-                // Per encode, not for good: the next job may be a single
-                // rendition the GPU handles fine, and the acceleration mode is
-                // what the UI reports as the machine's capability.
-                this.accelMode = previous;
-            }
+        } finally {
+            release();
         }
     }
 
-    /** Spawn one ffmpeg run for {@link encode} and wait for it. */
+    /**
+     * Encode a ladder in waves, each staying within the session cap.
+     *
+     * Every wave decodes the source again, which is the price of not exceeding
+     * the cap — six rungs in waves of three cost two decodes rather than six.
+     * Stream directories are named after the rendition, so each wave writes
+     * straight to its final output and only the master playlists are merged.
+     */
+    private async runLadderWaves(
+        waves: LadderWave[],
+        opts: EncodeOptions,
+        totalDuration: number,
+        alignmentOffset: number
+    ): Promise<EncodeResult> {
+        const { outputDir, encodeConfig, onProgress } = opts;
+
+        this.logger.log(
+            `Ladder of ${waves.reduce((n, w) => n + w.sessionCount, 0)} encoded ` +
+                `renditions split into ${waves.length} waves of at most ` +
+                `${MAX_HARDWARE_SESSIONS}: ` +
+                waves
+                    .map((w) =>
+                        w.renditions
+                            .map((r) => r.label ?? `${r.height}p`)
+                            .join('+')
+                    )
+                    .join(', ')
+        );
+
+        for (const [index, wave] of waves.entries()) {
+            const args = await this.buildVideoArgs(opts, alignmentOffset, wave);
+
+            // Each wave reports 0-100 for its own run, so the job's bar advances
+            // through an equal share per wave. Every wave decodes the whole
+            // source and decoding dominates, so equal shares track the work
+            // closely enough to keep the bar honest.
+            const span = 100 / waves.length;
+            const base = span * index;
+            const waveOpts: EncodeOptions = {
+                ...opts,
+                onProgress: (percent) =>
+                    onProgress(Math.min(99.9, base + (percent * span) / 100)),
+            };
+
+            const release = await acquireEncoderSessions(wave.sessionCount);
+            try {
+                await this.runEncode(
+                    args,
+                    waveOpts,
+                    totalDuration,
+                    alignmentOffset,
+                    false
+                );
+            } finally {
+                release();
+            }
+        }
+
+        await this.mergeWaveMasterPlaylists(outputDir, waves, encodeConfig);
+        await this.fixMasterPlaylist(outputDir, encodeConfig);
+        onProgress(100);
+
+        return {
+            outputDir,
+            masterPlaylist: 'master.m3u8',
+            segmentFormat: 'fmp4',
+            alignmentOffset,
+        };
+    }
+
+    /**
+     * Fold the waves' master playlists into the single master.m3u8 the rest of
+     * the pipeline expects, then delete them.
+     */
+    private async mergeWaveMasterPlaylists(
+        outputDir: string,
+        waves: LadderWave[],
+        encodeConfig: EncodeConfigDto
+    ): Promise<void> {
+        const contents = await Promise.all(
+            waves.map((wave) =>
+                readFile(join(outputDir, wave.masterName), 'utf8')
+            )
+        );
+
+        // A variant's URI names its stream directory, the directory is named
+        // after the rendition, and the rendition carries the audio group that
+        // every wave after the first had to omit.
+        const renditions = encodeConfig.videoRenditions ?? [];
+        const multiTrack =
+            new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
+        const groupByDir = new Map<string, string>();
+        for (const rendition of renditions) {
+            groupByDir.set(
+                `stream_${this.buildVideoStreamName(rendition, multiTrack)}`,
+                rendition.audioGroupId
+            );
+        }
+
+        await writeFile(
+            join(outputDir, 'master.m3u8'),
+            mergeWaveMasters(contents, (uri) =>
+                groupByDir.get(uri.split('/')[0])
+            ),
+            'utf8'
+        );
+
+        await Promise.all(
+            waves.map((wave) =>
+                rm(join(outputDir, wave.masterName), { force: true })
+            )
+        );
+    }
+
+    /**
+     * Spawn one ffmpeg run for {@link encode} and wait for it.
+     *
+     * `postProcess` is false for a wave that is not the last: master.m3u8 does
+     * not exist yet — each wave writes its own — so there is nothing to rewrite
+     * until they have been merged.
+     */
     private runEncode(
         args: string[],
         opts: EncodeOptions,
         totalDuration: number,
-        alignmentOffset: number
+        alignmentOffset: number,
+        postProcess = true
     ): Promise<EncodeResult> {
         const { outputDir, encodeConfig, onProgress } = opts;
         const type = encodeConfig.type;
@@ -1281,7 +1419,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
                     // One spec-correct master, angles and all. Splitting it per
                     // angle is the player's job now (see the hls package's
                     // extractAnglePlaylist / extractAudioOnlyPlaylist).
-                    if (type === 'video') {
+                    if (!postProcess) {
+                        // A wave: its caller merges the masters and rewrites the
+                        // result once every wave has run.
+                    } else if (type === 'video') {
                         await this.fixMasterPlaylist(outputDir, encodeConfig);
                     } else {
                         await this.fixAudioOnlyMasterPlaylist(
