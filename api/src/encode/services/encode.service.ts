@@ -69,7 +69,6 @@ export class EncodeService {
         private readonly encryptionService: EncryptionService,
         private readonly thumbnailService: ThumbnailService,
         private readonly waveformService: WaveformService,
-        private readonly s3Service: S3Service,
         private readonly segmentPipelineService: SegmentPipelineService
     ) {}
 
@@ -116,9 +115,7 @@ export class EncodeService {
         // Declared outside the try so the failure path can stop it. A pipeline
         // polls on an interval, and nothing below is guaranteed to reach the
         // drain that clears it.
-        let pipeline:
-            | ReturnType<SegmentPipelineService['createPipeline']>
-            | undefined;
+        let pipeline: ReturnType<typeof createPipeline> | undefined;
 
         try {
             const encryptionEnabled =
