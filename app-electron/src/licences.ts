@@ -18,6 +18,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
  */
 
 /**
+ * Patents are a separate question from any copyright licence, so the notice
+ * lives in the repository rather than beside the binaries. Points at the default
+ * branch so the link outlives the branch this was written on.
+ */
+const PATENTS_URL =
+    'https://github.com/bccsa/luminary-media-convert/blob/main/PATENTS.md';
+
+/**
  * Licence files shipped beside the binary, with what each one covers. Most are
  * written by build.sh; the two Electron ones are collected at packaging time by
  * build/after-pack.cjs.
@@ -154,8 +162,7 @@ function buildHtml(): string {
 <body>
   <h1>Luminary Media Convert</h1>
   <p class="lede">Third-party components distributed with this application, and
-  their licence terms. Patents are a separate question that no copyright licence
-  addresses — see PATENTS.md in the project repository.</p>
+  their licence terms. <a href="${PATENTS_URL}" target="_blank">PATENTS.md</a></p>
   <table>${runtime}</table>
   ${sections.join('\n')}
 </body></html>`;

@@ -31,24 +31,6 @@ users of this software. There is no arrangement under which a user's use is
 covered by anything this project has secured. Each user carries their own patent
 relationships.
 
-## What this project does about it
-
-These are engineering decisions, recorded so you can see what the software
-actually does. They are not claims about your legal position.
-
-- **No software H.264 encoder is bundled.** Encoding uses an encoder already
-  present on the machine — VideoToolbox on macOS, or NVENC, Quick Sync, AMF or
-  the Media Foundation encoder on Windows.
-- **No H.265/HEVC support**, in any form.
-- **AAC-LC only**, using FFmpeg's native AAC encoder.
-- FFmpeg is **built from source** by `ffmpeg-build/build.sh` from the versions
-  pinned in `ffmpeg-build/versions.sh`, rather than taken from a prebuilt
-  distribution. The exact configuration is recorded in `BUILDCONF.txt` beside
-  the shipped binary.
-
-Note that decoders as well as encoders may implement patented techniques. This
-software decodes the source files you give it.
-
 ## Reporting
 
 If you believe something in this repository infringes a patent, please open an
