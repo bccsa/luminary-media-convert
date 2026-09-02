@@ -75,7 +75,7 @@ describe('PlayerController — load', () => {
     it('fails into state, never rejects, when no blobs can be served', async () => {
         // jsdom and some SSR runtimes have no Blob/createObjectURL, so with no
         // serveStrategy supplied the default construction throws — synchronously,
-        // which used to escape load() above its try block. Hosts call load()
+        // and a throw above load()'s try block escapes it. Hosts call load()
         // fire-and-forget because the contract is that failures surface through
         // state; a rejecting load is an unhandled rejection in every one of them.
         // Node has createObjectURL, so the environment is degraded by hand —
@@ -933,7 +933,7 @@ describe('PlayerController — scrub thumbnails', () => {
         expect(errors).toEqual([]);
     });
 
-    it('does not carry one source\'s frames into the next', async () => {
+    it("does not carry one source's frames into the next", async () => {
         /*
          * The failure this prevents: load a video with sprites, then load one
          * without, and the scrubber previews frames from the first video —

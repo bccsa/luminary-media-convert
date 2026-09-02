@@ -231,7 +231,10 @@ describe('SidecarLoader — scrub thumbnails', () => {
     it('decrypts an LMCENC sidecar, as an encrypted session writes it', async () => {
         // Since #162 an encrypted session wraps every .vtt it writes, this one
         // included. The sprite images stay plain JPEGs.
-        const h = loader({ [VTT_URL]: encryptLmcenc(THUMBS_VTT) }, TEST_KEY_HEX);
+        const h = loader(
+            { [VTT_URL]: encryptLmcenc(THUMBS_VTT) },
+            TEST_KEY_HEX,
+        );
 
         expect(await h.loader.loadThumbnails({ url: VTT_URL })).toHaveLength(2);
     });
@@ -253,7 +256,9 @@ describe('SidecarLoader — scrub thumbnails', () => {
 
         expect(await h.loader.loadThumbnails(undefined)).toEqual([]);
         expect(
-            await h.loader.loadThumbnails({ url: 'https://cdn.example.com/nope.vtt' }),
+            await h.loader.loadThumbnails({
+                url: 'https://cdn.example.com/nope.vtt',
+            }),
         ).toEqual([]);
     });
 

@@ -127,10 +127,10 @@ describe('S3Service', () => {
     });
 
     /**
-     * These cases previously ran through `uploadDirectory`, which turned out to
-     * have no callers — so they were asserting a fix that never reached storage.
-     * Kept as direct tests of the helper, which the live upload path in
-     * `encode.service` uses to build every key.
+     * Tests of the key-building helper directly, rather than through
+     * `uploadDirectory`, which has no callers — asserting through it would assert
+     * a fix that never reaches storage. `encode.service`'s live upload path uses
+     * this helper to build every key.
      */
     describe('canonicalPrefix', () => {
         it('drops a leading slash', () => {

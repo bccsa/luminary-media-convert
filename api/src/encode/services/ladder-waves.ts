@@ -6,9 +6,8 @@ import type { VideoRenditionDto } from '../dto/encode-config.dto.js';
  *
  * One invocation with `split=N` opens N encoder sessions at once. GeForce
  * drivers cap those, and past the cap the extra sessions fail to open and take
- * the whole encode with them. Until now a failed hardware encode fell back to
- * libx264; the encoder no longer carries one, so the ladder has to stay within
- * the cap rather than recover from exceeding it.
+ * the whole encode with them. The build carries no libx264 to fall back to, so
+ * the ladder has to stay within the cap rather than recover from exceeding it.
  *
  * Each run decodes the source again, which is why this is waves of the cap
  * rather than one rendition at a time: six rungs cost two decodes, not six.

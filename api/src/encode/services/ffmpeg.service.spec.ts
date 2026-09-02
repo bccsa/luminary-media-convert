@@ -128,10 +128,10 @@ describe('FfmpegService', () => {
         });
 
         service = new FfmpegService();
-        // Argument-building tests need a mode. They used to inherit 'cpu' as the
-        // field's default; the default is now 'none', because before detection
-        // runs nothing is known and the shipped LGPL ffmpeg has no software
-        // encoder to assume. The detection tests below set their own.
+        // Argument-building tests need a mode, and the field defaults to 'none'
+        // — before detection runs nothing is known, and the shipped LGPL ffmpeg
+        // has no software encoder to assume. The detection tests below set their
+        // own.
         (service as any).accelMode = 'cpu';
     });
 
@@ -989,10 +989,10 @@ describe('FfmpegService', () => {
         });
 
         it('should always use segmentDuration for -hls_time', async () => {
-            // The chunk chain is the encoder's decision now, not the source's:
-            // -hls_time used to be overridden with the detected source GOP
-            // whenever byte-range output was on, which made segment length a
-            // property of whatever file was handed over.
+            // The chunk chain is the encoder's decision, not the source's.
+            // Overriding -hls_time with the detected source GOP under byte-range
+            // output would make segment length a property of whatever file was
+            // handed over.
             const encodeConfig: EncodeConfigDto = {
                 type: 'video',
                 segmentDuration: 10,
@@ -2195,9 +2195,9 @@ describe('FfmpegService', () => {
         });
 
         it('should always report fmp4, aligned or not', async () => {
-            // The output container stopped being a property of the input: a
-            // source whose streams do not start together is seeked into
-            // alignment rather than escaped into MPEG-TS.
+            // The container is not a property of the input: a source whose
+            // streams do not start together is seeked into alignment rather than
+            // escaped into MPEG-TS.
             for (const offset of [0, 0.1]) {
                 alignmentOffsetSpy.mockResolvedValue(offset);
                 const mockProc = createMockProcess();
@@ -2435,8 +2435,8 @@ describe('FfmpegService', () => {
 
             const calls = onProgress.mock.calls.map((c: any[]) => c[0]);
             // Capped while running, so a rounded 100 never claims a finish that
-            // has not happened. Nothing used to lift it afterwards, so a
-            // finished encode sat at 99.9% through the whole upload phase.
+            // has not happened — and lifted at the end, or a finished encode
+            // sits at 99.9% through the whole upload phase.
             expect(calls.slice(0, -1).every((v: number) => v <= 99.9)).toBe(
                 true
             );
@@ -2493,11 +2493,10 @@ describe('FfmpegService', () => {
 
         it('always resolves to master.m3u8, whatever the angles', async () => {
             // The encoder writes one spec-correct master carrying every camera
-            // angle as an EXT-X-MEDIA rendition group. It used to emit a file
-            // per angle plus an audio_only.m3u8 and hand back a list; narrowing
-            // is the player's job now (extractAnglePlaylist /
-            // extractAudioOnlyPlaylist in the hls package), so there is one
-            // name and it never varies.
+            // angle as an EXT-X-MEDIA rendition group, so there is one name and
+            // it never varies. Narrowing to an angle or to audio is the player's
+            // job (extractAnglePlaylist / extractAudioOnlyPlaylist in the hls
+            // package).
             const mockProc = createMockProcess();
             mockSpawn.mockReturnValue(mockProc);
 
@@ -4482,9 +4481,10 @@ describe('hlsOutputPath', () => {
 
 describe('isHardwareEncoderFailure', () => {
     // Verbatim from a GeForce machine whose driver caps concurrent NVENC
-    // sessions: a six-rendition ladder opened six encoders and every one past
-    // the cap failed like this. The encode used to die with it; it now retries
-    // on CPU.
+    // sessions: a ladder opening more encoders than the cap allows fails like
+    // this for every one past it. Nothing retries on this today — the wave
+    // planner keeps the ladder under the cap instead — so what is asserted is
+    // the matcher, against the string a real driver produces.
     const nvencOverCap =
         'FFmpeg exited with code 4294967274. stderr tail:\n' +
         '[vost#0:1/h264_nvenc @ 0000022801fabac0] Terminating thread with return code -22 (Invalid argument)\n' +

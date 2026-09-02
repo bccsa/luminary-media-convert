@@ -397,9 +397,8 @@ describe('the Windows fallback chain', () => {
 describe('what a user is told when encoding is not possible', () => {
     const r = { width: 1280, height: 720, videoBitrateKbps: 2500 };
 
-    // The substitution path exists but nothing used to mention it, so the
-    // message named a dead end. Agreed with the product owner: when there is no
-    // encoder, say so and offer the way out.
+    // A message that names no way out is a dead end: the substitution path
+    // exists, so the failure has to mention it. Agreed with the product owner.
     it('names the way out when there is no encoder at all', () => {
         let message = '';
         try {

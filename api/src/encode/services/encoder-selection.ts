@@ -1,11 +1,10 @@
 /**
  * Which H.264 encoder to use, and the arguments that go with it.
  *
- * Four places used to answer this independently — the ABR ladder, previews,
- * quick-trim bridges, and each of their CPU-fallback paths — every one with its
- * own `if (accelMode === …)` chain over the same four cases. Adding a fifth
- * encoder meant finding all of them, and adding it to three of the four is a
- * silent bug: the ladder would use it and previews would not.
+ * Answered in one place so that four callers — the ABR ladder, previews,
+ * quick-trim bridges, and their fallback paths — cannot drift apart. With an
+ * `if (accelMode === …)` chain in each, adding an encoder to three of the four
+ * is a silent bug: the ladder would use it and previews would not.
  *
  * Capabilities are described as data here rather than as branches, so a new
  * encoder is a new table entry.

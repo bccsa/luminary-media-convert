@@ -236,9 +236,9 @@ describe('CmsController — a repeated click on the same post', () => {
     });
 
     it('does not hand another approved site the same session', async () => {
-        // The reuse branch used to match on documentId alone, and document ids
-        // are the CMS's own post identifiers — routinely public. So a second
-        // site the user had also approved could name one and be handed that
+        // Reuse matches on the document *and* the caller. Document ids are the
+        // CMS's own post identifiers and routinely public, so matching on the id
+        // alone would let a second approved site name one and be handed that
         // session's read token, and with it the playback URL and the AES key.
         // Approving a site is not supposed to grant it access to another's work.
         const controller = build(['https://cms.test', 'https://other.test']);

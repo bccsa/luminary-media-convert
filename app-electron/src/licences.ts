@@ -27,8 +27,8 @@ const PATENTS_URL =
 
 /**
  * Licence files shipped beside the binary, with what each one covers. Most are
- * written by build.sh; the two Electron ones are collected at packaging time by
- * build/after-pack.cjs.
+ * written by build.sh; the two Electron ones and the npm collection are gathered
+ * at packaging time by build/after-pack.cjs.
  *
  * `link` means the text is offered as a file to open rather than shown inline —
  * Chromium's runs to nine megabytes, which is past what is reasonable to render
@@ -71,6 +71,12 @@ const NOTICES: {
     {
         file: 'COPYING.LGPLv2.1',
         heading: 'GNU Lesser General Public License v2.1',
+    },
+    {
+        file: 'LICENSES-npm.txt',
+        heading: 'npm packages bundled with the application',
+        note: 'Around 250 packages ship inside the application archive, all under permissive licences — MIT, Apache-2.0, ISC and BSD. Collected at packaging time by scripts/collect-npm-licences.mjs.',
+        link: true,
     },
 ];
 
