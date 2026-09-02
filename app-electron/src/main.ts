@@ -256,7 +256,8 @@ function bundledWebClient(): string | undefined {
  * app in the Dock deliberately — so "running, no window" is an ordinary state
  * rather than a broken one, and returning early there means a CMS session
  * opens and nothing appears. `activate` already creates one in that case;
- * every other caller needs the same.
+ * every other caller needs the same — but only once the app is ready, because
+ * `open-url` fires before that when the protocol link is what launched us.
  *
  * Raising it is not the same on both platforms. macOS takes
  * `app.focus({ steal: true })`, which is what that option is for. Windows
@@ -268,7 +269,11 @@ function bundledWebClient(): string | undefined {
  */
 function focusWindow(): void {
     if (!mainWindow || mainWindow.isDestroyed()) {
-        createWindow();
+        // `open-url` arrives before the app is ready when the protocol link is
+        // what launched us, and a BrowserWindow cannot be constructed yet.
+        // Startup makes the window a moment later, and focusSession has already
+        // parked the id for a renderer that is not up.
+        if (app.isReady()) createWindow();
         return;
     }
 
