@@ -103,10 +103,11 @@ mac:
               # from the macOS builds, and a filter that matches nothing is not an error.
               - LICENSE-libvpl.txt
               # LGPL-2.1 s.6 asks for a copy of the licence to travel with the
-              # binary, exactly as the GPL did. GPL-*.txt is kept so a build
-              # made before the LGPL switch still carries its own notice.
+              # binary. Only the LGPL text is listed: a GPL text here would mean
+              # a pre-LGPL binary, and packaging one with notices that match is
+              # how it ships unnoticed. scripts/check-encoder-sources.mjs stops
+              # that before anything is built.
               - COPYING.LGPLv2.1
-              - GPL-*.txt
               # What the shipped ffmpeg was actually configured with. The licence
               # gate in scripts/verify-package.mjs reads it, because a cross-built
               # Windows binary cannot be run on the machine that packages it.
