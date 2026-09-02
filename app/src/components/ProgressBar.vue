@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+
 const props = withDefaults(defineProps<{
     label: string;
     progress?: number | null;
@@ -9,6 +11,18 @@ const props = withDefaults(defineProps<{
     indeterminate: false,
     subtitle: undefined,
 });
+
+/**
+ * One decimal, because progress arrives as a raw float: a bar reading
+ * "3.1000000000000005%" is arithmetic rather than progress. `Number()` drops a
+ * trailing .0, so a whole percentage still reads as one.
+ *
+ * The label only — the bar's width keeps the unrounded value, where the extra
+ * precision costs nothing and is not read by anybody.
+ */
+const shownProgress = computed(() =>
+    props.progress == null ? null : Number(props.progress.toFixed(1)),
+);
 </script>
 
 <template>
@@ -22,7 +36,7 @@ const props = withDefaults(defineProps<{
                 :class="progress >= 100
                     ? 'text-emerald-600 dark:text-emerald-400'
                     : 'text-sky-600 dark:text-sky-400'"
-            >{{ progress }}%</span>
+            >{{ shownProgress }}%</span>
         </div>
         <div class="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
             <div
