@@ -115,7 +115,9 @@ export class EncodeService {
         // Declared outside the try so the failure path can stop it. A pipeline
         // polls on an interval, and nothing below is guaranteed to reach the
         // drain that clears it.
-        let pipeline: ReturnType<typeof createPipeline> | undefined;
+        let pipeline:
+            | ReturnType<SegmentPipelineService['createPipeline']>
+            | undefined;
 
         try {
             const encryptionEnabled =
@@ -453,11 +455,9 @@ export class EncodeService {
                 session.encodeConfig.type === 'video' &&
                 session.config.thumbnails !== false
             ) {
-                // This used to be the expensive one — a fresh FFmpeg pass over
-                // the finished output, measured at 114.7s of a 125s encode. It
-                // now lays out frames sampled once at ingest and decodes
-                // nothing, so it is reported for completeness rather than
-                // because anyone will be left waiting on it.
+                // Lays out frames sampled once at ingest and decodes nothing,
+                // so this phase is reported for completeness rather than because
+                // anyone will be left waiting on it.
                 reportPhase('thumbnails');
                 try {
                     const thumbResult =
@@ -776,10 +776,10 @@ export class EncodeService {
      * staging shares a host with production (#59), so one filling the disk takes
      * the other down with it.
      *
-     * `session.json` is spared. Clearing the whole directory used to take it too,
-     * which quietly undid session persistence (#67) for exactly the sessions a
-     * user comes back to: a completed session vanished on the next restart and the
-     * client was told it had expired.
+     * `session.json` is spared: clearing it with the rest undoes session
+     * persistence (#67) for exactly the sessions a user comes back to — a
+     * completed session vanishes on the next restart and the client is told it
+     * has expired.
      *
      * A failed session keeps everything until the sweep ages it out (#73). A
      * failure is when someone wants to retry or inspect the input.

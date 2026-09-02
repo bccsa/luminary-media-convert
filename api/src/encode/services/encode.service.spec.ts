@@ -28,7 +28,6 @@ import {
     WAVEFORM_SIDECAR_VERSION,
     WaveformService,
 } from './waveform.service.js';
-import { S3Service } from './s3.service.js';
 import {
     SegmentPipelineService,
     type PipelineProgress,
@@ -99,7 +98,6 @@ describe('EncodeService', () => {
     let encryptionService: Mocked<EncryptionService>;
     let thumbnailService: Mocked<ThumbnailService>;
     let waveformService: Mocked<WaveformService>;
-    let s3Service: Mocked<S3Service>;
     let segmentPipelineService: Mocked<SegmentPipelineService>;
     let mockPipeline: SegmentPipeline;
     let testWorkDir: string;
@@ -148,7 +146,6 @@ describe('EncodeService', () => {
 
         // Uploads run through SegmentPipelineService, mocked below; this stands
         // in only for the prefix helper the encode path reads off the class.
-        s3Service = {} as any;
 
         mockPipeline = makeMockPipeline();
 
@@ -162,7 +159,6 @@ describe('EncodeService', () => {
             encryptionService,
             thumbnailService,
             waveformService,
-            s3Service,
             segmentPipelineService
         );
     });
@@ -911,7 +907,6 @@ describe('EncodeService', () => {
             encryptionService,
             thumbnailService,
             waveformService,
-            s3Service,
             segmentPipelineService
         );
 
@@ -1165,7 +1160,6 @@ describe('EncodeService', () => {
             encryptionService,
             thumbnailService,
             waveformService,
-            s3Service,
             segmentPipelineService
         );
 
@@ -1295,7 +1289,6 @@ describe('EncodeService — encrypting the text assets last', () => {
             encryptionService,
             thumbnailService,
             waveformService,
-            {} as any,
             { createPipeline: vi.fn().mockReturnValue(mockPipeline) } as any
         );
     });
@@ -1462,7 +1455,6 @@ describe('EncodeService — naming the finalize phases', () => {
             encryptionService,
             thumbnailService,
             waveformService,
-            {} as any,
             { createPipeline: vi.fn().mockReturnValue(mockPipeline) } as any
         );
     });
@@ -1699,7 +1691,6 @@ describe('EncodeService — the delivered waveform sidecar', () => {
             encryptionService,
             thumbnailService,
             waveformService,
-            {} as any,
             {
                 createPipeline: vi.fn(() => {
                     const pipeline = makeMockPipeline();
