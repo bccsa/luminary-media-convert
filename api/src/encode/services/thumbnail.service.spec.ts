@@ -408,8 +408,8 @@ describe('ThumbnailService', () => {
         });
 
         it('reads the finished storyboard from where it was written', async () => {
-            // The cache used to be looked for one directory above the file, so it
-            // never hit and every request kicked off another full ffmpeg pass.
+            // Looked for where it was written: one directory out and the cache
+            // never hits, so every request kicks off another full ffmpeg pass.
             mkdirSync(producedDir(), { recursive: true });
             writeFileSync(
                 join(producedDir(), 'thumbnails.vtt'),
@@ -564,9 +564,9 @@ describe('ThumbnailService', () => {
         });
 
         it('gives up on a failed pass rather than trying again', async () => {
-            // The software-retry guard that used to sit here could not work:
-            // VideoToolbox logged a per-frame decode failure and still exited 0,
-            // so the retry never fired on the failure it existed for.
+            // A software-retry guard cannot work here: VideoToolbox logs a
+            // per-frame decode failure and still exits 0, so the retry would
+            // never fire on the failure it exists for.
             const result = await run({ fail: true });
 
             expect(result).toBeNull();

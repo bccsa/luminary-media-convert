@@ -407,18 +407,28 @@ describe('EncodeController', () => {
                 const session = sessionService.create(makeConfig());
                 sessionService.updateStatus(session.id, 'uploaded');
                 sessionService.setProbeResult(session.id, {
-                    format: { duration: 60, bitrateKbps: 3000, formatName: 'mp4' },
-                    videoTracks: Array.from({ length: videoTracks }, (_, index) => ({
-                        index,
-                        codec: 'h264',
-                        width: 1920,
-                        height: 1080,
-                    })) as never,
-                    audioTracks: Array.from({ length: audioTracks }, (_, index) => ({
-                        index,
-                        codec: 'aac',
-                        channels: 2,
-                    })) as never,
+                    format: {
+                        duration: 60,
+                        bitrateKbps: 3000,
+                        formatName: 'mp4',
+                    },
+                    videoTracks: Array.from(
+                        { length: videoTracks },
+                        (_, index) => ({
+                            index,
+                            codec: 'h264',
+                            width: 1920,
+                            height: 1080,
+                        })
+                    ) as never,
+                    audioTracks: Array.from(
+                        { length: audioTracks },
+                        (_, index) => ({
+                            index,
+                            codec: 'aac',
+                            channels: 2,
+                        })
+                    ) as never,
                 });
                 return session;
             };
@@ -1677,9 +1687,9 @@ describe('EncodeController', () => {
 
         it('never puts the encryption key in the status payload', () => {
             const session = sessionService.create(makeConfig());
-            // (id, files, masterPlaylist, thumbnailsVtt, segmentFormat,
-            // encryptionKeyHex) — the angle-playlist argument that used to sit
-            // in the middle is gone with the per-angle files themselves.
+            // Positional: (id, files, masterPlaylist, thumbnailsVtt,
+            // segmentFormat, encryptionKeyHex). There is no angle-playlist
+            // argument — the encoder writes one master carrying every angle.
             sessionService.setCompleted(
                 session.id,
                 ['master.m3u8'],
@@ -2282,9 +2292,10 @@ describe('EncodeController — masked session key', () => {
         );
     });
 
-    it('is not part of the status payload any more', () => {
-        // The key used to ride along on every poll and SSE frame, which put it
-        // in logs and screenshots for the life of the session.
+    it('is not part of the status payload', () => {
+        // A key riding along on every poll and SSE frame is a key in logs and
+        // screenshots for the life of the session. It is fetched from its own
+        // endpoint instead.
         const session = sessionService.create(makeConfig());
         sessionService.setEncryptionKey(
             session.id,
