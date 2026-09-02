@@ -53,7 +53,7 @@ else
 fi
 
 work="$here/.work/$target"
-prefix="$work/deps"     # x264 installs here; ffmpeg links against it
+prefix="$work/deps"     # libwebp and libvpl install here; ffmpeg links against them
 out="$repo/app-electron/bin/$target"
 
 log() { printf '\n  \033[1m%s\033[0m\n' "$1"; }
