@@ -65,10 +65,8 @@ export interface EncodeOptions {
  *
  * New encodes are always `'fmp4'` — a source whose streams do not start
  * together is aligned with an input seek rather than escaped into MPEG-TS, so
- * the output's container is no longer a property of the input. `'mpegts'`
- * survives in the union for one reason: a `session.json` written before that
- * change is still restored at boot, and a restored session has to report what
- * it actually produced.
+ * the container is not a property of the input. `'mpegts'` stays in the union
+ * because a restored `session.json` has to report what it actually produced.
  */
 export type SegmentFormat = 'fmp4' | 'mpegts';
 
@@ -176,10 +174,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         /*
          * Is there a usable FFmpeg at all — is it installed, and is it new
          * enough? Asked before the acceleration probes below, which answer a
-         * different question and used to be the only question asked: each wraps
-         * `execSync` in `try/catch` and falls through to 'cpu', so a machine with
-         * no ffmpeg whatsoever reported "No GPU found, using CPU encoding" and
-         * said nothing more until the first encode, several user decisions later.
+         * different question: each wraps `execSync` in `try/catch` and falls
+         * through to 'cpu', so on a machine with no ffmpeg they report "No GPU
+         * found, using CPU encoding" and nothing more until the first encode,
+         * several user decisions later.
          */
         const { availability, reason, detail } = await checkFfmpeg();
         this.unusableReason = reason;
@@ -378,9 +376,9 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     private detectAppleGpu(): boolean {
         // Every Mac, not only Apple Silicon. VideoToolbox is a framework rather
         // than a hardware API — on a Mac with no hardware encoder it uses
-        // Apple's own software H.264 encoder, which `-allow_sw 1` asks for. The
-        // arm64 gate that used to be here sent Intel Macs to libx264, and with
-        // no libx264 in the build that is now a machine that cannot encode.
+        // Apple's own software H.264 encoder, which `-allow_sw 1` asks for.
+        // Gating on arm64 would leave an Intel Mac with nothing to encode with,
+        // the build carrying no libx264.
         if (process.platform !== 'darwin') {
             return false;
         }

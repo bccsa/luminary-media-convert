@@ -7,10 +7,10 @@
  * driver) — and every session in the process counts against the same number.
  *
  * That is why this is a module-level semaphore rather than a field on a
- * service. The ladder, previews and quick-trim bridges each used to keep their
- * own count: three subsystems each politely staying under three, adding up to
- * nine. A ladder encoding while somebody scrubs the preview timeline is the
- * ordinary case, not a corner one.
+ * service. A per-service count would have the ladder, previews and quick-trim
+ * bridges each politely staying under three and adding up to nine. A ladder
+ * encoding while somebody scrubs the preview timeline is the ordinary case, not
+ * a corner one.
  *
  * Exceeding the cap is not a graceful failure. The extra sessions fail to open
  * with "Could not open encoder before EOF", and the encode fails with them.

@@ -11,10 +11,9 @@
  * app answers this: the poster machinery runs as normal and paints nothing.
  *
  * Inlined rather than shipped as a file so the package stays a single JS module
- * with no asset resolution for a consumer's bundler to get wrong. The cost of
- * inlining is that the pixel is unreadable: the base64 that used to be here
- * decoded to RGBA `[255, 0, 0, 127]` — red at half opacity — and washed every
- * frame it covered, most visibly over a YouTube iframe and over audio-only
+ * with no asset resolution for a consumer's bundler to get wrong. The cost is
+ * that the pixel is unreadable by eye: a wrong base64 here paints over every
+ * frame it covers, most visibly over a YouTube iframe and over audio-only
  * playback, where the poster is the only layer left. `poster.spec.ts` decodes it
  * rather than trusting the name of the constant.
  */
