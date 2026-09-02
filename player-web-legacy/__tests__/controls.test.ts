@@ -120,3 +120,26 @@ describe('buildVideoJsOptions', () => {
         expect(options.autoplay).toBe(false);
     });
 });
+
+/**
+ * `videojs-youtube` registers its tech but never adds itself to the order, and
+ * video.js only considers what the order lists. Without this, a YouTube source
+ * finds no tech that accepts `video/youtube`, falls through to Html5, and a
+ * YouTube page URL ends up as the src of a bare <video> — a broken-media
+ * placeholder on screen and a console full of postMessage origin warnings.
+ */
+describe('techOrder', () => {
+    const order = () => buildVideoJsOptions(DEFAULT_CONTROLS).techOrder;
+
+    it('lists youtube, or a YouTube source has no tech that can play it', () => {
+        expect(order()).toContain('youtube');
+    });
+
+    it('keeps html5, which is what plays every HLS source', () => {
+        expect(order()).toContain('html5');
+    });
+
+    it('offers youtube first, which costs HLS nothing — its tech claims only video/youtube', () => {
+        expect(order()[0]).toBe('youtube');
+    });
+});
