@@ -27,13 +27,13 @@ already have.
 
 ## What the first five cases are for
 
-| # | Output | Answers |
-|---|---|---|
-| 1 | Plaintext, single angle | Baseline. If this fails, nothing below means anything |
-| 2 | Plaintext, multi-angle | Does the client stay on one angle, or does its ABR cross between them? |
-| 3 | Encrypted, playlists encrypted (default) | Confirms LMCENC output is unreadable to a stock client |
-| 4 | Encrypted, `encryptPlaylists: false`, no `keyUrl` | Is the opt-out sufficient on its own? (No — `luminary://key` is unresolvable) |
-| 5 | Encrypted, `encryptPlaylists: false` + real `keyUrl` | The only encrypted configuration a stock client can play |
+| #   | Output                                               | Answers                                                                       |
+| --- | ---------------------------------------------------- | ----------------------------------------------------------------------------- |
+| 1   | Plaintext, single angle                              | Baseline. If this fails, nothing below means anything                         |
+| 2   | Plaintext, multi-angle                               | Does the client stay on one angle, or does its ABR cross between them?        |
+| 3   | Encrypted, playlists encrypted (default)             | Confirms LMCENC output is unreadable to a stock client                        |
+| 4   | Encrypted, `encryptPlaylists: false`, no `keyUrl`    | Is the opt-out sufficient on its own? (No — `luminary://key` is unresolvable) |
+| 5   | Encrypted, `encryptPlaylists: false` + real `keyUrl` | The only encrypted configuration a stock client can play                      |
 
 **Case 5 is a test fixture, not a deployment pattern.** It requires the raw AES key to be fetchable
 over HTTP, and in this harness that means a key file sitting in the same bucket as the content it
@@ -41,7 +41,7 @@ encrypts — which protects nothing. This encoder generates keys locally precise
 leave the machine, and it has no key server. A client that cannot decrypt playlists should be sent
 unencrypted output; a client with its own key delivery is what the opt-out exists for.
 
-Findings from the last run are recorded in `Todo.md` §0a.
+Findings from the last run are in [results-2026-08-11.md](results-2026-08-11.md).
 
 ## Cases 6–9 — the quick-trim (smart cut) spike
 

@@ -46,7 +46,7 @@ export class EncryptionConfigDto {
             `names "${LUMINARY_KEY_PLACEHOLDER_URI}", a scheme no player can ` +
             'resolve. That needs keyUrl as well, pointing at something that ' +
             'serves the raw 16 key bytes — which this encoder is not, by ' +
-            'design. Verified against a stock client; see Todo.md section 0a.',
+            'design. Verified against a stock client — see docs/stock-player-check.',
         default: true,
     })
     @IsBoolean()

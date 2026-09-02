@@ -136,7 +136,7 @@ Privacy & Security → **Open Anyway**; right-click → Open no longer works, Ap
 it. Windows shows a SmartScreen warning. The portable Windows build additionally carries
 the stock Electron icon, because stamping it needs Wine.
 
-See [Todo.md](Todo.md) for signing, notarization and auto-update.
+Signing, notarization and auto-update are tracked in [#206](https://github.com/bccsa/luminary-media-convert/issues/206).
 
 ## Scripts
 
@@ -157,7 +157,7 @@ See [Todo.md](Todo.md) for signing, notarization and auto-update.
 - [CLAUDE.md](CLAUDE.md) — the deep reference: architecture, CMS contract, trust model, endpoint tables, conventions, packaging notes
 - [api/README.md](api/README.md) — API reference, authentication, environment, encoding workflow, output layout
 - [app/README.md](app/README.md) — renderer structure and environment
-- [Todo.md](Todo.md) — known gaps and follow-up work
+- [Issues](https://github.com/bccsa/luminary-media-convert/issues) — known gaps and follow-up work
 - [PATENTS.md](PATENTS.md) — the patent position, which no copyright licence covers
 
 ## Consuming the player libraries

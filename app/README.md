@@ -26,10 +26,10 @@ Per-session routes (preview, waveform, storyboard) use the session's own `sess_*
 
 ## Routes
 
-| Path | View |
-|---|---|
-| `/` | redirects to `/sessions` |
-| `/sessions` | `ActiveSessionsView` — session list |
+| Path            | View                                        |
+| --------------- | ------------------------------------------- |
+| `/`             | redirects to `/sessions`                    |
+| `/sessions`     | `ActiveSessionsView` — session list         |
 | `/sessions/:id` | `SessionView` — the whole session lifecycle |
 
 ## Key components
@@ -57,9 +57,9 @@ The key itself is not published on status reads or the event stream. The app ask
 
 Only needed for browser development. The packaged app needs none: the API serves the client, so the base URL is empty (same origin) and the token comes from the bridge.
 
-| Variable | Description |
-|---|---|
-| `VITE_API_URL` | Base URL of the local Encoding API, e.g. `http://127.0.0.1:3000` |
+| Variable         | Description                                                                   |
+| ---------------- | ----------------------------------------------------------------------------- |
+| `VITE_API_URL`   | Base URL of the local Encoding API, e.g. `http://127.0.0.1:3000`              |
 | `VITE_API_TOKEN` | Stands in for the preload bridge token; must match the API's `MASTER_API_KEY` |
 
 Example `app/.env`:
@@ -80,7 +80,7 @@ npm -w app run preview  # build + preview
 npm -w app run test     # Vitest
 ```
 
-Some specs were intentionally left broken during the local-only migration (`api.spec.ts` still exercises a `createSession` helper that no longer exists) — tracked in [`../Todo.md`](../Todo.md).
+Some specs were intentionally left broken during the local-only migration (`api.spec.ts` still exercises a `createSession` helper that no longer exists).
 
 ## Tech Stack
 

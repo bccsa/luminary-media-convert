@@ -41,7 +41,7 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 - **S3 storage**: MinIO JS client (universal S3 compatibility: MinIO, R2, AWS S3, B2, Spaces)
 - **Validation**: `class-validator` + `class-transformer` with a global `ValidationPipe` (transform, whitelist, forbidNonWhitelisted)
 - **API docs**: `@nestjs/swagger` — published at `/api/docs` only when `enableSwagger` is passed (standalone `main.ts` does; the Electron host does not)
-- **Testing**: Vitest (`*.spec.ts` colocated in `api/src/`, e2e in `api/test/`). Note: many specs were intentionally left broken during the migration — see `Todo.md`
+- **Testing**: Vitest (`*.spec.ts` colocated in `api/src/`, e2e in `api/test/`). Note: some specs were intentionally left broken during the migration — see the open issues
 
 ### Desktop Shell (`app-electron/`)
 
@@ -223,6 +223,7 @@ The CMS is an ordinary web app on another origin; the encoder listens on loopbac
 
 1. **`GET /api/cms/health`** — unauthenticated liveness probe returning `{ status: 'ok', apiVersion }`. The CMS calls this before showing the "upload media" affordance at all; when it fails it offers a `luminary-convert://` launch link instead.
 2. **`POST /api/cms/sessions`** — authorised by the caller's `Origin`, not by a key (there is no credential a page could hold that the pages around it could not also read). Body:
+
     ```jsonc
     {
         "documentId": "post_01HTZ8Y0J4", // idempotency key
@@ -240,7 +241,9 @@ The CMS is an ordinary web app on another origin; the encoder listens on loopbac
         "existingMedia": { "hlsUrl": "…", "hlsKey": "…" }, // validated + accepted, NOT acted on yet
     }
     ```
+
     Response `201`:
+
     ```json
     {
         "sessionId": "…",
@@ -255,6 +258,7 @@ The CMS is an ordinary web app on another origin; the encoder listens on loopbac
     - **Per-session subfolder**: the destination becomes `<canonicalPrefix(pathPrefix)>/<sessionId>`, so a re-encode of the same post cannot half-overwrite the live output.
     - **Window focus**: creating (or reusing) a session fires `CMS_SESSION_HOOK`, which the Electron host uses to bring its window forward — the user has to pick a file, and the app may be behind the browser.
     - **`eventsUrl`** is built from the request's own `Host`, because the port is assigned by the host app and this process has no better idea of it than the caller does.
+
 3. **SSE** — the CMS subscribes to `eventsUrl` with `EventSource`. Events are the `SessionEvent` shape:
     ```ts
     { sessionId, status, progress?, pipelineProgress?, queuePosition?, error?, files?,
@@ -561,4 +565,4 @@ Run it against a running API (default `http://127.0.0.1:31711`, editable in the 
 
 ## Follow-ups
 
-Known gaps and deferred work are tracked in [`Todo.md`](Todo.md). Notably: CMS edit mode for existing collections (`existingMedia` is accepted and ignored), auto-update and code signing, Linux builds, Windows build verification, storage that is never reclaimed when a document is deleted or a collection superseded, and restoring the test suites that were intentionally broken during the migration.
+Known gaps and deferred work are tracked as [issues](https://github.com/bccsa/luminary-media-convert/issues). Notably: CMS edit mode for existing collections (#205 — `existingMedia` is accepted and ignored), auto-update and code signing (#206), Linux builds (#207), storage that is never reclaimed when a document is deleted or a collection superseded (#208), and Windows build verification (#209).
