@@ -19,6 +19,8 @@ import type { PlayerControlsOptions } from '../controls';
  */
 export interface VideoJsOptions {
     fluid: boolean;
+    /** Techs video.js may choose between, in order of preference. */
+    techOrder: string[];
     html5: {
         vhs: {
             overrideNative: boolean;
@@ -113,6 +115,18 @@ export function buildVideoJsOptions(controls: PlayerControlsOptions): VideoJsOpt
 
     return {
         fluid: false,
+        // `videojs-youtube` registers its tech but does not add itself to the
+        // order, and video.js only considers what is listed here — so without
+        // this a YouTube source finds no tech that accepts `video/youtube`,
+        // falls through to Html5, and a YouTube page URL ends up as the src of a
+        // bare <video>. The browser renders its broken-media placeholder and the
+        // iframe API fills the console with postMessage origin warnings.
+        //
+        // Listed first, and harmless there: the Youtube tech only claims
+        // `video/youtube`, so every HLS source still goes to Html5. Named as a
+        // string rather than imported, because the tech is loaded on demand and
+        // video.js skips an entry that is not registered.
+        techOrder: ['youtube', 'html5'],
         html5: {
             vhs: {
                 // The whole point: VHS drives even where the browser could play
