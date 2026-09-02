@@ -249,10 +249,40 @@ function bundledWebClient(): string | undefined {
  * Window
  * ------------------------------------------------------------------ */
 
+/**
+ * Bring the app forward, making a window if there is none.
+ *
+ * On macOS closing the window does not quit — `window-all-closed` leaves the
+ * app in the Dock deliberately — so "running, no window" is an ordinary state
+ * rather than a broken one, and returning early there means a CMS session
+ * opens and nothing appears. `activate` already creates one in that case;
+ * every other caller needs the same.
+ *
+ * Raising it is not the same on both platforms. macOS takes
+ * `app.focus({ steal: true })`, which is what that option is for. Windows
+ * refuses a foreground change requested by a process that does not have it —
+ * the request arrives over loopback from a browser that does — and
+ * `win.focus()` alone flashes the taskbar button instead. Toggling
+ * always-on-top around `show()` is the standard way through, and it is dropped
+ * immediately so the window does not sit above everything else afterwards.
+ */
 function focusWindow(): void {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+        createWindow();
+        return;
+    }
+
     const win = mainWindow;
-    if (!win || win.isDestroyed()) return;
     if (win.isMinimized()) win.restore();
+
+    if (process.platform === 'win32') {
+        win.setAlwaysOnTop(true);
+        win.show();
+        win.setAlwaysOnTop(false);
+        win.focus();
+        return;
+    }
+
     win.show();
     win.focus();
     app.focus({ steal: true });
@@ -278,6 +308,8 @@ let pendingSessionId: string | null = null;
  */
 function focusSession(sessionId: string): void {
     pendingSessionId = sessionId;
+    // Creates the window when there is none, so the id below is parked for a
+    // renderer that has not loaded yet and claimed when it has.
     focusWindow();
 
     const contents = mainWindow?.webContents;
