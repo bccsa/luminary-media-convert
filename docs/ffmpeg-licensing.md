@@ -1,5 +1,14 @@
 # Shipping FFmpeg: what licence we are actually under, and what it obliges
 
+> **Superseded, 1 September 2026.** This document establishes the position for a
+> **GPL** FFmpeg built with libx264, which is what shipped when it was written.
+> The encoder is now built **LGPL-2.1** with no libx264 and no `--enable-gpl`, so
+> the question it answers — whether an Apache-2.0 application may ship beside a
+> GPL binary — no longer arises. Kept because the reasoning is the record of how
+> that decision was reached, and because sections 5 (corresponding source), 6
+> (patents) and 8 (platforms) still apply. For the position as it stands, see the
+> README's Licensing section.
+
 **This is a technical investigation, not legal advice.** It establishes the facts
 from the binary and from the licensors' own documents, so that whoever at BCC
 signs off a public release is deciding from evidence rather than from
@@ -101,11 +110,14 @@ copy of this License along with the Program". A link in a notice is not a copy,
 and until 12 Aug 2026 a link was all we shipped: a 642-byte `LICENSE-ffmpeg.txt`
 pointing at gnu.org.
 
-The full texts of **GPL-2.0** and **GPL-3.0** are vendored in
-`app-electron/bin/licenses/`, copied beside the binaries by `ffmpeg-build/build.sh`, and
-carried into the app by `extraResources`. The builds are v2-or-later, so both texts
-travel: "or later" genuinely offers v3, and a recipient taking that option should not
-have to go looking for the text. libwebp is statically linked and BSD-3-Clause, so its
+_(As of the LGPL build: the text that travels is `COPYING.LGPLv2.1`, copied out
+of the FFmpeg source tarball by `ffmpeg-build/build.sh` and carried into the app by
+`extraResources`. The paragraph below describes the GPL arrangement it replaced.)_
+
+The full texts of **GPL-2.0** and **GPL-3.0** were vendored in
+`app-electron/bin/licenses/` and copied beside the binaries. The builds were
+v2-or-later, so both texts travelled: "or later" genuinely offers v3, and a
+recipient taking that option should not have to go looking for the text. libwebp is statically linked and BSD-3-Clause, so its
 notice ships as `LICENSE-libwebp.txt` beside them; the Windows binaries also link
 libvpl (Intel's Quick Sync dispatcher), which is MIT and asks the same, so
 `LICENSE-libvpl.txt` travels with those.

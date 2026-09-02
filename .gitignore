@@ -22,8 +22,6 @@ app-electron/bin/*/
 # …except the licence texts, which are a few KB of text and must ship whether or
 # not anyone reruns a build. The GPL obliges a *copy* of the licence to travel
 # with the binary; a URL in a notice is not a copy.
-!app-electron/bin/licenses/
-!app-electron/bin/licenses/*
 *.tsbuildinfo
 docs/todo.md
 
