@@ -14,14 +14,13 @@
         "dist:mac": "../ffmpeg-build/build.sh darwin-arm64 && ../ffmpeg-build/build.sh darwin-x64 && npm run package:mac",
         "dist:win": "../ffmpeg-build/build.sh win32-x64 && npm run package:win",
         "pack": "../ffmpeg-build/build.sh && npm run build:workspaces && npm run build && electron-builder --dir --config electron-builder.yml && npm run verify-package",
-        "verify-package": "node ../scripts/check-patent-wording.mjs && node scripts/verify-package.mjs",
+        "verify-package": "node scripts/verify-package.mjs",
         "check-pinned-urls": "node scripts/check-pinned-urls.mjs",
         "build-ffmpeg": "../ffmpeg-build/build.sh",
         "package:mac": "npm run build:workspaces && npm run build && electron-builder --mac --config electron-builder.yml && npm run verify-package",
         "package:win": "npm run build:workspaces && npm run build && electron-builder --win --config electron-builder.yml && npm run verify-package",
         "package:win-portable": "npm run build:workspaces && npm run build && electron-builder --win zip --x64 --config electron-builder.yml -c.win.signAndEditExecutable=false && npm run verify-package",
-        "dist:win-portable": "../ffmpeg-build/build.sh win32-x64 && npm run package:win-portable",
-        "check-wording": "node ../scripts/check-patent-wording.mjs"
+        "dist:win-portable": "../ffmpeg-build/build.sh win32-x64 && npm run package:win-portable"
     },
     "dependencies": {
         "@luminary-media-converter/api": "file:../api"

@@ -152,6 +152,27 @@ async function copyElectronNotices(context, resourcesDir) {
     );
 }
 
+/**
+ * The npm packages inside app.asar are redistributed with the app, and their
+ * licences — all permissive — ask for the notice to travel with the copy.
+ * Collected here rather than checked in so the file describes the tree that
+ * actually shipped.
+ */
+function collectNpmNotices(resourcesDir) {
+    const script = join(
+        __dirname,
+        '..',
+        '..',
+        'scripts',
+        'collect-npm-licences.mjs'
+    );
+    execFileSync(
+        process.execPath,
+        [script, join(resourcesDir, 'LICENSES-npm.txt')],
+        { stdio: 'inherit' }
+    );
+}
+
 exports.default = async function afterPack(context) {
     const app = join(
         context.appOutDir,
@@ -160,12 +181,13 @@ exports.default = async function afterPack(context) {
 
     // Before signing, not after: adding files to a signed bundle invalidates the
     // signature, which is the defect the rest of this hook exists to repair.
-    await copyElectronNotices(
-        context,
+    const resourcesDir =
         context.electronPlatformName === 'darwin'
             ? join(app, 'Contents', 'Resources')
-            : join(context.appOutDir, 'resources')
-    );
+            : join(context.appOutDir, 'resources');
+
+    await copyElectronNotices(context, resourcesDir);
+    collectNpmNotices(resourcesDir);
 
     if (context.electronPlatformName !== 'darwin') return;
 
