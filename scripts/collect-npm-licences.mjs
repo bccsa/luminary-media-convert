@@ -38,14 +38,20 @@ const LICENCE_FILE = /^(LICEN[CS]E|COPYING|NOTICE)(\..*)?$/i;
  * since `files` takes node_modules minus devDependencies.
  */
 function productionTree() {
-    // `npm` is `npm.cmd` on Windows, and execFileSync does not consult PATHEXT —
-    // so the bare name is ENOENT there, which failed packaging on a Windows runner
-    // before it reached electron-builder.
-    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    // On Windows npm is a .cmd, and since Node 20.12 (CVE-2024-27980) spawning one
+    // without a shell is refused outright — EINVAL, where naming it npm.cmd alone
+    // gets you. A shell is what resolves it, and the arguments below are fixed
+    // flags with nothing to quote, so it costs nothing to ask for one.
+    const windows = process.platform === 'win32';
     const json = execFileSync(
-        npm,
+        'npm',
         ['ls', '--omit=dev', '--all', '--json', '--long'],
-        { cwd: APP_ELECTRON, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
+        {
+            cwd: APP_ELECTRON,
+            encoding: 'utf8',
+            maxBuffer: 64 * 1024 * 1024,
+            shell: windows,
+        }
     );
     return JSON.parse(json);
 }
