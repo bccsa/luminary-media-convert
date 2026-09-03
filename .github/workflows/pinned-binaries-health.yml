@@ -1,8 +1,8 @@
 name: Pinned FFmpeg URLs still resolve
 
 # Checks that every source `ffmpeg-build/build.sh` fetches is reachable: FFmpeg's
-# release tarball and its signature, libwebp's tarball, x264's git repository and the
-# nv-codec-headers tag. It catches a pin that names something unpublished — a wrong
+# release tarball and its signature, libwebp's tarball and the nv-codec-headers tag.
+# No x264: the LGPL build does not fetch it. It catches a pin that names something unpublished — a wrong
 # version, a mistyped digest, a tag that does not exist.
 #
 # Runs on pull requests that touch the pins, and on demand before cutting a release.
@@ -17,7 +17,7 @@ on:
         types: [opened, synchronize, reopened]
         paths:
             - ffmpeg-build/versions.sh
-            - electron/scripts/check-pinned-urls.mjs
+            - app-electron/scripts/check-pinned-urls.mjs
             - .github/workflows/pinned-binaries-health.yml
 
 permissions:
@@ -36,4 +36,4 @@ jobs:
             # A copy in this file would drift, and a health check that watches the
             # wrong URLs is worse than none.
             - name: Every pinned URL is still reachable
-              run: node electron/scripts/check-pinned-urls.mjs
+              run: node app-electron/scripts/check-pinned-urls.mjs
