@@ -405,6 +405,83 @@ describe('SessionService — restoring after a restart', () => {
         }
     );
 
+    it.each([
+        'uploading',
+        'queued',
+        'encoding',
+        'encrypting',
+        'uploading_to_s3',
+    ] as const)(
+        'reclaims the output of a session left %s, keeping its source',
+        (status) => {
+            // A `failed` session is not swept on a clock and is only discarded at
+            // the *next* boot, so before this the partial output of a crashed
+            // encode sat on the volume through a whole session. The source stays:
+            // that is what makes a retry cheap.
+            const id = `crashed-${status}`;
+            seedOnDisk({ id, status });
+            mkdirSync(join(workDir, id, 'output'), { recursive: true });
+            writeFileSync(join(workDir, id, 'output', 'seg0.ts'), 'partial');
+            writeFileSync(join(workDir, id, 'source.mp4'), 'the upload');
+
+            const service = build();
+            service.onModuleInit();
+
+            expect(service.get(id)?.status).toBe('failed');
+            expect(existsSync(join(workDir, id, 'output'))).toBe(false);
+            expect(existsSync(join(workDir, id, 'source.mp4'))).toBe(true);
+        }
+    );
+
+    it('removes a working directory that holds no session record', () => {
+        // Nothing else ever enumerates the work directory, so a directory the
+        // restore loop skips is unreachable for good — and it can hold a
+        // part-received upload. restore() runs before this process has created
+        // anything, so "no readable record" here means orphaned, not in progress.
+        const dir = join(workDir, 'orphan');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'source.mp4'), 'gigabytes, in principle');
+
+        build().onModuleInit();
+
+        expect(existsSync(dir)).toBe(false);
+    });
+
+    it('removes a working directory whose session record cannot be parsed', () => {
+        const dir = join(workDir, 'corrupt');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'session.json'), '{ not json');
+
+        build().onModuleInit();
+
+        expect(existsSync(dir)).toBe(false);
+    });
+
+    it('removes a working directory whose record has no id or token', () => {
+        const dir = join(workDir, 'headless');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(
+            join(dir, 'session.json'),
+            JSON.stringify({ status: 'uploaded' })
+        );
+
+        build().onModuleInit();
+
+        expect(existsSync(dir)).toBe(false);
+    });
+
+    it('leaves a restorable session alone while clearing orphans around it', () => {
+        seedOnDisk({ id: 'keeper', status: 'uploaded' });
+        mkdirSync(join(workDir, 'orphan'), { recursive: true });
+
+        const service = build();
+        service.onModuleInit();
+
+        expect(service.get('keeper')).toBeDefined();
+        expect(existsSync(join(workDir, 'keeper'))).toBe(true);
+        expect(existsSync(join(workDir, 'orphan'))).toBe(false);
+    });
+
     it('fails a session whose credentials cannot be recovered', () => {
         // No sidecar on disk: a different machine, or a reset keychain. The
         // config holds placeholders, and anything reaching S3 with those would
