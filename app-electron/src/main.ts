@@ -22,6 +22,7 @@ import {
 } from '@luminary-media-converter/api';
 import { showLicences } from './licences';
 import { candidateBinaries, resolveFfmpegBinary } from './ffmpeg-location';
+import { resolveWindowTarget } from './window-target';
 
 const PROTOCOL = 'luminary-convert';
 
@@ -269,10 +270,10 @@ function bundledWebClient(): string | undefined {
  */
 function focusWindow(): void {
     if (!mainWindow || mainWindow.isDestroyed()) {
-        // `open-url` arrives before the app is ready when the protocol link is
-        // what launched us, and a BrowserWindow cannot be constructed yet.
-        // Startup makes the window a moment later, and focusSession has already
-        // parked the id for a renderer that is not up.
+        // `open-url` arrives before the app is ready — and before the API is
+        // listening — when the protocol link is what launched us. createWindow
+        // declines in both cases; startup makes the window a moment later, and
+        // focusSession has already parked the id for a renderer that is not up.
         if (app.isReady()) createWindow();
         return;
     }
@@ -494,6 +495,16 @@ function createWindow(): void {
         return;
     }
 
+    // Before the window, not after: a packaged renderer is served by the API, so
+    // until that is listening there is nowhere to point one. `start()` creates
+    // the window itself once the server is up.
+    const target = resolveWindowTarget({
+        isPackaged: app.isPackaged,
+        serverUrl: server?.url,
+        devRendererUrl: process.env.ELECTRON_RENDERER_URL,
+    });
+    if (!target) return;
+
     mainWindow = new BrowserWindow({
         width: 1280,
         height: 860,
@@ -521,10 +532,6 @@ function createWindow(): void {
         void shell.openExternal(url);
         return { action: 'deny' };
     });
-
-    const target = app.isPackaged
-        ? server!.url
-        : (process.env.ELECTRON_RENDERER_URL ?? 'http://localhost:5173');
 
     // In development the renderer is Vite's dev server, which is started
     // alongside this process and is routinely a few seconds behind it. Without
