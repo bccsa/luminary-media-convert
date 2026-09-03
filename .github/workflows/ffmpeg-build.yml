@@ -15,11 +15,18 @@ name: Build FFmpeg from source
 on:
     workflow_dispatch:
     push:
+        # main only. Three targets compiled from source is tens of minutes, and a
+        # feature branch touching a pin should not spend that on every push — open
+        # the PR, then dispatch a run when the pin is what you want tested.
+        branches:
+            - main
         paths:
             # The build definition itself. A change to a pin or a configure flag is
             # exactly when "does this still produce a working encoder" is unanswered.
+            #
+            # This workflow is deliberately not in its own list: editing the checks
+            # is not a reason to recompile FFmpeg three ways. Dispatch it by hand.
             - ffmpeg-build/**
-            - .github/workflows/ffmpeg-build.yml
 
 permissions:
     contents: read
