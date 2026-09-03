@@ -38,8 +38,12 @@ const LICENCE_FILE = /^(LICEN[CS]E|COPYING|NOTICE)(\..*)?$/i;
  * since `files` takes node_modules minus devDependencies.
  */
 function productionTree() {
+    // `npm` is `npm.cmd` on Windows, and execFileSync does not consult PATHEXT —
+    // so the bare name is ENOENT there, which failed packaging on a Windows runner
+    // before it reached electron-builder.
+    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
     const json = execFileSync(
-        'npm',
+        npm,
         ['ls', '--omit=dev', '--all', '--json', '--long'],
         { cwd: APP_ELECTRON, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
     );
