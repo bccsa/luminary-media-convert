@@ -1,0 +1,110 @@
+name: Tests and build
+
+# Every workspace's tests, and a build from a clean checkout.
+#
+# CI was removed when the SaaS platform was (#161) and never came back, so for the
+# whole of the LGPL migration and the player work the suites ran only on whichever
+# machine a developer happened to be sitting at. The build job is not ceremony:
+# building from a clean checkout is what catches an ordering break in `build:libs`,
+# which a developer's stale `dist/` hides — that is how one survived to the first
+# Windows packaging attempt.
+#
+# It also matters beyond this repository now: bccsa/luminary consumes the player
+# packages as a submodule and builds them in its own CI, so a break here turns up
+# as a red run over there with nothing to point at.
+
+# push on main, pull_request for everything else. Both together on a feature branch
+# ran this twice per commit — same SHA, two seconds apart — for identical
+# information, because every branch here has a pull request open.
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+        types: [opened, synchronize, reopened]
+
+permissions:
+    contents: read
+
+# Electron's postinstall downloads a ~100 MB binary, and that download is the single
+# most common cause of a red run here: "socket hang up" from electron/install.js,
+# which has nothing to do with the code under test. Nothing here launches Electron —
+# app-electron's suites cover pure helpers — so the download is skipped outright
+# rather than retried.
+env:
+    ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+
+# A new push supersedes the run it replaces.
+concurrency:
+    group: tests-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    build:
+        name: Build from a clean checkout
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v6
+              with:
+                  node-version-file: api/.node-version
+                  cache: 'npm'
+                  cache-dependency-path: package-lock.json
+            - run: npm ci
+
+            # The shared libraries, in dependency order, with no leftover dist to
+            # lean on. This is the step that catches an ordering regression.
+            - name: Build the shared libraries
+              run: npm run build:libs
+
+            # Then everything the packaged app is made of. `build:bundled` is what
+            # dist:mac / dist:win call, so a break here breaks a release.
+            - name: Build the API and web client
+              run: npm run build:bundled
+
+            # Declarations are what consumers type-check against; a library that
+            # emits JS but no .d.ts breaks its consumers rather than itself. This is
+            # exactly how bccsa/luminary consumes them.
+            - name: Every library emitted its type declarations
+              run: |
+                  for lib in hls-core encode-config player-core player-web player-web-legacy; do
+                    count=$(find "$lib/dist" -name '*.d.ts' 2>/dev/null | wc -l | tr -d ' ')
+                    test "$count" -gt 0 || { echo "$lib emitted no .d.ts files"; exit 1; }
+                    echo "  ✓ $lib ($count declaration files)"
+                  done
+
+    test:
+        name: ${{ matrix.workspace }} tests
+        runs-on: ubuntu-latest
+        strategy:
+            # One workspace per job, and never cancel the others: when two suites
+            # break, seeing both in one run beats discovering the second tomorrow.
+            fail-fast: false
+            matrix:
+                workspace:
+                    [
+                        api,
+                        app,
+                        app-electron,
+                        encode-config,
+                        hls-core,
+                        player-core,
+                        player-web,
+                        player-web-legacy,
+                    ]
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v6
+              with:
+                  node-version-file: api/.node-version
+                  cache: 'npm'
+                  cache-dependency-path: package-lock.json
+            - run: npm ci
+
+            # Several suites import a sibling library's built output, so the
+            # libraries have to exist before any of them runs.
+            - name: Build the shared libraries
+              run: npm run build:libs
+
+            - name: Run the suite
+              run: npm -w ${{ matrix.workspace }} run test -- --run
