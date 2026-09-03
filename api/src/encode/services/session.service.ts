@@ -375,6 +375,45 @@ export class SessionService implements OnModuleInit {
         }
     }
 
+    /**
+     * Drop a session's encoded output but keep its source upload.
+     *
+     * The same bargain `cleanupSessionFiles` strikes for an encode that fails
+     * while the app is running: the output is regenerable, the source is
+     * gigabytes the user would otherwise have to send again, so a retry stays
+     * cheap. A crash gets the same treatment — before this, its output sat
+     * untouched through the whole next session and was only reclaimed by the
+     * boot after that, since a `failed` session is not swept on a clock.
+     */
+    private purgeOutput(id: string): void {
+        try {
+            rmSync(join(this.workDir, id, 'output'), {
+                recursive: true,
+                force: true,
+            });
+        } catch (err) {
+            this.logger.warn(
+                `Could not remove output for session ${id}: ${(err as Error).message}`
+            );
+        }
+    }
+
+    /**
+     * Remove a working directory that holds no session we can read.
+     *
+     * Only ever called from `restore`, which runs before this process has
+     * created anything, so a directory without a readable `session.json` at that
+     * moment is unreachable: no token resolves to it and no sweep will ever look
+     * at it again. It can still hold a part-received upload, so it is named
+     * rather than removed quietly.
+     */
+    private purgeOrphan(name: string, why: string): void {
+        this.logger.warn(
+            `Removing working directory ${name}: ${why}. Anything it held is gone.`
+        );
+        this.purge(name);
+    }
+
     private restore(): void {
         if (!existsSync(this.workDir)) return;
 
@@ -382,18 +421,30 @@ export class SessionService implements OnModuleInit {
         let abandoned = 0;
         let discarded = 0;
         let stranded = 0;
+        let orphaned = 0;
         for (const entry of readdirSync(this.workDir, {
             withFileTypes: true,
         })) {
             if (!entry.isDirectory()) continue;
             const path = join(this.workDir, entry.name, 'session.json');
-            if (!existsSync(path)) continue;
+            if (!existsSync(path)) {
+                this.purgeOrphan(entry.name, 'it holds no session record');
+                orphaned++;
+                continue;
+            }
 
             try {
                 const session = JSON.parse(
                     readFileSync(path, 'utf-8')
                 ) as Session;
-                if (!session?.id || !session?.sessionToken) continue;
+                if (!session?.id || !session?.sessionToken) {
+                    this.purgeOrphan(
+                        entry.name,
+                        'its session record is missing an id or token'
+                    );
+                    orphaned++;
+                    continue;
+                }
 
                 // A finished session has nothing left to do and nothing left to
                 // show: its output is in the customer's bucket and its URL is
@@ -419,6 +470,7 @@ export class SessionService implements OnModuleInit {
                     session.status = 'failed';
                     session.error =
                         'The encoder restarted while this session was in progress.';
+                    this.purgeOutput(session.id);
                     abandoned++;
                 }
 
@@ -441,13 +493,15 @@ export class SessionService implements OnModuleInit {
                 this.persist(session);
                 restored++;
             } catch (err) {
-                this.logger.warn(
-                    `Could not restore session from ${path}: ${(err as Error).message}`
+                this.purgeOrphan(
+                    entry.name,
+                    `its session record could not be read (${(err as Error).message})`
                 );
+                orphaned++;
             }
         }
 
-        if (restored > 0 || discarded > 0) {
+        if (restored > 0 || discarded > 0 || orphaned > 0) {
             this.logger.log(
                 `Restored ${restored} session(s) from disk` +
                     (abandoned > 0
@@ -458,6 +512,9 @@ export class SessionService implements OnModuleInit {
                         : '') +
                     (discarded > 0
                         ? `, discarded ${discarded} finished session(s)`
+                        : '') +
+                    (orphaned > 0
+                        ? `, removed ${orphaned} orphaned working director${orphaned === 1 ? 'y' : 'ies'}`
                         : '')
             );
         }
