@@ -13,6 +13,7 @@ import {
     readFileSync,
     renameSync,
     rmSync,
+    statSync,
     writeFileSync,
 } from 'fs';
 import { join } from 'path';
@@ -137,6 +138,26 @@ export interface Session {
     lastActivityAt: number;
 }
 
+/**
+ * Bytes held under a directory, best-effort.
+ *
+ * Only ever reported to a human deciding whether to clear it, so an unreadable
+ * entry is skipped rather than failing the whole count.
+ */
+function directorySize(dir: string): number {
+    let total = 0;
+    try {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            const path = join(dir, entry.name);
+            if (entry.isDirectory()) total += directorySize(path);
+            else total += statSync(path).size;
+        }
+    } catch {
+        // Removed under us, or unreadable. Either way it is not part of the answer.
+    }
+    return total;
+}
+
 /** Statuses that cannot survive the process that was driving them. */
 const IN_FLIGHT: SessionStatus[] = [
     'uploading',
@@ -148,6 +169,20 @@ const IN_FLIGHT: SessionStatus[] = [
 
 /** Statuses nothing will move again. */
 const TERMINAL: SessionStatus[] = ['completed', 'failed'];
+
+/**
+ * Statuses where something is happening to the session right now.
+ *
+ * The one set a user-initiated clear must not touch: everything else is either
+ * finished, or waiting on a person who can start again.
+ */
+const BUSY: SessionStatus[] = [
+    'uploading',
+    'queued',
+    'encoding',
+    'encrypting',
+    'uploading_to_s3',
+];
 
 /** Statuses a session can still be worked on from. */
 const ACTIVE: SessionStatus[] = [
@@ -864,6 +899,79 @@ export class SessionService implements OnModuleInit {
      * boot instead, so nothing has to guess how long a completed encode is still
      * interesting for.
      */
+    /**
+     * What a "clear working files" action would remove, and how much it frees.
+     *
+     * Everything the sweeps would eventually take — finished sessions, idle ones,
+     * and directories holding no session at all — with no age threshold, because
+     * the user asked. Anything mid-flight is excluded and counted separately, so
+     * the caller can say why a running encode was left alone rather than
+     * appearing to have missed it.
+     */
+    describeReclaimable(): { sessions: number; bytes: number; busy: number } {
+        const { ids, busy } = this.collectReclaimable();
+        let bytes = 0;
+        for (const id of ids) bytes += directorySize(join(this.workDir, id));
+        return { sessions: ids.length, bytes, busy };
+    }
+
+    /**
+     * Remove everything {@link describeReclaimable} reports, and forget the
+     * sessions it belonged to. Returns what was actually freed.
+     */
+    reclaim(): { sessions: number; bytes: number; busy: number } {
+        const { ids, busy } = this.collectReclaimable();
+        let bytes = 0;
+
+        for (const id of ids) {
+            bytes += directorySize(join(this.workDir, id));
+            const session = this.sessions.get(id);
+            if (session) {
+                this.forget(session);
+                this.sessions.delete(id);
+            }
+            this.purge(id);
+        }
+
+        if (ids.length) {
+            // Named as a group rather than individually: this is the user's own
+            // deliberate action, not a sweep they need to reconstruct later.
+            this.logger.log(
+                `Cleared ${ids.length} working director${ids.length === 1 ? 'y' : 'ies'} at the user's request`
+            );
+        }
+
+        return { sessions: ids.length, bytes, busy };
+    }
+
+    /**
+     * Session directories safe to remove, plus a count of those left alone.
+     *
+     * Reads the disk rather than only the session map, so a directory with no
+     * record — the orphan case `restore` clears at boot — is included here too
+     * rather than waiting for the next start.
+     */
+    private collectReclaimable(): { ids: string[]; busy: number } {
+        if (!existsSync(this.workDir)) return { ids: [], busy: 0 };
+
+        const ids: string[] = [];
+        let busy = 0;
+
+        for (const entry of readdirSync(this.workDir, {
+            withFileTypes: true,
+        })) {
+            if (!entry.isDirectory()) continue;
+            const session = this.sessions.get(entry.name);
+            if (session && BUSY.includes(session.status)) {
+                busy++;
+                continue;
+            }
+            ids.push(entry.name);
+        }
+
+        return { ids, busy };
+    }
+
     cleanupAbandoned(maxAgeMs: number): number {
         const cutoff = Date.now() - maxAgeMs;
         const idle: SessionStatus[] = ['created', 'uploading', 'uploaded'];

@@ -13,6 +13,7 @@ import {
     privateNetworkAccessMiddleware,
 } from './cors.config.js';
 import type { CredentialCipher } from './encode/services/credential-cipher.js';
+import { SessionService } from './encode/services/session.service.js';
 import { API_VERSION } from './version.js';
 
 /**
@@ -95,6 +96,17 @@ export interface RunningServer {
     /** Where the API — and the web client, if served — can be reached. */
     url: string;
     close(): Promise<void>;
+    /** What a "clear working files" action would free, without freeing it. */
+    describeReclaimable(): WorkspaceReclaim;
+    /** Remove every session directory that is not actively being worked on. */
+    reclaimWorkspace(): WorkspaceReclaim;
+}
+
+/** Sessions and bytes a workspace clear covers, and how many it left running. */
+export interface WorkspaceReclaim {
+    sessions: number;
+    bytes: number;
+    busy: number;
 }
 
 /**
@@ -297,5 +309,8 @@ export async function createServer(
         port: boundPort,
         url: `http://${host}:${boundPort}`,
         close: () => app.close(),
+        describeReclaimable: () =>
+            app.get(SessionService).describeReclaimable(),
+        reclaimWorkspace: () => app.get(SessionService).reclaim(),
     };
 }
