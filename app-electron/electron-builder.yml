@@ -84,9 +84,10 @@ protocols:
 
 mac:
     artifactName: ${productName}-${version}-mac-${arch}.${ext}
+    # Only the encoder here. The web client is the root extraResources entry;
+    # repeating it per platform made electron-builder copy it twice into the
+    # same place, which Windows refuses (EBUSY) and macOS quietly tolerated.
     extraResources:
-        - from: ../app/dist
-          to: app
         - from: bin/darwin-${arch}
           to: .
           filter: &encoderFiles
@@ -151,8 +152,6 @@ dmg:
 win:
     artifactName: ${productName}-${version}-win-${arch}.${ext}
     extraResources:
-        - from: ../app/dist
-          to: app
         - from: bin/win32-${arch}
           to: .
           filter: *encoderFiles
