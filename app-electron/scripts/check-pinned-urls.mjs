@@ -3,7 +3,7 @@
  * Ask whether the sources our FFmpeg build depends on still exist.
  *
  * Building from source has its own supply chain — FFmpeg's release tarball and
- * signature, x264's git repository, libwebp's tarball, the NVENC headers, the Quick
+ * signature, libwebp's tarball, the NVENC headers, the Quick
  * Sync dispatcher — shorter than downloading a binary, but not absent.
  *
  * A source that cannot be fetched means `dist:mac` and `dist:win` stop working for
@@ -38,8 +38,6 @@ const pin = (name) => {
 
 const ffmpegVersion = pin('FFMPEG_VERSION');
 const libwebpVersion = pin('LIBWEBP_VERSION');
-const x264Repo = pin('X264_REPO');
-const x264Commit = pin('X264_COMMIT');
 const nvTag = pin('NV_CODEC_HEADERS_TAG');
 
 const httpTargets = [
@@ -255,12 +253,6 @@ for (const t of httpTargets) {
 }
 
 for (const t of [
-    {
-        what: `x264 ${x264Commit.slice(0, 12)}`,
-        repo: x264Repo,
-        ref: x264Commit,
-        kind: 'commit',
-    },
     {
         what: `nv-codec-headers ${nvTag}`,
         repo: pin('NV_CODEC_HEADERS_REPO'),

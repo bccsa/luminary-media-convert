@@ -15,11 +15,18 @@ name: Build FFmpeg from source
 on:
     workflow_dispatch:
     push:
+        # main only. Three targets compiled from source is tens of minutes, and a
+        # feature branch touching a pin should not spend that on every push — open
+        # the PR, then dispatch a run when the pin is what you want tested.
+        branches:
+            - main
         paths:
             # The build definition itself. A change to a pin or a configure flag is
             # exactly when "does this still produce a working encoder" is unanswered.
+            #
+            # This workflow is deliberately not in its own list: editing the checks
+            # is not a reason to recompile FFmpeg three ways. Dispatch it by hand.
             - ffmpeg-build/**
-            - .github/workflows/ffmpeg-build.yml
 
 permissions:
     contents: read
@@ -78,9 +85,15 @@ jobs:
                   "$FF" -hide_banner -version | head -1
                   "$FF" -hide_banner -L | sed -n '2,4p'
                   "$FF" -hide_banner -hwaccels
-                  for e in libx264 h264_videotoolbox aac libwebp mjpeg pcm_s16le; do
+                  for e in h264_videotoolbox aac libwebp mjpeg pcm_s16le; do
                     "$FF" -hide_banner -encoders | grep -qw "$e" || { echo "MISSING encoder $e"; exit 1; }
                   done
+                  # The licensing position, asked of the binary rather than assumed:
+                  # libx264 is what --enable-gpl gates, and this build has neither.
+                  if "$FF" -hide_banner -encoders | grep -qw libx264; then
+                    echo "libx264 is present — this is not an LGPL build"; exit 1
+                  fi
+                  "$FF" -hide_banner -L | grep -q "Lesser" || { echo "banner does not report LGPL"; exit 1; }
                   for f in scale scale_vt tile trim concat fps format crop aresample; do
                     "$FF" -hide_banner -filters | grep -qE " $f +" || { echo "MISSING filter $f"; exit 1; }
                   done
@@ -100,16 +113,18 @@ jobs:
                   FF="app-electron/bin/${{ matrix.target }}/ffmpeg"
                   head -c 5760000 /dev/zero > raw.yuv     # 320x240 yuv420p, 50 frames
                   head -c 64000 /dev/zero > raw.pcm       # 2s of 16-bit mono @ 16 kHz
+                  # h264_videotoolbox, not libx264: there is no software H.264
+                  # encoder in this build at all, which is the whole point of it.
                   "$FF" -hide_banner -loglevel error \
                     -f rawvideo -pix_fmt yuv420p -s 320x240 -r 25 -i raw.yuv \
                     -f s16le -ar 16000 -ac 1 -i raw.pcm \
-                    -c:v libx264 -c:a aac -shortest src.mp4 -y
+                    -c:v h264_videotoolbox -c:a aac -shortest src.mp4 -y
                   # HLS with fMP4 segments — what the encoder actually emits.
-                  "$FF" -hide_banner -loglevel error -i src.mp4 -c:v libx264 -c:a aac \
+                  "$FF" -hide_banner -loglevel error -i src.mp4 -c:v h264_videotoolbox -c:a aac \
                     -hls_time 1 -hls_segment_type fmp4 -hls_playlist_type vod \
                     -hls_segment_filename "s_%d.m4s" o.m3u8 -y
                   test -s o.m3u8
-                  echo "  HLS fMP4 written with libx264 + aac"
+                  echo "  HLS fMP4 written with h264_videotoolbox + aac"
                   # Sprite sheet: the tile filter through libwebp.
                   "$FF" -hide_banner -loglevel error -i src.mp4 \
                     -vf "fps=1,scale=160:-1,tile=2x1" -c:v libwebp sp.webp -y
@@ -169,9 +184,15 @@ jobs:
                   "$FF" -hide_banner -version | head -1
                   "$FF" -hide_banner -L | sed -n '2,4p'
                   "$FF" -hide_banner -hwaccels
-                  for e in libx264 h264_nvenc h264_qsv aac libwebp mjpeg pcm_s16le; do
+                  for e in h264_nvenc h264_qsv aac libwebp mjpeg pcm_s16le; do
                     "$FF" -hide_banner -encoders | grep -qw "$e" || { echo "MISSING encoder $e"; exit 1; }
                   done
+                  # The licensing position, asked of the binary rather than assumed:
+                  # libx264 is what --enable-gpl gates, and this build has neither.
+                  if "$FF" -hide_banner -encoders | grep -qw libx264; then
+                    echo "libx264 is present — this is not an LGPL build"; exit 1
+                  fi
+                  "$FF" -hide_banner -L | grep -q "Lesser" || { echo "banner does not report LGPL"; exit 1; }
                   for f in scale_cuda vpp_qsv scale_qsv; do
                     "$FF" -hide_banner -filters | grep -qE " $f +" || { echo "MISSING filter $f"; exit 1; }
                   done
@@ -181,7 +202,7 @@ jobs:
                   # cross-build cannot answer for itself, and it is the one that
                   # cannot be fixed after shipping.
                   "$FF" -hide_banner -hwaccels | grep -qw qsv || { echo "MISSING qsv hwaccel"; exit 1; }
-                  echo "NVENC, Quick Sync and the CPU fallback are all present"
+                  echo "NVENC and Quick Sync are present, and no software H.264 encoder is"
             # Features, not flags: a configure flag can name a component that the
             # binary cannot actually use, and only writing a file proves otherwise.
             #
@@ -195,22 +216,22 @@ jobs:
                   FF="bin/ffmpeg.exe"
                   head -c 5760000 /dev/zero > raw.yuv     # 320x240 yuv420p, 50 frames
                   head -c 64000 /dev/zero > raw.pcm       # 2s of 16-bit mono @ 16 kHz
+                  # No H.264 is written here, and that is not an omission. This
+                  # runner has neither an NVIDIA nor an Intel GPU, and the build
+                  # carries no software H.264 encoder — so every route to H.264 is
+                  # absent by design. Their presence was checked above, which is the
+                  # question a cross-build cannot answer for itself; that they encode
+                  # is answered on real hardware, not here.
+                  #
+                  # What is provable without a GPU still is: the filter chain, libwebp
+                  # and the waveform path, all straight from the raw inputs.
                   "$FF" -hide_banner -loglevel error \
                     -f rawvideo -pix_fmt yuv420p -s 320x240 -r 25 -i raw.yuv \
-                    -f s16le -ar 16000 -ac 1 -i raw.pcm \
-                    -c:v libx264 -c:a aac -shortest src.mp4 -y
-                  # HLS with fMP4 segments — what the encoder actually emits.
-                  "$FF" -hide_banner -loglevel error -i src.mp4 -c:v libx264 -c:a aac \
-                    -hls_time 1 -hls_segment_type fmp4 -hls_playlist_type vod \
-                    -hls_segment_filename "s_%d.m4s" o.m3u8 -y
-                  test -s o.m3u8
-                  echo "  HLS fMP4 written with libx264 + aac"
-                  # Sprite sheet: the tile filter through libwebp.
-                  "$FF" -hide_banner -loglevel error -i src.mp4 \
                     -vf "fps=1,scale=160:-1,tile=2x1" -c:v libwebp sp.webp -y
                   test -s sp.webp
-                  echo "  libwebp sprite written"
+                  echo "  libwebp sprite written through the tile filter"
                   # WaveformService's path: raw PCM on stdout.
-                  bytes=$("$FF" -hide_banner -loglevel error -i src.mp4 -ac 1 -ar 8000 -f s16le - | wc -c)
+                  bytes=$("$FF" -hide_banner -loglevel error \
+                    -f s16le -ar 16000 -ac 1 -i raw.pcm -ac 1 -ar 8000 -f s16le - | wc -c)
                   test "$bytes" -gt 1000
                   echo "  raw PCM out: $bytes bytes"

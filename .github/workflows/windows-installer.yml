@@ -72,6 +72,6 @@ jobs:
                   name: luminary-media-convert-win-unsigned
                   # Unsigned: there is no Authenticode certificate in this project,
                   # so SmartScreen may warn. Fine for verification, not for release.
-                  path: electron/release/*.exe
+                  path: app-electron/release/*.exe
                   retention-days: 7
                   if-no-files-found: error
