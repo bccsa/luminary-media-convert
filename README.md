@@ -14,7 +14,9 @@ It also speaks to the Luminary CMS. A user clicking "upload media" on a post in 
               │       (gated by Origin, TOFU)      │   • safeStorage cipher   │
               │                                    │   • origin dialogs       │
               │  SSE  /api/sessions/:id/events ◄───│   • ffmpeg / ffprobe     │
-              │       hlsUrl + encryptionKeyHex    │                          │
+              │       hlsUrl, progress, status     │                          │
+              │  GET  /api/sessions/:id/key ──────►│                          │
+              │       the AES-128 key, masked      │                          │
                                                    │  renderer = app/dist     │
                                                    └───────────┬──────────────┘
                                                                │  local file, by reference
@@ -27,19 +29,23 @@ The API binds to `127.0.0.1` only. The renderer authenticates with a token minte
 
 ## Workspaces
 
-| Workspace        | Description                                            | README                                                                     |
-| ---------------- | ------------------------------------------------------ | -------------------------------------------------------------------------- |
-| `api/`           | Encoding API — NestJS, embeddable via `createServer()` | [api/README.md](api/README.md)                                             |
-| `app/`           | Vue 3 renderer UI                                      | [app/README.md](app/README.md)                                             |
-| `app-electron/`  | Desktop shell, hosts the API in-process, packaging     | [app-electron/bin/README.md](app-electron/bin/README.md) (ffmpeg binaries) |
-| `cms-mock/`      | Dev-only stand-in for the Luminary CMS                 | [cms-mock/README.md](cms-mock/README.md)                                   |
-| `encode-config/` | Shared encode-config form + types                      | [encode-config/README.md](encode-config/README.md)                         |
-| `hls-core/`      | Shared HLS parsing, key utilities, angle extraction    | —                                                                          |
+| Workspace            | Description                                            | README                                                                     |
+| -------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `api/`               | Encoding API — NestJS, embeddable via `createServer()` | [api/README.md](api/README.md)                                             |
+| `app/`               | Vue 3 renderer UI                                      | [app/README.md](app/README.md)                                             |
+| `app-electron/`      | Desktop shell, hosts the API in-process, packaging     | [app-electron/bin/README.md](app-electron/bin/README.md) (ffmpeg binaries) |
+| `cms-mock/`          | Dev-only stand-in for the Luminary CMS                 | [cms-mock/README.md](cms-mock/README.md)                                   |
+| `encode-config/`     | Shared encode-config form + types                      | [encode-config/README.md](encode-config/README.md)                         |
+| `hls-core/`          | Shared HLS parsing, key utilities, angle extraction    | —                                                                          |
+| `player-core/`       | Player pipeline: fetch, decrypt, extract angles, state | —                                                                          |
+| `player-web/`        | Web player over the `PlayerAdapter` contract           | —                                                                          |
+| `player-web-legacy/` | The same contract on Video.js 8 / VHS                  | [player-web-legacy/README.md](player-web-legacy/README.md)                 |
+| `ffmpeg-build/`      | Builds the bundled LGPL FFmpeg                         | [ffmpeg-build/README.md](ffmpeg-build/README.md)                           |
 
 ## Prerequisites
 
 - **Node.js** ≥ 18
-- **FFmpeg + ffprobe** on `PATH` for development (with `libx264` and `aac`; `h264_nvenc` for NVIDIA, `h264_videotoolbox` + `scale_vt` for Apple Silicon). Packaged builds ship their own — see [app-electron/bin/README.md](app-electron/bin/README.md)
+- **FFmpeg + ffprobe** on `PATH` for development, with `aac` and a hardware H.264 encoder for your machine — `h264_videotoolbox` + `scale_vt` on Apple Silicon, `h264_nvenc` on NVIDIA. Deliberately **not** a `libx264` build: there is no software H.264 fallback left anywhere, because packaged builds ship an LGPL FFmpeg without it and development is meant to fail the same way. Packaged builds ship their own — see [app-electron/bin/README.md](app-electron/bin/README.md)
 - An **S3-compatible bucket** to write output to (MinIO, R2, AWS S3, B2, Spaces…)
 
 ## Quick start
@@ -123,7 +129,7 @@ PATH="/opt/homebrew/opt/llvm/bin:$PATH" npm -w app-electron run dist:win-portabl
 ```
 
 The ffmpeg build itself is [`ffmpeg-build/README.md`](ffmpeg-build/README.md) — why we
-build rather than download, what goes in, and the GPL position. `app-electron/bin/README.md`
+build rather than download, what goes in, and the LGPL position. `app-electron/bin/README.md`
 covers where the binaries land and their licences.
 
 ### What is signed, and what a user sees
