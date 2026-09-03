@@ -53,7 +53,7 @@ else
 fi
 
 work="$here/.work/$target"
-prefix="$work/deps"     # x264 installs here; ffmpeg links against it
+prefix="$work/deps"     # libwebp and libvpl install here; ffmpeg links against them
 out="$repo/app-electron/bin/$target"
 
 log() { printf '\n  \033[1m%s\033[0m\n' "$1"; }
@@ -136,44 +136,6 @@ echo "    ✓ GPG signature verified against $FFMPEG_SIGNING_KEY"
 src="$work/ffmpeg-$FFMPEG_VERSION"
 [ -d "$src" ] || tar -xf "$tarball" -C "$work"
 
-# ── x264, pinned to a commit ─────────────────────────────────────────────────
-log "x264 $X264_COMMIT"
-x264src="$work/x264"
-if [ ! -d "$x264src/.git" ]; then
-    git clone -q "$X264_REPO" "$x264src"
-fi
-git -C "$x264src" fetch -q origin
-git -C "$x264src" checkout -q "$X264_COMMIT"
-
-# Keyed to the pin, not merely to the file's existence: a bumped X264_COMMIT with a
-# leftover .a in $prefix would otherwise link the previous revision while the licence
-# notice attests the new one.
-x264_stamp="$prefix/.x264-$X264_COMMIT"
-if [ ! -f "$x264_stamp" ]; then
-    # Invalidate first, stamp only after success: a failed build must leave neither
-    # the old library nor any stamp, or a later revert of the pin would skip a
-    # rebuild it needs.
-    rm -f "$prefix"/.x264-* "$prefix/lib/libx264.a"
-    (
-        cd "$x264src"
-        # Static, PIC, no CLI: ffmpeg links the library and nothing wants the
-        # x264 command-line tool in the bundle.
-        x264_flags=(--prefix="$prefix" --enable-static --enable-pic --disable-cli)
-        if [ "$os" = "mingw32" ]; then
-            x264_flags+=(--host=x86_64-w64-mingw32 --cross-prefix="$cross_prefix")
-        elif [ "$arch" != "$host_arch" ]; then
-            x264_flags+=(--host="$arch-apple-darwin")
-        fi
-        ./configure "${x264_flags[@]}" >"$work/x264-configure.log" 2>&1 ||
-            { tail -20 "$work/x264-configure.log"; fail "x264 configure failed"; }
-        make -j"$(nproc_cmd)" >"$work/x264-make.log" 2>&1 ||
-            { tail -20 "$work/x264-make.log"; fail "x264 build failed"; }
-        make install >>"$work/x264-make.log" 2>&1
-    )
-    touch "$x264_stamp"
-fi
-echo "    ✓ libx264.a"
-
 # ── libwebp, ours rather than the system's ───────────────────────────────────
 # A system libwebp links the binary against a path that exists on this machine and
 # not on a user's, and every functional test still passes here because the library is
@@ -236,6 +198,32 @@ if [ "$os" = "mingw32" ]; then
     make -C "$nvsrc" PREFIX="$prefix" install >"$work/nv-headers.log" 2>&1 ||
         { tail -20 "$work/nv-headers.log"; fail "nv-codec-headers install failed"; }
     echo "    ✓ ffnvcodec.pc"
+fi
+
+# ── AMF headers, for h264_amf (Windows only) ─────────────────────────────────
+# AMD's equivalent of nv-codec-headers: headers only, no library, no AMD hardware
+# needed. `--enable-amf` compiles against them and the runtime comes out of the
+# user's Radeon driver.
+#
+# This is what gives a Radeon machine a hardware encoder. Without it such a
+# machine has no hardware path at all — which is survivable only while libx264 is
+# still compiled in.
+if [ "$os" = "mingw32" ]; then
+    log "AMF headers $AMF_TAG"
+    amfsrc="$work/amf"
+    [ -d "$amfsrc/.git" ] || git clone -q "$AMF_REPO" "$amfsrc"
+    git -C "$amfsrc" fetch -q --tags --force origin
+    tagged="$(git -C "$amfsrc" rev-list -n1 "$AMF_TAG" 2>/dev/null || true)"
+    [ "$tagged" = "$AMF_COMMIT" ] ||
+        fail "AMF $AMF_TAG points at ${tagged:-nothing},\n    expected $AMF_COMMIT"
+    git -C "$amfsrc" checkout -q "$AMF_COMMIT"
+    # No build system to run: FFmpeg looks for AMF/core/Version.h on the include
+    # path, so the headers are copied into the prefix directly.
+    mkdir -p "$prefix/include/AMF"
+    cp -R "$amfsrc/amf/public/include/." "$prefix/include/AMF/"
+    [ -f "$prefix/include/AMF/core/Version.h" ] ||
+        fail "AMF headers did not land at $prefix/include/AMF/core/Version.h"
+    echo "    ✓ AMF/core/Version.h"
 fi
 
 # ── libvpl, the Quick Sync dispatcher (Windows only) ─────────────────────────
@@ -309,7 +297,7 @@ fi
 # Narrow on the way out, wide on the way in: we control what is written, not what
 # users hand us. Encoders and muxers are an allow-list; decoders, demuxers and
 # parsers stay complete, or somebody's ProRes/MXF/VP9 source stops opening.
-encoders="libx264,aac,libwebp,mjpeg,pcm_s16le"
+encoders="aac,libwebp,mjpeg,pcm_s16le"
 # Configure uses FFmpeg's *internal* names, which are not always the names you
 # pass to `-f`: raw PCM is `-f s16le` on the command line but `pcm_s16le` here.
 # Getting it wrong is silent — configure accepted `s16le`, the build succeeded,
@@ -323,7 +311,26 @@ case "$target" in
     # machine has: NVENC for NVIDIA, h264_qsv for Intel Quick Sync. Both are
     # loaded from the user's driver at run time, so carrying both costs a
     # compiled-in encoder each and nothing at all on a machine without them.
-    win32-*) encoders="$encoders,h264_nvenc,h264_qsv" ;;
+    # h264_amf for Radeon, h264_mf for everything else: the Media Foundation
+    # encoder ships with every Windows install, so a machine with no usable GPU
+    # at all still has an encoder that is not ours.
+    #
+    # NOT TESTED ON HARDWARE. All four are confirmed compiled into the binary,
+    # and the build itself is verified LGPL — but no Windows machine has been
+    # available to run them on, so nobody has seen h264_amf or h264_mf open a
+    # single frame. Two things follow from that, and both matter now that this
+    # build carries no libx264 to fall back on:
+    #
+    #   - The argument sets for both (encoder-selection.ts) are reasoned from
+    #     documentation, not from a machine that accepted them. An option an
+    #     encoder rejects is a failure to open, not a worse picture.
+    #   - h264_mf is reported to stop somewhere near 1080p. If that is true, a
+    #     GPU-less Windows box asked for a 4K rendition fails outright — for
+    #     exactly the users the fallback exists to serve.
+    #
+    # scripts/probe-encoders.mjs answers both in a few seconds on any Windows
+    # machine with Node. Until someone runs it, treat Windows as unshipped.
+    win32-*) encoders="$encoders,h264_nvenc,h264_qsv,h264_amf,h264_mf" ;;
 esac
 
 configure_flags=(
@@ -332,13 +339,19 @@ configure_flags=(
     --extra-cflags="-I$prefix/include"
     --extra-ldflags="-L$prefix/lib"
 
-    # Licensing: GPL because libx264 is, and never nonfree — that produces a
-    # binary FFmpeg itself describes as unredistributable. No version3 either,
-    # which keeps the result v2-or-later.
-    --enable-gpl
-    --enable-libx264
+    # Licensing: LGPL-2.1. --enable-gpl is what pulls in libx264 and makes the
+    # result GPL, so dropping the software encoder is what buys the weaker
+    # licence — that is the whole point of the exercise, not a side effect.
+    # Never nonfree, which produces a binary FFmpeg itself calls
+    # unredistributable; and no version3, which keeps this v2.1-or-later.
     --enable-libwebp
 
+    # Static, against the letter of the licensing policy, which asks for
+    # --enable-shared. That flag belongs to the linked-library mode; this app
+    # spawns ffmpeg as a separate process, where the policy's own text says no
+    # linking obligations apply. Shared would gain nothing legally and would
+    # break the dependency audit below, which is what keeps the binary
+    # relocatable. Raised with the product owner and agreed, 31 Aug 2026.
     --enable-static
     --disable-shared
 
@@ -383,6 +396,19 @@ if [ "$os" = "mingw32" ]; then
         --enable-nvenc
         --enable-cuda-llvm
         --enable-ffnvcodec
+        --enable-amf
+        # AMF's display-capture source filter, which we do not want and which
+        # does not compile: FFmpeg 8.1's vsrc_amf.c is C and includes AMF's
+        # DisplayCapture.h, whose `extern "C"` is unguarded and whose signatures
+        # use `amf::` — a C++-only header. AMF 1.4.36 is both FFmpeg's stated
+        # minimum and the newest tag, so no version satisfies both. Disabling
+        # the filter costs nothing here: what we want from AMF is h264_amf.
+        --disable-filter=amf_capture
+        # Microsoft's own H.264 encoder, present on every Windows install. It is
+        # the last resort in the fallback chain: slower and weaker than the GPU
+        # encoders, and reportedly capped near 1080p, but it is the difference
+        # between a GPU-less machine encoding badly and not encoding at all.
+        --enable-mediafoundation
 
         # Intel Quick Sync, through the oneVPL dispatcher built above. libmfx is
         # the older route to the same encoders and FFmpeg refuses to have both;
@@ -484,25 +510,20 @@ echo "    ✓ no foreign dependencies — relocatable"
 # sources at which versions, and which GPL version applies. A notice that
 # misdescribes what it accompanies is worse than none.
 log "Licence notice"
-# 2 unless the binary says otherwise. This build never passes --enable-version3, so
-# 2 is the right answer — but it is read off the binary where that is possible,
-# because a licence notice should describe the artefact rather than the intention.
-# On a cross-built target that cannot be run here, the configure flags are the only
-# evidence available, and they are in this file.
-licence_version="2"
+# Read off the binary wherever it can be run, because a licence notice should
+# describe the artefact rather than the intention. Without --enable-gpl this is
+# LGPL-2.1-or-later, and the check below is what would catch a build that
+# silently became something else — a reinstated --enable-gpl, or a component
+# that dragged in version3.
+licence="LGPL-2.1-or-later"
+licence_texts="COPYING.LGPLv2.1 beside this file"
+gpl_texts=(COPYING.LGPLv2.1)
 if [ "$native" = true ]; then
-    "$out/ffmpeg$exe" -hide_banner -L 2>/dev/null | grep -q 'either version 3' &&
-        licence_version="3"
-fi
-
-# A v2-or-later work offers v3 as well, so both texts travel; a v3-or-later one
-# offers only v3.
-if [ "$licence_version" = "3" ]; then
-    gpl_texts=(GPL-3.0.txt)
-    licence_texts="GPL-3.0.txt"
-else
-    gpl_texts=(GPL-2.0.txt GPL-3.0.txt)
-    licence_texts="GPL-2.0.txt (and GPL-3.0.txt, at your option)"
+    banner="$("$out/ffmpeg$exe" -hide_banner -L 2>/dev/null || true)"
+    grep -q 'Lesser' <<<"$banner" ||
+        fail "This build reports a GPL licence, not LGPL.\n    The licensing policy requires an LGPL build; check the configure flags."
+    grep -q 'either version 3' <<<"$banner" &&
+        fail "This build is v3-or-later. No --enable-version3 is passed here, so a\n    dependency has forced it; find which before shipping."
 fi
 
 nv_pin_line=""
@@ -511,7 +532,9 @@ vpl_static_line=""
 if [ "$os" = "mingw32" ]; then
     nv_pin_line="
   nv-codec-headers $NV_CODEC_HEADERS_TAG ($NV_CODEC_HEADERS_COMMIT)
-    $NV_CODEC_HEADERS_REPO"
+    $NV_CODEC_HEADERS_REPO
+  AMF $AMF_TAG ($AMF_COMMIT)
+    $AMF_REPO"
     vpl_pin_line="
   libvpl $LIBVPL_TAG ($LIBVPL_COMMIT)
     $LIBVPL_REPO"
@@ -522,28 +545,38 @@ if [ "$os" = "mingw32" ]; then
     cp "$vplsrc/LICENSE" "$out/LICENSE-libvpl.txt"
 fi
 
-for licence in "${gpl_texts[@]}"; do
-    from="$repo/app-electron/bin/licenses/$licence"
-    [ -f "$from" ] || fail "$licence is missing from app-electron/bin/licenses/"
-    # A v2-or-later work offers v3 as well, so both travel. (A v3-only build would
-    # ship v3 alone.)
-    cp "$from" "$out/$licence"
+# The LGPL text comes from the FFmpeg tarball itself rather than a copy we keep,
+# so it is literally the licence the source shipped under. LGPL-2.1 s.6 asks for
+# a copy to travel with the binary; a link is not one.
+for licence_file in "${gpl_texts[@]}"; do
+    from="$src/$licence_file"
+    [ -f "$from" ] || fail "$licence_file is not in the FFmpeg source tree at $src"
+    cp "$from" "$out/$licence_file"
 done
+# Any GPL texts left from an earlier build would now misdescribe this binary.
+rm -f "$out"/GPL-*.txt
 
 cat > "$out/LICENSE-ffmpeg.txt" <<EOF
 FFmpeg $FFMPEG_VERSION ($target), built from source by this project, distributed
-under the GNU General Public License version $licence_version or later, with
-libx264 statically linked.
+under the GNU Lesser General Public License version 2.1 or later.
+
+No software H.264 encoder is included: this build carries no libx264, and
+encoding uses an encoder already present on your machine (VideoToolbox on
+macOS; NVENC, Quick Sync, AMF or Media Foundation on Windows).
 
 This application invokes ffmpeg as a separate process; it is not linked against
 the FFmpeg libraries. The application itself is licensed under Apache-2.0.
 
-Licence:        GPL-$licence_version.0-or-later
-Licence text:   $licence_texts beside this file
+Licence:        $licence
+Licence text:   $licence_texts
 FFmpeg project: https://ffmpeg.org/
 
+You may replace this ffmpeg with your own build. The application takes the one
+beside it by default, and "Choose FFmpeg..." in its menu points it at any
+directory holding an ffmpeg and ffprobe instead; setting FFMPEG_PATH and
+FFPROBE_PATH in the environment does the same and takes precedence over both.
+
 Statically linked, under their own terms:
-  libx264   GPL-2.0-or-later, covered by the GPL text above
   libwebp   BSD-3-Clause — see LICENSE-libwebp.txt beside this file$vpl_static_line
 
 Corresponding source: this binary was built by ffmpeg-build/build.sh in the
@@ -552,18 +585,41 @@ ffmpeg-build/versions.sh:
 
   FFmpeg $FFMPEG_VERSION   https://ffmpeg.org/releases/ffmpeg-$FFMPEG_VERSION.tar.xz
     sha256 $FFMPEG_SHA256
-  x264      $X264_COMMIT
-    $X264_REPO
   libwebp $LIBWEBP_VERSION
     sha256 $LIBWEBP_SHA256$nv_pin_line$vpl_pin_line
 
 That script and versions file are the complete instructions for rebuilding this
-binary. No x265: this build writes H.264 only.
+binary, and for building a modified one to put in its place. No x264 and no
+x265: this build writes H.264 only, using your machine's own encoder.
+
+Substituting your own build: the application does not require the ffmpeg shipped
+beside it. Choose FFmpeg… in the application menu points it at any directory
+holding an ffmpeg and ffprobe, and it will use those instead after a restart.
+Setting FFMPEG_PATH and FFPROBE_PATH in the environment does the same thing and
+takes precedence over both.
 EOF
 cp "$webpsrc/COPYING" "$out/LICENSE-libwebp.txt"
-notices="LICENSE-ffmpeg.txt (GPL-$licence_version.0-or-later), ${gpl_texts[*]}, LICENSE-libwebp.txt"
+notices="LICENSE-ffmpeg.txt ($licence), ${gpl_texts[*]}, LICENSE-libwebp.txt"
 [ "$os" = "mingw32" ] && notices="$notices, LICENSE-libvpl.txt"
 echo "    ✓ $notices"
+
+# ── Build configuration, recorded beside the binary ──────────────────────────
+# The licence gate in app-electron/scripts/verify-package.mjs reads this file.
+# It has to be a file rather than a live `-buildconf`, because the Windows
+# binary cannot be executed on the macOS machine that packages it, and a gate
+# that quietly skips the cross-built target is not a gate.
+log "Build configuration"
+if [ "$native" = true ]; then
+    "$out/ffmpeg$exe" -hide_banner -buildconf > "$out/BUILDCONF.txt"
+else
+    # Cross-built: the flags this script passed are the only evidence available.
+    # Same shape configure echoes back, so the gate parses one format.
+    {
+        echo "  configuration:"
+        printf '    %s\n' "${configure_flags[@]}"
+    } > "$out/BUILDCONF.txt"
+fi
+echo "    ✓ BUILDCONF.txt"
 
 log "Built $target"
 for b in "ffmpeg$exe" "ffprobe$exe"; do

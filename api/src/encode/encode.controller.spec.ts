@@ -396,6 +396,102 @@ describe('EncodeController', () => {
             ).rejects.toThrow(BadRequestException);
         });
 
+        /**
+         * Track indices count their own kind, not streams. Out of range, ffmpeg
+         * is handed a map like `0:a:4` and dies parsing its own options, so the
+         * user is shown a wall of ffmpeg banner output about a command line they
+         * never wrote. The probe already knows the answer.
+         */
+        describe('track indices out of range', () => {
+            const uploaded = (audioTracks: number, videoTracks = 1) => {
+                const session = sessionService.create(makeConfig());
+                sessionService.updateStatus(session.id, 'uploaded');
+                sessionService.setProbeResult(session.id, {
+                    format: {
+                        duration: 60,
+                        bitrateKbps: 3000,
+                        formatName: 'mp4',
+                    },
+                    videoTracks: Array.from(
+                        { length: videoTracks },
+                        (_, index) => ({
+                            index,
+                            codec: 'h264',
+                            width: 1920,
+                            height: 1080,
+                        })
+                    ) as never,
+                    audioTracks: Array.from(
+                        { length: audioTracks },
+                        (_, index) => ({
+                            index,
+                            codec: 'aac',
+                            channels: 2,
+                        })
+                    ) as never,
+                });
+                return session;
+            };
+
+            it('refuses an audio group past the last audio track', async () => {
+                const session = uploaded(4);
+                const config = makeEncodeConfig();
+                config.audioGroups![0].sourceTrackIndex = 4;
+
+                await expect(
+                    controller.startEncode(session.id, config, makeRequest())
+                ).rejects.toThrow(/audio track 4.*4 audio tracks \(0–3\)/s);
+                expect(queueService.enqueue).not.toHaveBeenCalled();
+            });
+
+            it('says the index counts tracks rather than streams', async () => {
+                // The mistake this catches is passing an absolute stream index,
+                // so the message has to name the distinction.
+                const session = uploaded(2);
+                const config = makeEncodeConfig();
+                config.audioGroups![0].sourceTrackIndex = 3;
+
+                await expect(
+                    controller.startEncode(session.id, config, makeRequest())
+                ).rejects.toThrow(/counts audio tracks, not streams/);
+            });
+
+            it('refuses a rendition past the last video track', async () => {
+                const session = uploaded(2, 1);
+                const config = makeEncodeConfig();
+                config.videoRenditions![0].sourceTrackIndex = 1;
+
+                await expect(
+                    controller.startEncode(session.id, config, makeRequest())
+                ).rejects.toThrow(/video track 1.*1 video track \(0–0\)/s);
+            });
+
+            it('accepts the last valid index', async () => {
+                // The boundary is the bug's neighbour: off by one here would
+                // refuse a legitimate track.
+                const session = uploaded(4);
+                const config = makeEncodeConfig();
+                config.audioGroups![0].sourceTrackIndex = 3;
+
+                await expect(
+                    controller.startEncode(session.id, config, makeRequest())
+                ).resolves.toBeDefined();
+            });
+
+            it('says nothing when the session has no probe result', async () => {
+                // Nothing to check against, and the encode has other reasons to
+                // refuse an unprobed session.
+                const session = sessionService.create(makeConfig());
+                sessionService.updateStatus(session.id, 'uploaded');
+                const config = makeEncodeConfig();
+                config.audioGroups![0].sourceTrackIndex = 99;
+
+                await expect(
+                    controller.startEncode(session.id, config, makeRequest())
+                ).resolves.toBeDefined();
+            });
+        });
+
         it('refuses with 503 and the install advice when ffmpeg is missing', async () => {
             /*
              * A 400 would blame the request, which is fine — it is the machine
@@ -1591,9 +1687,9 @@ describe('EncodeController', () => {
 
         it('never puts the encryption key in the status payload', () => {
             const session = sessionService.create(makeConfig());
-            // (id, files, masterPlaylist, thumbnailsVtt, segmentFormat,
-            // encryptionKeyHex) — the angle-playlist argument that used to sit
-            // in the middle is gone with the per-angle files themselves.
+            // Positional: (id, files, masterPlaylist, thumbnailsVtt,
+            // segmentFormat, encryptionKeyHex). There is no angle-playlist
+            // argument — the encoder writes one master carrying every angle.
             sessionService.setCompleted(
                 session.id,
                 ['master.m3u8'],
@@ -2196,9 +2292,10 @@ describe('EncodeController — masked session key', () => {
         );
     });
 
-    it('is not part of the status payload any more', () => {
-        // The key used to ride along on every poll and SSE frame, which put it
-        // in logs and screenshots for the life of the session.
+    it('is not part of the status payload', () => {
+        // A key riding along on every poll and SSE frame is a key in logs and
+        // screenshots for the life of the session. It is fetched from its own
+        // endpoint instead.
         const session = sessionService.create(makeConfig());
         sessionService.setEncryptionKey(
             session.id,

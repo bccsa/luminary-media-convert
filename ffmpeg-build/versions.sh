@@ -16,11 +16,12 @@ FFMPEG_SHA256="b072aed6871998cce9b36e7774033105ca29e33632be5b6347f3206898e0756a"
 # FFmpeg's release signing key, fingerprint as published on ffmpeg.org/download.html.
 FFMPEG_SIGNING_KEY="FCF986EA15E6E293A5644F10B4322F04D67658D8"
 
-# x264 from VideoLAN's own repository, pinned to a commit rather than a branch —
-# "stable" moves, and a moving source cannot be corresponding source for anything.
-# x264 publishes no signed releases, so the pin is the integrity control.
-X264_REPO="https://code.videolan.org/videolan/x264.git"
-X264_COMMIT="b35605ace3ddf7c1a5d67a2eb553f034aef41d55"  # stable @ 2025-06-08
+# No x264, and that is the licensing decision rather than a technical one.
+# --enable-gpl exists to gate libx264 and friends; without it FFmpeg builds
+# LGPL-2.1, which is what lets this application ship it as a separate program
+# without the combined-work question a GPL encoder would raise. The cost is that
+# there is no software H.264 encoder in the binary at all — encoding uses the one
+# already on the user's machine.
 
 # libwebp, built from Google's own release tarball rather than taken from the system.
 # A system libwebp makes the binary depend on a path that does not exist on a user's
@@ -76,6 +77,32 @@ LIBVPL_TAG="v2.17.0"
 # Lightweight tag, so `ls-remote` advertises one hash and it is the commit. Pinned
 # alongside the tag all the same: the tag is mutable, the commit is not.
 LIBVPL_COMMIT="d77f9195cf495b937631607333288fd917ae8939"
+
+# AMF — AMD's encoder headers, for the Windows target only. What `--enable-amf`
+# compiles against, giving the build `h264_amf`.
+#
+# Headers only, like nv-codec-headers: no library is linked and no AMD hardware is
+# needed to build. The runtime lives in the user's Radeon driver, so a GPU-less
+# runner produces a binary with working AMF exactly as it does for NVENC.
+#
+# Being headers, they add nothing to the conveyed work, so no notice ships for
+# them — the same treatment nv-codec-headers gets above, and for the same reason.
+# They are recorded in the corresponding-source list because they are an input to
+# the build.
+#
+# The floor is verified: FFmpeg 8.1 requires AMF >= 1.4.36 (configure checks
+# AMF_VERSION >= 0x0001000400240000) and this is exactly that, so the pin is the
+# minimum rather than a comfortable margin. There is no ceiling to find, because
+# 1.4.36 is also the newest tag published.
+#
+# Note the compile-time catch that goes with it: FFmpeg 8.1's vsrc_amf.c is C
+# and includes AMF's DisplayCapture.h, which is C++ only. build.sh disables the
+# amf_capture filter for that reason. If a later AMF or FFmpeg fixes the header,
+# that --disable-filter can go.
+AMF_REPO="https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git"
+AMF_TAG="v1.4.36"
+# Annotated tag, so this is the peeled SHA — see the nv-codec-headers note above.
+AMF_COMMIT="16f7d73e0b45c473e903e46981ed0b91efc4c091"
 
 # No x265. The encoder only ever writes H.264 — every variant in the master
 # playlist is avc1 — so HEVC support is weight we would carry and never use, plus

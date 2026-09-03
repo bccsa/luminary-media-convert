@@ -216,7 +216,7 @@ describe('absolutize', () => {
             (globalThis as any).document = {
                 baseURI: 'http://127.0.0.1:31711/sessions/abc',
             };
-            // The wrong answer this used to produce, by way of the browser.
+            // Resolving through the browser's baseURI gives the wrong answer.
             expect(absolutize('r0/playlist.m3u8', relativeBase)).not.toContain(
                 '/sessions/abc/r0/',
             );

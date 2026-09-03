@@ -69,7 +69,6 @@ export class EncodeService {
         private readonly encryptionService: EncryptionService,
         private readonly thumbnailService: ThumbnailService,
         private readonly waveformService: WaveformService,
-        private readonly s3Service: S3Service,
         private readonly segmentPipelineService: SegmentPipelineService
     ) {}
 
@@ -112,6 +111,13 @@ export class EncodeService {
                 `Could not clear previous output for ${sessionId}: ${(err as Error).message}`
             );
         });
+
+        // Declared outside the try so the failure path can stop it. A pipeline
+        // polls on an interval, and nothing below is guaranteed to reach the
+        // drain that clears it.
+        let pipeline:
+            | ReturnType<SegmentPipelineService['createPipeline']>
+            | undefined;
 
         try {
             const encryptionEnabled =
@@ -382,7 +388,7 @@ export class EncodeService {
                 currentProgress.encoding = 0;
             }
 
-            const pipeline = createPipeline(
+            pipeline = createPipeline(
                 encodeConfig,
                 encodeResult && plan
                     ? plan.plannedTotalSegments
@@ -449,11 +455,9 @@ export class EncodeService {
                 session.encodeConfig.type === 'video' &&
                 session.config.thumbnails !== false
             ) {
-                // This used to be the expensive one — a fresh FFmpeg pass over
-                // the finished output, measured at 114.7s of a 125s encode. It
-                // now lays out frames sampled once at ingest and decodes
-                // nothing, so it is reported for completeness rather than
-                // because anyone will be left waiting on it.
+                // Lays out frames sampled once at ingest and decodes nothing,
+                // so this phase is reported for completeness rather than because
+                // anyone will be left waiting on it.
                 reportPhase('thumbnails');
                 try {
                     const thumbResult =
@@ -677,6 +681,18 @@ export class EncodeService {
             this.logger.error(`Session ${sessionId} failed: ${errorMsg}`);
             this.sessionService.setFailed(sessionId, errorMsg);
         } finally {
+            // A drain stops the poll timer on its way out; every other exit from
+            // this method — an ffmpeg failure, a refused config, a throw from any
+            // step between — leaves it running against a directory the session
+            // has finished with.
+            //
+            // Left running it is not merely a leaked interval. A retry starts a
+            // second pipeline over the same output directory, both enqueue each
+            // new segment, and whichever uploads second finds the file already
+            // deleted by the first — a retry that fails on ENOENT for a segment
+            // the encode produced correctly. Aborting an already-drained
+            // pipeline is a no-op, so this is unconditional.
+            pipeline?.abort();
             await this.cleanupSessionFiles(sessionId);
         }
     }
@@ -760,10 +776,10 @@ export class EncodeService {
      * staging shares a host with production (#59), so one filling the disk takes
      * the other down with it.
      *
-     * `session.json` is spared. Clearing the whole directory used to take it too,
-     * which quietly undid session persistence (#67) for exactly the sessions a
-     * user comes back to: a completed session vanished on the next restart and the
-     * client was told it had expired.
+     * `session.json` is spared: clearing it with the rest undoes session
+     * persistence (#67) for exactly the sessions a user comes back to — a
+     * completed session vanishes on the next restart and the client is told it
+     * has expired.
      *
      * A failed session keeps everything until the sweep ages it out (#73). A
      * failure is when someone wants to retry or inspect the input.

@@ -28,7 +28,6 @@ import {
     WAVEFORM_SIDECAR_VERSION,
     WaveformService,
 } from './waveform.service.js';
-import { S3Service } from './s3.service.js';
 import {
     SegmentPipelineService,
     type PipelineProgress,
@@ -99,7 +98,6 @@ describe('EncodeService', () => {
     let encryptionService: Mocked<EncryptionService>;
     let thumbnailService: Mocked<ThumbnailService>;
     let waveformService: Mocked<WaveformService>;
-    let s3Service: Mocked<S3Service>;
     let segmentPipelineService: Mocked<SegmentPipelineService>;
     let mockPipeline: SegmentPipeline;
     let testWorkDir: string;
@@ -148,7 +146,6 @@ describe('EncodeService', () => {
 
         // Uploads run through SegmentPipelineService, mocked below; this stands
         // in only for the prefix helper the encode path reads off the class.
-        s3Service = {} as any;
 
         mockPipeline = makeMockPipeline();
 
@@ -162,7 +159,6 @@ describe('EncodeService', () => {
             encryptionService,
             thumbnailService,
             waveformService,
-            s3Service,
             segmentPipelineService
         );
     });
@@ -221,10 +217,80 @@ describe('EncodeService', () => {
     /**
      * Every uploaded key — segments, playlists and sidecars — is built from the
      * prefix handed to the pipeline, so this is the only place normalizing it
-     * has any effect. An earlier fix normalized a different upload method that
-     * turned out to have no callers, and a prefix typed with a leading slash
-     * still reached storage; that method has since been removed.
+     * has any effect. Normalizing anywhere else reaches no caller, and a prefix
+     * typed with a leading slash still gets to storage.
      */
+    /**
+     * A pipeline polls on an interval, and only the success path reaches the
+     * drain that clears it — so every other exit has to stop it explicitly. One
+     * left running against a directory the session had finished with means a
+     * retry starts a second over the same directory: both enqueue each new
+     * segment, and whichever uploads second finds the file already deleted by
+     * the first, failing on ENOENT for a segment the encode produced
+     * correctly.
+     */
+    describe('stopping the pipeline when the encode does not finish', () => {
+        it('aborts it when ffmpeg fails', async () => {
+            ffmpegService.encode.mockRejectedValue(
+                new Error('ffmpeg exited 1')
+            );
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+            await service.processSession(session.id);
+
+            expect(sessionService.get(session.id)!.status).toBe('failed');
+            expect(mockPipeline.abort).toHaveBeenCalled();
+        });
+
+        it('aborts it when the pipeline itself errored', async () => {
+            const failing = makeMockPipeline();
+            Object.defineProperty(failing, 'error', {
+                get: () => new Error('S3 upload failed'),
+            });
+            (
+                segmentPipelineService.createPipeline as ReturnType<
+                    typeof vi.fn
+                >
+            ).mockReturnValue(failing);
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+            await service.processSession(session.id);
+
+            expect(sessionService.get(session.id)!.status).toBe('failed');
+            expect(failing.abort).toHaveBeenCalled();
+        });
+
+        it('aborts it when the drain throws', async () => {
+            (mockPipeline.drain as ReturnType<typeof vi.fn>).mockRejectedValue(
+                new Error('drain failed')
+            );
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+            await service.processSession(session.id);
+
+            expect(mockPipeline.abort).toHaveBeenCalled();
+        });
+
+        it('aborts it on the way out of a successful encode too', async () => {
+            // Abort after a drain is a no-op, and making it unconditional is
+            // what stops the next exit path from being the one that forgets.
+            const session = sessionService.create(makeConfig());
+            sessionService.setFilePath(session.id, '/tmp/input.mp4');
+            sessionService.setEncodeConfig(session.id, makeEncodeConfig());
+
+            await service.processSession(session.id);
+
+            expect(sessionService.get(session.id)!.status).toBe('completed');
+            expect(mockPipeline.abort).toHaveBeenCalled();
+        });
+    });
+
     describe('s3 path prefix given to the pipeline', () => {
         const prefixPassedToPipeline = () =>
             (segmentPipelineService.createPipeline as ReturnType<typeof vi.fn>)
@@ -316,9 +382,10 @@ describe('EncodeService', () => {
     });
 
     /**
-     * Running out of space used to surface as a raw ENOSPC from whatever line
-     * touched the disk first — after the source had been uploaded, the job
-     * queued, and in one case forty minutes of encoding spent.
+     * Checked before the work rather than discovered during it: an unchecked
+     * disk surfaces as a raw ENOSPC from whatever line touches it first, after
+     * the source is uploaded, the job queued, and in one case forty minutes of
+     * encoding spent.
      */
     describe('refusing an encode that cannot fit', () => {
         function withFreeBytes(bytes: number | null) {
@@ -481,11 +548,9 @@ describe('EncodeService', () => {
     });
 
     it('should leave byte-range packing to the pipeline, never to ffmpeg', async () => {
-        // FFmpeg used to be able to do the packing itself, after the encode had
-        // finished, from a worker thread. Nothing has reached that path since
-        // the pipeline started streaming segments out as they were written, and
-        // the option is gone: the session's byteRange setting goes to the
-        // pipeline and nowhere else.
+        // The pipeline streams segments out as they are written, so packing
+        // belongs to it: the session's byteRange setting goes to the pipeline
+        // and nowhere else. FFmpeg has no packing option here to reach.
         const config = makeConfig();
         config.byteRange = true;
         const session = sessionService.create(config);
@@ -840,7 +905,6 @@ describe('EncodeService', () => {
             encryptionService,
             thumbnailService,
             waveformService,
-            s3Service,
             segmentPipelineService
         );
 
@@ -895,8 +959,8 @@ describe('EncodeService', () => {
 
             await service.processSession(session.id);
 
-            // Clearing the whole directory used to take this with it, which left
-            // the client being told its just-completed session had expired.
+            // Spared by the cleanup: clearing the whole directory takes it too,
+            // and the client is then told its just-completed session expired.
             expect(existsSync(statePath)).toBe(true);
         });
 
@@ -1094,7 +1158,6 @@ describe('EncodeService', () => {
             encryptionService,
             thumbnailService,
             waveformService,
-            s3Service,
             segmentPipelineService
         );
 
@@ -1224,7 +1287,6 @@ describe('EncodeService — encrypting the text assets last', () => {
             encryptionService,
             thumbnailService,
             waveformService,
-            {} as any,
             { createPipeline: vi.fn().mockReturnValue(mockPipeline) } as any
         );
     });
@@ -1283,9 +1345,9 @@ describe('EncodeService — encrypting the text assets last', () => {
 /**
  * Everything between the last segment and the completion event — packing the
  * storyboard, writing the waveform, encrypting the playlists, uploading them —
- * used to happen in silence. On a long encode that is several minutes with
- * every bar frozen at 100% and no way to tell a working session from a hung
- * one. Each step now names itself, and the bars keep their values while it does.
+ * names itself, and the bars keep their values while it does. In silence that is
+ * several minutes on a long encode with every bar frozen at 100%, and no way to
+ * tell a working session from a hung one.
  */
 describe('EncodeService — naming the finalize phases', () => {
     let service: EncodeService;
@@ -1391,7 +1453,6 @@ describe('EncodeService — naming the finalize phases', () => {
             encryptionService,
             thumbnailService,
             waveformService,
-            {} as any,
             { createPipeline: vi.fn().mockReturnValue(mockPipeline) } as any
         );
     });
@@ -1628,7 +1689,6 @@ describe('EncodeService — the delivered waveform sidecar', () => {
             encryptionService,
             thumbnailService,
             waveformService,
-            {} as any,
             {
                 createPipeline: vi.fn(() => {
                     const pipeline = makeMockPipeline();

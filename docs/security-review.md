@@ -196,10 +196,15 @@ disagree with the reasoning rather than rediscover the fact.
   sessions until they revoke it. Revocation now exists in-product (the trusted
   sites panel); before this work it required editing a JSON file by hand.
 - **Unsigned builds.** macOS Gatekeeper requires right-click → Open on first
-  launch; there is no notarization and no auto-update. Tracked as Todo item 2.
-- **A GPL ffmpeg is shipped.** It runs as a separate process and is never linked,
-  so the obligation travels with ffmpeg, not with this Apache-2.0 codebase. A
-  technical reading, not legal advice — see `app-electron/bin/README.md`.
+  launch; there is no notarization and no auto-update. Tracked as
+  [#206](https://github.com/bccsa/luminary-media-convert/issues/206).
+- **An LGPL ffmpeg is shipped.** Built without `--enable-gpl` and without
+  libx264, it runs as a separate process and is never linked, so the obligation
+  travels with ffmpeg rather than with this Apache-2.0 codebase. What LGPL-2.1
+  asks in return — the licence text beside the binary, and the ability to
+  substitute another build — is met by `build.sh` and by the encoder resolution
+  order (`FFMPEG_PATH`, the user's own directory, then ours). A technical
+  reading, not legal advice.
 - **Running the API as a remote service would invalidate this review.** The
   deploy workflows and Dockerfile that still described that mode have since been
   removed, which is why this is now a note rather than an open

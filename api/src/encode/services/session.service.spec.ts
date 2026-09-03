@@ -405,6 +405,83 @@ describe('SessionService — restoring after a restart', () => {
         }
     );
 
+    it.each([
+        'uploading',
+        'queued',
+        'encoding',
+        'encrypting',
+        'uploading_to_s3',
+    ] as const)(
+        'reclaims the output of a session left %s, keeping its source',
+        (status) => {
+            // A `failed` session is not swept on a clock and is only discarded at
+            // the *next* boot, so before this the partial output of a crashed
+            // encode sat on the volume through a whole session. The source stays:
+            // that is what makes a retry cheap.
+            const id = `crashed-${status}`;
+            seedOnDisk({ id, status });
+            mkdirSync(join(workDir, id, 'output'), { recursive: true });
+            writeFileSync(join(workDir, id, 'output', 'seg0.ts'), 'partial');
+            writeFileSync(join(workDir, id, 'source.mp4'), 'the upload');
+
+            const service = build();
+            service.onModuleInit();
+
+            expect(service.get(id)?.status).toBe('failed');
+            expect(existsSync(join(workDir, id, 'output'))).toBe(false);
+            expect(existsSync(join(workDir, id, 'source.mp4'))).toBe(true);
+        }
+    );
+
+    it('removes a working directory that holds no session record', () => {
+        // Nothing else ever enumerates the work directory, so a directory the
+        // restore loop skips is unreachable for good — and it can hold a
+        // part-received upload. restore() runs before this process has created
+        // anything, so "no readable record" here means orphaned, not in progress.
+        const dir = join(workDir, 'orphan');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'source.mp4'), 'gigabytes, in principle');
+
+        build().onModuleInit();
+
+        expect(existsSync(dir)).toBe(false);
+    });
+
+    it('removes a working directory whose session record cannot be parsed', () => {
+        const dir = join(workDir, 'corrupt');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'session.json'), '{ not json');
+
+        build().onModuleInit();
+
+        expect(existsSync(dir)).toBe(false);
+    });
+
+    it('removes a working directory whose record has no id or token', () => {
+        const dir = join(workDir, 'headless');
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(
+            join(dir, 'session.json'),
+            JSON.stringify({ status: 'uploaded' })
+        );
+
+        build().onModuleInit();
+
+        expect(existsSync(dir)).toBe(false);
+    });
+
+    it('leaves a restorable session alone while clearing orphans around it', () => {
+        seedOnDisk({ id: 'keeper', status: 'uploaded' });
+        mkdirSync(join(workDir, 'orphan'), { recursive: true });
+
+        const service = build();
+        service.onModuleInit();
+
+        expect(service.get('keeper')).toBeDefined();
+        expect(existsSync(join(workDir, 'keeper'))).toBe(true);
+        expect(existsSync(join(workDir, 'orphan'))).toBe(false);
+    });
+
     it('fails a session whose credentials cannot be recovered', () => {
         // No sidecar on disk: a different machine, or a reset keychain. The
         // config holds placeholders, and anything reaching S3 with those would
@@ -740,5 +817,85 @@ describe('SessionService — events', () => {
                 })
             );
         });
+    });
+});
+
+/**
+ * The app reclaims space on its own, but none of that survives being dragged to
+ * the Trash — on macOS the only uninstall there is. This is the user's own way
+ * to get the disk back (#228).
+ */
+describe('SessionService — clearing working files on request', () => {
+    function seedWithBytes(
+        id: string,
+        status: Session['status'],
+        bytes: number
+    ) {
+        seedOnDisk({ id, status });
+        writeFileSync(join(workDir, id, 'source.mp4'), 'x'.repeat(bytes));
+    }
+
+    it('reports what it would free without freeing it', () => {
+        seedWithBytes('done', 'completed', 2048);
+        const service = build();
+
+        const described = service.describeReclaimable();
+
+        expect(described.sessions).toBe(1);
+        expect(described.bytes).toBeGreaterThanOrEqual(2048);
+        expect(existsSync(join(workDir, 'done'))).toBe(true);
+    });
+
+    it('removes idle sessions and forgets them', () => {
+        // Not a terminal pair: boot already discards those, so restoring first
+        // would leave nothing for this to prove.
+        seedWithBytes('idle', 'uploaded', 512);
+        seedWithBytes('fresh', 'created', 512);
+        const service = build();
+        service.onModuleInit();
+
+        const freed = service.reclaim();
+
+        expect(freed.sessions).toBe(2);
+        expect(existsSync(join(workDir, 'idle'))).toBe(false);
+        expect(existsSync(join(workDir, 'fresh'))).toBe(false);
+        expect(service.get('idle')).toBeUndefined();
+    });
+
+    it.each([
+        'queued',
+        'encoding',
+        'encrypting',
+        'uploading_to_s3',
+        'uploading',
+    ] as const)('leaves a session that is %s alone and counts it', (status) => {
+        // A menu item that reads like housekeeping must not cancel an encode.
+        seedWithBytes('busy', status, 512);
+        const service = build();
+        service.onModuleInit();
+        // restore() fails in-flight sessions on boot, so put it back mid-flight.
+        service.updateStatus('busy', status);
+
+        const freed = service.reclaim();
+
+        expect(freed.sessions).toBe(0);
+        expect(freed.busy).toBe(1);
+        expect(existsSync(join(workDir, 'busy'))).toBe(true);
+    });
+
+    it('takes directories that hold no session record at all', () => {
+        mkdirSync(join(workDir, 'orphan'), { recursive: true });
+        writeFileSync(join(workDir, 'orphan', 'source.mp4'), 'x'.repeat(256));
+
+        const freed = build().reclaim();
+
+        expect(freed.sessions).toBe(1);
+        expect(existsSync(join(workDir, 'orphan'))).toBe(false);
+    });
+
+    it('is a no-op on an empty workspace', () => {
+        const freed = build().reclaim();
+
+        expect(freed).toEqual({ sessions: 0, bytes: 0, busy: 0 });
     });
 });

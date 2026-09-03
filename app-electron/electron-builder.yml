@@ -102,7 +102,16 @@ mac:
               # Windows binaries and MIT-licensed, which asks the same of us. Absent
               # from the macOS builds, and a filter that matches nothing is not an error.
               - LICENSE-libvpl.txt
-              - GPL-*.txt
+              # LGPL-2.1 s.6 asks for a copy of the licence to travel with the
+              # binary. Only the LGPL text is listed: a GPL text here would mean
+              # a pre-LGPL binary, and packaging one with notices that match is
+              # how it ships unnoticed. scripts/check-encoder-sources.mjs stops
+              # that before anything is built.
+              - COPYING.LGPLv2.1
+              # What the shipped ffmpeg was actually configured with. The licence
+              # gate in scripts/verify-package.mjs reads it, because a cross-built
+              # Windows binary cannot be run on the machine that packages it.
+              - BUILDCONF.txt
     category: public.app-category.video
     # build/icon.icns, carrying every size from 16px to 1024px. Named
     # explicitly rather than left to electron-builder's filename convention, so
@@ -160,3 +169,8 @@ nsis:
     perMachine: false
     allowToChangeInstallationDirectory: true
     shortcutName: Luminary Media Convert
+    # Uploaded source video lives under appData and can run to gigabytes; leaving
+    # it behind on uninstall is both wasted disk and someone's media still on the
+    # machine. electron-builder guards this with `${ifNot} ${isUpdated}`, so an
+    # in-place update keeps settings and trusted origins (#228).
+    deleteAppDataOnUninstall: true

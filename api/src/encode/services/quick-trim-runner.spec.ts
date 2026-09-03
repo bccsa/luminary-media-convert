@@ -29,6 +29,11 @@ import {
     type QuickTrimStreamTarget,
 } from './quick-trim-runner.js';
 import {
+    heldEncoderSessions,
+    MAX_HARDWARE_SESSIONS,
+    resetEncoderSessions,
+} from './encoder-sessions.js';
+import {
     planQuickTrim,
     isQuickTrimRejection,
     type QuickTrimPart,
@@ -1098,6 +1103,88 @@ describe('quick trim runner', () => {
         });
     });
 
+    describe('the encoder session budget', () => {
+        beforeEach(() => resetEncoderSessions());
+
+        it('holds one session per video bridge and none for anything else', async () => {
+            const heldByLabel = new Map<string, number>();
+            const muxer = fakeMuxer([]);
+            ptsAnswers = [20.62];
+
+            await runQuickTrim(
+                deps({
+                    runJob: async (args, onTime, label) => {
+                        heldByLabel.set(label, heldEncoderSessions());
+                        await muxer(args, onTime, label);
+                    },
+                }),
+                options(outputDir),
+                makePlan()
+            );
+
+            const videoBridges = [...heldByLabel.keys()].filter((l) =>
+                l.startsWith(`${VIDEO_DIR} bridge`)
+            );
+            expect(videoBridges.length).toBeGreaterThan(0);
+            // The count is process-wide, so a bridge observes its own session
+            // plus any held by bridges running beside it — at least its own,
+            // never more than the cap.
+            for (const label of videoBridges) {
+                expect(heldByLabel.get(label)!).toBeGreaterThanOrEqual(1);
+                expect(heldByLabel.get(label)!).toBeLessThanOrEqual(
+                    MAX_HARDWARE_SESSIONS
+                );
+            }
+            expect(heldEncoderSessions()).toBe(0);
+        });
+
+        it('never touches the budget when every part is a copy', async () => {
+            const held: number[] = [];
+            const muxer = fakeMuxer([]);
+            ptsAnswers = [20.62];
+
+            // On the keyframe grid at both ends: no bridge anywhere, and
+            // copies hand bytes to the muxer without opening an encoder.
+            await runQuickTrim(
+                deps({
+                    runJob: async (args, onTime, label) => {
+                        held.push(heldEncoderSessions());
+                        await muxer(args, onTime, label);
+                    },
+                }),
+                options(outputDir),
+                makePlanFor([{ inSec: 20.62, outSec: 40.62 }])
+            );
+
+            expect(held.length).toBeGreaterThan(0);
+            expect(held.every((h) => h === 0)).toBe(true);
+        });
+
+        it('releases the session when a bridge fails', async () => {
+            const muxer = fakeMuxer([]);
+            ptsAnswers = [20.62];
+
+            await expect(
+                runQuickTrim(
+                    deps({
+                        runJob: async (args, onTime, label) => {
+                            if (label.startsWith(`${VIDEO_DIR} bridge`)) {
+                                throw new Error('encoder refused to open');
+                            }
+                            await muxer(args, onTime, label);
+                        },
+                    }),
+                    options(outputDir),
+                    makePlan()
+                )
+            ).rejects.toThrow('encoder refused to open');
+
+            // A leaked permit is permanent for the process — enough of them
+            // and every later encode deadlocks.
+            expect(heldEncoderSessions()).toBe(0);
+        });
+    });
+
     describe('outputs beside the segments', () => {
         it('writes the kept ranges as an ffconcat list', async () => {
             ptsAnswers = [20.62];
@@ -1242,6 +1329,9 @@ describe('quick trim runner', () => {
 
         it('runs every job as a child of its own', async () => {
             const service = new FfmpegService();
+            // Detection has not run here; without a mode the encoder module
+            // refuses to name one, which is the point of it.
+            (service as any).accelMode = 'cpu';
             const spawned: string[][] = [];
             const muxer = fakeMuxer([]);
 
@@ -1279,6 +1369,9 @@ describe('quick trim runner', () => {
 
         it('derives the stream directories the plan is keyed by', () => {
             const service = new FfmpegService();
+            // Detection has not run here; without a mode the encoder module
+            // refuses to name one, which is the point of it.
+            (service as any).accelMode = 'cpu';
             expect(
                 service
                     .quickTrimStreamTargets(encodeConfig())

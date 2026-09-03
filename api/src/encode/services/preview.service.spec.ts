@@ -2655,39 +2655,53 @@ describe('PreviewService', () => {
             expect(args).not.toContain('-hwaccel');
         });
 
-        it('should fall back to CPU when GPU encode fails', async () => {
+        it('does not retry a failed GPU segment on CPU', async () => {
             const svc = await initHevcService('nvidia');
 
             mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
             mockStat.mockResolvedValue({ size: 2048 });
             mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
 
-            // First call (GPU) fails, second call (CPU fallback) succeeds
             let callCount = 0;
             mockExecFile.mockImplementation((...callArgs: any[]) => {
                 const cb = callArgs[callArgs.length - 1];
                 callCount++;
-                if (callCount === 1) {
-                    // GPU failure
-                    cb(new Error('NVENC session limit'), {
-                        stdout: '',
-                        stderr: '',
-                    });
-                } else {
-                    // CPU fallback succeeds
-                    cb(null, { stdout: Buffer.from('cpu-data'), stderr: '' });
-                }
+                cb(new Error('NVENC session limit'), {
+                    stdout: '',
+                    stderr: '',
+                });
             });
 
-            const result = await svc.getSegmentStream('s1', 0, 0);
+            expect(await svc.getSegmentStream('s1', 0, 0)).toBeNull();
 
-            expect(result).not.toBeNull();
-            expect(callCount).toBe(2);
+            // There is no software H.264 encoder in this FFmpeg to retry with, so
+            // a second attempt could only fail on a missing encoder and bury the
+            // hardware error that actually stopped the preview.
+            expect(callCount).toBe(1);
+        });
 
-            // Second call should be CPU args
-            const cpuArgs = mockExecFile.mock.calls[1][1] as string[];
-            expect(cpuArgs).toContain('libx264');
-            expect(cpuArgs).not.toContain('-hwaccel');
+        it('tells the user they can supply their own FFmpeg when a segment fails', async () => {
+            const svc = await initHevcService('nvidia');
+            const logged = vi
+                .spyOn((svc as any).logger, 'error')
+                .mockImplementation(() => {});
+
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+            mockExecFile.mockImplementation((...callArgs: any[]) => {
+                const cb = callArgs[callArgs.length - 1];
+                cb(new Error('NVENC session limit'), {
+                    stdout: '',
+                    stderr: '',
+                });
+            });
+
+            await svc.getSegmentStream('s1', 0, 0);
+
+            const messages = logged.mock.calls.map((c) => String(c[0]));
+            expect(messages.join('\n')).toMatch(/NVENC session limit/);
+            expect(messages.join('\n')).toMatch(/Choose FFmpeg|FFMPEG_PATH/);
         });
 
         it('should place -hwaccel flags before -i', async () => {

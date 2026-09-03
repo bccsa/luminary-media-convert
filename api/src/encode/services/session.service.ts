@@ -13,6 +13,7 @@ import {
     readFileSync,
     renameSync,
     rmSync,
+    statSync,
     writeFileSync,
 } from 'fs';
 import { join } from 'path';
@@ -137,6 +138,26 @@ export interface Session {
     lastActivityAt: number;
 }
 
+/**
+ * Bytes held under a directory, best-effort.
+ *
+ * Only ever reported to a human deciding whether to clear it, so an unreadable
+ * entry is skipped rather than failing the whole count.
+ */
+function directorySize(dir: string): number {
+    let total = 0;
+    try {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            const path = join(dir, entry.name);
+            if (entry.isDirectory()) total += directorySize(path);
+            else total += statSync(path).size;
+        }
+    } catch {
+        // Removed under us, or unreadable. Either way it is not part of the answer.
+    }
+    return total;
+}
+
 /** Statuses that cannot survive the process that was driving them. */
 const IN_FLIGHT: SessionStatus[] = [
     'uploading',
@@ -148,6 +169,20 @@ const IN_FLIGHT: SessionStatus[] = [
 
 /** Statuses nothing will move again. */
 const TERMINAL: SessionStatus[] = ['completed', 'failed'];
+
+/**
+ * Statuses where something is happening to the session right now.
+ *
+ * The one set a user-initiated clear must not touch: everything else is either
+ * finished, or waiting on a person who can start again.
+ */
+const BUSY: SessionStatus[] = [
+    'uploading',
+    'queued',
+    'encoding',
+    'encrypting',
+    'uploading_to_s3',
+];
 
 /** Statuses a session can still be worked on from. */
 const ACTIVE: SessionStatus[] = [
@@ -375,6 +410,45 @@ export class SessionService implements OnModuleInit {
         }
     }
 
+    /**
+     * Drop a session's encoded output but keep its source upload.
+     *
+     * The same bargain `cleanupSessionFiles` strikes for an encode that fails
+     * while the app is running: the output is regenerable, the source is
+     * gigabytes the user would otherwise have to send again, so a retry stays
+     * cheap. A crash gets the same treatment — before this, its output sat
+     * untouched through the whole next session and was only reclaimed by the
+     * boot after that, since a `failed` session is not swept on a clock.
+     */
+    private purgeOutput(id: string): void {
+        try {
+            rmSync(join(this.workDir, id, 'output'), {
+                recursive: true,
+                force: true,
+            });
+        } catch (err) {
+            this.logger.warn(
+                `Could not remove output for session ${id}: ${(err as Error).message}`
+            );
+        }
+    }
+
+    /**
+     * Remove a working directory that holds no session we can read.
+     *
+     * Only ever called from `restore`, which runs before this process has
+     * created anything, so a directory without a readable `session.json` at that
+     * moment is unreachable: no token resolves to it and no sweep will ever look
+     * at it again. It can still hold a part-received upload, so it is named
+     * rather than removed quietly.
+     */
+    private purgeOrphan(name: string, why: string): void {
+        this.logger.warn(
+            `Removing working directory ${name}: ${why}. Anything it held is gone.`
+        );
+        this.purge(name);
+    }
+
     private restore(): void {
         if (!existsSync(this.workDir)) return;
 
@@ -382,18 +456,30 @@ export class SessionService implements OnModuleInit {
         let abandoned = 0;
         let discarded = 0;
         let stranded = 0;
+        let orphaned = 0;
         for (const entry of readdirSync(this.workDir, {
             withFileTypes: true,
         })) {
             if (!entry.isDirectory()) continue;
             const path = join(this.workDir, entry.name, 'session.json');
-            if (!existsSync(path)) continue;
+            if (!existsSync(path)) {
+                this.purgeOrphan(entry.name, 'it holds no session record');
+                orphaned++;
+                continue;
+            }
 
             try {
                 const session = JSON.parse(
                     readFileSync(path, 'utf-8')
                 ) as Session;
-                if (!session?.id || !session?.sessionToken) continue;
+                if (!session?.id || !session?.sessionToken) {
+                    this.purgeOrphan(
+                        entry.name,
+                        'its session record is missing an id or token'
+                    );
+                    orphaned++;
+                    continue;
+                }
 
                 // A finished session has nothing left to do and nothing left to
                 // show: its output is in the customer's bucket and its URL is
@@ -419,6 +505,7 @@ export class SessionService implements OnModuleInit {
                     session.status = 'failed';
                     session.error =
                         'The encoder restarted while this session was in progress.';
+                    this.purgeOutput(session.id);
                     abandoned++;
                 }
 
@@ -441,13 +528,15 @@ export class SessionService implements OnModuleInit {
                 this.persist(session);
                 restored++;
             } catch (err) {
-                this.logger.warn(
-                    `Could not restore session from ${path}: ${(err as Error).message}`
+                this.purgeOrphan(
+                    entry.name,
+                    `its session record could not be read (${(err as Error).message})`
                 );
+                orphaned++;
             }
         }
 
-        if (restored > 0 || discarded > 0) {
+        if (restored > 0 || discarded > 0 || orphaned > 0) {
             this.logger.log(
                 `Restored ${restored} session(s) from disk` +
                     (abandoned > 0
@@ -458,6 +547,9 @@ export class SessionService implements OnModuleInit {
                         : '') +
                     (discarded > 0
                         ? `, discarded ${discarded} finished session(s)`
+                        : '') +
+                    (orphaned > 0
+                        ? `, removed ${orphaned} orphaned working director${orphaned === 1 ? 'y' : 'ies'}`
                         : '')
             );
         }
@@ -807,6 +899,79 @@ export class SessionService implements OnModuleInit {
      * boot instead, so nothing has to guess how long a completed encode is still
      * interesting for.
      */
+    /**
+     * What a "clear working files" action would remove, and how much it frees.
+     *
+     * Everything the sweeps would eventually take — finished sessions, idle ones,
+     * and directories holding no session at all — with no age threshold, because
+     * the user asked. Anything mid-flight is excluded and counted separately, so
+     * the caller can say why a running encode was left alone rather than
+     * appearing to have missed it.
+     */
+    describeReclaimable(): { sessions: number; bytes: number; busy: number } {
+        const { ids, busy } = this.collectReclaimable();
+        let bytes = 0;
+        for (const id of ids) bytes += directorySize(join(this.workDir, id));
+        return { sessions: ids.length, bytes, busy };
+    }
+
+    /**
+     * Remove everything {@link describeReclaimable} reports, and forget the
+     * sessions it belonged to. Returns what was actually freed.
+     */
+    reclaim(): { sessions: number; bytes: number; busy: number } {
+        const { ids, busy } = this.collectReclaimable();
+        let bytes = 0;
+
+        for (const id of ids) {
+            bytes += directorySize(join(this.workDir, id));
+            const session = this.sessions.get(id);
+            if (session) {
+                this.forget(session);
+                this.sessions.delete(id);
+            }
+            this.purge(id);
+        }
+
+        if (ids.length) {
+            // Named as a group rather than individually: this is the user's own
+            // deliberate action, not a sweep they need to reconstruct later.
+            this.logger.log(
+                `Cleared ${ids.length} working director${ids.length === 1 ? 'y' : 'ies'} at the user's request`
+            );
+        }
+
+        return { sessions: ids.length, bytes, busy };
+    }
+
+    /**
+     * Session directories safe to remove, plus a count of those left alone.
+     *
+     * Reads the disk rather than only the session map, so a directory with no
+     * record — the orphan case `restore` clears at boot — is included here too
+     * rather than waiting for the next start.
+     */
+    private collectReclaimable(): { ids: string[]; busy: number } {
+        if (!existsSync(this.workDir)) return { ids: [], busy: 0 };
+
+        const ids: string[] = [];
+        let busy = 0;
+
+        for (const entry of readdirSync(this.workDir, {
+            withFileTypes: true,
+        })) {
+            if (!entry.isDirectory()) continue;
+            const session = this.sessions.get(entry.name);
+            if (session && BUSY.includes(session.status)) {
+                busy++;
+                continue;
+            }
+            ids.push(entry.name);
+        }
+
+        return { ids, busy };
+    }
+
     cleanupAbandoned(maxAgeMs: number): number {
         const cutoff = Date.now() - maxAgeMs;
         const idle: SessionStatus[] = ['created', 'uploading', 'uploaded'];

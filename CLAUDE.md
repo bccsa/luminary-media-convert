@@ -12,12 +12,13 @@ A local-only desktop media encoder. A folder-based npm workspaces monorepo conta
 - **`hls-core/`** — Shared TypeScript library providing **lossless** HLS master/media playlist parsing and building (round-trips real FFmpeg output byte-faithfully, unknown tags/attributes preserved via WeakMap-backed metadata), the LMCENC encrypted-text-asset format helpers (`enc-format.ts`), S3-key utilities, sidecar path conventions, the `LUMINARY_KEY_PLACEHOLDER_URI` constant, and angle/audio-only extraction (text helpers + model-level `extractAngle`). Published as `@luminary-media-converter/hls-core`; consumed by `api/`, `app/`, `cms-mock/` and `player-core/`.
 - **`player-core/`** — Framework-agnostic, headless player wrapper: HLS munging pipeline (client-side angle extraction, quality capping, key handling, LMCENC decryption), `PlayerController` state store, recovery/stall/coming-soon policy, and the `PlayerAdapter` contract for pluggable engines (hls.js today; AVPlayer/ExoPlayer adapters later in a Capacitor shell). Published as `@luminary-media-converter/player-core`. See `player-core/src/types.ts` for the full contract.
 - **`player-web/`** — Web reference implementation of the player: `HlsJsAdapter` (hls.js on a plain `<video>`, in-memory AES key delivery via a custom key loader — no key blob URLs), `LuminaryPlayer.vue`, iOS-style fullscreen controls with orientation lock, and `PlayerMessages` i18n (every user-facing string overridable; scoped slots for full custom UI). It draws no chrome over the picture outside fullscreen: entering is a double-click / double-tap on the video, or `enterFullscreen()` from the host — which is where the button belongs (the encoder puts it beside its angle / audio / quality selectors). Inside fullscreen the controls, exit button included, are the player's. Also home to the **chunk-warming loop** (`ChunkPrefetcher` in `adapter/chunkWarming.ts`, driven through the optional `PlayerAdapter.warmChunks` contract — see `docs/chunk-warming.md`) and a dev-only test harness (`npm -w player-web run demo`: plays any master URL + optional key through the real player, with warming console instrumentation). Published as `@luminary-media-converter/player-web`; consumed by `app/`.
+- **`player-web-legacy/`** — Second web implementation of the same player, on Video.js 8 (VHS 3.17.5) instead of hls.js: `VideoJsAdapter` over `player-core`'s `PlayerAdapter` contract, and a `LuminaryPlayer.vue` with the same props, slots and `defineExpose` surface as `player-web`'s, so an app can swap one for the other. It exists to replicate the [bccsa/luminary](https://github.com/bccsa/luminary) app's video.js skin — video.js owns the whole chrome, in every mode, and `styles.css` repositions its stock components. In-memory `luminary://key` delivery comes from wrapping VHS's per-handler xhr factory (`vhsKeyInterceptor.ts`) rather than from an hls.js key loader; an optional YouTube mode plays a YouTube URL through `videojs-youtube`, bypassing the LMC pipeline entirely with a null controller. Same dev harness (`npm -w player-web-legacy run demo`). Published as `@luminary-media-converter/player-web-legacy`; consumed by the Luminary app via a git-submodule checkout plus a file-reference install, not by anything in this repo.
 
 There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, webhook delivery, or PWA/Cloudflare deployment. Those workspaces (`saas/`, `admin/`, `tusd/`) were removed in the local-only migration.
 
 ## Monorepo Structure
 
-- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls-core", "player-core", "player-web", "cms-mock", "app-electron"]`)
+- Root `package.json` declares npm workspaces (`"workspaces": ["api", "app", "encode-config", "hls-core", "player-core", "player-web", "player-web-legacy", "cms-mock", "app-electron"]`)
 - Dependencies are hoisted to the root `node_modules/`
 - Run workspace scripts from root: `npm -w api run <script>` or `npm -w app run <script>`
 - Root `npm run dev` — browser development: builds the shared libraries, then runs their watch builds (each Vue library watches JS and `.d.ts` side by side, so a type-check during dev is not left staring at a `dist` with no declarations), the API dev server and the Vite web client concurrently
@@ -40,7 +41,7 @@ There is **no** SaaS service, admin panel, Auth0, CouchDB, tus upload server, we
 - **S3 storage**: MinIO JS client (universal S3 compatibility: MinIO, R2, AWS S3, B2, Spaces)
 - **Validation**: `class-validator` + `class-transformer` with a global `ValidationPipe` (transform, whitelist, forbidNonWhitelisted)
 - **API docs**: `@nestjs/swagger` — published at `/api/docs` only when `enableSwagger` is passed (standalone `main.ts` does; the Electron host does not)
-- **Testing**: Vitest (`*.spec.ts` colocated in `api/src/`, e2e in `api/test/`). Note: many specs were intentionally left broken during the migration — see `Todo.md`
+- **Testing**: Vitest (`*.spec.ts` colocated in `api/src/`, e2e in `api/test/`). Note: some specs were intentionally left broken during the migration — see the open issues
 
 ### Desktop Shell (`app-electron/`)
 
@@ -204,6 +205,8 @@ cms-mock/
 hls-core/src/{index,parse,build,keys,sidecar,angles}.ts
 encode-config/src/{index,types,EncodeConfigForm.vue,layoutStorage,styles.css}
 app/src/components/segment-editor/{index,SegmentEditor.vue,types,time,vtt,thumbnailVtt,styles.css}
+player-web-legacy/src/{index,controls,messages,youtube,audioTrackLanguage,styles.css}
+player-web-legacy/src/{adapter/{VideoJsAdapter,vhsKeyInterceptor,chunkWarming},components/{LuminaryPlayer.vue,AudioVideoToggle.vue},vjs/{playerOptions,autoHide,keepAlive,poster}}
 ```
 
 ## Architecture
@@ -220,6 +223,7 @@ The CMS is an ordinary web app on another origin; the encoder listens on loopbac
 
 1. **`GET /api/cms/health`** — unauthenticated liveness probe returning `{ status: 'ok', apiVersion }`. The CMS calls this before showing the "upload media" affordance at all; when it fails it offers a `luminary-convert://` launch link instead.
 2. **`POST /api/cms/sessions`** — authorised by the caller's `Origin`, not by a key (there is no credential a page could hold that the pages around it could not also read). Body:
+
     ```jsonc
     {
         "documentId": "post_01HTZ8Y0J4", // idempotency key
@@ -237,7 +241,9 @@ The CMS is an ordinary web app on another origin; the encoder listens on loopbac
         "existingMedia": { "hlsUrl": "…", "hlsKey": "…" }, // validated + accepted, NOT acted on yet
     }
     ```
+
     Response `201`:
+
     ```json
     {
         "sessionId": "…",
@@ -252,6 +258,7 @@ The CMS is an ordinary web app on another origin; the encoder listens on loopbac
     - **Per-session subfolder**: the destination becomes `<canonicalPrefix(pathPrefix)>/<sessionId>`, so a re-encode of the same post cannot half-overwrite the live output.
     - **Window focus**: creating (or reusing) a session fires `CMS_SESSION_HOOK`, which the Electron host uses to bring its window forward — the user has to pick a file, and the app may be behind the browser.
     - **`eventsUrl`** is built from the request's own `Host`, because the port is assigned by the host app and this process has no better idea of it than the caller does.
+
 3. **SSE** — the CMS subscribes to `eventsUrl` with `EventSource`. Events are the `SessionEvent` shape:
     ```ts
     { sessionId, status, progress?, pipelineProgress?, queuePosition?, error?, files?,
@@ -542,7 +549,7 @@ Run it against a running API (default `http://127.0.0.1:31711`, editable in the 
 - **Targets**: macOS `dmg` + `zip` (arm64), Windows `nsis` (x64). Run `npm -w app-electron run dist:mac` / `dist:win`, or `pack` for an unpacked directory
 - **Windows can be built from a Mac**, which is what `dist:win-portable` is for: it produces a portable `zip` rather than the NSIS installer, because NSIS needs Wine and a portable zip needs nothing. `-c.win.signAndEditExecutable=false` is what avoids Wine entirely — the cost is that the `.exe` carries the stock Electron icon, since stamping the icon is itself a Wine job. Prerequisites are `brew install mingw-w64 cmake llvm`, and **LLVM is not optional**: `--enable-cuda-llvm` gives `scale_cuda` for the NVIDIA path and needs a clang with the NVPTX backend, which Apple's clang does not have. Put it first on `PATH` when building ffmpeg: `PATH="/opt/homebrew/opt/llvm/bin:$PATH" npm -w app-electron run dist:win-portable`
 - **The ffmpeg binaries are declared per platform, not by macro.** `${platform}` expands to the _host_, so `bin/${platform}-${arch}` quietly packaged macOS binaries inside a Windows app when cross-building — an app that installs, opens, and cannot encode. It was invisible while packaging only ever ran on a matching runner. `mac.extraResources` and `win.extraResources` now name `bin/darwin-${arch}` and `bin/win32-${arch}` outright, sharing one filter list through a YAML anchor. `${arch}` is safe because electron-builder runs one pass per architecture. `verify-package.mjs` reads the Mach-O/PE header and fails the build on a mismatch, which is how this was caught
-- **All three build what they ship.** Each runs `build:workspaces` → the root's `build:bundled` (the five shared libraries, then the API, then the web client) before `electron-builder`. They used to compile only Electron's own TypeScript and package whatever `app/dist` and `api/dist` happened to contain — the last build anyone ran, or nothing at all on a clean clone, since both are gitignored. `npm -w` does not work from inside a workspace directory, hence the `cd ..` hop
+- **All three build what they ship.** Each runs `build:workspaces` → the root's `build:bundled` → `build:libs` (the five shared libraries — `hls-core`, `encode-config`, `player-core`, `player-web`, `player-web-legacy`), then the API, then the web client, before `electron-builder`. `player-web-legacy` is in that chain although nothing packaged consumes it: it is a workspace with a `build` script, and a library the repo does not build is a library nobody notices breaking. They used to compile only Electron's own TypeScript and package whatever `app/dist` and `api/dist` happened to contain — the last build anyone ran, or nothing at all on a clean clone, since both are gitignored. `npm -w` does not work from inside a workspace directory, hence the `cd ..` hop
 - **A `VITE_*` value cannot follow a developer's `.env` into a build.** Vite bakes every one it finds into every bundle, so `app/src/api.ts` and `auth-token.ts` read theirs strictly inside `import.meta.env.DEV`, which no `vite build` sets. `API_BASE` compiles to `""` — same-origin, which is the only correct answer once the API is serving the client. Pinned by tests that assert `DEV: false` _with_ the variables set, not merely absent
 - **`asar: true`** — verified rather than assumed: the packaged app was launched from outside the repository (so nothing could resolve upwards into the development `node_modules`) and the API started, served the client and answered requests from inside the archive
 - **electron-builder 26 is required.** Version 25 collected the hoisted workspace dependencies incompletely — `call-bind-apply-helpers` ended up only nested under `call-bind`, express failed to load, and Nest reported it as "No driver (HTTP) has been selected", which points nowhere near the real cause. Symptom if this regresses: the packaged app exits or logs a missing-driver error while the same code runs fine unpackaged
@@ -558,4 +565,4 @@ Run it against a running API (default `http://127.0.0.1:31711`, editable in the 
 
 ## Follow-ups
 
-Known gaps and deferred work are tracked in [`Todo.md`](Todo.md). Notably: CMS edit mode for existing collections (`existingMedia` is accepted and ignored), auto-update and code signing, Linux builds, Windows build verification, storage that is never reclaimed when a document is deleted or a collection superseded, and restoring the test suites that were intentionally broken during the migration.
+Known gaps and deferred work are tracked as [issues](https://github.com/bccsa/luminary-media-convert/issues). Notably: CMS edit mode for existing collections (#205 — `existingMedia` is accepted and ignored), auto-update and code signing (#206), Linux builds (#207), storage that is never reclaimed when a document is deleted or a collection superseded (#208), and Windows build verification (#209).

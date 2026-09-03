@@ -3,6 +3,7 @@ import {
     BrowserWindow,
     dialog,
     ipcMain,
+    Menu,
     safeStorage,
     shell,
 } from 'electron';
@@ -19,6 +20,9 @@ import {
     MIN_FFMPEG_VERSION,
     type RunningServer,
 } from '@luminary-media-converter/api';
+import { showLicences } from './licences';
+import { candidateBinaries, resolveFfmpegBinary } from './ffmpeg-location';
+import { resolveWindowTarget } from './window-target';
 
 const PROTOCOL = 'luminary-convert';
 
@@ -49,6 +53,15 @@ interface Settings {
      * button.
      */
     deniedOrigins: string[];
+    /**
+     * A directory holding an ffmpeg the user would rather we used than the one
+     * we ship. Unset for everybody who has never opened the menu item.
+     *
+     * A directory rather than two file paths, so ffmpeg and ffprobe cannot be
+     * chosen from different builds — a pair that disagree fail in ways that
+     * look like a broken source file.
+     */
+    ffmpegDir?: string | null;
 }
 
 const settingsPath = (): string =>
@@ -63,6 +76,7 @@ async function loadSettings(): Promise<void> {
         settings = {
             allowedOrigins: parsed.allowedOrigins ?? [],
             deniedOrigins: parsed.deniedOrigins ?? [],
+            ffmpegDir: parsed.ffmpegDir ?? null,
         };
     } catch {
         // No settings yet, or unreadable: start from "trust nothing", which is
@@ -164,6 +178,30 @@ function buildCipher():
 }
 
 /**
+ * The ffmpeg or ffprobe to run: the environment, then the user's chosen
+ * directory, then the one we ship.
+ *
+ * The order matters and used not to hold. The bundled path was passed
+ * unconditionally, which overwrote FFMPEG_PATH in the environment — so the
+ * documented developer escape hatch silently did nothing in a packaged build,
+ * and there was no way at all for a user to substitute their own build.
+ *
+ * That substitutability is not a convenience. We ship an LGPL ffmpeg as a
+ * separate program, and being able to replace it with your own copy is the
+ * condition attached to distributing it that way.
+ */
+function resolveBinary(name: 'ffmpeg' | 'ffprobe'): string | undefined {
+    return resolveFfmpegBinary(name, {
+        env: process.env,
+        ffmpegDir: settings.ffmpegDir,
+        bundled: bundledBinary,
+        platform: process.platform,
+        exists: existsSync,
+        warn: (message) => console.warn(message),
+    });
+}
+
+/**
  * The ffmpeg or ffprobe this app should use, in the order they are trusted.
  *
  * 1. **Packaged**: the copy beside the app's own resources, which packaging put
@@ -212,10 +250,45 @@ function bundledWebClient(): string | undefined {
  * Window
  * ------------------------------------------------------------------ */
 
+/**
+ * Bring the app forward, making a window if there is none.
+ *
+ * On macOS closing the window does not quit — `window-all-closed` leaves the
+ * app in the Dock deliberately — so "running, no window" is an ordinary state
+ * rather than a broken one, and returning early there means a CMS session
+ * opens and nothing appears. `activate` already creates one in that case;
+ * every other caller needs the same — but only once the app is ready, because
+ * `open-url` fires before that when the protocol link is what launched us.
+ *
+ * Raising it is not the same on both platforms. macOS takes
+ * `app.focus({ steal: true })`, which is what that option is for. Windows
+ * refuses a foreground change requested by a process that does not have it —
+ * the request arrives over loopback from a browser that does — and
+ * `win.focus()` alone flashes the taskbar button instead. Toggling
+ * always-on-top around `show()` is the standard way through, and it is dropped
+ * immediately so the window does not sit above everything else afterwards.
+ */
 function focusWindow(): void {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+        // `open-url` arrives before the app is ready — and before the API is
+        // listening — when the protocol link is what launched us. createWindow
+        // declines in both cases; startup makes the window a moment later, and
+        // focusSession has already parked the id for a renderer that is not up.
+        if (app.isReady()) createWindow();
+        return;
+    }
+
     const win = mainWindow;
-    if (!win || win.isDestroyed()) return;
     if (win.isMinimized()) win.restore();
+
+    if (process.platform === 'win32') {
+        win.setAlwaysOnTop(true);
+        win.show();
+        win.setAlwaysOnTop(false);
+        win.focus();
+        return;
+    }
+
     win.show();
     win.focus();
     app.focus({ steal: true });
@@ -241,6 +314,8 @@ let pendingSessionId: string | null = null;
  */
 function focusSession(sessionId: string): void {
     pendingSessionId = sessionId;
+    // Creates the window when there is none, so the id below is parked for a
+    // renderer that has not loaded yet and claimed when it has.
     focusWindow();
 
     const contents = mainWindow?.webContents;
@@ -251,11 +326,262 @@ function focusSession(sessionId: string): void {
     pendingSessionId = null;
 }
 
+/**
+ * Restart, because the encoder is inspected once at startup and cached.
+ *
+ * `FfmpegService` probes acceleration on init and holds the answer for the
+ * process's life. Swapping the binary underneath it would leave the app
+ * encoding with one ffmpeg and reporting the capabilities of another, so the
+ * honest options are relaunch or refuse — and refusing would make the setting
+ * useless.
+ */
+async function applyFfmpegDirectory(dir: string | null): Promise<void> {
+    settings.ffmpegDir = dir;
+    await saveSettings();
+    // The menu is built once at startup and reads this to enable "Use the
+    // bundled FFmpeg". Someone who defers the restart would otherwise be
+    // looking at a stale item until they do.
+    buildMenu();
+
+    const { response } = await dialog.showMessageBox({
+        type: 'info',
+        title: 'Restart required',
+        message: dir
+            ? 'Luminary Media Convert will use the FFmpeg you chose.'
+            : 'Luminary Media Convert will use the FFmpeg it ships with.',
+        detail: 'The encoder is inspected when the app starts, so this takes effect after a restart.',
+        buttons: ['Restart now', 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+    });
+    if (response === 0) {
+        app.relaunch();
+        app.exit(0);
+    }
+}
+
+/**
+ * Let the user point the app at their own FFmpeg build.
+ *
+ * We ship an LGPL ffmpeg and run it as a separate program; being able to
+ * replace it with your own copy is the condition attached to distributing it
+ * that way. A folder is asked for rather than a file so ffmpeg and ffprobe
+ * always come from the same build.
+ *
+ * Nothing is scanned. Only the directory the user chose is looked at, and only
+ * to confirm it holds an ffmpeg new enough to use — the same check the app runs
+ * against its own binary at startup, pointed somewhere else.
+ */
+async function chooseFfmpegDirectory(): Promise<void> {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+        title: 'Choose an FFmpeg folder',
+        message: 'Select a folder containing ffmpeg and ffprobe.',
+        properties: ['openDirectory'],
+    });
+    if (canceled || !filePaths[0]) return;
+
+    const dir = filePaths[0];
+    const candidate = candidateBinaries(dir, process.platform);
+    const before = {
+        ffmpeg: process.env.FFMPEG_PATH,
+        ffprobe: process.env.FFPROBE_PATH,
+    };
+
+    let reason: string | null | undefined;
+    let detail: string | null | undefined;
+    try {
+        process.env.FFMPEG_PATH = candidate.ffmpeg;
+        process.env.FFPROBE_PATH = candidate.ffprobe;
+        ({ reason, detail } = await checkFfmpeg());
+    } finally {
+        // Restore whatever was there, including nothing: leaving the candidate
+        // in the environment would point the running API at a binary the user
+        // may have just been told is unusable.
+        for (const [key, value] of [
+            ['FFMPEG_PATH', before.ffmpeg],
+            ['FFPROBE_PATH', before.ffprobe],
+        ] as const) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+        }
+    }
+
+    if (reason) {
+        if (detail) console.error(detail);
+        dialog.showErrorBox(
+            'That folder cannot be used',
+            `${reason}\n\nLuminary Media Convert will keep using the FFmpeg it ships with.`
+        );
+        return;
+    }
+
+    await applyFfmpegDirectory(dir);
+}
+
+/**
+ * The application menu.
+ *
+ * Built rather than left to Electron's default because the default has no way
+ * to reach the licence texts, and the GPL/LGPL both want them in front of the
+ * user rather than buried in the app bundle. Everything else here is a standard
+ * role: replacing the default menu without them would take copy, paste and the
+ * window controls with it.
+ */
+/** Bytes as something a person can weigh a decision against. */
+function formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit++;
+    }
+    return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+/**
+ * Clear the sessions on disk, on the user's say-so.
+ *
+ * The app already reclaims space on its own — finished sessions at boot, idle
+ * ones hourly — but none of that survives the app being dragged to the Trash,
+ * which on macOS is the only uninstall there is. This is how someone gets their
+ * disk back without hunting through Application Support (#228).
+ *
+ * Anything mid-encode is left alone and said so, rather than being cancelled by
+ * a menu item that reads like housekeeping.
+ */
+async function clearWorkingFiles(): Promise<void> {
+    if (!server) return;
+
+    return queueDialog(async () => {
+        const { sessions, bytes, busy } = server!.describeReclaimable();
+        const busyNote = busy
+            ? `\n\n${busy} session${busy === 1 ? '' : 's'} still working will be kept.`
+            : '';
+
+        if (!sessions) {
+            await dialog.showMessageBox({
+                type: 'info',
+                message: 'Nothing to clear',
+                detail: `There are no working files to remove.${busyNote}`,
+                buttons: ['OK'],
+            });
+            return;
+        }
+
+        const { response } = await dialog.showMessageBox({
+            type: 'warning',
+            message: `Clear ${sessions} working file set${sessions === 1 ? '' : 's'}?`,
+            detail:
+                `This frees about ${formatSize(bytes)}. It removes the videos you ` +
+                `uploaded for encoding and any output still on this machine. ` +
+                `Media already published to your storage is not affected.${busyNote}`,
+            buttons: ['Clear', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+        });
+        if (response !== 0) return;
+
+        const freed = server!.reclaimWorkspace();
+        await dialog.showMessageBox({
+            type: 'info',
+            message: 'Working files cleared',
+            detail: `Freed about ${formatSize(freed.bytes)}.${busyNote}`,
+            buttons: ['OK'],
+        });
+    });
+}
+
+function buildMenu(): void {
+    const isMac = process.platform === 'darwin';
+    // No ellipsis. Apple's convention reserves it for an item that needs more
+    // input before it can act; this opens a window and asks for nothing. The
+    // FFmpeg picker below keeps its ellipsis for exactly that reason.
+    const licences = {
+        label: 'Licences',
+        click: () => showLicences(mainWindow),
+    };
+    // Deliberately a plain item rather than anything prominent: the licence
+    // asks that substitution be possible, not that we recommend it.
+    const ffmpegItems: Electron.MenuItemConstructorOptions[] = [
+        { label: 'Choose FFmpeg…', click: () => void chooseFfmpegDirectory() },
+        {
+            label: 'Use the bundled FFmpeg',
+            enabled: !!settings.ffmpegDir,
+            click: () => void applyFfmpegDirectory(null),
+        },
+    ];
+
+    // Ellipsis: it asks before it acts.
+    const maintenanceItems: Electron.MenuItemConstructorOptions[] = [
+        {
+            label: 'Clear Working Files…',
+            click: () => void clearWorkingFiles(),
+        },
+    ];
+
+    Menu.setApplicationMenu(
+        Menu.buildFromTemplate([
+            ...(isMac
+                ? ([
+                      {
+                          label: app.name,
+                          submenu: [
+                              { role: 'about' },
+                              { type: 'separator' },
+                              ...ffmpegItems,
+                              { type: 'separator' },
+                              ...maintenanceItems,
+                              { type: 'separator' },
+                              { role: 'services' },
+                              { type: 'separator' },
+                              { role: 'hide' },
+                              { role: 'hideOthers' },
+                              { role: 'unhide' },
+                              { type: 'separator' },
+                              { role: 'quit' },
+                          ],
+                      },
+                  ] as Electron.MenuItemConstructorOptions[])
+                : []),
+            { role: 'fileMenu' },
+            { role: 'editMenu' },
+            { role: 'viewMenu' },
+            { role: 'windowMenu' },
+            {
+                role: 'help',
+                submenu: isMac
+                    ? [licences]
+                    : [
+                          licences,
+                          { type: 'separator' },
+                          ...ffmpegItems,
+                          { type: 'separator' },
+                          ...maintenanceItems,
+                          { type: 'separator' },
+                          { role: 'about' },
+                      ],
+            },
+        ] as Electron.MenuItemConstructorOptions[])
+    );
+}
+
 function createWindow(): void {
     if (mainWindow && !mainWindow.isDestroyed()) {
         focusWindow();
         return;
     }
+
+    // Before the window, not after: a packaged renderer is served by the API, so
+    // until that is listening there is nowhere to point one. `start()` creates
+    // the window itself once the server is up.
+    const target = resolveWindowTarget({
+        isPackaged: app.isPackaged,
+        serverUrl: server?.url,
+        devRendererUrl: process.env.ELECTRON_RENDERER_URL,
+    });
+    if (!target) return;
 
     mainWindow = new BrowserWindow({
         width: 1280,
@@ -284,10 +610,6 @@ function createWindow(): void {
         void shell.openExternal(url);
         return { action: 'deny' };
     });
-
-    const target = app.isPackaged
-        ? server!.url
-        : (process.env.ELECTRON_RENDERER_URL ?? 'http://localhost:5173');
 
     // In development the renderer is Vite's dev server, which is started
     // alongside this process and is routinely a few seconds behind it. Without
@@ -407,8 +729,8 @@ async function start(): Promise<void> {
             },
             credentialCipher: buildCipher(),
             onCmsSessionCreated: (sessionId) => focusSession(sessionId),
-            ffmpegPath: bundledBinary('ffmpeg'),
-            ffprobePath: bundledBinary('ffprobe'),
+            ffmpegPath: resolveBinary('ffmpeg'),
+            ffprobePath: resolveBinary('ffprobe'),
             staticAppDir: bundledWebClient(),
         });
         console.log(`Encoding API listening on ${server.url}`);
@@ -427,6 +749,7 @@ async function start(): Promise<void> {
     // that something can be done with it.
     if (!(await encoderPresent())) return;
 
+    buildMenu();
     createWindow();
 
     app.on('activate', () => {

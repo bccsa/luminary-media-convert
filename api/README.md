@@ -16,13 +16,13 @@ It binds to **loopback only** (`127.0.0.1`). Nothing here is meant to be reachab
 - [Environment Variables](#environment-variables)
 - [Embedding the API](#embedding-the-api)
 - [Endpoints](#endpoints)
-  - [1. Create a session](#1-create-a-session)
-  - [2. Attach a local file](#2-attach-a-local-file)
-  - [3. Poll session status](#3-poll-session-status)
-  - [4. Start encoding](#4-start-encoding)
-  - [5. Delete a session](#5-delete-a-session)
-  - [CMS handshake](#cms-handshake)
-  - [HLS edit](#hls-edit)
+    - [1. Create a session](#1-create-a-session)
+    - [2. Attach a local file](#2-attach-a-local-file)
+    - [3. Poll session status](#3-poll-session-status)
+    - [4. Start encoding](#4-start-encoding)
+    - [5. Delete a session](#5-delete-a-session)
+    - [CMS handshake](#cms-handshake)
+    - [HLS edit](#hls-edit)
 - [Encoding Workflow](#encoding-workflow)
 - [Credential Handling](#credential-handling)
 - [Encrypted HLS and the `luminary://key` contract](#encrypted-hls-and-the-luminarykey-contract)
@@ -39,24 +39,24 @@ It binds to **loopback only** (`127.0.0.1`). Nothing here is meant to be reachab
 
 There is no identity provider, no key store and no external validation webhook. Three credential tiers, resolved in order by `AuthResolverGuard`. Endpoints declare what they accept with `@AuthTypes(...)`, defaulting to `['master']`.
 
-| Credential | Form | Held by | Scope |
-|---|---|---|---|
-| Instance API token | `X-API-Key: <token>` | The app's own UI | Everything — it is accepted regardless of an endpoint's `@AuthTypes`. Minted per launch by the Electron main process and handed to the renderer over the preload bridge; standalone it comes from `MASTER_API_KEY` |
-| Session token | `Authorization: Bearer sess_*`, or `?token=` on the preview / waveform / storyboard routes | The UI, per session | One session: attach a file, encode, poll, delete, chapters, preview |
-| Read token | `?token=read_*` | The CMS that opened the session | Watch only: the SSE stream and the status endpoint. Cannot start, cancel, or reach the source file. Minted only for CMS-created sessions |
+| Credential         | Form                                                                                       | Held by                         | Scope                                                                                                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Instance API token | `X-API-Key: <token>`                                                                       | The app's own UI                | Everything — it is accepted regardless of an endpoint's `@AuthTypes`. Minted per launch by the Electron main process and handed to the renderer over the preload bridge; standalone it comes from `MASTER_API_KEY` |
+| Session token      | `Authorization: Bearer sess_*`, or `?token=` on the preview / waveform / storyboard routes | The UI, per session             | One session: attach a file, encode, poll, delete, chapters, preview                                                                                                                                                |
+| Read token         | `?token=read_*`                                                                            | The CMS that opened the session | Watch only: the SSE stream and the status endpoint. Cannot start, cancel, or reach the source file. Minted only for CMS-created sessions                                                                           |
 
 A request that presents an `X-API-Key` which does not match is rejected outright — it does not fall through to the other tiers. When no token is configured at all, key auth is effectively disabled and every keyed endpoint refuses.
 
 ## Origin gating and Local Network Access
 
-`/api/cms/*` is not key-authenticated. There is no credential a page in a browser could hold that the pages around it could not also read, so the question worth asking is *which site is calling* — and that is the one thing the browser answers honestly.
+`/api/cms/*` is not key-authenticated. There is no credential a page in a browser could hold that the pages around it could not also read, so the question worth asking is _which site is calling_ — and that is the one thing the browser answers honestly.
 
 - `OriginRegistry` holds an allowlist. Origins are normalised (lower-cased, no trailing slash) and compared exactly.
 - Standalone, the allowlist is `CMS_ALLOWED_ORIGINS` (comma-separated) and there is no approver: an unknown origin is simply refused.
 - Embedded, the host also supplies an `originApprover`. The Electron shell shows a native dialog, remembers both allows and denies in its settings file, and serialises dialogs so two requests milliseconds apart cannot stack two modal sheets over one decision.
 - After binding, the server approves its own address, so a packaged app never asks the user whether to trust itself.
 - CORS refusal is expressed by withholding the header, not by raising — the browser reports an ordinary CORS block instead of the API returning 500 to something it deliberately turned away.
-- A public page reaching `127.0.0.1` is a private-network request: `privateNetworkAccessMiddleware` answers Chrome's Local Network Access preflight with `Access-Control-Allow-Private-Network: true`. That is a grant of *reachability* only; who may talk to the API is still the allowlist's decision on the same response.
+- A public page reaching `127.0.0.1` is a private-network request: `privateNetworkAccessMiddleware` answers Chrome's Local Network Access preflight with `Access-Control-Allow-Private-Network: true`. That is a grant of _reachability_ only; who may talk to the API is still the allowlist's decision on the same response.
 - A request with **no** `Origin` (curl, or a renderer whose origin browsers report inconsistently) is accepted only from a loopback peer.
 
 ---
@@ -65,21 +65,21 @@ A request that presents an `X-API-Key` which does not match is rejected outright
 
 Only relevant when running standalone — the embedding host passes these in code.
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `MASTER_API_KEY` | for keyed endpoints | — | The instance API token accepted on `X-API-Key` |
-| `PORT` | No | `3000` | HTTP port (the embedded default is `31711`) |
-| `HOST` | No | `127.0.0.1` | Bind address |
-| `WORK_DIR` | No | `./work` | Scratch directory for sessions, previews and sidecars |
-| `CMS_ALLOWED_ORIGINS` | No | — | Comma-separated origins allowed to use `/api/cms/*` |
-| `FFMPEG_PATH` | No | PATH lookup | Absolute path to the ffmpeg executable |
-| `FFPROBE_PATH` | No | PATH lookup | Absolute path to the ffprobe executable |
-| `FFMPEG_TIMEOUT_MS` | No | none | Max FFmpeg runtime before a forced kill |
-| `FFMPEG_THREADS` | No | — | Thread count passed to FFmpeg |
-| `DISK_RESERVE_BYTES` | No | `2147483648` (2 GB) | Free space kept in hand on the work volume |
-| `SESSION_ABANDONED_MAX_AGE_HOURS` | No | `6` | How long an idle session may sit before it is swept |
-| `SESSION_CLEANUP_CRON` | No | `0 * * * *` | Sweep schedule |
-| `S3_UPLOAD_STALL_TIMEOUT_MS` | No | `300000` | Stall detector for S3 uploads (judged on bytes sent, not files completed) |
+| Variable                          | Required            | Default             | Description                                                               |
+| --------------------------------- | ------------------- | ------------------- | ------------------------------------------------------------------------- |
+| `MASTER_API_KEY`                  | for keyed endpoints | —                   | The instance API token accepted on `X-API-Key`                            |
+| `PORT`                            | No                  | `3000`              | HTTP port (the embedded default is `31711`)                               |
+| `HOST`                            | No                  | `127.0.0.1`         | Bind address                                                              |
+| `WORK_DIR`                        | No                  | `./work`            | Scratch directory for sessions, previews and sidecars                     |
+| `CMS_ALLOWED_ORIGINS`             | No                  | —                   | Comma-separated origins allowed to use `/api/cms/*`                       |
+| `FFMPEG_PATH`                     | No                  | PATH lookup         | Absolute path to the ffmpeg executable                                    |
+| `FFPROBE_PATH`                    | No                  | PATH lookup         | Absolute path to the ffprobe executable                                   |
+| `FFMPEG_TIMEOUT_MS`               | No                  | none                | Max FFmpeg runtime before a forced kill                                   |
+| `FFMPEG_THREADS`                  | No                  | —                   | Thread count passed to FFmpeg                                             |
+| `DISK_RESERVE_BYTES`              | No                  | `2147483648` (2 GB) | Free space kept in hand on the work volume                                |
+| `SESSION_ABANDONED_MAX_AGE_HOURS` | No                  | `6`                 | How long an idle session may sit before it is swept                       |
+| `SESSION_CLEANUP_CRON`            | No                  | `0 * * * *`         | Sweep schedule                                                            |
+| `S3_UPLOAD_STALL_TIMEOUT_MS`      | No                  | `300000`            | Stall detector for S3 uploads (judged on bytes sent, not files completed) |
 
 Example `api/.env`:
 
@@ -123,22 +123,22 @@ const server = await createServer({
 
 Interactive OpenAPI docs at `/api/docs` when Swagger is enabled.
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| POST | `/api/sessions` | token | Create a session |
-| GET | `/api/sessions` | token | List every session, newest first (includes session tokens) |
-| POST | `/api/sessions/:id/local-file` | token, session | Attach a file already on this machine |
-| POST | `/api/sessions/:id/encode` | token, session | Submit the encode config and enqueue |
-| GET | `/api/sessions/:id` | token, session, read | Poll status |
-| GET | `/api/sessions/:id/events` | `?token=` (session or read) | SSE event stream |
-| DELETE | `/api/sessions/:id` | token, session | Cancel and delete (not while `encrypting` / `uploading_to_s3`) |
-| GET / PUT | `/api/sessions/:id/chapters` | token, session | Read / write `chapters/<lang>.vtt` in the session's own prefix |
-| GET | `/api/sessions/:id/waveform` | `?token=` | Waveform peaks for the source |
-| GET | `/api/sessions/:id/preview/**` | `?token=` | On-demand preview master / rendition playlists and MPEG-TS segments |
-| GET | `/api/sessions/:id/thumbnails/**` | `?token=` | Pre-encode source storyboard VTT and sprite sheets |
-| GET | `/api/cms/health` | none | Liveness probe for the CMS |
-| POST | `/api/cms/sessions` | Origin | Open (or reuse) a session for a CMS document |
-| POST | `/api/hls/{read,mutate,discover,chapters/read,chapters/write,waveform/read}` | token | Stateless HLS-edit operations against inline S3 credentials |
+| Method    | Path                                                                         | Auth                        | Description                                                         |
+| --------- | ---------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------- |
+| POST      | `/api/sessions`                                                              | token                       | Create a session                                                    |
+| GET       | `/api/sessions`                                                              | token                       | List every session, newest first (includes session tokens)          |
+| POST      | `/api/sessions/:id/local-file`                                               | token, session              | Attach a file already on this machine                               |
+| POST      | `/api/sessions/:id/encode`                                                   | token, session              | Submit the encode config and enqueue                                |
+| GET       | `/api/sessions/:id`                                                          | token, session, read        | Poll status                                                         |
+| GET       | `/api/sessions/:id/events`                                                   | `?token=` (session or read) | SSE event stream                                                    |
+| DELETE    | `/api/sessions/:id`                                                          | token, session              | Cancel and delete (not while `encrypting` / `uploading_to_s3`)      |
+| GET / PUT | `/api/sessions/:id/chapters`                                                 | token, session              | Read / write `chapters/<lang>.vtt` in the session's own prefix      |
+| GET       | `/api/sessions/:id/waveform`                                                 | `?token=`                   | Waveform peaks for the source                                       |
+| GET       | `/api/sessions/:id/preview/**`                                               | `?token=`                   | On-demand preview master / rendition playlists and MPEG-TS segments |
+| GET       | `/api/sessions/:id/thumbnails/**`                                            | `?token=`                   | Pre-encode source storyboard VTT and sprite sheets                  |
+| GET       | `/api/cms/health`                                                            | none                        | Liveness probe for the CMS                                          |
+| POST      | `/api/cms/sessions`                                                          | Origin                      | Open (or reuse) a session for a CMS document                        |
+| POST      | `/api/hls/{read,mutate,discover,chapters/read,chapters/write,waveform/read}` | token                       | Stateless HLS-edit operations against inline S3 credentials         |
 
 ### 1. Create a session
 
@@ -150,22 +150,22 @@ Content-Type: application/json
 
 ```json
 {
-  "s3": {
-    "endPoint": "minio.example.com",
-    "port": 9000,
-    "useSSL": false,
-    "bucket": "media-output",
-    "region": "us-east-1",
-    "accessKey": "YOUR_ACCESS_KEY",
-    "secretKey": "YOUR_SECRET_KEY",
-    "pathPrefix": "videos/my-project"
-  },
-  "encryption": { "enabled": true },
-  "segmentDuration": 6,
-  "byteRange": true,
-  "byteRangeMaxFileSizeMB": 500,
-  "audioByteRangeMaxFileSizeMB": 50,
-  "thumbnails": true
+    "s3": {
+        "endPoint": "minio.example.com",
+        "port": 9000,
+        "useSSL": false,
+        "bucket": "media-output",
+        "region": "us-east-1",
+        "accessKey": "YOUR_ACCESS_KEY",
+        "secretKey": "YOUR_SECRET_KEY",
+        "pathPrefix": "videos/my-project"
+    },
+    "encryption": { "enabled": true },
+    "segmentDuration": 6,
+    "byteRange": true,
+    "byteRangeMaxFileSizeMB": 500,
+    "audioByteRangeMaxFileSizeMB": 50,
+    "thumbnails": true
 }
 ```
 
@@ -175,8 +175,8 @@ Everything but `s3` is optional. `segmentDuration` defaults to 6 s, `byteRange` 
 
 ```json
 {
-  "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "sessionToken": "sess_f8e7d6c5b4a3291087654321"
+    "sessionId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "sessionToken": "sess_f8e7d6c5b4a3291087654321"
 }
 ```
 
@@ -205,17 +205,17 @@ X-API-Key: <instance token>
 # or: ?token=<session or read token>
 ```
 
-| Status | Description | Extra fields |
-|---|---|---|
-| `created` | Session created, awaiting a source file | — |
-| `uploading` | Source ingest in progress | `progress`, `ingestTotalBytes` |
-| `uploaded` | Source in place and probed | `probeResult` |
-| `queued` | Waiting in the FIFO queue | `queuePosition` |
-| `encoding` | FFmpeg running | `progress`, `pipelineProgress`, `hlsUrl`, `encryptionKeyHex` |
-| `encrypting` | Segment encryption | `progress`, `pipelineProgress` |
-| `uploading_to_s3` | Output going to the bucket | `progress`, `pipelineProgress` |
-| `completed` | Done | `files`, `masterPlaylist`, `thumbnailsVtt`, `segmentFormat` |
-| `failed` | Error | `error`, and `canRetry` when the source and credentials are both still available |
+| Status            | Description                             | Extra fields                                                                     |
+| ----------------- | --------------------------------------- | -------------------------------------------------------------------------------- |
+| `created`         | Session created, awaiting a source file | —                                                                                |
+| `uploading`       | Source ingest in progress               | `progress`, `ingestTotalBytes`                                                   |
+| `uploaded`        | Source in place and probed              | `probeResult`                                                                    |
+| `queued`          | Waiting in the FIFO queue               | `queuePosition`                                                                  |
+| `encoding`        | FFmpeg running                          | `progress`, `pipelineProgress`, `hlsUrl`, `encryptionKeyHex`                     |
+| `encrypting`      | Segment encryption                      | `progress`, `pipelineProgress`                                                   |
+| `uploading_to_s3` | Output going to the bucket              | `progress`, `pipelineProgress`                                                   |
+| `completed`       | Done                                    | `files`, `masterPlaylist`, `thumbnailsVtt`, `segmentFormat`                      |
+| `failed`          | Error                                   | `error`, and `canRetry` when the source and credentials are both still available |
 
 `hlsUrl` and `encryptionKeyHex` appear from the moment encoding starts, not at completion — a caller that reconnects mid-encode has to be able to ask for them again. `title`, `documentId`, `encoder` and any submitted `trimSegments` are always reported.
 
@@ -231,15 +231,40 @@ Video:
 
 ```json
 {
-  "type": "video",
-  "videoRenditions": [
-    { "width": 1920, "height": 1080, "videoBitrateKbps": 5000, "copyStream": false, "audioGroupId": "hd", "label": "1080p", "vbr": true },
-    { "width": 1280, "height": 720,  "videoBitrateKbps": 2500, "copyStream": false, "audioGroupId": "hd", "label": "720p",  "vbr": true }
-  ],
-  "audioGroups": [
-    { "id": "hd", "label": "HD Audio", "audioBitrateKbps": 256, "channels": 2, "audioCodec": "aac", "sourceTrackIndex": 0, "language": "eng", "vbr": true }
-  ],
-  "trimSegments": [{ "inSec": 12.0, "outSec": 300.5 }]
+    "type": "video",
+    "videoRenditions": [
+        {
+            "width": 1920,
+            "height": 1080,
+            "videoBitrateKbps": 5000,
+            "copyStream": false,
+            "audioGroupId": "hd",
+            "label": "1080p",
+            "vbr": true
+        },
+        {
+            "width": 1280,
+            "height": 720,
+            "videoBitrateKbps": 2500,
+            "copyStream": false,
+            "audioGroupId": "hd",
+            "label": "720p",
+            "vbr": true
+        }
+    ],
+    "audioGroups": [
+        {
+            "id": "hd",
+            "label": "HD Audio",
+            "audioBitrateKbps": 256,
+            "channels": 2,
+            "audioCodec": "aac",
+            "sourceTrackIndex": 0,
+            "language": "eng",
+            "vbr": true
+        }
+    ],
+    "trimSegments": [{ "inSec": 12.0, "outSec": 300.5 }]
 }
 ```
 
@@ -247,11 +272,27 @@ Audio-only:
 
 ```json
 {
-  "type": "audio",
-  "audioGroups": [
-    { "id": "hd",  "label": "High Quality",     "audioBitrateKbps": 192, "channels": 2, "audioCodec": "aac", "sourceTrackIndex": 0, "vbr": true },
-    { "id": "low", "label": "Bandwidth Saving", "audioBitrateKbps": 64,  "channels": 2, "audioCodec": "aac", "sourceTrackIndex": 0, "vbr": true }
-  ]
+    "type": "audio",
+    "audioGroups": [
+        {
+            "id": "hd",
+            "label": "High Quality",
+            "audioBitrateKbps": 192,
+            "channels": 2,
+            "audioCodec": "aac",
+            "sourceTrackIndex": 0,
+            "vbr": true
+        },
+        {
+            "id": "low",
+            "label": "Bandwidth Saving",
+            "audioBitrateKbps": 64,
+            "channels": 2,
+            "audioCodec": "aac",
+            "sourceTrackIndex": 0,
+            "vbr": true
+        }
+    ]
 }
 ```
 
@@ -277,12 +318,12 @@ DELETE /api/sessions/:sessionId
 
 ```json
 {
-  "documentId": "post_01HTZ8Y0J4",
-  "title": "Episode 12 — The Long Way Round",
-  "s3": { "…": "…" },
-  "publicBaseUrl": "https://cdn.example.com/media",
-  "encryption": { "required": true },
-  "existingMedia": { "hlsUrl": "…", "hlsKey": "…" }
+    "documentId": "post_01HTZ8Y0J4",
+    "title": "Episode 12 — The Long Way Round",
+    "s3": { "…": "…" },
+    "publicBaseUrl": "https://cdn.example.com/media",
+    "encryption": { "required": true },
+    "existingMedia": { "hlsUrl": "…", "hlsKey": "…" }
 }
 ```
 
@@ -290,11 +331,11 @@ DELETE /api/sessions/:sessionId
 
 ```json
 {
-  "sessionId": "…",
-  "readToken": "read_…",
-  "eventsUrl": "http://127.0.0.1:31711/api/sessions/<id>/events?token=read_…",
-  "apiVersion": "0.0.1",
-  "reused": false
+    "sessionId": "…",
+    "readToken": "read_…",
+    "eventsUrl": "http://127.0.0.1:31711/api/sessions/<id>/events?token=read_…",
+    "apiVersion": "0.0.1",
+    "reused": false
 }
 ```
 
@@ -310,14 +351,14 @@ The CMS then subscribes to `eventsUrl`. The first `encoding` event carries `hlsU
 
 Stateless operations against inline S3 credentials, used for post-encode edits:
 
-| Path | Description |
-|---|---|
-| `POST /api/hls/read` | Fetch and parse a master playlist; returns the parsed master + current ETag |
-| `POST /api/hls/mutate` | Apply ordered operations (upsert/remove subtitle, upsert/remove chapters) with `If-Match`; returns the new ETag. `409` on mismatch |
-| `POST /api/hls/discover` | Scan a folder prefix for HLS masters / angles |
-| `POST /api/hls/chapters/read` | Read `chapters/<lang>.vtt`; `404` when absent |
-| `POST /api/hls/chapters/write` | Write `chapters/<lang>.vtt` (≤ 1 MiB, `text/vtt`) |
-| `POST /api/hls/waveform/read` | Read `waveform.json`; `404` when absent |
+| Path                           | Description                                                                                                                        |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/hls/read`           | Fetch and parse a master playlist; returns the parsed master + current ETag                                                        |
+| `POST /api/hls/mutate`         | Apply ordered operations (upsert/remove subtitle, upsert/remove chapters) with `If-Match`; returns the new ETag. `409` on mismatch |
+| `POST /api/hls/discover`       | Scan a folder prefix for HLS masters / angles                                                                                      |
+| `POST /api/hls/chapters/read`  | Read `chapters/<lang>.vtt`; `404` when absent                                                                                      |
+| `POST /api/hls/chapters/write` | Write `chapters/<lang>.vtt` (≤ 1 MiB, `text/vtt`)                                                                                  |
+| `POST /api/hls/waveform/read`  | Read `waveform.json`; `404` when absent                                                                                            |
 
 The session-scoped `GET`/`PUT /api/sessions/:id/chapters` routes are the same operations with the bucket and prefix resolved from the session, so the caller supplies nothing but a language.
 
@@ -329,7 +370,7 @@ The session-scoped `GET`/`PUT /api/sessions/:id/chapters` routes are the same op
 2. **Source attach** — an absolute path to a file already on the machine. `IngestService` then runs the shared post-ingest pipeline: record the path → ffprobe → initialise the preview → status `uploaded` → prime the waveform cache and source storyboard in the background.
 3. **Configure** — the client reads the probe results, computes a suggested config, and lets the user adjust renditions, audio groups, copy/VBR and trim ranges. An on-demand HLS preview is available throughout.
 4. **Queue** — FIFO, one encode at a time.
-5. **Encode** — the AES key and IV are generated *before* the status flips to `encoding`, and `hlsUrl` is published at the same moment, so anything watching that transition is handed both. FFmpeg probes per-stream start times and aligns misaligned streams with an input seek to the latest start; output is always fMP4. `SegmentPipelineService` streams each new segment through encrypt → upload → byte-range pack with bounded concurrency, so S3 uploads keep pace with FFmpeg rather than running serially afterwards.
+5. **Encode** — the AES key and IV are generated _before_ the status flips to `encoding`, and `hlsUrl` is published at the same moment, so anything watching that transition is handed both. FFmpeg probes per-stream start times and aligns misaligned streams with an input seek to the latest start; output is always fMP4. `SegmentPipelineService` streams each new segment through encrypt → upload → byte-range pack with bounded concurrency, so S3 uploads keep pace with FFmpeg rather than running serially afterwards.
 6. **Finish** — `#EXT-X-KEY` tags injected, thumbnail sprites + `thumbnails.vtt` generated for video encodes, `waveform.json` written beside `master.m3u8`, and the completion event lists every object key.
 
 ### Session lifecycle
@@ -436,7 +477,7 @@ Stream directory names derive from the rendition labels. Players can warm the ne
 
 ## Disk Guards and Session Sweeping
 
-- `disk-space.ts` refuses an ingest or an encode that would not fit, keeping `DISK_RESERVE_BYTES` (2 GB by default) in hand. Checked *before* the transfer, so a doomed ingest does not cost the user the whole transfer first.
+- `disk-space.ts` refuses an ingest or an encode that would not fit, keeping `DISK_RESERVE_BYTES` (2 GB by default) in hand. Checked _before_ the transfer, so a doomed ingest does not cost the user the whole transfer first.
 - `SessionCleanupService` sweeps hourly and removes only genuinely idle sessions — `created`, `uploading`, `uploaded` — that have shown no activity for `SESSION_ABANDONED_MAX_AGE_HOURS`. Queued and encoding sessions are left alone.
 - Abandonment is judged on `lastActivityAt`, not `createdAt`: a slow multi-gigabyte ingest is hours old and perfectly alive, while a tab closed on the config screen is hours old and never coming back.
 - Finished sessions are discarded at boot along with their work directory, so no age threshold has to stand in for "the user is done looking at this".
@@ -462,7 +503,7 @@ npm -w api test             # unit tests (Vitest)
 npm -w api run test:e2e     # end-to-end tests
 ```
 
-Many specs were intentionally left broken during the local-only migration and are tracked for restoration in [`../Todo.md`](../Todo.md).
+Many specs were intentionally left broken during the local-only migration and are tracked for restoration in the [issues](https://github.com/bccsa/luminary-media-convert/issues).
 
 ## Tech Stack
 

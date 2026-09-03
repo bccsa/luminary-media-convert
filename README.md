@@ -27,14 +27,14 @@ The API binds to `127.0.0.1` only. The renderer authenticates with a token minte
 
 ## Workspaces
 
-| Workspace | Description | README |
-|---|---|---|
-| `api/` | Encoding API — NestJS, embeddable via `createServer()` | [api/README.md](api/README.md) |
-| `app/` | Vue 3 renderer UI | [app/README.md](app/README.md) |
-| `app-electron/` | Desktop shell, hosts the API in-process, packaging | [app-electron/bin/README.md](app-electron/bin/README.md) (ffmpeg binaries) |
-| `cms-mock/` | Dev-only stand-in for the Luminary CMS | [cms-mock/README.md](cms-mock/README.md) |
-| `encode-config/` | Shared encode-config form + types | [encode-config/README.md](encode-config/README.md) |
-| `hls-core/` | Shared HLS parsing, key utilities, angle extraction | — |
+| Workspace        | Description                                            | README                                                                     |
+| ---------------- | ------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `api/`           | Encoding API — NestJS, embeddable via `createServer()` | [api/README.md](api/README.md)                                             |
+| `app/`           | Vue 3 renderer UI                                      | [app/README.md](app/README.md)                                             |
+| `app-electron/`  | Desktop shell, hosts the API in-process, packaging     | [app-electron/bin/README.md](app-electron/bin/README.md) (ffmpeg binaries) |
+| `cms-mock/`      | Dev-only stand-in for the Luminary CMS                 | [cms-mock/README.md](cms-mock/README.md)                                   |
+| `encode-config/` | Shared encode-config form + types                      | [encode-config/README.md](encode-config/README.md)                         |
+| `hls-core/`      | Shared HLS parsing, key utilities, angle extraction    | —                                                                          |
 
 ## Prerequisites
 
@@ -108,11 +108,11 @@ Neither the artifacts nor the ffmpeg binaries are in the repository.
 
 ### What each build needs
 
-| Target | Host | Prerequisites |
-|---|---|---|
-| macOS dmg/zip | macOS | `brew install nasm pkg-config gnupg` (plus the Xcode CLT) |
-| Windows portable zip | macOS or Linux | the above, plus `brew install mingw-w64 cmake llvm` |
-| Windows NSIS installer | Windows | a Windows machine, or Wine — which is why the portable target exists |
+| Target                 | Host           | Prerequisites                                                        |
+| ---------------------- | -------------- | -------------------------------------------------------------------- |
+| macOS dmg/zip          | macOS          | `brew install nasm pkg-config gnupg` (plus the Xcode CLT)            |
+| Windows portable zip   | macOS or Linux | the above, plus `brew install mingw-w64 cmake llvm`                  |
+| Windows NSIS installer | Windows        | a Windows machine, or Wine — which is why the portable target exists |
 
 **LLVM is not optional for the Windows build.** `--enable-cuda-llvm` gives `scale_cuda`
 for the NVIDIA path and needs a clang with the NVPTX backend, which Apple's clang does
@@ -129,68 +129,74 @@ covers where the binaries land and their licences.
 ### What is signed, and what a user sees
 
 Builds are **unsigned** — there is no Developer ID and no Authenticode certificate, so
-there is no auto-update either. macOS bundles are still *ad-hoc* signed by
+there is no auto-update either. macOS bundles are still _ad-hoc_ signed by
 `app-electron/build/after-pack.cjs`, without which a downloaded copy is refused outright as
 "damaged". On macOS 15 and later, opening an unsigned app takes System Settings →
 Privacy & Security → **Open Anyway**; right-click → Open no longer works, Apple removed
 it. Windows shows a SmartScreen warning. The portable Windows build additionally carries
 the stock Electron icon, because stamping it needs Wine.
 
-See [Todo.md](Todo.md) for signing, notarization and auto-update.
+Signing, notarization and auto-update are tracked in [#206](https://github.com/bccsa/luminary-media-convert/issues/206).
 
 ## Scripts
 
-| Command | What it does |
-|---|---|
-| `npm run dev` | Libraries (watch) + API + web client |
-| `npm run dev:electron` | Libraries (watch) + API build + web client + Electron |
-| `npm -w api run dev` | API dev server with watch |
-| `npm -w api run build` / `test` / `test:e2e` | Build and test the API |
-| `npm -w app run dev` / `build` / `test` | Web client |
-| `npm -w cms-mock run dev` | CMS mock on port 5199 |
-| `npm -w app-electron run dev` / `dist:mac` / `dist:win` / `pack` | Desktop shell |
-| `npm -w app-electron run dist:win-portable` | Portable Windows zip, buildable on macOS |
-| `npm -w {hls-core,encode-config,player-core,player-web} run build` / `dev` / `test` | Shared libraries |
+| Command                                                                             | What it does                                          |
+| ----------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `npm run dev`                                                                       | Libraries (watch) + API + web client                  |
+| `npm run dev:electron`                                                              | Libraries (watch) + API build + web client + Electron |
+| `npm -w api run dev`                                                                | API dev server with watch                             |
+| `npm -w api run build` / `test` / `test:e2e`                                        | Build and test the API                                |
+| `npm -w app run dev` / `build` / `test`                                             | Web client                                            |
+| `npm -w cms-mock run dev`                                                           | CMS mock on port 5199                                 |
+| `npm -w app-electron run dev` / `dist:mac` / `dist:win` / `pack`                    | Desktop shell                                         |
+| `npm -w app-electron run dist:win-portable`                                         | Portable Windows zip, buildable on macOS              |
+| `npm -w {hls-core,encode-config,player-core,player-web} run build` / `dev` / `test` | Shared libraries                                      |
 
 ## Documentation
 
 - [CLAUDE.md](CLAUDE.md) — the deep reference: architecture, CMS contract, trust model, endpoint tables, conventions, packaging notes
 - [api/README.md](api/README.md) — API reference, authentication, environment, encoding workflow, output layout
 - [app/README.md](app/README.md) — renderer structure and environment
-- [Todo.md](Todo.md) — known gaps and follow-up work
+- [Issues](https://github.com/bccsa/luminary-media-convert/issues) — known gaps and follow-up work
+- [PATENTS.md](PATENTS.md) — the patent position, which no copyright licence covers
+
+## Consuming the player libraries
+
+An app that embeds `player-web` or `player-web-legacy` needs the five library
+workspaces built — they ship only `dist/` — and needs none of the desktop app to
+do it. `npm run ci:libs` installs exactly that subset, and `npm run build:libs`
+builds it:
+
+```bash
+npm run ci:libs      # ~180 MB, no electron
+npm run build:libs
+```
+
+A plain `npm ci` installs every workspace, which pulls in `electron` and
+`electron-builder` and downloads the Electron binary — around 500 MB and a
+lengthy download, to produce five small libraries. That is the right thing when
+working on the encoder and the wrong thing in a consumer's image build.
+
+The workspace list in `ci:libs` is the one in `build:libs`. Adding a library
+means adding it to both, which is why they sit next to each other.
 
 ## Licensing
 
 Licensed per directory rather than repository-wide, because the pieces are not
 all destined for the same audience: the shared libraries are meant to be consumed
-by other applications, while the desktop shell is a distributed product that
-ships a GPL binary alongside it.
+by other applications, while the build scripts are a separate concern.
 
-| | Licence | |
-| --- | --- | --- |
-| `api/`, `app/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `cms-mock/` | Apache-2.0 | each carries its own `LICENSE` |
-| `app-electron/`, `ffmpeg-build/` | GPL-3.0-or-later | each carries its own `LICENSE`; the build scripts also carry an SPDX header |
-| everything else — `docs/`, `test-media/`, the root files | Apache-2.0 | declared by the root `package.json` |
+|                                                                                                                                                    | Licence          |                                                                                                                        |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| every workspace — `api/`, `app/`, `app-electron/`, `encode-config/`, `hls-core/`, `player-core/`, `player-web/`, `player-web-legacy/`, `cms-mock/` | Apache-2.0       | each carries its own `LICENSE`                                                                                         |
+| `ffmpeg-build/`                                                                                                                                    | GPL-3.0-or-later | carries its own `LICENSE`; the build scripts also carry an SPDX header                                                 |
+| everything else — `docs/`, `test-media/`, the root files                                                                                           | Apache-2.0       | the root `LICENSE`                                                                                                     |
+| the bundled FFmpeg and FFprobe                                                                                                                     | LGPL-2.1         | built without `--enable-gpl` and without libx264; `COPYING.LGPLv2.1` and `LICENSE-ffmpeg.txt` ship beside the binaries |
 
-There is deliberately no repository-level `LICENSE` file: with two licences in
-play, a single one at the root would contradict whichever directory it did not
-describe.
+The LGPL build is enforced rather than assumed: `verify-package.mjs` fails the
+package unless the shipped encoder reports LGPL and carries no libx264, and it
+reads `BUILDCONF.txt` for targets the packaging machine cannot execute.
 
-**Why the shell is GPL and the libraries are not.** The app spawns FFmpeg as a
-child process and reads its output; it never links FFmpeg's libraries. On that
-basis [docs/ffmpeg-licensing.md](docs/ffmpeg-licensing.md) — quoting the FSF's own
-FAQ — concludes the bundle is an *aggregate*, and Apache-2.0 code alongside it is
-not a derivative work. So the GPL on `app-electron` and `ffmpeg-build` is a
-**deliberate choice rather than an obligation**: those two are what actually get
-distributed with a GPL encoder inside, and licensing them to match removes any
-question about the combination. The libraries stay Apache-2.0 precisely because
-nothing about FFmpeg reaches them.
-
-`-or-later` rather than `GPL-3.0`: the bare identifier is deprecated in SPDX, and
-"or any later version" is the FSF's own recommendation for new code. It also
-matches the binaries, which are built **GPL v2-or-later** (no `--enable-version3`)
-and whose licence texts ship beside them, as the GPL requires.
-
-One thing this does not settle: `docs/ffmpeg-licensing.md` records that the GPL
-position still needs BCC sign-off, and that remains true. It is a release gate,
-not a code one.
+Substitution is what the LGPL asks in return for shipping this way. The encoder
+resolves in order: `FFMPEG_PATH`, then a directory the user chooses in the app,
+then the bundled binary.

@@ -1,4 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
+import {
+    aacArgs,
+    decodeArgs,
+    previewVideoArgs,
+    USE_YOUR_OWN_FFMPEG,
+    type AccelMode,
+} from './encoder-selection';
+import { acquireEncoderSession } from './encoder-sessions';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join } from 'path';
@@ -742,7 +750,7 @@ export class PreviewService {
         videoMap: string,
         audioMap: string | null,
         rendition: Rendition,
-        accelMode: string,
+        accelMode: AccelMode,
         useGpu: boolean,
         /**
          * Where the copy path asks the demuxer to seek — ahead of `start` by
@@ -782,7 +790,7 @@ export class PreviewService {
                 '-vn'
             );
             if (audioMap) args.push('-map', audioMap);
-            args.push('-c:a', 'aac', '-b:a', '128k', ...TS_OUTPUT);
+            args.push(...aacArgs(), '-b:a', '128k', ...TS_OUTPUT);
             return args;
         }
 
@@ -796,18 +804,7 @@ export class PreviewService {
         // auto_scale_0"), so every segment failed over to CPU. Copy-mode
         // renditions never reach the filter, which is why this only showed on
         // sources that have to be transcoded — HEVC and the like.
-        if (useGpu && accelMode === 'nvidia') {
-            args.push('-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda');
-        } else if (useGpu && accelMode === 'apple') {
-            args.push(
-                '-hwaccel',
-                'videotoolbox',
-                '-hwaccel_output_format',
-                'videotoolbox_vld'
-            );
-        } else if (useGpu && accelMode === 'intel') {
-            args.push('-hwaccel', 'qsv', '-hwaccel_output_format', 'qsv');
-        }
+        args.push(...decodeArgs(accelMode, 'preview', useGpu));
 
         if (rendition.canCopy) {
             // The demuxer lands on the largest keyframe at or before the seek
@@ -832,7 +829,7 @@ export class PreviewService {
             );
             if (audioMap) args.push('-map', audioMap.replace(/^0:/, '1:'));
             args.push('-c:v', 'copy', '-to', String(start + segDur));
-            if (audioMap) args.push('-c:a', 'aac', '-b:a', '128k');
+            if (audioMap) args.push(...aacArgs(), '-b:a', '128k');
             args.push(...TS_OUTPUT);
             return args;
         }
@@ -849,54 +846,11 @@ export class PreviewService {
         );
         if (audioMap) args.push('-map', audioMap);
 
-        if (useGpu && accelMode === 'nvidia') {
-            args.push('-c:v', 'h264_nvenc', '-preset', 'p1');
-            if (rendition.scaleFilter) {
-                args.push('-vf', `scale_cuda=${rendition.scaleFilter}`);
-            }
-        } else if (useGpu && accelMode === 'intel') {
-            // veryfast for the same reason NVENC gets p1 here: a preview segment
-            // is generated on demand while someone waits for it.
-            args.push('-c:v', 'h264_qsv', '-preset', 'veryfast');
-            if (rendition.scaleFilter) {
-                const [w, h] = rendition.scaleFilter.split(':');
-                args.push('-vf', `vpp_qsv=w=${w}:h=${h}`);
-            }
-        } else if (useGpu && accelMode === 'apple') {
-            args.push(
-                '-c:v',
-                'h264_videotoolbox',
-                '-allow_sw',
-                '1',
-                '-realtime',
-                '0',
-                '-b:v',
-                '1500k'
-            );
-            if (rendition.scaleFilter) {
-                args.push(
-                    '-vf',
-                    `scale_vt=w=${rendition.scaleFilter.split(':')[0]}:h=-2`
-                );
-            }
-        } else {
-            // CPU fallback
-            args.push(
-                '-c:v',
-                'libx264',
-                '-preset',
-                'ultrafast',
-                '-crf',
-                '28',
-                '-tune',
-                'zerolatency'
-            );
-            if (rendition.scaleFilter) {
-                args.push('-vf', `scale=${rendition.scaleFilter}`);
-            }
-        }
+        args.push(
+            ...previewVideoArgs(accelMode, useGpu, rendition.scaleFilter)
+        );
 
-        if (audioMap) args.push('-c:a', 'aac', '-b:a', '128k');
+        if (audioMap) args.push(...aacArgs(), '-b:a', '128k');
         args.push(...TS_OUTPUT);
 
         return args;
@@ -927,7 +881,10 @@ export class PreviewService {
 
         const accelMode = this.ffmpegService.getAccelMode();
         const useGpu =
-            !rendition.canCopy && !rendition.audioOnly && accelMode !== 'cpu';
+            !rendition.canCopy &&
+            !rendition.audioOnly &&
+            accelMode !== 'cpu' &&
+            accelMode !== 'none';
 
         this.logger.debug(
             `Segment r${renditionIndex}/s${segmentIndex} (${useGpu ? accelMode : rendition.canCopy ? 'copy' : 'cpu'})`
@@ -952,28 +909,32 @@ export class PreviewService {
                 encoding: 'buffer' as BufferEncoding,
             };
 
-            let result: { stdout: any };
-            try {
-                result = await execFileAsync(ffmpegBin(), args, opts);
-            } catch (gpuErr: any) {
-                if (!useGpu) throw gpuErr;
-                // GPU failed (e.g. NVENC session limit) — retry with CPU
-                this.logger.warn(
-                    `GPU encode failed for r${renditionIndex}/s${segmentIndex}, falling back to CPU: ${gpuErr.message}`
+            // No CPU retry: this FFmpeg has no software H.264 encoder to retry
+            // with, so one would fail on a missing encoder and report that
+            // instead of the hardware error that actually stopped the preview.
+            // The session limit that motivated the retry is now kept away by the
+            // shared session budget above.
+            const result: { stdout: any } = await execFileAsync(
+                ffmpegBin(),
+                args,
+                opts
+            ).catch((err: any) => {
+                const via = useGpu
+                    ? accelMode
+                    : rendition.canCopy
+                      ? 'stream copy'
+                      : 'cpu';
+                // The substitution hint belongs to encoder failures: a copied
+                // segment never opened an encoder, so a different FFmpeg is not
+                // the remedy for whatever stopped it.
+                const hint = rendition.canCopy
+                    ? ''
+                    : `\n\n${USE_YOUR_OWN_FFMPEG}`;
+                throw new Error(
+                    `Preview segment r${renditionIndex}/s${segmentIndex} failed on ` +
+                        `${via}: ${err.message}${hint}`
                 );
-                const cpuArgs = this.buildSegmentArgs(
-                    state.filePath,
-                    start,
-                    segDur,
-                    videoMap,
-                    audioMap,
-                    rendition,
-                    'cpu',
-                    false,
-                    copySeekStart
-                );
-                result = await execFileAsync(ffmpegBin(), cpuArgs, opts);
-            }
+            });
 
             // Write segment data ourselves — guaranteed flushed via writeFile
             await writeFile(outputPath, result.stdout);
@@ -982,7 +943,21 @@ export class PreviewService {
         // Wait for a concurrency slot
         await this.acquireSlot();
 
+        // Two separate limits. The slot above bounds ffmpeg *processes*, which
+        // is about this service's own load. This one bounds hardware encode
+        // *sessions*, whose cap belongs to the graphics driver and is shared
+        // with the ladder — previews staying under three on their own is no
+        // help while a six-rung ladder is running beside them.
+        //
+        // Only a transcoding segment opens an encoder. Copy mode hands bytes
+        // to the muxer and takes no session.
+        let releaseEncoderSession: () => void = () => {};
+
         try {
+            if (!rendition.canCopy) {
+                releaseEncoderSession = await acquireEncoderSession();
+            }
+
             if (!rendition.canCopy || !state.keyframeStep) {
                 await runOnce(start);
                 return outputPath;
@@ -1068,6 +1043,7 @@ export class PreviewService {
             );
             throw e;
         } finally {
+            releaseEncoderSession();
             this.releaseSlot();
         }
 

@@ -72,6 +72,40 @@ function setup(
 }
 
 describe('PlayerController — load', () => {
+    it('fails into state, never rejects, when no blobs can be served', async () => {
+        // jsdom and some SSR runtimes have no Blob/createObjectURL, so with no
+        // serveStrategy supplied the default construction throws — synchronously,
+        // and a throw above load()'s try block escapes it. Hosts call load()
+        // fire-and-forget because the contract is that failures surface through
+        // state; a rejecting load is an unhandled rejection in every one of them.
+        // Node has createObjectURL, so the environment is degraded by hand —
+        // this is jsdom's actual shape, where it is absent.
+        const original = URL.createObjectURL;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (URL as any).createObjectURL = undefined;
+        try {
+            const adapter = new FakeAdapter();
+            const fake = makeFetch(simpleRoutes);
+            const controller = new PlayerController(adapter, {
+                fetchImpl: fake.fetchImpl,
+                // no serveStrategy — the default cannot be built here
+                prefetch: { enabled: false },
+            });
+            const errors: PlayerError[] = [];
+            controller.on('error', (error) => errors.push(error));
+
+            await expect(
+                controller.load({ masterUrl: MASTER_URL }),
+            ).resolves.toBeUndefined();
+
+            expect(controller.getState().lifecycle).toBe('error');
+            expect(errors).toHaveLength(1);
+            controller.destroy();
+        } finally {
+            URL.createObjectURL = original;
+        }
+    });
+
     it('serves a munged master even for an unencrypted, un-narrowed source', async () => {
         const { adapter, controller, serveStrategy } = setup(simpleRoutes);
         await controller.load({ masterUrl: MASTER_URL });
@@ -899,7 +933,7 @@ describe('PlayerController — scrub thumbnails', () => {
         expect(errors).toEqual([]);
     });
 
-    it('does not carry one source\'s frames into the next', async () => {
+    it("does not carry one source's frames into the next", async () => {
         /*
          * The failure this prevents: load a video with sprites, then load one
          * without, and the scrubber previews frames from the first video —
