@@ -819,3 +819,83 @@ describe('SessionService — events', () => {
         });
     });
 });
+
+/**
+ * The app reclaims space on its own, but none of that survives being dragged to
+ * the Trash — on macOS the only uninstall there is. This is the user's own way
+ * to get the disk back (#228).
+ */
+describe('SessionService — clearing working files on request', () => {
+    function seedWithBytes(
+        id: string,
+        status: Session['status'],
+        bytes: number
+    ) {
+        seedOnDisk({ id, status });
+        writeFileSync(join(workDir, id, 'source.mp4'), 'x'.repeat(bytes));
+    }
+
+    it('reports what it would free without freeing it', () => {
+        seedWithBytes('done', 'completed', 2048);
+        const service = build();
+
+        const described = service.describeReclaimable();
+
+        expect(described.sessions).toBe(1);
+        expect(described.bytes).toBeGreaterThanOrEqual(2048);
+        expect(existsSync(join(workDir, 'done'))).toBe(true);
+    });
+
+    it('removes idle sessions and forgets them', () => {
+        // Not a terminal pair: boot already discards those, so restoring first
+        // would leave nothing for this to prove.
+        seedWithBytes('idle', 'uploaded', 512);
+        seedWithBytes('fresh', 'created', 512);
+        const service = build();
+        service.onModuleInit();
+
+        const freed = service.reclaim();
+
+        expect(freed.sessions).toBe(2);
+        expect(existsSync(join(workDir, 'idle'))).toBe(false);
+        expect(existsSync(join(workDir, 'fresh'))).toBe(false);
+        expect(service.get('idle')).toBeUndefined();
+    });
+
+    it.each([
+        'queued',
+        'encoding',
+        'encrypting',
+        'uploading_to_s3',
+        'uploading',
+    ] as const)('leaves a session that is %s alone and counts it', (status) => {
+        // A menu item that reads like housekeeping must not cancel an encode.
+        seedWithBytes('busy', status, 512);
+        const service = build();
+        service.onModuleInit();
+        // restore() fails in-flight sessions on boot, so put it back mid-flight.
+        service.updateStatus('busy', status);
+
+        const freed = service.reclaim();
+
+        expect(freed.sessions).toBe(0);
+        expect(freed.busy).toBe(1);
+        expect(existsSync(join(workDir, 'busy'))).toBe(true);
+    });
+
+    it('takes directories that hold no session record at all', () => {
+        mkdirSync(join(workDir, 'orphan'), { recursive: true });
+        writeFileSync(join(workDir, 'orphan', 'source.mp4'), 'x'.repeat(256));
+
+        const freed = build().reclaim();
+
+        expect(freed.sessions).toBe(1);
+        expect(existsSync(join(workDir, 'orphan'))).toBe(false);
+    });
+
+    it('is a no-op on an empty workspace', () => {
+        const freed = build().reclaim();
+
+        expect(freed).toEqual({ sessions: 0, bytes: 0, busy: 0 });
+    });
+});

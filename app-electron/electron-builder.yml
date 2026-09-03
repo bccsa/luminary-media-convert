@@ -169,3 +169,8 @@ nsis:
     perMachine: false
     allowToChangeInstallationDirectory: true
     shortcutName: Luminary Media Convert
+    # Uploaded source video lives under appData and can run to gigabytes; leaving
+    # it behind on uninstall is both wasted disk and someone's media still on the
+    # machine. electron-builder guards this with `${ifNot} ${isUpdated}`, so an
+    # in-place update keeps settings and trusted origins (#228).
+    deleteAppDataOnUninstall: true

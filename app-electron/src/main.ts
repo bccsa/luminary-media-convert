@@ -427,6 +427,72 @@ async function chooseFfmpegDirectory(): Promise<void> {
  * role: replacing the default menu without them would take copy, paste and the
  * window controls with it.
  */
+/** Bytes as something a person can weigh a decision against. */
+function formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit++;
+    }
+    return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+/**
+ * Clear the sessions on disk, on the user's say-so.
+ *
+ * The app already reclaims space on its own — finished sessions at boot, idle
+ * ones hourly — but none of that survives the app being dragged to the Trash,
+ * which on macOS is the only uninstall there is. This is how someone gets their
+ * disk back without hunting through Application Support (#228).
+ *
+ * Anything mid-encode is left alone and said so, rather than being cancelled by
+ * a menu item that reads like housekeeping.
+ */
+async function clearWorkingFiles(): Promise<void> {
+    if (!server) return;
+
+    return queueDialog(async () => {
+        const { sessions, bytes, busy } = server!.describeReclaimable();
+        const busyNote = busy
+            ? `\n\n${busy} session${busy === 1 ? '' : 's'} still working will be kept.`
+            : '';
+
+        if (!sessions) {
+            await dialog.showMessageBox({
+                type: 'info',
+                message: 'Nothing to clear',
+                detail: `There are no working files to remove.${busyNote}`,
+                buttons: ['OK'],
+            });
+            return;
+        }
+
+        const { response } = await dialog.showMessageBox({
+            type: 'warning',
+            message: `Clear ${sessions} working file set${sessions === 1 ? '' : 's'}?`,
+            detail:
+                `This frees about ${formatSize(bytes)}. It removes the videos you ` +
+                `uploaded for encoding and any output still on this machine. ` +
+                `Media already published to your storage is not affected.${busyNote}`,
+            buttons: ['Clear', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+        });
+        if (response !== 0) return;
+
+        const freed = server!.reclaimWorkspace();
+        await dialog.showMessageBox({
+            type: 'info',
+            message: 'Working files cleared',
+            detail: `Freed about ${formatSize(freed.bytes)}.${busyNote}`,
+            buttons: ['OK'],
+        });
+    });
+}
+
 function buildMenu(): void {
     const isMac = process.platform === 'darwin';
     // No ellipsis. Apple's convention reserves it for an item that needs more
@@ -447,6 +513,14 @@ function buildMenu(): void {
         },
     ];
 
+    // Ellipsis: it asks before it acts.
+    const maintenanceItems: Electron.MenuItemConstructorOptions[] = [
+        {
+            label: 'Clear Working Files…',
+            click: () => void clearWorkingFiles(),
+        },
+    ];
+
     Menu.setApplicationMenu(
         Menu.buildFromTemplate([
             ...(isMac
@@ -457,6 +531,8 @@ function buildMenu(): void {
                               { role: 'about' },
                               { type: 'separator' },
                               ...ffmpegItems,
+                              { type: 'separator' },
+                              ...maintenanceItems,
                               { type: 'separator' },
                               { role: 'services' },
                               { type: 'separator' },
@@ -481,6 +557,8 @@ function buildMenu(): void {
                           licences,
                           { type: 'separator' },
                           ...ffmpegItems,
+                          { type: 'separator' },
+                          ...maintenanceItems,
                           { type: 'separator' },
                           { role: 'about' },
                       ],
