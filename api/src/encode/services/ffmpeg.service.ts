@@ -884,7 +884,11 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         // input can only be consumed once, so a source track feeding several
         // groups is fanned out with asplit. Copy-mode audio cannot pass a
         // filter — the controller refuses copyStream with trimSegments.
-        if (trimming) {
+        //
+        // A wave that carries no audio maps none, so there is nothing for the
+        // graph to feed: ffmpeg is given no -filter_complex at all rather than
+        // an empty one, which it refuses outright.
+        if (trimming && audioGroups.length > 0) {
             const groupsByTrack = new Map<number, number[]>();
             audioGroups.forEach((group, i) => {
                 const track = group.sourceTrackIndex;
@@ -1044,7 +1048,8 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         args.push('-progress', 'pipe:2', '-stats_period', '1');
         args.push('-vn');
 
-        if (trimming) {
+        // See buildVideoArgs: no groups, no maps, so no graph to give them.
+        if (trimming && audioGroups.length > 0) {
             const groupsByTrack = new Map<number, number[]>();
             audioGroups.forEach((group, i) => {
                 const track = group.sourceTrackIndex;
