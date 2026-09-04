@@ -1,5 +1,7 @@
 import { type MockInstance } from 'vitest';
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
+import { planLadderWaves } from './ladder-waves.js';
+import { MAX_HARDWARE_SESSIONS } from './encoder-sessions.js';
 import {
     mkdtempSync,
     rmSync,
@@ -1268,6 +1270,89 @@ describe('FfmpegService', () => {
             expect(args).toContain('-i');
             expect(args).toContain('/tmp/input.mp4');
             expect(args).not.toContain('concat');
+        });
+
+        /*
+         * A trimmed ladder longer than the session cap runs in waves, and audio
+         * rides with the first one. The later waves map no audio, so the audio
+         * filter graph has nothing to feed — and built from no groups it came
+         * out empty, which ffmpeg refuses with "No filters specified in the
+         * graph description" (exit 234). Every trimmed encode of more than
+         * MAX_HARDWARE_SESSIONS re-encoded rungs died on its second wave.
+         */
+        describe('a wave that carries no audio', () => {
+            const ladder = (): EncodeConfigDto => ({
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [1080, 720, 540, 480, 360, 240].map((h) => ({
+                    width: Math.round((h * 16) / 9),
+                    height: h,
+                    videoBitrateKbps: h * 3,
+                    copyStream: false,
+                    audioGroupId: 'hd',
+                })),
+                audioGroups: [
+                    {
+                        id: 'hd',
+                        audioBitrateKbps: 128,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                ],
+                trimSegments: [{ inSec: 10, outSec: 30 }],
+            });
+
+            const argsForWave = async (
+                encodeConfig: EncodeConfigDto,
+                waveIndex: number
+            ): Promise<string[]> => {
+                const waves = planLadderWaves(
+                    encodeConfig.videoRenditions!,
+                    MAX_HARDWARE_SESSIONS
+                );
+                // The planner has to have split it, or the case under test is
+                // not the case being run.
+                expect(waves.length).toBeGreaterThan(1);
+                return (service as any).buildVideoArgs(
+                    {
+                        inputPath: '/tmp/input.mp4',
+                        outputDir: tmpDir,
+                        encodeConfig,
+                    },
+                    0,
+                    waves[waveIndex]
+                );
+            };
+
+            it('is given no empty argument, which is what ffmpeg refused', async () => {
+                const args = await argsForWave(ladder(), 1);
+
+                expect(args).not.toContain('');
+            });
+
+            it('gets the video graph and no audio graph', async () => {
+                const args = await argsForWave(ladder(), 1);
+
+                const graphs = args.filter((a) => a === '-filter_complex');
+                expect(graphs).toHaveLength(1);
+
+                const graph = args[args.indexOf('-filter_complex') + 1];
+                expect(graph).toContain('select=concatdec_select');
+                expect(graph).toContain('split=');
+                expect(graph).not.toContain('aselect');
+                expect(args.join(' ')).not.toContain('[aout');
+            });
+
+            it('leaves the first wave, which does carry the audio, alone', async () => {
+                const args = await argsForWave(ladder(), 0);
+
+                expect(
+                    args.filter((a) => a === '-filter_complex')
+                ).toHaveLength(2);
+                expect(args.join(' ')).toContain('aselect=concatdec_select');
+                expect(args).toContain('[aout0]');
+            });
         });
     });
 
