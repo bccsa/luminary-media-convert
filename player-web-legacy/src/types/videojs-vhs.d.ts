@@ -31,6 +31,9 @@ export interface VhsXhrResponse {
     aborted?: boolean;
     timedout?: boolean;
     abort?: () => void;
+    /** VHS attaches a `loadend` listener to every request it is tracking. */
+    addEventListener?: (type: string, listener: unknown) => void;
+    removeEventListener?: (type: string, listener: unknown) => void;
     [key: string]: unknown;
 }
 

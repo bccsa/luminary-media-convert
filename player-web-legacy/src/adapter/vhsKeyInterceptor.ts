@@ -109,8 +109,14 @@ export function installMemoryKeyXhr(
             // A standalone 16-byte ArrayBuffer: VHS keeps the buffer and checks
             // its length exactly, so a view onto a larger one would be rejected.
             response: hasKey ? key.slice().buffer : new ArrayBuffer(0),
-            // mediaSegmentRequest files whatever comes back in its abort list.
+            // mediaSegmentRequest files whatever comes back in its abort list, then
+            // attaches a `loadend` listener to every entry in it. Both have to exist
+            // or the segment load throws before a single byte is decrypted. Nothing
+            // depends on the event arriving: VHS's handler only reads `aborted`, and
+            // this request is answered from memory and never aborted.
             abort: noop,
+            addEventListener: noop,
+            removeEventListener: noop,
         };
         const error = hasKey
             ? null
