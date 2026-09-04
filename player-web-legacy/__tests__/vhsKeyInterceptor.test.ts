@@ -77,6 +77,38 @@ describe('installMemoryKeyXhr', () => {
         expect(callback.mock.calls[0][0]).toBeInstanceOf(Error);
     });
 
+    it('survives what VHS actually does with the object it gets back', async () => {
+        /*
+         * media-segment-request.js files every request in an `activeXhrs` array
+         * and then calls `addEventListener('loadend', ...)` on each one, and
+         * `abortAll` calls `abort()`. A plain response object without those threw
+         * "addEventListener is not a function" and killed the segment load, so
+         * encrypted playback failed with a black frame.
+         */
+        const player = fakePlayerWithVhs();
+        installMemoryKeyXhr(player, () => KEY);
+
+        const request: any = player._vhs.xhr({ uri: LUMINARY_KEY_PLACEHOLDER_URI }, vi.fn());
+        await Promise.resolve();
+
+        const activeXhrs = [request];
+        expect(() =>
+            activeXhrs.forEach((xhr) => xhr.addEventListener('loadend', vi.fn())),
+        ).not.toThrow();
+        expect(() => activeXhrs.forEach((xhr) => xhr.abort())).not.toThrow();
+        expect(() => request.removeEventListener('loadend', vi.fn())).not.toThrow();
+    });
+
+    it('reports itself as not aborted, which is what the loadend handler reads', () => {
+        // VHS's handleLoadEnd calls abortFn() when a request says it was aborted.
+        const player = fakePlayerWithVhs();
+        installMemoryKeyXhr(player, () => KEY);
+
+        const request: any = player._vhs.xhr({ uri: LUMINARY_KEY_PLACEHOLDER_URI }, vi.fn());
+
+        expect(request.aborted).toBe(false);
+    });
+
     it('passes every other request straight through', () => {
         const original = vi.fn(() => 'passed-through');
         const player = fakePlayerWithVhs(original);
