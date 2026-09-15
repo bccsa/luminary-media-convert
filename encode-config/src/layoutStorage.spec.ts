@@ -224,17 +224,52 @@ describe('getStoredConfig / saveConfig', () => {
         expect(() => saveConfig('k', config)).not.toThrow();
     });
 
-    it('cannot save over a corrupted store — pinned as it behaves, not as it should', () => {
-        // `saveConfig` parses the existing store inside its own try, so a
-        // corrupted entry throws before the write and is swallowed with it.
-        // The corruption is therefore permanent for that browser: every later
-        // save silently does nothing and the user never gets a remembered
-        // ladder again. Pre-existing, low severity (the cost is a suggestion,
-        // not an encode) and deliberately left alone by the square-pixel work
-        // — this test exists so the behaviour is visible rather than assumed.
+    it('saves over a corrupted store instead of being stopped by it', () => {
+        // The defect this replaced: both accessors parsed inside their own
+        // single try, so a corrupted entry threw before the write and was
+        // swallowed with it. The corruption was then permanent for that
+        // browser — every later save silently did nothing.
         localStorage.setItem('luminary_encode_configs', 'garbage');
+
         saveConfig('k', config);
-        expect(getStoredConfig('k')).toBeNull();
-        expect(localStorage.getItem('luminary_encode_configs')).toBe('garbage');
+
+        expect(getStoredConfig('k')).toEqual(config);
+        expect(localStorage.getItem('luminary_encode_configs')).not.toBe(
+            'garbage'
+        );
+    });
+
+    it('recovers from a store that parses but is not an object', () => {
+        // `typeof null === 'object'` and an array indexes without complaining,
+        // so neither can be left to reach the caller as an empty-looking store.
+        for (const wrong of ['null', '[]', '"a string"', '42']) {
+            localStorage.setItem('luminary_encode_configs', wrong);
+            expect(getStoredConfig('k')).toBeNull();
+
+            saveConfig('k', config);
+            expect(getStoredConfig('k')).toEqual(config);
+            localStorage.clear();
+        }
+    });
+
+    it('keeps the other entries when it writes over a readable store', () => {
+        // Replacing the blob is only licensed when it cannot be read. A store
+        // that parses must not lose the layouts it already holds.
+        saveConfig('first', config);
+        saveConfig('second', config);
+
+        expect(getStoredConfig('first')).toEqual(config);
+        expect(getStoredConfig('second')).toEqual(config);
+    });
+
+    it('still gives up quietly when the write itself is refused', () => {
+        // The corrupted-store path is now recoverable; a refused write is not,
+        // and must stay silent rather than surfacing at the form.
+        localStorage.setItem('luminary_encode_configs', 'garbage');
+        vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+            throw new Error('QuotaExceededError');
+        });
+
+        expect(() => saveConfig('k', config)).not.toThrow();
     });
 });
