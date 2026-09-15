@@ -146,6 +146,36 @@ describe('ladderFor', () => {
         expect(rungs(track({ width: 100, height: 100 }))).toEqual(['100x100']);
     });
 
+    it('gives that fallback rung the source bitrate, or a floor when it has none', () => {
+        // Below every table rung there is nothing to interpolate against, so
+        // the source's own bitrate is the only number available — and a source
+        // that did not report one still has to get a budget.
+        expect(
+            ladderFor(track({ width: 100, height: 100, bitrateKbps: 750 }))[0]
+                .bitrateKbps
+        ).toBe(750);
+        expect(
+            ladderFor(track({ width: 100, height: 100, bitrateKbps: 0 }))[0]
+                .bitrateKbps
+        ).toBe(1000);
+    });
+
+    it('keeps the fallback rung even, and unsquished', () => {
+        // The one path that does not go through `aspectWidthForHeight`, so its
+        // rounding is its own and worth pinning separately.
+        const [rung] = ladderFor(
+            track({
+                width: 101,
+                height: 99,
+                displayWidth: 135,
+                displayHeight: 99,
+            })
+        );
+        expect(rung.width % 2).toBe(0);
+        expect(rung.height % 2).toBe(0);
+        expect(`${rung.width}x${rung.height}`).toBe('136x100');
+    });
+
     it('prices the extra rung above the standard rung beneath it', () => {
         // Linear in pixel count against the rung below *at this source's shape*.
         // Measured against the table's own 16:9 width instead, a 4:3 720x540

@@ -318,3 +318,126 @@ describe('EncodeConfigForm non-square pixels', () => {
         expect(copyBoxes(wrapper)[0].attributes('disabled')).toBeUndefined();
     });
 });
+
+/**
+ * Clearing the last cut takes the quick path away with it, so every Copy the
+ * relaxed rule allowed is re-examined under the full one. A rendition that
+ * survives that is re-pinned to its source track's *coded* dimensions — which
+ * is right, because a copy publishes the source's own bytes, and is only ever
+ * reached for a track whose coded and display sizes agree.
+ */
+describe('EncodeConfigForm copy dimensions when a trim is cleared', () => {
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
+    function alignedSquareProbe(): ProbeResult {
+        return {
+            format: { duration: 120, bitrateKbps: 8000, formatName: 'mov,mp4' },
+            videoTracks: [
+                videoTrack({ index: 0, startTime: 0, name: 'Wide' }),
+                videoTrack({
+                    index: 1,
+                    startTime: 0,
+                    width: 1280,
+                    height: 720,
+                    bitrateKbps: 2500,
+                    name: 'Close',
+                }),
+            ],
+            audioTracks: [
+                {
+                    index: 0,
+                    codec: 'aac',
+                    bitrateKbps: 128,
+                    channels: 2,
+                    sampleRate: 48000,
+                    startTime: 0,
+                },
+            ],
+        };
+    }
+
+    function dimensions(wrapper: ReturnType<typeof mount>): string[] {
+        const config = (
+            wrapper.vm as unknown as {
+                buildEncodeConfig: () => {
+                    videoRenditions?: { width: number; height: number }[];
+                } | null;
+            }
+        ).buildEncodeConfig();
+        return (config?.videoRenditions ?? []).map(
+            (r) => `${r.width}x${r.height}`
+        );
+    }
+
+    it('re-pins a surviving copy to its source track', async () => {
+        const wrapper = mount(EncodeConfigForm, {
+            props: {
+                probeResult: alignedSquareProbe(),
+                byteRange: false,
+                trimActive: true,
+            },
+        });
+
+        expect(copyFlags(wrapper)).toEqual([true, true]);
+
+        await wrapper.setProps({ trimActive: false });
+
+        // Streams start together, so the full rule allows these too: both stay
+        // ticked and both carry their own track's dimensions.
+        expect(copyFlags(wrapper)).toEqual([true, true]);
+        expect(dimensions(wrapper)).toEqual(['1920x1080', '1280x720']);
+    });
+
+    it('un-ticks a copy the full rule refuses instead of re-pinning it', async () => {
+        // The dead end this guard exists for: a misaligned source opens
+        // un-ticked (reanalyze applies the full rule whatever the trim state),
+        // but under a trim the box is enabled and the user may tick it. Clear
+        // the cut and that rendition would sit greyed out and still ticked,
+        // with no way back.
+        const wrapper = mount(EncodeConfigForm, {
+            props: {
+                probeResult: misalignedProbe(),
+                byteRange: false,
+                trimActive: true,
+            },
+        });
+
+        const box = copyBoxes(wrapper)[0];
+        expect(box.attributes('disabled')).toBeUndefined();
+        await box.setValue(true);
+        expect(copyFlags(wrapper)[0]).toBe(true);
+
+        await wrapper.setProps({ trimActive: false });
+
+        // The alignment rule comes back and takes it away again.
+        expect(copyFlags(wrapper)[0]).toBe(false);
+        expect(copyBoxes(wrapper)[0].attributes('disabled')).toBeDefined();
+    });
+
+    it('never re-pins an anamorphic track, because it never survives', async () => {
+        // The guard above the re-pin catches it first, which is what makes the
+        // coded dimensions on that line safe to write.
+        const probe = alignedSquareProbe();
+        probe.videoTracks = [
+            videoTrack({
+                index: 0,
+                startTime: 0,
+                width: 720,
+                height: 576,
+                displayWidth: 1024,
+                displayHeight: 576,
+                bitrateKbps: 4000,
+            }),
+        ];
+
+        const wrapper = mount(EncodeConfigForm, {
+            props: { probeResult: probe, byteRange: false, trimActive: true },
+        });
+        await wrapper.setProps({ trimActive: false });
+
+        expect(copyFlags(wrapper).some(Boolean)).toBe(false);
+        expect(dimensions(wrapper)[0]).toBe('1024x576');
+    });
+});

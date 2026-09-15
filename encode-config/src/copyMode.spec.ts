@@ -207,3 +207,117 @@ describe('non-square pixels', () => {
         expect(quickTrimBlockedReason(legacy, 6)).toBeNull();
     });
 });
+
+/**
+ * The edges of the two rules that were here before the shape rule joined them.
+ * Covered now because both feed the same greyed tick box, and a wrong answer at
+ * an edge reads to the user exactly like a wrong answer anywhere else.
+ */
+describe('alignment and cadence edges', () => {
+    it('reports no alignment target for a source with one stream', () => {
+        // Nothing to be misaligned against: a lone stream defines the timeline.
+        expect(
+            latestStreamStart({
+                format: { duration: 60, bitrateKbps: 6000, formatName: 'mov' },
+                videoTracks: [goodCadenceTrack({ startTime: 5 })],
+                audioTracks: [],
+            })
+        ).toBe(0);
+    });
+
+    it('reports no target when every stream already agrees', () => {
+        // Inside ALIGNMENT_TOLERANCE_SECONDS the source is aligned as far as a
+        // player is concerned, so nothing is seeked and every copy is allowed.
+        expect(
+            latestStreamStart({
+                format: { duration: 60, bitrateKbps: 6000, formatName: 'mov' },
+                videoTracks: [
+                    goodCadenceTrack({ index: 0, startTime: 0 }),
+                    goodCadenceTrack({ index: 1, startTime: 0.01 }),
+                ],
+                audioTracks: [],
+            })
+        ).toBe(0);
+    });
+
+    it('ignores streams that do not say where they start', () => {
+        expect(
+            latestStreamStart({
+                format: { duration: 60, bitrateKbps: 6000, formatName: 'mov' },
+                videoTracks: [
+                    goodCadenceTrack({ index: 0, startTime: undefined }),
+                    goodCadenceTrack({ index: 1, startTime: 0.8 }),
+                ],
+                audioTracks: [],
+            })
+        ).toBe(0);
+    });
+
+    it('tolerates a rounding frame either side of the segment boundary', () => {
+        // 6 s of 29.97 fps is 179.82 frames and divides nothing cleanly. A
+        // remainder of one frame at either end is the rounding, not a mismatch.
+        const ntsc = goodCadenceTrack({
+            frameRate: 29.97,
+            gopFrames: 60,
+            gopSeconds: 2,
+            startTime: 0,
+        });
+        expect(copyModeBlockedReason(ntsc, 0, 6)).toBeNull();
+        expect(quickTrimBlockedReason(ntsc, 6)).toBeNull();
+    });
+
+    it('refuses a track whose frame rate is unusable', () => {
+        const noFps = goodCadenceTrack({ frameRate: 0, startTime: 0 });
+        expect(copyModeBlockedReason(noFps, 0, 6)).toMatch(
+            /keyframe structure could not be determined/
+        );
+    });
+
+    it('refuses a track with no sampled keyframe interval', () => {
+        const noGop = goodCadenceTrack({ gopFrames: 0, startTime: 0 });
+        expect(copyModeBlockedReason(noGop, 0, 6)).toMatch(
+            /keyframe structure could not be determined/
+        );
+    });
+
+    it('refuses the same when the fields are absent rather than zero', () => {
+        // A probe that predates the GOP sampling, or a container that would not
+        // say. Absent has to count against the track exactly as zero does — a
+        // wrong guess here is discovered by a viewer, not by us.
+        const noGop = goodCadenceTrack({ startTime: 0 });
+        delete (noGop as { gopFrames?: number }).gopFrames;
+        expect(copyModeBlockedReason(noGop, 0, 6)).toMatch(
+            /keyframe structure could not be determined/
+        );
+
+        const noFps = goodCadenceTrack({ startTime: 0 });
+        delete (noFps as { frameRate?: number }).frameRate;
+        expect(copyModeBlockedReason(noFps, 0, 6)).toMatch(
+            /keyframe structure could not be determined/
+        );
+    });
+
+    it('derives the interval for the message when the probe did not state it', () => {
+        const noSeconds = goodCadenceTrack({
+            frameRate: 25,
+            gopFrames: 62,
+            gopSeconds: undefined,
+            startTime: 0,
+        });
+        expect(copyModeBlockedReason(noSeconds, 0, 6)).toMatch(
+            /keyframe interval \(2\.48s\) does not fit 6s segments/
+        );
+    });
+
+    it('lets the track being aligned to keep its copy', () => {
+        // It is seeked exactly, so it is the one stream a shared offset cannot
+        // put out of sync.
+        const target = goodCadenceTrack({ startTime: 0.98 });
+        expect(copyModeBlockedReason(target, 0.98, 6)).toBeNull();
+    });
+
+    it('ignores the alignment rule for a track with no start time', () => {
+        const unknown = goodCadenceTrack({ startTime: undefined });
+        expect(copyModeBlockedReason(unknown, 0.98, 6)).toBeNull();
+    });
+});

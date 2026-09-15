@@ -116,6 +116,22 @@ describe('selectStoryboardTrack', () => {
         expect(track).toEqual({ index: 1, width: 256, height: 144 });
     });
 
+    it('falls back to the largest whichever end of the list it sits at', () => {
+        // The reduce keeps its incumbent when the candidate is no bigger, so
+        // the list order must not decide the answer.
+        const first = selectStoryboardTrack([
+            { index: 0, width: 256, height: 144 },
+            { index: 1, width: 160, height: 90 },
+        ]);
+        const last = selectStoryboardTrack([
+            { index: 1, width: 160, height: 90 },
+            { index: 0, width: 256, height: 144 },
+        ]);
+
+        expect(first).toEqual({ index: 0, width: 256, height: 144 });
+        expect(last).toEqual(first);
+    });
+
     it('ignores tracks with no usable dimensions', () => {
         const track = selectStoryboardTrack([
             { index: 0, width: 0, height: 0 },
