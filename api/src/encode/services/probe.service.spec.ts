@@ -1227,6 +1227,31 @@ describe('ProbeService', () => {
             });
         });
 
+        it('survives a video stream that reports no dimensions at all', async () => {
+            // Nothing to correct and nothing to divide by. The track still has
+            // to come back — `selectStoryboardTrack` and the ladder both filter
+            // on dimensions themselves and would rather see a zero than a NaN.
+            mockExecFileResult(
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            avg_frame_rate: '25/1',
+                            sample_aspect_ratio: '64:45',
+                        },
+                    ],
+                })
+            );
+
+            const track = (await service.probe('/tmp/test.mp4')).videoTracks[0];
+            expect(track.width).toBe(0);
+            expect(track.height).toBe(0);
+            expect(track.displayWidth).toBe(0);
+            expect(track.displayHeight).toBe(0);
+        });
+
         it('keeps both dimensions even for the encoders', async () => {
             // 4:3 on a 705-wide frame is 940 exactly; 703 at 4:3 is 937.33,
             // which yuv420p cannot take.

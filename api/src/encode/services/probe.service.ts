@@ -195,6 +195,12 @@ function displayDimensions(
     const [num, den] = (sar ?? '').split(':').map(Number);
     if (!(num > 0) || !(den > 0) || num === den)
         return { width: codedWidth, height: codedHeight };
+    // A stream that reports no dimensions has no shape to correct, and the even
+    // floor below would invent a 2x2 picture for it rather than leave the
+    // absence visible. Nothing downstream wants a fabricated size: every reader
+    // already filters on a positive dimension.
+    if (!(codedWidth > 0) || !(codedHeight > 0))
+        return { width: codedWidth, height: codedHeight };
 
     const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
     return num > den
