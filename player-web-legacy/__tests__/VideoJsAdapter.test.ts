@@ -162,12 +162,16 @@ describe('VideoJsAdapter — the contract player-core relies on', () => {
 
 describe('VideoJsAdapter — recovery ladder', () => {
     const source = { url: 'blob:master', isBlob: true, recovery: DEFAULT_RECOVERY_POLICY };
+    // Each adapter listens on the shared `document`; one left behind would
+    // answer the next test's visibility changes.
+    const adapters: VideoJsAdapter[] = [];
 
     function setup() {
         vi.useFakeTimers();
         vi.stubGlobal('MediaSource', class {});
-        const p = fakePlayer({ paused: () => true });
+        const p = fakePlayer();
         const a = new VideoJsAdapter(p);
+        adapters.push(a);
         const errors: unknown[] = [];
         const reloads: number[] = [];
         a.on('error', (e) => errors.push(e));
@@ -181,6 +185,7 @@ describe('VideoJsAdapter — recovery ladder', () => {
     }
 
     afterEach(() => {
+        for (const a of adapters.splice(0)) a.destroy();
         vi.useRealTimers();
         vi.unstubAllGlobals();
     });
