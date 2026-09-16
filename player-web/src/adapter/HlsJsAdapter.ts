@@ -151,6 +151,8 @@ export class HlsJsAdapter implements PlayerAdapter {
     private readonly video: HTMLVideoElement;
     private readonly hlsConfig: Partial<HlsConfig>;
     private hls: Hls | null = null;
+    /** The source currently attached — what {@link reattach} re-prepares against. */
+    private lastSource: AdapterSource | null = null;
     private prefetcher: ChunkPrefetcher | null = null;
     private keyBytes: Uint8Array | null = null;
     private trackEls: HTMLTrackElement[] = [];
@@ -168,6 +170,7 @@ export class HlsJsAdapter implements PlayerAdapter {
 
     async loadSource(src: AdapterSource): Promise<void> {
         this.teardownEngine();
+        this.lastSource = src;
         this.keyBytes = src.keyHex ? keyBytes(src.keyHex) : null;
 
         if (!isHlsEngineSupported()) {
@@ -220,6 +223,30 @@ export class HlsJsAdapter implements PlayerAdapter {
         };
         this.emit('error', payload);
     };
+
+    /**
+     * Rung 1 of the recovery obligation on `PlayerAdapter`: re-prepare the
+     * engine against the source it already holds, with no munge and no wrapper
+     * involvement. hls.js re-parses the manifest and rebuilds its buffers, and
+     * the custom key loader is part of the instance, so nothing needs re-arming.
+     *
+     * Life support, like the rest of this package: it satisfies the contract so
+     * the workspace builds and the encoder app keeps working, and stops there.
+     * The ladder that would call it repeatedly, with backoff, lives in
+     * `player-web-legacy` — see `docs/suspension-safe-playback.md`.
+     */
+    async reattach(): Promise<void> {
+        const src = this.lastSource;
+        if (this.destroyed || !src) return;
+        if (!this.hls) {
+            // No MSE: the platform player holds the URL directly.
+            this.video.src = src.url;
+            return;
+        }
+        const seekTo = this.getCurrentTime();
+        this.hls.loadSource(src.url);
+        if (seekTo > 0) this.video.currentTime = seekTo;
+    }
 
     // -- playback -----------------------------------------------------------
 
@@ -463,6 +490,7 @@ export class HlsJsAdapter implements PlayerAdapter {
             this.hls = null;
         }
         this.keyBytes = null;
+        this.lastSource = null;
     }
 
     destroy(): void {

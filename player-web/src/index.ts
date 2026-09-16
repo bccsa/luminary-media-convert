@@ -3,6 +3,9 @@ export * from '@luminary-media-converter/player-core';
 export { default as LuminaryPlayer } from './components/LuminaryPlayer.vue';
 export { default as FullscreenControls } from './components/FullscreenControls.vue';
 
+// The web's serving layer, which `player-core` now requires a host to supply.
+export { BlobServeStrategy } from './serve/BlobServeStrategy';
+
 export {
     HlsJsAdapter,
     UnsupportedBrowserError,
