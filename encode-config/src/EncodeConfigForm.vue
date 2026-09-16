@@ -10,7 +10,12 @@ import type {
     TrimCopyMode,
 } from './types';
 import { computeLayoutKey, getStoredConfig } from './layoutStorage';
-import { fpsAdjustedBitrateKbps } from './ladder';
+import {
+    aspectWidthForHeight,
+    fpsAdjustedBitrateKbps,
+    ladderFor,
+} from './ladder';
+import { displayDimensionsOf } from './aspect';
 import {
     buildSuggestedAudioGroups,
     getAudioTierForHeight,
@@ -172,6 +177,10 @@ watch(
             if (rendition.copyStream && rendition.sourceTrackIndex != null) {
                 const track = editableVideoTracks[rendition.sourceTrackIndex];
                 if (track) {
+                    // Coded dimensions, and correctly so: a copy publishes the
+                    // source's own bytes. It is only reached for a track whose
+                    // coded and display sizes agree, because an anamorphic one
+                    // was un-ticked by the guard above.
                     rendition.width = track.width;
                     rendition.height = track.height;
                     rendition.videoBitrateKbps =
@@ -181,35 +190,6 @@ watch(
         }
     }
 );
-
-const ABR_LADDER = [
-    { height: 2160, width: 3840, bitrateKbps: 15000, label: '4K' },
-    { height: 1440, width: 2560, bitrateKbps: 8000, label: '1440p' },
-    { height: 1080, width: 1920, bitrateKbps: 5000, label: '1080p' },
-    { height: 720, width: 1280, bitrateKbps: 2500, label: '720p' },
-    { height: 480, width: 854, bitrateKbps: 1000, label: '480p' },
-    { height: 360, width: 640, bitrateKbps: 600, label: '360p' },
-    { height: 240, width: 426, bitrateKbps: 300, label: '240p' },
-    { height: 144, width: 256, bitrateKbps: 150, label: '144p' },
-];
-
-// Derive a rendition width from a target height that preserves the source's
-// aspect ratio, rounded to an even number (H.264/yuv420p requires even
-// dimensions). For a 16:9 source this reproduces the ABR_LADDER widths exactly;
-// for non-standard ratios (4:3, 21:9, portrait, …) it avoids stretching the
-// picture into 16:9. Returns at least 2.
-function aspectWidthForHeight(
-    height: number,
-    sourceWidth: number,
-    sourceHeight: number
-): number {
-    if (!sourceWidth || !sourceHeight) return height;
-    // Round to the nearest even number — this reproduces the canonical 16:9
-    // ladder widths exactly (e.g. 480p → 854, 240p → 426) while keeping every
-    // dimension even, as H.264/yuv420p requires.
-    const width = Math.round((height * sourceWidth) / sourceHeight / 2) * 2;
-    return Math.max(2, width);
-}
 
 function mapTierToGroupId(standardGroupId: string, tierIds: string[]): string {
     if (tierIds.includes(standardGroupId)) return standardGroupId;
@@ -223,8 +203,14 @@ function mapTierToGroupId(standardGroupId: string, tierIds: string[]): string {
 }
 
 function reanalyzeVideo() {
+    // By display area, not coded area: two angles of the same picture size
+    // should sort together whatever shape their samples are.
+    const displayArea = (t: VideoTrackInfo) => {
+        const d = displayDimensionsOf(t);
+        return d.width * d.height;
+    };
     const sortedVideoTracks = [...editableVideoTracks].sort(
-        (a, b) => b.height * b.width - a.height * a.width
+        (a, b) => displayArea(b) - displayArea(a)
     );
 
     const newGroups = buildSuggestedAudioGroups(
@@ -237,7 +223,8 @@ function reanalyzeVideo() {
     if (sortedVideoTracks.length > 1) {
         const newRenditions: VideoRendition[] = sortedVideoTracks.map(
             (track) => {
-                const tier = getAudioTierForHeight(track.height);
+                const display = displayDimensionsOf(track);
+                const tier = getAudioTierForHeight(display.height);
                 const audioGroupId = mapTierToGroupId(tier.groupId, tierIds);
                 // Multi-angle output has always defaulted to copying each
                 // angle — it is far and away the cheapest thing to do with a
@@ -251,8 +238,12 @@ function reanalyzeVideo() {
                         effectiveSegmentDuration.value
                     ) == null;
                 return {
-                    width: track.width,
-                    height: track.height,
+                    // Display dimensions: the encoder scales to these and tags
+                    // the result square. An anamorphic angle is never `canCopy`
+                    // — `copyModeBlockedReason` refuses it — so a copied angle's
+                    // display size and coded size are the same number anyway.
+                    width: display.width,
+                    height: display.height,
                     videoBitrateKbps: track.bitrateKbps || 1000,
                     copyStream: canCopy,
                     sourceTrackIndex: track.index,
@@ -265,23 +256,15 @@ function reanalyzeVideo() {
         videoRenditions.splice(0, videoRenditions.length, ...newRenditions);
     } else if (sortedVideoTracks.length === 1) {
         const track = sortedVideoTracks[0];
-        const ladder = ABR_LADDER.filter((r) => r.height <= track.height);
-        if (ladder.length === 0) {
-            ladder.push({
-                height: track.height,
-                width: track.width,
-                bitrateKbps: track.bitrateKbps || 1000,
-                label: `${track.height}p`,
-            });
-        }
-        const newRenditions: VideoRendition[] = ladder.map((rung) => {
+        const display = displayDimensionsOf(track);
+        const newRenditions: VideoRendition[] = ladderFor(track).map((rung) => {
             const tier = getAudioTierForHeight(rung.height);
             const audioGroupId = mapTierToGroupId(tier.groupId, tierIds);
             return {
                 width: aspectWidthForHeight(
                     rung.height,
-                    track.width,
-                    track.height
+                    display.width,
+                    display.height
                 ),
                 height: rung.height,
                 videoBitrateKbps: fpsAdjustedBitrateKbps(rung.bitrateKbps, track.frameRate ?? 30),

@@ -188,12 +188,28 @@ describe('previewVideoArgs', () => {
             const args = previewVideoArgs(mode, true, '640:360');
             return args[args.indexOf('-vf') + 1];
         };
-        expect(filterOf('nvidia')).toBe('scale_cuda=640:360');
-        expect(filterOf('intel')).toBe('vpp_qsv=w=640:h=360');
-        expect(filterOf('cpu')).toBe('scale=640:360');
-        // VideoToolbox takes the width and derives the height, which is fine for
-        // a preview and would not be for a ladder rung bound to its playlist.
-        expect(filterOf('apple')).toBe('scale_vt=w=640:h=-2');
+        // Every one tagged square. The preview's widths are display widths, so
+        // the frame has to stop claiming a ratio of its own.
+        expect(filterOf('nvidia')).toBe('scale_cuda=640:360,setsar=1');
+        expect(filterOf('intel')).toBe('vpp_qsv=w=640:h=360,setsar=1');
+        expect(filterOf('cpu')).toBe('scale=640:360,setsar=1');
+        expect(filterOf('amd')).toBe('scale=640:360,setsar=1');
+        expect(filterOf('mediafoundation')).toBe('scale=640:360,setsar=1');
+        // VideoToolbox used to take the width and derive the height, on the
+        // reasoning that a preview could afford it. It cannot: `-2` reads the
+        // *input's* storage ratio, so on a 720x576 source carrying 16:9 a
+        // 854-wide rung came out 683 tall rather than 480.
+        expect(filterOf('apple')).toBe('scale_vt=w=640:h=360,setsar=1');
+    });
+
+    it('adds no filter at all when there is nothing to scale', () => {
+        // The tag rides on the scaler, so a copy-through preview stays bare.
+        for (const mode of ['cpu', 'nvidia', 'apple', 'intel'] as AccelMode[]) {
+            expect(previewVideoArgs(mode, true)).not.toContain('-vf');
+            expect(previewVideoArgs(mode, true).join(' ')).not.toContain(
+                'setsar'
+            );
+        }
     });
 });
 

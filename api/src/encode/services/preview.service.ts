@@ -17,6 +17,7 @@ import { SessionService } from './session.service.js';
 import type { ProbeResult, AudioTrackInfo } from './probe.service.js';
 import { FfmpegService } from './ffmpeg.service.js';
 import { ffmpegBin, ffprobeBin } from './ffbin.js';
+import { displayDimensionsOf, isAnamorphic } from './aspect.js';
 
 const MAX_AUDIO_BITRATE_KBPS = 150;
 
@@ -439,7 +440,13 @@ export class PreviewService {
         if (videos.length === 0) return [];
 
         const codec = videos[0].codec.toLowerCase();
-        const canCopyCodec = TS_COPY_CODECS.has(codec);
+        // An anamorphic track is never copied here, however cheap it would be.
+        // The trim player is where the user first sees the shape of their
+        // source, and a copied preview carries the source's own sample aspect
+        // ratio — leaving the picture correct only if the browser honours SAR
+        // in MPEG-TS. Transcoding it costs a preview and settles the question.
+        const canCopyCodec =
+            TS_COPY_CODECS.has(codec) && !videos.some((v) => isAnamorphic(v));
 
         if (canCopyCodec && videos.length > 1) {
             // Multi-stream file with copy-compatible codec — use existing streams as renditions
@@ -487,22 +494,29 @@ export class PreviewService {
             // Source > 480p — fall through to generate multiple transcode renditions
         }
 
-        // Transcode mode (HEVC, ProRes, >480p H.264, etc.) — generate 2-3 renditions
+        // Transcode mode (HEVC, ProRes, >480p H.264, anamorphic, …) — 2-3 renditions
         const renditions: Rendition[] = [];
         const v = videos[0];
+        // Display dimensions: the preview has to show the picture's real shape,
+        // and for an anamorphic source its coded size is not it.
+        const display = displayDimensionsOf(v);
         const heights = [480, 360, 240].filter(
-            (h) => h <= Math.max(v.height, 240)
+            (h) => h <= Math.max(display.height, 240)
         );
 
         for (const h of heights) {
-            const w = Math.round((v.width * h) / v.height / 2) * 2;
+            const w = Math.round((display.width * h) / display.height / 2) * 2;
             renditions.push({
                 videoIndex: v.index,
                 width: w,
                 height: h,
                 bitrateKbps: Math.round(h * 2), // rough estimate
                 canCopy: false,
-                scaleFilter: `${w}:-2`,
+                // Both dimensions stated, never `-2`: that derives the height
+                // from the *input's storage* ratio, so `scale=854:-2` on a
+                // 720x576 input gives 683, not 480. It only ever worked because
+                // `w` came from that same storage ratio.
+                scaleFilter: `${w}:${h}`,
             });
         }
 

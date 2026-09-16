@@ -2029,6 +2029,95 @@ describe('PreviewService', () => {
             expect(service.isReady('s1')).toBe(true);
         });
 
+        /**
+         * The trim player is where the user first sees the shape of their
+         * source, so an anamorphic one is transcoded rather than copied: a
+         * copied preview carries the source's own sample aspect ratio and comes
+         * out right only if the browser honours SAR in MPEG-TS.
+         */
+        describe('anamorphic sources', () => {
+            function anamorphicService(
+                overrides: Record<string, unknown> = {}
+            ) {
+                const probe = makeProbe({
+                    videoTracks: [
+                        {
+                            index: 0,
+                            codec: 'h264',
+                            width: 720,
+                            height: 576,
+                            displayWidth: 1024,
+                            displayHeight: 576,
+                            bitrateKbps: 4000,
+                            frameRate: 25,
+                            ...overrides,
+                        },
+                    ],
+                });
+                sessionService = makeSessionService({
+                    filePath: '/tmp/video.mp4',
+                    probeResult: probe,
+                });
+                return new PreviewService(sessionService, makeFfmpegService());
+            }
+
+            it('advertises the display size, not the coded size', async () => {
+                service = anamorphicService();
+                await service.init('s1');
+
+                const master = service.getPlaylist('s1', 'tok')!;
+                // 854x480, the 16:9 rung — not 600x480, the storage shape.
+                expect(master).toContain('RESOLUTION=854x480');
+                expect(master).not.toContain('RESOLUTION=600x480');
+                expect(master).not.toContain('RESOLUTION=720x576');
+            });
+
+            it('builds every rung at the display shape', async () => {
+                service = anamorphicService();
+                await service.init('s1');
+
+                const master = service.getPlaylist('s1', 'tok')!;
+                expect(master.match(/RESOLUTION=(\d+x\d+)/g)).toEqual([
+                    'RESOLUTION=854x480',
+                    'RESOLUTION=640x360',
+                    'RESOLUTION=426x240',
+                ]);
+            });
+
+            it('refuses the copy path even for a small copyable source', async () => {
+                // 360 lines of H.264 is exactly what the copy path exists for.
+                // Anamorphic takes it away: the picture's shape matters more
+                // than the cost of one preview.
+                service = anamorphicService({
+                    width: 480,
+                    height: 360,
+                    displayWidth: 640,
+                    displayHeight: 360,
+                });
+                await service.init('s1');
+
+                const master = service.getPlaylist('s1', 'tok')!;
+                expect(master).toContain('RESOLUTION=640x360');
+                expect(master).not.toContain('RESOLUTION=480x360');
+            });
+
+            it('keeps copying a square-pixel source that fits', async () => {
+                service = anamorphicService({
+                    width: 640,
+                    height: 360,
+                    displayWidth: 640,
+                    displayHeight: 360,
+                });
+                await service.init('s1');
+
+                // One rendition, the source's own — the copy path, untouched.
+                const master = service.getPlaylist('s1', 'tok')!;
+                expect(master.match(/RESOLUTION=(\d+x\d+)/g)).toEqual([
+                    'RESOLUTION=640x360',
+                ]);
+            });
+        });
+
         it('should compute correct width for non-copyable renditions (even number)', async () => {
             const probe = makeProbe({
                 videoTracks: [
@@ -2598,6 +2687,57 @@ describe('PreviewService', () => {
             const vfIdx = args.indexOf('-vf');
             expect(vfIdx).toBeGreaterThan(-1);
             expect(args[vfIdx + 1]).toMatch(/^scale_vt=/);
+        });
+
+        /**
+         * The preview is tagged square for the same reason the encoder is: the
+         * widths above are display widths, so the frame has to stop claiming a
+         * ratio of its own. A preview segment is H.264 in MPEG-TS played by a
+         * plain <video>, and an inherited 64:45 on an 854-wide frame would
+         * stretch a picture that is already the right shape.
+         */
+        it.each([
+            ['cpu', /^scale=\d+:\d+,setsar=1$/],
+            ['nvidia', /^scale_cuda=\d+:\d+,setsar=1$/],
+            ['apple', /^scale_vt=w=\d+:h=\d+,setsar=1$/],
+            ['intel', /^vpp_qsv=w=\d+:h=\d+,setsar=1$/],
+        ])('tags %s preview output square', async (mode, expected) => {
+            const svc = await initHevcService(mode);
+
+            mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+            mockStat.mockResolvedValue({ size: 2048 });
+            setupExecFile(() => ({ stdout: Buffer.from('data'), stderr: '' }));
+            mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+            await svc.getSegmentStream('s1', 0, 0);
+
+            const args = mockExecFile.mock.calls[0][1] as string[];
+            expect(args[args.indexOf('-vf') + 1]).toMatch(expected);
+        });
+
+        it('states both scale dimensions rather than deriving one', async () => {
+            // `-2` derives the height from the *input\'s storage* ratio, so
+            // `scale=854:-2` on a 720x576 input gives 683, not 480. It only
+            // ever worked because the width came from that same ratio, and it
+            // broke the moment widths became display widths.
+            for (const mode of ['cpu', 'nvidia', 'apple', 'intel']) {
+                const svc = await initHevcService(mode);
+
+                mockExistsSync.mockReturnValueOnce(false).mockReturnValue(true);
+                mockStat.mockResolvedValue({ size: 2048 });
+                setupExecFile(() => ({
+                    stdout: Buffer.from('data'),
+                    stderr: '',
+                }));
+                mockCreateReadStream.mockReturnValue({ pipe: vi.fn() });
+
+                await svc.getSegmentStream('s1', 0, 0);
+
+                const args = mockExecFile.mock.calls[0][1] as string[];
+                const vf = args[args.indexOf('-vf') + 1];
+                expect(vf, `${mode} scale filter`).not.toContain('-2');
+                expect(vf).toContain('480');
+            }
         });
 
         it('should use libx264 for cpu mode (no GPU flags)', async () => {

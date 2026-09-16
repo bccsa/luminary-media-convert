@@ -1,7 +1,13 @@
 export { default as EncodeConfigForm } from './EncodeConfigForm.vue';
 export * from './types';
 export { computeLayoutKey, getStoredConfig, saveConfig } from './layoutStorage';
-export { fpsAdjustedBitrateKbps } from './ladder';
+export {
+    ABR_LADDER,
+    aspectWidthForHeight,
+    fpsAdjustedBitrateKbps,
+    ladderFor,
+} from './ladder';
+export type { LadderRung } from './ladder';
 
 /**
  * Language-code validation, for hosts that collect a language outside this form
@@ -20,3 +26,10 @@ export {
     latestStreamStart,
     quickTrimBlockedReason,
 } from './copyMode';
+
+/**
+ * Square-pixel geometry, for hosts that need to lay out a picture the same way
+ * the ladder does — a coded frame size does not say what shape it is.
+ */
+export { displayDimensionsOf, isAnamorphic } from './aspect';
+export type { AspectTrack } from './aspect';

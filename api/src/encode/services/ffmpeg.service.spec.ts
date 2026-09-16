@@ -401,6 +401,127 @@ describe('FfmpegService', () => {
             expect(args[preset1Idx + 1]).toBe('fast');
         });
 
+        /**
+         * Square pixels are the output contract, so the tag is on every scaled
+         * rendition whichever scaler produced it. Unconditional deliberately:
+         * `scale` and `scale_vt` rewrite SAR to preserve the input's display
+         * aspect, while `scale_cuda`/`vpp_qsv` inherit their input link's ratio
+         * — which, once the ladder widths are display widths, would hand the
+         * encoder a 1024x576 frame still tagged 64:45.
+         */
+        describe('square-pixel output', () => {
+            const oneRendition: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                videoRenditions: [
+                    {
+                        width: 1024,
+                        height: 576,
+                        videoBitrateKbps: 1439,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '576p',
+                    },
+                ],
+                audioGroups: [
+                    {
+                        id: 'hd',
+                        label: 'HD Audio',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                ],
+            };
+
+            it.each([
+                ['cpu', 'scale=1024:576,setsar=1'],
+                ['nvidia', 'scale_cuda=1024:576,setsar=1'],
+                ['apple', 'scale_vt=w=1024:h=576,setsar=1'],
+                ['intel', 'vpp_qsv=w=1024:h=576,setsar=1'],
+            ])('tags the %s scaler output square', async (mode, expected) => {
+                (service as any).accelMode = mode;
+
+                const args = await buildVideoArgs({
+                    inputPath: '/tmp/input.mp4',
+                    outputDir: '/tmp/output',
+                    encodeConfig: oneRendition,
+                });
+
+                const filterVal = args[args.indexOf('-filter_complex') + 1];
+                expect(filterVal).toContain(expected);
+            });
+
+            it('puts setsar after the scaler, never before it', async () => {
+                // A scale filter derives its output link's ratio from its input,
+                // so an earlier setsar would simply be overwritten.
+                (service as any).accelMode = 'cpu';
+
+                const args = await buildVideoArgs({
+                    inputPath: '/tmp/input.mp4',
+                    outputDir: '/tmp/output',
+                    encodeConfig: oneRendition,
+                });
+
+                const filterVal = args[args.indexOf('-filter_complex') + 1];
+                expect(filterVal).not.toMatch(/setsar=1,\s*scale/);
+                expect(filterVal).toMatch(/scale=1024:576,setsar=1\[vout0\]/);
+            });
+
+            it('tags every rendition of a multi-rung ladder', async () => {
+                (service as any).accelMode = 'cpu';
+
+                const args = await buildVideoArgs({
+                    inputPath: '/tmp/input.mp4',
+                    outputDir: '/tmp/output',
+                    encodeConfig: {
+                        ...oneRendition,
+                        videoRenditions: [
+                            ...oneRendition.videoRenditions!,
+                            {
+                                width: 854,
+                                height: 480,
+                                videoBitrateKbps: 1000,
+                                copyStream: false,
+                                audioGroupId: 'hd',
+                                label: '480p',
+                            },
+                        ],
+                    },
+                });
+
+                const filterVal = args[args.indexOf('-filter_complex') + 1];
+                expect(filterVal).toContain('scale=1024:576,setsar=1[vout0]');
+                expect(filterVal).toContain('scale=854:480,setsar=1[vout1]');
+            });
+
+            it('leaves a copy rendition out of the filter graph entirely', async () => {
+                // Nothing to tag: a copy never passes through a filter. The
+                // shape of a copied stream is settled by refusing it at submit
+                // when the source is anamorphic, not here.
+                (service as any).accelMode = 'cpu';
+
+                const args = await buildVideoArgs({
+                    inputPath: '/tmp/input.mp4',
+                    outputDir: '/tmp/output',
+                    encodeConfig: {
+                        ...oneRendition,
+                        videoRenditions: [
+                            {
+                                ...oneRendition.videoRenditions![0],
+                                copyStream: true,
+                                sourceTrackIndex: 0,
+                            },
+                        ],
+                    },
+                });
+
+                expect(args).not.toContain('-filter_complex');
+                expect(args.join(' ')).not.toContain('setsar');
+            });
+        });
+
         it('should include -hwaccel cuda when NVIDIA GPU is available', async () => {
             (service as any).accelMode = 'nvidia';
 

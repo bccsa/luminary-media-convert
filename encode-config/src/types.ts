@@ -5,6 +5,22 @@ export interface VideoTrackInfo {
     codec: string;
     width: number;
     height: number;
+    /**
+     * The dimensions this picture is meant to be shown at, in square pixels.
+     *
+     * A 720x576 PAL broadcast carrying 16:9 stores non-square samples and its
+     * coded size says nothing about its shape; it is shown 1024x576. Equal to
+     * {@link width} / {@link height} for the overwhelmingly common square-pixel
+     * source, which is what makes the inequality the whole of the question "is
+     * this track anamorphic" — see `isAnamorphic` in `aspect.ts`.
+     *
+     * Absent on a probe from before the API reported it. Read it through
+     * `displayDimensionsOf` rather than directly, so the fallback to the coded
+     * size happens in one place.
+     */
+    displayWidth?: number;
+    /** See {@link displayWidth}. */
+    displayHeight?: number;
     bitrateKbps: number;
     frameRate: number;
     profile?: string;

@@ -1,5 +1,6 @@
 import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
 import type { ProbeResult } from './probe.service.js';
+import { displayDimensionsOf, isAnamorphic } from './aspect.js';
 
 /**
  * How far apart two streams may start before the encode has to pull them
@@ -34,18 +35,32 @@ export const FORBIDDEN_COPY_CODECS = new Set(['hevc', 'h265', 'h.265', 'x265']);
  *
  * Copying a video stream is the cheapest thing this encoder does and the most
  * conditional: it hands the source's own bytes to the HLS muxer, which means
- * the source, not the config, decides where segments may be cut and where the
- * stream may be seeked to. Two conditions follow from that, and both are
- * enforced here rather than left to produce output nobody watches to the end:
+ * the source, not the config, decides what codec the output is in, what shape
+ * its pixels are, where segments may be cut and where the stream may be seeked
+ * to. Four conditions follow from that, and all four are enforced here rather
+ * than left to produce output nobody watches to the end. The first two are
+ * properties of the bytes themselves, so they hold however the copy is being
+ * used — a quick cut splices the same bitstream and inherits both:
  *
- *  1. **The stream must not need trimming.** When the source's streams start at
+ *  1. **The codec must be one we would have written anyway.** A copied stream
+ *     bypasses the encoder entirely, so without this a ticked Copy box is a way
+ *     to publish H.265 from a build with no H.265 encoder in it. Decoding HEVC
+ *     to transcode it is unaffected; only the passthrough is refused. See
+ *     {@link FORBIDDEN_COPY_CODECS}.
+ *  2. **The pixels must already be square.** HLS output from this encoder is
+ *     always square-pixel, and the sample aspect ratio of a copied stream is in
+ *     its bitstream — the muxer never sees a frame, so nothing between the
+ *     source and the playlist can square it. A 720x576 broadcast carrying 16:9
+ *     would be published as 720x576 and described as 720x576, which is neither
+ *     its shape nor its size.
+ *  3. **The stream must not need trimming.** When the source's streams start at
  *     different times the encode seeks past the head to align them, and a seek
  *     over a copied stream lands on the nearest keyframe rather than the frame
  *     asked for. Everything re-encoded starts where it was told to; the copied
  *     stream starts wherever its last keyframe was, and stays that far out of
  *     sync for the whole programme. The latest-starting stream is the one being
  *     aligned *to* and is seeked exactly, so it is allowed.
- *  2. **The keyframes must fit the segments.** FFmpeg cuts a copied stream at
+ *  4. **The keyframes must fit the segments.** FFmpeg cuts a copied stream at
  *     source keyframes, so a segment can only be as long as a whole number of
  *     the source's GOPs. A 2 s GOP divides 6 s segments; a 2.5 s one does not,
  *     and the output gets segments of 5 s and 7.5 s that no `#EXT-X-TARGETDURATION`
@@ -176,6 +191,19 @@ function copyModeTrackRejection(
         return (
             `Video track ${index} is ${codec.toUpperCase()}, which cannot be copied — ` +
             `re-encode this rendition instead.`
+        );
+    }
+
+    // Then shape, which like the codec is a property of the bytes rather than
+    // of what is being asked of them — a quick cut splices the same bitstream
+    // and inherits the same SAR.
+    if (track && isAnamorphic(track)) {
+        const display = displayDimensionsOf(track);
+        return (
+            `Video track ${index} stores non-square pixels ` +
+            `(${track.width}x${track.height} shown ${display.width}x${display.height}); ` +
+            `copy mode hands the source's own bytes to the muxer, which cannot ` +
+            `square them — re-encode this rendition instead.`
         );
     }
 

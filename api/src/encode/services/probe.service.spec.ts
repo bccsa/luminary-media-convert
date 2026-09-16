@@ -1153,4 +1153,111 @@ describe('ProbeService', () => {
             expect(result.videoTracks[0].gopRegular).toBeUndefined();
         });
     });
+    /**
+     * The root of the anamorphic bug: ffprobe returns `sample_aspect_ratio` on
+     * `-show_streams` and the mapping used to drop it, so nothing downstream
+     * could know a 720x576 broadcast was a 16:9 picture. Every dimension
+     * decision then treated the coded frame as if its pixels were square.
+     */
+    describe('display dimensions', () => {
+        async function displayFor(sampleAspectRatio?: string, dims = [720, 576]) {
+            mockExecFileResult(
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            width: dims[0],
+                            height: dims[1],
+                            avg_frame_rate: '25/1',
+                            ...(sampleAspectRatio
+                                ? { sample_aspect_ratio: sampleAspectRatio }
+                                : {}),
+                        },
+                    ],
+                })
+            );
+            const track = (await service.probe('/tmp/test.mp4')).videoTracks[0];
+            return {
+                displayWidth: track.displayWidth,
+                displayHeight: track.displayHeight,
+            };
+        }
+
+        it('widens PAL SD carrying 16:9 to its square-pixel size', async () => {
+            // 720 at 64:45 is 1024 exactly. The height is untouched: the
+            // correction never throws a source line away.
+            expect(await displayFor('64:45')).toEqual({
+                displayWidth: 1024,
+                displayHeight: 576,
+            });
+        });
+
+        it('heightens NTSC DV rather than narrowing it', async () => {
+            // 720x480 at 8:9 is a 640x480 picture, but correcting on the width
+            // would discard eighty columns of real detail. Scale the short axis
+            // up instead: same shape, nothing lost.
+            expect(await displayFor('8:9', [720, 480])).toEqual({
+                displayWidth: 720,
+                displayHeight: 540,
+            });
+        });
+
+        it('leaves a square-pixel source exactly as coded', async () => {
+            expect(await displayFor('1:1', [1920, 1080])).toEqual({
+                displayWidth: 1920,
+                displayHeight: 1080,
+            });
+        });
+
+        it.each([
+            ['an absent tag', undefined],
+            ['ffprobe\'s unknown ratio', '0:1'],
+            ['a literal N/A', 'N/A'],
+            ['a malformed value', 'garbage'],
+        ])('reads %s as square pixels', async (_label, sar) => {
+            // Definite rather than undefined, for `parseStartTime`'s reason: a
+            // container that does not say what shape its samples are is saying
+            // they are square, and a third case would have to be answered at
+            // every reader.
+            expect(await displayFor(sar as string | undefined)).toEqual({
+                displayWidth: 720,
+                displayHeight: 576,
+            });
+        });
+
+        it('survives a video stream that reports no dimensions at all', async () => {
+            // Nothing to correct and nothing to divide by. The track still has
+            // to come back — `selectStoryboardTrack` and the ladder both filter
+            // on dimensions themselves and would rather see a zero than a NaN.
+            mockExecFileResult(
+                makeFfprobeOutput({
+                    streams: [
+                        {
+                            index: 0,
+                            codec_type: 'video',
+                            codec_name: 'h264',
+                            avg_frame_rate: '25/1',
+                            sample_aspect_ratio: '64:45',
+                        },
+                    ],
+                })
+            );
+
+            const track = (await service.probe('/tmp/test.mp4')).videoTracks[0];
+            expect(track.width).toBe(0);
+            expect(track.height).toBe(0);
+            expect(track.displayWidth).toBe(0);
+            expect(track.displayHeight).toBe(0);
+        });
+
+        it('keeps both dimensions even for the encoders', async () => {
+            // 4:3 on a 705-wide frame is 940 exactly; 703 at 4:3 is 937.33,
+            // which yuv420p cannot take.
+            const odd = await displayFor('4:3', [703, 575]);
+            expect(odd.displayWidth! % 2).toBe(0);
+            expect(odd.displayHeight! % 2).toBe(0);
+        });
+    });
 });

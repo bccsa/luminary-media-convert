@@ -5,6 +5,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { promisify } from 'util';
 import { ffmpegBin } from './ffbin.js';
+import { displayDimensionsOf } from './aspect.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -27,7 +28,15 @@ export interface ThumbnailResult {
     vttRelativePath: string;
 }
 
-/** The source video track the storyboard samples: dense video index plus dims. */
+/**
+ * The source video track the storyboard samples: dense video index plus dims.
+ *
+ * The dimensions are the track's **display** dimensions, in square pixels —
+ * what the thumbnail geometry is a fraction of, not necessarily what the frame
+ * is coded at. A 720x576 broadcast carrying 16:9 is 1024x576 of these, and
+ * sized from its coded frame the storyboard came out 160x128: a 5:4 squash of a
+ * 16:9 picture, faithfully reproduced by every client that renders the cue.
+ */
 export interface StoryboardTrack {
     index: number;
     width: number;
@@ -69,25 +78,49 @@ export interface PreviewThumbnails {
  */
 export function selectStoryboardTrack(
     tracks:
-        | readonly { index: number; width?: number; height?: number }[]
+        | readonly {
+              index: number;
+              width?: number;
+              height?: number;
+              displayWidth?: number;
+              displayHeight?: number;
+          }[]
         | undefined
 ): StoryboardTrack | null {
     const usable = (tracks ?? [])
         .filter((t) => (t.width ?? 0) > 0 && (t.height ?? 0) > 0)
-        .map((t) => ({
-            index: t.index,
-            width: t.width as number,
-            height: t.height as number,
-        }));
+        .map((t) => {
+            const display = displayDimensionsOf({
+                width: t.width as number,
+                height: t.height as number,
+                displayWidth: t.displayWidth,
+                displayHeight: t.displayHeight,
+            });
+            return {
+                track: {
+                    index: t.index,
+                    width: display.width,
+                    height: display.height,
+                },
+                // Selection compares coded width, deliberately: it asks how
+                // much real detail there is to downscale from and how much the
+                // decode costs, and both are questions about stored samples.
+                // An anamorphic track carries 720 of them however wide it is
+                // shown.
+                codedWidth: t.width as number,
+            };
+        });
     if (usable.length === 0) return null;
 
-    const wideEnough = usable.filter((t) => t.width >= THUMB_WIDTH * 2);
+    const wideEnough = usable.filter((t) => t.codedWidth >= THUMB_WIDTH * 2);
     if (wideEnough.length > 0) {
         return wideEnough.reduce((best, t) =>
-            t.width < best.width ? t : best
-        );
+            t.codedWidth < best.codedWidth ? t : best
+        ).track;
     }
-    return usable.reduce((best, t) => (t.width > best.width ? t : best));
+    return usable.reduce((best, t) =>
+        t.codedWidth > best.codedWidth ? t : best
+    ).track;
 }
 
 @Injectable()
@@ -236,9 +269,20 @@ export class ThumbnailService {
         }
     }
 
-    /** Thumbnail height for the source's aspect ratio, kept even for the encoders. */
-    private thumbHeightFor(sourceWidth: number, sourceHeight: number): number {
-        return Math.ceil(((THUMB_WIDTH / sourceWidth) * sourceHeight) / 2) * 2;
+    /**
+     * Thumbnail height for the source's aspect ratio, kept even for the
+     * encoders.
+     *
+     * Display dimensions, not coded ones — the thumbnail is a picture of the
+     * picture. See {@link StoryboardTrack}.
+     */
+    private thumbHeightFor(
+        displayWidth: number,
+        displayHeight: number
+    ): number {
+        return (
+            Math.ceil(((THUMB_WIDTH / displayWidth) * displayHeight) / 2) * 2
+        );
     }
 
     private async detectSpriteFormat(): Promise<SpriteFormat | null> {
