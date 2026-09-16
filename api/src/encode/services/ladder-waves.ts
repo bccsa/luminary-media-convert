@@ -135,11 +135,30 @@ function declaredAudioGroups(headerLines: string[]): Map<string, string> {
 }
 
 /**
+ * What the ladder can say about each audio group's codecs when no variant in it
+ * does: keyed by the encode config's group id, answered from the encoder's own
+ * knowledge (a re-encoded group is AAC-LC by construction; a copy-mode group is
+ * read from the init segment it wrote).
+ *
+ * Exists because learning from variants has a blind spot. Only the first wave
+ * carries audio, so only its variants come back from ffmpeg with an audio
+ * codec — and an audio group used solely by later-wave renditions is one no
+ * first-wave variant ever names. Its `AUDIO=` was restored, its codec was not,
+ * and a player that counts codecs per variant (Video.js's VHS does, and marks a
+ * mismatch incompatible for good) refused every rendition on that group. On the
+ * common five-rung, two-group ladder that was the whole bandwidth-saving tier.
+ */
+export type AudioCodecsFor = (
+    configGroupId: string
+) => readonly string[] | undefined;
+
+/**
  * The audio codecs each group contributes, learnt from the variants that kept
  * their `AUDIO=` — the first wave's.
  *
  * A variant that references an audio group is supposed to list that group's
- * codecs too, and a run with no audio in it cannot know them.
+ * codecs too, and a run with no audio in it cannot know them. The encoder's own
+ * answer ({@link AudioCodecsFor}) fills in for a group nothing here declares.
  */
 function audioCodecsByGroup(blocks: VariantBlock[]): Map<string, string[]> {
     const byGroup = new Map<string, string[]>();
@@ -155,41 +174,68 @@ function audioCodecsByGroup(blocks: VariantBlock[]): Map<string, string[]> {
     return byGroup;
 }
 
+/** True when a `CODECS` attribute is present and names at least one audio codec. */
+function declaresAudioCodec(attributes: string): boolean {
+    const codecs = attributes.match(/CODECS="([^"]+)"/)?.[1];
+    return (
+        codecs !== undefined &&
+        codecs.split(',').some((c) => !VIDEO_CODEC.test(c.trim()))
+    );
+}
+
+/** `attributes` with `codecs` appended to its `CODECS` list where absent. */
+function withCodecs(attributes: string, codecs: readonly string[]): string {
+    const missing = codecs.filter((codec) => !attributes.includes(codec));
+    if (!missing.length) return attributes;
+    return attributes.replace(
+        /CODECS="([^"]+)"/,
+        (_match, list: string) => `CODECS="${[list, ...missing].join(',')}"`
+    );
+}
+
 /**
- * Re-attach the audio group to a variant that lost it.
+ * Re-attach the audio group to a variant that lost it, and the audio codec to
+ * a variant that lost only that.
  *
  * Only the first wave is given the audio streams, so ffmpeg omits `AUDIO=` from
  * every later wave's variants — it has no group to point at. The association is
  * the ladder's, not that run's, so it is restored here from the rendition the
- * URI names, along with the codecs that come with it.
+ * URI names, along with the codecs that come with it: learnt from a first-wave
+ * variant of the same group where there is one, vouched for by the encoder
+ * where there is not.
  */
 function withAudioGroup(
     block: VariantBlock,
     audioGroupFor: (uri: string) => string | undefined,
     declared: Map<string, string>,
-    codecsByGroup: Map<string, string[]>
+    codecsByGroup: Map<string, string[]>,
+    audioCodecsFor: AudioCodecsFor | undefined
 ): string {
-    if (/(^|,)AUDIO=/.test(block.attributes)) {
-        return `#EXT-X-STREAM-INF:${block.attributes}\n${block.uri}`;
+    const configId = audioGroupFor(block.uri);
+    const known = (group: string): readonly string[] => {
+        const learnt = codecsByGroup.get(group);
+        if (learnt?.length) return learnt;
+        if (!configId || !audioCodecsFor) return [];
+        return audioCodecsFor(configId) ?? [];
+    };
+
+    const kept = block.attributes.match(/(?:^|,)AUDIO="([^"]+)"/)?.[1];
+    if (kept !== undefined) {
+        // Kept its group. ffmpeg leaves the audio codec off a `CODECS` it
+        // cannot complete, which is the same defect to a player as losing it.
+        if (declaresAudioCodec(block.attributes)) {
+            return `#EXT-X-STREAM-INF:${block.attributes}\n${block.uri}`;
+        }
+        const attributes = withCodecs(block.attributes, known(kept));
+        return `#EXT-X-STREAM-INF:${attributes}\n${block.uri}`;
     }
 
-    const configId = audioGroupFor(block.uri);
     const group = configId ? declared.get(configId) : undefined;
     if (!group) {
         return `#EXT-X-STREAM-INF:${block.attributes}\n${block.uri}`;
     }
 
-    let attributes = block.attributes;
-    const missing = (codecsByGroup.get(group) ?? []).filter(
-        (codec) => !attributes.includes(codec)
-    );
-    if (missing.length) {
-        attributes = attributes.replace(
-            /CODECS="([^"]+)"/,
-            (_match, list: string) => `CODECS="${[list, ...missing].join(',')}"`
-        );
-    }
-
+    const attributes = withCodecs(block.attributes, known(group));
     return `#EXT-X-STREAM-INF:${attributes},AUDIO="${group}"\n${block.uri}`;
 }
 
@@ -201,7 +247,8 @@ function withAudioGroup(
  */
 export function mergeWaveMasters(
     contents: string[],
-    audioGroupFor: (uri: string) => string | undefined
+    audioGroupFor: (uri: string) => string | undefined,
+    audioCodecsFor?: AudioCodecsFor
 ): string {
     const [first = ''] = contents;
     const header = first
@@ -219,7 +266,13 @@ export function mergeWaveMasters(
     const codecsByGroup = audioCodecsByGroup(blocks);
 
     const variants = blocks.map((block) =>
-        withAudioGroup(block, audioGroupFor, declared, codecsByGroup)
+        withAudioGroup(
+            block,
+            audioGroupFor,
+            declared,
+            codecsByGroup,
+            audioCodecsFor
+        )
     );
 
     return `${[...header, ...variants].join('\n')}\n`;

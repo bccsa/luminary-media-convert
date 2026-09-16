@@ -159,6 +159,17 @@ export function aacArgs(streamIndex?: number): string[] {
 }
 
 /**
+ * The RFC 6381 codec attribute of everything {@link aacArgs} produces.
+ *
+ * `-profile:a aac_low` is AAC-LC, audio object type 2, and the master playlist
+ * can therefore vouch for `mp4a.40.2` on any re-encoded audio group without
+ * looking at the output — the constraint above is what makes that true. Copy-
+ * mode audio is the one path to another object type, and is read from the
+ * stream itself (`aac-codec-attribute.ts`) rather than assumed.
+ */
+export const AAC_LC_CODEC_ATTRIBUTE = 'mp4a.40.2';
+
+/**
  * Flags that go before `-i`, to decode on the same device that will encode.
  *
  * Empty for the CPU path, and empty when nothing is being re-encoded: a

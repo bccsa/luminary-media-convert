@@ -54,7 +54,7 @@ const HEADER_BYTES = 8;
 
 const UINT32_MAX = 0xffffffff;
 
-interface Box {
+export interface Box {
     type: string;
     /** Offset of the box header. */
     start: number;
@@ -72,7 +72,7 @@ interface Box {
  * guessing at one is exactly the kind of silent misread this module exists to
  * avoid, so it is refused.
  */
-function readBoxes(buffer: Buffer, from: number, to: number): Box[] {
+export function readBoxes(buffer: Buffer, from: number, to: number): Box[] {
     const boxes: Box[] = [];
     let offset = from;
 
@@ -119,7 +119,7 @@ function readBoxes(buffer: Buffer, from: number, to: number): Box[] {
     return boxes;
 }
 
-function childrenOf(buffer: Buffer, box: Box, type: string): Box[] {
+export function childrenOf(buffer: Buffer, box: Box, type: string): Box[] {
     return readBoxes(buffer, box.contentStart, box.end).filter(
         (child) => child.type === type
     );
