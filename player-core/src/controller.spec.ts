@@ -6,7 +6,11 @@ import {
 import { DEFAULT_ANGLE_ID } from './pipeline/pipeline.js';
 import { DEFAULT_POLL_INTERVAL_MS } from './poller.js';
 import { DEFAULT_LEAD_SECONDS, DEFAULT_WARM_BYTES } from './prefetch.js';
-import { AUDIO_ONLY_ANGLE_ID, type PlayerError } from './types.js';
+import {
+    AUDIO_ONLY_ANGLE_ID,
+    DEFAULT_RECOVERY_POLICY,
+    type PlayerError,
+} from './types.js';
 import {
     CHAPTERS_VTT,
     CHUNKED_MEDIA_PLAYLIST,
@@ -72,40 +76,6 @@ function setup(
 }
 
 describe('PlayerController — load', () => {
-    it('fails into state, never rejects, when no blobs can be served', async () => {
-        // jsdom and some SSR runtimes have no Blob/createObjectURL, so with no
-        // serveStrategy supplied the default construction throws — synchronously,
-        // and a throw above load()'s try block escapes it. Hosts call load()
-        // fire-and-forget because the contract is that failures surface through
-        // state; a rejecting load is an unhandled rejection in every one of them.
-        // Node has createObjectURL, so the environment is degraded by hand —
-        // this is jsdom's actual shape, where it is absent.
-        const original = URL.createObjectURL;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (URL as any).createObjectURL = undefined;
-        try {
-            const adapter = new FakeAdapter();
-            const fake = makeFetch(simpleRoutes);
-            const controller = new PlayerController(adapter, {
-                fetchImpl: fake.fetchImpl,
-                // no serveStrategy — the default cannot be built here
-                prefetch: { enabled: false },
-            });
-            const errors: PlayerError[] = [];
-            controller.on('error', (error) => errors.push(error));
-
-            await expect(
-                controller.load({ masterUrl: MASTER_URL }),
-            ).resolves.toBeUndefined();
-
-            expect(controller.getState().lifecycle).toBe('error');
-            expect(errors).toHaveLength(1);
-            controller.destroy();
-        } finally {
-            URL.createObjectURL = original;
-        }
-    });
-
     it('serves a munged master even for an unencrypted, un-narrowed source', async () => {
         const { adapter, controller, serveStrategy } = setup(simpleRoutes);
         await controller.load({ masterUrl: MASTER_URL });
@@ -178,7 +148,13 @@ describe('PlayerController — load', () => {
         });
         await controller.load({ masterUrl: MASTER_URL, keyHex: TEST_KEY_HEX });
         expect(adapter.loads).toEqual([
-            { url: MASTER_URL, isBlob: false, keyHex: TEST_KEY_HEX },
+            {
+                url: MASTER_URL,
+                isBlob: false,
+                keyHex: TEST_KEY_HEX,
+                // Resolved, never partial: the adapter runs the ladder on it.
+                recovery: DEFAULT_RECOVERY_POLICY,
+            },
         ]);
         // Only the master was read; no sub-playlists were fetched.
         expect(calls).toEqual([MASTER_URL]);
@@ -551,54 +527,13 @@ describe('PlayerController — playback state', () => {
     });
 });
 
-describe('PlayerController — recovery', () => {
-    beforeEach(() => vi.useFakeTimers());
-    afterEach(() => vi.useRealTimers());
-
-    it('escalates in-place → 2s / 4s / 8s reloads → fatal error', async () => {
-        const { adapter, controller, errors } = setup(simpleRoutes);
-        await controller.load({ masterUrl: MASTER_URL });
-        const recovered: number[] = [];
-        controller.on('recovered', ({ attempt }) => recovered.push(attempt));
-
-        const fail = () =>
-            adapter.emit('error', { category: 'media', fatal: true });
-
-        fail();
-        expect(adapter.recoverCalls).toEqual(['media']);
-        expect(adapter.loads).toHaveLength(1);
-
-        fail();
-        await vi.advanceTimersByTimeAsync(1_999);
-        expect(adapter.loads).toHaveLength(1);
-        await vi.advanceTimersByTimeAsync(1);
-        expect(adapter.loads).toHaveLength(2);
-
-        fail();
-        await vi.advanceTimersByTimeAsync(4_000);
-        expect(adapter.loads).toHaveLength(3);
-
-        fail();
-        await vi.advanceTimersByTimeAsync(8_000);
-        expect(adapter.loads).toHaveLength(4);
-
-        fail();
-        expect(controller.getState().lifecycle).toBe('error');
-        expect(controller.getState().error).toMatchObject({
-            code: 'media',
-            fatal: true,
-        });
-        expect(errors).toHaveLength(1);
-        expect(recovered).toEqual([1, 2, 3]);
-    });
-
+describe('PlayerController — an adapter that has exhausted its recovery', () => {
     it('ignores non-fatal engine errors', async () => {
         const { adapter, controller } = setup(simpleRoutes);
         await controller.load({ masterUrl: MASTER_URL });
 
         adapter.emit('error', { category: 'network', fatal: false });
-        await vi.advanceTimersByTimeAsync(10_000);
-        expect(adapter.recoverCalls).toEqual([]);
+        await flush();
         expect(controller.getState().lifecycle).toBe('ready');
     });
 
@@ -613,62 +548,6 @@ describe('PlayerController — recovery', () => {
 
         adapter.emit('error', { category: 'network', fatal: true });
         expect(controller.getState().error?.code).toBe('network');
-    });
-});
-
-describe('PlayerController — stall watchdog', () => {
-    beforeEach(() => vi.useFakeTimers());
-    afterEach(() => vi.useRealTimers());
-
-    it('nudges after 10s, then routes a wedged engine to the media-error path', async () => {
-        const { adapter, controller } = setup(simpleRoutes, {
-            recoverResult: false,
-        });
-        await controller.load({
-            masterUrl: MASTER_URL,
-            recovery: { maxReloadAttempts: 0 },
-        });
-
-        adapter.currentTime = 5;
-        adapter.emit('playing', undefined);
-        // A wedged engine ignores the nudge.
-        const seeks: number[] = [];
-        vi.spyOn(adapter, 'seek').mockImplementation((s: number) => {
-            seeks.push(s);
-        });
-
-        await vi.advanceTimersByTimeAsync(10_000);
-        expect(seeks).toEqual([5.1]);
-        expect(controller.getState().stalled).toBe(true);
-
-        await vi.advanceTimersByTimeAsync(10_000);
-        expect(controller.getState().lifecycle).toBe('error');
-        expect(controller.getState().error?.code).toBe('media');
-    });
-
-    it('clears the stall when the nudge works', async () => {
-        const { adapter, controller } = setup(simpleRoutes);
-        await controller.load({ masterUrl: MASTER_URL });
-
-        adapter.emit('playing', undefined);
-        await vi.advanceTimersByTimeAsync(10_000);
-        expect(controller.getState().stalled).toBe(true);
-
-        adapter.currentTime = 60;
-        await vi.advanceTimersByTimeAsync(10_000);
-        expect(controller.getState().stalled).toBe(false);
-        expect(controller.getState().lifecycle).toBe('ready');
-    });
-
-    it('stops watching while paused', async () => {
-        const { adapter, controller } = setup(simpleRoutes);
-        await controller.load({ masterUrl: MASTER_URL });
-
-        adapter.emit('playing', undefined);
-        adapter.emit('pause', undefined);
-        await vi.advanceTimersByTimeAsync(60_000);
-        expect(controller.getState().stalled).toBe(false);
-        expect(controller.getState().lifecycle).toBe('ready');
     });
 });
 

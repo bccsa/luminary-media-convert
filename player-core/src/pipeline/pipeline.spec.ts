@@ -7,7 +7,7 @@ import {
     mungeSource,
     type PipelineContext,
 } from './pipeline.js';
-import { KEY_CONTENT_TYPE } from './blob-registry.js';
+import { KEY_CONTENT_TYPE } from './content-types.js';
 import { LUMINARY_KEY_PLACEHOLDER_URI } from './rewrite-media.js';
 import { parseMasterText } from './playlist-text.js';
 import {

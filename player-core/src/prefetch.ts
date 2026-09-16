@@ -19,7 +19,7 @@
  * buffer front is platform work — a JS interval is throttled or suspended once
  * the app is backgrounded, precisely when a native player keeps playing — so it
  * belongs to the adapter, specified by `PlayerAdapter.warmChunks` and
- * implemented for the web in `player-web/src/adapter/chunkWarming.ts`.
+ * implemented for the web in `player-web-legacy/src/adapter/chunkWarming.ts`.
  * `docs/chunk-warming.md` is the porting guide.
  */
 
@@ -57,7 +57,10 @@ export interface ChunkBoundary {
  *
  * Playlists whose segments carry no `#EXT-X-BYTERANGE` are skipped: there are
  * no shared objects to warm, so prefetch disables itself on anything but
- * byte-range output rather than issuing pointless requests.
+ * byte-range output rather than issuing pointless requests. A LIVE playlist is
+ * skipped for the same reason from the other direction: chunk packing is
+ * something the encoder does to a finished file, and a schedule built from a
+ * sliding window would be wrong by the next refresh anyway.
  *
  * Chains are deduped by their first chunk URL. Every rendition of an angle
  * references the same chunk files, so one schedule covers all of them — and the
@@ -70,7 +73,9 @@ export function buildChunkSchedules(
     const byChain = new Map<string, ChunkBoundary[]>();
 
     for (const playlist of mediaPlaylists) {
-        const segments = parseMediaPlaylist(playlist.text).segments;
+        const parsed = parseMediaPlaylist(playlist.text);
+        if (!parsed.endList) continue;
+        const segments = parsed.segments;
         if (!segments.some((segment) => segment.byteRange)) continue;
 
         const boundaries: ChunkBoundary[] = [];

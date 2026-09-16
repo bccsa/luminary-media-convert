@@ -286,6 +286,7 @@ export class FakeAdapter implements PlayerAdapter {
     readonly variantCalls: string[] = [];
     readonly audioTrackCalls: string[] = [];
     readonly recoverCalls: string[] = [];
+    reattachCount = 0;
     readonly warmCalls: Array<{
         schedules: ChunkBoundary[][];
         options: ChunkWarmOptions;
@@ -389,6 +390,16 @@ export class FakeAdapter implements PlayerAdapter {
     recover(category: 'network' | 'media' | 'other'): boolean {
         this.recoverCalls.push(category);
         return this.recoverResult;
+    }
+
+    /**
+     * Rung 2 of the recovery obligation. A real adapter re-prepares its engine
+     * against the source it holds; there is no engine here, so this records the
+     * call — what a controller spec can assert is that the wrapper never makes
+     * it, the adapter's ladder does.
+     */
+    async reattach(): Promise<void> {
+        this.reattachCount += 1;
     }
 
     /**
