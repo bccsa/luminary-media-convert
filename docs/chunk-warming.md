@@ -133,6 +133,14 @@ a half-filled bag whose defaults it would have to know.
 
 ## Porting to a native adapter
 
+Warming was the first piece to be split this way, and the argument below turned
+out to be the general one: anything that has to act *during* playback cannot
+live in shared JavaScript, because a native engine keeps playing while the
+WebView is frozen. Stall detection, the recovery ladder and live playlist
+refresh are split on the same reasoning —
+[suspension-safe-playback.md](suspension-safe-playback.md) is that rule stated
+once, for all of them, and is the document to read first when porting.
+
 Schedules are plain data: build them in JS with `buildChunkSchedules` and hand
 them across the bridge, or rebuild them natively from the same playlists — both
 are fine, and the result must be identical either way.
@@ -151,8 +159,10 @@ platform's own scheduling primitives, following the semantics above.
   (`PlayerAdapter.warmChunks`, `ChunkWarmOptions`, `ChunkBoundary`).
 - Policy resolution: `player-core/src/controller.ts`
   (`PlayerController.updateChunkWarming`).
-- The loop, for the web: `player-web/src/adapter/chunkWarming.ts`
-  (`ChunkPrefetcher`), wired up in `player-web/src/adapter/HlsJsAdapter.ts`.
+- The loop, for the web: `player-web-legacy/src/adapter/chunkWarming.ts`
+  (`ChunkPrefetcher`), wired up in
+  `player-web-legacy/src/adapter/VideoJsAdapter.ts`. `player-web` carries a
+  byte-identical copy until it is retired.
 - Behaviour pinned by `player-web/__tests__/chunk-warming.test.ts` (the loop),
   `player-web/__tests__/adapter.test.ts` (the wiring and its lifecycle) and
   `player-core/src/controller.spec.ts` (the handover).
