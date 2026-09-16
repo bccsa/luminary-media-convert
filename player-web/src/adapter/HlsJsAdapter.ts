@@ -9,7 +9,11 @@ import type {
     LoaderContext,
     MediaPlaylist,
 } from 'hls.js';
-import { LUMINARY_KEY_PLACEHOLDER_URI, keyBytes } from '@luminary-media-converter/player-core';
+import {
+    DEFAULT_RECOVERY_POLICY,
+    LUMINARY_KEY_PLACEHOLDER_URI,
+    keyBytes,
+} from '@luminary-media-converter/player-core';
 import type {
     AdapterAudioTrack,
     AdapterCapabilities,
@@ -25,6 +29,7 @@ import type {
     PlayerAdapter,
     Unsubscribe,
 } from '@luminary-media-converter/player-core';
+import { RecoveryLadder } from '../drivers/RecoveryLadder';
 import { ChunkPrefetcher } from './chunkWarming';
 
 /** Attribute used to correlate a `<track>` element with its adapter track id. */
@@ -137,8 +142,8 @@ export interface HlsJsAdapterOptions {
  * {@link PlayerAdapter} over hls.js driving a caller-supplied `<video>`.
  *
  * Owns intra-source ABR (`levels`/`currentLevel`), audio-track selection,
- * native `<track>` rendering and the first-line recovery primitives. All
- * policy (retries, backoff, stall detection, polling) stays in the wrapper.
+ * native `<track>` rendering and the recovery obligation on `PlayerAdapter`,
+ * which it meets with a copy of `player-web-legacy`'s {@link RecoveryLadder}.
  */
 export class HlsJsAdapter implements PlayerAdapter {
     readonly capabilities: AdapterCapabilities = {
@@ -153,6 +158,9 @@ export class HlsJsAdapter implements PlayerAdapter {
     private hls: Hls | null = null;
     /** The source currently attached — what {@link reattach} re-prepares against. */
     private lastSource: AdapterSource | null = null;
+    private readonly ladder: RecoveryLadder;
+    /** Where forward progress is measured from: the furthest played position since the last seek. */
+    private lastProgressTime = 0;
     private prefetcher: ChunkPrefetcher | null = null;
     private keyBytes: Uint8Array | null = null;
     private trackEls: HTMLTrackElement[] = [];
@@ -164,6 +172,14 @@ export class HlsJsAdapter implements PlayerAdapter {
     constructor(video: HTMLVideoElement, options: HlsJsAdapterOptions = {}) {
         this.video = video;
         this.hlsConfig = options.hlsConfig ?? {};
+        // The real policy arrives with the first source.
+        this.ladder = new RecoveryLadder(DEFAULT_RECOVERY_POLICY, {
+            recoverInPlace: (category) => this.recover(category),
+            reattach: () => this.reattach(),
+            requestReload: (reason, attempt) =>
+                this.emit('reload-requested', { reason, attempt }),
+            onExhausted: (payload) => this.emit('error', payload),
+        });
     }
 
     // -- loading ------------------------------------------------------------
@@ -172,6 +188,10 @@ export class HlsJsAdapter implements PlayerAdapter {
         this.teardownEngine();
         this.lastSource = src;
         this.keyBytes = src.keyHex ? keyBytes(src.keyHex) : null;
+        this.lastProgressTime = 0;
+        this.ladder.setPolicy(src.recovery);
+        // Resets the ladder, except on the re-munge the ladder itself asked for.
+        this.ladder.noteSourceLoaded();
 
         if (!isHlsEngineSupported()) {
             if (src.isBlob) {
@@ -221,7 +241,10 @@ export class HlsJsAdapter implements PlayerAdapter {
             fatal: Boolean(data.fatal),
             detail: data,
         };
-        this.emit('error', payload);
+        // A fatal error goes up the ladder; `error` reaches the wrapper only
+        // once every rung is spent. Non-fatal ones are informational.
+        if (payload.fatal) this.ladder.note(payload);
+        else this.emit('error', payload);
     };
 
     /**
@@ -259,6 +282,9 @@ export class HlsJsAdapter implements PlayerAdapter {
     }
 
     seek(seconds: number): void {
+        // A seek is not progress: set before `currentTime`, whose own
+        // `timeupdate` must not read as a recovery having worked.
+        this.lastProgressTime = seconds;
         this.video.currentTime = seconds;
     }
 
@@ -430,7 +456,12 @@ export class HlsJsAdapter implements PlayerAdapter {
             this.mediaListeners.push([type, handler]);
         };
         add('timeupdate', () => {
-            this.emit('timeupdate', { currentTime: this.getCurrentTime() });
+            const currentTime = this.getCurrentTime();
+            if (currentTime > this.lastProgressTime) {
+                this.lastProgressTime = currentTime;
+                this.ladder.notePlaybackHealthy();
+            }
+            this.emit('timeupdate', { currentTime });
             // `progress` alone is too coarse: it fires on network activity, so
             // the band would sit still while the playhead ran through media
             // that is already buffered.
@@ -445,6 +476,11 @@ export class HlsJsAdapter implements PlayerAdapter {
         add('pause', () => this.emit('pause', undefined));
         add('ended', () => this.emit('ended', undefined));
         add('waiting', () => this.emit('waiting', undefined));
+        // `seeking` precedes the seek's `timeupdate`, including seeks this
+        // adapter did not issue.
+        add('seeking', () => {
+            this.lastProgressTime = this.getCurrentTime();
+        });
         add('seeked', () => this.emit('seeked', undefined));
     }
 
@@ -496,6 +532,7 @@ export class HlsJsAdapter implements PlayerAdapter {
     destroy(): void {
         if (this.destroyed) return;
         this.destroyed = true;
+        this.ladder.destroy();
         this.teardownEngine();
         this.activeTextTrackId = null;
         this.listeners.clear();

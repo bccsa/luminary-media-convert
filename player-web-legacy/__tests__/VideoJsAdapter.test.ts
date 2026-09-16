@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { DEFAULT_RECOVERY_POLICY } from '@luminary-media-converter/player-core';
 import { VideoJsAdapter } from '../src/adapter/VideoJsAdapter';
 import { fakePlayer } from './helpers';
 
@@ -156,5 +157,93 @@ describe('VideoJsAdapter — the contract player-core relies on', () => {
         expect(a.getAudioTracks()).toEqual([]);
         expect(() => a.setVariant('720')).not.toThrow();
         expect(() => a.setAudioTrack('en')).not.toThrow();
+    });
+});
+
+describe('VideoJsAdapter — recovery ladder', () => {
+    const source = { url: 'blob:master', isBlob: true, recovery: DEFAULT_RECOVERY_POLICY };
+
+    function setup() {
+        vi.useFakeTimers();
+        vi.stubGlobal('MediaSource', class {});
+        const p = fakePlayer({ paused: () => true });
+        const a = new VideoJsAdapter(p);
+        const errors: unknown[] = [];
+        const reloads: number[] = [];
+        a.on('error', (e) => errors.push(e));
+        a.on('reload-requested', ({ attempt }) => reloads.push(attempt));
+        return { p, a, errors, reloads };
+    }
+
+    function setVisibility(state: 'visible' | 'hidden') {
+        Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+    }
+
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+    });
+
+    it('does not count the position restored after a re-munge as recovery', async () => {
+        const { p, a, errors } = setup();
+        // What the controller does on `reload-requested`: rebuild, then restore the position.
+        a.on('reload-requested', () => {
+            void a.loadSource(source).then(() => {
+                p._time = 0;
+                a.seek(120);
+                p.fire('timeupdate');
+            });
+        });
+        await a.loadSource(source);
+        p._time = 120;
+        p.fire('timeupdate');
+
+        // The same failure every time playback gets back to 120 s.
+        p._error = { code: 2 };
+        for (let i = 0; i < 10 && errors.length === 0; i++) {
+            p.fire('error');
+            await vi.advanceTimersByTimeAsync(10_000);
+        }
+
+        expect(errors).toHaveLength(1);
+    });
+
+    it('does not rebuild a source it has given up on when the page becomes visible', async () => {
+        const { p, a, errors, reloads } = setup();
+        await a.loadSource(source);
+        p._error = { code: 3 };
+        for (let i = 0; i < 6 && errors.length === 0; i++) {
+            p.fire('error');
+            await vi.advanceTimersByTimeAsync(10_000);
+        }
+        expect(errors).toHaveLength(1);
+        const requested = reloads.length;
+
+        setVisibility('hidden');
+        setVisibility('visible');
+
+        expect(reloads).toHaveLength(requested);
+    });
+
+    it('re-raises a re-munge only when the page was hidden while it was outstanding', async () => {
+        const { p, a, reloads } = setup();
+        await a.loadSource(source);
+        p._error = { code: 3 };
+        // In place (declined), re-attach, then the first re-munge request.
+        p.fire('error');
+        await vi.advanceTimersByTimeAsync(10_000);
+        p.fire('error');
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(reloads).toEqual([2]);
+
+        // Delivered while visible: returning to the page must not repeat it.
+        setVisibility('visible');
+        expect(reloads).toEqual([2]);
+
+        // Hidden while still outstanding: it may not have been delivered.
+        setVisibility('hidden');
+        setVisibility('visible');
+        expect(reloads).toEqual([2, 2]);
     });
 });

@@ -1,5 +1,11 @@
 /**
- * The recovery ladder — the whole of it, policy and timers together.
+ * The recovery ladder — the whole of it, policy and timers together. A copy,
+ * on life support.
+ *
+ * The canonical version is `player-web-legacy/src/drivers/RecoveryLadder.ts`,
+ * and this file exists only so `HlsJsAdapter` meets the recovery obligation
+ * until this package is deleted. Do not develop it here; `BlobServeStrategy.ts`
+ * is duplicated between the two packages on the same terms.
  *
  * This is the reference implementation of the obligation `PlayerAdapter` states
  * in `player-core/src/types.ts`: before an adapter may declare playback over,

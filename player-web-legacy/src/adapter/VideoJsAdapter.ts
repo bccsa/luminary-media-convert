@@ -122,7 +122,7 @@ export class VideoJsAdapter implements PlayerAdapter {
     private readonly ladder: RecoveryLadder;
     /** The source currently attached — what {@link reattach} re-prepares against. */
     private lastSource: AdapterSource | null = null;
-    /** Highest playhead position seen, for spotting genuine forward progress. */
+    /** Where forward progress is measured from: the furthest played position since the last seek. */
     private lastProgressTime = 0;
     private onVisibilityChange: (() => void) | null = null;
     private remoteTextTracks = new Map<string, RemoteTextTrackElement>();
@@ -296,12 +296,23 @@ export class VideoJsAdapter implements PlayerAdapter {
             // re-src, and setting currentTime now would be discarded.
             const handler = (): void => {
                 this.deferredSeek = null;
-                this.player.currentTime(seconds);
+                this.seekNow(seconds);
             };
             this.deferredSeek = handler;
             this.player.one('loadedmetadata', handler);
             return;
         }
+        this.seekNow(seconds);
+    }
+
+    /**
+     * A seek moves the playhead without playback having progressed, so it moves
+     * the progress baseline with it. Set before `currentTime`, because the
+     * browser fires `timeupdate` for the seek itself — and a position restored
+     * after a re-munge must not read as the recovery having worked.
+     */
+    private seekNow(seconds: number): void {
+        this.lastProgressTime = seconds;
         this.player.currentTime(seconds);
     }
 
@@ -582,6 +593,11 @@ export class VideoJsAdapter implements PlayerAdapter {
             this.emit('ended', undefined);
         });
         add('waiting', () => this.emit('waiting', undefined));
+        // Seeks the adapter did not issue (the viewer's, VHS's gap skips) move
+        // the baseline too. `seeking` precedes the seek's `timeupdate`.
+        add('seeking', () => {
+            this.lastProgressTime = this.getCurrentTime();
+        });
         add('seeked', () => {
             this.stallSignals.resetBaseline(this.getCurrentTime());
             this.emit('seeked', undefined);
@@ -616,7 +632,10 @@ export class VideoJsAdapter implements PlayerAdapter {
     private attachVisibilityListener(): void {
         if (typeof document === 'undefined') return;
         const handler = (): void => {
-            if (document.visibilityState !== 'visible') return;
+            if (document.visibilityState !== 'visible') {
+                this.ladder.noteSuspended();
+                return;
+            }
             this.emitResumeState();
         };
         this.onVisibilityChange = handler;
