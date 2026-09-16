@@ -8,6 +8,11 @@ export * from '@luminary-media-converter/player-core';
 export { default as LuminaryPlayer } from './components/LuminaryPlayer.vue';
 export { default as AudioVideoToggle } from './components/AudioVideoToggle.vue';
 
+// The web's serving layer. `player-core` requires one and defaults to nothing,
+// so a host building its own controller needs this — and a native shell
+// implements `ServeStrategy` in its place.
+export { BlobServeStrategy } from './serve/BlobServeStrategy';
+
 export {
     VideoJsAdapter,
     UnsupportedBrowserError,
