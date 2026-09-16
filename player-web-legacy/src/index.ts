@@ -15,10 +15,40 @@ export {
     type VideoJsAdapterOptions,
 } from './adapter/VideoJsAdapter';
 
-// The in-memory key seam. Exported because it is the piece most likely to need
-// swapping out if a video.js upgrade moves VHS's request factory — see the
-// README's note on flipping `keyDelivery` to 'url'.
+// The VHS request-factory seam and the two policies on it. Exported because
+// they are the pieces most likely to need swapping out if a video.js upgrade
+// moves VHS's request factory — see the README's note on flipping
+// `keyDelivery` to 'url'.
+export { wrapVhsXhr, vhsHandler, vhsTech } from './adapter/vhsXhrSeam';
 export { installMemoryKeyXhr } from './adapter/vhsKeyInterceptor';
+export {
+    installByteRangeTimeout,
+    byteRangeBackstopMs,
+    BYTE_RANGE_TIMEOUT_MULTIPLIER,
+    BYTE_RANGE_TIMEOUT_FALLBACK_MS,
+} from './adapter/vhsRequestTimeout';
+
+// Stall detection is VHS's; this reads its verdicts. Exported, with the clock
+// it counts on, as part of the set a native adapter is ported from.
+export {
+    VhsStallSignals,
+    UNKNOWN_WAITING_STRIKES,
+    UNKNOWN_WAITING_WINDOW_MS,
+    type VhsStallSignalHooks,
+    type VhsStallSignalOptions,
+    type UsageEventTarget,
+} from './adapter/vhsStallSignals';
+export { monotonicNow } from './drivers/clock';
+
+// The recovery ladder, whole. Exported because it IS the porting unit: a native
+// adapter whose engine has no retry policy of its own ports this file, and one
+// whose engine does (ExoPlayer) satisfies the same obligation with that instead.
+export {
+    RecoveryLadder,
+    type RecoveryLadderHooks,
+    type RecoveryLadderOptions,
+    type RecoveryReason,
+} from './drivers/RecoveryLadder';
 
 // Exported as the reference warming loop a native adapter is ported from, not
 // because a host has any reason to construct one: the adapter owns its own.
