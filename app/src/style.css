@@ -225,11 +225,52 @@
     .ecf-input-kbps { @apply !w-[4.5rem] text-right !p-[0.1875rem_0.375rem] !text-[0.8125rem]; }
     .ecf-input-lbl { @apply !w-[5.5rem] !p-[0.1875rem_0.375rem] !text-[0.8125rem]; }
     .ecf-input-id { @apply !w-16 !p-[0.1875rem_0.375rem] !text-[0.8125rem]; }
-    .ecf-input-lang { @apply !w-12 text-center !p-[0.1875rem_0.25rem] !text-[0.8125rem]; }
     .ecf-input-num { @apply !w-20 text-center; }
     .ecf-select-inline { @apply !min-w-[7rem] !p-[0.1875rem_2rem_0.1875rem_0.375rem] !text-[0.8125rem]; }
     .ecf-select-ch { @apply !w-[5.5rem] !p-[0.1875rem_2rem_0.1875rem_0.375rem] !text-[0.8125rem]; }
     .ecf-select-src { @apply !min-w-[10rem] !p-[0.1875rem_2rem_0.1875rem_0.375rem] !text-xs; }
+
+    /* EncodeConfigForm — SelectMenu: every dropdown in the form (trigger + themed panel, styled as FormSelectListbox) */
+    .ecf-menu-trigger {
+        @apply relative flex cursor-pointer appearance-none items-center overflow-hidden bg-no-repeat text-left
+            bg-[length:1rem_1rem] bg-[position:right_0.375rem_center];
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b' stroke-width='2'%3e%3cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3e%3c/svg%3e");
+    }
+    .ecf-menu-trigger[aria-expanded='true'] { @apply border-sky-500 ring-2 ring-sky-500/20 dark:ring-sky-400/25; }
+    .ecf-menu-trigger--code { @apply !w-[4.75rem] font-mono !p-[0.1875rem_1.75rem_0.1875rem_0.5rem] !text-[0.8125rem]; }
+    .ecf-menu-value { @apply block min-w-0 truncate; }
+    .ecf-menu-placeholder { @apply block min-w-0 truncate text-slate-400 dark:text-slate-500; }
+    .ecf-input-invalid,
+    .ecf-input-invalid:focus {
+        @apply border-red-500 bg-red-50 dark:border-red-400/70 dark:bg-red-950/30;
+    }
+    .ecf-menu-panel {
+        @apply flex flex-col overflow-hidden rounded-lg border shadow-lg outline-none ring-1
+            border-slate-200 bg-white text-slate-900 ring-slate-900/10
+            dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:ring-white/10;
+    }
+    .ecf-menu-search-wrap {
+        @apply relative shrink-0 border-b border-slate-200 p-1.5 dark:border-slate-700;
+    }
+    .ecf-menu-search-icon {
+        @apply pointer-events-none absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-slate-500;
+    }
+    .ecf-menu-search {
+        @apply w-full rounded-md border border-slate-300 bg-white py-1.5 pl-7 pr-2 text-xs text-slate-900 placeholder-slate-400 outline-none transition-colors
+            focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20
+            dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-500 dark:focus:ring-sky-400/25;
+    }
+    .ecf-menu-list { @apply m-0 min-h-0 flex-1 list-none overflow-y-auto overscroll-contain py-1; }
+    .ecf-menu-option {
+        @apply flex cursor-pointer items-center gap-2.5 px-3 py-1.5 text-xs text-slate-800 dark:text-slate-200;
+    }
+    .ecf-menu-option--selected { @apply bg-slate-50 text-slate-900 dark:bg-slate-950/50 dark:text-slate-100; }
+    .ecf-menu-option--active { @apply bg-slate-100 text-slate-900 dark:bg-slate-700/60 dark:text-slate-100; }
+    .ecf-menu-option--disabled { @apply cursor-not-allowed opacity-40; }
+    .ecf-menu-code { @apply w-7 shrink-0 font-mono text-[0.6875rem] text-slate-500 dark:text-slate-400; }
+    .ecf-menu-label { @apply min-w-0 flex-1 truncate; }
+    .ecf-menu-check { @apply h-4 w-4 shrink-0 text-slate-600 dark:text-slate-400; }
+    .ecf-menu-empty { @apply px-3 py-2 text-xs text-slate-500 dark:text-slate-400; }
     .ecf-toggle {
         @apply inline-flex items-center gap-1 text-xs cursor-pointer whitespace-nowrap mr-2.5 last:mr-0
             text-slate-500 dark:text-slate-400;

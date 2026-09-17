@@ -21,45 +21,13 @@ import {
     getAudioTierForHeight,
 } from './audioGroups';
 import { applySavedTrackLabels } from './trackLabels';
-import {
-    isValidLanguageCode,
-    LANGUAGE_OPTIONS,
-    languageName,
-    normalizeLanguageInput,
-} from './language-codes';
+import LanguageSelect from './LanguageSelect.vue';
+import SelectMenu, { type SelectMenuOption } from './SelectMenu.vue';
 import {
     copyModeBlockedReason,
     latestStreamStart,
     quickTrimBlockedReason,
 } from './copyMode';
-
-/**
- * Keep a language field to something a player can act on.
- *
- * Lower-cased and letters-only as it is typed, capped at three, because these
- * strings travel verbatim into `#EXT-X-MEDIA:LANGUAGE=`: `ENG` and `eng` reach a
- * player as two different languages, and `en` reaches it as none it recognises.
- * Writing the element's value back as well as the model's keeps the two in step
- * when this changed what was typed.
- */
-function onLanguageInput(event: Event, apply: (value: string) => void): void {
-    const el = event.target as HTMLInputElement;
-    const next = normalizeLanguageInput(el.value)
-        .replace(/[^a-z]/g, '')
-        .slice(0, 3);
-    if (el.value !== next) el.value = next;
-    apply(next);
-}
-
-/** What the field says about itself on hover, valid or not. */
-function languageTitle(code: string | undefined | null): string {
-    const normalized = normalizeLanguageInput(code);
-    if (normalized === '') return 'ISO 639-2 three-letter code, e.g. eng';
-    const name = languageName(normalized);
-    return name
-        ? `${normalized} — ${name}`
-        : `${normalized} is not an ISO 639-2 code`;
-}
 
 const props = withDefaults(
     defineProps<{
@@ -434,7 +402,8 @@ function formatDuration(seconds: number): string {
 }
 
 function onTrackInputKeydown(e: KeyboardEvent) {
-    const target = e.target as HTMLInputElement;
+    if (e.defaultPrevented) return;
+    const target = e.target as HTMLElement;
     if (!target?.hasAttribute?.('data-track-field')) return;
     const row = parseInt(target.getAttribute('data-row') ?? '-1', 10);
     const col = parseInt(target.getAttribute('data-col') ?? '-1', 10);
@@ -443,8 +412,8 @@ function onTrackInputKeydown(e: KeyboardEvent) {
     const fieldset = target.closest('fieldset');
     if (!fieldset) return;
     const inputs = Array.from(
-        fieldset.querySelectorAll<HTMLInputElement>(
-            'input[data-track-field][data-row][data-col]'
+        fieldset.querySelectorAll<HTMLElement>(
+            '[data-track-field][data-row][data-col]'
         )
     );
     const rows =
@@ -485,7 +454,7 @@ function onTrackInputKeydown(e: KeyboardEvent) {
     );
     if (next) {
         next.focus();
-        next.select();
+        if (next instanceof HTMLInputElement) next.select();
     }
 }
 
@@ -496,6 +465,41 @@ function channelLabel(ch: number): string {
     if (ch === 8) return '7.1';
     return `${ch}ch`;
 }
+
+const CHANNEL_OPTIONS: readonly SelectMenuOption[] = [1, 2, 6, 8].map(
+    (ch) => ({ value: ch, label: channelLabel(ch) }),
+);
+
+const videoSourceOptions = computed<SelectMenuOption[]>(() =>
+    editableVideoTracks.map((t) => ({
+        value: t.index,
+        label:
+            `#${t.index}${t.name ? ` — ${t.name}` : ''} ` +
+            `(${t.width}×${t.height}, ${
+                t.bitrateKbps != null && t.bitrateKbps > 0
+                    ? `${t.bitrateKbps} kbps`
+                    : 'bitrate n/a'
+            })`,
+    })),
+);
+
+const audioSourceOptions = computed<SelectMenuOption[]>(() =>
+    editableAudioTracks.map((t) => ({
+        value: t.index,
+        label: [
+            `#${t.index}:`,
+            t.codec,
+            t.bitrateKbps ? `${t.bitrateKbps}k` : '',
+            `${channelLabel(t.channels)}${t.language ? ` [${t.language}]` : ''}`,
+        ]
+            .filter(Boolean)
+            .join(' '),
+    })),
+);
+
+const audioGroupSelectOptions = computed<SelectMenuOption[]>(() =>
+    uniqueAudioGroupOptions.value.map((o) => ({ value: o.id, label: o.label })),
+);
 
 const canSubmit = computed(() => {
     if (encodingType.value === 'video') {
@@ -826,22 +830,10 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                         {{ t.sampleRate }} Hz
                                     </td>
                                     <td class="ecf-td">
-                                        <input
-                                            :value="t.language"
-                                            type="text"
-                                            class="ecf-input ecf-input-xs ecf-input-center"
-                                            :class="{
-                                                'ecf-input-invalid':
-                                                    !isValidLanguageCode(
-                                                        t.language,
-                                                    ),
-                                            }"
+                                        <LanguageSelect
+                                            v-model="t.language"
                                             placeholder="und"
-                                            list="ecf-language-codes"
-                                            maxlength="3"
-                                            autocapitalize="off"
-                                            spellcheck="false"
-                                            :title="languageTitle(t.language)"
+                                            aria-label="Track language"
                                             data-track-field="audio-language"
                                             :data-track-index="t.index"
                                             :data-row="
@@ -849,12 +841,6 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                                 audioIdx
                                             "
                                             data-col="0"
-                                            @input="
-                                                onLanguageInput(
-                                                    $event,
-                                                    (v) => (t.language = v),
-                                                )
-                                            "
                                             @keydown="onTrackInputKeydown"
                                         />
                                     </td>
@@ -959,35 +945,13 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                             "
                                             class="ecf-lt-td"
                                         >
-                                            <select
-                                                v-model.number="
-                                                    r.sourceTrackIndex
-                                                "
-                                                class="ecf-select ecf-select-src"
+                                            <SelectMenu
+                                                v-model="r.sourceTrackIndex"
+                                                :options="videoSourceOptions"
+                                                class="ecf-select-src"
+                                                aria-label="Source track"
                                                 @change="onCopySourceChange(r)"
-                                            >
-                                                <option
-                                                    v-for="t in editableVideoTracks"
-                                                    :key="t.index"
-                                                    :value="t.index"
-                                                >
-                                                    #{{ t.index
-                                                    }}{{
-                                                        t.name
-                                                            ? ` — ${t.name}`
-                                                            : ''
-                                                    }}
-                                                    ({{ t.width }}&times;{{
-                                                        t.height
-                                                    }},
-                                                    {{
-                                                        t.bitrateKbps != null &&
-                                                        t.bitrateKbps > 0
-                                                            ? `${t.bitrateKbps} kbps`
-                                                            : 'bitrate n/a'
-                                                    }})
-                                                </option>
-                                            </select>
+                                            />
                                         </td>
                                         <td class="ecf-lt-td">
                                             <span
@@ -1025,18 +989,12 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                             />
                                         </td>
                                         <td class="ecf-lt-td">
-                                            <select
+                                            <SelectMenu
                                                 v-model="r.audioGroupId"
-                                                class="ecf-select ecf-select-inline"
-                                            >
-                                                <option
-                                                    v-for="opt in uniqueAudioGroupOptions"
-                                                    :key="opt.id"
-                                                    :value="opt.id"
-                                                >
-                                                    {{ opt.label }}
-                                                </option>
-                                            </select>
+                                                :options="audioGroupSelectOptions"
+                                                class="ecf-select-inline"
+                                                aria-label="Audio group"
+                                            />
                                         </td>
                                         <td class="ecf-lt-td">
                                             <input
@@ -1214,73 +1172,27 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                             />
                                         </td>
                                         <td class="ecf-lt-td">
-                                            <select
-                                                v-model.number="g.channels"
-                                                class="ecf-select ecf-select-ch"
+                                            <SelectMenu
+                                                v-model="g.channels"
+                                                :options="CHANNEL_OPTIONS"
+                                                class="ecf-select-ch"
+                                                aria-label="Channels"
                                                 :disabled="g.copyStream"
-                                            >
-                                                <option :value="1">Mono</option>
-                                                <option :value="2">
-                                                    Stereo
-                                                </option>
-                                                <option :value="6">5.1</option>
-                                                <option :value="8">7.1</option>
-                                            </select>
+                                            />
                                         </td>
                                         <td class="ecf-lt-td">
-                                            <select
-                                                v-model.number="
-                                                    g.sourceTrackIndex
-                                                "
-                                                class="ecf-select ecf-select-src"
-                                            >
-                                                <option
-                                                    v-for="t in editableAudioTracks"
-                                                    :key="t.index"
-                                                    :value="t.index"
-                                                >
-                                                    #{{ t.index }}:
-                                                    {{ t.codec }}
-                                                    {{
-                                                        t.bitrateKbps
-                                                            ? `${t.bitrateKbps}k`
-                                                            : ''
-                                                    }}
-                                                    {{ channelLabel(t.channels)
-                                                    }}{{
-                                                        t.language
-                                                            ? ` [${t.language}]`
-                                                            : ''
-                                                    }}
-                                                </option>
-                                            </select>
+                                            <SelectMenu
+                                                v-model="g.sourceTrackIndex"
+                                                :options="audioSourceOptions"
+                                                class="ecf-select-src"
+                                                aria-label="Source track"
+                                            />
                                         </td>
                                         <td class="ecf-lt-td">
-                                            <input
-                                                :value="g.language"
-                                                type="text"
-                                                class="ecf-input ecf-input-lang"
-                                                :class="{
-                                                    'ecf-input-invalid':
-                                                        !isValidLanguageCode(
-                                                            g.language,
-                                                        ),
-                                                }"
+                                            <LanguageSelect
+                                                v-model="g.language"
                                                 placeholder="eng"
-                                                list="ecf-language-codes"
-                                                maxlength="3"
-                                                autocapitalize="off"
-                                                spellcheck="false"
-                                                :title="
-                                                    languageTitle(g.language)
-                                                "
-                                                @input="
-                                                    onLanguageInput(
-                                                        $event,
-                                                        (v) =>
-                                                            (g.language = v),
-                                                    )
-                                                "
+                                                aria-label="Audio group language"
                                             />
                                         </td>
                                         <td class="ecf-lt-td ecf-lt-td--opts">
@@ -1425,20 +1337,5 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                 }}
             </button>
         </div>
-    
-        <!--
-            One list for both language fields. Typing is the fast path — three
-            letters — but nobody remembers whether German is `ger` or `deu`, and
-            both are correct, so the names are here to be searched.
-        -->
-        <datalist id="ecf-language-codes">
-            <option
-                v-for="[code, name] in LANGUAGE_OPTIONS"
-                :key="code"
-                :value="code"
-            >
-                {{ name }}
-            </option>
-        </datalist>
 </div>
 </template>

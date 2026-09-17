@@ -482,13 +482,6 @@
     font-size: 0.8125rem;
 }
 
-.ecf-input-lang {
-    width: 3rem;
-    text-align: center;
-    padding: 0.1875rem 0.25rem;
-    font-size: 0.8125rem;
-}
-
 /*
  * A language field holding something that is not a language code.
  *
@@ -1179,3 +1172,127 @@ html.dark .ecf-root--session .ecf-btn-primary-disabled:hover {
     background-color: rgb(30 41 59 / 0.5);
     color: #64748b;
 }
+
+/* SelectMenu — every dropdown in the form (the panel is teleported to <body>) */
+.ecf-menu-trigger {
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ecf-menu-trigger--code {
+    width: 4.75rem;
+    padding: 0.1875rem 1.75rem 0.1875rem 0.5rem;
+    font-size: 0.8125rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background-size: 1.25em 1.25em;
+    background-position: right 0.25rem center;
+}
+
+.ecf-menu-value,
+.ecf-menu-placeholder {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ecf-menu-trigger[aria-expanded='true'] {
+    border-color: #0ea5e9;
+    box-shadow: 0 0 0 1px #0ea5e9;
+}
+
+.ecf-menu-placeholder { color: #71717a; }
+
+.ecf-menu-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 0.5rem;
+    border: 1px solid #3f3f46;
+    background: #27272a;
+    color: #f4f4f5;
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+    font-family: inherit;
+}
+
+.ecf-menu-search-wrap {
+    position: relative;
+    flex-shrink: 0;
+    padding: 0.375rem;
+    border-bottom: 1px solid #3f3f46;
+}
+
+.ecf-menu-search-icon {
+    position: absolute;
+    left: 0.875rem;
+    top: 50%;
+    width: 0.875rem;
+    height: 0.875rem;
+    transform: translateY(-50%);
+    color: #71717a;
+    pointer-events: none;
+}
+
+.ecf-menu-search {
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: 0.375rem;
+    border: 1px solid #3f3f46;
+    background: #18181b;
+    color: #f4f4f5;
+    padding: 0.375rem 0.5rem 0.375rem 1.75rem;
+    font-size: 0.75rem;
+    outline: none;
+}
+
+.ecf-menu-search:focus {
+    border-color: #0ea5e9;
+    box-shadow: 0 0 0 1px #0ea5e9;
+}
+
+.ecf-menu-list {
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 0.25rem 0;
+    list-style: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.ecf-menu-option {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+}
+
+.ecf-menu-option--selected { background: rgb(9 9 11 / 0.5); }
+.ecf-menu-option--active { background: #3f3f46; }
+.ecf-menu-option--disabled { cursor: not-allowed; opacity: 0.4; }
+
+.ecf-menu-code {
+    width: 1.75rem;
+    flex-shrink: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.6875rem;
+    color: #a1a1aa;
+}
+
+.ecf-menu-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ecf-menu-check { width: 1rem; height: 1rem; flex-shrink: 0; color: #a1a1aa; }
+
+.ecf-menu-empty { padding: 0.5rem 0.75rem; font-size: 0.75rem; color: #a1a1aa; }
