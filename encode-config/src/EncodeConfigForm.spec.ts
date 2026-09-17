@@ -441,3 +441,44 @@ describe('EncodeConfigForm copy dimensions when a trim is cleared', () => {
         expect(dimensions(wrapper)[0]).toBe('1024x576');
     });
 });
+
+describe('EncodeConfigForm dropdowns', () => {
+    it('uses the one themed menu for every dropdown, never a native select or datalist', () => {
+        const wrapper = mount(EncodeConfigForm, {
+            props: { probeResult: misalignedProbe(), byteRange: false },
+        });
+
+        expect(wrapper.findAll('select')).toHaveLength(0);
+        expect(wrapper.findAll('datalist')).toHaveLength(0);
+        const labels = wrapper
+            .findAll('[data-select-menu]')
+            .map((m) => m.attributes('aria-label'));
+        expect(labels).toEqual(
+            expect.arrayContaining([
+                'Source track',
+                'Audio group',
+                'Channels',
+                'Track language',
+                'Audio group language',
+            ]),
+        );
+    });
+
+    it('shows a picked channel layout on the trigger', async () => {
+        const wrapper = mount(EncodeConfigForm, {
+            props: { probeResult: misalignedProbe(), byteRange: false },
+            attachTo: document.body,
+        });
+
+        const channels = wrapper.find('[data-select-menu][aria-label="Channels"]');
+        await channels.trigger('click');
+        const mono = Array.from(
+            document.body.querySelectorAll<HTMLElement>('[role="option"]'),
+        ).find((li) => li.textContent!.trim() === 'Mono')!;
+        mono.click();
+        await wrapper.vm.$nextTick();
+
+        expect(channels.text()).toBe('Mono');
+        wrapper.unmount();
+    });
+});
