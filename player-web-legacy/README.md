@@ -133,6 +133,45 @@ If that seam ever breaks, the fallback is one word: construct the adapter with
 instead. Playback keeps working; a `blob:` key request appears in the network
 panel.
 
+### Byte-range requests get a longer timeout, on the same seam
+
+VHS issues every segment request with a timeout of 1.5 × the target duration —
+9 s for the encoder's default 6 s segments — and on a timeout takes what its
+source calls emergency action: the video loader forces ABR to the lowest
+rendition, the audio loader raises an error that excludes the current video
+rendition or flips the audio track back to default. Both assume a slow request
+means too little bandwidth for the rendition. On byte-range output it means a
+cold chunk object still backhauling at the edge, and every rendition of an
+angle shares that object, so the "switch down" re-requests the same cold
+object at a different offset: nine seconds discarded, quality floored, wait
+restarted. `vhsRequestTimeout.ts` wraps the same `vhs.xhr` factory and gives
+requests carrying a `Range` header a backstop of ten times the target duration
+instead. A dead request still times out; everything without a `Range` keeps
+VHS's default; VHS's bandwidth-estimate early abort is untouched.
+
+### The suspension-safe split
+
+Stall detection, the recovery ladder and chunk warming all live in this package
+rather than in `player-core`, and `src/drivers/` is the set a native adapter
+ports. The rule is one line — anything that has to act *during* playback cannot
+live in shared JavaScript, because a native engine keeps playing while a locked
+screen freezes the WebView — and `docs/suspension-safe-playback.md` is that rule
+written out, with the normative semantics for each piece.
+
+### Stalls are VHS's call
+
+`player-core` used to run a stall watchdog of its own — a 10 s timer on
+`currentTime` that seeked forward when nothing moved. It could not tell a slow
+chunk fetch from a wedged decoder, its seek landed past the buffer end and
+made VHS abort every request in flight, and the resulting `seeking` reset
+VHS's own counters. It is gone. VHS's `PlaybackWatcher` samples the buffer
+every 250 ms, skips gaps, corrects underflow and nudges a stuck decoder
+itself, announcing each verdict as a `usage` event on the tech;
+`vhsStallSignals.ts` reads those, reports `stalled` to the wrapper, and turns
+three `vhs-unknown-waiting` verdicts inside ten seconds — VHS nudged three
+times and nothing moved — into a fatal media error, which is what hands the
+wrapper's reload ladder the one thing VHS cannot do: rebuild the source.
+
 ### Skip intervals snap to 5, 10 or 30
 
 Video.js ships skip-button icons for those three values only, and hides a skip

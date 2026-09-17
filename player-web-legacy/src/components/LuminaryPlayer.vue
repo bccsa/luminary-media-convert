@@ -39,6 +39,7 @@ import type {
     PlayerSource,
 } from '@luminary-media-converter/player-core';
 import { VideoJsAdapter } from '../adapter/VideoJsAdapter';
+import { BlobServeStrategy } from '../serve/BlobServeStrategy';
 import { usePlayerState } from '../composables/usePlayerState';
 import { mergeMessages, type PlayerMessages } from '../messages';
 import { mergeControls, type PlayerControlsOptions } from '../controls';
@@ -110,8 +111,13 @@ interface Props {
      * prefetch tuning and its debug logging live here. Read once, when the
      * controller is built; ignored when `createController` is supplied,
      * since that caller constructs the controller itself.
+     *
+     * `Partial`, because the controller requires a `serveStrategy` and this
+     * component supplies one: on the web that is always object URLs, and a host
+     * has no reason to think about it. Naming one here still overrides it,
+     * which is the seam a native shell uses.
      */
-    controllerOptions?: PlayerControllerOptions;
+    controllerOptions?: Partial<PlayerControllerOptions>;
     /**
      * @internal Test seam — substitutes controller construction. Not part of
      * the supported API; the default builds
@@ -213,7 +219,13 @@ function mediaElement(instance: Player): HTMLVideoElement {
 
 function defaultCreateController(video: HTMLVideoElement): PlayerControllerApi {
     void video;
-    return new PlayerController(new VideoJsAdapter(player.value!), props.controllerOptions);
+    return new PlayerController(new VideoJsAdapter(player.value!), {
+        // The web's serving layer, supplied rather than defaulted: `player-core`
+        // is headless and cannot mint a URL on anyone's behalf. A host may name
+        // its own — which is how a native shell substitutes a loopback server.
+        serveStrategy: new BlobServeStrategy(),
+        ...props.controllerOptions,
+    });
 }
 
 // --- source loading -------------------------------------------------------

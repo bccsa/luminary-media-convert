@@ -33,7 +33,8 @@ import {
     KEY_CONTENT_TYPE,
     PLAYLIST_CONTENT_TYPE,
     VTT_CONTENT_TYPE,
-} from './blob-registry.js';
+} from './content-types.js';
+import { describeLiveness, type LivePlaylistSpec } from '../policy/live.js';
 import { keyBytes, type SubtleLike } from './decrypt.js';
 import {
     PipelineError,
@@ -104,8 +105,21 @@ export interface MungedMediaPlaylist {
     text: string;
 }
 
+/**
+ * A munged source, short of the one thing the pipeline does not own: the
+ * recovery policy the controller resolves and the adapter's ladder runs on.
+ * The controller completes it at the point of attach.
+ */
+export type MungedSource = Omit<AdapterSource, 'recovery'>;
+
 export interface MungeResult {
-    source: AdapterSource;
+    source: MungedSource;
+    /**
+     * At least one media playlist is still being written (no `#EXT-X-ENDLIST`),
+     * so the source has to be re-read for as long as it plays. Byte-range chunk
+     * warming is meaningless for such a source and disables itself.
+     */
+    isLive: boolean;
     /** Post-cap renditions, as derived from the playlist text. */
     qualities: Quality[];
     isAudioOnly: boolean;
@@ -255,6 +269,36 @@ export async function mungeSource(
     };
 
     const mediaPlaylists: MungedMediaPlaylist[] = [];
+    let isLive = false;
+
+    /**
+     * Hand a live playlist to the serving layer, which owns keeping it fresh.
+     *
+     * Returns the URL to serve it from, or throws when the strategy cannot do
+     * the job. Refusing is the point: served statically, a live playlist would
+     * play its first snapshot and then sit at the end of it forever, which
+     * looks like playback and is not.
+     */
+    const serveLivePlaylist = (url: string, text: string): string => {
+        const { targetDurationSec } = describeLiveness(text);
+        const spec: LivePlaylistSpec = {
+            url,
+            baseUrl: url,
+            keyUri: resolveKeyUri() ?? LUMINARY_KEY_PLACEHOLDER_URI,
+            ...(ctx.keyHex ? { keyBytes: keyBytes(ctx.keyHex) } : {}),
+            refreshSec: targetDurationSec,
+        };
+        const served = ctx.serveStrategy.serveLive?.(spec);
+        if (!served) {
+            throw new PipelineError(
+                'live-unsupported',
+                `${url} is still being written (no #EXT-X-ENDLIST) and this ` +
+                    'player cannot refresh a live playlist',
+                { url },
+            );
+        }
+        return served;
+    };
 
     let servedMasterText: string;
     if (!info.isMaster) {
@@ -266,6 +310,24 @@ export async function mungeSource(
             mediaType: 'VIDEO',
             text: capped,
         });
+        if (describeLiveness(capped).isLive) {
+            isLive = true;
+            // Nothing to serve as a master: the live URL IS the source.
+            return {
+                source: {
+                    url: serveLivePlaylist(info.url, capped),
+                    isBlob: true,
+                    ...(ctx.keyHex && ctx.keyDelivery === 'memory'
+                        ? { keyHex: ctx.keyHex }
+                        : {}),
+                },
+                qualities,
+                isAudioOnly,
+                masterText: capped,
+                mediaPlaylists,
+                isLive,
+            };
+        }
         servedMasterText = rewriteMediaPlaylist(capped, {
             playlistUrl: info.url,
             keyUri: hasAes128Key(capped) ? resolveKeyUri() : undefined,
@@ -281,6 +343,12 @@ export async function mungeSource(
                 mediaType: ref.mediaType ?? 'VIDEO',
                 text,
             });
+
+            if (describeLiveness(text).isLive) {
+                isLive = true;
+                replacements.set(ref.uri, serveLivePlaylist(absolute, text));
+                continue;
+            }
 
             const segmentReplacements =
                 ref.mediaType === 'SUBTITLES' && ctx.keyHex
@@ -316,6 +384,7 @@ export async function mungeSource(
         isAudioOnly,
         masterText: servedMasterText,
         mediaPlaylists,
+        isLive,
     };
 }
 

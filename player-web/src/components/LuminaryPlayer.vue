@@ -8,6 +8,7 @@ import type {
     PlayerSource,
 } from '@luminary-media-converter/player-core';
 import { HlsJsAdapter } from '../adapter/HlsJsAdapter';
+import { BlobServeStrategy } from '../serve/BlobServeStrategy';
 import { usePlayerState } from '../composables/usePlayerState';
 import { useFullscreenOrientation } from '../composables/useFullscreenOrientation';
 import ScrubThumbnail from './ScrubThumbnail.vue';
@@ -58,8 +59,13 @@ interface Props {
      * prefetch tuning and its debug logging live here. Read once, when the
      * controller is built; ignored when `createController` is supplied,
      * since that caller constructs the controller itself.
+     *
+     * `Partial`, because the controller requires a `serveStrategy` and this
+     * component supplies one: on the web that is always object URLs, and a host
+     * has no reason to think about it. Naming one here still overrides it,
+     * which is the seam a native shell uses.
      */
-    controllerOptions?: PlayerControllerOptions;
+    controllerOptions?: Partial<PlayerControllerOptions>;
     /**
      * @internal Test seam — substitutes controller construction. Not part of
      * the supported API; the default builds `PlayerController(HlsJsAdapter)`.
@@ -97,7 +103,10 @@ const windowedPreviewCue = computed(() => {
 });
 
 function defaultCreateController(video: HTMLVideoElement): PlayerControllerApi {
-    return new PlayerController(new HlsJsAdapter(video), props.controllerOptions);
+    return new PlayerController(new HlsJsAdapter(video), {
+        serveStrategy: new BlobServeStrategy(),
+        ...props.controllerOptions,
+    });
 }
 
 onMounted(() => {

@@ -13,6 +13,13 @@
 /** The request description VHS passes to its request factory. */
 export interface VhsXhrOptions {
     uri: string;
+    /** Set for byte-range segment requests (`Range: bytes=…`) and nothing else. */
+    headers?: Record<string, string>;
+    /**
+     * Milliseconds; VHS derives it from the target duration and passes 0 for
+     * "no timeout" on the lowest enabled rendition.
+     */
+    timeout?: number;
     [key: string]: unknown;
 }
 
@@ -66,10 +73,26 @@ export interface VhsXhrFactory {
     [key: string]: unknown;
 }
 
+/** The main playlist loader; `media()` is the media playlist currently playing. */
+export interface VhsPlaylistLoader {
+    media(): { targetDuration?: number; [key: string]: unknown } | null | undefined;
+    [key: string]: unknown;
+}
+
 /** The handler VHS attaches to the tech once a source is loaded. */
 export interface VhsHandler {
     xhr: VhsXhrFactory;
+    playlists?: VhsPlaylistLoader;
     [key: string]: unknown;
+}
+
+/**
+ * A `usage` event, triggered on the tech: VHS's own account of what it just
+ * did — `vhs-gap-skip`, `vhs-unknown-waiting`, `vhs-rendition-excluded`, …
+ */
+export interface VhsUsageEvent {
+    type: 'usage';
+    name: string;
 }
 
 /** One entry of `player.qualityLevels()`. */

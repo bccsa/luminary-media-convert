@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+    AAC_LC_CODEC_ATTRIBUTE,
     aacArgs,
     bitrateToVideoCrf,
     MEDIA_FOUNDATION_MAX_HEIGHT,
@@ -340,6 +341,14 @@ describe('aacArgs', () => {
         for (const args of [aacArgs(), aacArgs(0)]) {
             expect(args.join(' ')).not.toMatch(/aac_he|libfdk/i);
         }
+    });
+
+    // The master playlist vouches for this attribute on every re-encoded
+    // audio group without reading the output — sound only while the encoder
+    // is held to AAC-LC, object type 2. The two pins stay together.
+    it('is what AAC_LC_CODEC_ATTRIBUTE describes', () => {
+        expect(AAC_LC_CODEC_ATTRIBUTE).toBe('mp4a.40.2');
+        expect(aacArgs()).toContain('aac_low');
     });
 });
 

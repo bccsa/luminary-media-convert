@@ -1,15 +1,15 @@
 /**
  * {@link PlayerController} — the headless player.
  *
- * Owns everything that is not engine-specific: the munging pipeline, the state
- * store, coming-soon polling, the recovery ladder and the stall watchdog. The
- * engine is reached only through {@link PlayerAdapter}, so the same controller
- * drives hls.js on the web today and AVPlayer / ExoPlayer in a Capacitor shell
- * later.
+ * Owns what no engine can: the munging pipeline, the state store and
+ * coming-soon polling. Detection and recovery belong to the engine, which
+ * reaches back through exactly one door — `reload-requested`, the rebuild of a
+ * munged source that only this code knows how to perform. The engine is reached
+ * through {@link PlayerAdapter}, so the same controller drives Video.js on the
+ * web today and AVPlayer / ExoPlayer in a Capacitor shell later.
  */
 
 import { Emitter } from './emitter.js';
-import { createDefaultServeStrategy } from './pipeline/blob-registry.js';
 import type { SubtleLike } from './pipeline/decrypt.js';
 import { isMissing, toPlayerError } from './pipeline/fetch.js';
 import {
@@ -27,11 +27,6 @@ import {
     DEFAULT_WARM_BYTES,
     buildChunkSchedules,
 } from './prefetch.js';
-import {
-    RecoveryManager,
-    StallWatchdog,
-    resolveRecoveryPolicy,
-} from './recovery.js';
 import { SidecarLoader, pickDefaultChapterTrack } from './sidecars.js';
 import {
     findThumbnailCue,
@@ -40,6 +35,7 @@ import {
 import { StateStore, createInitialState } from './store.js';
 import {
     AUDIO_ONLY_ANGLE_ID,
+    type AdapterErrorPayload,
     type Angle,
     type ChunkWarmOptions,
     type PlayerAdapter,
@@ -51,6 +47,7 @@ import {
     type PlayerState,
     type Quality,
     type RecoveryPolicy,
+    resolveRecoveryPolicy,
     type ServeStrategy,
     type Unsubscribe,
 } from './types.js';
@@ -58,8 +55,18 @@ import {
 export interface PlayerControllerOptions {
     /** Injectable `fetch` (tests, auth-wrapped fetch, Capacitor HTTP). */
     fetchImpl?: typeof fetch;
-    /** How munged text reaches the engine. Defaults to blob/object URLs. */
-    serveStrategy?: ServeStrategy;
+    /**
+     * How munged text reaches the engine: blob URLs on the web
+     * (`BlobServeStrategy`, in the player packages), a loopback server or file
+     * URIs in a native shell.
+     *
+     * Required, and deliberately so. It used to default to blob URLs, which
+     * meant a native shell that forgot to pass one was handed URLs its player
+     * cannot read, silently, at runtime. It is also the seam the whole native
+     * port hangs off and, until this became required, no real host had ever
+     * exercised it — every one of them fell through to the default.
+     */
+    serveStrategy: ServeStrategy;
     /** Injectable WebCrypto; defaults to `globalThis.crypto.subtle`. */
     subtle?: SubtleLike;
     /**
@@ -95,10 +102,8 @@ export class PlayerController implements PlayerControllerApi {
     private readonly fetchImpl: typeof fetch;
     private readonly subtle?: SubtleLike;
 
-    private serveStrategy: ServeStrategy | null;
+    private readonly serveStrategy: ServeStrategy;
     private policy: RecoveryPolicy = resolveRecoveryPolicy();
-    private recovery: RecoveryManager;
-    private watchdog: StallWatchdog;
     private poller: Poller | null = null;
     private sidecarLoader: SidecarLoader | null = null;
     /** Parsed scrub-preview cues for the current source; empty when there are none. */
@@ -113,21 +118,18 @@ export class PlayerController implements PlayerControllerApi {
     private startPosition = 0;
     private resumePlaying = false;
     private chapterTrackPinned = false;
-    private lastProgress = 0;
 
     constructor(
         private readonly adapter: PlayerAdapter,
-        private readonly options: PlayerControllerOptions = {},
+        private readonly options: PlayerControllerOptions,
     ) {
         this.fetchImpl =
             options.fetchImpl ??
             ((input: RequestInfo | URL, init?: RequestInit) =>
                 globalThis.fetch(input, init));
         this.subtle = options.subtle;
-        this.serveStrategy = options.serveStrategy ?? null;
+        this.serveStrategy = options.serveStrategy;
 
-        this.recovery = this.createRecovery();
-        this.watchdog = this.createWatchdog();
         this.attachAdapter();
     }
 
@@ -147,12 +149,9 @@ export class PlayerController implements PlayerControllerApi {
         this.teardownSource();
         this.source = source;
         this.policy = resolveRecoveryPolicy(source.recovery);
-        this.recovery = this.createRecovery();
-        this.watchdog = this.createWatchdog();
         this.startPosition = preserved;
         this.resumePlaying = resume;
         this.chapterTrackPinned = false;
-        this.lastProgress = 0;
         this.cache = new Map();
         this.qualityToVariant = new Map();
         // Cleared here, not only when the next set arrives: a load that fails
@@ -168,15 +167,14 @@ export class PlayerController implements PlayerControllerApi {
         });
 
         try {
-            // Inside the try, not above it: `serve()` throws synchronously in an
-            // environment with no way to serve blobs (no Blob/createObjectURL —
-            // jsdom, some SSR runtimes). Every host calls `load()` fire-and-forget
-            // on the promise, because the contract is that failures surface
-            // through state — a throw here escaped as an unhandled rejection
-            // instead of rendering the error panel.
+            // Inside the try, not above it: a serving layer may throw on first
+            // use — a native shell whose loopback server failed to bind, say.
+            // Every host calls `load()` fire-and-forget, because the contract is
+            // that failures surface through state; a throw here would escape as
+            // an unhandled rejection instead of rendering the error panel.
             this.sidecarLoader = new SidecarLoader({
                 fetchImpl: this.fetchImpl,
-                serveStrategy: this.serve(),
+                serveStrategy: this.serveStrategy,
                 keyHex: source.keyHex,
                 subtle: this.subtle,
             });
@@ -298,7 +296,13 @@ export class PlayerController implements PlayerControllerApi {
               );
         if (generation !== this.generation) return;
 
-        await this.adapter.loadSource(source ?? munged!.source);
+        // The policy is completed here rather than in the pipeline: it is the
+        // controller that resolves a source's overrides, and the adapter that
+        // runs the ladder on the result.
+        await this.adapter.loadSource({
+            ...(source ?? munged!.source),
+            recovery: this.policy,
+        });
         if (generation !== this.generation) return;
 
         // The narrowed master references only this angle's renditions plus the
@@ -424,7 +428,6 @@ export class PlayerController implements PlayerControllerApi {
         const seekTo = this.adapter.getCurrentTime();
         const resume = this.state.playing;
 
-        this.watchdog.stop();
         try {
             await this.attachAngle(generation, id, { seekTo, resume });
         } catch (error) {
@@ -501,15 +504,10 @@ export class PlayerController implements PlayerControllerApi {
         return this.store.getState();
     }
 
-    private serve(): ServeStrategy {
-        this.serveStrategy ??= createDefaultServeStrategy();
-        return this.serveStrategy;
-    }
-
     private context(): PipelineContext {
         return {
             fetchImpl: this.fetchImpl,
-            serveStrategy: this.serve(),
+            serveStrategy: this.serveStrategy,
             keyDelivery: this.adapter.capabilities.keyDelivery,
             keyHex: this.source?.keyHex,
             subtle: this.subtle,
@@ -555,9 +553,7 @@ export class PlayerController implements PlayerControllerApi {
         this.poller?.stop();
         this.poller = null;
         this.updateChunkWarming(null);
-        this.watchdog.stop();
-        this.recovery.destroy();
-        this.serveStrategy?.release();
+        this.serveStrategy.release();
         this.master = null;
     }
 
@@ -658,10 +654,6 @@ export class PlayerController implements PlayerControllerApi {
         this.adapterSubscriptions.push(
             this.adapter.on('timeupdate', ({ currentTime }) => {
                 this.store.setState({ currentTime });
-                if (currentTime > this.lastProgress) {
-                    this.lastProgress = currentTime;
-                    this.recovery.notePlaybackHealthy();
-                }
             }),
             this.adapter.on('durationchange', ({ duration }) => {
                 this.store.setState({ duration });
@@ -675,26 +667,39 @@ export class PlayerController implements PlayerControllerApi {
                     ended: false,
                     stalled: false,
                 });
-                this.recovery.notePlaybackHealthy();
-                this.watchdog.start();
             }),
             this.adapter.on('pause', () => {
-                this.store.setState({ playing: false });
-                this.watchdog.stop();
+                this.store.setState({ playing: false, stalled: false });
             }),
             this.adapter.on('ended', () => {
-                this.store.setState({ playing: false, ended: true });
-                this.watchdog.stop();
+                this.store.setState({
+                    playing: false,
+                    ended: true,
+                    stalled: false,
+                });
             }),
-            // 'waiting' is normal buffering — the stall watchdog decides when
-            // it has gone on long enough to be a problem.
+            // 'waiting' is normal buffering. Whether it has gone on long enough
+            // to count as a stall is the engine's call, made against its own
+            // buffer and delivered as 'stalled'; the wrapper only publishes it.
+            this.adapter.on('stalled', ({ stalled }) => {
+                this.store.setState({ stalled });
+            }),
             this.adapter.on('seeked', () => {
                 this.store.setState({
                     currentTime: this.adapter.getCurrentTime(),
                 });
             }),
+            // By contract an adapter has already spent its recovery obligation
+            // before raising a fatal error — its engine's own primitive, bounded
+            // re-attaches, and any re-munge it asked for below. There is nothing
+            // left for the wrapper to try, so this is the end of the road.
             this.adapter.on('error', (payload) => {
-                this.recovery.handleError(payload);
+                if (!payload.fatal) return;
+                this.fail(adapterErrorToPlayerError(payload));
+            }),
+            // The one recovery step an engine cannot perform for itself.
+            this.adapter.on('reload-requested', ({ attempt }) => {
+                void this.remunge(attempt);
             }),
             this.adapter.on('variants-updated', () => this.refreshQualities()),
             this.adapter.on('audiotracks-updated', () =>
@@ -703,37 +708,33 @@ export class PlayerController implements PlayerControllerApi {
         );
     }
 
-    private createRecovery(): RecoveryManager {
-        return new RecoveryManager(this.policy, {
-            recoverInPlace: (category) =>
-                this.adapter.recover?.(category) ?? false,
-            reload: async (attempt) => {
-                const generation = this.generation;
-                const seekTo = this.adapter.getCurrentTime();
-                const resume = this.state.playing;
-                await this.attachAngle(generation, this.state.activeAngleId, {
-                    seekTo,
-                    resume,
-                });
-                if (generation !== this.generation) return;
-                this.emitter.emit('recovered', { attempt });
-            },
-            onFatal: (error) => this.fail(error),
-        });
-    }
-
-    private createWatchdog(): StallWatchdog {
-        return new StallWatchdog(this.policy, {
-            getCurrentTime: () => this.adapter.getCurrentTime(),
-            seek: (seconds) => this.adapter.seek(seconds),
-            onStalled: (stalled) => this.store.setState({ stalled }),
-            onWedged: () =>
-                this.recovery.handleError({ category: 'media', fatal: true }),
-        });
+    /**
+     * Rebuild and re-attach the current selection, at an adapter's request.
+     *
+     * The same angle and the same cap: this is not a change of source but a
+     * rebuild of it, for the failures re-attaching could not fix. A throw here
+     * is terminal — the adapter asked for the last thing anyone could do.
+     */
+    private async remunge(attempt: number): Promise<void> {
+        if (this.state.lifecycle === 'destroyed') return;
+        const generation = this.generation;
+        const seekTo = this.adapter.getCurrentTime();
+        const resume = this.state.playing;
+        try {
+            await this.attachAngle(generation, this.state.activeAngleId, {
+                seekTo,
+                resume,
+            });
+        } catch (error) {
+            if (generation !== this.generation) return;
+            this.fail(toPlayerError(error));
+            return;
+        }
+        if (generation !== this.generation) return;
+        this.emitter.emit('recovered', { attempt });
     }
 
     private fail(error: PlayerError): void {
-        this.watchdog.stop();
         // Same reasoning as the waiting-for-master path: the adapter may
         // still be playing a previous source; an error surface over live
         // playback misstates both.
@@ -745,6 +746,26 @@ export class PlayerController implements PlayerControllerApi {
     private emitNonFatal(error: PlayerError): void {
         this.emitter.emit('error', { ...error, fatal: false });
     }
+}
+
+/**
+ * An exhausted adapter's error, as something a viewer can be shown. The
+ * category is the engine's account of what went wrong; the message says the
+ * recovery everyone agreed to try has been tried.
+ */
+function adapterErrorToPlayerError(payload: AdapterErrorPayload): PlayerError {
+    const code: PlayerError['code'] =
+        payload.category === 'network'
+            ? 'network'
+            : payload.category === 'media'
+              ? 'media'
+              : 'unknown';
+    return {
+        code,
+        fatal: true,
+        message: `Playback failed: unrecoverable ${payload.category} error`,
+        cause: payload.detail,
+    };
 }
 
 function defaultAngleId(angles: Angle[]): string | null {

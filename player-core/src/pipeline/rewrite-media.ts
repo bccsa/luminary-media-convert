@@ -6,17 +6,27 @@
  * every URI is absolutized against the playlist's ORIGINAL URL first. The key
  * policy is applied in the same pass.
  *
- * The rewrite runs on the lossless model: parse, edit the URIs the model owns,
- * build. Everything else — byte ranges, `#EXTINF` spelling, unknown tags,
- * unknown attributes, attribute order — comes back out exactly as it went in.
+ * ### Why this is string work rather than a model round-trip
+ *
+ * It used to parse into `hls-core`'s lossless model, edit three fields and
+ * build. The model earns its keep where a playlist is genuinely restructured —
+ * the master munge narrows angles and caps quality — but the media rewrite
+ * makes exactly three edits, all of them to text: substitute a key URI,
+ * absolutize a `URI="…"` attribute, absolutize a segment line. Doing that
+ * directly is not a shortcut, it is strictly MORE preserving: a line this pass
+ * does not recognise is not reformatted from a model, it is not touched at all,
+ * so attribute order in a tag nothing here cares about survives exactly as
+ * written. The old implementation already conceded the point, keeping a textual
+ * fallback for every tag the model did not represent.
+ *
+ * It also has to be text. This is the only rewrite on the per-request path for
+ * live, where a native asset resolver re-fetches, re-decrypts and re-applies it
+ * every target-duration while JavaScript may be frozen — so it is ported to
+ * Swift and Kotlin, and two string edits port in a way a 468-line lossless
+ * parser does not. One implementation of the rule, three languages, the same
+ * fixtures. `docs/suspension-safe-playback.md` has the boundary in prose.
  */
-import {
-    LUMINARY_KEY_PLACEHOLDER_URI,
-    buildMediaPlaylist,
-    getMediaPlaylistLayout,
-    parseMediaPlaylist,
-    setMediaPlaylistLayout,
-} from '@luminary-media-converter/hls-core';
+import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls-core';
 import { absolutize } from './playlist-text.js';
 
 export { LUMINARY_KEY_PLACEHOLDER_URI };
@@ -39,6 +49,8 @@ export interface RewriteMediaOptions {
     segmentReplacements?: ReadonlyMap<string, string>;
 }
 
+const KEY_TAG = '#EXT-X-KEY:';
+
 /**
  * Rewrite one media playlist.
  *
@@ -50,58 +62,64 @@ export interface RewriteMediaOptions {
  * - Segment URIs → absolutized (or replaced from `segmentReplacements`).
  * - `#EXT-X-BYTERANGE` → untouched: the offsets address ciphertext in the
  *   packed file and must not be recomputed.
+ * - Everything else → reproduced exactly, because nothing here reads it.
  */
 export function rewriteMediaPlaylist(
     text: string,
     options: RewriteMediaOptions,
 ): string {
-    const playlist = parseMediaPlaylist(text);
-
-    if (options.keyUri) {
-        for (const key of playlist.keys) {
-            if (key.method === 'NONE') continue;
-            key.uri = options.keyUri;
-        }
-    }
-
-    for (const map of playlist.maps) {
-        map.uri = absolutize(map.uri, options.playlistUrl);
-    }
-
-    for (const segment of playlist.segments) {
-        segment.uri = rewriteSegmentUri(segment.uri, options);
-    }
-
-    // Lines outside the model keep the old line-level treatment, so a tag this
-    // package has never modeled still gets its URIs absolutized.
-    const layout = getMediaPlaylistLayout(playlist);
-    if (layout) {
-        setMediaPlaylistLayout(
-            playlist,
-            layout.map((item) =>
-                typeof item === 'string' ? rewriteRawLine(item, options) : item,
-            ),
-        );
-    }
-
-    return buildMediaPlaylist(playlist);
+    return text
+        .split('\n')
+        .map((line) => rewriteLine(line, options))
+        .join('\n');
 }
 
-function rewriteSegmentUri(uri: string, options: RewriteMediaOptions): string {
-    const absolute = absolutize(uri, options.playlistUrl);
-    return options.segmentReplacements?.get(absolute) ?? absolute;
+function rewriteLine(line: string, options: RewriteMediaOptions): string {
+    // Playlists written on Windows arrive CRLF; the carriage return is part of
+    // the separator, not of the URI, and has to be put back afterwards.
+    const cr = line.endsWith('\r');
+    const body = cr ? line.slice(0, -1) : line;
+    const rewritten = rewriteBody(body, options);
+    return cr ? `${rewritten}\r` : rewritten;
 }
 
-function rewriteRawLine(line: string, options: RewriteMediaOptions): string {
+function rewriteBody(line: string, options: RewriteMediaOptions): string {
     if (!line) return line;
     if (!line.startsWith('#')) return rewriteSegmentUri(line, options);
-    // A key line the model could not read is left exactly as found: its URI is
-    // a key URI, and the key policy above is the only thing allowed near those.
-    if (line.startsWith('#EXT-X-KEY:')) return line;
+    if (line.startsWith(KEY_TAG)) return rewriteKeyLine(line, options);
     if (!line.includes('URI="')) return line;
     return line.replace(
         /URI="([^"]*)"/g,
         (_match, uri: string) =>
             `URI="${absolutize(uri, options.playlistUrl)}"`,
     );
+}
+
+/**
+ * The key line is the one place a URI is replaced outright rather than
+ * resolved: a locally supplied session key wins over whatever the playlist
+ * names, which is the whole point of `luminary://key`. Every other attribute —
+ * `IV`, `KEYFORMAT`, `KEYFORMATVERSIONS` — is left exactly as found.
+ */
+function rewriteKeyLine(line: string, options: RewriteMediaOptions): string {
+    const { keyUri } = options;
+    if (!keyUri) return line;
+
+    const attrs = line.slice(KEY_TAG.length);
+    // `METHOD=NONE` declares the segments after it are NOT encrypted. Pointing
+    // a key at it would claim the opposite.
+    if (/(?:^|,)\s*METHOD=NONE(?:,|$)/.test(attrs)) return line;
+
+    if (/URI="[^"]*"/.test(line)) {
+        return line.replace(/URI="[^"]*"/, `URI="${keyUri}"`);
+    }
+    // A non-NONE key with no URI at all is malformed HLS — the attribute is
+    // required — but the key it is missing is exactly the one being supplied,
+    // so completing the line is more useful than passing the fault through.
+    return `${line},URI="${keyUri}"`;
+}
+
+function rewriteSegmentUri(uri: string, options: RewriteMediaOptions): string {
+    const absolute = absolutize(uri, options.playlistUrl);
+    return options.segmentReplacements?.get(absolute) ?? absolute;
 }
