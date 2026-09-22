@@ -24,6 +24,7 @@ export interface VideoJsOptions {
     html5: {
         vhs: {
             overrideNative: boolean;
+            experimentalUseMMS: boolean;
             enableLowInitialPlaylist: boolean;
             maxPlaylistRetries: number;
             useBandwidthFromLocalStorage: boolean;
@@ -133,6 +134,9 @@ export function buildVideoJsOptions(controls: PlayerControlsOptions): VideoJsOpt
                 // HLS natively, because what it is given is a munged blob
                 // playlist no native pipeline would resolve.
                 overrideNative: true,
+                // iPhones have ManagedMediaSource but no MediaSource; without this VHS
+                // refuses every source there.
+                experimentalUseMMS: true,
                 enableLowInitialPlaylist: true,
                 maxPlaylistRetries: 10,
                 useBandwidthFromLocalStorage: true,
