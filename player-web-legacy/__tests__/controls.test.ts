@@ -119,6 +119,15 @@ describe('buildVideoJsOptions', () => {
         expect(options.html5.vhs.overrideNative).toBe(true);
         expect(options.autoplay).toBe(false);
     });
+
+    it('leaves maxPlaylistRetries unset, so an early abort cannot cost a rendition for good', () => {
+        // A finite value caps how many exclusions a rendition survives before
+        // VHS drops it for the rest of the load, and VHS excludes the playing
+        // rendition every time a slow CDN edge trips its early-abort path.
+        const vhs: Record<string, unknown> = buildVideoJsOptions(DEFAULT_CONTROLS).html5.vhs;
+
+        expect('maxPlaylistRetries' in vhs).toBe(false);
+    });
 });
 
 /**

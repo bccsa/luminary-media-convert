@@ -3,9 +3,9 @@
  * this player exists to be visually and behaviourally indistinguishable from
  * it, and the options object is half of that (the other half is `styles.css`).
  *
- * Two deliberate departures from the app's literal object are noted at their
- * lines: the bogus `skipBackwardButton` child, and `IS_ANY_SAFARI` in place of
- * `IS_SAFARI`.
+ * Three deliberate departures from the app's literal object are noted at their
+ * lines: the bogus `skipBackwardButton` child, `IS_ANY_SAFARI` in place of
+ * `IS_SAFARI`, and the dropped `maxPlaylistRetries`.
  */
 import videojs from 'video.js';
 import type { PlayerControlsOptions } from '../controls';
@@ -25,7 +25,6 @@ export interface VideoJsOptions {
         vhs: {
             overrideNative: boolean;
             enableLowInitialPlaylist: boolean;
-            maxPlaylistRetries: number;
             useBandwidthFromLocalStorage: boolean;
             useDevicePixelRatio: boolean;
         };
@@ -134,7 +133,12 @@ export function buildVideoJsOptions(controls: PlayerControlsOptions): VideoJsOpt
                 // playlist no native pipeline would resolve.
                 overrideNative: true,
                 enableLowInitialPlaylist: true,
-                maxPlaylistRetries: 10,
+                // `maxPlaylistRetries` is deliberately absent, leaving VHS's
+                // default of Infinity. It is not a retry count: it caps how
+                // many exclusions a rendition survives before VHS drops it for
+                // the rest of the load, and VHS excludes the playing rendition
+                // every time a slow CDN edge trips its early-abort path — so a
+                // finite value ratchets the top of the ladder away for good.
                 useBandwidthFromLocalStorage: true,
                 useDevicePixelRatio: true,
             },
