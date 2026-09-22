@@ -102,6 +102,12 @@ describe('buildVideoJsOptions', () => {
         expect(children).toContain('audioTrackButton');
     });
 
+    it('lets VHS use ManagedMediaSource, the only media source iPhones have', () => {
+        // Without it VHS reports it can't handle any source on an iPhone, and the
+        // player fails every video with MEDIA_ERR_SRC_NOT_SUPPORTED.
+        expect(buildVideoJsOptions(DEFAULT_CONTROLS).html5.vhs.experimentalUseMMS).toBe(true);
+    });
+
     it('keeps the subtitle and PiP buttons in the fixed child list', () => {
         // Control-bar children are fixed at construction: a source's text tracks
         // are not known then, and the player may switch to YouTube and back.
