@@ -8,6 +8,7 @@ vi.mock('hls.js', async () => {
 import { HlsJsAdapter, UnsupportedBrowserError } from '../src/adapter/HlsJsAdapter';
 import { BaseLoaderStub, FakeHls, baseLoaderCalls, resetHlsMock } from './hls-mock';
 import { keyBytes } from '@luminary-media-converter/player-core';
+import { DEFAULT_RECOVERY_POLICY } from '@luminary-media-converter/player-core';
 import type { AdapterErrorPayload } from '@luminary-media-converter/player-core';
 
 const KEY_HEX = '000102030405060708090a0b0c0d0e0f';
@@ -267,11 +268,12 @@ describe('HlsJsAdapter — event mapping', () => {
         const adapter = new HlsJsAdapter(createVideo());
         const errors: AdapterErrorPayload[] = [];
         adapter.on('error', (payload) => errors.push(payload));
-        await adapter.loadSource({ url: 'blob:master', isBlob: true });
+        await adapter.loadSource({ url: 'blob:master', isBlob: true, recovery: DEFAULT_RECOVERY_POLICY });
 
-        lastHls().trigger(FakeHls.Events.ERROR, { type, fatal: true });
+        // Non-fatal: passed straight through. Fatal ones go up the ladder first.
+        lastHls().trigger(FakeHls.Events.ERROR, { type, fatal: false });
 
-        expect(errors[0]).toMatchObject({ category, fatal: true });
+        expect(errors[0]).toMatchObject({ category, fatal: false });
     });
 
     it('forwards media element events', async () => {
@@ -500,6 +502,57 @@ describe('HlsJsAdapter — recovery', () => {
         expect(hls.startLoadCalls).toBe(1);
 
         expect(adapter.recover('other')).toBe(false);
+    });
+
+    it('recovers in place, then re-attaches and asks for re-munges, before reporting a fatal error', async () => {
+        vi.useFakeTimers();
+        const adapter = new HlsJsAdapter(createVideo());
+        const errors: AdapterErrorPayload[] = [];
+        const reloads: number[] = [];
+        adapter.on('error', (payload) => errors.push(payload));
+        adapter.on('reload-requested', ({ attempt }) => reloads.push(attempt));
+        await adapter.loadSource({ url: 'blob:master', isBlob: true, recovery: DEFAULT_RECOVERY_POLICY });
+        const hls = lastHls();
+
+        // In place, re-attach, re-munge, re-munge, then out of rungs.
+        for (let i = 0; i < 5; i++) {
+            hls.trigger(FakeHls.Events.ERROR, { type: FakeHls.ErrorTypes.MEDIA_ERROR, fatal: true });
+            await vi.advanceTimersByTimeAsync(10_000);
+        }
+
+        expect(hls.recoverMediaErrorCalls).toBe(1);
+        expect(reloads).toEqual([2, 3]);
+        expect(errors).toHaveLength(1);
+        expect(errors[0]).toMatchObject({ category: 'media', fatal: true });
+        vi.useRealTimers();
+    });
+
+    it('does not count the position restored after a re-munge as recovery', async () => {
+        vi.useFakeTimers();
+        const video = createVideo();
+        const adapter = new HlsJsAdapter(video);
+        const source = { url: 'blob:master', isBlob: true, recovery: DEFAULT_RECOVERY_POLICY };
+        const errors: AdapterErrorPayload[] = [];
+        adapter.on('error', (payload) => errors.push(payload));
+        // What the controller does on `reload-requested`: rebuild, then restore the position.
+        adapter.on('reload-requested', () => {
+            void adapter.loadSource(source).then(() => {
+                adapter.seek(120);
+                video.dispatchEvent(new Event('timeupdate'));
+            });
+        });
+        await adapter.loadSource(source);
+        video.currentTime = 120;
+        video.dispatchEvent(new Event('timeupdate'));
+
+        // The same failure every time playback gets back to 120 s.
+        for (let i = 0; i < 10 && errors.length === 0; i++) {
+            lastHls().trigger(FakeHls.Events.ERROR, { type: FakeHls.ErrorTypes.MEDIA_ERROR, fatal: true });
+            await vi.advanceTimersByTimeAsync(10_000);
+        }
+
+        expect(errors).toHaveLength(1);
+        vi.useRealTimers();
     });
 
     it('declines recovery without an engine', () => {

@@ -6,12 +6,8 @@ export type { PlayerControllerOptions } from './controller.js';
 export { Emitter } from './emitter.js';
 export { StateStore, createInitialState } from './store.js';
 export { Poller, DEFAULT_POLL_INTERVAL_MS } from './poller.js';
-export {
-    RecoveryManager,
-    StallWatchdog,
-    DEFAULT_RECOVERY_POLICY,
-    resolveRecoveryPolicy,
-} from './recovery.js';
+// `DEFAULT_RECOVERY_POLICY` / `resolveRecoveryPolicy` come from `types.js`
+// above: the policy is data the adapter's ladder reads, not behaviour here.
 // The warming loop itself is an adapter's job (`PlayerAdapter.warmChunks`);
 // what ships from here is the schedule builder and the policy defaults.
 export {
@@ -28,14 +24,18 @@ export {
 } from './sidecars.js';
 export { parseVttCues, parseVttTimestamp } from './vtt.js';
 
-// Pipeline — the deliberately public, pure pieces.
+// Liveness, and the plain-data spec a native serving layer refreshes from.
+export { describeLiveness } from './policy/live.js';
+export type { Liveness, LivePlaylistSpec } from './policy/live.js';
+
+// Pipeline — the deliberately public, pure pieces. The blob-backed
+// `ServeStrategy` is NOT among them: it lives in the player packages, because
+// this one is headless and a host must now supply its own.
 export {
-    BlobServeStrategy,
-    createDefaultServeStrategy,
     KEY_CONTENT_TYPE,
     PLAYLIST_CONTENT_TYPE,
     VTT_CONTENT_TYPE,
-} from './pipeline/blob-registry.js';
+} from './pipeline/content-types.js';
 export {
     bytesToHex,
     decryptLmcenc,
@@ -62,6 +62,7 @@ export type {
     MungeOptions,
     MungeResult,
     MungedMediaPlaylist,
+    MungedSource,
     PipelineContext,
 } from './pipeline/pipeline.js';
 export {

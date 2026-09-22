@@ -23,7 +23,7 @@ import {
     parseThumbnailVtt,
     type ThumbnailSpriteCue,
 } from '@luminary-media-converter/hls-core';
-import { VTT_CONTENT_TYPE } from './pipeline/blob-registry.js';
+import { VTT_CONTENT_TYPE } from './pipeline/content-types.js';
 import { fetchMaybeEncrypted } from './pipeline/fetch.js';
 import type { SubtleLike } from './pipeline/decrypt.js';
 import { parseVttCues } from './vtt.js';

@@ -1,5 +1,9 @@
 import { type MockInstance } from 'vitest';
-import type { EncodeConfigDto } from '../dto/encode-config.dto.js';
+import type {
+    AudioGroupDto,
+    EncodeConfigDto,
+    VideoRenditionDto,
+} from '../dto/encode-config.dto.js';
 import { planLadderWaves } from './ladder-waves.js';
 import { MAX_HARDWARE_SESSIONS } from './encoder-sessions.js';
 import {
@@ -8,6 +12,7 @@ import {
     writeFileSync,
     readFileSync,
     existsSync,
+    mkdirSync,
 } from 'fs';
 import { isAbsolute, join } from 'path';
 import { tmpdir } from 'os';
@@ -4740,5 +4745,316 @@ describe('isHardwareEncoderFailure', () => {
                 new Error('FFmpeg timed out after 60000ms')
             )
         ).toBe(false);
+    });
+});
+
+describe('FfmpegService — audio codecs for the merged master', () => {
+    // The wave split leaves every wave but the first without audio, and the
+    // merge restores AUDIO= from the encode config. The audio CODEC it also
+    // has to restore is learnt from first-wave variants where it can be — and
+    // vouched for by the service where it cannot: a re-encoded group is
+    // AAC-LC by construction, a copied group is whatever the init segment
+    // ffmpeg wrote says it is.
+
+    /**
+     * `init_4.mp4` of a real copy-mode audio group (AAC-LC, 48 kHz, mono).
+     * The same bytes as the fixture in `aac-codec-attribute.spec.ts`.
+     */
+    const REAL_INIT = Buffer.from(
+        'AAAAHGZ0eXBpc281AAACAGlzbzVpc282bXA0MQAAAtltb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAAAAABAAABAAAAAAAA' +
+            'AAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAB23Ry' +
+            'YWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAQEAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAA' +
+            'AAAAAAAAAEAAAAAAAAAAAAAAAAAAACRlZHRzAAAAHGVsc3QAAAAAAAAAAQAAAAAAAAAAAAEAAAAAAVNtZGlhAAAAIG1kaGQAAAAA' +
+            'AAAAAAAAAAAAALuAAAAAAFXEAAAAAAAlaGRscgAAAAAAAAAAc291bgAAAAAAAAAAAAAAAE1vbm8AAAABBm1pbmYAAAAQc21oZAAA' +
+            'AAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAAAynN0YmwAAAB+c3RzZAAAAAAAAAABAAAAbm1wNGEA' +
+            'AAAAAAAAAQAAAAAAAAAAAAEAEAAAAAC7gAAAAAAANmVzZHMAAAAAA4CAgCUAAQAEgICAF0AVAAAAAAENiAABDYgFgICABRGIVuUA' +
+            'BoCAgAECAAAAFGJ0cnQAAAAAAAENiAABDYgAAAAQc3R0cwAAAAAAAAAAAAAAEHN0c2MAAAAAAAAAAAAAABRzdHN6AAAAAAAAAAAA' +
+            'AAAAAAAAEHN0Y28AAAAAAAAAAAAAAChtdmV4AAAAIHRyZXgAAAAAAAAAAQAAAAEAAAAAAAAAAAAAAAAAAABidWR0YQAAAFptZXRh' +
+            'AAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjYy' +
+            'LjEyLjEwMA==',
+        'base64'
+    );
+
+    let service: FfmpegService;
+    let outputDir: string;
+    let warn: MockInstance;
+
+    beforeEach(() => {
+        service = new FfmpegService();
+        (service as any).accelMode = 'cpu';
+        outputDir = mkdtempSync(join(tmpdir(), 'ffmpeg-codecs-'));
+        warn = vi
+            .spyOn((service as any).logger, 'warn')
+            .mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+        warn.mockRestore();
+        rmSync(outputDir, { recursive: true, force: true });
+    });
+
+    const audioGroup = (
+        id: string,
+        label: string,
+        copyStream: boolean
+    ): AudioGroupDto =>
+        ({
+            id,
+            label,
+            audioCodec: 'aac',
+            copyStream,
+            channels: 1,
+            audioBitrateKbps: 32,
+            sourceTrackIndex: 0,
+        }) as AudioGroupDto;
+
+    /** Lay down what ffmpeg leaves behind for one audio group. */
+    function writeAudioStream(
+        group: AudioGroupDto,
+        options: { init?: Buffer | null; map?: boolean } = {}
+    ): void {
+        const { init = REAL_INIT, map = true } = options;
+        const dir = join(
+            outputDir,
+            `stream_${(service as any).buildAudioStreamName(group)}`
+        );
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(
+            join(dir, 'playlist.m3u8'),
+            [
+                '#EXTM3U',
+                '#EXT-X-VERSION:7',
+                '#EXT-X-TARGETDURATION:6',
+                ...(map ? ['#EXT-X-MAP:URI="init_4.mp4"'] : []),
+                '#EXTINF:6.000000,',
+                'segment_0.m4s',
+                '#EXT-X-ENDLIST',
+                '',
+            ].join('\n')
+        );
+        if (init) writeFileSync(join(dir, 'init_4.mp4'), init);
+    }
+
+    describe('audioGroupCodecAttributes (private, tested via reflection)', () => {
+        it('vouches for AAC-LC on a re-encoded group without reading anything', async () => {
+            const codecs = await (service as any).audioGroupCodecAttributes(
+                join(outputDir, 'nothing-was-written-here'),
+                [audioGroup('mid', 'Standard', false)]
+            );
+
+            expect(codecs.get('mid')).toEqual(['mp4a.40.2']);
+            expect(warn).not.toHaveBeenCalled();
+        });
+
+        it("reads a copied group's codec off the init segment ffmpeg wrote", async () => {
+            const low = audioGroup('low', 'Bandwidth Saving', true);
+            writeAudioStream(low);
+
+            const codecs = await (service as any).audioGroupCodecAttributes(
+                outputDir,
+                [low]
+            );
+
+            expect(codecs.get('low')).toEqual(['mp4a.40.2']);
+            expect(warn).not.toHaveBeenCalled();
+        });
+
+        it('answers for every group in one pass', async () => {
+            const low = audioGroup('low', 'Bandwidth Saving', true);
+            writeAudioStream(low);
+
+            const codecs = await (service as any).audioGroupCodecAttributes(
+                outputDir,
+                [audioGroup('mid', 'Standard', false), low]
+            );
+
+            expect([...codecs.keys()].sort()).toEqual(['low', 'mid']);
+        });
+
+        it('leaves out a copied group whose playlist is missing, and says so', async () => {
+            const low = audioGroup('low', 'Bandwidth Saving', true);
+
+            const codecs = await (service as any).audioGroupCodecAttributes(
+                outputDir,
+                [low]
+            );
+
+            expect(codecs.has('low')).toBe(false);
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(String(warn.mock.calls[0][0])).toContain('low');
+        });
+
+        it('leaves out a copied group whose playlist names no init segment', async () => {
+            const low = audioGroup('low', 'Bandwidth Saving', true);
+            writeAudioStream(low, { map: false });
+
+            const codecs = await (service as any).audioGroupCodecAttributes(
+                outputDir,
+                [low]
+            );
+
+            expect(codecs.has('low')).toBe(false);
+            expect(warn).toHaveBeenCalledTimes(1);
+        });
+
+        it('leaves out a copied group whose init segment is not AAC', async () => {
+            // Nothing is invented for a stream that cannot be read: a wrong
+            // codec would have the player refuse the variant just as surely as
+            // a missing one, and with less to go on.
+            const low = audioGroup('low', 'Bandwidth Saving', true);
+            writeAudioStream(low, { init: Buffer.from('not an init segment') });
+
+            const codecs = await (service as any).audioGroupCodecAttributes(
+                outputDir,
+                [low]
+            );
+
+            expect(codecs.has('low')).toBe(false);
+            expect(warn).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('mergeWaveMasterPlaylists (private, tested via reflection)', () => {
+        // The ladder that surfaced the gap: five renditions on two groups,
+        // split into waves of three, so the second wave — the one without
+        // audio — is the only wave that references the copied group.
+        const rendition = (
+            height: number,
+            width: number,
+            audioGroupId: string
+        ): VideoRenditionDto =>
+            ({
+                width,
+                height,
+                videoBitrateKbps: height * 4,
+                copyStream: false,
+                audioGroupId,
+            }) as VideoRenditionDto;
+
+        const renditions = [
+            rendition(1080, 1920, 'mid'),
+            rendition(720, 1280, 'mid'),
+            rendition(360, 640, 'mid'),
+            rendition(240, 426, 'low'),
+            rendition(144, 256, 'low'),
+        ];
+        const mid = audioGroup('mid', 'Standard', false);
+        const low = audioGroup('low', 'Bandwidth Saving', true);
+        const encodeConfig = {
+            type: 'video',
+            videoRenditions: renditions,
+            audioGroups: [mid, low],
+        } as EncodeConfigDto;
+
+        const dirOf = (r: VideoRenditionDto) =>
+            `stream_${(service as any).buildVideoStreamName(r, false)}`;
+        const variant = (
+            r: VideoRenditionDto,
+            codecs: string,
+            audio?: string
+        ) => [
+            `#EXT-X-STREAM-INF:BANDWIDTH=${r.videoBitrateKbps * 1000},RESOLUTION=${r.width}x${r.height},CODECS="${codecs}"` +
+                (audio ? `,AUDIO="${audio}"` : ''),
+            `${dirOf(r)}/playlist.m3u8`,
+        ];
+
+        async function merge(): Promise<string> {
+            const waves = planLadderWaves(renditions, MAX_HARDWARE_SESSIONS);
+            expect(waves).toHaveLength(2);
+
+            writeFileSync(
+                join(outputDir, waves[0].masterName),
+                [
+                    '#EXTM3U',
+                    '#EXT-X-VERSION:7',
+                    `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_mid",NAME="Standard",DEFAULT=YES,URI="stream_${(service as any).buildAudioStreamName(mid)}/playlist.m3u8"`,
+                    `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_low",NAME="Bandwidth Saving",DEFAULT=YES,URI="stream_${(service as any).buildAudioStreamName(low)}/playlist.m3u8"`,
+                    ...variant(
+                        renditions[0],
+                        'avc1.640028,mp4a.40.2',
+                        'group_mid'
+                    ),
+                    ...variant(
+                        renditions[1],
+                        'avc1.64001f,mp4a.40.2',
+                        'group_mid'
+                    ),
+                    ...variant(
+                        renditions[2],
+                        'avc1.64001e,mp4a.40.2',
+                        'group_mid'
+                    ),
+                    '',
+                ].join('\n')
+            );
+            writeFileSync(
+                join(outputDir, waves[1].masterName),
+                [
+                    '#EXTM3U',
+                    '#EXT-X-VERSION:7',
+                    ...variant(renditions[3], 'avc1.640015'),
+                    ...variant(renditions[4], 'avc1.64000c'),
+                    '',
+                ].join('\n')
+            );
+
+            await (service as any).mergeWaveMasterPlaylists(
+                outputDir,
+                waves,
+                encodeConfig
+            );
+            return readFileSync(join(outputDir, 'master.m3u8'), 'utf8');
+        }
+
+        const lineFor = (master: string, r: VideoRenditionDto) =>
+            master
+                .split('\n')
+                .find((l) => l.includes(`RESOLUTION=${r.width}x${r.height}`))!;
+
+        it("declares the copied group's codec, read from its init, on the later wave", async () => {
+            writeAudioStream(low);
+
+            const master = await merge();
+
+            expect(lineFor(master, renditions[3])).toContain(
+                'CODECS="avc1.640015,mp4a.40.2",AUDIO="group_low"'
+            );
+            expect(lineFor(master, renditions[4])).toContain(
+                'CODECS="avc1.64000c,mp4a.40.2",AUDIO="group_low"'
+            );
+        });
+
+        it('leaves the first wave as ffmpeg wrote it', async () => {
+            writeAudioStream(low);
+
+            const master = await merge();
+
+            expect(lineFor(master, renditions[0])).toBe(
+                variant(renditions[0], 'avc1.640028,mp4a.40.2', 'group_mid')[0]
+            );
+        });
+
+        it('restores the group but not a codec it could not read', async () => {
+            // No init to read: the variant is degraded rather than wrong.
+            const master = await merge();
+
+            expect(lineFor(master, renditions[3])).toContain(
+                'CODECS="avc1.640015",AUDIO="group_low"'
+            );
+            expect(warn).toHaveBeenCalledTimes(1);
+        });
+
+        it('removes the wave masters once merged', async () => {
+            writeAudioStream(low);
+            const waves = planLadderWaves(renditions, MAX_HARDWARE_SESSIONS);
+
+            await merge();
+
+            for (const wave of waves) {
+                expect(existsSync(join(outputDir, wave.masterName))).toBe(
+                    false
+                );
+            }
+        });
     });
 });

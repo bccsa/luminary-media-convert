@@ -1,22 +1,27 @@
 import { keyBytes } from '@luminary-media-converter/player-core';
-import type {
-    AdapterAudioTrack,
-    AdapterCapabilities,
-    AdapterErrorCategory,
-    AdapterEventMap,
-    AdapterEventName,
-    AdapterSource,
-    AdapterTextTrack,
-    AdapterVariant,
-    ChunkBoundary,
-    ChunkWarmOptions,
-    PlayerAdapter,
-    Unsubscribe,
+import {
+    DEFAULT_RECOVERY_POLICY,
+    type AdapterAudioTrack,
+    type AdapterCapabilities,
+    type AdapterErrorCategory,
+    type AdapterEventMap,
+    type AdapterEventName,
+    type AdapterSource,
+    type AdapterTextTrack,
+    type AdapterVariant,
+    type ChunkBoundary,
+    type ChunkWarmOptions,
+    type PlayerAdapter,
+    type Unsubscribe,
 } from '@luminary-media-converter/player-core';
 import type Player from 'video.js/dist/types/player';
 import type { QualityLevel, QualityLevelList } from '../types/videojs-vhs';
+import { RecoveryLadder } from '../drivers/RecoveryLadder';
 import { ChunkPrefetcher } from './chunkWarming';
 import { installMemoryKeyXhr } from './vhsKeyInterceptor';
+import { installByteRangeTimeout } from './vhsRequestTimeout';
+import { VhsStallSignals } from './vhsStallSignals';
+import { vhsTech } from './vhsXhrSeam';
 
 /** The MIME type that routes a source to VHS rather than to the native tech. */
 const HLS_MIME_TYPE = 'application/x-mpegURL';
@@ -110,8 +115,16 @@ export class VideoJsAdapter implements PlayerAdapter {
     private readonly player: Player;
     private prefetcher: ChunkPrefetcher | null = null;
     private keyBytes: Uint8Array | null = null;
-    private uninstallKeyXhr: (() => void) | null = null;
-    private keyInstallHandlers: [string, () => void][] = [];
+    /** Uninstallers for the VHS seam wrappers, in install order. */
+    private sourceHookUninstallers: (() => void)[] = [];
+    private sourceHookHandlers: [string, () => void][] = [];
+    private readonly stallSignals: VhsStallSignals;
+    private readonly ladder: RecoveryLadder;
+    /** The source currently attached — what {@link reattach} re-prepares against. */
+    private lastSource: AdapterSource | null = null;
+    /** Where forward progress is measured from: the furthest played position since the last seek. */
+    private lastProgressTime = 0;
+    private onVisibilityChange: (() => void) | null = null;
     private remoteTextTracks = new Map<string, RemoteTextTrackElement>();
     private activeTextTrackId: string | null = null;
     private deferredSeek: (() => void) | null = null;
@@ -128,15 +141,43 @@ export class VideoJsAdapter implements PlayerAdapter {
             variantSwitching: true,
             renderText: true,
         };
+        this.stallSignals = new VhsStallSignals({
+            onStalled: (stalled) => this.emit('stalled', { stalled }),
+            // VHS nudged three times and the engine did not move. That is a
+            // wedge, not a transient fault, and it goes to the ladder like any
+            // other — which will re-attach before asking anyone to re-munge.
+            onWedged: (detail) =>
+                this.ladder.note(
+                    { category: 'media', fatal: true, detail },
+                    'wedged',
+                ),
+        });
+        // The real policy arrives with the first source; until then the
+        // published defaults, so an error before any load still climbs sanely.
+        this.ladder = new RecoveryLadder(DEFAULT_RECOVERY_POLICY, {
+            recoverInPlace: (category) => this.recover(category),
+            reattach: () => this.reattach(),
+            requestReload: (reason, attempt) =>
+                this.emit('reload-requested', { reason, attempt }),
+            onExhausted: (payload) => this.emit('error', payload),
+        });
         this.attachPlayerListeners();
         this.attachListListeners();
+        this.attachVisibilityListener();
+        this.stallSignals.attach(vhsTech(this.player));
     }
 
     // -- loading ------------------------------------------------------------
 
     async loadSource(src: AdapterSource): Promise<void> {
         this.teardownSource();
+        this.lastSource = src;
         this.keyBytes = src.keyHex ? keyBytes(src.keyHex) : null;
+        this.lastProgressTime = 0;
+        this.ladder.setPolicy(src.recovery);
+        // Resets the ladder — except for the re-munge the ladder asked for,
+        // which arrives here and must not wipe the count deciding what is left.
+        this.ladder.noteSourceLoaded();
 
         if (!isVideoJsEngineSupported()) {
             if (src.isBlob) {
@@ -151,7 +192,7 @@ export class VideoJsAdapter implements PlayerAdapter {
             return;
         }
 
-        if (this.capabilities.keyDelivery === 'memory') this.armKeyInstall();
+        this.armSourceHooks();
         this.player.src({ src: src.url, type: HLS_MIME_TYPE });
         // Deliberately not awaiting readiness: the wrapper drives playback off
         // adapter events, and a load that never becomes ready is an error, not
@@ -159,32 +200,82 @@ export class VideoJsAdapter implements PlayerAdapter {
     }
 
     /**
-     * Wrap the request factory of the handler the next `src()` is about to
-     * create. `xhr-hooks-ready` is fired from `handleSource` the moment it
-     * exists — before any playlist request goes out — and `loadstart` is the
-     * fallback for a source VHS is not handling, where there is nothing to wrap
-     * and nothing that would ask for a key.
+     * Re-prepare the engine against the source already attached: rung 1 of the
+     * recovery obligation, and the only rung a suspended runtime could still
+     * climb, since nothing outside this adapter is involved.
+     *
+     * A re-src is what recovery has always amounted to on VHS — the wrapper's
+     * old reload re-munged first, but for an unchanged selection that produced
+     * byte-identical playlists behind fresh URLs, so only the engine being
+     * rebuilt ever mattered. Video.js's own `reloadSourceOnError` plugin is the
+     * reference for the mechanics (capture the position, re-src, restore on
+     * `loadedmetadata`, play); it is not the implementation, because it has no
+     * attempt cap and a wall-clock interval, so it would retry a permanent
+     * failure every thirty seconds for as long as the page is open.
+     *
+     * What must survive: the remote text tracks (added with manual cleanup,
+     * they outlive a `src()`) and the warming loop (the chunk chains have not
+     * changed). What must be re-armed: the VHS seam wrappers, since a re-src
+     * builds a fresh handler with a fresh request factory.
      */
-    private armKeyInstall(): void {
-        this.disarmKeyInstall();
+    async reattach(): Promise<void> {
+        const src = this.lastSource;
+        if (this.destroyed || !src) return;
+
+        const seekTo = this.getCurrentTime();
+        const wasPlaying = !this.player.paused();
+
+        this.cancelDeferredSeek();
+        this.armSourceHooks();
+        this.player.src({ src: src.url, type: HLS_MIME_TYPE });
+
+        if (seekTo > 0) this.seek(seekTo);
+        // `play()` answers `undefined` on techs with no promise support, so the
+        // optional call — the same idiom `keepAlive` uses. A refused resume is
+        // swallowed: the picture is back either way, and the viewer can press play.
+        if (wasPlaying) await this.player.play()?.catch(() => undefined);
+    }
+
+    /**
+     * Wrap the request factory of the handler the next `src()` is about to
+     * create: the byte-range timeout backstop always, and in-memory key
+     * delivery when this adapter has claimed that job. `xhr-hooks-ready` is
+     * fired from `handleSource` the moment the handler exists — before any
+     * playlist request goes out — and `loadstart` is the fallback for a source
+     * VHS is not handling, where there is nothing to wrap.
+     */
+    private armSourceHooks(): void {
+        this.disarmSourceHooks();
         const install = (): void => {
-            this.disarmKeyInstall();
-            this.uninstallKeyXhr = installMemoryKeyXhr(this.player, () => this.keyBytes);
+            this.disarmSourceHooks();
+            this.uninstallSourceHooks();
+            this.sourceHookUninstallers = [installByteRangeTimeout(this.player)];
+            if (this.capabilities.keyDelivery === 'memory') {
+                this.sourceHookUninstallers.push(
+                    installMemoryKeyXhr(this.player, () => this.keyBytes),
+                );
+            }
         };
-        this.keyInstallHandlers = [
+        this.sourceHookHandlers = [
             ['xhr-hooks-ready', install],
             ['loadstart', install],
         ];
-        for (const [event, handler] of this.keyInstallHandlers) {
+        for (const [event, handler] of this.sourceHookHandlers) {
             this.player.one(event, handler);
         }
     }
 
-    private disarmKeyInstall(): void {
-        for (const [event, handler] of this.keyInstallHandlers) {
+    private disarmSourceHooks(): void {
+        for (const [event, handler] of this.sourceHookHandlers) {
             this.player.off(event, handler);
         }
-        this.keyInstallHandlers = [];
+        this.sourceHookHandlers = [];
+    }
+
+    /** Unwind the seam wrappers in reverse install order, so each finds its own. */
+    private uninstallSourceHooks(): void {
+        for (const uninstall of this.sourceHookUninstallers.reverse()) uninstall();
+        this.sourceHookUninstallers = [];
     }
 
     // -- playback -----------------------------------------------------------
@@ -205,12 +296,23 @@ export class VideoJsAdapter implements PlayerAdapter {
             // re-src, and setting currentTime now would be discarded.
             const handler = (): void => {
                 this.deferredSeek = null;
-                this.player.currentTime(seconds);
+                this.seekNow(seconds);
             };
             this.deferredSeek = handler;
             this.player.one('loadedmetadata', handler);
             return;
         }
+        this.seekNow(seconds);
+    }
+
+    /**
+     * A seek moves the playhead without playback having progressed, so it moves
+     * the progress baseline with it. Set before `currentTime`, because the
+     * browser fires `timeupdate` for the seek itself — and a position restored
+     * after a re-munge must not read as the recovery having worked.
+     */
+    private seekNow(seconds: number): void {
+        this.lastProgressTime = seconds;
         this.player.currentTime(seconds);
     }
 
@@ -380,9 +482,12 @@ export class VideoJsAdapter implements PlayerAdapter {
 
     /**
      * Always false. VHS exposes no in-place recovery primitive — it has already
-     * exhausted its own retries by the time an error surfaces — so the wrapper
-     * escalates straight to a reload through {@link loadSource}, which re-srcs
-     * the player. That re-src *is* the recovery.
+     * exhausted its own retries by the time an error surfaces, and its stall
+     * handling ({@link VhsStallSignals}) has already nudged — so rung 0 of the
+     * ladder is declined and it goes straight to {@link reattach}.
+     *
+     * Saying so plainly matters: reporting a repair that did nothing would have
+     * the ladder believe it and stop climbing.
      */
     recover(_category: AdapterErrorCategory): boolean {
         return false;
@@ -457,32 +562,99 @@ export class VideoJsAdapter implements PlayerAdapter {
             this.playerListeners.push([type, handler]);
         };
         add('timeupdate', () => {
-            this.emit('timeupdate', { currentTime: this.getCurrentTime() });
+            const currentTime = this.getCurrentTime();
+            if (currentTime > this.lastProgressTime) {
+                this.lastProgressTime = currentTime;
+                // Real forward progress: whatever went wrong is behind us.
+                this.ladder.notePlaybackHealthy();
+            }
+            this.stallSignals.noteTime(currentTime);
+            this.emit('timeupdate', { currentTime });
             // `progress` alone is too coarse: it fires on network activity, so
             // the band would sit still while the playhead ran through media
             // that is already buffered.
             this.emitProgress();
         });
+        // The tech is created with the first source and can be swapped by a
+        // later one (YouTube), so the stall verdicts are re-subscribed per load.
+        add('loadstart', () => this.stallSignals.attach(vhsTech(this.player)));
         add('durationchange', () => this.emit('durationchange', { duration: this.getDuration() }));
         add('progress', () => this.emitProgress());
         add('playing', () => this.emit('playing', undefined));
         // `play` fires before buffering completes; emitting on both keeps the
         // UI responsive. Consumers treat `playing` as idempotent.
         add('play', () => this.emit('playing', undefined));
-        add('pause', () => this.emit('pause', undefined));
-        add('ended', () => this.emit('ended', undefined));
+        add('pause', () => {
+            this.stallSignals.clear();
+            this.emit('pause', undefined);
+        });
+        add('ended', () => {
+            this.stallSignals.clear();
+            this.emit('ended', undefined);
+        });
         add('waiting', () => this.emit('waiting', undefined));
-        add('seeked', () => this.emit('seeked', undefined));
+        // Seeks the adapter did not issue (the viewer's, VHS's gap skips) move
+        // the baseline too. `seeking` precedes the seek's `timeupdate`.
+        add('seeking', () => {
+            this.lastProgressTime = this.getCurrentTime();
+        });
+        add('seeked', () => {
+            this.stallSignals.resetBaseline(this.getCurrentTime());
+            this.emit('seeked', undefined);
+        });
         add('error', () => {
             const error = this.player.error();
-            this.emit('error', {
+            // Into the ladder, not out to the wrapper: by contract `error`
+            // reaches the wrapper only once every rung has been spent, and
+            // that is the ladder's call to make, not this listener's.
+            this.ladder.note({
                 category: errorCategory(error?.code),
-                // Everything that reaches the player element is terminal: VHS
-                // has already spent its own retries getting here.
                 fatal: true,
                 detail: error ?? undefined,
             });
         });
+    }
+
+    /**
+     * Catch the state store up after the runtime was frozen.
+     *
+     * Every field the wrapper publishes is pushed from an adapter event, so a
+     * suspension leaves the playhead, the buffered band and the transport state
+     * showing whatever they showed when the screen locked. Rather than give the
+     * wrapper a pull API for one moment, the adapter re-emits what it already
+     * emits — the store corrects itself through the path it uses the rest of
+     * the time, and every platform states this the same way: on resume, say
+     * again what is true now.
+     *
+     * A native adapter hangs this on its own lifecycle callbacks; on the web
+     * the equivalent signal is the page becoming visible again.
+     */
+    private attachVisibilityListener(): void {
+        if (typeof document === 'undefined') return;
+        const handler = (): void => {
+            if (document.visibilityState !== 'visible') {
+                this.ladder.noteSuspended();
+                return;
+            }
+            this.emitResumeState();
+        };
+        this.onVisibilityChange = handler;
+        document.addEventListener('visibilitychange', handler);
+    }
+
+    private emitResumeState(): void {
+        if (this.destroyed) return;
+        const currentTime = this.getCurrentTime();
+        this.lastProgressTime = currentTime;
+        this.stallSignals.resetBaseline(currentTime);
+
+        this.emit('timeupdate', { currentTime });
+        this.emit('durationchange', { duration: this.getDuration() });
+        this.emitProgress();
+        this.emit(this.player.paused() ? 'pause' : 'playing', undefined);
+
+        // A re-munge asked for while the runtime was frozen reached nobody.
+        this.ladder.noteResumed();
     }
 
     private detachPlayerListeners(): void {
@@ -554,17 +726,27 @@ export class VideoJsAdapter implements PlayerAdapter {
         this.prefetcher?.stop();
         this.prefetcher = null;
         this.cancelDeferredSeek();
-        this.disarmKeyInstall();
-        this.uninstallKeyXhr?.();
-        this.uninstallKeyXhr = null;
+        this.disarmSourceHooks();
+        this.uninstallSourceHooks();
+        this.stallSignals.clear();
         this.removeRemoteTextTracks();
         this.keyBytes = null;
+        this.lastSource = null;
     }
 
     destroy(): void {
         if (this.destroyed) return;
         this.destroyed = true;
         this.teardownSource();
+        this.ladder.destroy();
+        this.stallSignals.detach();
+        if (this.onVisibilityChange && typeof document !== 'undefined') {
+            document.removeEventListener(
+                'visibilitychange',
+                this.onVisibilityChange,
+            );
+        }
+        this.onVisibilityChange = null;
         this.detachPlayerListeners();
         this.detachListListeners();
         this.activeTextTrackId = null;

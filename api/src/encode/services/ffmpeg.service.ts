@@ -18,12 +18,14 @@ import {
     ladderVideoArgs,
     scalerExpr,
     type AccelMode,
+    AAC_LC_CODEC_ATTRIBUTE,
 } from './encoder-selection';
 import {
     mergeWaveMasters,
     planLadderWaves,
     type LadderWave,
 } from './ladder-waves';
+import { aacCodecAttribute } from './aac-codec-attribute';
 import {
     acquireEncoderSessions,
     MAX_HARDWARE_SESSIONS,
@@ -1332,6 +1334,65 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
     }
 
     /**
+     * The codec attribute each audio group's variants must declare, keyed by
+     * the config's group id — what the merge falls back on for a group that no
+     * first-wave variant names.
+     *
+     * A re-encoded group is AAC-LC because `aacArgs` says so; nothing has to be
+     * read. A copy-mode group carries whatever the source did, so its answer is
+     * read from the init segment ffmpeg wrote for it — the same bytes ffmpeg's
+     * own `CODECS` came from. A group whose init cannot be read is left out
+     * with a warning: its later-wave variants then declare no audio codec, as
+     * they did before, which degrades the master rather than failing the encode.
+     */
+    private async audioGroupCodecAttributes(
+        outputDir: string,
+        groups: AudioGroupDto[]
+    ): Promise<Map<string, string[]>> {
+        const attributes = new Map<string, string[]>();
+        for (const group of groups) {
+            if (!group.copyStream) {
+                attributes.set(group.id, [AAC_LC_CODEC_ATTRIBUTE]);
+                continue;
+            }
+            const dir = join(
+                outputDir,
+                `stream_${this.buildAudioStreamName(group)}`
+            );
+            try {
+                const playlist = await readFile(
+                    join(dir, 'playlist.m3u8'),
+                    'utf8'
+                );
+                const initUri = playlist.match(
+                    /^#EXT-X-MAP:.*?URI="([^"]+)"/m
+                )?.[1];
+                if (!initUri) {
+                    throw new Error('its playlist declares no #EXT-X-MAP');
+                }
+                const attribute = aacCodecAttribute(
+                    await readFile(join(dir, initUri))
+                );
+                if (!attribute) {
+                    throw new Error(
+                        `${initUri} carries no readable AAC decoder configuration`
+                    );
+                }
+                attributes.set(group.id, [attribute]);
+            } catch (error) {
+                const reason =
+                    error instanceof Error ? error.message : String(error);
+                this.logger.warn(
+                    `Audio group "${group.id}" (copy-stream): cannot read its ` +
+                        `codec from the init segment — ${reason}. Variants ` +
+                        `encoded in a later wave will declare no audio codec.`
+                );
+            }
+        }
+        return attributes;
+    }
+
+    /**
      * Fold the waves' master playlists into the single master.m3u8 the rest of
      * the pipeline expects, then delete them.
      */
@@ -1360,10 +1421,17 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             );
         }
 
+        const audioCodecs = await this.audioGroupCodecAttributes(
+            outputDir,
+            encodeConfig.audioGroups ?? []
+        );
+
         await writeFile(
             join(outputDir, 'master.m3u8'),
-            mergeWaveMasters(contents, (uri) =>
-                groupByDir.get(uri.split('/')[0])
+            mergeWaveMasters(
+                contents,
+                (uri) => groupByDir.get(uri.split('/')[0]),
+                (groupId) => audioCodecs.get(groupId)
             ),
             'utf8'
         );

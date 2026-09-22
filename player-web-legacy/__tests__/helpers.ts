@@ -41,6 +41,7 @@ export function fakePlayer(overrides: Record<string, unknown> = {}) {
         src: vi.fn(),
         play: vi.fn(() => Promise.resolve()),
         pause: vi.fn(),
+        paused: vi.fn(() => true),
         currentTime: vi.fn((v?: number) =>
             v === undefined ? (player._time as number) : ((player._time = v) as unknown as void),
         ),

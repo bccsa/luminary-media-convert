@@ -3,7 +3,7 @@
  *
  * The wrapper is a headless controller: it owns HLS playlist munging (angle
  * extraction, quality capping, key handling, decryption), playback policy
- * (recovery, stall detection, coming-soon polling) and a framework-free state
+ * (recovery, coming-soon polling) and a framework-free state
  * store. It drives an engine through the {@link PlayerAdapter} interface —
  * hls.js on the web today, AVPlayer / ExoPlayer in a Capacitor shell later.
  *
@@ -12,11 +12,13 @@
  */
 
 import type { ChunkBoundary } from './prefetch.js';
+import type { LivePlaylistSpec } from './policy/live.js';
 
 // Re-exported so this file reads as the whole contract: an adapter author
-// implementing warmChunks() needs the boundary shape in front of them, and
-// should not have to go looking in the module that happens to build it.
-export type { ChunkBoundary };
+// implementing warmChunks() needs the boundary shape in front of them, and a
+// serving layer implementing serveLive() needs the spec shape, without either
+// having to go looking in the module that happens to build it.
+export type { ChunkBoundary, LivePlaylistSpec };
 
 // ---------------------------------------------------------------------------
 // Source description
@@ -48,18 +50,33 @@ export interface PollPolicy {
     enabled?: boolean;
 }
 
-/** Escape hatch over the wrapper's recovery policy. Defaults are sane. */
+/**
+ * Escape hatch over the recovery ladder's tuning. Defaults are sane.
+ *
+ * Data, not behaviour: the controller resolves a source's overrides into a
+ * complete policy and hands it to the adapter in {@link AdapterSource.recovery},
+ * which runs the ladder. See {@link PlayerAdapter} for the obligation itself.
+ */
 export interface RecoveryPolicy {
-    /** Window in which a recurring same-category error escalates to reload. Default 10 000. */
+    /** Window in which a recurring same-category error counts as recurring. Default 10 000. */
     escalationWindowMs: number;
-    /** Full-reload attempts before giving up. Default 3. */
+    /** Recovery attempts before giving up. Default 3. */
     maxReloadAttempts: number;
-    /** Spacing of reload attempts. Default [2 000, 4 000, 8 000]. */
+    /** Spacing of those attempts. Default [2 000, 4 000, 8 000]. */
     reloadDelaysMs: number[];
-    /** No-progress time that counts as a stall while playing. Default 10 000. */
-    stallTimeoutMs: number;
-    /** Forward nudge applied on first stall detection, in seconds. Default 0.1. */
-    stallNudgeSeconds: number;
+}
+
+export const DEFAULT_RECOVERY_POLICY: RecoveryPolicy = {
+    escalationWindowMs: 10_000,
+    maxReloadAttempts: 3,
+    reloadDelaysMs: [2_000, 4_000, 8_000],
+};
+
+/** Fill a caller's partial overrides out to a complete policy. */
+export function resolveRecoveryPolicy(
+    overrides?: Partial<RecoveryPolicy>,
+): RecoveryPolicy {
+    return { ...DEFAULT_RECOVERY_POLICY, ...overrides };
 }
 
 /** Everything the wrapper needs to present one piece of content. */
@@ -204,6 +221,13 @@ export interface PlayerError {
         | 'decrypt-failed'
         /** Response was neither LMCENC nor a recognizable playlist/VTT. */
         | 'invalid-content'
+        /**
+         * The source is live, and the serving layer cannot keep a playlist
+         * fresh — it declares no `serveLive`. Refused outright rather than
+         * played from a snapshot frozen at its first read, which is the worst
+         * of the available failures: it looks like playback and is not.
+         */
+        | 'live-unsupported'
         /** A referenced sub-playlist or sidecar failed to load. */
         | 'fetch-failed'
         /** Engine cannot play munged content in this browser (e.g. iOS < 17.1, no MSE). */
@@ -223,7 +247,12 @@ export interface PlayerState {
     lifecycle: Lifecycle;
     playing: boolean;
     ended: boolean;
-    /** True while the stall watchdog considers playback wedged. */
+    /**
+     * True while the engine reports playback stalled — stuck, not merely
+     * buffering. Detection is the engine's: every engine watches its own
+     * buffer far better than a wrapper sampling `currentTime` could, and
+     * announces the verdict through {@link AdapterEventMap.stalled}.
+     */
     stalled: boolean;
     currentTime: number;
     /** 0 until known. */
@@ -332,6 +361,13 @@ export interface AdapterSource {
     isBlob: boolean;
     /** Raw session key for 'memory' key delivery. */
     keyHex?: string;
+    /**
+     * The recovery ladder's tuning for this source, already resolved — the
+     * adapter is handed decisions, never a partial bag whose defaults it would
+     * have to know. Travels with the source rather than the constructor so a
+     * {@link PlayerSource.recovery} override reaches the adapter that runs it.
+     */
+    recovery: RecoveryPolicy;
 }
 
 export interface AdapterVariant {
@@ -376,8 +412,37 @@ export interface AdapterEventMap {
     ended: void;
     /** Engine is buffering / waiting for data. */
     waiting: void;
+    /**
+     * The engine's own verdict that playback is stuck (true) or moving again
+     * (false) — not ordinary buffering, which is `waiting`. Detection belongs
+     * to the engine: VHS's `PlaybackWatcher`, hls.js's gap controller and the
+     * native players all watch their own buffer, and a wrapper timer sampling
+     * `currentTime` cannot tell a slow request from a wedged decoder. An
+     * adapter whose engine says nothing simply never emits this.
+     */
+    stalled: { stalled: boolean };
     seeked: void;
+    /**
+     * The adapter has exhausted its recovery obligation (see
+     * {@link PlayerAdapter}) and playback is over. The wrapper does not retry:
+     * by the time this arrives the engine's own primitive, the bounded
+     * `reattach()`s and any re-munge it asked for have all been spent, so the
+     * wrapper surfaces it as a fatal {@link PlayerError} and stops.
+     *
+     * A non-fatal payload is informational and ignored.
+     */
     error: AdapterErrorPayload;
+    /**
+     * The adapter needs the munged source rebuilt — the one recovery step it
+     * cannot perform itself, because only the wrapper knows what the source was
+     * munged from (angles, quality cap, LMCENC, key).
+     *
+     * Requires JavaScript to be awake, so a native adapter cannot raise it
+     * while the app is suspended; it holds the request and raises it on resume
+     * instead of counting it as a failed attempt. `attempt` is the ladder's own
+     * count, passed through to the wrapper's `recovered` event.
+     */
+    'reload-requested': { reason: 'wedged' | 'fatal'; attempt: number };
     'variants-updated': void;
     'audiotracks-updated': void;
 }
@@ -417,15 +482,67 @@ export interface ChunkWarmOptions {
 /**
  * The engine-facing contract.
  *
- * Adapters own intra-source ABR and first-line recovery primitives; ALL
- * policy (retry counts, backoff, stall detection, polling) lives in the
- * wrapper so every platform behaves identically.
+ * Adapters own intra-source ABR, stall detection and recovery; the wrapper owns
+ * munging, coming-soon polling and the state store. The dividing line is what
+ * survives a suspended JavaScript runtime: a native engine keeps pulling
+ * segments from its own threads while a locked screen freezes the WebView, so
+ * anything that must act during playback has to live beside the engine, and
+ * only what genuinely cannot — rebuilding a munged source — is asked of the
+ * wrapper. `docs/suspension-safe-playback.md` is the prose version.
+ *
+ * ### The recovery obligation
+ *
+ * Before emitting `error` with `fatal: true`, an adapter MUST, using the
+ * {@link RecoveryPolicy} it was handed in {@link AdapterSource.recovery}:
+ *
+ * 1. **Try its engine's in-place primitive once**, if it has one — hls.js
+ *    `recoverMediaError()` / `startLoad()`, ExoPlayer `prepare()`. An engine
+ *    with nothing to try skips this rung rather than pretending to succeed.
+ * 2. **Re-attach, bounded, with backoff.** {@link reattach} against the URLs it
+ *    already holds, spaced by `reloadDelaysMs` and capped at
+ *    `maxReloadAttempts`, measured on a MONOTONIC clock — wall-clock time jumps
+ *    across a suspension, which makes an error that recurred the instant
+ *    playback resumed look like a fresh one and restarts the ladder at the
+ *    wrong rung.
+ * 3. **Ask for a re-munge** via `reload-requested`, for the failures a
+ *    re-attach cannot fix. This one needs JavaScript, so an adapter that cannot
+ *    reach it while suspended holds the request and raises it on resume rather
+ *    than counting it as a failed attempt.
+ *
+ * Only then is the obligation spent, and `error` means exactly that.
+ *
+ * A platform whose engine already provides rungs 1–2 satisfies the obligation
+ * with it: ExoPlayer's `LoadErrorHandlingPolicy` is precisely a
+ * retry-count-plus-backoff policy, and re-implementing ours beside it would be
+ * two ladders fighting. A platform with no equivalent — AVPlayer — ports the
+ * reference module, `player-web-legacy/src/drivers/RecoveryLadder.ts`, which
+ * is self-contained for that reason.
  */
 export interface PlayerAdapter {
     readonly capabilities: AdapterCapabilities;
 
     loadSource(src: AdapterSource): Promise<void>;
     destroy(): void;
+
+    /**
+     * Re-prepare the engine against the source it already holds — no munge, no
+     * wrapper involvement, nothing that needs JavaScript beyond the adapter
+     * itself. Rung 2 of the recovery obligation above.
+     *
+     * The munge is deterministic for an unchanged selection: narrowing and
+     * capping are pure and the playlists come back byte-identical, so a full
+     * reload would produce the same text behind a fresh set of URLs. All the
+     * value is in the engine being re-created, which is what this does. Keeping
+     * them separate is what lets a backgrounded native player recover on its
+     * own, and a re-munge is then reserved for what genuinely changes the
+     * source: an angle switch, a quality cap, a live refresh.
+     *
+     * Position and play state are the adapter's to restore, and whatever the
+     * adapter attached to the source — text tracks, key delivery, a warming
+     * loop — must survive or be re-armed, since the source has not changed.
+     * A no-op is correct when nothing has been loaded yet.
+     */
+    reattach(): Promise<void>;
 
     play(): Promise<void>;
     pause(): void;
@@ -507,10 +624,11 @@ export interface PlayerAdapter {
      * player (AVPlayer, ExoPlayer) instead of reusing a JS timer across the
      * bridge; the schedules themselves are plain data and serialize fine.
      *
-     * Reference implementation: `player-web/src/adapter/chunkWarming.ts`
-     * (`ChunkPrefetcher`), wired up in
-     * `player-web/src/adapter/HlsJsAdapter.ts`. Prose version, for porting:
-     * `docs/chunk-warming.md`.
+     * Reference implementation:
+     * `player-web-legacy/src/adapter/chunkWarming.ts` (`ChunkPrefetcher`),
+     * wired up in `player-web-legacy/src/adapter/VideoJsAdapter.ts`. Prose
+     * versions, for porting: `docs/chunk-warming.md` for the loop itself, and
+     * `docs/suspension-safe-playback.md` for the rule it is one case of.
      */
     warmChunks?(schedules: ChunkBoundary[][], options: ChunkWarmOptions): void;
 
@@ -527,12 +645,32 @@ export interface PlayerAdapter {
 /**
  * Isolates "turn munged text into something the engine can load".
  * Web: object/blob URLs. Native shells: a loopback server or file URIs.
+ *
+ * Required by {@link PlayerControllerOptions} rather than defaulted, and the
+ * reason is the native port: a shell that forgot to supply one used to be
+ * handed `blob:` URLs silently, which its player cannot read at all. A missing
+ * serving layer is now a compile error in the one place it can still be fixed.
  */
 export interface ServeStrategy {
     /** Returns a URL serving `content` with the given MIME type. */
     serve(content: string | Uint8Array, contentType: string): string;
     /** Releases every URL handed out since the last release(). */
     release(): void;
+    /**
+     * Serve a LIVE media playlist: return a URL that re-resolves on every
+     * engine request, refreshing itself per {@link LivePlaylistSpec}.
+     *
+     * Its presence IS the live capability — a strategy cannot claim what it
+     * has not implemented, the way a boolean flag would let it — and its
+     * absence is what makes the pipeline refuse a live source rather than serve
+     * a snapshot that will never change again.
+     *
+     * What happens behind the returned URL is the strategy's business and never
+     * the controller's: fetch, sniff for LMCENC, decrypt, rewrite, respond, on
+     * whatever cadence the spec names. That is the whole point — on a native
+     * shell it has to happen while JavaScript is frozen.
+     */
+    serveLive?(spec: LivePlaylistSpec): string;
 }
 
 // ---------------------------------------------------------------------------
