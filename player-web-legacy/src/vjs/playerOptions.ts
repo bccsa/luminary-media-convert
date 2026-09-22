@@ -3,9 +3,10 @@
  * this player exists to be visually and behaviourally indistinguishable from
  * it, and the options object is half of that (the other half is `styles.css`).
  *
- * Three deliberate departures from the app's literal object are noted at their
+ * Four deliberate departures from the app's literal object are noted at their
  * lines: the bogus `skipBackwardButton` child, `IS_ANY_SAFARI` in place of
- * `IS_SAFARI`, and `cacheEncryptionKeys`, which changes nothing a viewer sees.
+ * `IS_SAFARI`, the dropped `maxPlaylistRetries`, and `cacheEncryptionKeys`, which
+ * changes nothing a viewer sees.
  */
 import videojs from 'video.js';
 import type Player from 'video.js/dist/types/player';
@@ -27,7 +28,6 @@ export interface VideoJsOptions {
             overrideNative: boolean;
             experimentalUseMMS: boolean;
             enableLowInitialPlaylist: boolean;
-            maxPlaylistRetries: number;
             useBandwidthFromLocalStorage: boolean;
             useDevicePixelRatio: boolean;
             cacheEncryptionKeys: boolean;
@@ -167,7 +167,12 @@ export function buildVideoJsOptions(controls: PlayerControlsOptions): VideoJsOpt
                 // refuses every source there.
                 experimentalUseMMS: true,
                 enableLowInitialPlaylist: true,
-                maxPlaylistRetries: 10,
+                // `maxPlaylistRetries` is deliberately absent, leaving VHS's
+                // default of Infinity. It is not a retry count: it caps how
+                // many exclusions a rendition survives before VHS drops it for
+                // the rest of the load, and VHS excludes the playing rendition
+                // every time a slow CDN edge trips its early-abort path — so a
+                // finite value ratchets the top of the ladder away for good.
                 useBandwidthFromLocalStorage: true,
                 useDevicePixelRatio: true,
                 // Not in the app's object. Without it VHS asks for the key
