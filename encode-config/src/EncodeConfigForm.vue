@@ -354,7 +354,11 @@ function reanalyzeVideo() {
         const newRenditions: VideoRendition[] = sortedVideoTracks.map(
             (track) => {
                 const display = displayDimensionsOf(track);
-                const tier = getAudioTierForHeight(display.height);
+                // By the short side, as the ladder is: a portrait angle's
+                // height is its long side.
+                const tier = getAudioTierForHeight(
+                    Math.min(display.width, display.height)
+                );
                 const audioGroupId = mapTierToGroupId(tier.groupId, tierIds);
                 // Multi-angle output has always defaulted to copying each
                 // angle — it is far and away the cheapest thing to do with a
@@ -390,7 +394,12 @@ function reanalyzeVideo() {
             track,
             contentFactor.value
         ).map((rung) => {
-            const tier = getAudioTierForHeight(rung.height);
+            // By the rung's short side, as it was chosen and priced: a
+            // portrait 480x854 rung is a 480p rung, and by height it took the
+            // HD audio group where its landscape twin takes the standard one.
+            const tier = getAudioTierForHeight(
+                Math.min(rung.width, rung.height)
+            );
             const audioGroupId = mapTierToGroupId(tier.groupId, tierIds);
             // No `label` on a ladder rung: the API derives each stream's S3
             // directory from `label ?? `${height}p``, so naming them here
@@ -542,10 +551,13 @@ function addVideoRendition() {
     // 16:9's and that bitrate is the old table's, so on a 4:3 or a low-bitrate
     // source the added row opened at a shape and a budget the source never had.
     // The 480p rung where the ladder reaches it, the smallest rung otherwise —
-    // a source below 480p has no 480p to offer.
+    // a source below 480p has no 480p to offer. Found by short side, so a
+    // portrait source's 480x854 counts.
     const track = editableVideoTracks[0];
     const rungs = track ? suggestLadder(track, contentFactor.value) : [];
-    const rung = rungs.find((r) => r.height === 480) ?? rungs[rungs.length - 1];
+    const rung =
+        rungs.find((r) => Math.min(r.width, r.height) === 480) ??
+        rungs[rungs.length - 1];
     const base = rung?.bitrateKbps ?? 1000;
     videoRenditions.push({
         width: rung?.width ?? 854,
@@ -887,6 +899,11 @@ function onCopyToggle(rendition: VideoRendition, index: number) {
                 rendition.height = track.height;
                 rendition.videoBitrateKbps =
                     track.bitrateKbps || rendition.videoBitrateKbps;
+                // A copy is a copy of a particular track, and both `canSubmit`
+                // and the API refuse one that does not say which. A multi-angle
+                // row always says; a single-track ladder's rungs never did, so
+                // ticking Copy on one disabled Start with no reason given.
+                rendition.sourceTrackIndex = track.index;
             }
         }
         syncLadderDials();

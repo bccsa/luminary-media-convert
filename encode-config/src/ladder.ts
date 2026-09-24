@@ -76,12 +76,19 @@ export function aspectWidthForHeight(
 /**
  * The ladder for a single-track source, top rung first.
  *
- * The standard rungs at or below the source's display height — plus a rung at
- * that height itself when the table has none. A 576-line PAL source otherwise
- * topped out at 480p, throwing away a fifth of the lines it actually has, and
- * for a 16:9 one it was worse: 480p at the source's storage shape, 600x480.
+ * Rungs are chosen and priced by the source's *short* side, and sized at its
+ * shape. The table's 1080p is a 1920x1080 picture, and 1080x1920 is the same
+ * picture turned on end; keyed by height instead, a phone's 1080x1920 was
+ * laddered as a 1920-line picture — eight rungs, a 4K budget on top, and an
+ * 810x1440 rung priced for 2560x1440. A landscape or square source's short side
+ * is its height, so for every one of those this is the ladder it always had.
  *
- * Only for a source that sits *inside* the table's range; one taller than 4K is
+ * The standard rungs at or below that side — plus a rung at the source's own
+ * size when the table has none. A 576-line PAL source otherwise topped out at
+ * 480p, throwing away a fifth of the lines it actually has, and for a 16:9 one
+ * it was worse: 480p at the source's storage shape, 600x480.
+ *
+ * Only for a source that sits *inside* the table's range; one bigger than 4K is
  * still capped at 4K, as it always has been. The extra rung is priced linearly
  * in pixel count against the standard rung below it, which keeps it on the
  * curve the table already draws (720p has 2.25x the pixels of 480p and 2.5x the
@@ -89,25 +96,32 @@ export function aspectWidthForHeight(
  */
 export function ladderFor(track: VideoTrackInfo): LadderRung[] {
     const display = displayDimensionsOf(track);
-    const sourceHeight = Math.max(2, Math.round(display.height / 2) * 2);
-    // Every rung's width is recomputed at the source's display shape, the table
-    // rungs included. The table's own widths are 16:9, and a caller that took
-    // them at face value offered a 4:3 source a 854x480 rung it would have to
-    // pillarbox to fill.
-    const rungs = ABR_LADDER.filter((r) => r.height <= display.height).map(
-        (r) => ({
-            ...r,
-            width: aspectWidthForHeight(r.height, display.width, display.height),
-        })
-    );
+    const portrait = display.height > display.width;
+    const shortSide = portrait ? display.width : display.height;
+    const longSide = portrait ? display.height : display.width;
+    const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+    // A rung whose short side is `side`, at the source's display shape — the
+    // table rungs included. The table's own widths are 16:9, and a caller that
+    // took them at face value offered a 4:3 source a 854x480 rung it would have
+    // to pillarbox to fill.
+    const sized = (side: number) => {
+        const other = aspectWidthForHeight(side, longSide, shortSide);
+        return portrait
+            ? { width: side, height: other }
+            : { width: other, height: side };
+    };
+    const rungs = ABR_LADDER.filter((r) => r.height <= shortSide).map((r) => ({
+        ...r,
+        ...sized(r.height),
+    }));
 
     if (rungs.length === 0) {
         return [
             {
-                height: sourceHeight,
-                width: Math.max(2, Math.round(display.width / 2) * 2),
+                width: even(display.width),
+                height: even(display.height),
                 bitrateKbps: track.bitrateKbps || 1000,
-                label: `${sourceHeight}p`,
+                label: `${even(shortSide)}p`,
                 // Below every table rung there is nothing to interpolate
                 // against, so this budget is the source's own measurement — at
                 // the source's own frame rate, which is what `sourceMeasured`
@@ -117,28 +131,24 @@ export function ladderFor(track: VideoTrackInfo): LadderRung[] {
         ];
     }
 
-    const hasSourceRung = ABR_LADDER.some((r) => r.height === display.height);
-    if (hasSourceRung || display.height >= ABR_LADDER[0].height) return rungs;
+    const hasSourceRung = ABR_LADDER.some((r) => r.height === shortSide);
+    if (hasSourceRung || shortSide >= ABR_LADDER[0].height) return rungs;
 
     const below = rungs[0];
-    const width = aspectWidthForHeight(
-        sourceHeight,
-        display.width,
-        display.height
-    );
+    const sourceSide = even(shortSide);
+    const top = sized(sourceSide);
     // Priced against the rung below it *at this source's shape* — which is what
-    // `below.width` now is. A 4:3 source's 480p rung is 640x480, not 854x480,
-    // and pricing against the table's wider 16:9 number made a 720x540 top rung
+    // `below` now is. A 4:3 source's 480p rung is 640x480, not 854x480, and
+    // pricing against the table's wider 16:9 number made a 720x540 top rung
     // come out cheaper than the 480p beneath it.
     return [
         {
-            height: sourceHeight,
-            width,
+            ...top,
             bitrateKbps: Math.round(
-                (below.bitrateKbps * (width * sourceHeight)) /
+                (below.bitrateKbps * (top.width * top.height)) /
                     (below.width * below.height)
             ),
-            label: `${sourceHeight}p`,
+            label: `${sourceSide}p`,
         },
         ...rungs,
     ];

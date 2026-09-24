@@ -481,6 +481,92 @@ describe('suggestLadder', () => {
         ]);
     });
 
+    it('ladders a portrait source by its short side', () => {
+        // A phone's 1080x1920 is a 1080p picture turned on end. Keyed by
+        // height it was laddered as a 1920-line one: eight rungs, a 4K budget
+        // on top, and an 810x1440 rung priced for 2560x1440 — over three times
+        // the bits per pixel its landscape twin gets.
+        const ladder = suggestLadder(
+            track({ width: 1080, height: 1920, frameRate: 30, bitrateKbps: 0 })
+        );
+        expect(
+            ladder.map((r) => `${r.width}x${r.height}@${r.bitrateKbps}`)
+        ).toEqual([
+            '1080x1920@5500',
+            '720x1280@3000',
+            '480x854@1400',
+            '360x640@800',
+            '240x426@400',
+            '144x256@200',
+        ]);
+        expect(ladder.map((r) => r.label)).toEqual([
+            '1080p',
+            '720p',
+            '480p',
+            '360p',
+            '240p',
+            '144p',
+        ]);
+    });
+
+    it('prices a measured portrait source at its class budget, not its own bitrate', () => {
+        // 8000 kbps is more than a 1080p picture needs at 30 fps, on end or
+        // not. By height, the top rung was handed all 8000.
+        const ladder = suggestLadder(
+            track({ width: 1080, height: 1920, frameRate: 30, bitrateKbps: 8000 })
+        );
+        expect(ladder[0]).toMatchObject({
+            width: 1080,
+            height: 1920,
+            bitrateKbps: 5500,
+        });
+    });
+
+    it("gives a portrait source exactly its landscape twin's ladder, turned on end", () => {
+        // The whole contract in one property: same rungs, same budgets, same
+        // labels, width and height swapped — across the table's range, above
+        // and below it, an extra rung at the source's own size, a 4:3 and an
+        // ultrawide shape, with and without a measured bitrate, at several
+        // frame rates and content factors.
+        const sizes = [
+            [1920, 1080],
+            [3840, 2160],
+            [7680, 4320],
+            [1280, 720],
+            [1024, 576],
+            [720, 540],
+            [2560, 1080],
+            [640, 360],
+            [160, 90],
+        ];
+        let compared = 0;
+        for (const [w, h] of sizes) {
+            for (const bitrateKbps of [0, 1805, 8000]) {
+                for (const frameRate of [25, 30, 50]) {
+                    for (const factor of [0.6, 1, 1.3]) {
+                        const landscape = suggestLadder(
+                            track({ width: w, height: h, bitrateKbps, frameRate }),
+                            factor
+                        );
+                        const portrait = suggestLadder(
+                            track({ width: h, height: w, bitrateKbps, frameRate }),
+                            factor
+                        );
+                        expect(portrait).toEqual(
+                            landscape.map((r) => ({
+                                ...r,
+                                width: r.height,
+                                height: r.width,
+                            }))
+                        );
+                        compared++;
+                    }
+                }
+            }
+        }
+        expect(compared).toBe(sizes.length * 3 * 3 * 3);
+    });
+
     it('treats a frame rate the probe never reported as 30 fps', () => {
         // The table is written for 30 fps, so an absent rate prices at the
         // table itself — neither a discount nor a raise on no evidence.

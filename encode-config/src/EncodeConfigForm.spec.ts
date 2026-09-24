@@ -1737,6 +1737,131 @@ describe('EncodeConfigForm bitrate ladder', () => {
         });
     });
 
+    describe('portrait sources', () => {
+        /**
+         * 320 kbps audio, so all three audio groups exist. Under 224 kbps there
+         * is no HD group and an HD rung shares Standard's, which would hide a
+         * rung sorted into the wrong one.
+         */
+        const withRichAudio = (probe: ProbeResult): ProbeResult => ({
+            ...probe,
+            audioTracks: [{ ...aacTrack(), bitrateKbps: 320 }],
+        });
+
+        /** A 1080p30 picture of unknown bitrate, either way up. */
+        const phone = (upright: boolean) =>
+            withRichAudio(
+                probeOf({
+                    width: upright ? 1080 : 1920,
+                    height: upright ? 1920 : 1080,
+                    frameRate: 30,
+                    gopFrames: 60,
+                    bitrateKbps: 0,
+                })
+            );
+
+        it('opens on the landscape ladder turned on end, audio groups included', () => {
+            // Chosen, priced and grouped by short side. By height the 480x854
+            // rung also took the HD audio group its landscape twin does not.
+            const flat = renditionsOf(mountForm(phone(false)));
+            const upright = renditionsOf(mountForm(phone(true)));
+            expect(
+                upright.map((r) => `${r.width}x${r.height}@${r.videoBitrateKbps}`)
+            ).toEqual([
+                '1080x1920@5500',
+                '720x1280@3000',
+                '480x854@1400',
+                '360x640@800',
+                '240x426@400',
+                '144x256@200',
+            ]);
+            expect(upright.map((r) => r.audioGroupId)).toEqual([
+                'hd',
+                'hd',
+                'mid',
+                'mid',
+                'low',
+                'low',
+            ]);
+            expect(upright).toEqual(
+                flat.map((r) => ({ ...r, width: r.height, height: r.width }))
+            );
+        });
+
+        it('puts portrait angles in the audio groups their landscape twins get', () => {
+            // By height, the 480x854 angle took HD and the 240x426 one
+            // Standard — each a group above its landscape twin.
+            const angles = (upright: boolean) =>
+                withRichAudio(
+                    probeOf(
+                        ...[
+                            [1920, 1080],
+                            [854, 480],
+                            [426, 240],
+                        ].map(([w, h]) => ({
+                            width: upright ? h : w,
+                            height: upright ? w : h,
+                            gopRegular: false,
+                        }))
+                    )
+                );
+            const groups = (probe: ProbeResult) =>
+                renditionsOf(mountForm(probe)).map((r) => r.audioGroupId);
+            expect(groups(angles(true))).toEqual(['hd', 'mid', 'low']);
+            expect(groups(angles(true))).toEqual(groups(angles(false)));
+        });
+
+        it('adds its 480p rung, not its smallest', async () => {
+            // Looked up by height, a portrait ladder has no 480 — its 480p rung
+            // is 854 tall — so Add fell through to the 144x256 rung.
+            const wrapper = mountForm(phone(true));
+            await clickButton(wrapper, '+ Add rendition');
+            expect(renditionsOf(wrapper).at(-1)).toMatchObject({
+                width: 480,
+                height: 854,
+                videoBitrateKbps: 1400,
+                label: '854p',
+            });
+        });
+    });
+
+    describe('copying a single-track rung', () => {
+        const canSubmit = (w: FormWrapper) =>
+            (w.vm as unknown as { getCanSubmit: () => boolean }).getCanSubmit();
+
+        it('names the track it copies, so Start stays enabled', async () => {
+            // The source qualifies for copy, so the box is offered — but a
+            // single-track ladder's rungs never said which track they came
+            // from, and a copy must: Start went quietly disabled the moment it
+            // was ticked, and the API refuses such a rung anyway ("copyStream
+            // renditions require a sourceTrackIndex").
+            const wrapper = mountForm(probeOf({}));
+            await copyBoxes(wrapper)[0].setValue(true);
+
+            expect(canSubmit(wrapper)).toBe(true);
+            expect(renditionsOf(wrapper)[0]).toMatchObject({
+                copyStream: true,
+                sourceTrackIndex: 0,
+                width: 1920,
+                height: 1080,
+                videoBitrateKbps: 5000,
+            });
+        });
+
+        it('goes back to a startable re-encode when un-ticked', async () => {
+            const wrapper = mountForm(probeOf({}));
+            await copyBoxes(wrapper)[0].setValue(true);
+            await copyBoxes(wrapper)[0].setValue(false);
+
+            // The suggested 1080p rung at 25 fps, as it opened.
+            expect(canSubmit(wrapper)).toBe(true);
+            expect(renditionsOf(wrapper)[0]).toMatchObject({
+                copyStream: false,
+                videoBitrateKbps: 4797,
+            });
+        });
+    });
+
     describe('submitted config', () => {
         it('submits single-track ladder rungs without a label', async () => {
             const wrapper = mountForm(acceptanceProbe());
