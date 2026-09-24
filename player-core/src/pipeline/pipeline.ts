@@ -45,12 +45,12 @@ import {
 import { scanMediaPlaylist, type MediaPlaylistScan } from './media-scan.js';
 import {
     absolutize,
+    absolutizeAgainst,
     anchorToDocument,
     collectMasterRefs,
     isMasterModel,
     masterHasVideo,
     parseMasterText,
-    segmentUris,
     substituteMasterRefs,
 } from './playlist-text.js';
 import { applyQualityCap, listQualities } from './quality-cap.js';
@@ -521,22 +521,50 @@ function startPlaylistReads(
 }
 
 /**
+ * Subtitle segments read at once: enough to overlap the round trips, few enough
+ * to leave the connections the engine is about to need.
+ */
+const VTT_READS_IN_FLIGHT = 4;
+
+/**
  * The engine fetches a SUBTITLES playlist's `.vtt` segments itself and cannot
  * decrypt LMCENC, so encrypted ones are decrypted here and served as plaintext.
  * Plaintext ones are left alone (the rewrite absolutizes them). VOD only —
  * the segment list is finite.
+ *
+ * Each distinct segment is read once, a few at a time: read one after another,
+ * a segmented track put a round trip per segment in front of playback. They
+ * are consumed in playlist order, as the media playlists are, so the failure
+ * reported and the order the strategy is asked to serve in are as they were.
  */
 async function serveDecryptedVttSegments(
     playlist: MediaPlaylistScan,
     playlistUrl: string,
     ctx: PipelineContext,
 ): Promise<Map<string, string>> {
+    const resolve = absolutizeAgainst(playlistUrl);
+    const urls = [...new Set(playlist.runs.map((run) => resolve(run.uri)))];
+
+    const reads: Promise<Uint8Array>[] = [];
+    const startRead = (index: number): void => {
+        const read = fetchBytes(urls[index]!, ctx);
+        // Marked handled as it starts, as in `startPlaylistReads`: once an
+        // earlier read has thrown, a later one's turn never comes.
+        void read.catch(() => undefined);
+        reads[index] = read;
+    };
+    for (let i = 0; i < Math.min(VTT_READS_IN_FLIGHT, urls.length); i++) {
+        startRead(i);
+    }
+
     const replacements = new Map<string, string>();
-    for (const uri of segmentUris(playlist)) {
-        const absolute = absolutize(uri, playlistUrl);
-        if (replacements.has(absolute)) continue;
-        const bytes = await fetchBytes(absolute, ctx);
+    for (let i = 0; i < urls.length; i++) {
+        const bytes = await reads[i]!;
+        if (i + VTT_READS_IN_FLIGHT < urls.length) {
+            startRead(i + VTT_READS_IN_FLIGHT);
+        }
         if (!isEncryptedPayload(bytes)) continue;
+        const absolute = urls[i]!;
         const asset = await decodeMaybeEncrypted(bytes, absolute, {
             keyHex: ctx.keyHex,
             expect: 'vtt',

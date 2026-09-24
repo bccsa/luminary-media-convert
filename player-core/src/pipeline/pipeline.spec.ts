@@ -896,3 +896,130 @@ describe('mungeSource — serving a source once', () => {
         expect(ctx.serve.served).toHaveLength(1);
     });
 });
+
+/** A SUBTITLES media playlist over the named `.vtt` segments. */
+function subtitlePlaylist(segments: string[]): string {
+    return [
+        '#EXTM3U',
+        '#EXT-X-VERSION:7',
+        '#EXT-X-TARGETDURATION:60',
+        ...segments.flatMap((uri) => ['#EXTINF:60.000000,', uri]),
+        '#EXT-X-ENDLIST',
+        '',
+    ].join('\n');
+}
+
+describe('mungeSource — reading subtitle segments', () => {
+    const vtt = (i: number) => `${BASE}/subs_en/en_${i}.vtt`;
+    /** Distinct per segment, so the order they are served in shows. */
+    const cue = (i: number) => `WEBVTT\n\nNOTE segment ${i}\n`;
+    const MEDIA = [
+        `${BASE}/angle0_1080/playlist.m3u8`,
+        `${BASE}/angle0_720/playlist.m3u8`,
+        `${BASE}/audio_128kbps/playlist.m3u8`,
+    ];
+
+    /** A munge of angle_0 whose media playlists have all been answered. */
+    async function munging(segments: number) {
+        const reads = makeDeferredFetch();
+        const serve = new FakeServeStrategy();
+        const ctx: PipelineContext = {
+            fetchImpl: reads.fetchImpl,
+            serveStrategy: serve,
+            keyDelivery: 'memory',
+            keyHex: TEST_KEY_HEX,
+            cache: new Map(),
+        };
+        const info = describeMaster(MASTER_URL, MULTI_ANGLE_MASTER);
+        const munged = mungeSource(info, { angleId: 'angle_0' }, ctx);
+        void munged.catch(() => undefined);
+        await flush();
+        for (const url of MEDIA) reads.respond(url, PLAIN_MEDIA_PLAYLIST);
+        reads.respond(
+            `${BASE}/subs_en/playlist.m3u8`,
+            subtitlePlaylist(
+                Array.from({ length: segments }, (_, i) => `en_${i}.vtt`),
+            ),
+        );
+        await flush();
+        const vttCalls = () =>
+            reads.calls.filter((url) => url.endsWith('.vtt'));
+        return { reads, serve, munged, vttCalls };
+    }
+
+    it('reads a segmented track a few segments at a time', async () => {
+        // One after another, every segment was a round trip in front of
+        // playback; all at once, a long track would take every connection.
+        const { reads, munged, vttCalls } = await munging(6);
+        expect(vttCalls()).toEqual([vtt(0), vtt(1), vtt(2), vtt(3)]);
+
+        reads.respond(vtt(0), encryptLmcenc(cue(0)));
+        await flush();
+        expect(vttCalls()).toEqual([vtt(0), vtt(1), vtt(2), vtt(3), vtt(4)]);
+
+        for (const i of [3, 2, 1]) reads.respond(vtt(i), encryptLmcenc(cue(i)));
+        await flush();
+        for (const i of [5, 4]) reads.respond(vtt(i), encryptLmcenc(cue(i)));
+        await expect(munged).resolves.toMatchObject({ isLive: false });
+    });
+
+    it('serves the segments in playlist order however the answers arrive', async () => {
+        const { reads, serve, munged } = await munging(4);
+        for (const i of [3, 2, 1, 0]) {
+            reads.respond(vtt(i), encryptLmcenc(cue(i)));
+            await flush();
+        }
+        await munged;
+
+        expect(
+            serve.served
+                .filter((item) => item.contentType === 'text/vtt')
+                .map((item) => item.content),
+        ).toEqual([cue(0), cue(1), cue(2), cue(3)]);
+    });
+
+    it('reports the first failing segment in playlist order, and leaves nothing unhandled', async () => {
+        const unhandled: unknown[] = [];
+        const record = (reason: unknown) => unhandled.push(reason);
+        process.on('unhandledRejection', record);
+        try {
+            const { reads, munged } = await munging(4);
+            reads.respond(vtt(2), { status: 500 });
+            await flush();
+            reads.respond(vtt(0), { status: 404 });
+
+            await expect(munged).rejects.toMatchObject({
+                code: 'fetch-failed',
+                missing: true,
+                url: vtt(0),
+            });
+            reads.respond(vtt(1), { status: 500 });
+            reads.respond(vtt(3), { status: 500 });
+            await flush();
+
+            expect(unhandled).toEqual([]);
+        } finally {
+            process.off('unhandledRejection', record);
+        }
+    });
+
+    it('reads a segment the playlist names twice only once', async () => {
+        const ctx = context(
+            {
+                ...multiAngleRoutes,
+                [`${BASE}/subs_en/playlist.m3u8`]: subtitlePlaylist([
+                    'en_0.vtt',
+                    'en_1.vtt',
+                    'en_0.vtt',
+                ]),
+                [`${BASE}/subs_en/en_0.vtt`]: cue(0),
+                [`${BASE}/subs_en/en_1.vtt`]: cue(1),
+            },
+            { keyHex: TEST_KEY_HEX },
+        );
+        const info = await loadMaster(MASTER_URL, ctx);
+        await mungeSource(info, { angleId: 'angle_0' }, ctx);
+
+        expect(ctx.calls.filter((url) => url === vtt(0))).toHaveLength(1);
+    });
+});
