@@ -37,6 +37,7 @@ import { StateStore, createInitialState } from './store.js';
 import {
     AUDIO_ONLY_ANGLE_ID,
     type AdapterErrorPayload,
+    type AdapterTextTrack,
     type Angle,
     type ChunkWarmOptions,
     type PlayerAdapter,
@@ -117,6 +118,12 @@ export class PlayerController implements PlayerControllerApi {
     private cache = new Map<string, string>();
     /** What this source has served; see {@link ServeMemo}. */
     private served: ServeMemo = { playlists: new Map() };
+    /**
+     * The sidecar subtitles handed to the adapter for this source. An adapter
+     * drops its text tracks with the source they belong to, on every
+     * `loadSource`, so each attach after the first has to hand them back.
+     */
+    private sidecarTextTracks: AdapterTextTrack[] = [];
     private qualityToVariant = new Map<string, string>();
     private startPosition = 0;
     private resumePlaying = false;
@@ -159,6 +166,7 @@ export class PlayerController implements PlayerControllerApi {
         // `teardownSource` above released every URL the last source was
         // served at, so nothing it memoized can be handed out again.
         this.served = { playlists: new Map() };
+        this.sidecarTextTracks = [];
         this.qualityToVariant = new Map();
         // Cleared here, not only when the next set arrives: a load that fails
         // before its sidecars would otherwise leave the previous video's frames
@@ -311,6 +319,12 @@ export class PlayerController implements PlayerControllerApi {
         });
         if (generation !== this.generation) return;
 
+        // The adapter dropped the sidecar subtitles with the source it just
+        // replaced. Empty on a first attach: they are loaded after it.
+        if (this.sidecarTextTracks.length > 0) {
+            this.adapter.setTextTracks(this.sidecarTextTracks);
+        }
+
         // The narrowed master references only this angle's renditions plus the
         // audio group, so the schedules built from it are exactly the chains
         // playback is about to pull — an angle switch comes back through here
@@ -349,6 +363,7 @@ export class PlayerController implements PlayerControllerApi {
             );
             if (generation !== this.generation) return;
             if (adapterTracks.length > 0) {
+                this.sidecarTextTracks = adapterTracks;
                 this.adapter.setTextTracks(adapterTracks);
                 this.store.setState({
                     subtitleTracks: [...info.subtitleTracks, ...tracks],

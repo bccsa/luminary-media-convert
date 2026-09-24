@@ -340,6 +340,74 @@ describe('PlayerController — serving a source once', () => {
     });
 });
 
+/**
+ * An adapter drops its text tracks with the source they belong to, on every
+ * `loadSource`. Sidecar subtitles are loaded once per source, so every attach
+ * after the first has to hand them back — or a switch leaves the store listing
+ * subtitles the engine no longer has.
+ */
+describe('PlayerController — sidecar subtitles across attaches', () => {
+    const SIDECAR = `${BASE}/subs/fr.vtt`;
+    const routes: Record<string, RouteBody> = {
+        ...multiAngleRoutes,
+        [SIDECAR]: FR_VTT,
+    };
+    const source = {
+        masterUrl: MASTER_URL,
+        sidecars: {
+            subtitles: [{ lang: 'fr', label: 'Français', url: SIDECAR }],
+        },
+    };
+
+    it('hands them back after an angle switch and the audio toggle', async () => {
+        const { adapter, controller } = setup(routes);
+        await controller.load(source);
+        const tracks = adapter.textTracks;
+        expect(tracks.map((track) => track.id)).toEqual(['s:fr']);
+
+        await controller.setAngle('angle_1');
+        expect(adapter.textTracks).toEqual(tracks);
+
+        await controller.setAngle(AUDIO_ONLY_ANGLE_ID);
+        expect(adapter.textTracks).toEqual(tracks);
+    });
+
+    it('hands them back after a recovery re-munge', async () => {
+        const { adapter, controller } = setup(routes);
+        await controller.load(source);
+
+        adapter.emit('reload-requested', { reason: 'fatal', attempt: 2 });
+        await flush();
+
+        expect(adapter.loads).toHaveLength(2);
+        expect(adapter.textTracks.map((track) => track.id)).toEqual(['s:fr']);
+    });
+
+    it('fetches and serves a sidecar once, however many attaches', async () => {
+        const { adapter, controller, serveStrategy, calls } = setup(routes);
+        await controller.load(source);
+        const { blobUrl } = adapter.textTracks[0]!;
+
+        await controller.setAngle('angle_1');
+        await controller.setAngle('angle_0');
+
+        expect(adapter.textTracks[0]?.blobUrl).toBe(blobUrl);
+        expect(calls.filter((url) => url === SIDECAR)).toHaveLength(1);
+        expect(
+            serveStrategy.contentTypes().filter((type) => type === 'text/vtt'),
+        ).toHaveLength(1);
+    });
+
+    it("does not carry one source's subtitles into the next", async () => {
+        const { adapter, controller } = setup(routes);
+        await controller.load(source);
+        await controller.load({ masterUrl: MASTER_URL });
+        await controller.setAngle('angle_1');
+
+        expect(adapter.textTracks).toEqual([]);
+    });
+});
+
 describe('PlayerController — quality and tracks', () => {
     it('maps contract quality ids onto adapter variant ids', async () => {
         const { adapter, controller } = setup(simpleRoutes, {

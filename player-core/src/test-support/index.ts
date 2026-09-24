@@ -391,6 +391,10 @@ export class FakeAdapter implements PlayerAdapter {
 
     async loadSource(src: AdapterSource): Promise<void> {
         this.loads.push(src);
+        // As both real adapters do: text tracks belong to the source, and a new
+        // source takes them away. A fake that kept them would hide a wrapper
+        // that forgot to hand them back.
+        this.textTracks = [];
     }
 
     destroy(): void {
