@@ -27,11 +27,18 @@ export class PipelineError extends Error {
      */
     readonly missing: boolean;
     readonly url?: string;
+    /** The HTTP status the server answered with, for a non-2xx response. */
+    readonly status?: number;
 
     constructor(
         code: PlayerError['code'],
         message: string,
-        options: { cause?: unknown; missing?: boolean; url?: string } = {},
+        options: {
+            cause?: unknown;
+            missing?: boolean;
+            url?: string;
+            status?: number;
+        } = {},
     ) {
         super(message);
         this.name = 'PipelineError';
@@ -39,6 +46,7 @@ export class PipelineError extends Error {
         this.fatal = true;
         this.missing = options.missing ?? false;
         this.url = options.url;
+        this.status = options.status;
         if (options.cause !== undefined) this.cause = options.cause;
     }
 
@@ -117,7 +125,7 @@ export async function fetchBytes(
         throw new PipelineError(
             'fetch-failed',
             `HTTP ${response.status} for ${url}`,
-            { missing, url },
+            { missing, url, status: response.status },
         );
     }
 

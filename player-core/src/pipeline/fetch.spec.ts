@@ -159,4 +159,29 @@ describe('fetchMaybeEncrypted', () => {
             }),
         ).rejects.toMatchObject({ code: 'fetch-failed' });
     });
+
+    it('carries the status the server answered with', async () => {
+        // A serving layer answering an engine's request on the network's behalf
+        // hands this back, so the engine reacts to a 404 as it would to one it
+        // had met itself.
+        for (const status of [403, 404, 500, 503]) {
+            const { fetchImpl } = makeFetch({ [URL_PLAYLIST]: { status } });
+            const error = await fetchMaybeEncrypted(URL_PLAYLIST, {
+                fetchImpl,
+                expect: 'playlist',
+            }).catch((e: unknown) => e);
+            expect((error as PipelineError).status).toBe(status);
+        }
+    });
+
+    it('has no status when there was no response at all', async () => {
+        const fetchImpl = (async () => {
+            throw new Error('offline');
+        }) as unknown as typeof fetch;
+        const error = await fetchMaybeEncrypted(URL_PLAYLIST, {
+            fetchImpl,
+            expect: 'playlist',
+        }).catch((e: unknown) => e);
+        expect((error as PipelineError).status).toBeUndefined();
+    });
 });

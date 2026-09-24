@@ -14,6 +14,7 @@ import type {
     AdapterSource,
     ChunkBoundary,
     ChunkWarmOptions,
+    LivePlaylistSpec,
     PlayerAdapter,
     ServeStrategy,
     Unsubscribe,
@@ -119,6 +120,22 @@ export const PLAIN_MEDIA_PLAYLIST = [
     '',
 ].join('\n');
 
+/**
+ * A live media playlist: a sliding window with no `#EXT-X-ENDLIST`, relative
+ * `.ts` segments, the shape a live packager rewrites every target duration.
+ */
+export const LIVE_MEDIA_PLAYLIST = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:3',
+    '#EXT-X-TARGETDURATION:4',
+    '#EXT-X-MEDIA-SEQUENCE:87996',
+    '#EXTINF:4,',
+    'l_87996.ts',
+    '#EXTINF:4,',
+    'l_87997.ts',
+    '',
+].join('\n');
+
 /** Subtitles media playlist referencing WebVTT segments. */
 export const SUBTITLE_MEDIA_PLAYLIST = [
     '#EXTM3U',
@@ -218,6 +235,20 @@ export class FakeServeStrategy implements ServeStrategy {
     /** Content types served, in order — used to prove no key was ever minted. */
     contentTypes(): string[] {
         return this.served.map((item) => item.contentType);
+    }
+}
+
+/**
+ * A {@link FakeServeStrategy} that can also serve live playlists, recording the
+ * spec of each one it is handed.
+ */
+export class FakeLiveServeStrategy extends FakeServeStrategy {
+    readonly liveSpecs: LivePlaylistSpec[] = [];
+    private liveCounter = 0;
+
+    serveLive(spec: LivePlaylistSpec): string {
+        this.liveSpecs.push(spec);
+        return `fake:live/${++this.liveCounter}`;
     }
 }
 

@@ -19,11 +19,17 @@
  *
  * Nothing in this repository produces live output (`-hls_playlist_type vod`
  * writes the playlist only at the end, which is why coming-soon polling
- * exists), so this ships specified and fixture-tested. The first real live
- * source is what proves it.
+ * exists); the sources are third-party live streams. {@link resolveLivePlaylist}
+ * is the per-request step every serving layer performs, and
+ * `player-web-legacy`'s `BlobServeStrategy` is the first to implement
+ * `serveLive` on top of it.
  */
 
 import { parseMediaPlaylist } from '@luminary-media-converter/hls-core';
+import { bytesToHex, type SubtleLike } from '../pipeline/decrypt.js';
+import { PipelineError, fetchMaybeEncrypted } from '../pipeline/fetch.js';
+import { hasAes128Key } from '../pipeline/playlist-text.js';
+import { rewriteMediaPlaylist } from '../pipeline/rewrite-media.js';
 
 /** What a media playlist says about whether it is finished. */
 export interface Liveness {
@@ -80,7 +86,7 @@ export function describeLiveness(playlistText: string): Liveness {
  * involvement at all: the engine fetches those itself.
  */
 export interface LivePlaylistSpec {
-    /** Absolute URL of the live media playlist, re-fetched every `refreshSec`. */
+    /** Absolute URL of the live media playlist, re-read on every engine request. */
     url: string;
     /** Base every relative URI in it resolves against — normally `url` itself. */
     baseUrl: string;
@@ -88,8 +94,13 @@ export interface LivePlaylistSpec {
      * What every AES-128 `URI="…"` is rewritten to. The sentinel
      * `luminary://key` for an adapter answering key requests from memory, a
      * served key URL otherwise.
+     *
+     * Absent exactly when there is no session key. Key lines are then left as
+     * written, and an AES-128 key turning up is a `key-required` failure — the
+     * rule the load applied to the first read, applied to every read after it,
+     * since a live stream can start encrypting part-way through.
      */
-    keyUri: string;
+    keyUri?: string;
     /**
      * The session key, for LMCENC. Absent means the resolver should expect
      * plaintext and pass an encrypted payload through as the error it is.
@@ -97,4 +108,54 @@ export interface LivePlaylistSpec {
     keyBytes?: Uint8Array;
     /** Re-read interval in seconds, from `#EXT-X-TARGETDURATION`. */
     refreshSec: number;
+}
+
+export interface ResolveLiveOptions {
+    fetchImpl: typeof fetch;
+    signal?: AbortSignal;
+    /** Injectable for tests; defaults to `globalThis.crypto.subtle`. */
+    subtle?: SubtleLike;
+}
+
+/**
+ * One read of a live media playlist, served-ready: fetch `spec.url`, decrypt
+ * it when it is LMCENC, apply the media rewrite. Call it once per engine
+ * request for the URL `serveLive(spec)` returned.
+ *
+ * Deliberately one read and not a loop. The engine already re-requests a live
+ * playlist on the cadence HLS prescribes — every target duration, half that
+ * when a read found nothing new — and answering those requests is the whole
+ * job; a timer of our own beside it would only race the engine's. `refreshSec`
+ * is for a serving layer that has to pre-fetch because it cannot answer a
+ * request asynchronously.
+ *
+ * Failures are {@link PipelineError}s carrying the upstream HTTP `status` when
+ * there was one, so a caller can hand the engine the status a direct request
+ * would have met and let the engine's own retry policy handle it.
+ *
+ * This is the reference a native resolver ports: the same three steps, in the
+ * same order, with the same failures.
+ */
+export async function resolveLivePlaylist(
+    spec: LivePlaylistSpec,
+    options: ResolveLiveOptions,
+): Promise<string> {
+    const asset = await fetchMaybeEncrypted(spec.url, {
+        fetchImpl: options.fetchImpl,
+        signal: options.signal,
+        subtle: options.subtle,
+        keyHex: spec.keyBytes ? bytesToHex(spec.keyBytes) : undefined,
+        expect: 'playlist',
+    });
+    if (!spec.keyUri && hasAes128Key(asset.text)) {
+        throw new PipelineError(
+            'key-required',
+            `${spec.url} declares AES-128 segments but no session key was supplied`,
+            { url: spec.url },
+        );
+    }
+    return rewriteMediaPlaylist(asset.text, {
+        playlistUrl: spec.baseUrl,
+        keyUri: spec.keyUri,
+    });
 }

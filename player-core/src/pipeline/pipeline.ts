@@ -284,8 +284,9 @@ export async function mungeSource(
         const spec: LivePlaylistSpec = {
             url,
             baseUrl: url,
-            keyUri: resolveKeyUri() ?? LUMINARY_KEY_PLACEHOLDER_URI,
-            ...(ctx.keyHex ? { keyBytes: keyBytes(ctx.keyHex) } : {}),
+            ...(ctx.keyHex
+                ? { keyUri: resolveKeyUri(), keyBytes: keyBytes(ctx.keyHex) }
+                : {}),
             refreshSec: targetDurationSec,
         };
         const served = ctx.serveStrategy.serveLive?.(spec);

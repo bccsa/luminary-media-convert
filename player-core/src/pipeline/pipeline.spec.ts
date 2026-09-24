@@ -8,13 +8,16 @@ import {
     type PipelineContext,
 } from './pipeline.js';
 import { KEY_CONTENT_TYPE } from './content-types.js';
+import { keyBytes } from './decrypt.js';
 import { LUMINARY_KEY_PLACEHOLDER_URI } from './rewrite-media.js';
 import { parseMasterText } from './playlist-text.js';
 import {
     AUDIO_ONLY_MASTER,
     CHAPTERS_VTT,
     ENCRYPTED_MEDIA_PLAYLIST,
+    FakeLiveServeStrategy,
     FakeServeStrategy,
+    LIVE_MEDIA_PLAYLIST,
     MULTI_ANGLE_MASTER,
     PLAIN_MEDIA_PLAYLIST,
     SIMPLE_MASTER,
@@ -408,5 +411,173 @@ describe('mungeSource — caching', () => {
         // angle_1's playlist is the only new fetch.
         expect(ctx.calls.length).toBe(afterFirst + 1);
         expect(ctx.calls.at(-1)).toBe(`${BASE}/angle1_1080/playlist.m3u8`);
+    });
+});
+
+/**
+ * `context()` over a serving layer that can refresh live playlists — the
+ * capability a live source needs, and the one `FakeServeStrategy` lacks.
+ */
+function liveContext(
+    routes: Record<string, string | Uint8Array | { status: number }>,
+    overrides: Partial<PipelineContext> = {},
+) {
+    const serve = new FakeLiveServeStrategy();
+    return { ...context(routes, overrides), serveStrategy: serve, serve };
+}
+
+describe('mungeSource — live sources', () => {
+    const VARIANTS = ['stream_1080', 'stream_720', 'stream_480'].map(
+        (dir) => `${BASE}/${dir}/playlist.m3u8`,
+    );
+    const AUDIO = ['audio_hi_128kbps', 'audio_lo_64kbps'].map(
+        (dir) => `${BASE}/${dir}/playlist.m3u8`,
+    );
+    const everyPlaylist = (text: string) =>
+        Object.fromEntries([...VARIANTS, ...AUDIO].map((url) => [url, text]));
+    const liveRoutes = {
+        [MASTER_URL]: SIMPLE_MASTER,
+        ...everyPlaylist(LIVE_MEDIA_PLAYLIST),
+    };
+    /** The encoder's AES-128 fixture, still being written. */
+    const LIVE_ENCRYPTED = ENCRYPTED_MEDIA_PLAYLIST.replace(
+        '#EXT-X-ENDLIST\n',
+        '',
+    );
+
+    it('refuses a live source when the serving layer cannot refresh a playlist', async () => {
+        // Served statically, a live playlist plays its first snapshot and then
+        // sits at the end of it — which looks like playback and is not.
+        const ctx = context(liveRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+
+        await expect(
+            mungeSource(info, { angleId: null }, ctx),
+        ).rejects.toMatchObject({ code: 'live-unsupported', url: VARIANTS[0] });
+    });
+
+    it('refuses a bare live media playlist the same way', async () => {
+        const ctx = context({ [MASTER_URL]: LIVE_MEDIA_PLAYLIST });
+        const info = await loadMaster(MASTER_URL, ctx);
+
+        await expect(
+            mungeSource(info, { angleId: null }, ctx),
+        ).rejects.toMatchObject({ code: 'live-unsupported' });
+    });
+
+    it('hands each live playlist to serveLive and points the master at what it returns', async () => {
+        const ctx = liveContext(liveRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(result.isLive).toBe(true);
+        expect(ctx.serve.liveSpecs.map((spec) => spec.url)).toEqual([
+            ...VARIANTS,
+            ...AUDIO,
+        ]);
+        const master = parseMasterText(result.masterText);
+        expect(master.variants.map((variant) => variant.uri)).toEqual([
+            'fake:live/1',
+            'fake:live/2',
+            'fake:live/3',
+        ]);
+        expect(master.media.map((media) => media.uri)).toEqual([
+            'fake:live/4',
+            'fake:live/5',
+        ]);
+        // Nothing but the master went through the static path.
+        expect(ctx.serve.served.map((item) => item.url)).toEqual([
+            result.source.url,
+        ]);
+    });
+
+    it('describes each playlist by its address, its base and its cadence — and no key without one', async () => {
+        const ctx = liveContext(liveRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+        await mungeSource(info, { angleId: null }, ctx);
+
+        // Strict: with no session key a spec carries no key URI at all, so a
+        // refresh leaves the playlist's own key lines as they are.
+        expect(ctx.serve.liveSpecs[1]).toStrictEqual({
+            url: VARIANTS[1],
+            baseUrl: VARIANTS[1],
+            refreshSec: 4,
+        });
+    });
+
+    it("names the key sentinel and carries the key bytes for a 'memory' adapter", async () => {
+        const ctx = liveContext(
+            { ...liveRoutes, [VARIANTS[0]!]: LIVE_ENCRYPTED },
+            { keyHex: TEST_KEY_HEX },
+        );
+        const info = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(info, { angleId: null }, ctx);
+
+        for (const spec of ctx.serve.liveSpecs) {
+            expect(spec.keyUri).toBe(LUMINARY_KEY_PLACEHOLDER_URI);
+            expect(spec.keyBytes).toEqual(keyBytes(TEST_KEY_HEX));
+        }
+        expect(ctx.serve.contentTypes()).not.toContain(KEY_CONTENT_TYPE);
+        expect(result.source.keyHex).toBe(TEST_KEY_HEX);
+    });
+
+    it("points a 'url' adapter's live playlists at the one key it served", async () => {
+        const ctx = liveContext(
+            { ...liveRoutes, [VARIANTS[0]!]: LIVE_ENCRYPTED },
+            { keyHex: TEST_KEY_HEX, keyDelivery: 'url' },
+        );
+        const info = await loadMaster(MASTER_URL, ctx);
+        await mungeSource(info, { angleId: null }, ctx);
+
+        const keys = ctx.serve.served.filter(
+            (item) => item.contentType === KEY_CONTENT_TYPE,
+        );
+        expect(keys).toHaveLength(1);
+        for (const spec of ctx.serve.liveSpecs) {
+            expect(spec.keyUri).toBe(keys[0]!.url);
+        }
+    });
+
+    it('decides per playlist, serving the finished ones of a mixed source as VOD', async () => {
+        const ctx = liveContext({
+            ...liveRoutes,
+            ...Object.fromEntries(
+                AUDIO.map((url) => [url, PLAIN_MEDIA_PLAYLIST]),
+            ),
+        });
+        const info = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(result.isLive).toBe(true);
+        expect(ctx.serve.liveSpecs.map((spec) => spec.url)).toEqual(VARIANTS);
+        const media = parseMasterText(result.masterText).media;
+        expect(ctx.serve.textOf(media[0]!.uri!)).toContain(
+            `${BASE}/audio_hi_128kbps/segment_0.m4s`,
+        );
+    });
+
+    it('serves a bare live media playlist as the source itself', async () => {
+        const ctx = liveContext({ [MASTER_URL]: LIVE_MEDIA_PLAYLIST });
+        const info = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(result.isLive).toBe(true);
+        expect(result.source.url).toBe('fake:live/1');
+        expect(ctx.serve.liveSpecs).toStrictEqual([
+            { url: MASTER_URL, baseUrl: MASTER_URL, refreshSec: 4 },
+        ]);
+        expect(ctx.serve.served).toEqual([]);
+    });
+
+    it('does not call a finished source live, whatever the serving layer can do', async () => {
+        const ctx = liveContext({
+            [MASTER_URL]: SIMPLE_MASTER,
+            ...everyPlaylist(PLAIN_MEDIA_PLAYLIST),
+        });
+        const info = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(result.isLive).toBe(false);
+        expect(ctx.serve.liveSpecs).toEqual([]);
     });
 });
