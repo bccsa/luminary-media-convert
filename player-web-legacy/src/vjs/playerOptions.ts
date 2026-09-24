@@ -3,9 +3,9 @@
  * this player exists to be visually and behaviourally indistinguishable from
  * it, and the options object is half of that (the other half is `styles.css`).
  *
- * Two deliberate departures from the app's literal object are noted at their
- * lines: the bogus `skipBackwardButton` child, and `IS_ANY_SAFARI` in place of
- * `IS_SAFARI`.
+ * Three deliberate departures from the app's literal object are noted at their
+ * lines: the bogus `skipBackwardButton` child, `IS_ANY_SAFARI` in place of
+ * `IS_SAFARI`, and `cacheEncryptionKeys`, which changes nothing a viewer sees.
  */
 import videojs from 'video.js';
 import type Player from 'video.js/dist/types/player';
@@ -30,6 +30,7 @@ export interface VideoJsOptions {
             maxPlaylistRetries: number;
             useBandwidthFromLocalStorage: boolean;
             useDevicePixelRatio: boolean;
+            cacheEncryptionKeys: boolean;
         };
         nativeAudioTracks: boolean;
         nativeVideoTracks: boolean;
@@ -169,6 +170,14 @@ export function buildVideoJsOptions(controls: PlayerControlsOptions): VideoJsOpt
                 maxPlaylistRetries: 10,
                 useBandwidthFromLocalStorage: true,
                 useDevicePixelRatio: true,
+                // Not in the app's object. Without it VHS asks for the key
+                // before every encrypted segment; the in-memory interceptor
+                // answers each time, so nothing reaches the network either
+                // way, but every ask is a fake request, a key copy and a
+                // microtask. The cache belongs to one segment loader, and every
+                // src() builds new loaders, so a source never inherits the key
+                // of the one before it under the shared `luminary://key` URI.
+                cacheEncryptionKeys: true,
             },
             // The app tests `IS_SAFARI`, which is false on iPhone/iPad, where
             // the native track lists are the ones that actually work.

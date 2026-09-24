@@ -113,6 +113,14 @@ describe('buildVideoJsOptions', () => {
         expect(buildVideoJsOptions(DEFAULT_CONTROLS).html5.vhs.experimentalUseMMS).toBe(true);
     });
 
+    it('has VHS keep the session key rather than ask for it before every segment', () => {
+        // The in-memory interceptor answers every ask, so nothing reaches the
+        // network either way; the cache spares a fake request, a key copy and a
+        // microtask per segment. It belongs to one segment loader, and every
+        // src() builds new ones, so a source never inherits the last one's key.
+        expect(buildVideoJsOptions(DEFAULT_CONTROLS).html5.vhs.cacheEncryptionKeys).toBe(true);
+    });
+
     it('keeps the subtitle and PiP buttons in the fixed child list', () => {
         // Control-bar children are fixed at construction: a source's text tracks
         // are not known then, and the player may switch to YouTube and back.
