@@ -40,6 +40,9 @@ function upstream(first = 100) {
 
 const signal = () => new AbortController().signal;
 
+/** Let promise callbacks run. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 /** jsdom implements neither object-URL call; stand them in for one test. */
 function stubObjectUrls() {
     const saved = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
@@ -127,27 +130,66 @@ describe('BlobServeStrategy — live playlists', () => {
     it('answers an address it never minted as a server answers a playlist it lacks', async () => {
         const { fetchImpl } = upstream();
         const strategy = new BlobServeStrategy({ fetchImpl });
+        strategy.serveLive(SPEC);
 
-        const error = await strategy
-            .resolveLive('luminary://live/999', signal())
-            .catch((e: unknown) => e);
+        for (const uri of ['luminary://live/999', 'luminary://live/0', 'luminary://live/next']) {
+            const error = await strategy.resolveLive(uri, signal()).catch((e: unknown) => e);
 
-        expect(error).toBeInstanceOf(PipelineError);
-        expect(error).toMatchObject({ code: 'fetch-failed', status: 404, missing: true });
+            expect(error).toBeInstanceOf(PipelineError);
+            expect(error).toMatchObject({ code: 'fetch-failed', status: 404, missing: true });
+        }
         expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it('leaves a released address unanswered until the engine gives up on it', async () => {
+        // Only the engine the address was handed to can still be asking — the old
+        // source, in the moments before the next one replaces it — and an error
+        // would send it through its exclusion ladder on the way out.
+        const { fetchImpl } = upstream();
+        const strategy = new BlobServeStrategy({ fetchImpl });
+        const uri = strategy.serveLive(SPEC);
+        strategy.release();
+
+        const engine = new AbortController();
+        const outcome = vi.fn();
+        const answer = strategy.resolveLive(uri, engine.signal).then(outcome, outcome);
+        await settle();
+        expect(outcome).not.toHaveBeenCalled();
+
+        engine.abort();
+        await answer;
+
+        expect(outcome).toHaveBeenCalledWith(engine.signal.reason);
+        expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it('gives up at once on a released address when the engine already has', async () => {
+        const strategy = new BlobServeStrategy({ fetchImpl: upstream().fetchImpl });
+        const uri = strategy.serveLive(SPEC);
+        strategy.release();
+        const engine = new AbortController();
+        engine.abort();
+
+        await expect(strategy.resolveLive(uri, engine.signal)).rejects.toBe(engine.signal.reason);
     });
 
     it('forgets its live playlists on release, as it revokes its blobs', async () => {
         const objectUrls = stubObjectUrls();
         try {
-            const strategy = new BlobServeStrategy({ fetchImpl: upstream().fetchImpl });
+            const { fetchImpl } = upstream();
+            const strategy = new BlobServeStrategy({ fetchImpl });
             const blob = strategy.serve('#EXTM3U\n', 'application/vnd.apple.mpegurl');
             const uri = strategy.serveLive(SPEC);
 
             strategy.release();
 
             expect(objectUrls.revoke).toHaveBeenCalledWith(blob);
-            await expect(strategy.resolveLive(uri, signal())).rejects.toMatchObject({ status: 404 });
+            // Released rather than served: the upstream is not read for it again.
+            const engine = new AbortController();
+            const answer = strategy.resolveLive(uri, engine.signal);
+            engine.abort();
+            await expect(answer).rejects.toBe(engine.signal.reason);
+            expect(fetchImpl).not.toHaveBeenCalled();
         } finally {
             objectUrls.restore();
         }
@@ -162,8 +204,14 @@ describe('BlobServeStrategy — live playlists', () => {
         const current = strategy.serveLive(SPEC);
 
         expect(current).not.toBe(old);
-        await expect(strategy.resolveLive(old, signal())).rejects.toMatchObject({ status: 404 });
         await expect(strategy.resolveLive(current, signal())).resolves.toContain('#EXTM3U');
+        const engine = new AbortController();
+        const outcome = vi.fn();
+        const stale = strategy.resolveLive(old, engine.signal).then(outcome, outcome);
+        await settle();
+        expect(outcome).not.toHaveBeenCalled();
+        engine.abort();
+        await stale;
     });
 
     it('reads through the global fetch when it is given none', async () => {

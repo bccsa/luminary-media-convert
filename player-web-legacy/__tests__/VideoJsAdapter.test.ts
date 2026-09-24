@@ -348,4 +348,51 @@ describe('VideoJsAdapter — live playlists', () => {
         expect(live.resolveLive).toHaveBeenCalledWith('luminary://live/2', expect.any(AbortSignal));
         expect(rebuilt).not.toHaveBeenCalled();
     });
+
+    it('leaves the handler it is moving away from wrapped, not back on the raw network', async () => {
+        // video.js disposes that handler only once the next src() lands, and a
+        // live one keeps refreshing until then: luminary://live/… over a real XHR
+        // is refused by the browser, and VHS excludes renditions over it.
+        const live = liveSource();
+        const { p, a, tech, network } = setup(live);
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+        const leaving = tech.vhs;
+
+        await a.loadSource({ ...source, url: 'blob:next' });
+        leaving.xhr({ uri: 'luminary://live/1' }, vi.fn());
+
+        expect(live.resolveLive).toHaveBeenCalledWith('luminary://live/1', expect.any(AbortSignal));
+        expect(network).not.toHaveBeenCalled();
+    });
+
+    it('leaves it wrapped on destroy as well, which is how a switch to YouTube begins', async () => {
+        const live = liveSource();
+        const { p, a, tech, network } = setup(live);
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+
+        a.destroy();
+        tech.vhs.xhr({ uri: 'luminary://live/1' }, vi.fn());
+
+        expect(live.resolveLive).toHaveBeenCalledTimes(1);
+        expect(network).not.toHaveBeenCalled();
+    });
+
+    it("answers a handler's key requests with its own source's key, whatever came next", async () => {
+        const { p, a, tech } = setup();
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+        const leaving = tech.vhs;
+
+        await a.loadSource({ ...source, url: 'blob:next', keyHex: 'ff'.repeat(16) });
+        const callback = vi.fn();
+        leaving.xhr({ uri: LUMINARY_KEY_PLACEHOLDER_URI }, callback);
+        await settle();
+
+        // KEY_HEX is 00 01 … 0f.
+        expect(new Uint8Array(callback.mock.calls[0]![1].response)).toEqual(
+            Uint8Array.from({ length: 16 }, (_, i) => i),
+        );
+    });
 });

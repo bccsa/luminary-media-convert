@@ -27,6 +27,12 @@
  * rewrite. There is no timer here: VHS already re-requests a live playlist on
  * the cadence HLS prescribes, and answering those requests is the whole job.
  *
+ * `release()` forgets the specs, but the engine they were given to is not gone
+ * yet: the controller releases a source before the next one is attached, and
+ * video.js disposes the old engine only once it is — or, for a switch to
+ * YouTube, once that tech has loaded. A refresh in that gap asks for a released
+ * address, and is left unanswered until the engine is disposed and abandons it.
+ *
  * This only works while JavaScript runs. A locked phone freezes the page and
  * the refresh with it — which on the web is also true of VHS itself, so nothing
  * is lost that was not lost anyway. A native shell cannot lean on that, which
@@ -67,7 +73,8 @@ export class BlobServeStrategy implements ServeStrategy, LivePlaylistSource {
     private readonly live = new Map<string, LivePlaylistSpec>();
     /**
      * Never reset, so a URI from a released generation can never name a spec
-     * registered after it — it stays unknown, and is answered as such.
+     * registered after it — and a number at or below it that is no longer
+     * registered is known to be one that was released, not one never minted.
      */
     private nextLiveId = 0;
     private readonly fetchImpl: typeof fetch;
@@ -93,19 +100,35 @@ export class BlobServeStrategy implements ServeStrategy, LivePlaylistSource {
     }
 
     resolveLive(uri: string, signal: AbortSignal): Promise<string> {
-        const spec = this.live.get(normalizeLivePlaylistUri(uri));
-        if (!spec) {
-            // Released, or never ours: answered the way a server answers a
-            // playlist it does not have, so the engine's own error path runs.
-            return Promise.reject(
-                new PipelineError('fetch-failed', `${uri} is not being served`, {
-                    missing: true,
-                    status: 404,
-                    url: uri,
-                }),
-            );
+        const address = normalizeLivePlaylistUri(uri);
+        const spec = this.live.get(address);
+        if (spec) {
+            return resolveLivePlaylist(spec, { fetchImpl: this.fetchImpl, signal });
         }
-        return resolveLivePlaylist(spec, { fetchImpl: this.fetchImpl, signal });
+        if (this.wasReleased(address)) {
+            // Only the engine that was given this address can be asking, and it
+            // is on its way out: the controller releases a source before the
+            // next one is attached, and video.js disposes the old engine only
+            // once that happens. An error here would send it through its whole
+            // exclusion ladder in its last moments — a warning per rendition —
+            // so it is not answered at all, and gives up when it is disposed.
+            return untilAborted(signal);
+        }
+        // Never ours: answered the way a server answers a playlist it does not
+        // have, so the engine's own error path runs.
+        return Promise.reject(
+            new PipelineError('fetch-failed', `${uri} is not being served`, {
+                missing: true,
+                status: 404,
+                url: uri,
+            }),
+        );
+    }
+
+    /** Minted here once, and released since. */
+    private wasReleased(address: string): boolean {
+        const id = Number(address.slice(LIVE_PLAYLIST_URI_PREFIX.length));
+        return Number.isInteger(id) && id >= 1 && id <= this.nextLiveId;
     }
 
     release(): void {
@@ -113,6 +136,17 @@ export class BlobServeStrategy implements ServeStrategy, LivePlaylistSource {
         this.urls = [];
         this.live.clear();
     }
+}
+
+/** A request left unanswered: it settles only when its caller gives up on it. */
+function untilAborted(signal: AbortSignal): Promise<never> {
+    return new Promise((_resolve, reject) => {
+        if (signal.aborted) {
+            reject(signal.reason);
+            return;
+        }
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
 }
 
 function toBlobPart(content: string | Uint8Array): BlobPart {

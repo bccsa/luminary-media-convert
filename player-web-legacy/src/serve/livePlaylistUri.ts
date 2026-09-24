@@ -35,8 +35,13 @@ export interface LivePlaylistSource {
     /**
      * The current text of the live playlist behind `uri`, rewritten and ready
      * to hand to the engine. Rejects with a `PipelineError` — carrying the
-     * upstream HTTP `status` where there was one — when it cannot be read,
-     * including for a URI this source never minted or has since released.
+     * upstream HTTP `status` where there was one — when it cannot be read, and
+     * with a 404 for a URI this source never minted.
+     *
+     * A URI it minted and has since released is never answered: the promise
+     * settles only when `signal` aborts. Only the engine the URI was handed to
+     * can be asking, in the moments before the next source replaces it, and an
+     * error would send it through its exclusion ladder on the way out.
      */
     resolveLive(uri: string, signal: AbortSignal): Promise<string>;
 }

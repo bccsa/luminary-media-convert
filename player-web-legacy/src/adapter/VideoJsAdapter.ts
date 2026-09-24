@@ -125,8 +125,6 @@ export class VideoJsAdapter implements PlayerAdapter {
     private readonly liveSource: LivePlaylistSource | undefined;
     private prefetcher: ChunkPrefetcher | null = null;
     private keyBytes: Uint8Array | null = null;
-    /** Uninstallers for the VHS seam wrappers, in install order. */
-    private sourceHookUninstallers: (() => void)[] = [];
     private sourceHookHandlers: [string, () => void][] = [];
     private readonly stallSignals: VhsStallSignals;
     private readonly ladder: RecoveryLadder;
@@ -255,22 +253,24 @@ export class VideoJsAdapter implements PlayerAdapter {
      * fired from `handleSource` the moment the handler exists — before any
      * playlist request goes out — and `loadstart` is the fallback for a source
      * VHS is not handling, where there is nothing to wrap.
+     *
+     * The wrappers are never uninstalled: they live and die with the handler
+     * they wrap, and every handler is disposed by the transition that replaces
+     * it. See `teardownSource` for why that is the point. So the key is the one
+     * this source was given, captured here, rather than whatever the adapter
+     * holds by the time a late request for it arrives.
      */
     private armSourceHooks(): void {
         this.disarmSourceHooks();
+        const keyBytes = this.keyBytes;
         const install = (): void => {
             this.disarmSourceHooks();
-            this.uninstallSourceHooks();
-            this.sourceHookUninstallers = [installByteRangeTimeout(this.player)];
+            installByteRangeTimeout(this.player);
             if (this.capabilities.keyDelivery === 'memory') {
-                this.sourceHookUninstallers.push(
-                    installMemoryKeyXhr(this.player, () => this.keyBytes),
-                );
+                installMemoryKeyXhr(this.player, () => keyBytes);
             }
             if (this.liveSource) {
-                this.sourceHookUninstallers.push(
-                    installLivePlaylistXhr(this.player, this.liveSource),
-                );
+                installLivePlaylistXhr(this.player, this.liveSource);
             }
         };
         this.sourceHookHandlers = [
@@ -289,11 +289,6 @@ export class VideoJsAdapter implements PlayerAdapter {
         this.sourceHookHandlers = [];
     }
 
-    /** Unwind the seam wrappers in reverse install order, so each finds its own. */
-    private uninstallSourceHooks(): void {
-        for (const uninstall of this.sourceHookUninstallers.reverse()) uninstall();
-        this.sourceHookUninstallers = [];
-    }
 
     // -- playback -----------------------------------------------------------
 
@@ -744,7 +739,15 @@ export class VideoJsAdapter implements PlayerAdapter {
         this.prefetcher = null;
         this.cancelDeferredSeek();
         this.disarmSourceHooks();
-        this.uninstallSourceHooks();
+        // The seam wrappers stay on the handler they wrap. It outlives this call:
+        // video.js disposes it only once the next src() lands, the tech is swapped
+        // for YouTube, or the player is disposed — all later, and a YouTube switch
+        // first waits for the tech to load. A live source refreshes its playlists
+        // all the while, and handing the handler its raw factory back sends
+        // luminary://live/… over a real XHR, which the browser refuses and VHS
+        // answers by excluding one rendition after another. Wrapped, it is
+        // answered to the last: keys with the bytes it was given, live playlists
+        // as the serving layer decides.
         this.stallSignals.clear();
         this.removeRemoteTextTracks();
         this.keyBytes = null;

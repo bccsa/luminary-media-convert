@@ -163,6 +163,14 @@ adapter together; a host building its own controller passes the same
 `BlobServeStrategy` to `new VideoJsAdapter(player, { liveSource })`, or the
 live URIs have no one to answer them.
 
+Moving to another source has a gap: the controller releases the old source's
+addresses before the new one is attached, and video.js disposes the old engine
+only once it is — for a switch to YouTube, only after that tech has loaded. The
+old engine keeps refreshing in between. So the adapter never unwraps a handler
+it is leaving (a raw `luminary://live/…` request is refused by the browser),
+and a released address is left unanswered rather than failed, which would send
+the old engine through its rendition exclusion ladder on its way out.
+
 The refresh is JavaScript, so it pauses when the page is frozen — as VHS does.
 A native shell cannot accept that, which is why its resolver does the same
 three steps unaided; see `docs/suspension-safe-playback.md`.

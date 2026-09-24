@@ -210,6 +210,13 @@ Nothing in this repository produces live output: `-hls_playlist_type vod` means
 ffmpeg writes the playlist only at the end, which is why coming-soon polling
 exists at all. Live sources are third-party streams.
 
+**An address outlives its release.** The controller releases a source before
+the next one is attached, and the engine it was given to keeps refreshing until
+it is actually replaced. A request for a released address comes from that
+engine and nothing else, so leave it unanswered until the engine abandons it;
+failing it sends a live engine through its whole error handling - on VHS, one
+excluded rendition after another - in the moments before it is discarded.
+
 **The web implementation** is `player-web-legacy`: `BlobServeStrategy.serveLive`
 registers the spec under a synthetic `luminary://live/<n>` (a blob URL cannot
 change), and `vhsLivePlaylistInterceptor.ts` answers VHS's requests for that URI
