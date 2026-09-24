@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildChunkSchedules, type ChunkBoundary } from './prefetch.js';
 import type { MungeResult } from './pipeline/pipeline.js';
+import { scanMediaPlaylist } from './pipeline/media-scan.js';
 
 const BASE = 'https://cdn.example.com/out/session';
 
@@ -90,5 +91,45 @@ describe('buildChunkSchedules', () => {
 
     it('has nothing to say about an empty munge', () => {
         expect(buildChunkSchedules([])).toEqual([]);
+    });
+
+    it('builds from the scan the munge attached, without reading the text', () => {
+        // The munge has already read every playlist once; reading them again
+        // here was the longest single task of an angle switch.
+        const scan = scanMediaPlaylist(VIDEO_CHAIN);
+        const [schedule] = buildChunkSchedules([
+            { ...playlist('v0_1080', 'not a playlist at all'), scan },
+        ]);
+
+        expect(schedule).toEqual<ChunkBoundary[]>([
+            { url: `${BASE}/media/v0_0.m4s`, start: 0, end: 20 },
+            { url: `${BASE}/media/v0_1.m4s`, start: 20, end: 40 },
+        ]);
+    });
+
+    it('joins neighbouring runs that name one chunk two ways', () => {
+        // Boundaries join on the resolved URL, not on the spelling.
+        const [schedule] = buildChunkSchedules([
+            playlist(
+                'v0_1080',
+                chunkedPlaylist([
+                    { chunk: '../media/v0_0.m4s', segments: 2 },
+                    { chunk: '/out/session/media/v0_0.m4s', segments: 3 },
+                    { chunk: '../media/v0_1.m4s', segments: 5 },
+                ]),
+            ),
+        ]);
+
+        expect(schedule).toEqual<ChunkBoundary[]>([
+            { url: `${BASE}/media/v0_0.m4s`, start: 0, end: 20 },
+            { url: `${BASE}/media/v0_1.m4s`, start: 20, end: 40 },
+        ]);
+    });
+
+    it('skips a playlist still being written', () => {
+        // Chunk packing is done to a finished file, and a schedule from a
+        // sliding window would be wrong by the next refresh.
+        const live = VIDEO_CHAIN.replace('#EXT-X-ENDLIST\n', '');
+        expect(buildChunkSchedules([playlist('v0_1080', live)])).toEqual([]);
     });
 });

@@ -1,11 +1,12 @@
 /**
  * Playlist introspection for the munging pipeline.
  *
- * Every function here is a pure view over the lossless model in
+ * Every master-playlist function here is a pure view over the lossless model in
  * `@luminary-media-converter/hls-core`: parse → inspect (or edit the model) →
- * build. Nothing in this package reads a playlist line by line any more, so
- * unknown tags, unknown attributes, attribute order and the exact numeric
- * spelling of a duration all survive a munge untouched.
+ * build, so unknown tags, unknown attributes, attribute order and the exact
+ * numeric spelling of a duration all survive a munge untouched. Media playlists
+ * are only ever read here, never rebuilt, and are read through the one-pass
+ * scan in `media-scan.ts`, which follows the model's rules without its cost.
  *
  * The entry types below are a narrow projection of the model, shaped for what
  * the pipeline actually asks: `height` rather than `resolutionParsed`,
@@ -18,11 +19,11 @@
 import {
     buildMasterPlaylist,
     parseMasterPlaylist,
-    parseMediaPlaylist,
     type HlsMedia,
     type HlsParsedMaster,
     type HlsVariant,
 } from '@luminary-media-converter/hls-core';
+import { scanMediaPlaylist, type MediaPlaylistScan } from './media-scan.js';
 
 // ---------------------------------------------------------------------------
 // Attribute helpers
@@ -243,12 +244,21 @@ export function masterHasVideo(master: HlsParsedMaster): boolean {
 
 /** True when a media playlist declares an AES-128 key (i.e. `METHOD` ≠ NONE). */
 export function hasAes128Key(text: string): boolean {
-    return parseMediaPlaylist(text).keys.some((key) => key.method !== 'NONE');
+    return scanMediaPlaylist(text).hasAes128Key;
 }
 
 /** Every segment URI of a media playlist, exactly as written. */
 export function listSegmentUris(text: string): string[] {
-    return parseMediaPlaylist(text).segments.map((segment) => segment.uri);
+    return segmentUris(scanMediaPlaylist(text));
+}
+
+/** {@link listSegmentUris} from a scan the caller already made. */
+export function segmentUris(scan: MediaPlaylistScan): string[] {
+    const uris: string[] = [];
+    for (const run of scan.runs) {
+        for (let i = 0; i < run.count; i++) uris.push(run.uri);
+    }
+    return uris;
 }
 
 // ---------------------------------------------------------------------------

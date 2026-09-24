@@ -25,10 +25,12 @@
  * `serveLive` on top of it.
  */
 
-import { parseMediaPlaylist } from '@luminary-media-converter/hls-core';
 import { bytesToHex, type SubtleLike } from '../pipeline/decrypt.js';
 import { PipelineError, fetchMaybeEncrypted } from '../pipeline/fetch.js';
-import { hasAes128Key } from '../pipeline/playlist-text.js';
+import {
+    scanMediaPlaylist,
+    type MediaPlaylistScan,
+} from '../pipeline/media-scan.js';
 import { rewriteMediaPlaylist } from '../pipeline/rewrite-media.js';
 
 /** What a media playlist says about whether it is finished. */
@@ -53,11 +55,15 @@ export interface Liveness {
 }
 
 export function describeLiveness(playlistText: string): Liveness {
-    const playlist = parseMediaPlaylist(playlistText);
+    return livenessOf(scanMediaPlaylist(playlistText));
+}
+
+/** {@link describeLiveness} from a scan the caller already made. */
+export function livenessOf(scan: MediaPlaylistScan): Liveness {
     return {
-        isLive: !playlist.endList,
-        targetDurationSec: playlist.targetDuration ?? 0,
-        mediaSequence: playlist.mediaSequence ?? 0,
+        isLive: scan.isLive,
+        targetDurationSec: scan.targetDurationSec,
+        mediaSequence: scan.mediaSequence,
     };
 }
 
@@ -147,7 +153,7 @@ export async function resolveLivePlaylist(
         keyHex: spec.keyBytes ? bytesToHex(spec.keyBytes) : undefined,
         expect: 'playlist',
     });
-    if (!spec.keyUri && hasAes128Key(asset.text)) {
+    if (!spec.keyUri && scanMediaPlaylist(asset.text).hasAes128Key) {
         throw new PipelineError(
             'key-required',
             `${spec.url} declares AES-128 segments but no session key was supplied`,

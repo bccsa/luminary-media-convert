@@ -23,7 +23,7 @@
  * `docs/chunk-warming.md` is the porting guide.
  */
 
-import { parseMediaPlaylist } from '@luminary-media-converter/hls-core';
+import { scanMediaPlaylist } from './pipeline/media-scan.js';
 import { absolutize } from './pipeline/playlist-text.js';
 import type { MungeResult } from './pipeline/pipeline.js';
 
@@ -66,6 +66,11 @@ export interface ChunkBoundary {
  * references the same chunk files, so one schedule covers all of them — and the
  * URLs say so, which is why no name parsing is needed to work out what belongs
  * to which angle.
+ *
+ * Built from each playlist's scan — the one the munge already made, when it
+ * made one — whose segments arrive as runs sharing a URI. A run is resolved
+ * once rather than once per segment, and two neighbouring runs that spell one
+ * object differently still merge, because boundaries join on the resolved URL.
  */
 export function buildChunkSchedules(
     mediaPlaylists: MungeResult['mediaPlaylists'],
@@ -73,26 +78,18 @@ export function buildChunkSchedules(
     const byChain = new Map<string, ChunkBoundary[]>();
 
     for (const playlist of mediaPlaylists) {
-        const parsed = parseMediaPlaylist(playlist.text);
-        if (!parsed.endList) continue;
-        const segments = parsed.segments;
-        if (!segments.some((segment) => segment.byteRange)) continue;
+        const scan = playlist.scan ?? scanMediaPlaylist(playlist.text);
+        if (scan.isLive || !scan.hasByteRanges) continue;
 
         const boundaries: ChunkBoundary[] = [];
-        let elapsed = 0;
-        for (const segment of segments) {
-            const url = absolutize(segment.uri, playlist.url);
+        for (const run of scan.runs) {
+            const url = absolutize(run.uri, playlist.url);
             const last = boundaries.at(-1);
             if (last && last.url === url) {
-                last.end = elapsed + segment.duration;
+                last.end = run.end;
             } else {
-                boundaries.push({
-                    url,
-                    start: elapsed,
-                    end: elapsed + segment.duration,
-                });
+                boundaries.push({ url, start: run.start, end: run.end });
             }
-            elapsed += segment.duration;
         }
 
         const first = boundaries[0];

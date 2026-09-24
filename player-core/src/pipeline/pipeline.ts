@@ -34,7 +34,7 @@ import {
     PLAYLIST_CONTENT_TYPE,
     VTT_CONTENT_TYPE,
 } from './content-types.js';
-import { describeLiveness, type LivePlaylistSpec } from '../policy/live.js';
+import type { LivePlaylistSpec } from '../policy/live.js';
 import { keyBytes, type SubtleLike } from './decrypt.js';
 import {
     PipelineError,
@@ -42,15 +42,15 @@ import {
     fetchBytes,
     fetchMaybeEncrypted,
 } from './fetch.js';
+import { scanMediaPlaylist, type MediaPlaylistScan } from './media-scan.js';
 import {
     absolutize,
     anchorToDocument,
     collectMasterRefs,
-    hasAes128Key,
     isMasterModel,
-    listSegmentUris,
     masterHasVideo,
     parseMasterText,
+    segmentUris,
     substituteMasterRefs,
 } from './playlist-text.js';
 import { applyQualityCap, listQualities } from './quality-cap.js';
@@ -105,6 +105,12 @@ export interface MungedMediaPlaylist {
     mediaType: string;
     /** Decoded text: post-LMCENC-decryption, pre-rewrite. */
     text: string;
+    /**
+     * The munge's scan of `text`, so a consumer after the segment layout —
+     * `buildChunkSchedules` — does not read the playlist a second time. Absent
+     * on a playlist described by hand; consumers scan `text` themselves then.
+     */
+    scan?: MediaPlaylistScan;
 }
 
 /**
@@ -284,15 +290,17 @@ export async function mungeSource(
      * play its first snapshot and then sit at the end of it forever, which
      * looks like playback and is not.
      */
-    const serveLivePlaylist = (url: string, text: string): string => {
-        const { targetDurationSec } = describeLiveness(text);
+    const serveLivePlaylist = (
+        url: string,
+        scan: MediaPlaylistScan,
+    ): string => {
         const spec: LivePlaylistSpec = {
             url,
             baseUrl: url,
             ...(ctx.keyHex
                 ? { keyUri: resolveKeyUri(), keyBytes: keyBytes(ctx.keyHex) }
                 : {}),
-            refreshSec: targetDurationSec,
+            refreshSec: scan.targetDurationSec,
         };
         const served = ctx.serveStrategy.serveLive?.(spec);
         if (!served) {
@@ -308,20 +316,23 @@ export async function mungeSource(
 
     let servedMasterText: string;
     if (!info.isMaster) {
-        requireKeyFor(capped, info.url, ctx);
+        // One read of the playlist answers every question asked of it below.
+        const scan = scanMediaPlaylist(capped);
+        requireKeyFor(scan, info.url, ctx);
         // The URL served a media playlist directly — it IS the only stream, so
         // it counts as video for anything reading the list back.
         mediaPlaylists.push({
             url: info.url,
             mediaType: 'VIDEO',
             text: capped,
+            scan,
         });
-        if (describeLiveness(capped).isLive) {
+        if (scan.isLive) {
             isLive = true;
             // Nothing to serve as a master: the live URL IS the source.
             return {
                 source: {
-                    url: serveLivePlaylist(info.url, capped),
+                    url: serveLivePlaylist(info.url, scan),
                     isBlob: true,
                     ...(ctx.keyHex && ctx.keyDelivery === 'memory'
                         ? { keyHex: ctx.keyHex }
@@ -336,7 +347,7 @@ export async function mungeSource(
         }
         servedMasterText = rewriteMediaPlaylist(capped, {
             playlistUrl: info.url,
-            keyUri: hasAes128Key(capped) ? resolveKeyUri() : undefined,
+            keyUri: scan.hasAes128Key ? resolveKeyUri() : undefined,
         });
     } else {
         const replacements = new Map<string, string>();
@@ -357,27 +368,31 @@ export async function mungeSource(
         );
         for (const { ref, absolute } of refs) {
             const text = await reads.get(absolute)!;
-            requireKeyFor(text, absolute, ctx);
+            // One read of the playlist answers every question asked of it
+            // below, and travels on to the chunk schedules with it.
+            const scan = scanMediaPlaylist(text);
+            requireKeyFor(scan, absolute, ctx);
             mediaPlaylists.push({
                 url: absolute,
                 mediaType: ref.mediaType ?? 'VIDEO',
                 text,
+                scan,
             });
 
-            if (describeLiveness(text).isLive) {
+            if (scan.isLive) {
                 isLive = true;
-                replacements.set(ref.uri, serveLivePlaylist(absolute, text));
+                replacements.set(ref.uri, serveLivePlaylist(absolute, scan));
                 continue;
             }
 
             const segmentReplacements =
                 ref.mediaType === 'SUBTITLES' && ctx.keyHex
-                    ? await serveDecryptedVttSegments(text, absolute, ctx)
+                    ? await serveDecryptedVttSegments(scan, absolute, ctx)
                     : undefined;
 
             const rewritten = rewriteMediaPlaylist(text, {
                 playlistUrl: absolute,
-                keyUri: hasAes128Key(text) ? resolveKeyUri() : undefined,
+                keyUri: scan.hasAes128Key ? resolveKeyUri() : undefined,
                 segmentReplacements,
             });
             replacements.set(
@@ -468,12 +483,12 @@ function startPlaylistReads(
  * the segment list is finite.
  */
 async function serveDecryptedVttSegments(
-    playlistText: string,
+    playlist: MediaPlaylistScan,
     playlistUrl: string,
     ctx: PipelineContext,
 ): Promise<Map<string, string>> {
     const replacements = new Map<string, string>();
-    for (const uri of listSegmentUris(playlistText)) {
+    for (const uri of segmentUris(playlist)) {
         const absolute = absolutize(uri, playlistUrl);
         if (replacements.has(absolute)) continue;
         const bytes = await fetchBytes(absolute, ctx);
@@ -492,11 +507,11 @@ async function serveDecryptedVttSegments(
 }
 
 function requireKeyFor(
-    playlistText: string,
+    playlist: MediaPlaylistScan,
     url: string,
     ctx: PipelineContext,
 ): void {
-    if (ctx.keyHex || !hasAes128Key(playlistText)) return;
+    if (ctx.keyHex || !playlist.hasAes128Key) return;
     throw new PipelineError(
         'key-required',
         `${url} declares AES-128 segments but no session key was supplied`,
