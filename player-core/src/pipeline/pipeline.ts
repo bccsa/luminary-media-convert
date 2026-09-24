@@ -13,7 +13,7 @@
 import {
     extractAnglePlaylist,
     isEncryptedPayload,
-    listVideoAngles,
+    listAngles,
 } from '@luminary-media-converter/hls-core';
 import {
     AUDIO_ONLY_ANGLE_ID,
@@ -26,7 +26,7 @@ import {
 } from '../types.js';
 import {
     buildAudioOnlyMaster,
-    hasAudioOnlyRendering,
+    canRenderAudioOnly,
     isAudioOnlyMaster,
 } from './audio-only.js';
 import {
@@ -47,8 +47,9 @@ import {
     anchorToDocument,
     collectMasterRefs,
     hasAes128Key,
-    isMasterPlaylistText,
+    isMasterModel,
     listSegmentUris,
+    masterHasVideo,
     parseMasterText,
     substituteMasterRefs,
 } from './playlist-text.js';
@@ -162,8 +163,13 @@ export function describeMaster(
     text: string,
     wasEncrypted = false,
 ): MasterInfo {
-    const isMaster = isMasterPlaylistText(text);
-    if (!isMaster) {
+    // Parsed once, and every question below asked of the one model. It was
+    // five parses, one of them building a whole audio-only master only to
+    // compare it with null.
+    const parsed = parseMasterText(text);
+    const { master } = parsed;
+
+    if (!isMasterModel(master)) {
         return {
             url,
             text,
@@ -176,8 +182,8 @@ export function describeMaster(
         };
     }
 
-    const nativelyAudioOnly = isAudioOnlyMaster(text);
-    const videoAngles = listVideoAngles(text).map<Angle>((angle) => ({
+    const nativelyAudioOnly = !masterHasVideo(master);
+    const videoAngles = listAngles(master).map<Angle>((angle) => ({
         id: angle.id,
         name: angle.name,
         isDefault: angle.isDefault,
@@ -187,11 +193,7 @@ export function describeMaster(
     if (!nativelyAudioOnly && angles.length === 0) {
         angles.push({ id: DEFAULT_ANGLE_ID, name: 'Default', isDefault: true });
     }
-    if (
-        !nativelyAudioOnly &&
-        angles.length > 0 &&
-        hasAudioOnlyRendering(text)
-    ) {
+    if (!nativelyAudioOnly && angles.length > 0 && canRenderAudioOnly(master)) {
         angles.push({
             id: AUDIO_ONLY_ANGLE_ID,
             name: 'Audio only',
@@ -199,7 +201,6 @@ export function describeMaster(
         });
     }
 
-    const parsed = parseMasterText(text);
     const audioTracks: AudioTrack[] = [];
     const subtitleTracks: SubtitleTrack[] = [];
     for (const entry of parsed.media) {

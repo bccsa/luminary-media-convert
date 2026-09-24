@@ -112,7 +112,11 @@ export interface ParsedMasterText {
  * variant, media or I-frame entry and is correctly rejected.
  */
 export function isMasterPlaylistText(text: string): boolean {
-    const master = parseMasterPlaylist(text);
+    return isMasterModel(parseMasterPlaylist(text));
+}
+
+/** {@link isMasterPlaylistText} against a model the caller already parsed. */
+export function isMasterModel(master: HlsParsedMaster): boolean {
     return (
         master.variants.length > 0 ||
         master.media.length > 0 ||
@@ -121,7 +125,11 @@ export function isMasterPlaylistText(text: string): boolean {
 }
 
 export function parseMasterText(text: string): ParsedMasterText {
-    const master = parseMasterPlaylist(text);
+    return projectMaster(parseMasterPlaylist(text));
+}
+
+/** {@link parseMasterText} over a model the caller already parsed. */
+export function projectMaster(master: HlsParsedMaster): ParsedMasterText {
     return {
         master,
         media: master.media.map(toMediaEntry),
@@ -218,7 +226,11 @@ export function substituteMasterRefs(
 
 /** True when the master (or any playlist) declares at least one video variant. */
 export function hasVideoVariants(text: string): boolean {
-    const master = parseMasterPlaylist(text);
+    return masterHasVideo(parseMasterPlaylist(text));
+}
+
+/** {@link hasVideoVariants} against a model the caller already parsed. */
+export function masterHasVideo(master: HlsParsedMaster): boolean {
     if (master.videoGroups.length > 0) return true;
     return master.variants.some(
         (v) => v.resolutionParsed !== undefined || v.videoGroup !== undefined,
