@@ -382,7 +382,12 @@ function flag<K extends string>(
     name: string,
     key: K
 ): Partial<Record<K, boolean>> {
-    const raw = plain(attrs, name);
+    // Quoted or not. The spec says enumerated-string, so unquoted, but real
+    // packagers write `DEFAULT="YES"` too; refusing it dropped the attribute
+    // on rebuild, and a master whose only default was written that way came
+    // out with no default at all. The builder writes it back unquoted.
+    const a = find(attrs, name);
+    const raw = a && !a.bare ? a.value : undefined;
     if (raw === 'YES') return { [key]: true } as Record<K, boolean>;
     if (raw === 'NO') return { [key]: false } as Record<K, boolean>;
     return {};
