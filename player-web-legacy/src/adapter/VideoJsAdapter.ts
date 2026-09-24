@@ -18,7 +18,9 @@ import type Player from 'video.js/dist/types/player';
 import type { QualityLevel, QualityLevelList } from '../types/videojs-vhs';
 import { RecoveryLadder } from '../drivers/RecoveryLadder';
 import { ChunkPrefetcher } from './chunkWarming';
+import type { LivePlaylistSource } from '../serve/livePlaylistUri';
 import { installMemoryKeyXhr } from './vhsKeyInterceptor';
+import { installLivePlaylistXhr } from './vhsLivePlaylistInterceptor';
 import { installByteRangeTimeout } from './vhsRequestTimeout';
 import { VhsStallSignals } from './vhsStallSignals';
 import { vhsTech } from './vhsXhrSeam';
@@ -97,6 +99,13 @@ export interface VideoJsAdapterOptions {
      * documented fallback if the VHS seam ever breaks.
      */
     keyDelivery?: 'memory' | 'url';
+    /**
+     * Who answers the `luminary://live/…` URIs a live source's munged master
+     * names — the `BlobServeStrategy` handed to the controller, which minted
+     * them. Without one, a live source still loads (the strategy decides
+     * that) but VHS cannot fetch its media playlists.
+     */
+    liveSource?: LivePlaylistSource;
 }
 
 /**
@@ -113,6 +122,7 @@ export class VideoJsAdapter implements PlayerAdapter {
     readonly capabilities: AdapterCapabilities;
 
     private readonly player: Player;
+    private readonly liveSource: LivePlaylistSource | undefined;
     private prefetcher: ChunkPrefetcher | null = null;
     private keyBytes: Uint8Array | null = null;
     /** Uninstallers for the VHS seam wrappers, in install order. */
@@ -135,6 +145,7 @@ export class VideoJsAdapter implements PlayerAdapter {
 
     constructor(player: Player, options: VideoJsAdapterOptions = {}) {
         this.player = player;
+        this.liveSource = options.liveSource;
         this.capabilities = {
             nativeHls: false,
             keyDelivery: options.keyDelivery ?? 'memory',
@@ -238,8 +249,9 @@ export class VideoJsAdapter implements PlayerAdapter {
 
     /**
      * Wrap the request factory of the handler the next `src()` is about to
-     * create: the byte-range timeout backstop always, and in-memory key
-     * delivery when this adapter has claimed that job. `xhr-hooks-ready` is
+     * create: the byte-range timeout backstop always, in-memory key delivery
+     * when this adapter has claimed that job, and live playlist refresh when a
+     * live source was supplied. `xhr-hooks-ready` is
      * fired from `handleSource` the moment the handler exists — before any
      * playlist request goes out — and `loadstart` is the fallback for a source
      * VHS is not handling, where there is nothing to wrap.
@@ -253,6 +265,11 @@ export class VideoJsAdapter implements PlayerAdapter {
             if (this.capabilities.keyDelivery === 'memory') {
                 this.sourceHookUninstallers.push(
                     installMemoryKeyXhr(this.player, () => this.keyBytes),
+                );
+            }
+            if (this.liveSource) {
+                this.sourceHookUninstallers.push(
+                    installLivePlaylistXhr(this.player, this.liveSource),
                 );
             }
         };

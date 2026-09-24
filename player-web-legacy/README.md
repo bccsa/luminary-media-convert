@@ -149,6 +149,24 @@ requests carrying a `Range` header a backstop of ten times the target duration
 instead. A dead request still times out; everything without a `Range` keeps
 VHS's default; VHS's bandwidth-estimate early abort is untouched.
 
+### Live streams are refreshed on the same seam
+
+A live media playlist (no `#EXT-X-ENDLIST`) changes every target duration, and
+a blob URL is frozen at creation. `BlobServeStrategy.serveLive` therefore hands
+the munged master a synthetic `luminary://live/<n>` for each live media
+playlist, and `vhsLivePlaylistInterceptor.ts` answers VHS's requests for it —
+the first one and every refresh after — with a fresh read through
+`player-core`'s `resolveLivePlaylist`: fetch, decrypt if LMCENC, rewrite. VHS
+keeps its own refresh cadence, retries and error handling; an upstream failure
+reaches it with the upstream status. `LuminaryPlayer` wires the strategy and the
+adapter together; a host building its own controller passes the same
+`BlobServeStrategy` to `new VideoJsAdapter(player, { liveSource })`, or the
+live URIs have no one to answer them.
+
+The refresh is JavaScript, so it pauses when the page is frozen — as VHS does.
+A native shell cannot accept that, which is why its resolver does the same
+three steps unaided; see `docs/suspension-safe-playback.md`.
+
 ### The suspension-safe split
 
 Stall detection, the recovery ladder and chunk warming all live in this package

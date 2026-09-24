@@ -164,7 +164,7 @@ loop belongs to your serving layer**.
 interface LivePlaylistSpec {
     url: string;          // the live media playlist, re-fetched every refreshSec
     baseUrl: string;      // what relative URIs in it resolve against
-    keyUri: string;       // what every AES-128 URI= is rewritten to
+    keyUri?: string;      // what every AES-128 URI= is rewritten to; absent ⇒ no key
     keyBytes?: Uint8Array;// the session key, for LMCENC; absent ⇒ plaintext only
     refreshSec: number;   // #EXT-X-TARGETDURATION
 }
@@ -175,6 +175,17 @@ Per engine request, behind the URL your `serveLive(spec)` returned:
 ```
 fetch(url) → if (isEncryptedPayload) decryptLmcenc(keyBytes) → rewrite → serve
 ```
+
+`resolveLivePlaylist(spec, { fetchImpl })` in `player-core` is exactly this, one
+read per call, and is the reference to port. With no `keyUri` (no session key),
+key lines are left alone and an AES-128 key appearing is a `key-required`
+failure — the rule the load applied to the first read, applied to every read,
+because a live stream can start encrypting part-way through.
+
+There is no refresh timer in that picture, and there should not be one: the
+engine already re-requests a live playlist on the cadence HLS prescribes, and
+answering each request freshly *is* the refresh. `refreshSec` is for a serving
+layer that cannot answer a request asynchronously and has to pre-fetch.
 
 The rewrite is two edits — substitute `keyUri`, absolutize against `baseUrl` —
 and that is why `rewriteMediaPlaylist` in `player-core` is string work rather
@@ -197,8 +208,14 @@ could lie about this; a missing method cannot.
 
 Nothing in this repository produces live output: `-hls_playlist_type vod` means
 ffmpeg writes the playlist only at the end, which is why coming-soon polling
-exists at all. The contract therefore ships specified and fixture-tested, and
-the first real live source is what proves it.
+exists at all. Live sources are third-party streams.
+
+**The web implementation** is `player-web-legacy`: `BlobServeStrategy.serveLive`
+registers the spec under a synthetic `luminary://live/<n>` (a blob URL cannot
+change), and `vhsLivePlaylistInterceptor.ts` answers VHS's requests for that URI
+on the same request seam the in-memory key uses, calling `resolveLivePlaylist`
+each time. It pauses with the page, as VHS itself does — acceptable on the web,
+and precisely what a native resolver must not do.
 
 ## A caution from the web implementation
 

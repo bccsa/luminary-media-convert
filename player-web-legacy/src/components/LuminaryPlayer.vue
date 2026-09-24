@@ -219,12 +219,19 @@ function mediaElement(instance: Player): HTMLVideoElement {
 
 function defaultCreateController(video: HTMLVideoElement): PlayerControllerApi {
     void video;
-    return new PlayerController(new VideoJsAdapter(player.value!), {
-        // The web's serving layer, supplied rather than defaulted: `player-core`
-        // is headless and cannot mint a URL on anyone's behalf. A host may name
-        // its own — which is how a native shell substitutes a loopback server.
-        serveStrategy: new BlobServeStrategy(),
+    // The web's serving layer, supplied rather than defaulted: `player-core`
+    // is headless and cannot mint a URL on anyone's behalf. A host may name
+    // its own — which is how a native shell substitutes a loopback server.
+    // The adapter answers the live URIs this one mints, so it is handed the
+    // same instance; a host-supplied strategy answers its own.
+    const serveStrategy =
+        props.controllerOptions?.serveStrategy ??
+        new BlobServeStrategy({ fetchImpl: props.controllerOptions?.fetchImpl });
+    const liveSource =
+        serveStrategy instanceof BlobServeStrategy ? serveStrategy : undefined;
+    return new PlayerController(new VideoJsAdapter(player.value!, { liveSource }), {
         ...props.controllerOptions,
+        serveStrategy,
     });
 }
 

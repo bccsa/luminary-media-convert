@@ -1,5 +1,8 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { DEFAULT_RECOVERY_POLICY } from '@luminary-media-converter/player-core';
+import {
+    DEFAULT_RECOVERY_POLICY,
+    LUMINARY_KEY_PLACEHOLDER_URI,
+} from '@luminary-media-converter/player-core';
 import { VideoJsAdapter } from '../src/adapter/VideoJsAdapter';
 import { fakePlayer } from './helpers';
 
@@ -250,5 +253,99 @@ describe('VideoJsAdapter — recovery ladder', () => {
         setVisibility('hidden');
         setVisibility('visible');
         expect(reloads).toEqual([2, 2]);
+    });
+});
+
+describe('VideoJsAdapter — live playlists', () => {
+    const KEY_HEX = '000102030405060708090a0b0c0d0e0f';
+    const source = { url: 'blob:master', isBlob: true, recovery: DEFAULT_RECOVERY_POLICY, keyHex: KEY_HEX };
+    const adapters: VideoJsAdapter[] = [];
+
+    /**
+     * A player whose tech carries a VHS handler with a request factory, which
+     * the adapter wraps once VHS announces it with `xhr-hooks-ready`.
+     */
+    function setup(liveSource?: { resolveLive: ReturnType<typeof vi.fn> }) {
+        vi.stubGlobal('MediaSource', class {});
+        const network = vi.fn(() => 'network');
+        const tech = { vhs: { xhr: network } as Record<string, any> };
+        const p = fakePlayer({ tech: vi.fn(() => tech) });
+        const a = new VideoJsAdapter(p, liveSource ? { liveSource } : {});
+        adapters.push(a);
+        return { p, a, tech, network };
+    }
+
+    const liveSource = () => ({ resolveLive: vi.fn(() => Promise.resolve('#EXTM3U\n')) });
+
+    /** Let promise callbacks run. */
+    async function settle(): Promise<void> {
+        for (let i = 0; i < 5; i++) await Promise.resolve();
+    }
+
+    afterEach(() => {
+        for (const a of adapters.splice(0)) a.destroy();
+        vi.unstubAllGlobals();
+    });
+
+    it('answers live playlist requests from the live source it was given', async () => {
+        const live = liveSource();
+        const { p, a, tech, network } = setup(live);
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+
+        const callback = vi.fn();
+        tech.vhs.xhr({ uri: 'luminary://live/1' }, callback);
+        await settle();
+
+        expect(live.resolveLive).toHaveBeenCalledWith('luminary://live/1', expect.any(AbortSignal));
+        expect(network).not.toHaveBeenCalled();
+        expect(callback).toHaveBeenCalledWith(null, expect.objectContaining({ status: 200 }));
+    });
+
+    it('answers keys and live playlists side by side, and sends the rest to the network', async () => {
+        // Three policies on one factory: none may swallow another's requests.
+        const live = liveSource();
+        const { p, a, tech, network } = setup(live);
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+
+        const keyCallback = vi.fn();
+        tech.vhs.xhr({ uri: LUMINARY_KEY_PLACEHOLDER_URI }, keyCallback);
+        tech.vhs.xhr({ uri: 'luminary://live/1' }, vi.fn());
+        tech.vhs.xhr({ uri: 'https://live.example.com/l_1.ts' }, vi.fn());
+        await settle();
+
+        expect(new Uint8Array(keyCallback.mock.calls[0]![1].response)).toHaveLength(16);
+        expect(live.resolveLive).toHaveBeenCalledTimes(1);
+        expect(network).toHaveBeenCalledTimes(1);
+        expect(network).toHaveBeenCalledWith({ uri: 'https://live.example.com/l_1.ts' }, expect.anything());
+    });
+
+    it('leaves live addresses to the network when it has no live source', async () => {
+        const { p, a, tech, network } = setup();
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+
+        tech.vhs.xhr({ uri: 'luminary://live/1' }, vi.fn());
+
+        expect(network).toHaveBeenCalledWith({ uri: 'luminary://live/1' }, expect.anything());
+    });
+
+    it('arms the live seam again on the handler a re-attach builds', async () => {
+        // A re-src builds a fresh VHS handler with a fresh request factory; a
+        // live stream that recovers must still be able to refresh.
+        const live = liveSource();
+        const { p, a, tech } = setup(live);
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+
+        const rebuilt = vi.fn();
+        tech.vhs = { xhr: rebuilt };
+        await a.reattach();
+        p.fire('xhr-hooks-ready');
+        tech.vhs.xhr({ uri: 'luminary://live/2' }, vi.fn());
+
+        expect(live.resolveLive).toHaveBeenCalledWith('luminary://live/2', expect.any(AbortSignal));
+        expect(rebuilt).not.toHaveBeenCalled();
     });
 });

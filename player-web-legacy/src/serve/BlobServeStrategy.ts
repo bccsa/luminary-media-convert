@@ -1,5 +1,5 @@
 /**
- * The web's serving layer: object URLs.
+ * The web's serving layer: object URLs, and synthetic URIs for live.
  *
  * `player-core` munges playlists into text and then has to hand that text to an
  * engine, which can only load a URL. On the web the answer is an object URL; in
@@ -16,24 +16,68 @@
  * load, so the native shell that follows is the second host through a proven
  * path rather than the first.
  *
- * Live is not implemented: there is no `serveLive`, which is exactly how a
- * strategy says so. The pipeline reads its absence and refuses a live source
- * rather than serving a snapshot that can never change. Implementing it here
- * would mean intercepting engine requests to re-fetch, re-decrypt and rewrite
- * the playlist on a cadence — possible over the VHS request seam, and still
- * useless on a locked phone, because that work is JavaScript. Live belongs to
- * the native resolver; see `docs/suspension-safe-playback.md`.
+ * ### Live
+ *
+ * A live media playlist changes every target duration, and an object URL is
+ * frozen at creation, so `serveLive` does not mint one. It registers the
+ * {@link LivePlaylistSpec} under a synthetic `luminary://live/<n>` and returns
+ * that; the adapter's VHS request seam recognises the scheme and calls
+ * {@link resolveLive} every time the engine asks, which re-reads the upstream
+ * playlist through `player-core`'s `resolveLivePlaylist` — fetch, LMCENC sniff,
+ * rewrite. There is no timer here: VHS already re-requests a live playlist on
+ * the cadence HLS prescribes, and answering those requests is the whole job.
+ *
+ * This only works while JavaScript runs. A locked phone freezes the page and
+ * the refresh with it — which on the web is also true of VHS itself, so nothing
+ * is lost that was not lost anyway. A native shell cannot lean on that, which
+ * is why the spec is plain data: its resolver does the same three steps behind
+ * a loopback URL or a resource-loader delegate, with no JavaScript involved.
+ * `docs/suspension-safe-playback.md` has the boundary.
  */
 
-import type { ServeStrategy } from '@luminary-media-converter/player-core';
+import {
+    PipelineError,
+    resolveLivePlaylist,
+    type LivePlaylistSpec,
+    type ServeStrategy,
+} from '@luminary-media-converter/player-core';
+import {
+    LIVE_PLAYLIST_URI_PREFIX,
+    normalizeLivePlaylistUri,
+    type LivePlaylistSource,
+} from './livePlaylistUri';
+
+export interface BlobServeStrategyOptions {
+    /**
+     * How live playlists are re-read. Pass the controller's own `fetchImpl`
+     * when the host supplies one, so a live refresh sends whatever the load
+     * sent. Defaults to the global `fetch`.
+     */
+    fetchImpl?: typeof fetch;
+}
 
 /**
  * Object-URL backed serve strategy with generation semantics: `release()`
  * revokes everything handed out since the previous `release()`, which the
  * controller calls once per source generation (on `load()` and `destroy()`).
+ * Live registrations follow the same rule.
  */
-export class BlobServeStrategy implements ServeStrategy {
+export class BlobServeStrategy implements ServeStrategy, LivePlaylistSource {
     private urls: string[] = [];
+    private readonly live = new Map<string, LivePlaylistSpec>();
+    /**
+     * Never reset, so a URI from a released generation can never name a spec
+     * registered after it — it stays unknown, and is answered as such.
+     */
+    private nextLiveId = 0;
+    private readonly fetchImpl: typeof fetch;
+
+    constructor(options: BlobServeStrategyOptions = {}) {
+        this.fetchImpl =
+            options.fetchImpl ??
+            ((input: RequestInfo | URL, init?: RequestInit) =>
+                globalThis.fetch(input, init));
+    }
 
     serve(content: string | Uint8Array, contentType: string): string {
         const blob = new Blob([toBlobPart(content)], { type: contentType });
@@ -42,9 +86,32 @@ export class BlobServeStrategy implements ServeStrategy {
         return url;
     }
 
+    serveLive(spec: LivePlaylistSpec): string {
+        const uri = `${LIVE_PLAYLIST_URI_PREFIX}${++this.nextLiveId}`;
+        this.live.set(uri, spec);
+        return uri;
+    }
+
+    resolveLive(uri: string, signal: AbortSignal): Promise<string> {
+        const spec = this.live.get(normalizeLivePlaylistUri(uri));
+        if (!spec) {
+            // Released, or never ours: answered the way a server answers a
+            // playlist it does not have, so the engine's own error path runs.
+            return Promise.reject(
+                new PipelineError('fetch-failed', `${uri} is not being served`, {
+                    missing: true,
+                    status: 404,
+                    url: uri,
+                }),
+            );
+        }
+        return resolveLivePlaylist(spec, { fetchImpl: this.fetchImpl, signal });
+    }
+
     release(): void {
         for (const url of this.urls) URL.revokeObjectURL(url);
         this.urls = [];
+        this.live.clear();
     }
 }
 
