@@ -615,7 +615,9 @@ export interface PlayerAdapter {
      *    finer sampling buys nothing.
      * 8. **Stop** on an empty-schedules call, when a new source replaces the
      *    current one, and on `destroy()` — a loop outliving its source warms
-     *    chunks nothing is going to play.
+     *    chunks nothing is going to play. It MAY also stop once every warmable
+     *    boundary (each whose `url` differs from the one before it, a chain's
+     *    first excepted) has been warmed: rule 3 leaves nothing more to do.
      *
      * The loop is deliberately adapter work rather than wrapper work: a JS
      * interval is throttled — or suspended outright — once the page or app is

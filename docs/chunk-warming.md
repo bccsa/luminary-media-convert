@@ -104,7 +104,12 @@ An implementation of `warmChunks` must:
    sampling buys nothing.
 9. **Stop** on an empty-schedules call, when a new source replaces the current
    one, and on `destroy()`. A loop that outlives its source warms chunks nothing
-   is going to play.
+   is going to play. It **may** also stop on its own once every warmable
+   boundary has been warmed — every boundary whose `url` differs from the one
+   before it, a chain's first excepted. Rule 4 means there is then nothing left
+   to do for this source, and a ticker sampling the buffer every second for the
+   rest of the video is a wakeup a low-end device pays for and gets nothing
+   back.
 
 ## Tuning
 
