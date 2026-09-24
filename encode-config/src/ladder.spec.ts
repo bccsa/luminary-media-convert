@@ -3,10 +3,10 @@ import { aspectWidthForHeight, fpsAdjustedBitrateKbps, ladderFor } from './ladde
 import type { VideoTrackInfo } from './types';
 
 describe('fpsAdjustedBitrateKbps', () => {
-    it('leaves 30 fps and below on the table value', () => {
+    it('scales symmetrically about 30 fps', () => {
         expect(fpsAdjustedBitrateKbps(5000, 30)).toBe(5000);
-        expect(fpsAdjustedBitrateKbps(5000, 25)).toBe(5000);
-        expect(fpsAdjustedBitrateKbps(5000, 23.976)).toBe(5000);
+        expect(fpsAdjustedBitrateKbps(5000, 25)).toBe(4361);
+        expect(fpsAdjustedBitrateKbps(5000, 23.976)).toBe(4226);
     });
 
     it('raises the budget for 50 fps material', () => {
