@@ -89,11 +89,15 @@ export { usePlayerState } from './composables/usePlayerState';
 
 // The video.js construction options and the pieces of the skin that are
 // behaviour rather than CSS. A host embedding the player through its own
-// video.js instance builds the same options from the same function.
+// video.js instance builds the same options from the same function — and, as
+// `LuminaryPlayer` does, calls `preferYouTubeTech` before setting a YouTube
+// source, since the options list only the tech that is always loaded.
 export {
     buildVideoJsOptions,
+    preferYouTubeTech,
     snapSkipSeconds,
     SKIP_ICON_SECONDS,
+    YOUTUBE_TECH,
     type VideoJsOptions,
 } from './vjs/playerOptions';
 export { installAutoHide, AUTO_HIDE_MS } from './vjs/autoHide';
