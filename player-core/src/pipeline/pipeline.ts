@@ -73,6 +73,32 @@ export interface PipelineContext {
     subtle?: SubtleLike;
     /** Raw decoded playlist text per absolute URL, for the current source. */
     cache: Map<string, string>;
+    /**
+     * What the current source has already served. Optional: without one, every
+     * munge serves everything afresh, as a one-off munge should.
+     */
+    served?: ServeMemo;
+}
+
+/**
+ * The media playlists a source has served, so re-munging it — an angle switch,
+ * the audio toggle, a recovery — serves only what it has not served yet.
+ *
+ * A media playlist's served form depends on its text, its URL and the session
+ * key, none of which an angle or a quality cap changes, so the URL it was
+ * served at stays good for the life of the source. Without this, every switch
+ * minted a full new set of blobs — every playlist, the key blob, the live
+ * registrations, re-downloaded subtitle segments — and nothing revoked them
+ * before the next `load()`. With it, a switch serves a master and whatever
+ * playlists the new angle is the first to need.
+ *
+ * Owned by the controller, which starts a new one with every source.
+ */
+export interface ServeMemo {
+    /** Absolute media playlist URL → the URL it is served at, and its scan. */
+    playlists: Map<string, { url: string; scan: MediaPlaylistScan }>;
+    /** The key URI, once a playlist has needed one. */
+    keyUri?: string;
 }
 
 /** Everything derived from a master playlist, before any narrowing. */
@@ -265,7 +291,7 @@ export async function mungeSource(
         info.nativelyAudioOnly ||
         (info.isMaster && isAudioOnlyMaster(capped));
 
-    let keyUri: string | undefined;
+    let keyUri = ctx.served?.keyUri;
     const resolveKeyUri = (): string | undefined => {
         if (!ctx.keyHex) return undefined;
         if (keyUri) return keyUri;
@@ -276,6 +302,7 @@ export async function mungeSource(
                       keyBytes(ctx.keyHex),
                       KEY_CONTENT_TYPE,
                   );
+        if (ctx.served) ctx.served.keyUri = keyUri;
         return keyUri;
     };
 
@@ -315,9 +342,11 @@ export async function mungeSource(
     };
 
     let servedMasterText: string;
+    let url: string;
     if (!info.isMaster) {
+        const memo = ctx.served?.playlists.get(info.url);
         // One read of the playlist answers every question asked of it below.
-        const scan = scanMediaPlaylist(capped);
+        const scan = memo?.scan ?? scanMediaPlaylist(capped);
         requireKeyFor(scan, info.url, ctx);
         // The URL served a media playlist directly — it IS the only stream, so
         // it counts as video for anything reading the list back.
@@ -330,9 +359,11 @@ export async function mungeSource(
         if (scan.isLive) {
             isLive = true;
             // Nothing to serve as a master: the live URL IS the source.
+            const liveUrl = memo?.url ?? serveLivePlaylist(info.url, scan);
+            ctx.served?.playlists.set(info.url, { url: liveUrl, scan });
             return {
                 source: {
-                    url: serveLivePlaylist(info.url, scan),
+                    url: liveUrl,
                     isBlob: true,
                     ...(ctx.keyHex && ctx.keyDelivery === 'memory'
                         ? { keyHex: ctx.keyHex }
@@ -345,10 +376,16 @@ export async function mungeSource(
                 isLive,
             };
         }
+        // Rewritten even when already served: the text is part of the result,
+        // and without the per-segment URL parses it costs next to nothing.
         servedMasterText = rewriteMediaPlaylist(capped, {
             playlistUrl: info.url,
             keyUri: scan.hasAes128Key ? resolveKeyUri() : undefined,
         });
+        url =
+            memo?.url ??
+            ctx.serveStrategy.serve(servedMasterText, PLAYLIST_CONTENT_TYPE);
+        ctx.served?.playlists.set(info.url, { url, scan });
     } else {
         const replacements = new Map<string, string>();
         const refs = collectMasterRefs(capped).map((ref) => ({
@@ -368,9 +405,10 @@ export async function mungeSource(
         );
         for (const { ref, absolute } of refs) {
             const text = await reads.get(absolute)!;
+            const memo = ctx.served?.playlists.get(absolute);
             // One read of the playlist answers every question asked of it
             // below, and travels on to the chunk schedules with it.
-            const scan = scanMediaPlaylist(text);
+            const scan = memo?.scan ?? scanMediaPlaylist(text);
             requireKeyFor(scan, absolute, ctx);
             mediaPlaylists.push({
                 url: absolute,
@@ -378,35 +416,41 @@ export async function mungeSource(
                 text,
                 scan,
             });
+            if (scan.isLive) isLive = true;
 
-            if (scan.isLive) {
-                isLive = true;
-                replacements.set(ref.uri, serveLivePlaylist(absolute, scan));
+            // Served for this source already, and nothing that differs between
+            // munges of it changes what serving it again would produce.
+            if (memo) {
+                replacements.set(ref.uri, memo.url);
                 continue;
             }
 
-            const segmentReplacements =
-                ref.mediaType === 'SUBTITLES' && ctx.keyHex
-                    ? await serveDecryptedVttSegments(scan, absolute, ctx)
-                    : undefined;
+            let served: string;
+            if (scan.isLive) {
+                served = serveLivePlaylist(absolute, scan);
+            } else {
+                const segmentReplacements =
+                    ref.mediaType === 'SUBTITLES' && ctx.keyHex
+                        ? await serveDecryptedVttSegments(scan, absolute, ctx)
+                        : undefined;
 
-            const rewritten = rewriteMediaPlaylist(text, {
-                playlistUrl: absolute,
-                keyUri: scan.hasAes128Key ? resolveKeyUri() : undefined,
-                segmentReplacements,
-            });
-            replacements.set(
-                ref.uri,
-                ctx.serveStrategy.serve(rewritten, PLAYLIST_CONTENT_TYPE),
-            );
+                const rewritten = rewriteMediaPlaylist(text, {
+                    playlistUrl: absolute,
+                    keyUri: scan.hasAes128Key ? resolveKeyUri() : undefined,
+                    segmentReplacements,
+                });
+                served = ctx.serveStrategy.serve(
+                    rewritten,
+                    PLAYLIST_CONTENT_TYPE,
+                );
+            }
+            ctx.served?.playlists.set(absolute, { url: served, scan });
+            replacements.set(ref.uri, served);
         }
         servedMasterText = substituteMasterRefs(capped, replacements);
+        url = ctx.serveStrategy.serve(servedMasterText, PLAYLIST_CONTENT_TYPE);
     }
 
-    const url = ctx.serveStrategy.serve(
-        servedMasterText,
-        PLAYLIST_CONTENT_TYPE,
-    );
     return {
         source: {
             url,

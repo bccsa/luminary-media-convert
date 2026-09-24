@@ -279,6 +279,67 @@ describe('PlayerController — setAngle', () => {
     });
 });
 
+/**
+ * A source's media playlists are served once for its whole life. An angle
+ * switch, the audio toggle and a recovery re-munge serve a new master and
+ * whatever playlist the new angle is the first to need, and nothing else —
+ * each used to mint the whole set again, and none of it was released before
+ * the next load.
+ */
+describe('PlayerController — serving a source once', () => {
+    /** The masters served, told apart from media playlists by what they carry. */
+    function masters(serveStrategy: FakeServeStrategy) {
+        return serveStrategy.served.filter((item) =>
+            String(item.content).includes('#EXT-X-STREAM-INF'),
+        );
+    }
+
+    it('serves each media playlist once across angle switches and the audio toggle', async () => {
+        const { adapter, controller, serveStrategy } = setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+
+        await controller.setAngle('angle_1');
+        await controller.setAngle('angle_0');
+        await controller.setAngle(AUDIO_ONLY_ANGLE_ID);
+        await controller.setAngle('angle_0');
+
+        expect(adapter.loads).toHaveLength(5);
+        expect(masters(serveStrategy)).toHaveLength(5);
+        // Both angle_0 renditions, angle_1's, audio and subtitles: once each.
+        expect(
+            serveStrategy.served.length - masters(serveStrategy).length,
+        ).toBe(5);
+    });
+
+    it('reuses them on a recovery re-munge', async () => {
+        const { adapter, controller, serveStrategy } = setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+        const before = serveStrategy.served.length;
+
+        adapter.emit('reload-requested', { reason: 'fatal', attempt: 2 });
+        await flush();
+
+        expect(adapter.loads).toHaveLength(2);
+        // A new master, pointing where the first one did.
+        expect(serveStrategy.served).toHaveLength(before + 1);
+        expect(serveStrategy.textOf(adapter.loads[1]!.url)).toBe(
+            serveStrategy.textOf(adapter.loads[0]!.url),
+        );
+    });
+
+    it('never hands a new load what the last one released', async () => {
+        const { controller, serveStrategy } = setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+        const perLoad = serveStrategy.served.length;
+
+        await controller.load({ masterUrl: MASTER_URL });
+
+        // Everything served again, and all of it after the release.
+        expect(serveStrategy.served).toHaveLength(perLoad * 2);
+        expect(serveStrategy.live).toHaveLength(perLoad);
+    });
+});
+
 describe('PlayerController — quality and tracks', () => {
     it('maps contract quality ids onto adapter variant ids', async () => {
         const { adapter, controller } = setup(simpleRoutes, {

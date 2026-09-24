@@ -68,6 +68,7 @@ export type {
     MungedMediaPlaylist,
     MungedSource,
     PipelineContext,
+    ServeMemo,
 } from './pipeline/pipeline.js';
 export type { MediaPlaylistScan, SegmentRun } from './pipeline/media-scan.js';
 export {

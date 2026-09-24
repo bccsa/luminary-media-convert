@@ -6,6 +6,7 @@ import {
     loadMaster,
     mungeSource,
     type PipelineContext,
+    type ServeMemo,
 } from './pipeline.js';
 import { KEY_CONTENT_TYPE } from './content-types.js';
 import { keyBytes } from './decrypt.js';
@@ -751,5 +752,147 @@ describe('loadMaster — the master URL', () => {
         const info = await loadMaster(spelled, ctx);
         expect(info.url).toBe(spelled);
         expect(ctx.calls).toEqual([spelled]);
+    });
+});
+
+/**
+ * `context()` with the memo a controller keeps for one source, which is what
+ * makes a second munge of it — an angle switch, the audio toggle, a recovery —
+ * serve only what the first did not.
+ */
+function memoContext(
+    routes: Record<string, string | Uint8Array | { status: number }>,
+    overrides: Partial<PipelineContext> = {},
+) {
+    const served: ServeMemo = { playlists: new Map() };
+    return { ...context(routes, overrides), served };
+}
+
+describe('mungeSource — serving a source once', () => {
+    it('serves each media playlist once, however often the source is munged', async () => {
+        const ctx = memoContext(multiAngleRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+
+        const first = await mungeSource(info, { angleId: 'angle_0' }, ctx);
+        // 2 variants + audio + subtitles playlists, then the master itself.
+        expect(ctx.serve.served).toHaveLength(5);
+
+        await mungeSource(info, { angleId: 'angle_1' }, ctx);
+        // angle_1's playlist is the only one not served yet; then its master.
+        expect(ctx.serve.served).toHaveLength(7);
+
+        const again = await mungeSource(info, { angleId: 'angle_0' }, ctx);
+        // Only a master, pointing at the URLs the first munge served.
+        expect(ctx.serve.served).toHaveLength(8);
+        expect(ctx.serve.textOf(again.source.url)).toBe(first.masterText);
+        expect(again.source.url).not.toBe(first.source.url);
+    });
+
+    it('still reports, and scans, every playlist it read', async () => {
+        // The chunk schedules are built from these on every attach, memo or
+        // not; a munge that served nothing new must still describe the source.
+        const ctx = memoContext(multiAngleRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+        const first = await mungeSource(info, { angleId: 'angle_0' }, ctx);
+        const again = await mungeSource(info, { angleId: 'angle_0' }, ctx);
+
+        expect(again.mediaPlaylists.map((p) => p.url)).toEqual(
+            first.mediaPlaylists.map((p) => p.url),
+        );
+        expect(again.mediaPlaylists.map((p) => p.scan)).toEqual(
+            first.mediaPlaylists.map((p) => p.scan),
+        );
+        expect(again.mediaPlaylists.every((p) => p.scan)).toBe(true);
+    });
+
+    it('serves everything afresh without a memo, as a one-off munge should', async () => {
+        const ctx = context(multiAngleRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+        await mungeSource(info, { angleId: 'angle_0' }, ctx);
+        await mungeSource(info, { angleId: 'angle_0' }, ctx);
+
+        expect(ctx.serve.served).toHaveLength(10);
+    });
+
+    it("serves a 'url' adapter's key once for the source", async () => {
+        const ctx = memoContext(
+            {
+                [MASTER_URL]: SIMPLE_MASTER,
+                [`${BASE}/stream_1080/playlist.m3u8`]: ENCRYPTED_MEDIA_PLAYLIST,
+                [`${BASE}/stream_720/playlist.m3u8`]: ENCRYPTED_MEDIA_PLAYLIST,
+                [`${BASE}/stream_480/playlist.m3u8`]: ENCRYPTED_MEDIA_PLAYLIST,
+                [`${BASE}/audio_hi_128kbps/playlist.m3u8`]:
+                    ENCRYPTED_MEDIA_PLAYLIST,
+                [`${BASE}/audio_lo_64kbps/playlist.m3u8`]:
+                    ENCRYPTED_MEDIA_PLAYLIST,
+            },
+            { keyHex: TEST_KEY_HEX, keyDelivery: 'url' },
+        );
+        const info = await loadMaster(MASTER_URL, ctx);
+        await mungeSource(info, { angleId: DEFAULT_ANGLE_ID }, ctx);
+        await mungeSource(
+            info,
+            { angleId: DEFAULT_ANGLE_ID, maxHeight: 720 },
+            ctx,
+        );
+
+        expect(
+            ctx.serve.served.filter(
+                (item) => item.contentType === KEY_CONTENT_TYPE,
+            ),
+        ).toHaveLength(1);
+    });
+
+    it('reads and decrypts encrypted subtitle segments once for the source', async () => {
+        const ctx = memoContext(
+            {
+                ...multiAngleRoutes,
+                [`${BASE}/subs_en/en_0.vtt`]: encryptLmcenc(CHAPTERS_VTT),
+            },
+            { keyHex: TEST_KEY_HEX },
+        );
+        const info = await loadMaster(MASTER_URL, ctx);
+        await mungeSource(info, { angleId: 'angle_0' }, ctx);
+        await mungeSource(info, { angleId: 'angle_1' }, ctx);
+        await mungeSource(info, { angleId: AUDIO_ONLY_ANGLE_ID }, ctx);
+
+        expect(
+            ctx.calls.filter((url) => url === `${BASE}/subs_en/en_0.vtt`),
+        ).toHaveLength(1);
+        expect(
+            ctx.serve.contentTypes().filter((t) => t === 'text/vtt'),
+        ).toHaveLength(1);
+    });
+
+    it('registers a live playlist once for the source', async () => {
+        const ctx = {
+            ...liveContext({
+                [MASTER_URL]: SIMPLE_MASTER,
+                [`${BASE}/stream_1080/playlist.m3u8`]: LIVE_MEDIA_PLAYLIST,
+                [`${BASE}/stream_720/playlist.m3u8`]: LIVE_MEDIA_PLAYLIST,
+                [`${BASE}/stream_480/playlist.m3u8`]: LIVE_MEDIA_PLAYLIST,
+                [`${BASE}/audio_hi_128kbps/playlist.m3u8`]: LIVE_MEDIA_PLAYLIST,
+                [`${BASE}/audio_lo_64kbps/playlist.m3u8`]: LIVE_MEDIA_PLAYLIST,
+            }),
+            served: { playlists: new Map() } as ServeMemo,
+        };
+        const info = await loadMaster(MASTER_URL, ctx);
+        const first = await mungeSource(info, { angleId: null }, ctx);
+        const again = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(ctx.serve.liveSpecs).toHaveLength(5);
+        expect(again.isLive).toBe(true);
+        expect(again.masterText).toBe(first.masterText);
+    });
+
+    it('hands back the URL a bare media playlist was first served at', async () => {
+        const ctx = memoContext({ [MASTER_URL]: PLAIN_MEDIA_PLAYLIST });
+        const info = await loadMaster(MASTER_URL, ctx);
+        const first = await mungeSource(info, { angleId: null }, ctx);
+        const again = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(again.source.url).toBe(first.source.url);
+        expect(again.masterText).toBe(first.masterText);
+        expect(ctx.serve.served).toHaveLength(1);
     });
 });

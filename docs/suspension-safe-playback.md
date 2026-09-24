@@ -101,6 +101,14 @@ ever in the engine being rebuilt. Separating them is what lets a backgrounded
 native player recover on its own, and reserves the re-munge for what genuinely
 changes the source: an angle switch, a quality cap, a live refresh.
 
+The wrapper now draws the same conclusion about URLs. A media playlist's served
+form depends only on its text, its URL and the session key, so a source serves
+each playlist once and every later munge of it — an angle switch, the audio
+toggle, a re-munge — reuses that URL, serving only a new master. The fresh URLs
+a re-munge used to mint were never revoked before the next load, and on a flaky
+connection, where the ladder resets every time playback recovers, they
+accumulated without bound.
+
 An implementation MUST:
 
 - Restore position and play state itself. The wrapper is not involved and may

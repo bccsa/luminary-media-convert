@@ -19,6 +19,7 @@ import {
     type MasterInfo,
     type MungeResult,
     type PipelineContext,
+    type ServeMemo,
 } from './pipeline/pipeline.js';
 import { sortQualities, toQuality } from './pipeline/quality-cap.js';
 import { Poller } from './poller.js';
@@ -114,6 +115,8 @@ export class PlayerController implements PlayerControllerApi {
     private source: PlayerSource | null = null;
     private master: MasterInfo | null = null;
     private cache = new Map<string, string>();
+    /** What this source has served; see {@link ServeMemo}. */
+    private served: ServeMemo = { playlists: new Map() };
     private qualityToVariant = new Map<string, string>();
     private startPosition = 0;
     private resumePlaying = false;
@@ -153,6 +156,9 @@ export class PlayerController implements PlayerControllerApi {
         this.resumePlaying = resume;
         this.chapterTrackPinned = false;
         this.cache = new Map();
+        // `teardownSource` above released every URL the last source was
+        // served at, so nothing it memoized can be handed out again.
+        this.served = { playlists: new Map() };
         this.qualityToVariant = new Map();
         // Cleared here, not only when the next set arrives: a load that fails
         // before its sidecars would otherwise leave the previous video's frames
@@ -512,6 +518,7 @@ export class PlayerController implements PlayerControllerApi {
             keyHex: this.source?.keyHex,
             subtle: this.subtle,
             cache: this.cache,
+            served: this.served,
         };
     }
 
