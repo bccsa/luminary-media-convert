@@ -43,7 +43,10 @@ export function parseThumbnailVttTime(str: string): number {
  */
 export function parseThumbnailVtt(text: string, baseUrl: string): ThumbnailSpriteCue[] {
     const cues: ThumbnailSpriteCue[] = [];
-    const blocks = text.split(/\n\n+/);
+    // WebVTT lines may end in CRLF, LF or a lone CR. Blocks are split on blank
+    // lines, and a CRLF file has no `\n\n` in it at all: unnormalized, the whole
+    // file is one block and only its first cue is ever found.
+    const blocks = text.replace(/\r\n?/g, '\n').split(/\n\n+/);
 
     for (const block of blocks) {
         const lines = block.trim().split('\n');
