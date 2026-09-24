@@ -24,6 +24,8 @@ import {
     SUBTITLE_MEDIA_PLAYLIST,
     TEST_KEY_HEX,
     encryptLmcenc,
+    flush,
+    makeDeferredFetch,
     makeFetch,
 } from '../test-support/index.js';
 
@@ -579,5 +581,136 @@ describe('mungeSource — live sources', () => {
 
         expect(result.isLive).toBe(false);
         expect(ctx.serve.liveSpecs).toEqual([]);
+    });
+});
+
+describe('mungeSource — reading the media playlists', () => {
+    /** SIMPLE_MASTER's playlists in master order: variants, then renditions. */
+    const MEDIA = [
+        'stream_1080',
+        'stream_720',
+        'stream_480',
+        'audio_hi_128kbps',
+        'audio_lo_64kbps',
+    ].map((dir) => `${BASE}/${dir}/playlist.m3u8`);
+    const info = describeMaster(MASTER_URL, SIMPLE_MASTER);
+
+    function deferredContext() {
+        const reads = makeDeferredFetch();
+        const serve = new FakeServeStrategy();
+        const ctx: PipelineContext = {
+            fetchImpl: reads.fetchImpl,
+            serveStrategy: serve,
+            keyDelivery: 'memory',
+            cache: new Map(),
+        };
+        return { ctx, reads, serve };
+    }
+
+    it('requests every media playlist before any has answered', async () => {
+        // One after another, the reads put a round trip per playlist in front
+        // of playback — twenty on a multi-language live ladder.
+        const { ctx, reads } = deferredContext();
+        const munged = mungeSource(info, { angleId: null }, ctx);
+        await flush();
+
+        expect(reads.calls).toEqual(MEDIA);
+
+        for (const url of MEDIA) reads.respond(url, PLAIN_MEDIA_PLAYLIST);
+        await expect(munged).resolves.toMatchObject({ isLive: false });
+    });
+
+    it('keeps master order however the answers arrive', async () => {
+        const { ctx, reads, serve } = deferredContext();
+        const munged = mungeSource(info, { angleId: null }, ctx);
+        await flush();
+        for (const url of [...MEDIA].reverse()) {
+            reads.respond(url, PLAIN_MEDIA_PLAYLIST);
+            await flush();
+        }
+        const result = await munged;
+
+        expect(result.mediaPlaylists.map((playlist) => playlist.url)).toEqual(
+            MEDIA,
+        );
+        // The strategy is asked to serve them in that order too, master last.
+        const servedFrom = serve.served
+            .slice(0, -1)
+            .map(
+                (item) =>
+                    /^https:\/\/\S+\/segment_0\.m4s$/m.exec(
+                        String(item.content),
+                    )?.[0],
+            );
+        expect(servedFrom).toEqual(
+            MEDIA.map((url) => url.replace('playlist.m3u8', 'segment_0.m4s')),
+        );
+        expect(serve.served.at(-1)?.url).toBe(result.source.url);
+    });
+
+    it('reports the first failure in master order, not the first to arrive', async () => {
+        // Which failure surfaces decides what the viewer is told — a missing
+        // playlist is "coming soon", a server error is an error — so it cannot
+        // be left to timing.
+        const { ctx, reads } = deferredContext();
+        const munged = mungeSource(info, { angleId: null }, ctx);
+        await flush();
+
+        reads.respond(MEDIA[2]!, { status: 500 });
+        await flush();
+        reads.respond(MEDIA[0]!, { status: 404 });
+
+        await expect(munged).rejects.toMatchObject({
+            code: 'fetch-failed',
+            missing: true,
+            url: MEDIA[0],
+        });
+    });
+
+    it('leaves no unhandled rejection behind when an earlier read has failed', async () => {
+        // The munge stops at the first failure, so the reads after it are never
+        // awaited — one of them failing too must not surface as unhandled.
+        const unhandled: unknown[] = [];
+        const record = (reason: unknown) => unhandled.push(reason);
+        process.on('unhandledRejection', record);
+        try {
+            const { ctx, reads } = deferredContext();
+            const munged = mungeSource(info, { angleId: null }, ctx);
+            await flush();
+
+            reads.respond(MEDIA[0]!, { status: 404 });
+            await expect(munged).rejects.toMatchObject({ code: 'fetch-failed' });
+            for (const url of MEDIA.slice(1)) {
+                reads.respond(url, { status: 500 });
+            }
+            await flush();
+
+            expect(unhandled).toEqual([]);
+        } finally {
+            process.off('unhandledRejection', record);
+        }
+    });
+
+    it('reads a playlist once, however many spellings the master has for it', async () => {
+        const ctx = context({
+            [MASTER_URL]: SIMPLE_MASTER.replace(
+                '\nstream_480/playlist.m3u8',
+                '\n./stream_720/playlist.m3u8',
+            ),
+            [`${BASE}/stream_1080/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+            [`${BASE}/stream_720/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+            [`${BASE}/audio_hi_128kbps/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+            [`${BASE}/audio_lo_64kbps/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+        });
+        const respelled = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(respelled, { angleId: null }, ctx);
+
+        expect(
+            ctx.calls.filter((url) => url === `${BASE}/stream_720/playlist.m3u8`),
+        ).toHaveLength(1);
+        // Both spellings are swapped for the served copy.
+        for (const variant of parseMasterText(result.masterText).variants) {
+            expect(variant.uri).toMatch(/^fake:served\//);
+        }
     });
 });

@@ -282,6 +282,44 @@ export function makeFetch(routes: Record<string, RouteBody>): FakeFetch {
     return { fetchImpl, calls, routes: table };
 }
 
+export interface DeferredFetch {
+    fetchImpl: typeof fetch;
+    /** URLs requested so far, in the order the requests were made. */
+    calls: string[];
+    /** Answer the pending request for `url`. Throws when none is pending. */
+    respond(url: string, route: RouteBody): void;
+}
+
+/**
+ * `fetch` whose requests stay pending until the spec answers them — one at a
+ * time, in any order — for pinning what happens while reads are in flight.
+ */
+export function makeDeferredFetch(): DeferredFetch {
+    const calls: string[] = [];
+    const pending = new Map<string, (response: Response) => void>();
+
+    const fetchImpl = ((input: RequestInfo | URL) => {
+        const url = String(input);
+        calls.push(url);
+        return new Promise<Response>((resolve) => pending.set(url, resolve));
+    }) as unknown as typeof fetch;
+
+    return {
+        fetchImpl,
+        calls,
+        respond(url, route) {
+            const resolve = pending.get(url);
+            if (!resolve) throw new Error(`No request pending for ${url}`);
+            pending.delete(url);
+            resolve(
+                typeof route === 'string' || route instanceof Uint8Array
+                    ? makeResponse(200, route)
+                    : makeResponse(route.status, route.body),
+            );
+        },
+    };
+}
+
 function makeResponse(status: number, body?: string | Uint8Array): Response {
     const bytes =
         body === undefined

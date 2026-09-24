@@ -335,9 +335,23 @@ export async function mungeSource(
         });
     } else {
         const replacements = new Map<string, string>();
-        for (const ref of collectMasterRefs(capped)) {
-            const absolute = absolutize(ref.uri, info.url);
-            const text = await fetchPlaylistText(absolute, ctx);
+        const refs = collectMasterRefs(capped).map((ref) => ({
+            ref,
+            absolute: absolutize(ref.uri, info.url),
+        }));
+        // Every read starts here, at once; the loop consumes them in master
+        // order. None depends on another, and reading them one after another
+        // put a round trip per playlist in front of playback — twenty on a
+        // multi-language live ladder. Consuming in order keeps everything
+        // observable as it was: which failure is reported when several reads
+        // fail, the order of `mediaPlaylists`, and the order the strategy is
+        // asked to serve in.
+        const reads = startPlaylistReads(
+            refs.map(({ absolute }) => absolute),
+            ctx,
+        );
+        for (const { ref, absolute } of refs) {
+            const text = await reads.get(absolute)!;
             requireKeyFor(text, absolute, ctx);
             mediaPlaylists.push({
                 url: absolute,
@@ -417,6 +431,29 @@ async function fetchPlaylistText(
     });
     ctx.cache.set(url, asset.text);
     return asset.text;
+}
+
+/**
+ * Start reading every URL at once, one read per distinct URL, and return the
+ * pending reads by URL for the caller to await in the order it needs.
+ *
+ * Each read is marked handled as it starts. The caller awaits them one at a
+ * time, so a read that fails before its turn would otherwise surface as an
+ * unhandled rejection — and once an earlier read has thrown, its turn never
+ * comes at all.
+ */
+function startPlaylistReads(
+    urls: readonly string[],
+    ctx: PipelineContext,
+): Map<string, Promise<string>> {
+    const reads = new Map<string, Promise<string>>();
+    for (const url of urls) {
+        if (reads.has(url)) continue;
+        const read = fetchPlaylistText(url, ctx);
+        void read.catch(() => undefined);
+        reads.set(url, read);
+    }
+    return reads;
 }
 
 /**
