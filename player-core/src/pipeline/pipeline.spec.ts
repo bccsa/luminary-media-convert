@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { AUDIO_ONLY_ANGLE_ID } from '../types.js';
 import {
     DEFAULT_ANGLE_ID,
@@ -712,5 +712,44 @@ describe('mungeSource — reading the media playlists', () => {
         for (const variant of parseMasterText(result.masterText).variants) {
             expect(variant.uri).toMatch(/^fake:served\//);
         }
+    });
+});
+
+describe('loadMaster — the master URL', () => {
+    const savedDocument = (globalThis as any).document;
+
+    afterEach(() => {
+        (globalThis as any).document = savedDocument;
+    });
+
+    it('anchors a relative master URL to the document, as fetch would', async () => {
+        // A same-origin host hands over `/api/…` with no scheme or host. Made
+        // absolute once, here, everything the source names resolves against a
+        // real base instead of each URI taking absolutize's fallback alone.
+        (globalThis as any).document = {
+            baseURI: 'http://127.0.0.1:31711/sessions/abc',
+        };
+        const relative = '/api/sessions/abc/preview/playlist.m3u8?token=t';
+        const absolute = `http://127.0.0.1:31711${relative}`;
+        const ctx = context({ [absolute]: PLAIN_MEDIA_PLAYLIST });
+
+        const info = await loadMaster(relative, ctx);
+        expect(info.url).toBe(absolute);
+        expect(ctx.calls).toEqual([absolute]);
+
+        const result = await mungeSource(info, { angleId: null }, ctx);
+        expect(result.masterText).toContain(
+            'http://127.0.0.1:31711/api/sessions/abc/preview/segment_0.m4s',
+        );
+    });
+
+    it('leaves an absolute URL exactly as the host wrote it', async () => {
+        // It also keys the playlist cache, so it is not normalized either.
+        const spelled = 'https://CDN.example.com/out/session/./master.m3u8';
+        const ctx = context({ [spelled]: PLAIN_MEDIA_PLAYLIST });
+
+        const info = await loadMaster(spelled, ctx);
+        expect(info.url).toBe(spelled);
+        expect(ctx.calls).toEqual([spelled]);
     });
 });

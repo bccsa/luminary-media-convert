@@ -275,6 +275,54 @@ export function absolutize(uri: string, base: string): string {
     }
 }
 
+/**
+ * {@link absolutize} against one base, for a whole playlist's worth of URIs.
+ *
+ * It remembers the last URI it resolved. Byte-range output names the same
+ * chunk object on a hundred or so consecutive segments, so a playlist that
+ * would cost one URL parse per segment costs one per chunk — the difference
+ * between a thousand parses and a dozen on a two-hour rendition. Still plain
+ * string work: a last-value memo ports to Swift and Kotlin with the rewrite.
+ */
+export function absolutizeAgainst(base: string): (uri: string) => string {
+    let lastUri: string | undefined;
+    let lastAbsolute = '';
+    return (uri) => {
+        if (uri !== lastUri) {
+            lastAbsolute = absolutize(uri, base);
+            lastUri = uri;
+        }
+        return lastAbsolute;
+    };
+}
+
+/**
+ * `url` anchored to the document when it is relative and there is a document to
+ * anchor it to; otherwise exactly as given.
+ *
+ * For the one URL a host hands over: the master's. Everything its playlists
+ * name resolves against it, and a relative base sends each of those through
+ * {@link absolutize}'s fallback — a TypeError thrown and caught per URI, which
+ * for a media playlist served as the source is one per segment. Resolving it
+ * here gives the same answer `fetch` would, once. An absolute URL is returned
+ * as written, not normalized, because it also keys the playlist cache.
+ */
+export function anchorToDocument(url: string): string {
+    try {
+        new URL(url);
+        return url;
+    } catch {
+        if (typeof document !== 'undefined' && document.baseURI) {
+            try {
+                return new URL(url, document.baseURI).href;
+            } catch {
+                /* fall through */
+            }
+        }
+        return url;
+    }
+}
+
 /** Replace the `URI="…"` attribute of a tag line the model does not model. */
 export function replaceUriAttr(line: string, uri: string): string {
     return line.replace(/URI="[^"]*"/, `URI="${uri}"`);

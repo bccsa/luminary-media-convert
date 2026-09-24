@@ -44,6 +44,7 @@ import {
 } from './fetch.js';
 import {
     absolutize,
+    anchorToDocument,
     collectMasterRefs,
     hasAes128Key,
     isMasterPlaylistText,
@@ -141,15 +142,18 @@ export async function loadMaster(
     url: string,
     ctx: PipelineContext,
 ): Promise<MasterInfo> {
-    const asset = await fetchMaybeEncrypted(url, {
+    // Everything read from here on resolves against this URL, so it is made
+    // absolute once rather than on every URI that needs it.
+    const absolute = anchorToDocument(url);
+    const asset = await fetchMaybeEncrypted(absolute, {
         fetchImpl: ctx.fetchImpl,
         keyHex: ctx.keyHex,
         expect: 'playlist',
         signal: ctx.signal,
         subtle: ctx.subtle,
     });
-    ctx.cache.set(url, asset.text);
-    return describeMaster(url, asset.text, asset.wasEncrypted);
+    ctx.cache.set(absolute, asset.text);
+    return describeMaster(absolute, asset.text, asset.wasEncrypted);
 }
 
 /** Pure derivation half of {@link loadMaster}; exported for fixture specs. */
