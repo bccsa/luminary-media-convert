@@ -85,7 +85,8 @@ const videoRenditions = reactive<VideoRendition[]>([]);
  * The ladder-max dial rescales from this snapshot rather than from whatever is
  * in the fields: rescaling from the current values compounds its own rounding,
  * so dragging the dial down and back would not return the ladder it started
- * from.
+ * from. A copied row's entry is carried along for alignment but ignored by the
+ * dials, and is re-derived when that row stops copying.
  */
 const ladderBaseKbps = reactive<number[]>([]);
 
@@ -96,13 +97,48 @@ const ladderMax = reactive<{ value: number }>({ value: 1 });
 let lastGoodLadderMax = 1;
 
 /**
- * Where the dial sits when it matches the suggestion — the largest suggested
- * rung, which is the top one. `Math.max(1, ...)` rather than `Math.max(...)`:
- * an empty baseline (audio-only mode, before any ladder exists) spreads to
- * `Math.max(1)`, so the 1 both floors the value and keeps `applyLadder`'s
- * divisor off zero.
+ * Where the dial currently stands relative to the suggestion: the max last
+ * typed (`ladderScaleNum`) over the top re-encoded rung's suggestion at that
+ * moment (`ladderScaleDen`). 1/1 on a fresh suggestion.
+ *
+ * Kept rather than re-derived from the max field, because the field is a
+ * rounded number and the rungs the operator has already set were priced from
+ * this ratio. A row that stops copying, or is added, joins at the same ratio,
+ * and the field is re-synced from it — so unticking an angle neither re-scales
+ * the rungs already set nor leaves the max showing a number no rung has.
+ *
+ * Held as the two numbers rather than their quotient, so a rung is priced as
+ * `base * max / suggestion` — the arithmetic the max dial has always done. A
+ * precomputed quotient rounds some exact half-kbps ties the other way.
  */
-const suggestedLadderMax = computed(() => Math.max(1, ...ladderBaseKbps));
+let ladderScaleNum = 1;
+let ladderScaleDen = 1;
+
+/**
+ * The suggestions of the rungs a dial can actually move: the re-encoded ones.
+ *
+ * Copied rows are left out because a copy's bitrate is the source's own. Were
+ * one the largest, the max would read — and scale against — a number it cannot
+ * set: after unticking the one 720p angle of a pair that both opened copying,
+ * the field showed the 1080p copy's 5000, and typing 2500, that rung's own
+ * value, halved it.
+ */
+const reencodedBaseKbps = computed(() =>
+    ladderBaseKbps.filter(
+        (_, i) => videoRenditions[i] != null && !videoRenditions[i].copyStream
+    )
+);
+
+/**
+ * Where the dial sits when it matches the suggestion — the largest suggested
+ * re-encoded rung, so typing a number sets that rung to it exactly.
+ * `Math.max(1, ...)` rather than `Math.max(...)`: with no re-encoded rung (audio
+ * mode, or every row copying) the list spreads to `Math.max(1)`, so the 1 both
+ * floors the value and keeps `applyLadder`'s divisor off zero.
+ */
+const suggestedLadderMax = computed(() =>
+    Math.max(1, ...reencodedBaseKbps.value)
+);
 
 /**
  * Bottom-rung dial, `null` meaning auto.
@@ -118,9 +154,14 @@ const ladderMin = reactive<{ value: number | null }>({ value: null });
 /** The last pin the min field accepted; null while it has never been pinned. */
 let lastGoodLadderMin: number | null = null;
 
-/** The smallest suggested rung — the bottom of the shape being remapped. */
+/**
+ * The smallest suggested re-encoded rung — the bottom of the shape being
+ * remapped. Copied rows are left out for the same reason as at the top.
+ */
 const suggestedLadderMin = computed(() =>
-    ladderBaseKbps.length ? Math.max(1, Math.min(...ladderBaseKbps)) : 1
+    reencodedBaseKbps.value.length
+        ? Math.max(1, Math.min(...reencodedBaseKbps.value))
+        : 1
 );
 
 /** Where the bottom rung lands when only the max dial is driving. */
@@ -154,7 +195,9 @@ const customFactor = reactive<{ value: number }>({ value: 0.6 });
  * A custom factor is clamped to 0.1–2 rather than refused: this is the field an
  * operator types into, and a stray keystroke should not be able to ask for a
  * ladder a hundred times the table's. Anything unparseable falls back to 1, so
- * an empty box suggests the generic ladder instead of nothing at all.
+ * an empty box suggests the generic ladder instead of nothing at all. The field
+ * is then rewritten to this number (`onContentPresetChange`), so it shows what
+ * is applied and what is remembered.
  */
 const contentFactor = computed(() =>
     contentPreset.value === 'custom'
@@ -220,14 +263,16 @@ function copyBlockedReason(rendition: VideoRendition): string | null {
  * copying under the relaxed rule would sit greyed out and still ticked, with no
  * way back — the same dead end `onCopySourceChange` avoids when a copy
  * rendition is pointed at a track that does not qualify, handled the same way.
+ * An un-ticked rendition is re-encoded from here on, so it is re-priced as one.
  */
 watch(
     () => props.trimActive,
     (active, wasActive) => {
         if (active || !wasActive) return;
-        for (const rendition of videoRenditions) {
+        for (const [i, rendition] of videoRenditions.entries()) {
             if (rendition.copyStream && copyBlockedReason(rendition) != null) {
                 rendition.copyStream = false;
+                rejoinLadder(i);
                 continue;
             }
             if (rendition.copyStream && rendition.sourceTrackIndex != null) {
@@ -258,6 +303,35 @@ function mapTierToGroupId(standardGroupId: string, tierIds: string[]): string {
     );
 }
 
+/**
+ * A multi-angle row is one angle at its own size, so its budget is the track's
+ * measured bitrate — the same ceiling the single-track ladder's cap imposes —
+ * on the same asymmetric terms as that ladder: a Low-motion factor scales it
+ * down, because spending less is always the operator's to choose, while a
+ * raising factor is ignored, because spending more than the source carries
+ * buys nothing. It used to be the measurement outright, and on a source that
+ * arrives as six pre-cut angles the content preset visibly did nothing. A
+ * copied angle mirrors the source's own number because that *is* the stream.
+ * An angle whose probe gave no bitrate takes the fps-adjusted table top for its
+ * own size: a 4K one opened at 1000 kbps once — a 240p budget for a 2160p
+ * picture — and the table is the honest guess, uncapped by construction since
+ * the cap is Infinity exactly when the source bitrate is the thing that is
+ * missing.
+ *
+ * At module scope because an angle that stops copying is priced by the same
+ * rule it would have been given had it opened re-encoded.
+ */
+function angleBudgetKbps(track: VideoTrackInfo, copied: boolean): number {
+    const measured = track.bitrateKbps;
+    if (!measured)
+        return suggestLadder(track, contentFactor.value)[0].bitrateKbps;
+    if (copied) return measured;
+    return Math.max(
+        1,
+        Math.round(measured * Math.min(contentFactor.value, 1))
+    );
+}
+
 function reanalyzeVideo() {
     // By display area, not coded area: two angles of the same picture size
     // should sort together whatever shape their samples are.
@@ -275,32 +349,6 @@ function reanalyzeVideo() {
     );
     const tierIds = [...new Set(newGroups.map((g) => g.id))];
     audioGroups.splice(0, audioGroups.length, ...newGroups);
-
-    /**
-     * A multi-angle row is one angle at its own size, so its budget is the
-     * track's measured bitrate — the same ceiling the single-track ladder's
-     * cap imposes — on the same asymmetric terms as that ladder: a Low-motion
-     * factor scales it down, because spending less is always the operator's
-     * to choose, while a raising factor is ignored, because spending more than
-     * the source carries buys nothing. It used to be the measurement outright,
-     * and on a source that arrives as six pre-cut angles the content preset
-     * visibly did nothing. A copied angle mirrors the source's own number
-     * because that *is* the stream. An angle whose probe gave no bitrate takes
-     * the fps-adjusted table top for its own size: a 4K one opened at 1000
-     * kbps once — a 240p budget for a 2160p picture — and the table is the
-     * honest guess, uncapped by construction since the cap is Infinity exactly
-     * when the source bitrate is the thing that is missing.
-     */
-    const angleBudgetKbps = (track: VideoTrackInfo, copied: boolean) => {
-        const measured = track.bitrateKbps;
-        if (!measured)
-            return suggestLadder(track, contentFactor.value)[0].bitrateKbps;
-        if (copied) return measured;
-        return Math.max(
-            1,
-            Math.round(measured * Math.min(contentFactor.value, 1))
-        );
-    };
 
     if (sortedVideoTracks.length > 1) {
         const newRenditions: VideoRendition[] = sortedVideoTracks.map(
@@ -368,6 +416,8 @@ function reanalyzeVideo() {
         ladderBaseKbps.length,
         ...videoRenditions.map((r) => r.videoBitrateKbps)
     );
+    ladderScaleNum = 1;
+    ladderScaleDen = 1;
     ladderMax.value = suggestedLadderMax.value;
     lastGoodLadderMax = ladderMax.value;
     // Back to auto with it: a pin from the previous ladder is a number about
@@ -496,10 +546,11 @@ function addVideoRendition() {
     const track = editableVideoTracks[0];
     const rungs = track ? suggestLadder(track, contentFactor.value) : [];
     const rung = rungs.find((r) => r.height === 480) ?? rungs[rungs.length - 1];
+    const base = rung?.bitrateKbps ?? 1000;
     videoRenditions.push({
         width: rung?.width ?? 854,
         height: rung?.height ?? 480,
-        videoBitrateKbps: rung?.bitrateKbps ?? 1000,
+        videoBitrateKbps: base,
         copyStream: false,
         audioGroupId: defaultGroupId,
         // Named for the size it actually is. The API falls back to
@@ -509,7 +560,11 @@ function addVideoRendition() {
         label: rung ? `${rung.height}p` : '480p',
         vbr: true,
     });
-    ladderBaseKbps.push(rung?.bitrateKbps ?? 1000);
+    ladderBaseKbps.push(base);
+    // At the dial's current level, not the raw suggestion: with the max moved
+    // to 3000, a 480p rung added at its suggested 535 would sit a third below
+    // the 480p rung already in the ladder.
+    joinLadder(videoRenditions.length - 1);
 }
 
 function removeVideoRendition(index: number) {
@@ -518,7 +573,99 @@ function removeVideoRendition(index: number) {
         // Kept index-aligned, or the dial would reprice every row below the
         // removed one from its neighbour's baseline.
         ladderBaseKbps.splice(index, 1);
+        // The top rung may have gone with it; the max field follows the scale
+        // rather than keep showing a number no rung has any more.
+        syncLadderDials();
     }
+}
+
+/**
+ * One re-encoded rung's bitrate at the dials' current setting.
+ *
+ * With the min on auto — or with no span to remap: one rung, or a baseline the
+ * source cap flattened — the max dial alone, `base * max / suggestion`. Pinned, the
+ * linear remap of the re-encoded suggestion onto `[min, max]` described at
+ * `applyLadder`.
+ */
+function priceRow(base: number): number {
+    const min = ladderMin.value;
+    const suggestedMax = suggestedLadderMax.value;
+    const suggestedMin = suggestedLadderMin.value;
+    const span = suggestedMax - suggestedMin;
+    if (min == null || span === 0)
+        return Math.max(
+            1,
+            Math.round((base * ladderScaleNum) / ladderScaleDen)
+        );
+    return Math.max(
+        1,
+        Math.round(
+            min + ((ladderMax.value - min) * (base - suggestedMin)) / span
+        )
+    );
+}
+
+/**
+ * Re-derive the max field from the dial's scale once the set of re-encoded
+ * rows has changed — a row added, removed, copied, or no longer copied.
+ *
+ * The scale, not the field, is what the rungs were priced from, so the field
+ * follows it: after the top rung is removed it shows the new top rung's value.
+ * A pinned min the new max no longer clears is let go, on the same terms as a
+ * max typed below it.
+ */
+function syncLadderDials(): void {
+    ladderMax.value = Math.max(
+        1,
+        Math.round(
+            (suggestedLadderMax.value * ladderScaleNum) / ladderScaleDen
+        )
+    );
+    lastGoodLadderMax = ladderMax.value;
+    if (ladderMin.value != null && ladderMin.value > ladderMax.value) {
+        ladderMin.value = null;
+        lastGoodLadderMin = null;
+    }
+}
+
+/**
+ * The suggestion for a row that has just stopped copying.
+ *
+ * While it copied, its bitrate was the source's own; re-encoded, it is a budget
+ * like any other rung, and is priced by the rule it would have met had it
+ * opened re-encoded — the angle's budget on a multi-angle source, the suggested
+ * rung at its height on a single-track one. Left at the copy's number, a 5000
+ * kbps angle un-ticked under Low motion was re-encoded at 5000 rather than
+ * 3000, and Re-analyze could not help, because it ticks Copy again.
+ */
+function reencodeBaseKbps(row: VideoRendition): number {
+    const track = editableVideoTracks[row.sourceTrackIndex ?? 0];
+    if (!track) return row.videoBitrateKbps;
+    if (editableVideoTracks.length > 1) return angleBudgetKbps(track, false);
+    return (
+        suggestLadder(track, contentFactor.value).find(
+            (r) => r.height === row.height
+        )?.bitrateKbps ?? angleBudgetKbps(track, false)
+    );
+}
+
+/**
+ * Price row `index` from its baseline entry at the dial's current level.
+ *
+ * The dials are synced first, so a pinned remap prices it against the max the
+ * field is about to show, with this row already counted among the re-encoded.
+ * Only this row is priced: the rungs the operator has already set stay where
+ * they are.
+ */
+function joinLadder(index: number): void {
+    syncLadderDials();
+    videoRenditions[index].videoBitrateKbps = priceRow(ladderBaseKbps[index]);
+}
+
+/** Row `index` has just stopped copying: re-derive its suggestion and join. */
+function rejoinLadder(index: number): void {
+    ladderBaseKbps[index] = reencodeBaseKbps(videoRenditions[index]);
+    joinLadder(index);
 }
 
 /**
@@ -536,14 +683,17 @@ function removeVideoRendition(index: number) {
  * order and strictly increasing, which is what an ABR ladder has to be. With
  * the min on auto it collapses algebraically to `base * max / suggestedMax`,
  * the proportional scale this had before there were two dials — and that case
- * is computed by that formula outright rather than through the remap, because
- * the auto min is rounded before it is displayed and feeding the rounded number
- * back in could move a rung by 1 kbps. An untouched min must leave the max dial
- * doing exactly what it did before, not almost.
+ * is computed as a proportional scale outright rather than through the remap,
+ * because the auto min is rounded before it is displayed and feeding the
+ * rounded number back in could move a rung by 1 kbps. The scale is kept as
+ * `ladderScaleNum`/`ladderScaleDen`, so rows that join later are priced by it
+ * too, by the same arithmetic.
  *
- * A pure function of the snapshot and the two dials, so applying it twice lands
- * where applying it once does. Copy rows are skipped: their bitrate is the
- * source's own, not a budget.
+ * Both ends are the re-encoded rows' (`suggestedLadderMax`/`Min`), so a typed
+ * max sets the top re-encoded rung to exactly that number. A pure function of
+ * the snapshot and the two dials, so applying it twice lands where applying it
+ * once does. Copy rows are skipped: their bitrate is the source's own, not a
+ * budget.
  */
 function applyLadder() {
     const max = ladderMax.value;
@@ -563,26 +713,13 @@ function applyLadder() {
         ladderMin.value = null;
         lastGoodLadderMin = null;
     }
-    const suggestedMax = suggestedLadderMax.value;
-    const suggestedMin = suggestedLadderMin.value;
-    const min = ladderMin.value;
-    const span = suggestedMax - suggestedMin;
+    ladderScaleNum = max;
+    ladderScaleDen = suggestedLadderMax.value;
     videoRenditions.forEach((r, i) => {
         if (r.copyStream) return;
         const base = ladderBaseKbps[i];
         if (base == null) return;
-        r.videoBitrateKbps =
-            min == null || span === 0
-                ? // No pin: the max dial alone. Also the only rule there is for
-                  // one rung, or a baseline the source cap flattened — no shape
-                  // to remap and no span to divide by.
-                  Math.max(1, Math.round((base * max) / suggestedMax))
-                : Math.max(
-                      1,
-                      Math.round(
-                          min + ((max - min) * (base - suggestedMin)) / span
-                      )
-                  );
+        r.videoBitrateKbps = priceRow(base);
     });
 }
 
@@ -626,8 +763,16 @@ function applyLadderMin(event: Event) {
  * snapshot at the end of `reanalyzeVideo()` then resets the baseline and the
  * dial for free, which is exactly the behaviour the Re-analyze button has.
  * Hand-edited rungs are replaced, on the same terms as a dial move.
+ *
+ * A custom factor is first rewritten to the one actually applied — clamped,
+ * or 1 for an unusable entry. The field then shows what the ladder was priced
+ * at, and what is remembered is a number the load check accepts: 5 used to be
+ * stored as typed, priced as 2, and refused on the way back in, so the same
+ * session reopened at the default 0.6.
  */
 function onContentPresetChange() {
+    if (contentPreset.value === 'custom')
+        customFactor.value = contentFactor.value;
     saveContentPreset(presetLayoutKey.value, {
         preset: contentPreset.value,
         customFactor: customFactor.value,
@@ -636,6 +781,8 @@ function onContentPresetChange() {
 }
 
 function resetLadder() {
+    ladderScaleNum = 1;
+    ladderScaleDen = 1;
     ladderMax.value = suggestedLadderMax.value;
     ladderMin.value = null;
     lastGoodLadderMin = null;
@@ -724,7 +871,13 @@ function onVbrToggle(g: AudioGroup) {
     }
 }
 
-function onCopyToggle(rendition: VideoRendition) {
+/**
+ * Ticked, a rendition mirrors its source track, and leaves the rungs the dials
+ * move; un-ticked, it joins them, re-priced as a re-encode at the dial's
+ * current level. Either way the max field is re-synced, because the top
+ * re-encoded rung may just have changed.
+ */
+function onCopyToggle(rendition: VideoRendition, index: number) {
     if (rendition.copyStream) {
         rendition.vbr = false;
         if (editableVideoTracks.length > 0) {
@@ -736,15 +889,28 @@ function onCopyToggle(rendition: VideoRendition) {
                     track.bitrateKbps || rendition.videoBitrateKbps;
             }
         }
+        syncLadderDials();
+    } else {
+        rejoinLadder(index);
     }
 }
 
-function onCopySourceChange(rendition: VideoRendition) {
+function onCopySourceChange(rendition: VideoRendition, index: number) {
     // Pointing a copy rendition at a track that does not qualify would leave
     // the tick box greyed out and still ticked, with no way back. Drop to
-    // re-encode instead; the reason is on the tooltip.
+    // re-encode instead; the reason is on the tooltip. From here on it is a
+    // re-encode of the track it now points at — at that track's own display
+    // size, as every angle opens, and priced as one. Left at the old track's
+    // size it was priced for one angle and scaled to another's frame.
     if (rendition.copyStream && copyBlockedReason(rendition) != null) {
         rendition.copyStream = false;
+        const track = editableVideoTracks[rendition.sourceTrackIndex ?? 0];
+        if (track) {
+            const display = displayDimensionsOf(track);
+            rendition.width = display.width;
+            rendition.height = display.height;
+        }
+        rejoinLadder(index);
     }
     if (rendition.copyStream && rendition.sourceTrackIndex != null) {
         const track = editableVideoTracks[rendition.sourceTrackIndex];
@@ -1399,7 +1565,7 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                                 :options="videoSourceOptions"
                                                 class="ecf-select-src"
                                                 aria-label="Source track"
-                                                @change="onCopySourceChange(r)"
+                                                @change="onCopySourceChange(r, i)"
                                             />
                                         </td>
                                         <td class="ecf-lt-td">
@@ -1484,7 +1650,7 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                                         copyBlockedReason(r) !=
                                                             null
                                                     "
-                                                    @change="onCopyToggle(r)"
+                                                    @change="onCopyToggle(r, i)"
                                                 />
                                                 Copy
                                             </label>
