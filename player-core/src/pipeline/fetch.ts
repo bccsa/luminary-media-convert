@@ -210,6 +210,14 @@ function matchesExpectation(bytes: Uint8Array, expect: ExpectedAsset): boolean {
     return isPlaylistText(bytes) || isVttText(bytes);
 }
 
+/**
+ * One decoder for every asset. A non-streaming `decode()` keeps no state
+ * between calls, so sharing it is safe; made on first use rather than at import
+ * so that loading the module asks nothing of the runtime.
+ */
+let utf8: TextDecoder | undefined;
+
 function decodeUtf8(bytes: Uint8Array): string {
-    return new TextDecoder('utf-8').decode(bytes);
+    utf8 ??= new TextDecoder('utf-8');
+    return utf8.decode(bytes);
 }

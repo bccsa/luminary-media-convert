@@ -57,9 +57,50 @@ function resolveSubtle(subtle?: SubtleLike): SubtleLike {
 }
 
 /**
+ * The last key imported, per WebCrypto implementation.
+ *
+ * A source decrypts every LMCENC playlist and sidecar it reads with one key —
+ * and a live source re-reads its playlists every target duration — so
+ * importing it again for each file is work thrown away. One entry, because one
+ * key is in use at a time and a new source's key simply replaces it. The key is
+ * imported non-extractable, so what is held here can decrypt and nothing else.
+ * Keyed by implementation, so an injected fake never answers for the real one.
+ */
+const lastImported = new WeakMap<
+    SubtleLike,
+    { keyHex: string; key: Promise<CryptoKey> }
+>();
+
+function importDecryptKey(
+    impl: SubtleLike,
+    keyHex: string,
+): Promise<CryptoKey> {
+    const cached = lastImported.get(impl);
+    if (cached?.keyHex === keyHex) return cached.key;
+
+    const key = impl.importKey(
+        'raw',
+        keyBytes(keyHex),
+        { name: 'AES-CBC' },
+        false,
+        ['decrypt'],
+    );
+    lastImported.set(impl, { keyHex, key });
+    // A failed import is not remembered: the next file tries again.
+    key.catch(() => {
+        if (lastImported.get(impl)?.key === key) lastImported.delete(impl);
+    });
+    return key;
+}
+
+/**
  * Decrypt an LMCENC payload. Throws when `bytes` is not LMCENC, when the key is
  * malformed, or when decryption fails (wrong key / corrupt file) — callers turn
  * those into typed {@link PlayerError}s.
+ *
+ * The IV and ciphertext go to WebCrypto as the views they are. A `BufferSource`
+ * is read over the view's own range, never its whole parent buffer, and
+ * WebCrypto copies its input anyway — a copy made here would be a second one.
  */
 export async function decryptLmcenc(
     bytes: Uint8Array,
@@ -69,28 +110,7 @@ export async function decryptLmcenc(
     const { iv, ciphertext } = splitEncryptedPayload(bytes);
     const impl = resolveSubtle(subtle);
 
-    const key = await impl.importKey(
-        'raw',
-        toArrayBuffer(keyBytes(keyHex)),
-        { name: 'AES-CBC' },
-        false,
-        ['decrypt'],
-    );
-    const plain = await impl.decrypt(
-        { name: 'AES-CBC', iv: toArrayBuffer(iv) },
-        key,
-        toArrayBuffer(ciphertext),
-    );
+    const key = await importDecryptKey(impl, keyHex);
+    const plain = await impl.decrypt({ name: 'AES-CBC', iv }, key, ciphertext);
     return new Uint8Array(plain);
-}
-
-/**
- * Copy a (possibly offset) view into a standalone ArrayBuffer.
- * `subarray()` views share their parent buffer, which WebCrypto would read in
- * full.
- */
-function toArrayBuffer(view: Uint8Array): ArrayBuffer {
-    const copy = new Uint8Array(view.length);
-    copy.set(view);
-    return copy.buffer;
 }
