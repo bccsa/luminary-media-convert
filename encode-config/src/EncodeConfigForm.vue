@@ -9,12 +9,13 @@ import type {
     VideoTrackInfo,
     TrimCopyMode,
 } from './types';
-import { computeLayoutKey, getStoredConfig } from './layoutStorage';
 import {
-    aspectWidthForHeight,
-    fpsAdjustedBitrateKbps,
-    ladderFor,
-} from './ladder';
+    computeLayoutKey,
+    getStoredConfig,
+    getStoredContentPreset,
+    saveContentPreset,
+} from './layoutStorage';
+import { CONTENT_PRESETS, sourceCapKbps, suggestLadder } from './ladder';
 import { displayDimensionsOf } from './aspect';
 import {
     buildSuggestedAudioGroups,
@@ -76,6 +77,93 @@ const segmentDuration = reactive<{ value: number }>({
 });
 
 const videoRenditions = reactive<VideoRendition[]>([]);
+
+/**
+ * The suggested bitrate each rendition row opened at, index-aligned with
+ * `videoRenditions`.
+ *
+ * The ladder-max dial rescales from this snapshot rather than from whatever is
+ * in the fields: rescaling from the current values compounds its own rounding,
+ * so dragging the dial down and back would not return the ladder it started
+ * from.
+ */
+const ladderBaseKbps = reactive<number[]>([]);
+
+/** Top-rung dial. Every `reanalyze()` resets it to the suggestion. */
+const ladderMax = reactive<{ value: number }>({ value: 1 });
+
+/** The last value the dial accepted, to put back when the field is cleared. */
+let lastGoodLadderMax = 1;
+
+/**
+ * Where the dial sits when it matches the suggestion — the largest suggested
+ * rung, which is the top one. `Math.max(1, ...)` rather than `Math.max(...)`:
+ * an empty baseline (audio-only mode, before any ladder exists) spreads to
+ * `Math.max(1)`, so the 1 both floors the value and keeps `applyLadder`'s
+ * divisor off zero.
+ */
+const suggestedLadderMax = computed(() => Math.max(1, ...ladderBaseKbps));
+
+/**
+ * Bottom-rung dial, `null` meaning auto.
+ *
+ * Auto by default, and that is the whole design of it: a second anchor that
+ * started out pinned would silently change what the max dial does, because two
+ * fixed ends define a remap where one end plus a ratio defined a scale. Left
+ * alone it tracks whatever the max dial implies, so the max dial's behaviour is
+ * byte-identical to before this field existed.
+ */
+const ladderMin = reactive<{ value: number | null }>({ value: null });
+
+/** The last pin the min field accepted; null while it has never been pinned. */
+let lastGoodLadderMin: number | null = null;
+
+/** The smallest suggested rung — the bottom of the shape being remapped. */
+const suggestedLadderMin = computed(() =>
+    ladderBaseKbps.length ? Math.max(1, Math.min(...ladderBaseKbps)) : 1
+);
+
+/** Where the bottom rung lands when only the max dial is driving. */
+const autoLadderMin = computed(() =>
+    Math.max(
+        1,
+        Math.round(
+            (suggestedLadderMin.value * ladderMax.value) /
+                suggestedLadderMax.value
+        )
+    )
+);
+
+/**
+ * How hard this material is to encode, as a multiplier on the table.
+ *
+ * The ABR table is sized for generic material, and a lot of what goes through
+ * here is not: a church service is three static camera positions and a talking
+ * head, which reaches the same quality on appreciably fewer bits than the table
+ * assumes. `custom` is the escape hatch for material that is neither.
+ */
+const contentPreset = reactive<{
+    value: 'low' | 'standard' | 'high' | 'custom';
+}>({ value: 'standard' });
+
+const customFactor = reactive<{ value: number }>({ value: 0.6 });
+
+/**
+ * The multiplier `suggestLadder` is actually given.
+ *
+ * A custom factor is clamped to 0.1–2 rather than refused: this is the field an
+ * operator types into, and a stray keystroke should not be able to ask for a
+ * ladder a hundred times the table's. Anything unparseable falls back to 1, so
+ * an empty box suggests the generic ladder instead of nothing at all.
+ */
+const contentFactor = computed(() =>
+    contentPreset.value === 'custom'
+        ? Number.isFinite(customFactor.value) && customFactor.value > 0
+            ? Math.min(2, Math.max(0.1, customFactor.value))
+            : 1
+        : (CONTENT_PRESETS.find((p) => p.id === contentPreset.value)?.factor ??
+          1)
+);
 
 const audioGroups = reactive<AudioGroup[]>([]);
 
@@ -188,6 +276,32 @@ function reanalyzeVideo() {
     const tierIds = [...new Set(newGroups.map((g) => g.id))];
     audioGroups.splice(0, audioGroups.length, ...newGroups);
 
+    /**
+     * A multi-angle row is one angle at its own size, so its budget is the
+     * track's measured bitrate — the same ceiling the single-track ladder's
+     * cap imposes — on the same asymmetric terms as that ladder: a Low-motion
+     * factor scales it down, because spending less is always the operator's
+     * to choose, while a raising factor is ignored, because spending more than
+     * the source carries buys nothing. It used to be the measurement outright,
+     * and on a source that arrives as six pre-cut angles the content preset
+     * visibly did nothing. A copied angle mirrors the source's own number
+     * because that *is* the stream. An angle whose probe gave no bitrate takes
+     * the fps-adjusted table top for its own size: a 4K one opened at 1000
+     * kbps once — a 240p budget for a 2160p picture — and the table is the
+     * honest guess, uncapped by construction since the cap is Infinity exactly
+     * when the source bitrate is the thing that is missing.
+     */
+    const angleBudgetKbps = (track: VideoTrackInfo, copied: boolean) => {
+        const measured = track.bitrateKbps;
+        if (!measured)
+            return suggestLadder(track, contentFactor.value)[0].bitrateKbps;
+        if (copied) return measured;
+        return Math.max(
+            1,
+            Math.round(measured * Math.min(contentFactor.value, 1))
+        );
+    };
+
     if (sortedVideoTracks.length > 1) {
         const newRenditions: VideoRendition[] = sortedVideoTracks.map(
             (track) => {
@@ -212,7 +326,7 @@ function reanalyzeVideo() {
                     // display size and coded size are the same number anyway.
                     width: display.width,
                     height: display.height,
-                    videoBitrateKbps: track.bitrateKbps || 1000,
+                    videoBitrateKbps: angleBudgetKbps(track, canCopy),
                     copyStream: canCopy,
                     sourceTrackIndex: track.index,
                     audioGroupId,
@@ -224,18 +338,19 @@ function reanalyzeVideo() {
         videoRenditions.splice(0, videoRenditions.length, ...newRenditions);
     } else if (sortedVideoTracks.length === 1) {
         const track = sortedVideoTracks[0];
-        const display = displayDimensionsOf(track);
-        const newRenditions: VideoRendition[] = ladderFor(track).map((rung) => {
+        const newRenditions: VideoRendition[] = suggestLadder(
+            track,
+            contentFactor.value
+        ).map((rung) => {
             const tier = getAudioTierForHeight(rung.height);
             const audioGroupId = mapTierToGroupId(tier.groupId, tierIds);
+            // No `label` on a ladder rung: the API derives each stream's S3
+            // directory from `label ?? `${height}p``, so naming them here
+            // would move the output for nothing.
             return {
-                width: aspectWidthForHeight(
-                    rung.height,
-                    display.width,
-                    display.height
-                ),
+                width: rung.width,
                 height: rung.height,
-                videoBitrateKbps: fpsAdjustedBitrateKbps(rung.bitrateKbps, track.frameRate ?? 30),
+                videoBitrateKbps: rung.bitrateKbps,
                 copyStream: false,
                 audioGroupId,
                 vbr: true,
@@ -243,6 +358,22 @@ function reanalyzeVideo() {
         });
         videoRenditions.splice(0, videoRenditions.length, ...newRenditions);
     }
+
+    // Snapshot after whichever branch ran: the dial rescales from what was
+    // suggested, and all three `reanalyze()` triggers — setup, the saved-labels
+    // re-run, the Re-analyze button — come through here, so the dial resets
+    // with the ladder for free.
+    ladderBaseKbps.splice(
+        0,
+        ladderBaseKbps.length,
+        ...videoRenditions.map((r) => r.videoBitrateKbps)
+    );
+    ladderMax.value = suggestedLadderMax.value;
+    lastGoodLadderMax = ladderMax.value;
+    // Back to auto with it: a pin from the previous ladder is a number about
+    // rungs that no longer exist.
+    ladderMin.value = null;
+    lastGoodLadderMin = null;
 }
 
 function reanalyzeAudio() {
@@ -258,6 +389,45 @@ function reanalyze() {
         reanalyzeAudio();
     } else {
         reanalyzeVideo();
+    }
+}
+
+/**
+ * The layout key the preset is filed under.
+ *
+ * Always the video key, whatever mode the form opens in: the preset only shapes
+ * a video ladder, and keying it by the current mode would file one preset under
+ * two names and lose it the moment someone toggled to Audio only and back.
+ */
+const presetLayoutKey = computed(() =>
+    computeLayoutKey(props.probeResult, 'video')
+);
+
+/**
+ * Restore the remembered preset *before* the first `reanalyze()`.
+ *
+ * The preset is an input to the suggestion, not a decoration on it — applied
+ * afterwards it would leave the operator looking at a generic ladder under a
+ * label claiming otherwise until something happened to re-derive it.
+ */
+{
+    const stored = getStoredContentPreset(presetLayoutKey.value);
+    const known =
+        stored?.preset === 'custom' ||
+        CONTENT_PRESETS.some((p) => p.id === stored?.preset);
+    // An id this build does not know (an older or newer store, a hand-edited
+    // one) is ignored rather than trusted: Standard is the honest default, and
+    // a factor out of range would price the whole ladder off it.
+    if (stored && known) {
+        contentPreset.value = stored.preset as typeof contentPreset.value;
+        if (
+            typeof stored.customFactor === 'number' &&
+            Number.isFinite(stored.customFactor) &&
+            stored.customFactor >= 0.1 &&
+            stored.customFactor <= 2
+        ) {
+            customFactor.value = stored.customFactor;
+        }
     }
 }
 
@@ -318,19 +488,215 @@ function loadPreviousTrackLabels() {
 
 function addVideoRendition() {
     const defaultGroupId = audioGroups[0]?.id ?? 'hd';
+    // Priced from the source instead of a fixed 854x480 @ 1000: that width is
+    // 16:9's and that bitrate is the old table's, so on a 4:3 or a low-bitrate
+    // source the added row opened at a shape and a budget the source never had.
+    // The 480p rung where the ladder reaches it, the smallest rung otherwise —
+    // a source below 480p has no 480p to offer.
+    const track = editableVideoTracks[0];
+    const rungs = track ? suggestLadder(track, contentFactor.value) : [];
+    const rung = rungs.find((r) => r.height === 480) ?? rungs[rungs.length - 1];
     videoRenditions.push({
-        width: 854,
-        height: 480,
-        videoBitrateKbps: 1000,
+        width: rung?.width ?? 854,
+        height: rung?.height ?? 480,
+        videoBitrateKbps: rung?.bitrateKbps ?? 1000,
         copyStream: false,
         audioGroupId: defaultGroupId,
-        label: '480p',
+        // Named for the size it actually is. The API falls back to
+        // `${height}p` when there is no label, so this is the same directory
+        // for a row that really is 480p — and the right one for a row that is
+        // not, which a literal '480p' would have misnamed in S3.
+        label: rung ? `${rung.height}p` : '480p',
         vbr: true,
     });
+    ladderBaseKbps.push(rung?.bitrateKbps ?? 1000);
 }
 
 function removeVideoRendition(index: number) {
-    if (videoRenditions.length > 1) videoRenditions.splice(index, 1);
+    if (videoRenditions.length > 1) {
+        videoRenditions.splice(index, 1);
+        // Kept index-aligned, or the dial would reprice every row below the
+        // removed one from its neighbour's baseline.
+        ladderBaseKbps.splice(index, 1);
+    }
+}
+
+/**
+ * Push both dials through the whole ladder.
+ *
+ * Bound to `@change`, never `@input`: every intermediate keystroke is a number
+ * too, and `3` on the way to `3000` would collapse the ladder to a thousandth
+ * of itself before the second digit arrived.
+ *
+ * The rule is a linear remap of the *suggested* shape onto `[min, max]` — each
+ * rung keeps its position between the suggested ends and is placed at the same
+ * position between the new ones. Linear in bitrate, not in rung index or pixel
+ * count, because the suggested numbers already encode how much each size is
+ * worth relative to its neighbours; stretching that line keeps the rungs in
+ * order and strictly increasing, which is what an ABR ladder has to be. With
+ * the min on auto it collapses algebraically to `base * max / suggestedMax`,
+ * the proportional scale this had before there were two dials — and that case
+ * is computed by that formula outright rather than through the remap, because
+ * the auto min is rounded before it is displayed and feeding the rounded number
+ * back in could move a rung by 1 kbps. An untouched min must leave the max dial
+ * doing exactly what it did before, not almost.
+ *
+ * A pure function of the snapshot and the two dials, so applying it twice lands
+ * where applying it once does. Copy rows are skipped: their bitrate is the
+ * source's own, not a budget.
+ */
+function applyLadder() {
+    const max = ladderMax.value;
+    if (!Number.isFinite(max) || max <= 0) {
+        // A cleared or nonsense field is not an instruction to encode at
+        // nothing. Put the last accepted number back and move no row. The field
+        // follows, because the model did change (to '' or the bad number) and
+        // changing it back re-renders the input.
+        ladderMax.value = lastGoodLadderMax;
+        return;
+    }
+    lastGoodLadderMax = max;
+    // A max dragged below a pinned min unpins it rather than being refused: the
+    // max is the primary control, and the alternative is a field that silently
+    // rejects what was typed into it because of a number in another box.
+    if (ladderMin.value != null && ladderMin.value > max) {
+        ladderMin.value = null;
+        lastGoodLadderMin = null;
+    }
+    const suggestedMax = suggestedLadderMax.value;
+    const suggestedMin = suggestedLadderMin.value;
+    const min = ladderMin.value;
+    const span = suggestedMax - suggestedMin;
+    videoRenditions.forEach((r, i) => {
+        if (r.copyStream) return;
+        const base = ladderBaseKbps[i];
+        if (base == null) return;
+        r.videoBitrateKbps =
+            min == null || span === 0
+                ? // No pin: the max dial alone. Also the only rule there is for
+                  // one rung, or a baseline the source cap flattened — no shape
+                  // to remap and no span to divide by.
+                  Math.max(1, Math.round((base * max) / suggestedMax))
+                : Math.max(
+                      1,
+                      Math.round(
+                          min + ((max - min) * (base - suggestedMin)) / span
+                      )
+                  );
+    });
+}
+
+/**
+ * Pin or un-pin the bottom rung.
+ *
+ * An empty field is the way back to auto, not an error: clearing it is how the
+ * operator says "stop holding the bottom up", and auto is the state the ladder
+ * started in. A pin above the max would invert the ladder, so it is refused
+ * like any other nonsense and the last good pin goes back in the box.
+ */
+function applyLadderMin(event: Event) {
+    const raw = ladderMin.value;
+    if (raw === null || (raw as unknown as string) === '') {
+        ladderMin.value = null;
+        lastGoodLadderMin = null;
+        applyLadder();
+        return;
+    }
+    if (!Number.isFinite(raw) || raw <= 0 || raw > ladderMax.value) {
+        ladderMin.value = lastGoodLadderMin;
+        // Unlike the max field, this one can be restored to `null` — the same
+        // value an empty box already models — so Vue may have nothing to
+        // re-render. Write the element back so it does not sit showing the
+        // rejected number.
+        const el = event.target as HTMLInputElement | null;
+        if (el)
+            el.value =
+                lastGoodLadderMin == null ? '' : String(lastGoodLadderMin);
+        return;
+    }
+    lastGoodLadderMin = raw;
+    applyLadder();
+}
+
+/**
+ * Remember the preset, then re-derive the whole ladder from it.
+ *
+ * `reanalyze()` and not a rescale of what is on screen: the factor feeds
+ * `suggestLadder` itself, so only a fresh suggestion reflects it — and the
+ * snapshot at the end of `reanalyzeVideo()` then resets the baseline and the
+ * dial for free, which is exactly the behaviour the Re-analyze button has.
+ * Hand-edited rungs are replaced, on the same terms as a dial move.
+ */
+function onContentPresetChange() {
+    saveContentPreset(presetLayoutKey.value, {
+        preset: contentPreset.value,
+        customFactor: customFactor.value,
+    });
+    reanalyze();
+}
+
+function resetLadder() {
+    ladderMax.value = suggestedLadderMax.value;
+    ladderMin.value = null;
+    lastGoodLadderMin = null;
+    applyLadder();
+}
+
+/**
+ * The min field is only meaningful with a shape to hold the bottom of: with one
+ * re-encoded rung the min and the max are the same rung, and pinning one to
+ * argue with the other is a control that can only contradict itself.
+ */
+const showLadderMin = computed(
+    () => videoRenditions.filter((r) => !r.copyStream).length > 1
+);
+
+/**
+ * A dial with nothing to scale is worse than no dial: hidden in audio mode, and
+ * hidden when every row copies, since a copy keeps the source's own bitrate and
+ * the dial would move nothing on screen.
+ */
+const showLadderMax = computed(
+    () =>
+        encodingType.value === 'video' &&
+        videoRenditions.some((r) => !r.copyStream)
+);
+
+/** `1920×1080 · 24 fps · 1805 kbps` — what the dial is being judged against. */
+const ladderSourceSummary = computed(() => {
+    if (editableVideoTracks.length !== 1) return '';
+    const track = editableVideoTracks[0];
+    const d = displayDimensionsOf(track);
+    const bitrate =
+        track.bitrateKbps != null && track.bitrateKbps > 0
+            ? `${track.bitrateKbps} kbps`
+            : 'bitrate n/a';
+    return `${d.width}×${d.height} · ${track.frameRate} fps · ${bitrate}`;
+});
+
+/**
+ * How much the source carries at this row's size, when the row asks for more.
+ *
+ * Advisory only: the operator may deliberately spend past the source (a fixed
+ * ladder a CDN expects, say) and the API puts no ceiling on `videoBitrateKbps`,
+ * so nothing here reaches `canSubmit`. Null when the row is inside the cap,
+ * copies its source, or the source never said what bitrate it carries — the cap
+ * is `Infinity` then and there is nothing to be above.
+ */
+function overCapKbps(rendition: VideoRendition): number | null {
+    const track = editableVideoTracks[rendition.sourceTrackIndex ?? 0];
+    if (rendition.copyStream || !track) return null;
+    const display = displayDimensionsOf(track);
+    const cap = sourceCapKbps(
+        rendition.width,
+        rendition.height,
+        track.bitrateKbps ?? 0,
+        display.width,
+        display.height
+    );
+    return Number.isFinite(cap) && rendition.videoBitrateKbps > cap
+        ? cap
+        : null;
 }
 
 function addAudioGroup() {
@@ -496,6 +862,11 @@ const audioSourceOptions = computed<SelectMenuOption[]>(() =>
             .join(' '),
     })),
 );
+
+const contentPresetOptions: SelectMenuOption[] = [
+    ...CONTENT_PRESETS.map((p) => ({ value: p.id, label: p.label })),
+    { value: 'custom', label: 'Custom…' },
+];
 
 const audioGroupSelectOptions = computed<SelectMenuOption[]>(() =>
     uniqueAudioGroupOptions.value.map((o) => ({ value: o.id, label: o.label })),
@@ -915,6 +1286,84 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                 </summary>
                 <div class="ecf-panel-body">
                     <p class="ecf-box-hint">One row per HLS variant stream</p>
+                    <div v-if="showLadderMax" class="ecf-form-row">
+                        <div class="ecf-form-field">
+                            <span class="ecf-field-label">Content</span>
+                            <SelectMenu
+                                v-model="contentPreset.value"
+                                :options="contentPresetOptions"
+                                class="ecf-select-inline"
+                                aria-label="Content"
+                                @change="onContentPresetChange"
+                            />
+                        </div>
+                        <div
+                            v-if="contentPreset.value === 'custom'"
+                            class="ecf-form-field"
+                        >
+                            <label
+                                class="ecf-field-label"
+                                for="ecf-content-factor"
+                                >Factor</label
+                            >
+                            <input
+                                id="ecf-content-factor"
+                                v-model.number="customFactor.value"
+                                type="number"
+                                min="0.1"
+                                max="2"
+                                step="0.05"
+                                class="ecf-input ecf-input-kbps"
+                                @change="onContentPresetChange"
+                            />
+                        </div>
+                        <div class="ecf-form-field">
+                            <label class="ecf-field-label" for="ecf-ladder-max"
+                                >Ladder max (kbps)</label
+                            >
+                            <input
+                                id="ecf-ladder-max"
+                                v-model.number="ladderMax.value"
+                                type="number"
+                                min="1"
+                                step="100"
+                                class="ecf-input ecf-input-kbps"
+                                @change="applyLadder"
+                            />
+                        </div>
+                        <div v-if="showLadderMin" class="ecf-form-field">
+                            <label class="ecf-field-label" for="ecf-ladder-min"
+                                >Ladder min (kbps)</label
+                            >
+                            <input
+                                id="ecf-ladder-min"
+                                v-model.number="ladderMin.value"
+                                type="number"
+                                min="1"
+                                step="10"
+                                class="ecf-input ecf-input-kbps"
+                                :placeholder="String(autoLadderMin)"
+                                @change="applyLadderMin"
+                            />
+                        </div>
+                        <button
+                            type="button"
+                            class="ecf-btn-sm"
+                            @click="resetLadder"
+                        >
+                            Reset to suggested
+                        </button>
+                        <span
+                            v-if="ladderSourceSummary"
+                            class="ecf-box-hint"
+                            >{{ ladderSourceSummary }}</span
+                        >
+                    </div>
+                    <p v-if="showLadderMax" class="ecf-box-hint">
+                        Content and the ladder max/min re-derive the ladder from
+                        the suggestion — leave min empty to keep the suggested
+                        shape; copied streams keep the source's own bitrate.
+                    </p>
                     <div class="ecf-table-wrap">
                         <table class="ecf-lt">
                             <thead class="ecf-lt-thead">
@@ -1064,6 +1513,37 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                                     />
                                                 </svg>
                                             </button>
+                                        </td>
+                                    </tr>
+                                    <tr
+                                        v-if="overCapKbps(r) != null"
+                                        class="ecf-lt-warning"
+                                    >
+                                        <td
+                                            :colspan="
+                                                showVideoRenditionSourceColumn
+                                                    ? 7
+                                                    : 6
+                                            "
+                                            class="ecf-lt-warning-td"
+                                        >
+                                            <svg
+                                                class="ecf-icon"
+                                                fill="none"
+                                                viewBox="0 0 24 24"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                aria-hidden="true"
+                                            >
+                                                <path
+                                                    stroke-linecap="round"
+                                                    stroke-linejoin="round"
+                                                    d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+                                                />
+                                            </svg>
+                                            Above what the source carries at
+                                            this size ({{ overCapKbps(r) }}
+                                            kbps)
                                         </td>
                                     </tr>
                                 </template>
