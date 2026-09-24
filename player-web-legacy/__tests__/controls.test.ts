@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { mergeControls, DEFAULT_CONTROLS } from '../src/controls';
-import { snapSkipSeconds, buildVideoJsOptions } from '../src/vjs/playerOptions';
+import {
+    snapSkipSeconds,
+    buildVideoJsOptions,
+    preferYouTubeTech,
+    YOUTUBE_TECH,
+} from '../src/vjs/playerOptions';
 
 describe('mergeControls', () => {
     it('is the library default when nothing is overridden', () => {
@@ -129,23 +134,53 @@ describe('buildVideoJsOptions', () => {
 
 /**
  * `videojs-youtube` registers its tech but never adds itself to the order, and
- * video.js only considers what the order lists. Without this, a YouTube source
- * finds no tech that accepts `video/youtube`, falls through to Html5, and a
- * YouTube page URL ends up as the src of a bare <video> — a broken-media
- * placeholder on screen and a console full of postMessage origin warnings.
+ * video.js only considers what the order lists — so the YouTube tech has to be
+ * put there. Not at construction: it is loaded on demand, and video.js logs
+ * "The "youtube" tech is undefined" for an unregistered entry every time it
+ * picks a tech, which in a session that never plays YouTube is every HLS load.
+ * It goes in when a YouTube source is about to be set.
  */
 describe('techOrder', () => {
-    const order = () => buildVideoJsOptions(DEFAULT_CONTROLS).techOrder;
+    it('starts with html5 alone, naming no tech that is loaded on demand', () => {
+        expect(buildVideoJsOptions(DEFAULT_CONTROLS).techOrder).toEqual(['html5']);
+    });
+});
 
-    it('lists youtube, or a YouTube source has no tech that can play it', () => {
-        expect(order()).toContain('youtube');
+describe('preferYouTubeTech', () => {
+    const playerWith = (techOrder: string[]) => ({ options_: { techOrder } }) as any;
+
+    it('puts youtube first, ahead of the html5 that plays every HLS source', () => {
+        const player = playerWith(['html5']);
+
+        preferYouTubeTech(player);
+
+        expect(player.options_.techOrder).toEqual([YOUTUBE_TECH, 'html5']);
     });
 
-    it('keeps html5, which is what plays every HLS source', () => {
-        expect(order()).toContain('html5');
+    it('changes nothing on a second call', () => {
+        const player = playerWith(['html5']);
+        preferYouTubeTech(player);
+        const first = player.options_.techOrder;
+
+        preferYouTubeTech(player);
+
+        expect(player.options_.techOrder).toBe(first);
     });
 
-    it('offers youtube first, which costs HLS nothing — its tech claims only video/youtube', () => {
-        expect(order()[0]).toBe('youtube');
+    it('moves youtube to the front rather than listing it twice', () => {
+        const player = playerWith(['html5', YOUTUBE_TECH]);
+
+        preferYouTubeTech(player);
+
+        expect(player.options_.techOrder).toEqual([YOUTUBE_TECH, 'html5']);
+    });
+
+    it('replaces the order rather than editing it', () => {
+        // A player nobody configured holds video.js's shared default array.
+        const shared = ['html5'];
+
+        preferYouTubeTech(playerWith(shared));
+
+        expect(shared).toEqual(['html5']);
     });
 });

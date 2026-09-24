@@ -43,7 +43,7 @@ import { BlobServeStrategy } from '../serve/BlobServeStrategy';
 import { usePlayerState } from '../composables/usePlayerState';
 import { mergeMessages, type PlayerMessages } from '../messages';
 import { mergeControls, type PlayerControlsOptions } from '../controls';
-import { buildVideoJsOptions } from '../vjs/playerOptions';
+import { buildVideoJsOptions, preferYouTubeTech } from '../vjs/playerOptions';
 import { installAutoHide } from '../vjs/autoHide';
 import { TRANSPARENT_POSTER } from '../vjs/poster';
 import { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from '../vjs/keepAlive';
@@ -319,6 +319,7 @@ async function loadSource(source: PlayerSource): Promise<void> {
         }
         await ensureYouTubeTech();
         if (superseded()) return;
+        preferYouTubeTech(instance);
         instance.src({ type: 'video/youtube', src: toVideoJsYouTubeUrl(source.masterUrl) });
         return;
     }
