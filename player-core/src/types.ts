@@ -555,6 +555,20 @@ export interface PlayerAdapter {
     /** `'auto'` re-enables ABR. */
     setVariant(id: string | 'auto'): void;
 
+    /**
+     * The audio tracks of the source the engine was last handed; empty until
+     * it has them.
+     *
+     * From the moment `loadSource` or `reattach()` replaces the source, any
+     * list the engine still holds is the outgoing source's: report no tracks,
+     * and ignore `setAudioTrack`, until the new source's arrive. Announce the
+     * empty list with `audiotracks-updated` — the wrapper hears of a
+     * `reattach()` no other way. A track selected in the outgoing list is
+     * loaded by an engine about to be torn down, from playlist URLs the wrapper
+     * may already have released; and the empty list is how the wrapper knows
+     * the engine is rebuilding with its own default selected, so that it hands
+     * a viewer's choice back.
+     */
     getAudioTracks(): AdapterAudioTrack[];
     setAudioTrack(id: string): void;
 
@@ -615,7 +629,9 @@ export interface PlayerAdapter {
      *    finer sampling buys nothing.
      * 8. **Stop** on an empty-schedules call, when a new source replaces the
      *    current one, and on `destroy()` — a loop outliving its source warms
-     *    chunks nothing is going to play.
+     *    chunks nothing is going to play. It MAY also stop once every warmable
+     *    boundary (each whose `url` differs from the one before it, a chain's
+     *    first excepted) has been warmed: rule 3 leaves nothing more to do.
      *
      * The loop is deliberately adapter work rather than wrapper work: a JS
      * interval is throttled — or suspended outright — once the page or app is
@@ -696,6 +712,12 @@ export interface PlayerControllerApi {
     setAngle(id: string): Promise<void>;
     /** Pins a rendition within the capped set; `'auto'` re-enables ABR. No reload. */
     setQuality(id: string | 'auto'): void;
+    /**
+     * Selects an audio track and keeps it selected until the next `load()`.
+     * An angle switch, the audio toggle and a recovery re-attach each rebuild
+     * the engine's track list with the stream's default in it; the choice is
+     * handed back every time.
+     */
     setAudioTrack(id: string): void;
     /** null = subtitles off. */
     setSubtitleTrack(id: string | null): void;

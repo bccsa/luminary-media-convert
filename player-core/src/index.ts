@@ -25,8 +25,12 @@ export {
 export { parseVttCues, parseVttTimestamp } from './vtt.js';
 
 // Liveness, and the plain-data spec a native serving layer refreshes from.
-export { describeLiveness } from './policy/live.js';
-export type { Liveness, LivePlaylistSpec } from './policy/live.js';
+export { describeLiveness, resolveLivePlaylist } from './policy/live.js';
+export type {
+    Liveness,
+    LivePlaylistSpec,
+    ResolveLiveOptions,
+} from './policy/live.js';
 
 // Pipeline — the deliberately public, pure pieces. The blob-backed
 // `ServeStrategy` is NOT among them: it lives in the player packages, because
@@ -64,7 +68,9 @@ export type {
     MungedMediaPlaylist,
     MungedSource,
     PipelineContext,
+    ServeMemo,
 } from './pipeline/pipeline.js';
+export type { MediaPlaylistScan, SegmentRun } from './pipeline/media-scan.js';
 export {
     applyQualityCap,
     listQualities,

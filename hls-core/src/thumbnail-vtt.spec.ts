@@ -90,4 +90,35 @@ describe('parseThumbnailVtt', () => {
             'https://cdn.example.com/out/sprite_0.jpg',
         );
     });
+
+    it('finds every cue whatever the line endings', () => {
+        // Cue blocks are split on blank lines, and a CRLF file has no `\n\n`
+        // in it: read as written, the whole file was one block and only its
+        // first cue was ever found — no preview past the first ten seconds.
+        const lines = [
+            'WEBVTT',
+            '',
+            '00:00:00.000 --> 00:00:10.000',
+            'sprite_0.jpg#xywh=0,0,160,90',
+            '',
+            '00:00:10.000 --> 00:00:20.000',
+            'sprite_0.jpg#xywh=160,0,160,90',
+            '',
+        ];
+
+        for (const newline of ['\n', '\r\n', '\r']) {
+            const parsed = parseThumbnailVtt(
+                lines.join(newline),
+                'https://cdn.example.com/out',
+            );
+
+            expect(parsed.map((c) => [c.startTime, c.endTime, c.x])).toEqual([
+                [0, 10, 0],
+                [10, 20, 160],
+            ]);
+            expect(parsed[1]?.spriteUrl).toBe(
+                'https://cdn.example.com/out/sprite_0.jpg',
+            );
+        }
+    });
 });

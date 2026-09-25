@@ -2,6 +2,7 @@
     "name": "@luminary-media-converter/player-web",
     "version": "0.0.1",
     "private": true,
+    "description": "Deprecated: the hls.js web player, superseded by @luminary-media-converter/player-web-legacy. Kept building for the encoder app until it moves.",
     "license": "Apache-2.0",
     "type": "module",
     "main": "./dist/index.js",

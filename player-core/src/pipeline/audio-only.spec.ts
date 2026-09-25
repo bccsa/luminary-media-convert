@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { parseMasterPlaylist } from '@luminary-media-converter/hls-core';
 import {
     buildAudioOnlyMaster,
+    canRenderAudioOnly,
     hasAudioOnlyRendering,
     isAudioOnlyMaster,
     referencedPlaylistUris,
@@ -57,5 +59,41 @@ describe('audio-only pseudo-angle', () => {
     it('recognizes a natively audio-only master', () => {
         expect(isAudioOnlyMaster(AUDIO_ONLY_MASTER)).toBe(true);
         expect(isAudioOnlyMaster(SIMPLE_MASTER)).toBe(false);
+    });
+
+    it('is offered exactly when an audio-only master can be built', () => {
+        // Asked of the model rather than built and thrown away — which makes
+        // agreeing with the build the whole of what the question must do.
+        const muxedAudio = [
+            '#EXTM3U',
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",DEFAULT=YES',
+            '#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720,AUDIO="aud"',
+            'v720/playlist.m3u8',
+            '',
+        ].join('\n');
+        const noGroup = [
+            '#EXTM3U',
+            '#EXT-X-MEDIA:TYPE=AUDIO,NAME="English",URI="audio/playlist.m3u8"',
+            '#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720',
+            'v720/playlist.m3u8',
+            '',
+        ].join('\n');
+
+        for (const master of [
+            MULTI_ANGLE_MASTER,
+            SIMPLE_MASTER,
+            AUDIO_ONLY_MASTER,
+            muxedAudio,
+            noGroup,
+        ]) {
+            const buildable = buildAudioOnlyMaster(master) !== null;
+            expect(hasAudioOnlyRendering(master)).toBe(buildable);
+            expect(canRenderAudioOnly(parseMasterPlaylist(master))).toBe(
+                buildable,
+            );
+        }
+        // Audio muxed into the video has no rendition of its own to promote.
+        expect(hasAudioOnlyRendering(muxedAudio)).toBe(false);
+        expect(hasAudioOnlyRendering(noGroup)).toBe(false);
     });
 });

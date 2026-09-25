@@ -19,6 +19,7 @@ import {
     type MasterInfo,
     type MungeResult,
     type PipelineContext,
+    type ServeMemo,
 } from './pipeline/pipeline.js';
 import { sortQualities, toQuality } from './pipeline/quality-cap.js';
 import { Poller } from './poller.js';
@@ -36,6 +37,7 @@ import { StateStore, createInitialState } from './store.js';
 import {
     AUDIO_ONLY_ANGLE_ID,
     type AdapterErrorPayload,
+    type AdapterTextTrack,
     type Angle,
     type ChunkWarmOptions,
     type PlayerAdapter,
@@ -114,6 +116,33 @@ export class PlayerController implements PlayerControllerApi {
     private source: PlayerSource | null = null;
     private master: MasterInfo | null = null;
     private cache = new Map<string, string>();
+    /** What this source has served; see {@link ServeMemo}. */
+    private served: ServeMemo = { playlists: new Map() };
+    /**
+     * The sidecar subtitles handed to the adapter for this source. An adapter
+     * drops its text tracks with the source they belong to, on every
+     * `loadSource`, so each attach after the first has to hand them back.
+     */
+    private sidecarTextTracks: AdapterTextTrack[] = [];
+    /**
+     * The audio track somebody chose through {@link setAudioTrack} — a host's
+     * selector, a viewer's pick relayed from the engine's own menu, a
+     * preferred-language rule. Null until somebody chooses; cleared by
+     * `load()`, since a new source is a new decision.
+     *
+     * Kept apart from `activeAudioTrackId` because it has to outlive the
+     * engine's track list. Every attach after the first — an angle switch, the
+     * audio toggle, a re-munge — hands the engine a new source, so does an
+     * adapter's own `reattach()`, and each rebuilds the list with the stream's
+     * default selected in it.
+     */
+    private chosenAudioTrackId: string | null = null;
+    /**
+     * The choice has yet to reach the engine's current list: it was made while
+     * the list did not carry it, or the list has been torn down since. Cleared
+     * when a list carrying it arrives and it is handed back.
+     */
+    private audioChoicePending = false;
     private qualityToVariant = new Map<string, string>();
     private startPosition = 0;
     private resumePlaying = false;
@@ -152,7 +181,13 @@ export class PlayerController implements PlayerControllerApi {
         this.startPosition = preserved;
         this.resumePlaying = resume;
         this.chapterTrackPinned = false;
+        this.chosenAudioTrackId = null;
+        this.audioChoicePending = false;
         this.cache = new Map();
+        // `teardownSource` above released every URL the last source was
+        // served at, so nothing it memoized can be handed out again.
+        this.served = { playlists: new Map() };
+        this.sidecarTextTracks = [];
         this.qualityToVariant = new Map();
         // Cleared here, not only when the next set arrives: a load that fails
         // before its sidecars would otherwise leave the previous video's frames
@@ -305,6 +340,12 @@ export class PlayerController implements PlayerControllerApi {
         });
         if (generation !== this.generation) return;
 
+        // The adapter dropped the sidecar subtitles with the source it just
+        // replaced. Empty on a first attach: they are loaded after it.
+        if (this.sidecarTextTracks.length > 0) {
+            this.adapter.setTextTracks(this.sidecarTextTracks);
+        }
+
         // The narrowed master references only this angle's renditions plus the
         // audio group, so the schedules built from it are exactly the chains
         // playback is about to pull — an angle switch comes back through here
@@ -343,6 +384,7 @@ export class PlayerController implements PlayerControllerApi {
             );
             if (generation !== this.generation) return;
             if (adapterTracks.length > 0) {
+                this.sidecarTextTracks = adapterTracks;
                 this.adapter.setTextTracks(adapterTracks);
                 this.store.setState({
                     subtitleTracks: [...info.subtitleTracks, ...tracks],
@@ -447,6 +489,12 @@ export class PlayerController implements PlayerControllerApi {
     }
 
     setAudioTrack(id: string): void {
+        this.chosenAudioTrackId = id;
+        // A list that does not carry it yet — the engine's has not arrived, or
+        // is being rebuilt — gets it handed over once it does.
+        this.audioChoicePending = !this.adapter
+            .getAudioTracks()
+            .some((track) => track.id === id);
         this.adapter.setAudioTrack(id);
         this.store.setState({ activeAudioTrackId: id });
         if (!this.chapterTrackPinned) {
@@ -512,6 +560,7 @@ export class PlayerController implements PlayerControllerApi {
             keyHex: this.source?.keyHex,
             subtle: this.subtle,
             cache: this.cache,
+            served: this.served,
         };
     }
 
@@ -630,23 +679,59 @@ export class PlayerController implements PlayerControllerApi {
 
     private refreshAudioTracks(): void {
         const tracks = this.adapter.getAudioTracks();
-        if (tracks.length === 0) return;
+        if (tracks.length === 0) {
+            // The engine tore its list down, and the one it builds next has
+            // its own default selected. See `PlayerAdapter.getAudioTracks`.
+            if (this.chosenAudioTrackId !== null) this.audioChoicePending = true;
+            return;
+        }
 
         const mapped = tracks.map((track) => ({
             id: track.id,
             lang: track.lang,
             label: track.label,
         }));
+        const chosen = this.chosenAudioTrackId;
+        const chosenListed =
+            chosen !== null && mapped.some((track) => track.id === chosen);
+        if (this.audioChoicePending && chosenListed) {
+            this.audioChoicePending = false;
+            this.handBackAudioChoice(chosen);
+        }
         if (sameIds(mapped, this.state.audioTracks)) return;
 
-        const active = mapped.some(
-            (track) => track.id === this.state.activeAudioTrackId,
-        )
-            ? this.state.activeAudioTrackId
-            : (mapped[0]?.id ?? null);
+        const active = chosenListed
+            ? chosen
+            : mapped.some((track) => track.id === this.state.activeAudioTrackId)
+              ? this.state.activeAudioTrackId
+              : (mapped[0]?.id ?? null);
         this.store.setState({
             audioTracks: mapped,
             activeAudioTrackId: active,
+        });
+    }
+
+    /**
+     * Selects the chosen track again in a list the engine has just rebuilt.
+     *
+     * A microtask late rather than now, because this runs while the engine is
+     * still announcing its tracks: video.js announces each one before it starts
+     * listening to it, so a track enabled from inside the announcement is
+     * enabled without the list — or VHS — ever hearing of it, and the default
+     * plays on with both marked enabled. By the next microtask the list is
+     * whole and listening.
+     */
+    private handBackAudioChoice(id: string): void {
+        const generation = this.generation;
+        void Promise.resolve().then(() => {
+            if (generation !== this.generation) return;
+            // A newer choice selected itself. A list torn down again in the
+            // meantime is pending again, and its rebuild hands this back.
+            if (this.chosenAudioTrackId !== id) return;
+            if (!this.adapter.getAudioTracks().some((track) => track.id === id)) {
+                return;
+            }
+            this.adapter.setAudioTrack(id);
         });
     }
 

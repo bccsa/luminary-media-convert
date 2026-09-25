@@ -27,6 +27,10 @@
  * instead, and `seek` is exposed to move to a saved one. That surface is the
  * same in both modes, which is what lets a host persist a resume point without
  * caring which engine is behind the picture. Legacy-only.
+ *
+ * A YouTube player that cannot load raises the same error panel (and `error`
+ * slot) as the pipeline does, as a `network` error: a network blocking YouTube,
+ * or Google's unusual-traffic block, which WebKit turns into a redirect loop.
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import videojs from 'video.js';
@@ -43,10 +47,11 @@ import { BlobServeStrategy } from '../serve/BlobServeStrategy';
 import { usePlayerState } from '../composables/usePlayerState';
 import { mergeMessages, type PlayerMessages } from '../messages';
 import { mergeControls, type PlayerControlsOptions } from '../controls';
-import { buildVideoJsOptions } from '../vjs/playerOptions';
+import { buildVideoJsOptions, preferYouTubeTech } from '../vjs/playerOptions';
 import { installAutoHide } from '../vjs/autoHide';
 import { TRANSPARENT_POSTER } from '../vjs/poster';
 import { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from '../vjs/keepAlive';
+import { retryYouTubeApi, watchYouTubeApi, whenYouTubeApiSettles } from '../vjs/youtubeApi';
 import { findPreferredTrack } from '../audioTrackLanguage';
 import { isYouTubeUrl, toVideoJsYouTubeUrl } from '../youtube';
 import { singleFlight } from '../singleFlight';
@@ -219,12 +224,19 @@ function mediaElement(instance: Player): HTMLVideoElement {
 
 function defaultCreateController(video: HTMLVideoElement): PlayerControllerApi {
     void video;
-    return new PlayerController(new VideoJsAdapter(player.value!), {
-        // The web's serving layer, supplied rather than defaulted: `player-core`
-        // is headless and cannot mint a URL on anyone's behalf. A host may name
-        // its own — which is how a native shell substitutes a loopback server.
-        serveStrategy: new BlobServeStrategy(),
+    // The web's serving layer, supplied rather than defaulted: `player-core`
+    // is headless and cannot mint a URL on anyone's behalf. A host may name
+    // its own — which is how a native shell substitutes a loopback server.
+    // The adapter answers the live URIs this one mints, so it is handed the
+    // same instance; a host-supplied strategy answers its own.
+    const serveStrategy =
+        props.controllerOptions?.serveStrategy ??
+        new BlobServeStrategy({ fetchImpl: props.controllerOptions?.fetchImpl });
+    const liveSource =
+        serveStrategy instanceof BlobServeStrategy ? serveStrategy : undefined;
+    return new PlayerController(new VideoJsAdapter(player.value!, { liveSource }), {
         ...props.controllerOptions,
+        serveStrategy,
     });
 }
 
@@ -260,6 +272,8 @@ const importYouTubeTech = singleFlight(() => import('videojs-youtube'));
  * video.js report an unplayable source, which is the honest outcome.
  */
 async function ensureYouTubeTech(): Promise<void> {
+    // Before the import, which is what starts the plugin loading the API.
+    watchYouTubeApi();
     try {
         await importYouTubeTech();
     } catch {
@@ -304,15 +318,23 @@ async function loadSource(source: PlayerSource): Promise<void> {
 
     const generation = ++loadGeneration;
     const superseded = (): boolean => generation !== loadGeneration || player.value !== instance;
+    youtubeError.value = null;
 
     if (isYouTubeUrl(source.masterUrl)) {
         if (controller.value) {
             controller.value.destroy();
             controller.value = null;
         }
+        // A new YouTube source, or the error panel's retry, tries the API
+        // again if it failed; the queued player is handed it if it loads.
+        retryYouTubeApi();
         await ensureYouTubeTech();
         if (superseded()) return;
+        preferYouTubeTech(instance);
         instance.src({ type: 'video/youtube', src: toVideoJsYouTubeUrl(source.masterUrl) });
+        if ((await whenYouTubeApiSettles()) === 'failed' && !superseded()) {
+            youtubeError.value = YOUTUBE_API_FAILED;
+        }
         return;
     }
 
@@ -392,14 +414,23 @@ watch([() => props.source, () => props.preferredLanguage], () => {
  *
  * A switch *to* the preferred language is not an override; it is agreement, and
  * suspending on it would give up on re-asserting the preference for no reason.
+ *
+ * Nor is an active track that arrives with a new track list. The controller
+ * publishes every list together with its own pick from it — the master's first
+ * track on load, the engine's first once VHS has built its own — and that is a
+ * default, not a choice. Counting it suspended the auto-apply on every load
+ * before it had run once, because this watcher is declared ahead of the one
+ * that applies and so saw the default first. Only a change among the tracks
+ * already on offer is somebody's selection.
  */
 watch(
-    () => state.value.activeAudioTrackId,
-    (id) => {
+    [() => state.value.activeAudioTrackId, () => state.value.audioTracks],
+    ([id, tracks], [, previousTracks]) => {
+        if (tracks !== previousTracks) return;
         if (preferredSuspended || !id) return;
         const preferred = props.preferredLanguage;
         if (!preferred || id === autoAppliedTrackId) return;
-        if (id === findPreferredTrack(state.value.audioTracks, preferred)) return;
+        if (id === findPreferredTrack(tracks, preferred)) return;
         preferredSuspended = true;
     },
 );
@@ -611,8 +642,25 @@ const ERROR_MESSAGE_KEYS: Partial<Record<PlayerError['code'], keyof PlayerMessag
     media: 'errorMedia',
 };
 
+/**
+ * A YouTube source whose player could not load: the iframe API never arrived,
+ * so what is behind the panel is waiting for something that is not coming. In
+ * YouTube mode there is no controller whose state could say so, and without
+ * this the viewer saw a dead player with no explanation.
+ */
+const YOUTUBE_API_FAILED: PlayerError = {
+    code: 'network',
+    fatal: true,
+    message: 'The YouTube iframe API could not be loaded',
+};
+
+const youtubeError = shallowRef<PlayerError | null>(null);
+
+/** The error on screen, whichever mode raised it. */
+const displayedError = computed(() => youtubeError.value ?? state.value.error);
+
 const errorText = computed(() => {
-    const code = state.value.error?.code;
+    const code = displayedError.value?.code;
     const key = code ? ERROR_MESSAGE_KEYS[code] : undefined;
     return key ? msg.value[key] : msg.value.errorGeneric;
 });
@@ -798,8 +846,8 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
             </slot>
         </template>
 
-        <template v-else-if="state.lifecycle === 'error'">
-            <slot name="error" :state="state" :error="state.error" :retry="retry">
+        <template v-else-if="state.lifecycle === 'error' || youtubeError">
+            <slot name="error" :state="state" :error="displayedError" :retry="retry">
                 <div class="lmpl-panel lmpl-error">
                     <p class="lmpl-panel-text">{{ errorText }}</p>
                     <button type="button" class="lmpl-btn lmpl-retry" @click="retry">

@@ -35,6 +35,9 @@ export function fakePlayer(overrides: Record<string, unknown> = {}) {
     });
 
     const player: Record<string, unknown> = {
+        // What video.js keeps its construction options in, starting from the
+        // order `buildVideoJsOptions` gives it; `preferYouTubeTech` edits it.
+        options_: { techOrder: ['html5'] },
         _levels: levels,
         _time: 0,
         _error: undefined as unknown,

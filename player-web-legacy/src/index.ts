@@ -11,7 +11,15 @@ export { default as AudioVideoToggle } from './components/AudioVideoToggle.vue';
 // The web's serving layer. `player-core` requires one and defaults to nothing,
 // so a host building its own controller needs this — and a native shell
 // implements `ServeStrategy` in its place.
-export { BlobServeStrategy } from './serve/BlobServeStrategy';
+export {
+    BlobServeStrategy,
+    type BlobServeStrategyOptions,
+} from './serve/BlobServeStrategy';
+export {
+    LIVE_PLAYLIST_URI_PREFIX,
+    isLivePlaylistUri,
+    type LivePlaylistSource,
+} from './serve/livePlaylistUri';
 
 export {
     VideoJsAdapter,
@@ -20,12 +28,13 @@ export {
     type VideoJsAdapterOptions,
 } from './adapter/VideoJsAdapter';
 
-// The VHS request-factory seam and the two policies on it. Exported because
+// The VHS request-factory seam and the policies on it. Exported because
 // they are the pieces most likely to need swapping out if a video.js upgrade
 // moves VHS's request factory — see the README's note on flipping
 // `keyDelivery` to 'url'.
 export { wrapVhsXhr, vhsHandler, vhsTech } from './adapter/vhsXhrSeam';
 export { installMemoryKeyXhr } from './adapter/vhsKeyInterceptor';
+export { installLivePlaylistXhr } from './adapter/vhsLivePlaylistInterceptor';
 export {
     installByteRangeTimeout,
     byteRangeBackstopMs,
@@ -80,11 +89,15 @@ export { usePlayerState } from './composables/usePlayerState';
 
 // The video.js construction options and the pieces of the skin that are
 // behaviour rather than CSS. A host embedding the player through its own
-// video.js instance builds the same options from the same function.
+// video.js instance builds the same options from the same function — and, as
+// `LuminaryPlayer` does, calls `preferYouTubeTech` before setting a YouTube
+// source, since the options list only the tech that is always loaded.
 export {
     buildVideoJsOptions,
+    preferYouTubeTech,
     snapSkipSeconds,
     SKIP_ICON_SECONDS,
+    YOUTUBE_TECH,
     type VideoJsOptions,
 } from './vjs/playerOptions';
 export { installAutoHide, AUTO_HIDE_MS } from './vjs/autoHide';

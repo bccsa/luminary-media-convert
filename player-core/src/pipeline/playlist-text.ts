@@ -1,11 +1,12 @@
 /**
  * Playlist introspection for the munging pipeline.
  *
- * Every function here is a pure view over the lossless model in
+ * Every master-playlist function here is a pure view over the lossless model in
  * `@luminary-media-converter/hls-core`: parse → inspect (or edit the model) →
- * build. Nothing in this package reads a playlist line by line any more, so
- * unknown tags, unknown attributes, attribute order and the exact numeric
- * spelling of a duration all survive a munge untouched.
+ * build, so unknown tags, unknown attributes, attribute order and the exact
+ * numeric spelling of a duration all survive a munge untouched. Media playlists
+ * are only ever read here, never rebuilt, and are read through the one-pass
+ * scan in `media-scan.ts`, which follows the model's rules without its cost.
  *
  * The entry types below are a narrow projection of the model, shaped for what
  * the pipeline actually asks: `height` rather than `resolutionParsed`,
@@ -18,11 +19,11 @@
 import {
     buildMasterPlaylist,
     parseMasterPlaylist,
-    parseMediaPlaylist,
     type HlsMedia,
     type HlsParsedMaster,
     type HlsVariant,
 } from '@luminary-media-converter/hls-core';
+import { scanMediaPlaylist, type MediaPlaylistScan } from './media-scan.js';
 
 // ---------------------------------------------------------------------------
 // Attribute helpers
@@ -112,7 +113,11 @@ export interface ParsedMasterText {
  * variant, media or I-frame entry and is correctly rejected.
  */
 export function isMasterPlaylistText(text: string): boolean {
-    const master = parseMasterPlaylist(text);
+    return isMasterModel(parseMasterPlaylist(text));
+}
+
+/** {@link isMasterPlaylistText} against a model the caller already parsed. */
+export function isMasterModel(master: HlsParsedMaster): boolean {
     return (
         master.variants.length > 0 ||
         master.media.length > 0 ||
@@ -121,7 +126,11 @@ export function isMasterPlaylistText(text: string): boolean {
 }
 
 export function parseMasterText(text: string): ParsedMasterText {
-    const master = parseMasterPlaylist(text);
+    return projectMaster(parseMasterPlaylist(text));
+}
+
+/** {@link parseMasterText} over a model the caller already parsed. */
+export function projectMaster(master: HlsParsedMaster): ParsedMasterText {
     return {
         master,
         media: master.media.map(toMediaEntry),
@@ -218,7 +227,11 @@ export function substituteMasterRefs(
 
 /** True when the master (or any playlist) declares at least one video variant. */
 export function hasVideoVariants(text: string): boolean {
-    const master = parseMasterPlaylist(text);
+    return masterHasVideo(parseMasterPlaylist(text));
+}
+
+/** {@link hasVideoVariants} against a model the caller already parsed. */
+export function masterHasVideo(master: HlsParsedMaster): boolean {
     if (master.videoGroups.length > 0) return true;
     return master.variants.some(
         (v) => v.resolutionParsed !== undefined || v.videoGroup !== undefined,
@@ -231,12 +244,21 @@ export function hasVideoVariants(text: string): boolean {
 
 /** True when a media playlist declares an AES-128 key (i.e. `METHOD` ≠ NONE). */
 export function hasAes128Key(text: string): boolean {
-    return parseMediaPlaylist(text).keys.some((key) => key.method !== 'NONE');
+    return scanMediaPlaylist(text).hasAes128Key;
 }
 
 /** Every segment URI of a media playlist, exactly as written. */
 export function listSegmentUris(text: string): string[] {
-    return parseMediaPlaylist(text).segments.map((segment) => segment.uri);
+    return segmentUris(scanMediaPlaylist(text));
+}
+
+/** {@link listSegmentUris} from a scan the caller already made. */
+export function segmentUris(scan: MediaPlaylistScan): string[] {
+    const uris: string[] = [];
+    for (const run of scan.runs) {
+        for (let i = 0; i < run.count; i++) uris.push(run.uri);
+    }
+    return uris;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +294,54 @@ export function absolutize(uri: string, base: string): string {
             }
         }
         return uri;
+    }
+}
+
+/**
+ * {@link absolutize} against one base, for a whole playlist's worth of URIs.
+ *
+ * It remembers the last URI it resolved. Byte-range output names the same
+ * chunk object on a hundred or so consecutive segments, so a playlist that
+ * would cost one URL parse per segment costs one per chunk — the difference
+ * between a thousand parses and a dozen on a two-hour rendition. Still plain
+ * string work: a last-value memo ports to Swift and Kotlin with the rewrite.
+ */
+export function absolutizeAgainst(base: string): (uri: string) => string {
+    let lastUri: string | undefined;
+    let lastAbsolute = '';
+    return (uri) => {
+        if (uri !== lastUri) {
+            lastAbsolute = absolutize(uri, base);
+            lastUri = uri;
+        }
+        return lastAbsolute;
+    };
+}
+
+/**
+ * `url` anchored to the document when it is relative and there is a document to
+ * anchor it to; otherwise exactly as given.
+ *
+ * For the one URL a host hands over: the master's. Everything its playlists
+ * name resolves against it, and a relative base sends each of those through
+ * {@link absolutize}'s fallback — a TypeError thrown and caught per URI, which
+ * for a media playlist served as the source is one per segment. Resolving it
+ * here gives the same answer `fetch` would, once. An absolute URL is returned
+ * as written, not normalized, because it also keys the playlist cache.
+ */
+export function anchorToDocument(url: string): string {
+    try {
+        new URL(url);
+        return url;
+    } catch {
+        if (typeof document !== 'undefined' && document.baseURI) {
+            try {
+                return new URL(url, document.baseURI).href;
+            } catch {
+                /* fall through */
+            }
+        }
+        return url;
     }
 }
 

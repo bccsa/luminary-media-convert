@@ -11,6 +11,7 @@
 import {
     extractAudioOnlyPlaylist,
     parseMasterPlaylist,
+    type HlsParsedMaster,
 } from '@luminary-media-converter/hls-core';
 import { hasVideoVariants } from './playlist-text.js';
 
@@ -24,7 +25,19 @@ export function buildAudioOnlyMaster(masterText: string): string | null {
 
 /** True when an audio-only rendering can be derived from this master. */
 export function hasAudioOnlyRendering(masterText: string): boolean {
-    return extractAudioOnlyPlaylist(masterText) !== null;
+    return canRenderAudioOnly(parseMasterPlaylist(masterText));
+}
+
+/**
+ * {@link hasAudioOnlyRendering} against a model the caller already parsed.
+ *
+ * Asked rather than attempted: {@link buildAudioOnlyMaster} returns a playlist
+ * exactly when some audio rendition names both a group and a URI, and building
+ * and serializing a whole master only to compare it with `null` is the long
+ * way to find that out.
+ */
+export function canRenderAudioOnly(master: HlsParsedMaster): boolean {
+    return master.audioGroups.some((entry) => !!entry.groupId && !!entry.uri);
 }
 
 /**

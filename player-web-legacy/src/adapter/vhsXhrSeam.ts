@@ -42,7 +42,9 @@ const HOOK_CALLBACK_SETS = ['_requestCallbackSet', '_responseCallbackSet'] as co
 /** The tech currently driving the player, or null before one exists. */
 export function vhsTech(player: Player): Tech | null {
     try {
-        return player.tech({ IWillNotUseThisInPlugins: true }) ?? null;
+        // `||`, not `??`: between unloading one tech and being handed the next,
+        // video.js reports `false`.
+        return player.tech({ IWillNotUseThisInPlugins: true }) || null;
     } catch {
         // tech() throws before a tech exists; treat it as "nothing yet".
         return null;

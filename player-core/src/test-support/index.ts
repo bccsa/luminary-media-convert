@@ -14,6 +14,7 @@ import type {
     AdapterSource,
     ChunkBoundary,
     ChunkWarmOptions,
+    LivePlaylistSpec,
     PlayerAdapter,
     ServeStrategy,
     Unsubscribe,
@@ -119,6 +120,22 @@ export const PLAIN_MEDIA_PLAYLIST = [
     '',
 ].join('\n');
 
+/**
+ * A live media playlist: a sliding window with no `#EXT-X-ENDLIST`, relative
+ * `.ts` segments, the shape a live packager rewrites every target duration.
+ */
+export const LIVE_MEDIA_PLAYLIST = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:3',
+    '#EXT-X-TARGETDURATION:4',
+    '#EXT-X-MEDIA-SEQUENCE:87996',
+    '#EXTINF:4,',
+    'l_87996.ts',
+    '#EXTINF:4,',
+    'l_87997.ts',
+    '',
+].join('\n');
+
 /** Subtitles media playlist referencing WebVTT segments. */
 export const SUBTITLE_MEDIA_PLAYLIST = [
     '#EXTM3U',
@@ -221,6 +238,20 @@ export class FakeServeStrategy implements ServeStrategy {
     }
 }
 
+/**
+ * A {@link FakeServeStrategy} that can also serve live playlists, recording the
+ * spec of each one it is handed.
+ */
+export class FakeLiveServeStrategy extends FakeServeStrategy {
+    readonly liveSpecs: LivePlaylistSpec[] = [];
+    private liveCounter = 0;
+
+    serveLive(spec: LivePlaylistSpec): string {
+        this.liveSpecs.push(spec);
+        return `fake:live/${++this.liveCounter}`;
+    }
+}
+
 export type RouteBody =
     | string
     | Uint8Array
@@ -249,6 +280,44 @@ export function makeFetch(routes: Record<string, RouteBody>): FakeFetch {
     }) as unknown as typeof fetch;
 
     return { fetchImpl, calls, routes: table };
+}
+
+export interface DeferredFetch {
+    fetchImpl: typeof fetch;
+    /** URLs requested so far, in the order the requests were made. */
+    calls: string[];
+    /** Answer the pending request for `url`. Throws when none is pending. */
+    respond(url: string, route: RouteBody): void;
+}
+
+/**
+ * `fetch` whose requests stay pending until the spec answers them — one at a
+ * time, in any order — for pinning what happens while reads are in flight.
+ */
+export function makeDeferredFetch(): DeferredFetch {
+    const calls: string[] = [];
+    const pending = new Map<string, (response: Response) => void>();
+
+    const fetchImpl = ((input: RequestInfo | URL) => {
+        const url = String(input);
+        calls.push(url);
+        return new Promise<Response>((resolve) => pending.set(url, resolve));
+    }) as unknown as typeof fetch;
+
+    return {
+        fetchImpl,
+        calls,
+        respond(url, route) {
+            const resolve = pending.get(url);
+            if (!resolve) throw new Error(`No request pending for ${url}`);
+            pending.delete(url);
+            resolve(
+                typeof route === 'string' || route instanceof Uint8Array
+                    ? makeResponse(200, route)
+                    : makeResponse(route.status, route.body),
+            );
+        },
+    };
 }
 
 function makeResponse(status: number, body?: string | Uint8Array): Response {
@@ -322,6 +391,14 @@ export class FakeAdapter implements PlayerAdapter {
 
     async loadSource(src: AdapterSource): Promise<void> {
         this.loads.push(src);
+        // As both real adapters do: text tracks belong to the source, and a new
+        // source takes them away. A fake that kept them would hide a wrapper
+        // that forgot to hand them back.
+        this.textTracks = [];
+        // Audio tracks too, by contract: none until the engine lists the new
+        // source's (`publishAudioTracks`), with its own default selected. A fake
+        // that kept them hid a wrapper that never handed a choice back.
+        this.audioTracks = [];
     }
 
     destroy(): void {
@@ -397,9 +474,14 @@ export class FakeAdapter implements PlayerAdapter {
      * against the source it holds; there is no engine here, so this records the
      * call — what a controller spec can assert is that the wrapper never makes
      * it, the adapter's ladder does.
+     *
+     * The audio tracks go as they do on a load, and the emptied list is
+     * announced: by contract that is the only way the wrapper learns of it.
      */
     async reattach(): Promise<void> {
         this.reattachCount += 1;
+        this.audioTracks = [];
+        this.emit('audiotracks-updated', undefined);
     }
 
     /**

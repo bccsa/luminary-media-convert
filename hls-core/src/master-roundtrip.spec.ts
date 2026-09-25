@@ -83,6 +83,25 @@ describe('master playlist round-trip', () => {
         expect(buildMasterPlaylist(parsed)).toContain('FRAME-RATE=29.970');
     });
 
+    it('writes a quoted flag back in the spec spelling, in place, rather than dropping it', () => {
+        // DEFAULT="YES" used to be unreadable to the model, and a modelled
+        // attribute the model does not hold is not written back — so every
+        // rebuild (the player's munge, an HLS edit) silently deleted the only
+        // default rendition. Unquoted is the spelling the spec defines and the
+        // one a strict parser matches literally.
+        const text = [
+            '#EXTM3U',
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",CHANNELS="2",NAME="English",LANGUAGE="eng",DEFAULT="YES",AUTOSELECT="YES",URI="audio/eng.m3u8"',
+            '#EXT-X-STREAM-INF:BANDWIDTH=825000,RESOLUTION=640x360,AUDIO="aud"',
+            'video/360.m3u8',
+            '',
+        ].join('\n');
+
+        expect(buildMasterPlaylist(parseMasterPlaylist(text))).toBe(
+            text.replace('DEFAULT="YES",AUTOSELECT="YES"', 'DEFAULT=YES,AUTOSELECT=YES')
+        );
+    });
+
     it('preserves the source attribute order rather than imposing its own', () => {
         const text = [
             '#EXTM3U',

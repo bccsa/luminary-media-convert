@@ -3,11 +3,12 @@
  * this player exists to be visually and behaviourally indistinguishable from
  * it, and the options object is half of that (the other half is `styles.css`).
  *
- * Two deliberate departures from the app's literal object are noted at their
- * lines: the bogus `skipBackwardButton` child, and `IS_ANY_SAFARI` in place of
- * `IS_SAFARI`.
+ * Three deliberate departures from the app's literal object are noted at their
+ * lines: the bogus `skipBackwardButton` child, `IS_ANY_SAFARI` in place of
+ * `IS_SAFARI`, and `cacheEncryptionKeys`, which changes nothing a viewer sees.
  */
 import videojs from 'video.js';
+import type Player from 'video.js/dist/types/player';
 import type { PlayerControlsOptions } from '../controls';
 
 /**
@@ -29,6 +30,7 @@ export interface VideoJsOptions {
             maxPlaylistRetries: number;
             useBandwidthFromLocalStorage: boolean;
             useDevicePixelRatio: boolean;
+            cacheEncryptionKeys: boolean;
         };
         nativeAudioTracks: boolean;
         nativeVideoTracks: boolean;
@@ -70,6 +72,38 @@ export function snapSkipSeconds(seconds: number): number | undefined {
         }
     }
     return closest;
+}
+
+/** The tech `videojs-youtube` registers, as `techOrder` names it. */
+export const YOUTUBE_TECH = 'youtube';
+
+/**
+ * Puts the YouTube tech first in this player's order, ahead of a YouTube
+ * source. Call it once the tech has been loaded; a second call changes nothing.
+ *
+ * It has to be listed: `videojs-youtube` registers its tech but does not add
+ * itself to the order, and video.js only considers what is listed — so without
+ * this a YouTube source finds no tech that accepts `video/youtube`, falls
+ * through to Html5, and a YouTube page URL ends up as the src of a bare
+ * <video>. The browser renders its broken-media placeholder and the iframe API
+ * fills the console with postMessage origin warnings.
+ *
+ * First, and harmless there for the rest of the player's life: the Youtube tech
+ * only claims `video/youtube`, so every HLS source still goes to Html5.
+ *
+ * Called whether or not the load succeeded. If it did not, video.js logs that
+ * the tech is undefined — which is then exactly what went wrong.
+ *
+ * A new array rather than an edit in place: the one in the options may be
+ * video.js's shared default in a player this module did not configure.
+ */
+export function preferYouTubeTech(player: Player): void {
+    const order: string[] = player.options_.techOrder;
+    if (order[0] === YOUTUBE_TECH) return;
+    player.options_.techOrder = [
+        YOUTUBE_TECH,
+        ...order.filter((name) => name !== YOUTUBE_TECH),
+    ];
 }
 
 /**
@@ -116,18 +150,13 @@ export function buildVideoJsOptions(controls: PlayerControlsOptions): VideoJsOpt
 
     return {
         fluid: false,
-        // `videojs-youtube` registers its tech but does not add itself to the
-        // order, and video.js only considers what is listed here — so without
-        // this a YouTube source finds no tech that accepts `video/youtube`,
-        // falls through to Html5, and a YouTube page URL ends up as the src of a
-        // bare <video>. The browser renders its broken-media placeholder and the
-        // iframe API fills the console with postMessage origin warnings.
-        //
-        // Listed first, and harmless there: the Youtube tech only claims
-        // `video/youtube`, so every HLS source still goes to Html5. Named as a
-        // string rather than imported, because the tech is loaded on demand and
-        // video.js skips an entry that is not registered.
-        techOrder: ['youtube', 'html5'],
+        // Html5 alone to begin with. The YouTube tech is loaded on demand, and
+        // listing a tech that is not registered yet costs a console error —
+        // "The "youtube" tech is undefined" — every time video.js picks a tech,
+        // which in a session that never plays YouTube is every HLS load. It
+        // reads as a failure and is not one. `preferYouTubeTech` adds it at the
+        // point it is registered.
+        techOrder: ['html5'],
         html5: {
             vhs: {
                 // The whole point: VHS drives even where the browser could play
@@ -141,6 +170,14 @@ export function buildVideoJsOptions(controls: PlayerControlsOptions): VideoJsOpt
                 maxPlaylistRetries: 10,
                 useBandwidthFromLocalStorage: true,
                 useDevicePixelRatio: true,
+                // Not in the app's object. Without it VHS asks for the key
+                // before every encrypted segment; the in-memory interceptor
+                // answers each time, so nothing reaches the network either
+                // way, but every ask is a fake request, a key copy and a
+                // microtask. The cache belongs to one segment loader, and every
+                // src() builds new loaders, so a source never inherits the key
+                // of the one before it under the shared `luminary://key` URI.
+                cacheEncryptionKeys: true,
             },
             // The app tests `IS_SAFARI`, which is false on iPhone/iPad, where
             // the native track lists are the ones that actually work.

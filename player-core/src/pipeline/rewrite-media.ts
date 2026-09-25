@@ -27,7 +27,7 @@
  * fixtures. `docs/suspension-safe-playback.md` has the boundary in prose.
  */
 import { LUMINARY_KEY_PLACEHOLDER_URI } from '@luminary-media-converter/hls-core';
-import { absolutize } from './playlist-text.js';
+import { absolutizeAgainst } from './playlist-text.js';
 
 export { LUMINARY_KEY_PLACEHOLDER_URI };
 
@@ -68,30 +68,41 @@ export function rewriteMediaPlaylist(
     text: string,
     options: RewriteMediaOptions,
 ): string {
+    const resolve = absolutizeAgainst(options.playlistUrl);
     return text
         .split('\n')
-        .map((line) => rewriteLine(line, options))
+        .map((line) => rewriteLine(line, options, resolve))
         .join('\n');
 }
 
-function rewriteLine(line: string, options: RewriteMediaOptions): string {
+/** Resolves a URI against the playlist being rewritten. */
+type Resolve = (uri: string) => string;
+
+function rewriteLine(
+    line: string,
+    options: RewriteMediaOptions,
+    resolve: Resolve,
+): string {
     // Playlists written on Windows arrive CRLF; the carriage return is part of
     // the separator, not of the URI, and has to be put back afterwards.
     const cr = line.endsWith('\r');
     const body = cr ? line.slice(0, -1) : line;
-    const rewritten = rewriteBody(body, options);
+    const rewritten = rewriteBody(body, options, resolve);
     return cr ? `${rewritten}\r` : rewritten;
 }
 
-function rewriteBody(line: string, options: RewriteMediaOptions): string {
+function rewriteBody(
+    line: string,
+    options: RewriteMediaOptions,
+    resolve: Resolve,
+): string {
     if (!line) return line;
-    if (!line.startsWith('#')) return rewriteSegmentUri(line, options);
+    if (!line.startsWith('#')) return rewriteSegmentUri(line, options, resolve);
     if (line.startsWith(KEY_TAG)) return rewriteKeyLine(line, options);
     if (!line.includes('URI="')) return line;
     return line.replace(
         /URI="([^"]*)"/g,
-        (_match, uri: string) =>
-            `URI="${absolutize(uri, options.playlistUrl)}"`,
+        (_match, uri: string) => `URI="${resolve(uri)}"`,
     );
 }
 
@@ -119,7 +130,11 @@ function rewriteKeyLine(line: string, options: RewriteMediaOptions): string {
     return `${line},URI="${keyUri}"`;
 }
 
-function rewriteSegmentUri(uri: string, options: RewriteMediaOptions): string {
-    const absolute = absolutize(uri, options.playlistUrl);
+function rewriteSegmentUri(
+    uri: string,
+    options: RewriteMediaOptions,
+    resolve: Resolve,
+): string {
+    const absolute = resolve(uri);
     return options.segmentReplacements?.get(absolute) ?? absolute;
 }

@@ -153,6 +153,39 @@ describe('rewriteMediaPlaylist', () => {
         expect(out).toContain('LAST-MSN=42');
     });
 
+    it('resolves a chunk named again after another URI, however they interleave', () => {
+        // One resolution is remembered at a time, for the run of segments
+        // byte-range output puts in one chunk; a chunk coming back after a
+        // different one, or after a tag's URI, must be resolved afresh.
+        const text = [
+            '#EXTM3U',
+            '#EXTINF:4,',
+            '#EXT-X-BYTERANGE:1000@0',
+            '../media/v0_0.m4s',
+            '#EXTINF:4,',
+            '#EXT-X-BYTERANGE:1000@1000',
+            '../media/v0_0.m4s',
+            '#EXT-X-MAP:URI="init_1.mp4"',
+            '#EXTINF:4,',
+            '#EXT-X-BYTERANGE:1000@0',
+            '../media/v0_1.m4s',
+            '#EXTINF:4,',
+            '#EXT-X-BYTERANGE:1000@2000',
+            '../media/v0_0.m4s',
+            '',
+        ].join('\n');
+
+        const out = rewriteMediaPlaylist(text, { playlistUrl: BASE });
+        const chunk = (n: number) =>
+            `https://cdn.example.com/out/session/media/v0_${n}.m4s`;
+        expect(
+            out.split('\n').filter((line) => line && !line.startsWith('#')),
+        ).toEqual([chunk(0), chunk(0), chunk(1), chunk(0)]);
+        expect(out).toContain(
+            '#EXT-X-MAP:URI="https://cdn.example.com/out/session/stream_720/init_1.mp4"',
+        );
+    });
+
     it('swaps segment URLs listed in segmentReplacements', () => {
         const absolute =
             'https://cdn.example.com/out/session/stream_720/segment_0.m4s';

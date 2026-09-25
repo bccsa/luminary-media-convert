@@ -50,6 +50,24 @@ describe('parseMasterPlaylist', () => {
         ]);
     });
 
+    it('reads a quoted YES/NO flag the way it reads a bare one', () => {
+        // The spec makes DEFAULT, AUTOSELECT and FORCED enumerated strings —
+        // unquoted — but packagers in the wild quote them. Reading only the
+        // bare spelling left such a master with no default rendition at all.
+        const content = [
+            '#EXTM3U',
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Untranslated",LANGUAGE="mul",DEFAULT=NO,AUTOSELECT=NO,URI="audio/mul.m3u8"',
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="English",LANGUAGE="eng",DEFAULT="YES",AUTOSELECT="YES",URI="audio/eng.m3u8"',
+            '#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="French",LANGUAGE="fra",DEFAULT="NO",FORCED="NO",URI="subs/fra.m3u8"',
+        ].join('\n');
+
+        const [untranslated, english, french] = parseMasterPlaylist(content).media;
+        expect(untranslated).toMatchObject({ default: false, autoselect: false });
+        expect(english).toMatchObject({ default: true, autoselect: true });
+        // A quoted NO is still an explicit NO, not an absent flag.
+        expect(french).toMatchObject({ default: false, forced: false });
+    });
+
     it('parses subtitle media and exposes them via `media`', () => {
         const content = [
             '#EXTM3U',

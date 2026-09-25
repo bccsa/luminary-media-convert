@@ -27,11 +27,18 @@ export class PipelineError extends Error {
      */
     readonly missing: boolean;
     readonly url?: string;
+    /** The HTTP status the server answered with, for a non-2xx response. */
+    readonly status?: number;
 
     constructor(
         code: PlayerError['code'],
         message: string,
-        options: { cause?: unknown; missing?: boolean; url?: string } = {},
+        options: {
+            cause?: unknown;
+            missing?: boolean;
+            url?: string;
+            status?: number;
+        } = {},
     ) {
         super(message);
         this.name = 'PipelineError';
@@ -39,6 +46,7 @@ export class PipelineError extends Error {
         this.fatal = true;
         this.missing = options.missing ?? false;
         this.url = options.url;
+        this.status = options.status;
         if (options.cause !== undefined) this.cause = options.cause;
     }
 
@@ -117,7 +125,7 @@ export async function fetchBytes(
         throw new PipelineError(
             'fetch-failed',
             `HTTP ${response.status} for ${url}`,
-            { missing, url },
+            { missing, url, status: response.status },
         );
     }
 
@@ -202,6 +210,14 @@ function matchesExpectation(bytes: Uint8Array, expect: ExpectedAsset): boolean {
     return isPlaylistText(bytes) || isVttText(bytes);
 }
 
+/**
+ * One decoder for every asset. A non-streaming `decode()` keeps no state
+ * between calls, so sharing it is safe; made on first use rather than at import
+ * so that loading the module asks nothing of the runtime.
+ */
+let utf8: TextDecoder | undefined;
+
 function decodeUtf8(bytes: Uint8Array): string {
-    return new TextDecoder('utf-8').decode(bytes);
+    utf8 ??= new TextDecoder('utf-8');
+    return utf8.decode(bytes);
 }

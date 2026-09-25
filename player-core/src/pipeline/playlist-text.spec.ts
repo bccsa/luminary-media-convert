@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
     absolutize,
+    absolutizeAgainst,
+    anchorToDocument,
     collectMasterRefs,
     hasAes128Key,
     hasVideoVariants,
@@ -228,5 +230,98 @@ describe('absolutize', () => {
                 'r0/playlist.m3u8',
             );
         });
+    });
+});
+
+describe('absolutizeAgainst', () => {
+    /**
+     * It remembers only the last URI, so what has to hold is that it never
+     * answers anything `absolutize` would not: runs of one URI, a URI coming
+     * back after another, and every form `absolutize` special-cases.
+     */
+    const uris = [
+        '../media/v0_0.m4s',
+        '../media/v0_0.m4s',
+        '../media/v0_1.m4s',
+        '../media/v0_0.m4s',
+        '',
+        'init.mp4',
+        'blob:https://app/abc',
+        'data:text/vtt,WEBVTT',
+        '//other/x.m4s',
+        '/root/x.m4s',
+        'https://elsewhere.example.com/x.m4s',
+        'seg.m4s?v=2',
+        'seg.m4s?v=2',
+        '../media/v0_1.m4s',
+    ];
+
+    it('answers what absolutize answers, URI after URI', () => {
+        const base = 'https://cdn.example.com/out/session/v0/playlist.m3u8?t=1';
+        const resolve = absolutizeAgainst(base);
+        expect(uris.map(resolve)).toEqual(
+            uris.map((uri) => absolutize(uri, base)),
+        );
+    });
+
+    describe('with a relative base', () => {
+        const savedDocument = (globalThis as any).document;
+
+        afterEach(() => {
+            (globalThis as any).document = savedDocument;
+        });
+
+        it('answers what absolutize answers, document or not', () => {
+            const base = '/api/sessions/abc/preview/r0/playlist.m3u8?token=t';
+            for (const document of [
+                undefined,
+                { baseURI: 'http://127.0.0.1:31711/sessions/abc' },
+            ]) {
+                (globalThis as any).document = document;
+                const resolve = absolutizeAgainst(base);
+                expect(uris.map(resolve)).toEqual(
+                    uris.map((uri) => absolutize(uri, base)),
+                );
+            }
+        });
+    });
+});
+
+describe('anchorToDocument', () => {
+    const savedDocument = (globalThis as any).document;
+
+    afterEach(() => {
+        (globalThis as any).document = savedDocument;
+    });
+
+    it('leaves an absolute URL exactly as written', () => {
+        // It keys the playlist cache, so not even normalized.
+        (globalThis as any).document = {
+            baseURI: 'http://127.0.0.1:31711/sessions/abc',
+        };
+        for (const url of [
+            'https://CDN.example.com/out/./session/master.m3u8',
+            'blob:https://app/abc',
+        ]) {
+            expect(anchorToDocument(url)).toBe(url);
+        }
+    });
+
+    it('anchors a relative URL to the document, as fetch would', () => {
+        (globalThis as any).document = {
+            baseURI: 'http://127.0.0.1:31711/sessions/abc',
+        };
+        expect(
+            anchorToDocument('/api/sessions/abc/preview/playlist.m3u8?token=t'),
+        ).toBe(
+            'http://127.0.0.1:31711/api/sessions/abc/preview/playlist.m3u8?token=t',
+        );
+    });
+
+    it('leaves a relative URL alone when there is no document', () => {
+        (globalThis as any).document = undefined;
+        expect(anchorToDocument('/api/sessions/abc/playlist.m3u8')).toBe(
+            '/api/sessions/abc/playlist.m3u8',
+        );
     });
 });

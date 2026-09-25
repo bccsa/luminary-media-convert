@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { AUDIO_ONLY_ANGLE_ID } from '../types.js';
 import {
     DEFAULT_ANGLE_ID,
@@ -6,21 +6,27 @@ import {
     loadMaster,
     mungeSource,
     type PipelineContext,
+    type ServeMemo,
 } from './pipeline.js';
 import { KEY_CONTENT_TYPE } from './content-types.js';
+import { keyBytes } from './decrypt.js';
 import { LUMINARY_KEY_PLACEHOLDER_URI } from './rewrite-media.js';
 import { parseMasterText } from './playlist-text.js';
 import {
     AUDIO_ONLY_MASTER,
     CHAPTERS_VTT,
     ENCRYPTED_MEDIA_PLAYLIST,
+    FakeLiveServeStrategy,
     FakeServeStrategy,
+    LIVE_MEDIA_PLAYLIST,
     MULTI_ANGLE_MASTER,
     PLAIN_MEDIA_PLAYLIST,
     SIMPLE_MASTER,
     SUBTITLE_MEDIA_PLAYLIST,
     TEST_KEY_HEX,
     encryptLmcenc,
+    flush,
+    makeDeferredFetch,
     makeFetch,
 } from '../test-support/index.js';
 
@@ -408,5 +414,612 @@ describe('mungeSource — caching', () => {
         // angle_1's playlist is the only new fetch.
         expect(ctx.calls.length).toBe(afterFirst + 1);
         expect(ctx.calls.at(-1)).toBe(`${BASE}/angle1_1080/playlist.m3u8`);
+    });
+});
+
+/**
+ * `context()` over a serving layer that can refresh live playlists — the
+ * capability a live source needs, and the one `FakeServeStrategy` lacks.
+ */
+function liveContext(
+    routes: Record<string, string | Uint8Array | { status: number }>,
+    overrides: Partial<PipelineContext> = {},
+) {
+    const serve = new FakeLiveServeStrategy();
+    return { ...context(routes, overrides), serveStrategy: serve, serve };
+}
+
+describe('mungeSource — live sources', () => {
+    const VARIANTS = ['stream_1080', 'stream_720', 'stream_480'].map(
+        (dir) => `${BASE}/${dir}/playlist.m3u8`,
+    );
+    const AUDIO = ['audio_hi_128kbps', 'audio_lo_64kbps'].map(
+        (dir) => `${BASE}/${dir}/playlist.m3u8`,
+    );
+    const everyPlaylist = (text: string) =>
+        Object.fromEntries([...VARIANTS, ...AUDIO].map((url) => [url, text]));
+    const liveRoutes = {
+        [MASTER_URL]: SIMPLE_MASTER,
+        ...everyPlaylist(LIVE_MEDIA_PLAYLIST),
+    };
+    /** The encoder's AES-128 fixture, still being written. */
+    const LIVE_ENCRYPTED = ENCRYPTED_MEDIA_PLAYLIST.replace(
+        '#EXT-X-ENDLIST\n',
+        '',
+    );
+
+    it('refuses a live source when the serving layer cannot refresh a playlist', async () => {
+        // Served statically, a live playlist plays its first snapshot and then
+        // sits at the end of it — which looks like playback and is not.
+        const ctx = context(liveRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+
+        await expect(
+            mungeSource(info, { angleId: null }, ctx),
+        ).rejects.toMatchObject({ code: 'live-unsupported', url: VARIANTS[0] });
+    });
+
+    it('refuses a bare live media playlist the same way', async () => {
+        const ctx = context({ [MASTER_URL]: LIVE_MEDIA_PLAYLIST });
+        const info = await loadMaster(MASTER_URL, ctx);
+
+        await expect(
+            mungeSource(info, { angleId: null }, ctx),
+        ).rejects.toMatchObject({ code: 'live-unsupported' });
+    });
+
+    it('hands each live playlist to serveLive and points the master at what it returns', async () => {
+        const ctx = liveContext(liveRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(result.isLive).toBe(true);
+        expect(ctx.serve.liveSpecs.map((spec) => spec.url)).toEqual([
+            ...VARIANTS,
+            ...AUDIO,
+        ]);
+        const master = parseMasterText(result.masterText);
+        expect(master.variants.map((variant) => variant.uri)).toEqual([
+            'fake:live/1',
+            'fake:live/2',
+            'fake:live/3',
+        ]);
+        expect(master.media.map((media) => media.uri)).toEqual([
+            'fake:live/4',
+            'fake:live/5',
+        ]);
+        // Nothing but the master went through the static path.
+        expect(ctx.serve.served.map((item) => item.url)).toEqual([
+            result.source.url,
+        ]);
+    });
+
+    it('describes each playlist by its address, its base and its cadence — and no key without one', async () => {
+        const ctx = liveContext(liveRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+        await mungeSource(info, { angleId: null }, ctx);
+
+        // Strict: with no session key a spec carries no key URI at all, so a
+        // refresh leaves the playlist's own key lines as they are.
+        expect(ctx.serve.liveSpecs[1]).toStrictEqual({
+            url: VARIANTS[1],
+            baseUrl: VARIANTS[1],
+            refreshSec: 4,
+        });
+    });
+
+    it("names the key sentinel and carries the key bytes for a 'memory' adapter", async () => {
+        const ctx = liveContext(
+            { ...liveRoutes, [VARIANTS[0]!]: LIVE_ENCRYPTED },
+            { keyHex: TEST_KEY_HEX },
+        );
+        const info = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(info, { angleId: null }, ctx);
+
+        for (const spec of ctx.serve.liveSpecs) {
+            expect(spec.keyUri).toBe(LUMINARY_KEY_PLACEHOLDER_URI);
+            expect(spec.keyBytes).toEqual(keyBytes(TEST_KEY_HEX));
+        }
+        expect(ctx.serve.contentTypes()).not.toContain(KEY_CONTENT_TYPE);
+        expect(result.source.keyHex).toBe(TEST_KEY_HEX);
+    });
+
+    it("points a 'url' adapter's live playlists at the one key it served", async () => {
+        const ctx = liveContext(
+            { ...liveRoutes, [VARIANTS[0]!]: LIVE_ENCRYPTED },
+            { keyHex: TEST_KEY_HEX, keyDelivery: 'url' },
+        );
+        const info = await loadMaster(MASTER_URL, ctx);
+        await mungeSource(info, { angleId: null }, ctx);
+
+        const keys = ctx.serve.served.filter(
+            (item) => item.contentType === KEY_CONTENT_TYPE,
+        );
+        expect(keys).toHaveLength(1);
+        for (const spec of ctx.serve.liveSpecs) {
+            expect(spec.keyUri).toBe(keys[0]!.url);
+        }
+    });
+
+    it('decides per playlist, serving the finished ones of a mixed source as VOD', async () => {
+        const ctx = liveContext({
+            ...liveRoutes,
+            ...Object.fromEntries(
+                AUDIO.map((url) => [url, PLAIN_MEDIA_PLAYLIST]),
+            ),
+        });
+        const info = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(result.isLive).toBe(true);
+        expect(ctx.serve.liveSpecs.map((spec) => spec.url)).toEqual(VARIANTS);
+        const media = parseMasterText(result.masterText).media;
+        expect(ctx.serve.textOf(media[0]!.uri!)).toContain(
+            `${BASE}/audio_hi_128kbps/segment_0.m4s`,
+        );
+    });
+
+    it('serves a bare live media playlist as the source itself', async () => {
+        const ctx = liveContext({ [MASTER_URL]: LIVE_MEDIA_PLAYLIST });
+        const info = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(result.isLive).toBe(true);
+        expect(result.source.url).toBe('fake:live/1');
+        expect(ctx.serve.liveSpecs).toStrictEqual([
+            { url: MASTER_URL, baseUrl: MASTER_URL, refreshSec: 4 },
+        ]);
+        expect(ctx.serve.served).toEqual([]);
+    });
+
+    it('does not call a finished source live, whatever the serving layer can do', async () => {
+        const ctx = liveContext({
+            [MASTER_URL]: SIMPLE_MASTER,
+            ...everyPlaylist(PLAIN_MEDIA_PLAYLIST),
+        });
+        const info = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(result.isLive).toBe(false);
+        expect(ctx.serve.liveSpecs).toEqual([]);
+    });
+});
+
+describe('mungeSource — reading the media playlists', () => {
+    /** SIMPLE_MASTER's playlists in master order: variants, then renditions. */
+    const MEDIA = [
+        'stream_1080',
+        'stream_720',
+        'stream_480',
+        'audio_hi_128kbps',
+        'audio_lo_64kbps',
+    ].map((dir) => `${BASE}/${dir}/playlist.m3u8`);
+    const info = describeMaster(MASTER_URL, SIMPLE_MASTER);
+
+    function deferredContext() {
+        const reads = makeDeferredFetch();
+        const serve = new FakeServeStrategy();
+        const ctx: PipelineContext = {
+            fetchImpl: reads.fetchImpl,
+            serveStrategy: serve,
+            keyDelivery: 'memory',
+            cache: new Map(),
+        };
+        return { ctx, reads, serve };
+    }
+
+    it('requests every media playlist before any has answered', async () => {
+        // One after another, the reads put a round trip per playlist in front
+        // of playback — twenty on a multi-language live ladder.
+        const { ctx, reads } = deferredContext();
+        const munged = mungeSource(info, { angleId: null }, ctx);
+        await flush();
+
+        expect(reads.calls).toEqual(MEDIA);
+
+        for (const url of MEDIA) reads.respond(url, PLAIN_MEDIA_PLAYLIST);
+        await expect(munged).resolves.toMatchObject({ isLive: false });
+    });
+
+    it('keeps master order however the answers arrive', async () => {
+        const { ctx, reads, serve } = deferredContext();
+        const munged = mungeSource(info, { angleId: null }, ctx);
+        await flush();
+        for (const url of [...MEDIA].reverse()) {
+            reads.respond(url, PLAIN_MEDIA_PLAYLIST);
+            await flush();
+        }
+        const result = await munged;
+
+        expect(result.mediaPlaylists.map((playlist) => playlist.url)).toEqual(
+            MEDIA,
+        );
+        // The strategy is asked to serve them in that order too, master last.
+        const servedFrom = serve.served
+            .slice(0, -1)
+            .map(
+                (item) =>
+                    /^https:\/\/\S+\/segment_0\.m4s$/m.exec(
+                        String(item.content),
+                    )?.[0],
+            );
+        expect(servedFrom).toEqual(
+            MEDIA.map((url) => url.replace('playlist.m3u8', 'segment_0.m4s')),
+        );
+        expect(serve.served.at(-1)?.url).toBe(result.source.url);
+    });
+
+    it('reports the first failure in master order, not the first to arrive', async () => {
+        // Which failure surfaces decides what the viewer is told — a missing
+        // playlist is "coming soon", a server error is an error — so it cannot
+        // be left to timing.
+        const { ctx, reads } = deferredContext();
+        const munged = mungeSource(info, { angleId: null }, ctx);
+        await flush();
+
+        reads.respond(MEDIA[2]!, { status: 500 });
+        await flush();
+        reads.respond(MEDIA[0]!, { status: 404 });
+
+        await expect(munged).rejects.toMatchObject({
+            code: 'fetch-failed',
+            missing: true,
+            url: MEDIA[0],
+        });
+    });
+
+    it('leaves no unhandled rejection behind when an earlier read has failed', async () => {
+        // The munge stops at the first failure, so the reads after it are never
+        // awaited — one of them failing too must not surface as unhandled.
+        const unhandled: unknown[] = [];
+        const record = (reason: unknown) => unhandled.push(reason);
+        process.on('unhandledRejection', record);
+        try {
+            const { ctx, reads } = deferredContext();
+            const munged = mungeSource(info, { angleId: null }, ctx);
+            await flush();
+
+            reads.respond(MEDIA[0]!, { status: 404 });
+            await expect(munged).rejects.toMatchObject({ code: 'fetch-failed' });
+            for (const url of MEDIA.slice(1)) {
+                reads.respond(url, { status: 500 });
+            }
+            await flush();
+
+            expect(unhandled).toEqual([]);
+        } finally {
+            process.off('unhandledRejection', record);
+        }
+    });
+
+    it('reads a playlist once, however many spellings the master has for it', async () => {
+        const ctx = context({
+            [MASTER_URL]: SIMPLE_MASTER.replace(
+                '\nstream_480/playlist.m3u8',
+                '\n./stream_720/playlist.m3u8',
+            ),
+            [`${BASE}/stream_1080/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+            [`${BASE}/stream_720/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+            [`${BASE}/audio_hi_128kbps/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+            [`${BASE}/audio_lo_64kbps/playlist.m3u8`]: PLAIN_MEDIA_PLAYLIST,
+        });
+        const respelled = await loadMaster(MASTER_URL, ctx);
+        const result = await mungeSource(respelled, { angleId: null }, ctx);
+
+        expect(
+            ctx.calls.filter((url) => url === `${BASE}/stream_720/playlist.m3u8`),
+        ).toHaveLength(1);
+        // Both spellings are swapped for the served copy.
+        for (const variant of parseMasterText(result.masterText).variants) {
+            expect(variant.uri).toMatch(/^fake:served\//);
+        }
+    });
+});
+
+describe('loadMaster — the master URL', () => {
+    const savedDocument = (globalThis as any).document;
+
+    afterEach(() => {
+        (globalThis as any).document = savedDocument;
+    });
+
+    it('anchors a relative master URL to the document, as fetch would', async () => {
+        // A same-origin host hands over `/api/…` with no scheme or host. Made
+        // absolute once, here, everything the source names resolves against a
+        // real base instead of each URI taking absolutize's fallback alone.
+        (globalThis as any).document = {
+            baseURI: 'http://127.0.0.1:31711/sessions/abc',
+        };
+        const relative = '/api/sessions/abc/preview/playlist.m3u8?token=t';
+        const absolute = `http://127.0.0.1:31711${relative}`;
+        const ctx = context({ [absolute]: PLAIN_MEDIA_PLAYLIST });
+
+        const info = await loadMaster(relative, ctx);
+        expect(info.url).toBe(absolute);
+        expect(ctx.calls).toEqual([absolute]);
+
+        const result = await mungeSource(info, { angleId: null }, ctx);
+        expect(result.masterText).toContain(
+            'http://127.0.0.1:31711/api/sessions/abc/preview/segment_0.m4s',
+        );
+    });
+
+    it('leaves an absolute URL exactly as the host wrote it', async () => {
+        // It also keys the playlist cache, so it is not normalized either.
+        const spelled = 'https://CDN.example.com/out/session/./master.m3u8';
+        const ctx = context({ [spelled]: PLAIN_MEDIA_PLAYLIST });
+
+        const info = await loadMaster(spelled, ctx);
+        expect(info.url).toBe(spelled);
+        expect(ctx.calls).toEqual([spelled]);
+    });
+});
+
+/**
+ * `context()` with the memo a controller keeps for one source, which is what
+ * makes a second munge of it — an angle switch, the audio toggle, a recovery —
+ * serve only what the first did not.
+ */
+function memoContext(
+    routes: Record<string, string | Uint8Array | { status: number }>,
+    overrides: Partial<PipelineContext> = {},
+) {
+    const served: ServeMemo = { playlists: new Map() };
+    return { ...context(routes, overrides), served };
+}
+
+describe('mungeSource — serving a source once', () => {
+    it('serves each media playlist once, however often the source is munged', async () => {
+        const ctx = memoContext(multiAngleRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+
+        const first = await mungeSource(info, { angleId: 'angle_0' }, ctx);
+        // 2 variants + audio + subtitles playlists, then the master itself.
+        expect(ctx.serve.served).toHaveLength(5);
+
+        await mungeSource(info, { angleId: 'angle_1' }, ctx);
+        // angle_1's playlist is the only one not served yet; then its master.
+        expect(ctx.serve.served).toHaveLength(7);
+
+        const again = await mungeSource(info, { angleId: 'angle_0' }, ctx);
+        // Only a master, pointing at the URLs the first munge served.
+        expect(ctx.serve.served).toHaveLength(8);
+        expect(ctx.serve.textOf(again.source.url)).toBe(first.masterText);
+        expect(again.source.url).not.toBe(first.source.url);
+    });
+
+    it('still reports, and scans, every playlist it read', async () => {
+        // The chunk schedules are built from these on every attach, memo or
+        // not; a munge that served nothing new must still describe the source.
+        const ctx = memoContext(multiAngleRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+        const first = await mungeSource(info, { angleId: 'angle_0' }, ctx);
+        const again = await mungeSource(info, { angleId: 'angle_0' }, ctx);
+
+        expect(again.mediaPlaylists.map((p) => p.url)).toEqual(
+            first.mediaPlaylists.map((p) => p.url),
+        );
+        expect(again.mediaPlaylists.map((p) => p.scan)).toEqual(
+            first.mediaPlaylists.map((p) => p.scan),
+        );
+        expect(again.mediaPlaylists.every((p) => p.scan)).toBe(true);
+    });
+
+    it('serves everything afresh without a memo, as a one-off munge should', async () => {
+        const ctx = context(multiAngleRoutes);
+        const info = await loadMaster(MASTER_URL, ctx);
+        await mungeSource(info, { angleId: 'angle_0' }, ctx);
+        await mungeSource(info, { angleId: 'angle_0' }, ctx);
+
+        expect(ctx.serve.served).toHaveLength(10);
+    });
+
+    it("serves a 'url' adapter's key once for the source", async () => {
+        const ctx = memoContext(
+            {
+                [MASTER_URL]: SIMPLE_MASTER,
+                [`${BASE}/stream_1080/playlist.m3u8`]: ENCRYPTED_MEDIA_PLAYLIST,
+                [`${BASE}/stream_720/playlist.m3u8`]: ENCRYPTED_MEDIA_PLAYLIST,
+                [`${BASE}/stream_480/playlist.m3u8`]: ENCRYPTED_MEDIA_PLAYLIST,
+                [`${BASE}/audio_hi_128kbps/playlist.m3u8`]:
+                    ENCRYPTED_MEDIA_PLAYLIST,
+                [`${BASE}/audio_lo_64kbps/playlist.m3u8`]:
+                    ENCRYPTED_MEDIA_PLAYLIST,
+            },
+            { keyHex: TEST_KEY_HEX, keyDelivery: 'url' },
+        );
+        const info = await loadMaster(MASTER_URL, ctx);
+        await mungeSource(info, { angleId: DEFAULT_ANGLE_ID }, ctx);
+        await mungeSource(
+            info,
+            { angleId: DEFAULT_ANGLE_ID, maxHeight: 720 },
+            ctx,
+        );
+
+        expect(
+            ctx.serve.served.filter(
+                (item) => item.contentType === KEY_CONTENT_TYPE,
+            ),
+        ).toHaveLength(1);
+    });
+
+    it('reads and decrypts encrypted subtitle segments once for the source', async () => {
+        const ctx = memoContext(
+            {
+                ...multiAngleRoutes,
+                [`${BASE}/subs_en/en_0.vtt`]: encryptLmcenc(CHAPTERS_VTT),
+            },
+            { keyHex: TEST_KEY_HEX },
+        );
+        const info = await loadMaster(MASTER_URL, ctx);
+        await mungeSource(info, { angleId: 'angle_0' }, ctx);
+        await mungeSource(info, { angleId: 'angle_1' }, ctx);
+        await mungeSource(info, { angleId: AUDIO_ONLY_ANGLE_ID }, ctx);
+
+        expect(
+            ctx.calls.filter((url) => url === `${BASE}/subs_en/en_0.vtt`),
+        ).toHaveLength(1);
+        expect(
+            ctx.serve.contentTypes().filter((t) => t === 'text/vtt'),
+        ).toHaveLength(1);
+    });
+
+    it('registers a live playlist once for the source', async () => {
+        const ctx = {
+            ...liveContext({
+                [MASTER_URL]: SIMPLE_MASTER,
+                [`${BASE}/stream_1080/playlist.m3u8`]: LIVE_MEDIA_PLAYLIST,
+                [`${BASE}/stream_720/playlist.m3u8`]: LIVE_MEDIA_PLAYLIST,
+                [`${BASE}/stream_480/playlist.m3u8`]: LIVE_MEDIA_PLAYLIST,
+                [`${BASE}/audio_hi_128kbps/playlist.m3u8`]: LIVE_MEDIA_PLAYLIST,
+                [`${BASE}/audio_lo_64kbps/playlist.m3u8`]: LIVE_MEDIA_PLAYLIST,
+            }),
+            served: { playlists: new Map() } as ServeMemo,
+        };
+        const info = await loadMaster(MASTER_URL, ctx);
+        const first = await mungeSource(info, { angleId: null }, ctx);
+        const again = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(ctx.serve.liveSpecs).toHaveLength(5);
+        expect(again.isLive).toBe(true);
+        expect(again.masterText).toBe(first.masterText);
+    });
+
+    it('hands back the URL a bare media playlist was first served at', async () => {
+        const ctx = memoContext({ [MASTER_URL]: PLAIN_MEDIA_PLAYLIST });
+        const info = await loadMaster(MASTER_URL, ctx);
+        const first = await mungeSource(info, { angleId: null }, ctx);
+        const again = await mungeSource(info, { angleId: null }, ctx);
+
+        expect(again.source.url).toBe(first.source.url);
+        expect(again.masterText).toBe(first.masterText);
+        expect(ctx.serve.served).toHaveLength(1);
+    });
+});
+
+/** A SUBTITLES media playlist over the named `.vtt` segments. */
+function subtitlePlaylist(segments: string[]): string {
+    return [
+        '#EXTM3U',
+        '#EXT-X-VERSION:7',
+        '#EXT-X-TARGETDURATION:60',
+        ...segments.flatMap((uri) => ['#EXTINF:60.000000,', uri]),
+        '#EXT-X-ENDLIST',
+        '',
+    ].join('\n');
+}
+
+describe('mungeSource — reading subtitle segments', () => {
+    const vtt = (i: number) => `${BASE}/subs_en/en_${i}.vtt`;
+    /** Distinct per segment, so the order they are served in shows. */
+    const cue = (i: number) => `WEBVTT\n\nNOTE segment ${i}\n`;
+    const MEDIA = [
+        `${BASE}/angle0_1080/playlist.m3u8`,
+        `${BASE}/angle0_720/playlist.m3u8`,
+        `${BASE}/audio_128kbps/playlist.m3u8`,
+    ];
+
+    /** A munge of angle_0 whose media playlists have all been answered. */
+    async function munging(segments: number) {
+        const reads = makeDeferredFetch();
+        const serve = new FakeServeStrategy();
+        const ctx: PipelineContext = {
+            fetchImpl: reads.fetchImpl,
+            serveStrategy: serve,
+            keyDelivery: 'memory',
+            keyHex: TEST_KEY_HEX,
+            cache: new Map(),
+        };
+        const info = describeMaster(MASTER_URL, MULTI_ANGLE_MASTER);
+        const munged = mungeSource(info, { angleId: 'angle_0' }, ctx);
+        void munged.catch(() => undefined);
+        await flush();
+        for (const url of MEDIA) reads.respond(url, PLAIN_MEDIA_PLAYLIST);
+        reads.respond(
+            `${BASE}/subs_en/playlist.m3u8`,
+            subtitlePlaylist(
+                Array.from({ length: segments }, (_, i) => `en_${i}.vtt`),
+            ),
+        );
+        await flush();
+        const vttCalls = () =>
+            reads.calls.filter((url) => url.endsWith('.vtt'));
+        return { reads, serve, munged, vttCalls };
+    }
+
+    it('reads a segmented track a few segments at a time', async () => {
+        // One after another, every segment was a round trip in front of
+        // playback; all at once, a long track would take every connection.
+        const { reads, munged, vttCalls } = await munging(6);
+        expect(vttCalls()).toEqual([vtt(0), vtt(1), vtt(2), vtt(3)]);
+
+        reads.respond(vtt(0), encryptLmcenc(cue(0)));
+        await flush();
+        expect(vttCalls()).toEqual([vtt(0), vtt(1), vtt(2), vtt(3), vtt(4)]);
+
+        for (const i of [3, 2, 1]) reads.respond(vtt(i), encryptLmcenc(cue(i)));
+        await flush();
+        for (const i of [5, 4]) reads.respond(vtt(i), encryptLmcenc(cue(i)));
+        await expect(munged).resolves.toMatchObject({ isLive: false });
+    });
+
+    it('serves the segments in playlist order however the answers arrive', async () => {
+        const { reads, serve, munged } = await munging(4);
+        for (const i of [3, 2, 1, 0]) {
+            reads.respond(vtt(i), encryptLmcenc(cue(i)));
+            await flush();
+        }
+        await munged;
+
+        expect(
+            serve.served
+                .filter((item) => item.contentType === 'text/vtt')
+                .map((item) => item.content),
+        ).toEqual([cue(0), cue(1), cue(2), cue(3)]);
+    });
+
+    it('reports the first failing segment in playlist order, and leaves nothing unhandled', async () => {
+        const unhandled: unknown[] = [];
+        const record = (reason: unknown) => unhandled.push(reason);
+        process.on('unhandledRejection', record);
+        try {
+            const { reads, munged } = await munging(4);
+            reads.respond(vtt(2), { status: 500 });
+            await flush();
+            reads.respond(vtt(0), { status: 404 });
+
+            await expect(munged).rejects.toMatchObject({
+                code: 'fetch-failed',
+                missing: true,
+                url: vtt(0),
+            });
+            reads.respond(vtt(1), { status: 500 });
+            reads.respond(vtt(3), { status: 500 });
+            await flush();
+
+            expect(unhandled).toEqual([]);
+        } finally {
+            process.off('unhandledRejection', record);
+        }
+    });
+
+    it('reads a segment the playlist names twice only once', async () => {
+        const ctx = context(
+            {
+                ...multiAngleRoutes,
+                [`${BASE}/subs_en/playlist.m3u8`]: subtitlePlaylist([
+                    'en_0.vtt',
+                    'en_1.vtt',
+                    'en_0.vtt',
+                ]),
+                [`${BASE}/subs_en/en_0.vtt`]: cue(0),
+                [`${BASE}/subs_en/en_1.vtt`]: cue(1),
+            },
+            { keyHex: TEST_KEY_HEX },
+        );
+        const info = await loadMaster(MASTER_URL, ctx);
+        await mungeSource(info, { angleId: 'angle_0' }, ctx);
+
+        expect(ctx.calls.filter((url) => url === vtt(0))).toHaveLength(1);
     });
 });

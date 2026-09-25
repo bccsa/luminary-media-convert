@@ -13,7 +13,7 @@
 import {
     extractAnglePlaylist,
     isEncryptedPayload,
-    listVideoAngles,
+    listAngles,
 } from '@luminary-media-converter/hls-core';
 import {
     AUDIO_ONLY_ANGLE_ID,
@@ -26,7 +26,7 @@ import {
 } from '../types.js';
 import {
     buildAudioOnlyMaster,
-    hasAudioOnlyRendering,
+    canRenderAudioOnly,
     isAudioOnlyMaster,
 } from './audio-only.js';
 import {
@@ -34,7 +34,7 @@ import {
     PLAYLIST_CONTENT_TYPE,
     VTT_CONTENT_TYPE,
 } from './content-types.js';
-import { describeLiveness, type LivePlaylistSpec } from '../policy/live.js';
+import type { LivePlaylistSpec } from '../policy/live.js';
 import { keyBytes, type SubtleLike } from './decrypt.js';
 import {
     PipelineError,
@@ -42,12 +42,14 @@ import {
     fetchBytes,
     fetchMaybeEncrypted,
 } from './fetch.js';
+import { scanMediaPlaylist, type MediaPlaylistScan } from './media-scan.js';
 import {
     absolutize,
+    absolutizeAgainst,
+    anchorToDocument,
     collectMasterRefs,
-    hasAes128Key,
-    isMasterPlaylistText,
-    listSegmentUris,
+    isMasterModel,
+    masterHasVideo,
     parseMasterText,
     substituteMasterRefs,
 } from './playlist-text.js';
@@ -71,6 +73,32 @@ export interface PipelineContext {
     subtle?: SubtleLike;
     /** Raw decoded playlist text per absolute URL, for the current source. */
     cache: Map<string, string>;
+    /**
+     * What the current source has already served. Optional: without one, every
+     * munge serves everything afresh, as a one-off munge should.
+     */
+    served?: ServeMemo;
+}
+
+/**
+ * The media playlists a source has served, so re-munging it — an angle switch,
+ * the audio toggle, a recovery — serves only what it has not served yet.
+ *
+ * A media playlist's served form depends on its text, its URL and the session
+ * key, none of which an angle or a quality cap changes, so the URL it was
+ * served at stays good for the life of the source. Without this, every switch
+ * minted a full new set of blobs — every playlist, the key blob, the live
+ * registrations, re-downloaded subtitle segments — and nothing revoked them
+ * before the next `load()`. With it, a switch serves a master and whatever
+ * playlists the new angle is the first to need.
+ *
+ * Owned by the controller, which starts a new one with every source.
+ */
+export interface ServeMemo {
+    /** Absolute media playlist URL → the URL it is served at, and its scan. */
+    playlists: Map<string, { url: string; scan: MediaPlaylistScan }>;
+    /** The key URI, once a playlist has needed one. */
+    keyUri?: string;
 }
 
 /** Everything derived from a master playlist, before any narrowing. */
@@ -103,6 +131,12 @@ export interface MungedMediaPlaylist {
     mediaType: string;
     /** Decoded text: post-LMCENC-decryption, pre-rewrite. */
     text: string;
+    /**
+     * The munge's scan of `text`, so a consumer after the segment layout —
+     * `buildChunkSchedules` — does not read the playlist a second time. Absent
+     * on a playlist described by hand; consumers scan `text` themselves then.
+     */
+    scan?: MediaPlaylistScan;
 }
 
 /**
@@ -141,15 +175,18 @@ export async function loadMaster(
     url: string,
     ctx: PipelineContext,
 ): Promise<MasterInfo> {
-    const asset = await fetchMaybeEncrypted(url, {
+    // Everything read from here on resolves against this URL, so it is made
+    // absolute once rather than on every URI that needs it.
+    const absolute = anchorToDocument(url);
+    const asset = await fetchMaybeEncrypted(absolute, {
         fetchImpl: ctx.fetchImpl,
         keyHex: ctx.keyHex,
         expect: 'playlist',
         signal: ctx.signal,
         subtle: ctx.subtle,
     });
-    ctx.cache.set(url, asset.text);
-    return describeMaster(url, asset.text, asset.wasEncrypted);
+    ctx.cache.set(absolute, asset.text);
+    return describeMaster(absolute, asset.text, asset.wasEncrypted);
 }
 
 /** Pure derivation half of {@link loadMaster}; exported for fixture specs. */
@@ -158,8 +195,13 @@ export function describeMaster(
     text: string,
     wasEncrypted = false,
 ): MasterInfo {
-    const isMaster = isMasterPlaylistText(text);
-    if (!isMaster) {
+    // Parsed once, and every question below asked of the one model. It was
+    // five parses, one of them building a whole audio-only master only to
+    // compare it with null.
+    const parsed = parseMasterText(text);
+    const { master } = parsed;
+
+    if (!isMasterModel(master)) {
         return {
             url,
             text,
@@ -172,8 +214,8 @@ export function describeMaster(
         };
     }
 
-    const nativelyAudioOnly = isAudioOnlyMaster(text);
-    const videoAngles = listVideoAngles(text).map<Angle>((angle) => ({
+    const nativelyAudioOnly = !masterHasVideo(master);
+    const videoAngles = listAngles(master).map<Angle>((angle) => ({
         id: angle.id,
         name: angle.name,
         isDefault: angle.isDefault,
@@ -183,11 +225,7 @@ export function describeMaster(
     if (!nativelyAudioOnly && angles.length === 0) {
         angles.push({ id: DEFAULT_ANGLE_ID, name: 'Default', isDefault: true });
     }
-    if (
-        !nativelyAudioOnly &&
-        angles.length > 0 &&
-        hasAudioOnlyRendering(text)
-    ) {
+    if (!nativelyAudioOnly && angles.length > 0 && canRenderAudioOnly(master)) {
         angles.push({
             id: AUDIO_ONLY_ANGLE_ID,
             name: 'Audio only',
@@ -195,7 +233,6 @@ export function describeMaster(
         });
     }
 
-    const parsed = parseMasterText(text);
     const audioTracks: AudioTrack[] = [];
     const subtitleTracks: SubtitleTrack[] = [];
     for (const entry of parsed.media) {
@@ -254,7 +291,7 @@ export async function mungeSource(
         info.nativelyAudioOnly ||
         (info.isMaster && isAudioOnlyMaster(capped));
 
-    let keyUri: string | undefined;
+    let keyUri = ctx.served?.keyUri;
     const resolveKeyUri = (): string | undefined => {
         if (!ctx.keyHex) return undefined;
         if (keyUri) return keyUri;
@@ -265,6 +302,7 @@ export async function mungeSource(
                       keyBytes(ctx.keyHex),
                       KEY_CONTENT_TYPE,
                   );
+        if (ctx.served) ctx.served.keyUri = keyUri;
         return keyUri;
     };
 
@@ -279,14 +317,17 @@ export async function mungeSource(
      * play its first snapshot and then sit at the end of it forever, which
      * looks like playback and is not.
      */
-    const serveLivePlaylist = (url: string, text: string): string => {
-        const { targetDurationSec } = describeLiveness(text);
+    const serveLivePlaylist = (
+        url: string,
+        scan: MediaPlaylistScan,
+    ): string => {
         const spec: LivePlaylistSpec = {
             url,
             baseUrl: url,
-            keyUri: resolveKeyUri() ?? LUMINARY_KEY_PLACEHOLDER_URI,
-            ...(ctx.keyHex ? { keyBytes: keyBytes(ctx.keyHex) } : {}),
-            refreshSec: targetDurationSec,
+            ...(ctx.keyHex
+                ? { keyUri: resolveKeyUri(), keyBytes: keyBytes(ctx.keyHex) }
+                : {}),
+            refreshSec: scan.targetDurationSec,
         };
         const served = ctx.serveStrategy.serveLive?.(spec);
         if (!served) {
@@ -301,21 +342,28 @@ export async function mungeSource(
     };
 
     let servedMasterText: string;
+    let url: string;
     if (!info.isMaster) {
-        requireKeyFor(capped, info.url, ctx);
+        const memo = ctx.served?.playlists.get(info.url);
+        // One read of the playlist answers every question asked of it below.
+        const scan = memo?.scan ?? scanMediaPlaylist(capped);
+        requireKeyFor(scan, info.url, ctx);
         // The URL served a media playlist directly — it IS the only stream, so
         // it counts as video for anything reading the list back.
         mediaPlaylists.push({
             url: info.url,
             mediaType: 'VIDEO',
             text: capped,
+            scan,
         });
-        if (describeLiveness(capped).isLive) {
+        if (scan.isLive) {
             isLive = true;
             // Nothing to serve as a master: the live URL IS the source.
+            const liveUrl = memo?.url ?? serveLivePlaylist(info.url, scan);
+            ctx.served?.playlists.set(info.url, { url: liveUrl, scan });
             return {
                 source: {
-                    url: serveLivePlaylist(info.url, capped),
+                    url: liveUrl,
                     isBlob: true,
                     ...(ctx.keyHex && ctx.keyDelivery === 'memory'
                         ? { keyHex: ctx.keyHex }
@@ -328,50 +376,81 @@ export async function mungeSource(
                 isLive,
             };
         }
+        // Rewritten even when already served: the text is part of the result,
+        // and without the per-segment URL parses it costs next to nothing.
         servedMasterText = rewriteMediaPlaylist(capped, {
             playlistUrl: info.url,
-            keyUri: hasAes128Key(capped) ? resolveKeyUri() : undefined,
+            keyUri: scan.hasAes128Key ? resolveKeyUri() : undefined,
         });
+        url =
+            memo?.url ??
+            ctx.serveStrategy.serve(servedMasterText, PLAYLIST_CONTENT_TYPE);
+        ctx.served?.playlists.set(info.url, { url, scan });
     } else {
         const replacements = new Map<string, string>();
-        for (const ref of collectMasterRefs(capped)) {
-            const absolute = absolutize(ref.uri, info.url);
-            const text = await fetchPlaylistText(absolute, ctx);
-            requireKeyFor(text, absolute, ctx);
+        const refs = collectMasterRefs(capped).map((ref) => ({
+            ref,
+            absolute: absolutize(ref.uri, info.url),
+        }));
+        // Every read starts here, at once; the loop consumes them in master
+        // order. None depends on another, and reading them one after another
+        // put a round trip per playlist in front of playback — twenty on a
+        // multi-language live ladder. Consuming in order keeps everything
+        // observable as it was: which failure is reported when several reads
+        // fail, the order of `mediaPlaylists`, and the order the strategy is
+        // asked to serve in.
+        const reads = startPlaylistReads(
+            refs.map(({ absolute }) => absolute),
+            ctx,
+        );
+        for (const { ref, absolute } of refs) {
+            const text = await reads.get(absolute)!;
+            const memo = ctx.served?.playlists.get(absolute);
+            // One read of the playlist answers every question asked of it
+            // below, and travels on to the chunk schedules with it.
+            const scan = memo?.scan ?? scanMediaPlaylist(text);
+            requireKeyFor(scan, absolute, ctx);
             mediaPlaylists.push({
                 url: absolute,
                 mediaType: ref.mediaType ?? 'VIDEO',
                 text,
+                scan,
             });
+            if (scan.isLive) isLive = true;
 
-            if (describeLiveness(text).isLive) {
-                isLive = true;
-                replacements.set(ref.uri, serveLivePlaylist(absolute, text));
+            // Served for this source already, and nothing that differs between
+            // munges of it changes what serving it again would produce.
+            if (memo) {
+                replacements.set(ref.uri, memo.url);
                 continue;
             }
 
-            const segmentReplacements =
-                ref.mediaType === 'SUBTITLES' && ctx.keyHex
-                    ? await serveDecryptedVttSegments(text, absolute, ctx)
-                    : undefined;
+            let served: string;
+            if (scan.isLive) {
+                served = serveLivePlaylist(absolute, scan);
+            } else {
+                const segmentReplacements =
+                    ref.mediaType === 'SUBTITLES' && ctx.keyHex
+                        ? await serveDecryptedVttSegments(scan, absolute, ctx)
+                        : undefined;
 
-            const rewritten = rewriteMediaPlaylist(text, {
-                playlistUrl: absolute,
-                keyUri: hasAes128Key(text) ? resolveKeyUri() : undefined,
-                segmentReplacements,
-            });
-            replacements.set(
-                ref.uri,
-                ctx.serveStrategy.serve(rewritten, PLAYLIST_CONTENT_TYPE),
-            );
+                const rewritten = rewriteMediaPlaylist(text, {
+                    playlistUrl: absolute,
+                    keyUri: scan.hasAes128Key ? resolveKeyUri() : undefined,
+                    segmentReplacements,
+                });
+                served = ctx.serveStrategy.serve(
+                    rewritten,
+                    PLAYLIST_CONTENT_TYPE,
+                );
+            }
+            ctx.served?.playlists.set(absolute, { url: served, scan });
+            replacements.set(ref.uri, served);
         }
         servedMasterText = substituteMasterRefs(capped, replacements);
+        url = ctx.serveStrategy.serve(servedMasterText, PLAYLIST_CONTENT_TYPE);
     }
 
-    const url = ctx.serveStrategy.serve(
-        servedMasterText,
-        PLAYLIST_CONTENT_TYPE,
-    );
     return {
         source: {
             url,
@@ -419,22 +498,73 @@ async function fetchPlaylistText(
 }
 
 /**
+ * Start reading every URL at once, one read per distinct URL, and return the
+ * pending reads by URL for the caller to await in the order it needs.
+ *
+ * Each read is marked handled as it starts. The caller awaits them one at a
+ * time, so a read that fails before its turn would otherwise surface as an
+ * unhandled rejection — and once an earlier read has thrown, its turn never
+ * comes at all.
+ */
+function startPlaylistReads(
+    urls: readonly string[],
+    ctx: PipelineContext,
+): Map<string, Promise<string>> {
+    const reads = new Map<string, Promise<string>>();
+    for (const url of urls) {
+        if (reads.has(url)) continue;
+        const read = fetchPlaylistText(url, ctx);
+        void read.catch(() => undefined);
+        reads.set(url, read);
+    }
+    return reads;
+}
+
+/**
+ * Subtitle segments read at once: enough to overlap the round trips, few enough
+ * to leave the connections the engine is about to need.
+ */
+const VTT_READS_IN_FLIGHT = 4;
+
+/**
  * The engine fetches a SUBTITLES playlist's `.vtt` segments itself and cannot
  * decrypt LMCENC, so encrypted ones are decrypted here and served as plaintext.
  * Plaintext ones are left alone (the rewrite absolutizes them). VOD only —
  * the segment list is finite.
+ *
+ * Each distinct segment is read once, a few at a time: read one after another,
+ * a segmented track put a round trip per segment in front of playback. They
+ * are consumed in playlist order, as the media playlists are, so the failure
+ * reported and the order the strategy is asked to serve in are as they were.
  */
 async function serveDecryptedVttSegments(
-    playlistText: string,
+    playlist: MediaPlaylistScan,
     playlistUrl: string,
     ctx: PipelineContext,
 ): Promise<Map<string, string>> {
+    const resolve = absolutizeAgainst(playlistUrl);
+    const urls = [...new Set(playlist.runs.map((run) => resolve(run.uri)))];
+
+    const reads: Promise<Uint8Array>[] = [];
+    const startRead = (index: number): void => {
+        const read = fetchBytes(urls[index]!, ctx);
+        // Marked handled as it starts, as in `startPlaylistReads`: once an
+        // earlier read has thrown, a later one's turn never comes.
+        void read.catch(() => undefined);
+        reads[index] = read;
+    };
+    for (let i = 0; i < Math.min(VTT_READS_IN_FLIGHT, urls.length); i++) {
+        startRead(i);
+    }
+
     const replacements = new Map<string, string>();
-    for (const uri of listSegmentUris(playlistText)) {
-        const absolute = absolutize(uri, playlistUrl);
-        if (replacements.has(absolute)) continue;
-        const bytes = await fetchBytes(absolute, ctx);
+    for (let i = 0; i < urls.length; i++) {
+        const bytes = await reads[i]!;
+        if (i + VTT_READS_IN_FLIGHT < urls.length) {
+            startRead(i + VTT_READS_IN_FLIGHT);
+        }
         if (!isEncryptedPayload(bytes)) continue;
+        const absolute = urls[i]!;
         const asset = await decodeMaybeEncrypted(bytes, absolute, {
             keyHex: ctx.keyHex,
             expect: 'vtt',
@@ -449,11 +579,11 @@ async function serveDecryptedVttSegments(
 }
 
 function requireKeyFor(
-    playlistText: string,
+    playlist: MediaPlaylistScan,
     url: string,
     ctx: PipelineContext,
 ): void {
-    if (ctx.keyHex || !hasAes128Key(playlistText)) return;
+    if (ctx.keyHex || !playlist.hasAes128Key) return;
     throw new PipelineError(
         'key-required',
         `${url} declares AES-128 segments but no session key was supplied`,

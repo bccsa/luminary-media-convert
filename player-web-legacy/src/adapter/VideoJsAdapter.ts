@@ -18,10 +18,12 @@ import type Player from 'video.js/dist/types/player';
 import type { QualityLevel, QualityLevelList } from '../types/videojs-vhs';
 import { RecoveryLadder } from '../drivers/RecoveryLadder';
 import { ChunkPrefetcher } from './chunkWarming';
+import type { LivePlaylistSource } from '../serve/livePlaylistUri';
 import { installMemoryKeyXhr } from './vhsKeyInterceptor';
+import { installLivePlaylistXhr } from './vhsLivePlaylistInterceptor';
 import { installByteRangeTimeout } from './vhsRequestTimeout';
 import { VhsStallSignals } from './vhsStallSignals';
-import { vhsTech } from './vhsXhrSeam';
+import { vhsHandler, vhsTech } from './vhsXhrSeam';
 
 /** The MIME type that routes a source to VHS rather than to the native tech. */
 const HLS_MIME_TYPE = 'application/x-mpegURL';
@@ -97,6 +99,13 @@ export interface VideoJsAdapterOptions {
      * documented fallback if the VHS seam ever breaks.
      */
     keyDelivery?: 'memory' | 'url';
+    /**
+     * Who answers the `luminary://live/…` URIs a live source's munged master
+     * names — the `BlobServeStrategy` handed to the controller, which minted
+     * them. Without one, a live source still loads (the strategy decides
+     * that) but VHS cannot fetch its media playlists.
+     */
+    liveSource?: LivePlaylistSource;
 }
 
 /**
@@ -113,20 +122,39 @@ export class VideoJsAdapter implements PlayerAdapter {
     readonly capabilities: AdapterCapabilities;
 
     private readonly player: Player;
+    private readonly liveSource: LivePlaylistSource | undefined;
     private prefetcher: ChunkPrefetcher | null = null;
     private keyBytes: Uint8Array | null = null;
-    /** Uninstallers for the VHS seam wrappers, in install order. */
-    private sourceHookUninstallers: (() => void)[] = [];
     private sourceHookHandlers: [string, () => void][] = [];
     private readonly stallSignals: VhsStallSignals;
     private readonly ladder: RecoveryLadder;
     /** The source currently attached — what {@link reattach} re-prepares against. */
     private lastSource: AdapterSource | null = null;
+    /**
+     * What this adapter last handed `player.src()`, so that video.js's record of
+     * its source can be put back when video.js loses it. Null while no source
+     * is attached.
+     */
+    private playerSource: { src: string; type?: string } | null = null;
+    /** Puts back the player's own `load()`; see {@link guardLoad}. */
+    private restoreLoad: (() => void) | null = null;
     /** Where forward progress is measured from: the furthest played position since the last seek. */
     private lastProgressTime = 0;
     private onVisibilityChange: (() => void) | null = null;
     private remoteTextTracks = new Map<string, RemoteTextTrackElement>();
     private activeTextTrackId: string | null = null;
+    /**
+     * The engine's audio tracks still belong to the source being replaced.
+     *
+     * video.js swaps sources a tick after `src()`, and until then the outgoing
+     * VHS handler is alive with its tracks in the list. A track selected there
+     * is loaded by that handler, from a playlist URL the wrapper revoked when
+     * the new load began; the request fails, VHS falls back to the stream's
+     * default, and the default is what gets carried into the new source. So the
+     * list reads as empty, and selections are refused, until video.js has torn
+     * it down.
+     */
+    private audioTracksOutgoing = false;
     private deferredSeek: (() => void) | null = null;
     private playerListeners: [string, () => void][] = [];
     private listListeners: (() => void)[] = [];
@@ -135,6 +163,7 @@ export class VideoJsAdapter implements PlayerAdapter {
 
     constructor(player: Player, options: VideoJsAdapterOptions = {}) {
         this.player = player;
+        this.liveSource = options.liveSource;
         this.capabilities = {
             nativeHls: false,
             keyDelivery: options.keyDelivery ?? 'memory',
@@ -164,6 +193,7 @@ export class VideoJsAdapter implements PlayerAdapter {
         this.attachPlayerListeners();
         this.attachListListeners();
         this.attachVisibilityListener();
+        this.guardLoad();
         this.stallSignals.attach(vhsTech(this.player));
     }
 
@@ -179,6 +209,8 @@ export class VideoJsAdapter implements PlayerAdapter {
         // which arrives here and must not wipe the count deciding what is left.
         this.ladder.noteSourceLoaded();
 
+        this.dropCarriedTextTracks();
+
         if (!isVideoJsEngineSupported()) {
             if (src.isBlob) {
                 // Munged content (encrypted / capped / angle-pinned) simply
@@ -188,12 +220,15 @@ export class VideoJsAdapter implements PlayerAdapter {
                 throw error;
             }
             // Best effort: hand the untouched URL to the platform player.
-            this.player.src({ src: src.url });
+            this.playerSource = { src: src.url };
+            this.player.src({ ...this.playerSource });
             return;
         }
 
         this.armSourceHooks();
-        this.player.src({ src: src.url, type: HLS_MIME_TYPE });
+        this.retireAudioTracks();
+        this.playerSource = { src: src.url, type: HLS_MIME_TYPE };
+        this.player.src({ ...this.playerSource });
         // Deliberately not awaiting readiness: the wrapper drives playback off
         // adapter events, and a load that never becomes ready is an error, not
         // a promise to hang on.
@@ -227,7 +262,9 @@ export class VideoJsAdapter implements PlayerAdapter {
 
         this.cancelDeferredSeek();
         this.armSourceHooks();
-        this.player.src({ src: src.url, type: HLS_MIME_TYPE });
+        this.retireAudioTracks();
+        this.playerSource = { src: src.url, type: HLS_MIME_TYPE };
+        this.player.src({ ...this.playerSource });
 
         if (seekTo > 0) this.seek(seekTo);
         // `play()` answers `undefined` on techs with no promise support, so the
@@ -238,26 +275,51 @@ export class VideoJsAdapter implements PlayerAdapter {
 
     /**
      * Wrap the request factory of the handler the next `src()` is about to
-     * create: the byte-range timeout backstop always, and in-memory key
-     * delivery when this adapter has claimed that job. `xhr-hooks-ready` is
+     * create: the byte-range timeout backstop always, in-memory key delivery
+     * when this adapter has claimed that job, and live playlist refresh when a
+     * live source was supplied. `xhr-hooks-ready` is
      * fired from `handleSource` the moment the handler exists — before any
      * playlist request goes out — and `loadstart` is the fallback for a source
      * VHS is not handling, where there is nothing to wrap.
+     *
+     * The wrappers are never uninstalled: they live and die with the handler
+     * they wrap, and every handler is disposed by the transition that replaces
+     * it. See `teardownSource` for why that is the point. So the key is the one
+     * this source was given, captured here, rather than whatever the adapter
+     * holds by the time a late request for it arrives.
+     *
+     * Coming back from YouTube, the handler cannot be reached when it is
+     * announced. video.js builds the new Html5 tech with the source already in
+     * hand, its constructor sets it, and VHS fires `xhr-hooks-ready` from in
+     * there — before the player has been given the tech that holds the
+     * handler. Wrapping then found nothing, and every `luminary://` request of
+     * that source went to the network: a live source's playlists, an encrypted
+     * one's key. The handler is reachable a microtask later, and the one request
+     * out by then is the master's, which no wrapper answers.
      */
     private armSourceHooks(): void {
         this.disarmSourceHooks();
-        const install = (): void => {
-            this.disarmSourceHooks();
-            this.uninstallSourceHooks();
-            this.sourceHookUninstallers = [installByteRangeTimeout(this.player)];
+        const keyBytes = this.keyBytes;
+        const wrap = (): void => {
+            installByteRangeTimeout(this.player);
             if (this.capabilities.keyDelivery === 'memory') {
-                this.sourceHookUninstallers.push(
-                    installMemoryKeyXhr(this.player, () => this.keyBytes),
-                );
+                installMemoryKeyXhr(this.player, () => keyBytes);
+            }
+            if (this.liveSource) {
+                installLivePlaylistXhr(this.player, this.liveSource);
             }
         };
+        const install = (): void => {
+            this.disarmSourceHooks();
+            if (vhsHandler(this.player)) wrap();
+            else queueMicrotask(wrap);
+        };
+        const onHooksReady = (): void => {
+            this.clearReplacedSources();
+            install();
+        };
         this.sourceHookHandlers = [
-            ['xhr-hooks-ready', install],
+            ['xhr-hooks-ready', onHooksReady],
             ['loadstart', install],
         ];
         for (const [event, handler] of this.sourceHookHandlers) {
@@ -272,11 +334,100 @@ export class VideoJsAdapter implements PlayerAdapter {
         this.sourceHookHandlers = [];
     }
 
-    /** Unwind the seam wrappers in reverse install order, so each finds its own. */
-    private uninstallSourceHooks(): void {
-        for (const uninstall of this.sourceHookUninstallers.reverse()) uninstall();
-        this.sourceHookUninstallers = [];
+    /**
+     * Drops the text tracks another tech is carrying, before a source hands the
+     * player back to Html5.
+     *
+     * video.js carries text tracks from one tech to the next as JSON, cues and
+     * all, and puts the cues back with `addCue` — which a native text track,
+     * as Safari's are, refuses when handed a plain object. So VHS's metadata
+     * track, filled by an HLS source and carried through YouTube, threw in the
+     * middle of the swap back to Html5. The swap was never finished: the tech
+     * was left without its event wiring, `changingSrc_` stayed set, and every
+     * play after it waited on a load that had already happened. The tracks
+     * belong to a source long gone; this one's are added after it loads.
+     */
+    private dropCarriedTextTracks(): void {
+        if ((this.player as unknown as { techName_?: string }).techName_ === 'Html5') return;
+        const tech = vhsTech(this.player) as { clearTracks?(types: string): void } | null;
+        tech?.clearTracks?.('text');
     }
+
+    /**
+     * Takes the outgoing handler's `<source>` elements off the media element,
+     * before the handler replacing it adds its own.
+     *
+     * On Safari and iOS, VHS attaches its MediaSource through `<source>`
+     * elements — its own URL, and the playlist's for AirPlay — rather than
+     * `src`, and never removes them. An element already playing does not look
+     * at a `<source>` added to it, so each new source's were stacked behind the
+     * last one's and never chosen: an angle switch, the audio toggle, a
+     * recovery re-attach or a new load played the old stream out to its end
+     * and stopped. `xhr-hooks-ready` falls between the two, with the old handler
+     * disposed and the new one not yet attached. A tech built for this source,
+     * on the way back from YouTube, has a fresh element, and is not reachable
+     * at this point anyway.
+     */
+    private clearReplacedSources(): void {
+        const tech = vhsTech(this.player) as { el?(): Element | null; reset?(): void } | null;
+        if (!tech?.el?.()?.querySelector('source')) return;
+        // The Html5 tech's own reset: every `<source>` and the `src` removed,
+        // and the element reloaded empty.
+        tech.reset?.();
+    }
+
+    /**
+     * Puts video.js's record of its source back to the one this adapter set,
+     * when video.js has lost it.
+     *
+     * video.js keeps that record (`currentSource()`) and trusts it: `play()`
+     * refuses to start without one, and `load()` rebuilds the engine from it.
+     * It rewrites it from every `sourceset` the tech reports once no source
+     * change is under way, skipping VHS's MediaSource URL only when the
+     * player's own source is not a blob — a guess that fails for a munged
+     * master, which always is one. A tech built on the way back from YouTube
+     * reports, once it is ready, the empty source it started with, so the
+     * record became empty, and in Safari every play that followed rebuilt the
+     * engine from nothing: "No compatible source was found for this media".
+     */
+    private keepSourceRecorded(): void {
+        const source = this.playerSource;
+        // video.js types `currentSource()` as a Tech; it is a source object.
+        const recorded = this.player.currentSource() as unknown as { src?: string };
+        if (!source || recorded.src === source.src) return;
+        (this.player as unknown as { updateSourceCaches_(source: object): void })
+            .updateSourceCaches_({ ...source });
+    }
+
+    /**
+     * Makes video.js's `load()` do nothing while this adapter plays a source
+     * through VHS.
+     *
+     * For a VHS source, `load()` is `src(currentSource())`: the engine rebuilt
+     * from video.js's record of the source, behind this adapter. Safari calls
+     * it from `play()` whenever a source change is under way — priming the
+     * element, which is native playback's concern — and a switch that resumes
+     * playback, whether an angle, the audio toggle or a recovery re-attach,
+     * plays right after its own `src()`. The rebuilt handler was one this
+     * adapter never wrapped, so its key and live-playlist requests went to the
+     * network and playback stopped. Declining loses nothing: video.js has
+     * already queued that `play()` for the source's `loadstart`. A source
+     * played natively keeps video.js's own `load()`.
+     */
+    private guardLoad(): void {
+        const player = this.player;
+        const hadOwn = Object.prototype.hasOwnProperty.call(player, 'load');
+        const original = player.load;
+        player.load = () => {
+            if (this.playerSource?.type === HLS_MIME_TYPE) return;
+            original?.call(player);
+        };
+        this.restoreLoad = () => {
+            if (hadOwn) player.load = original;
+            else delete (player as { load?: unknown }).load;
+        };
+    }
+
 
     // -- playback -----------------------------------------------------------
 
@@ -408,9 +559,22 @@ export class VideoJsAdapter implements PlayerAdapter {
         }
     }
 
+    /**
+     * Marks the engine's current tracks as the outgoing source's — see
+     * {@link audioTracksOutgoing} — and says so, since the wrapper does not
+     * otherwise hear of a `reattach()`. An empty list is also its cue that the
+     * list will be rebuilt with the stream's default selected.
+     */
+    private retireAudioTracks(): void {
+        const tracks = this.audioTrackList();
+        if (!tracks || tracks.length === 0) return;
+        this.audioTracksOutgoing = true;
+        this.emit('audiotracks-updated', undefined);
+    }
+
     getAudioTracks(): AdapterAudioTrack[] {
         const tracks = this.audioTrackList();
-        if (!tracks) return [];
+        if (!tracks || this.audioTracksOutgoing) return [];
         const result: AdapterAudioTrack[] = [];
         for (let i = 0; i < tracks.length; i++) {
             const track = tracks[i];
@@ -426,7 +590,8 @@ export class VideoJsAdapter implements PlayerAdapter {
 
     setAudioTrack(id: string): void {
         const tracks = this.audioTrackList();
-        if (!tracks) return;
+        // The wrapper hands its choice to the new list once that arrives.
+        if (!tracks || this.audioTracksOutgoing) return;
         for (let i = 0; i < tracks.length; i++) {
             const track = tracks[i];
             if (!track) continue;
@@ -578,6 +743,7 @@ export class VideoJsAdapter implements PlayerAdapter {
         // The tech is created with the first source and can be swapped by a
         // later one (YouTube), so the stall verdicts are re-subscribed per load.
         add('loadstart', () => this.stallSignals.attach(vhsTech(this.player)));
+        add('sourceset', () => this.keepSourceRecorded());
         add('durationchange', () => this.emit('durationchange', { duration: this.getDuration() }));
         add('progress', () => this.emitProgress());
         add('playing', () => this.emit('playing', undefined));
@@ -681,7 +847,11 @@ export class VideoJsAdapter implements PlayerAdapter {
 
         const tracks = this.audioTrackList();
         if (tracks) {
-            const onAudioTracks = (): void => this.emit('audiotracks-updated', undefined);
+            const onAudioTracks = (): void => {
+                // Torn down: whatever video.js adds next is the new source's.
+                if (tracks.length === 0) this.audioTracksOutgoing = false;
+                this.emit('audiotracks-updated', undefined);
+            };
             for (const type of ['addtrack', 'removetrack', 'change']) {
                 tracks.on(type, onAudioTracks);
                 this.listListeners.push(() => tracks.off(type, onAudioTracks));
@@ -727,11 +897,20 @@ export class VideoJsAdapter implements PlayerAdapter {
         this.prefetcher = null;
         this.cancelDeferredSeek();
         this.disarmSourceHooks();
-        this.uninstallSourceHooks();
+        // The seam wrappers stay on the handler they wrap. It outlives this call:
+        // video.js disposes it only once the next src() lands, the tech is swapped
+        // for YouTube, or the player is disposed — all later, and a YouTube switch
+        // first waits for the tech to load. A live source refreshes its playlists
+        // all the while, and handing the handler its raw factory back sends
+        // luminary://live/… over a real XHR, which the browser refuses and VHS
+        // answers by excluding one rendition after another. Wrapped, it is
+        // answered to the last: keys with the bytes it was given, live playlists
+        // as the serving layer decides.
         this.stallSignals.clear();
         this.removeRemoteTextTracks();
         this.keyBytes = null;
         this.lastSource = null;
+        this.playerSource = null;
     }
 
     destroy(): void {
@@ -749,6 +928,8 @@ export class VideoJsAdapter implements PlayerAdapter {
         this.onVisibilityChange = null;
         this.detachPlayerListeners();
         this.detachListListeners();
+        this.restoreLoad?.();
+        this.restoreLoad = null;
         this.activeTextTrackId = null;
         this.listeners.clear();
         // The player is not disposed: it belongs to the component that made it,
