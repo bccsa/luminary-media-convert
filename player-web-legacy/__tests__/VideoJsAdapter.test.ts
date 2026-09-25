@@ -624,3 +624,111 @@ describe('VideoJsAdapter — coming back from YouTube', () => {
         expect(p.currentSource()).toEqual({ src: 'blob:master', type: 'application/x-mpegURL' });
     });
 });
+
+/**
+ * On Safari, VHS attaches its MediaSource through `<source>` elements, and
+ * video.js's `play()` calls `load()` while a source change is under way. Each
+ * undid a switch made behind it — an angle, the audio toggle, a recovery
+ * re-attach: the first by playing the old stream on, the second by rebuilding
+ * the engine from video.js's record of the source.
+ */
+describe('VideoJsAdapter — changing source in Safari', () => {
+    const source = { url: 'blob:master', isBlob: true, recovery: DEFAULT_RECOVERY_POLICY };
+    const adapters: VideoJsAdapter[] = [];
+
+    function setup({ mediaSource = true } = {}) {
+        if (mediaSource) vi.stubGlobal('MediaSource', class {});
+        const video = document.createElement('video');
+        const tech = {
+            vhs: { xhr: vi.fn() },
+            el: () => video,
+            // The Html5 tech's own: every `<source>` and the `src` removed.
+            reset: vi.fn(() => {
+                video.querySelectorAll('source').forEach((element) => element.remove());
+                video.removeAttribute('src');
+            }),
+        };
+        const load = vi.fn();
+        const p = fakePlayer({ techName_: 'Html5', tech: vi.fn(() => tech) });
+        // Where video.js keeps it: on the prototype, not the instance.
+        Object.setPrototypeOf(p, { load });
+        const a = new VideoJsAdapter(p);
+        adapters.push(a);
+        return { p, a, video, tech, load };
+    }
+
+    /** What VHS attaches on Safari: its MediaSource's URL, and the playlist's for AirPlay. */
+    function attachSources(video: HTMLVideoElement, mediaSourceUrl: string, playlistUrl: string): void {
+        for (const src of [mediaSourceUrl, playlistUrl]) {
+            video.append(Object.assign(document.createElement('source'), { src }));
+        }
+    }
+
+    const sourcesOf = (video: HTMLVideoElement) =>
+        [...video.querySelectorAll('source')].map((element) => element.getAttribute('src'));
+
+    afterEach(() => {
+        for (const a of adapters.splice(0)) a.destroy();
+        vi.unstubAllGlobals();
+    });
+
+    it("takes the replaced handler's <source> elements off before the next one adds its own", async () => {
+        // A playing element ignores a `<source>` added to it: the old stream
+        // played on to its end, and stopped.
+        const { p, a, video } = setup();
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+        attachSources(video, 'blob:media-source-1', 'blob:master');
+
+        await a.loadSource({ ...source, url: 'blob:angle-2' });
+        p.fire('xhr-hooks-ready');
+        attachSources(video, 'blob:media-source-2', 'blob:angle-2');
+        p.fire('loadstart');
+
+        expect(sourcesOf(video)).toEqual(['blob:media-source-2', 'blob:angle-2']);
+    });
+
+    it('leaves an element given its source through `src` alone', async () => {
+        // Everywhere else VHS sets `src`, which the next handler's replaces.
+        const { p, a, video, tech } = setup();
+        await a.loadSource(source);
+        video.setAttribute('src', 'blob:media-source-1');
+
+        await a.loadSource({ ...source, url: 'blob:angle-2' });
+        p.fire('xhr-hooks-ready');
+
+        expect(tech.reset).not.toHaveBeenCalled();
+    });
+
+    it("declines video.js's load() while VHS plays the source", async () => {
+        // For a VHS source, load() is src(currentSource()): a handler built
+        // behind the adapter, which never wrapped it.
+        const { p, a, load } = setup();
+        await a.loadSource(source);
+
+        p.load();
+
+        expect(load).not.toHaveBeenCalled();
+    });
+
+    it('leaves load() to video.js for a source played natively', async () => {
+        // With no Media Source the platform plays the URL, and load() is how
+        // video.js primes the element for it.
+        const { p, a, load } = setup({ mediaSource: false });
+        await a.loadSource({ url: 'https://cdn.example.com/master.m3u8', isBlob: false, recovery: DEFAULT_RECOVERY_POLICY });
+
+        p.load();
+
+        expect(load).toHaveBeenCalledTimes(1);
+        expect(load.mock.contexts[0]).toBe(p);
+    });
+
+    it('gives load() back when destroyed', async () => {
+        const { p, a, load } = setup();
+        await a.loadSource(source);
+
+        a.destroy();
+
+        expect(p.load).toBe(load);
+    });
+});

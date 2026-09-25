@@ -136,6 +136,8 @@ export class VideoJsAdapter implements PlayerAdapter {
      * is attached.
      */
     private playerSource: { src: string; type?: string } | null = null;
+    /** Puts back the player's own `load()`; see {@link guardLoad}. */
+    private restoreLoad: (() => void) | null = null;
     /** Where forward progress is measured from: the furthest played position since the last seek. */
     private lastProgressTime = 0;
     private onVisibilityChange: (() => void) | null = null;
@@ -191,6 +193,7 @@ export class VideoJsAdapter implements PlayerAdapter {
         this.attachPlayerListeners();
         this.attachListListeners();
         this.attachVisibilityListener();
+        this.guardLoad();
         this.stallSignals.attach(vhsTech(this.player));
     }
 
@@ -311,8 +314,12 @@ export class VideoJsAdapter implements PlayerAdapter {
             if (vhsHandler(this.player)) wrap();
             else queueMicrotask(wrap);
         };
+        const onHooksReady = (): void => {
+            this.clearReplacedSources();
+            install();
+        };
         this.sourceHookHandlers = [
-            ['xhr-hooks-ready', install],
+            ['xhr-hooks-ready', onHooksReady],
             ['loadstart', install],
         ];
         for (const [event, handler] of this.sourceHookHandlers) {
@@ -347,6 +354,29 @@ export class VideoJsAdapter implements PlayerAdapter {
     }
 
     /**
+     * Takes the outgoing handler's `<source>` elements off the media element,
+     * before the handler replacing it adds its own.
+     *
+     * On Safari and iOS, VHS attaches its MediaSource through `<source>`
+     * elements — its own URL, and the playlist's for AirPlay — rather than
+     * `src`, and never removes them. An element already playing does not look
+     * at a `<source>` added to it, so each new source's were stacked behind the
+     * last one's and never chosen: an angle switch, the audio toggle, a
+     * recovery re-attach or a new load played the old stream out to its end
+     * and stopped. `xhr-hooks-ready` falls between the two, with the old handler
+     * disposed and the new one not yet attached. A tech built for this source,
+     * on the way back from YouTube, has a fresh element, and is not reachable
+     * at this point anyway.
+     */
+    private clearReplacedSources(): void {
+        const tech = vhsTech(this.player) as { el?(): Element | null; reset?(): void } | null;
+        if (!tech?.el?.()?.querySelector('source')) return;
+        // The Html5 tech's own reset: every `<source>` and the `src` removed,
+        // and the element reloaded empty.
+        tech.reset?.();
+    }
+
+    /**
      * Puts video.js's record of its source back to the one this adapter set,
      * when video.js has lost it.
      *
@@ -367,6 +397,35 @@ export class VideoJsAdapter implements PlayerAdapter {
         if (!source || recorded.src === source.src) return;
         (this.player as unknown as { updateSourceCaches_(source: object): void })
             .updateSourceCaches_({ ...source });
+    }
+
+    /**
+     * Makes video.js's `load()` do nothing while this adapter plays a source
+     * through VHS.
+     *
+     * For a VHS source, `load()` is `src(currentSource())`: the engine rebuilt
+     * from video.js's record of the source, behind this adapter. Safari calls
+     * it from `play()` whenever a source change is under way — priming the
+     * element, which is native playback's concern — and a switch that resumes
+     * playback, whether an angle, the audio toggle or a recovery re-attach,
+     * plays right after its own `src()`. The rebuilt handler was one this
+     * adapter never wrapped, so its key and live-playlist requests went to the
+     * network and playback stopped. Declining loses nothing: video.js has
+     * already queued that `play()` for the source's `loadstart`. A source
+     * played natively keeps video.js's own `load()`.
+     */
+    private guardLoad(): void {
+        const player = this.player;
+        const hadOwn = Object.prototype.hasOwnProperty.call(player, 'load');
+        const original = player.load;
+        player.load = () => {
+            if (this.playerSource?.type === HLS_MIME_TYPE) return;
+            original?.call(player);
+        };
+        this.restoreLoad = () => {
+            if (hadOwn) player.load = original;
+            else delete (player as { load?: unknown }).load;
+        };
     }
 
 
@@ -869,6 +928,8 @@ export class VideoJsAdapter implements PlayerAdapter {
         this.onVisibilityChange = null;
         this.detachPlayerListeners();
         this.detachListListeners();
+        this.restoreLoad?.();
+        this.restoreLoad = null;
         this.activeTextTrackId = null;
         this.listeners.clear();
         // The player is not disposed: it belongs to the component that made it,
