@@ -396,3 +396,118 @@ describe('VideoJsAdapter — live playlists', () => {
         );
     });
 });
+
+/**
+ * video.js swaps sources a tick after `src()`, and until then the outgoing VHS
+ * handler is alive with its tracks in the list. Selecting one sends that handler
+ * for a playlist whose URL the wrapper revoked when the new load began: the
+ * request fails, VHS falls back to its default, and the default is what the new
+ * source was given. So the adapter keeps the outgoing list to itself.
+ */
+describe("VideoJsAdapter — the outgoing source's audio tracks", () => {
+    const source = { url: 'blob:master', isBlob: true, recovery: DEFAULT_RECOVERY_POLICY };
+    const adapters: VideoJsAdapter[] = [];
+
+    /**
+     * An audio track list that behaves as video.js's does across a source
+     * change: every addition and removal is announced, and the outgoing
+     * source's tracks are all removed before the new source's are added.
+     */
+    function trackList() {
+        const handlers = new Map<string, Set<() => void>>();
+        const fire = (type: string) => handlers.get(type)?.forEach((handler) => handler());
+        const list: any = Object.assign([] as any[], {
+            on: (type: string, handler: () => void) => {
+                handlers.set(type, (handlers.get(type) ?? new Set()).add(handler));
+            },
+            off: (type: string, handler: () => void) => handlers.get(type)?.delete(handler),
+            add(id: string, enabled = false) {
+                list.push({ id, language: id, label: id.toUpperCase(), enabled });
+                fire('addtrack');
+            },
+            clear() {
+                while (list.length > 0) {
+                    list.pop();
+                    fire('removetrack');
+                }
+            },
+        });
+        return list;
+    }
+
+    function setup() {
+        vi.stubGlobal('MediaSource', class {});
+        const tracks = trackList();
+        const a = new VideoJsAdapter(fakePlayer({ audioTracks: () => tracks }));
+        adapters.push(a);
+        const updates = vi.fn();
+        a.on('audiotracks-updated', updates);
+        return { a, tracks, updates };
+    }
+
+    /** A source loaded and playing, its tracks listed. */
+    async function playing() {
+        const context = setup();
+        await context.a.loadSource(source);
+        context.tracks.add('en', true);
+        context.tracks.add('fr');
+        context.updates.mockClear();
+        return context;
+    }
+
+    afterEach(() => {
+        for (const a of adapters.splice(0)) a.destroy();
+        vi.unstubAllGlobals();
+    });
+
+    it('lists none from the next load until video.js has torn the old ones down', async () => {
+        const { a, tracks } = await playing();
+
+        await a.loadSource({ ...source, url: 'blob:next' });
+        expect(a.getAudioTracks()).toEqual([]);
+
+        tracks.clear();
+        tracks.add('en', true);
+        expect(a.getAudioTracks()).toEqual([{ id: 'en', lang: 'en', label: 'EN' }]);
+    });
+
+    it('refuses a selection in the outgoing list', async () => {
+        const { a, tracks } = await playing();
+
+        await a.loadSource({ ...source, url: 'blob:next' });
+        a.setAudioTrack('fr');
+
+        expect(tracks[1].enabled).toBe(false);
+    });
+
+    it("selects in the new source's list once it has arrived", async () => {
+        const { a, tracks } = await playing();
+        await a.loadSource({ ...source, url: 'blob:next' });
+        tracks.clear();
+        tracks.add('en', true);
+        tracks.add('fr');
+
+        a.setAudioTrack('fr');
+
+        expect(tracks[1].enabled).toBe(true);
+    });
+
+    it('announces the retirement, which is all the wrapper learns of a re-attach', async () => {
+        const { a, updates } = await playing();
+
+        await a.reattach();
+
+        expect(a.getAudioTracks()).toEqual([]);
+        expect(updates).toHaveBeenCalledTimes(1);
+    });
+
+    it('has nothing to retire on a first load', async () => {
+        const { a, tracks, updates } = setup();
+
+        await a.loadSource(source);
+        expect(updates).not.toHaveBeenCalled();
+
+        tracks.add('en', true);
+        expect(a.getAudioTracks()).toEqual([{ id: 'en', lang: 'en', label: 'EN' }]);
+    });
+});

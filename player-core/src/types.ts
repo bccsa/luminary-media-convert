@@ -556,14 +556,18 @@ export interface PlayerAdapter {
     setVariant(id: string | 'auto'): void;
 
     /**
-     * The engine's audio tracks; empty while it has none.
+     * The audio tracks of the source the engine was last handed; empty until
+     * it has them.
      *
-     * A list the engine rebuilds — for a new source, or for its own
-     * `reattach()` — must be seen empty in between: already empty when
-     * `loadSource` resolves, or announced with `audiotracks-updated` as it
-     * empties. The engine selects its own default in the list it builds, and
-     * that empty moment is how the wrapper knows to hand a viewer's choice
-     * back into it.
+     * From the moment `loadSource` or `reattach()` replaces the source, any
+     * list the engine still holds is the outgoing source's: report no tracks,
+     * and ignore `setAudioTrack`, until the new source's arrive. Announce the
+     * empty list with `audiotracks-updated` — the wrapper hears of a
+     * `reattach()` no other way. A track selected in the outgoing list is
+     * loaded by an engine about to be torn down, from playlist URLs the wrapper
+     * may already have released; and the empty list is how the wrapper knows
+     * the engine is rebuilding with its own default selected, so that it hands
+     * a viewer's choice back.
      */
     getAudioTracks(): AdapterAudioTrack[];
     setAudioTrack(id: string): void;

@@ -135,6 +135,18 @@ export class VideoJsAdapter implements PlayerAdapter {
     private onVisibilityChange: (() => void) | null = null;
     private remoteTextTracks = new Map<string, RemoteTextTrackElement>();
     private activeTextTrackId: string | null = null;
+    /**
+     * The engine's audio tracks still belong to the source being replaced.
+     *
+     * video.js swaps sources a tick after `src()`, and until then the outgoing
+     * VHS handler is alive with its tracks in the list. A track selected there
+     * is loaded by that handler, from a playlist URL the wrapper revoked when
+     * the new load began; the request fails, VHS falls back to the stream's
+     * default, and the default is what gets carried into the new source. So the
+     * list reads as empty, and selections are refused, until video.js has torn
+     * it down.
+     */
+    private audioTracksOutgoing = false;
     private deferredSeek: (() => void) | null = null;
     private playerListeners: [string, () => void][] = [];
     private listListeners: (() => void)[] = [];
@@ -202,6 +214,7 @@ export class VideoJsAdapter implements PlayerAdapter {
         }
 
         this.armSourceHooks();
+        this.retireAudioTracks();
         this.player.src({ src: src.url, type: HLS_MIME_TYPE });
         // Deliberately not awaiting readiness: the wrapper drives playback off
         // adapter events, and a load that never becomes ready is an error, not
@@ -236,6 +249,7 @@ export class VideoJsAdapter implements PlayerAdapter {
 
         this.cancelDeferredSeek();
         this.armSourceHooks();
+        this.retireAudioTracks();
         this.player.src({ src: src.url, type: HLS_MIME_TYPE });
 
         if (seekTo > 0) this.seek(seekTo);
@@ -420,9 +434,22 @@ export class VideoJsAdapter implements PlayerAdapter {
         }
     }
 
+    /**
+     * Marks the engine's current tracks as the outgoing source's — see
+     * {@link audioTracksOutgoing} — and says so, since the wrapper does not
+     * otherwise hear of a `reattach()`. An empty list is also its cue that the
+     * list will be rebuilt with the stream's default selected.
+     */
+    private retireAudioTracks(): void {
+        const tracks = this.audioTrackList();
+        if (!tracks || tracks.length === 0) return;
+        this.audioTracksOutgoing = true;
+        this.emit('audiotracks-updated', undefined);
+    }
+
     getAudioTracks(): AdapterAudioTrack[] {
         const tracks = this.audioTrackList();
-        if (!tracks) return [];
+        if (!tracks || this.audioTracksOutgoing) return [];
         const result: AdapterAudioTrack[] = [];
         for (let i = 0; i < tracks.length; i++) {
             const track = tracks[i];
@@ -438,7 +465,8 @@ export class VideoJsAdapter implements PlayerAdapter {
 
     setAudioTrack(id: string): void {
         const tracks = this.audioTrackList();
-        if (!tracks) return;
+        // The wrapper hands its choice to the new list once that arrives.
+        if (!tracks || this.audioTracksOutgoing) return;
         for (let i = 0; i < tracks.length; i++) {
             const track = tracks[i];
             if (!track) continue;
@@ -693,7 +721,11 @@ export class VideoJsAdapter implements PlayerAdapter {
 
         const tracks = this.audioTrackList();
         if (tracks) {
-            const onAudioTracks = (): void => this.emit('audiotracks-updated', undefined);
+            const onAudioTracks = (): void => {
+                // Torn down: whatever video.js adds next is the new source's.
+                if (tracks.length === 0) this.audioTracksOutgoing = false;
+                this.emit('audiotracks-updated', undefined);
+            };
             for (const type of ['addtrack', 'removetrack', 'change']) {
                 tracks.on(type, onAudioTracks);
                 this.listListeners.push(() => tracks.off(type, onAudioTracks));
