@@ -986,16 +986,19 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
             '+negative_cts_offsets+default_base_moof'
         );
 
-        // The whole ladder, never this wave's share of it: the name decides the
-        // output directory, and buildStreamChainMap applies the same test over
-        // the full set. Deciding it per wave would rename a rendition purely
-        // because it landed in a run with fewer tracks.
-        const multiTrack =
-            new Set(allRenditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
+        const streamNames = this.buildVideoStreamNames(allRenditions);
 
         const varParts: string[] = [];
         for (const { rendition, outputIndex } of videoIndexMap) {
-            const name = this.buildVideoStreamName(rendition, multiTrack);
+            // A wave holds the ladder's own rendition objects, so this only
+            // misses if one was copied on the way in — and an unnamed stream
+            // would silently encode into `stream_undefined`.
+            const name = streamNames.get(rendition);
+            if (!name) {
+                throw new Error(
+                    'Rendition is not one of the ladder the stream names were built from'
+                );
+            }
             // In a wave without audio the agroup names streams absent from this
             // run. Verified harmless against the shipped ffmpeg: the muxer
             // simply writes no AUDIO attribute, and the merge restores it from
@@ -1411,12 +1414,11 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         // after the rendition, and the rendition carries the audio group that
         // every wave after the first had to omit.
         const renditions = encodeConfig.videoRenditions ?? [];
-        const multiTrack =
-            new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
+        const streamNames = this.buildVideoStreamNames(renditions);
         const groupByDir = new Map<string, string>();
         for (const rendition of renditions) {
             groupByDir.set(
-                `stream_${this.buildVideoStreamName(rendition, multiTrack)}`,
+                `stream_${streamNames.get(rendition)!}`,
                 rendition.audioGroupId
             );
         }
@@ -1624,15 +1626,10 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         if (config.type === 'video') {
             const renditions = config.videoRenditions ?? [];
-            const multiTrack =
-                new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size >
-                1;
+            const streamNames = this.buildVideoStreamNames(renditions);
             for (const rendition of renditions) {
                 targets.push({
-                    streamDir: `stream_${this.buildVideoStreamName(
-                        rendition,
-                        multiTrack
-                    )}`,
+                    streamDir: `stream_${streamNames.get(rendition)!}`,
                     kind: 'video',
                     sourceTrackIndex: rendition.sourceTrackIndex ?? 0,
                     rendition,
@@ -2011,14 +2008,12 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
 
         if (encodeConfig.type === 'video') {
             const renditions = encodeConfig.videoRenditions ?? [];
-            // The same test buildVideoArgs applies when it names the stream
-            // directories, and it has to stay the same test: a different answer
-            // here maps chains onto directories that do not exist.
-            const multiTrack =
-                new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size >
-                1;
+            // The same names buildVideoArgs gives the stream directories, from
+            // the same builder: a chain keyed on a name nothing writes packs
+            // nothing.
+            const streamNames = this.buildVideoStreamNames(renditions);
             for (const rendition of renditions) {
-                const name = this.buildVideoStreamName(rendition, multiTrack);
+                const name = streamNames.get(rendition)!;
                 chains[`stream_${name}`] =
                     `v${rendition.sourceTrackIndex ?? 0}`;
             }
@@ -2031,6 +2026,42 @@ export class FfmpegService implements OnModuleInit, OnModuleDestroy {
         }
 
         return chains;
+    }
+
+    /**
+     * The stream directory name for every rendition of a ladder, unique by
+     * construction.
+     *
+     * The name becomes ffmpeg's `%v`, so it *is* the output directory. Two
+     * renditions that share one name share one directory: ffmpeg accepts the
+     * duplicate silently and both write the same `playlist.m3u8` and the same
+     * `segment_%05d.m4s`, so the ladder ends up advertising two variants over
+     * one clobbered encode. The base name carries only label and dimensions,
+     * which a second rendition at the same size — another bitrate, another
+     * audio group — matches exactly, so uniqueness cannot come from it alone.
+     *
+     * Always take the whole ladder, never one wave's share of it: the name
+     * decides the directory, and every caller has to arrive at the same answer
+     * or it maps onto a directory nothing writes.
+     */
+    private buildVideoStreamNames(
+        renditions: VideoRenditionDto[]
+    ): Map<VideoRenditionDto, string> {
+        const multiTrack =
+            new Set(renditions.map((r) => r.sourceTrackIndex ?? 0)).size > 1;
+
+        const names = new Map<VideoRenditionDto, string>();
+        const taken = new Set<string>();
+        for (const rendition of renditions) {
+            const base = this.buildVideoStreamName(rendition, multiTrack);
+            // The first claimant keeps the bare name, so a ladder with no
+            // duplicates is named exactly as it always was.
+            let name = base;
+            for (let n = 2; taken.has(name); n++) name = `${base}_${n}`;
+            taken.add(name);
+            names.set(rendition, name);
+        }
+        return names;
     }
 
     private buildVideoStreamName(

@@ -114,6 +114,56 @@ export function ladderFor(track: VideoTrackInfo): LadderRung[] {
     ];
 }
 
+/** The height and bitrate to open a hand-added rendition on. */
+export interface NextRung {
+    height: number;
+    bitrateKbps: number;
+}
+
+/**
+ * What a rendition added by hand should default to: a rung the ladder does not
+ * already have.
+ *
+ * The button used to open on a fixed 854x480 — the suggested ladder's 480p rung
+ * to the byte on any 16:9 source, so its commonest use added a second encode of
+ * a picture size already there. Prefers the tallest standard rung still free,
+ * and once they are all taken (the usual case straight after analysis) steps
+ * below the lowest, halving until the height is free.
+ *
+ * Bitrate for a stepped rung is priced by pixel count against the rung above
+ * it, the same curve {@link ladderFor} draws; both share the source's shape, so
+ * the ratio is the square of the heights.
+ */
+export function nextRenditionRung(
+    track: VideoTrackInfo | undefined,
+    usedHeights: readonly number[]
+): NextRung {
+    const used = new Set(usedHeights);
+    const rungs = track ? ladderFor(track) : ABR_LADDER;
+
+    const free = rungs.find((r) => !used.has(r.height));
+    if (free) return { height: free.height, bitrateKbps: free.bitrateKbps };
+
+    const lowest = rungs[rungs.length - 1];
+    let height = evenHeight(lowest.height / 2);
+    while (used.has(height) && height > MIN_RUNG_HEIGHT) {
+        height = evenHeight(height / 2);
+    }
+
+    const scale = (height / lowest.height) ** 2;
+    return {
+        height,
+        bitrateKbps: Math.max(1, Math.round(lowest.bitrateKbps * scale)),
+    };
+}
+
+/** Encoders need even dimensions; 2 is the floor a rung can shrink to. */
+const MIN_RUNG_HEIGHT = 2;
+
+function evenHeight(value: number): number {
+    return Math.max(MIN_RUNG_HEIGHT, Math.round(value / 2) * 2);
+}
+
 /**
  * Scale a ladder rung's bitrate to the source frame rate.
  *

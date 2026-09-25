@@ -3331,6 +3331,143 @@ describe('FfmpegService', () => {
     });
 
     /**
+     * The name is ffmpeg's `%v`, so it is the output directory. Two renditions
+     * sharing one name share one directory, and ffmpeg clobbers rather than
+     * complains — the ladder then advertises two variants over one encode.
+     */
+    describe('buildVideoStreamNames', () => {
+        const rendition = (over: Record<string, unknown> = {}) =>
+            ({
+                width: 854,
+                height: 480,
+                videoBitrateKbps: 1000,
+                copyStream: false,
+                audioGroupId: 'hd',
+                ...over,
+            }) as any;
+
+        const names = (renditions: any[]): string[] => {
+            const map = (service as any).buildVideoStreamNames(renditions);
+            return renditions.map((r) => map.get(r));
+        };
+
+        it('leaves a ladder with no duplicate names exactly as it was', () => {
+            expect(
+                names([
+                    rendition({ width: 1920, height: 1080 }),
+                    rendition({ width: 1280, height: 720 }),
+                    rendition(),
+                ])
+            ).toEqual(['1080p_1920x1080', '720p_1280x720', '480p_854x480']);
+        });
+
+        it('separates two renditions that differ only by audio group', () => {
+            expect(
+                names([
+                    rendition({ audioGroupId: 'hd' }),
+                    rendition({ audioGroupId: 'low' }),
+                ])
+            ).toEqual(['480p_854x480', '480p_854x480_2']);
+        });
+
+        it('separates two renditions at one size that differ only by bitrate', () => {
+            expect(
+                names([
+                    rendition({ videoBitrateKbps: 1000 }),
+                    rendition({ videoBitrateKbps: 600 }),
+                ])
+            ).toEqual(['480p_854x480', '480p_854x480_2']);
+        });
+
+        it('keeps counting past a three-way collision', () => {
+            expect(names([rendition(), rendition(), rendition()])).toEqual([
+                '480p_854x480',
+                '480p_854x480_2',
+                '480p_854x480_3',
+            ]);
+        });
+
+        it('reads multiTrack off the whole ladder, not the colliding pair', () => {
+            expect(
+                names([
+                    rendition({ sourceTrackIndex: 0 }),
+                    rendition({ sourceTrackIndex: 1 }),
+                ])
+            ).toEqual(['480p_t0_854x480', '480p_t1_854x480']);
+        });
+    });
+
+    /**
+     * The collision reaches ffmpeg through `%v`, so the proof it is fixed is
+     * that no two variant entries name one stream directory.
+     */
+    describe('duplicate renditions in var_stream_map', () => {
+        const buildVideoArgs = (opts: any): Promise<string[]> => {
+            return (service as any).buildVideoArgs(opts);
+        };
+
+        it('gives each duplicate rendition its own stream name', async () => {
+            const encodeConfig: EncodeConfigDto = {
+                type: 'video',
+                segmentDuration: 6,
+                // What the form produces when "Add rendition" is clicked on a
+                // 16:9 source: its hardcoded 854x480/'480p' is the suggested
+                // ladder's 480p rung to the byte.
+                videoRenditions: [
+                    {
+                        width: 854,
+                        height: 480,
+                        videoBitrateKbps: 1000,
+                        copyStream: false,
+                        audioGroupId: 'low',
+                    },
+                    {
+                        width: 854,
+                        height: 480,
+                        videoBitrateKbps: 1000,
+                        copyStream: false,
+                        audioGroupId: 'hd',
+                        label: '480p',
+                    },
+                ],
+                audioGroups: [
+                    {
+                        id: 'hd',
+                        label: 'English',
+                        audioBitrateKbps: 192,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                    {
+                        id: 'low',
+                        label: 'English',
+                        audioBitrateKbps: 64,
+                        channels: 2,
+                        audioCodec: 'aac',
+                        sourceTrackIndex: 0,
+                    },
+                ],
+            };
+
+            const args = await buildVideoArgs({
+                inputPath: '/tmp/input.mp4',
+                outputDir: '/tmp/output',
+                encodeConfig,
+            });
+
+            const varMap = args[args.indexOf('-var_stream_map') + 1];
+            const videoNames = varMap
+                .split(' ')
+                .filter((part) => part.startsWith('v:'))
+                .map((part) => /name:([^,]+)/.exec(part)?.[1]);
+
+            expect(videoNames).toEqual(['480p_854x480', '480p_854x480_2']);
+            expect(new Set(videoNames).size).toBe(videoNames.length);
+        });
+    });
+
+    /**
      * Which stream directories share a byte-range chunk chain. The names have to
      * come out of the same builders `buildVideoArgs` names the directories with
      * — a chain keyed on a name nothing writes packs nothing.
@@ -3398,6 +3535,25 @@ describe('FfmpegService', () => {
             expect(service.buildStreamChainMap(config)).toEqual({
                 stream_1080p_1920x1080: 'v0',
                 stream_720p_1280x720: 'v0',
+                stream_hd_HD_Audio: 'a',
+            });
+        });
+
+        it('keys a duplicated rendition on the directory it is actually given', () => {
+            const config = {
+                type: 'video',
+                videoRenditions: [
+                    rendition({ label: '1080p' }),
+                    rendition({ label: '1080p', audioGroupId: 'sd' }),
+                ],
+                audioGroups: [audioGroup()],
+            } as unknown as EncodeConfigDto;
+
+            // The pair collided into one key before, so the map claimed one
+            // fewer directory than the encode writes.
+            expect(service.buildStreamChainMap(config)).toEqual({
+                stream_1080p_1920x1080: 'v0',
+                stream_1080p_1920x1080_2: 'v0',
                 stream_hd_HD_Audio: 'a',
             });
         });
