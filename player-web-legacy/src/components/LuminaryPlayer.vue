@@ -400,14 +400,23 @@ watch([() => props.source, () => props.preferredLanguage], () => {
  *
  * A switch *to* the preferred language is not an override; it is agreement, and
  * suspending on it would give up on re-asserting the preference for no reason.
+ *
+ * Nor is an active track that arrives with a new track list. The controller
+ * publishes every list together with its own pick from it — the master's first
+ * track on load, the engine's first once VHS has built its own — and that is a
+ * default, not a choice. Counting it suspended the auto-apply on every load
+ * before it had run once, because this watcher is declared ahead of the one
+ * that applies and so saw the default first. Only a change among the tracks
+ * already on offer is somebody's selection.
  */
 watch(
-    () => state.value.activeAudioTrackId,
-    (id) => {
+    [() => state.value.activeAudioTrackId, () => state.value.audioTracks],
+    ([id, tracks], [, previousTracks]) => {
+        if (tracks !== previousTracks) return;
         if (preferredSuspended || !id) return;
         const preferred = props.preferredLanguage;
         if (!preferred || id === autoAppliedTrackId) return;
-        if (id === findPreferredTrack(state.value.audioTracks, preferred)) return;
+        if (id === findPreferredTrack(tracks, preferred)) return;
         preferredSuspended = true;
     },
 );
