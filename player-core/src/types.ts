@@ -555,6 +555,16 @@ export interface PlayerAdapter {
     /** `'auto'` re-enables ABR. */
     setVariant(id: string | 'auto'): void;
 
+    /**
+     * The engine's audio tracks; empty while it has none.
+     *
+     * A list the engine rebuilds — for a new source, or for its own
+     * `reattach()` — must be seen empty in between: already empty when
+     * `loadSource` resolves, or announced with `audiotracks-updated` as it
+     * empties. The engine selects its own default in the list it builds, and
+     * that empty moment is how the wrapper knows to hand a viewer's choice
+     * back into it.
+     */
     getAudioTracks(): AdapterAudioTrack[];
     setAudioTrack(id: string): void;
 
@@ -698,6 +708,12 @@ export interface PlayerControllerApi {
     setAngle(id: string): Promise<void>;
     /** Pins a rendition within the capped set; `'auto'` re-enables ABR. No reload. */
     setQuality(id: string | 'auto'): void;
+    /**
+     * Selects an audio track and keeps it selected until the next `load()`.
+     * An angle switch, the audio toggle and a recovery re-attach each rebuild
+     * the engine's track list with the stream's default in it; the choice is
+     * handed back every time.
+     */
     setAudioTrack(id: string): void;
     /** null = subtitles off. */
     setSubtitleTrack(id: string | null): void;

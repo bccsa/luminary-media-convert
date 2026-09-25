@@ -408,6 +408,139 @@ describe('PlayerController — sidecar subtitles across attaches', () => {
     });
 });
 
+/**
+ * An engine rebuilds its audio track list on every attach — an angle switch,
+ * the audio toggle, a re-munge, its own re-attach — and selects the stream's
+ * default in the list it builds. The track somebody chose is handed back, or a
+ * viewer who picked French hears the default after pressing the audio toggle.
+ */
+describe('PlayerController — the chosen audio track across attaches', () => {
+    const TRACKS = [
+        { id: 'hls-0', lang: 'en', label: 'English' },
+        { id: 'hls-1', lang: 'fr', label: 'Français' },
+    ];
+
+    /** A loaded source whose engine lists {@link TRACKS}, with French chosen. */
+    async function frenchChosen() {
+        const context = setup(multiAngleRoutes);
+        await context.controller.load({ masterUrl: MASTER_URL });
+        context.adapter.publishAudioTracks(TRACKS);
+        context.controller.setAudioTrack('hls-1');
+        await flush();
+        context.adapter.audioTrackCalls.splice(0);
+        return context;
+    }
+
+    it('hands it back after an angle switch and the audio toggle', async () => {
+        const { adapter, controller } = await frenchChosen();
+
+        for (const angle of ['angle_1', AUDIO_ONLY_ANGLE_ID]) {
+            await controller.setAngle(angle);
+            adapter.publishAudioTracks(TRACKS);
+            await flush();
+
+            expect(adapter.audioTrackCalls.splice(0)).toEqual(['hls-1']);
+            expect(controller.getState().activeAudioTrackId).toBe('hls-1');
+        }
+    });
+
+    it('hands it back after a recovery re-munge', async () => {
+        const { adapter, controller } = await frenchChosen();
+
+        adapter.emit('reload-requested', { reason: 'fatal', attempt: 2 });
+        await flush();
+        adapter.publishAudioTracks(TRACKS);
+        await flush();
+
+        expect(adapter.loads).toHaveLength(2);
+        expect(adapter.audioTrackCalls).toEqual(['hls-1']);
+    });
+
+    it("hands it back after the adapter's own re-attach, announced by the emptied list", async () => {
+        const { adapter } = await frenchChosen();
+
+        await adapter.reattach();
+        adapter.publishAudioTracks(TRACKS);
+        await flush();
+
+        expect(adapter.audioTrackCalls).toEqual(['hls-1']);
+    });
+
+    it('waits for a list that carries it: VHS adds its tracks one at a time', async () => {
+        const { adapter, controller } = await frenchChosen();
+        await controller.setAngle('angle_1');
+
+        adapter.publishAudioTracks(TRACKS.slice(0, 1));
+        await flush();
+        expect(adapter.audioTrackCalls).toEqual([]);
+
+        adapter.publishAudioTracks(TRACKS);
+        await flush();
+        expect(adapter.audioTrackCalls).toEqual(['hls-1']);
+    });
+
+    it('selects a microtask after the list is announced, not inside the announcement', async () => {
+        // video.js announces each track before it listens to it, so a track
+        // enabled from inside the announcement is enabled without VHS hearing.
+        const { adapter, controller } = await frenchChosen();
+        await controller.setAngle('angle_1');
+
+        adapter.publishAudioTracks(TRACKS);
+        expect(adapter.audioTrackCalls).toEqual([]);
+
+        await Promise.resolve();
+        expect(adapter.audioTrackCalls).toEqual(['hls-1']);
+    });
+
+    it('hands over a choice made before the engine listed it', async () => {
+        const { adapter, controller } = setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL });
+        controller.setAudioTrack('hls-1');
+        adapter.audioTrackCalls.splice(0);
+
+        adapter.publishAudioTracks(TRACKS);
+        await flush();
+
+        expect(adapter.audioTrackCalls).toEqual(['hls-1']);
+        expect(controller.getState().activeAudioTrackId).toBe('hls-1');
+    });
+
+    it('lets a newer choice overtake one still waiting to be handed back', async () => {
+        const { adapter, controller } = await frenchChosen();
+        await controller.setAngle('angle_1');
+
+        adapter.publishAudioTracks(TRACKS);
+        controller.setAudioTrack('hls-0');
+        await flush();
+
+        expect(adapter.audioTrackCalls).toEqual(['hls-0']);
+        expect(controller.getState().activeAudioTrackId).toBe('hls-0');
+    });
+
+    it('leaves a list that was not rebuilt alone', async () => {
+        // An engine republishes its list for reasons of its own — a pick in its
+        // own menu, a level switch — and selecting again then would fight the
+        // viewer who just chose.
+        const { adapter } = await frenchChosen();
+
+        adapter.publishAudioTracks(TRACKS);
+        await flush();
+
+        expect(adapter.audioTrackCalls).toEqual([]);
+    });
+
+    it('forgets the choice on a new load', async () => {
+        const { adapter, controller } = await frenchChosen();
+
+        await controller.load({ masterUrl: MASTER_URL });
+        adapter.publishAudioTracks(TRACKS);
+        await flush();
+
+        expect(adapter.audioTrackCalls).toEqual([]);
+        expect(controller.getState().activeAudioTrackId).toBe('hls-0');
+    });
+});
+
 describe('PlayerController — quality and tracks', () => {
     it('maps contract quality ids onto adapter variant ids', async () => {
         const { adapter, controller } = setup(simpleRoutes, {

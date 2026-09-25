@@ -395,6 +395,10 @@ export class FakeAdapter implements PlayerAdapter {
         // source takes them away. A fake that kept them would hide a wrapper
         // that forgot to hand them back.
         this.textTracks = [];
+        // Audio tracks too, by contract: none until the engine lists the new
+        // source's (`publishAudioTracks`), with its own default selected. A fake
+        // that kept them hid a wrapper that never handed a choice back.
+        this.audioTracks = [];
     }
 
     destroy(): void {
@@ -470,9 +474,14 @@ export class FakeAdapter implements PlayerAdapter {
      * against the source it holds; there is no engine here, so this records the
      * call — what a controller spec can assert is that the wrapper never makes
      * it, the adapter's ladder does.
+     *
+     * The audio tracks go as they do on a load, and the emptied list is
+     * announced: by contract that is the only way the wrapper learns of it.
      */
     async reattach(): Promise<void> {
         this.reattachCount += 1;
+        this.audioTracks = [];
+        this.emit('audiotracks-updated', undefined);
     }
 
     /**
