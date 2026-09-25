@@ -27,6 +27,10 @@
  * instead, and `seek` is exposed to move to a saved one. That surface is the
  * same in both modes, which is what lets a host persist a resume point without
  * caring which engine is behind the picture. Legacy-only.
+ *
+ * A YouTube player that cannot load raises the same error panel (and `error`
+ * slot) as the pipeline does, as a `network` error: a network blocking YouTube,
+ * or Google's unusual-traffic block, which WebKit turns into a redirect loop.
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import videojs from 'video.js';
@@ -47,6 +51,7 @@ import { buildVideoJsOptions, preferYouTubeTech } from '../vjs/playerOptions';
 import { installAutoHide } from '../vjs/autoHide';
 import { TRANSPARENT_POSTER } from '../vjs/poster';
 import { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from '../vjs/keepAlive';
+import { retryYouTubeApi, watchYouTubeApi, whenYouTubeApiSettles } from '../vjs/youtubeApi';
 import { findPreferredTrack } from '../audioTrackLanguage';
 import { isYouTubeUrl, toVideoJsYouTubeUrl } from '../youtube';
 import { singleFlight } from '../singleFlight';
@@ -267,6 +272,8 @@ const importYouTubeTech = singleFlight(() => import('videojs-youtube'));
  * video.js report an unplayable source, which is the honest outcome.
  */
 async function ensureYouTubeTech(): Promise<void> {
+    // Before the import, which is what starts the plugin loading the API.
+    watchYouTubeApi();
     try {
         await importYouTubeTech();
     } catch {
@@ -311,16 +318,23 @@ async function loadSource(source: PlayerSource): Promise<void> {
 
     const generation = ++loadGeneration;
     const superseded = (): boolean => generation !== loadGeneration || player.value !== instance;
+    youtubeError.value = null;
 
     if (isYouTubeUrl(source.masterUrl)) {
         if (controller.value) {
             controller.value.destroy();
             controller.value = null;
         }
+        // A new YouTube source, or the error panel's retry, tries the API
+        // again if it failed; the queued player is handed it if it loads.
+        retryYouTubeApi();
         await ensureYouTubeTech();
         if (superseded()) return;
         preferYouTubeTech(instance);
         instance.src({ type: 'video/youtube', src: toVideoJsYouTubeUrl(source.masterUrl) });
+        if ((await whenYouTubeApiSettles()) === 'failed' && !superseded()) {
+            youtubeError.value = YOUTUBE_API_FAILED;
+        }
         return;
     }
 
@@ -628,8 +642,25 @@ const ERROR_MESSAGE_KEYS: Partial<Record<PlayerError['code'], keyof PlayerMessag
     media: 'errorMedia',
 };
 
+/**
+ * A YouTube source whose player could not load: the iframe API never arrived,
+ * so what is behind the panel is waiting for something that is not coming. In
+ * YouTube mode there is no controller whose state could say so, and without
+ * this the viewer saw a dead player with no explanation.
+ */
+const YOUTUBE_API_FAILED: PlayerError = {
+    code: 'network',
+    fatal: true,
+    message: 'The YouTube iframe API could not be loaded',
+};
+
+const youtubeError = shallowRef<PlayerError | null>(null);
+
+/** The error on screen, whichever mode raised it. */
+const displayedError = computed(() => youtubeError.value ?? state.value.error);
+
 const errorText = computed(() => {
-    const code = state.value.error?.code;
+    const code = displayedError.value?.code;
     const key = code ? ERROR_MESSAGE_KEYS[code] : undefined;
     return key ? msg.value[key] : msg.value.errorGeneric;
 });
@@ -815,8 +846,8 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
             </slot>
         </template>
 
-        <template v-else-if="state.lifecycle === 'error'">
-            <slot name="error" :state="state" :error="state.error" :retry="retry">
+        <template v-else-if="state.lifecycle === 'error' || youtubeError">
+            <slot name="error" :state="state" :error="displayedError" :retry="retry">
                 <div class="lmpl-panel lmpl-error">
                     <p class="lmpl-panel-text">{{ errorText }}</p>
                     <button type="button" class="lmpl-btn lmpl-retry" @click="retry">
