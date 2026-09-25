@@ -3,8 +3,13 @@ import {
     DEFAULT_RECOVERY_POLICY,
     LUMINARY_KEY_PLACEHOLDER_URI,
 } from '@luminary-media-converter/player-core';
-import { VideoJsAdapter } from '../src/adapter/VideoJsAdapter';
+import { VideoJsAdapter, type VideoJsAdapterOptions } from '../src/adapter/VideoJsAdapter';
 import { fakePlayer } from './helpers';
+
+/** Let promise callbacks run. */
+async function settle(): Promise<void> {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+}
 
 describe('VideoJsAdapter — the contract player-core relies on', () => {
     it('serves keys from memory by default, and says so', () => {
@@ -277,11 +282,6 @@ describe('VideoJsAdapter — live playlists', () => {
 
     const liveSource = () => ({ resolveLive: vi.fn(() => Promise.resolve('#EXTM3U\n')) });
 
-    /** Let promise callbacks run. */
-    async function settle(): Promise<void> {
-        for (let i = 0; i < 5; i++) await Promise.resolve();
-    }
-
     afterEach(() => {
         for (const a of adapters.splice(0)) a.destroy();
         vi.unstubAllGlobals();
@@ -509,5 +509,63 @@ describe("VideoJsAdapter — the outgoing source's audio tracks", () => {
 
         tracks.add('en', true);
         expect(a.getAudioTracks()).toEqual([{ id: 'en', lang: 'en', label: 'EN' }]);
+    });
+});
+
+/**
+ * The way back from YouTube is a tech swap inside `src()`. video.js unloads the
+ * YouTube tech, carrying its text tracks across as JSON, and builds an Html5
+ * tech with the source already in hand. The new VHS handler announces itself
+ * from inside that constructor, while the player still reports no tech at all.
+ */
+describe('VideoJsAdapter — coming back from YouTube', () => {
+    const KEY_HEX = '000102030405060708090a0b0c0d0e0f';
+    const source = { url: 'blob:master', isBlob: true, recovery: DEFAULT_RECOVERY_POLICY, keyHex: KEY_HEX };
+    const adapters: VideoJsAdapter[] = [];
+
+    /** A player on the YouTube tech, whose `src()` swaps it for Html5 as video.js's does. */
+    function fromYouTube(options: VideoJsAdapterOptions = {}) {
+        vi.stubGlobal('MediaSource', class {});
+        const network = vi.fn(() => 'network');
+        const youtube = {};
+        const html5 = { vhs: { xhr: network } as Record<string, any> };
+        let tech: unknown = youtube;
+        const p = fakePlayer({
+            techName_: 'Youtube',
+            tech: vi.fn(() => tech),
+            src: vi.fn(() => {
+                tech = false;
+                // loadTech_: the new tech's constructor sets the source, and
+                // VHS announces its handler from in there.
+                p.techName_ = 'Html5';
+                p.fire('xhr-hooks-ready');
+                tech = html5;
+            }),
+        });
+        const a = new VideoJsAdapter(p, options);
+        adapters.push(a);
+        return { p, a, html5, network };
+    }
+
+    afterEach(() => {
+        for (const a of adapters.splice(0)) a.destroy();
+        vi.unstubAllGlobals();
+    });
+
+    it("answers the new source's keys and live playlists, though its handler is out of reach when announced", async () => {
+        // Unanswered, a live source's playlist requests went out as real XHRs,
+        // which the browser refuses, and VHS excluded one rendition after another.
+        const live = { resolveLive: vi.fn(() => Promise.resolve('#EXTM3U\n')) };
+        const { a, html5, network } = fromYouTube({ liveSource: live });
+        await a.loadSource(source);
+
+        const keyCallback = vi.fn();
+        html5.vhs.xhr({ uri: LUMINARY_KEY_PLACEHOLDER_URI }, keyCallback);
+        html5.vhs.xhr({ uri: 'luminary://live/1' }, vi.fn());
+        await settle();
+
+        expect(network).not.toHaveBeenCalled();
+        expect(new Uint8Array(keyCallback.mock.calls[0]![1].response)).toHaveLength(16);
+        expect(live.resolveLive).toHaveBeenCalledWith('luminary://live/1', expect.any(AbortSignal));
     });
 });

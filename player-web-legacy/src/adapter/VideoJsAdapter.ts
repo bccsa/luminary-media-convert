@@ -23,7 +23,7 @@ import { installMemoryKeyXhr } from './vhsKeyInterceptor';
 import { installLivePlaylistXhr } from './vhsLivePlaylistInterceptor';
 import { installByteRangeTimeout } from './vhsRequestTimeout';
 import { VhsStallSignals } from './vhsStallSignals';
-import { vhsTech } from './vhsXhrSeam';
+import { vhsHandler, vhsTech } from './vhsXhrSeam';
 
 /** The MIME type that routes a source to VHS rather than to the native tech. */
 const HLS_MIME_TYPE = 'application/x-mpegURL';
@@ -273,12 +273,20 @@ export class VideoJsAdapter implements PlayerAdapter {
      * it. See `teardownSource` for why that is the point. So the key is the one
      * this source was given, captured here, rather than whatever the adapter
      * holds by the time a late request for it arrives.
+     *
+     * Coming back from YouTube, the handler cannot be reached when it is
+     * announced. video.js builds the new Html5 tech with the source already in
+     * hand, its constructor sets it, and VHS fires `xhr-hooks-ready` from in
+     * there — before the player has been given the tech that holds the
+     * handler. Wrapping then found nothing, and every `luminary://` request of
+     * that source went to the network: a live source's playlists, an encrypted
+     * one's key. The handler is reachable a microtask later, and the one request
+     * out by then is the master's, which no wrapper answers.
      */
     private armSourceHooks(): void {
         this.disarmSourceHooks();
         const keyBytes = this.keyBytes;
-        const install = (): void => {
-            this.disarmSourceHooks();
+        const wrap = (): void => {
             installByteRangeTimeout(this.player);
             if (this.capabilities.keyDelivery === 'memory') {
                 installMemoryKeyXhr(this.player, () => keyBytes);
@@ -286,6 +294,11 @@ export class VideoJsAdapter implements PlayerAdapter {
             if (this.liveSource) {
                 installLivePlaylistXhr(this.player, this.liveSource);
             }
+        };
+        const install = (): void => {
+            this.disarmSourceHooks();
+            if (vhsHandler(this.player)) wrap();
+            else queueMicrotask(wrap);
         };
         this.sourceHookHandlers = [
             ['xhr-hooks-ready', install],
