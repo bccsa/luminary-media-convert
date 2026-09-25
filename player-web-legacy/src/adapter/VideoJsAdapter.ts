@@ -130,6 +130,12 @@ export class VideoJsAdapter implements PlayerAdapter {
     private readonly ladder: RecoveryLadder;
     /** The source currently attached — what {@link reattach} re-prepares against. */
     private lastSource: AdapterSource | null = null;
+    /**
+     * What this adapter last handed `player.src()`, so that video.js's record of
+     * its source can be put back when video.js loses it. Null while no source
+     * is attached.
+     */
+    private playerSource: { src: string; type?: string } | null = null;
     /** Where forward progress is measured from: the furthest played position since the last seek. */
     private lastProgressTime = 0;
     private onVisibilityChange: (() => void) | null = null;
@@ -200,6 +206,8 @@ export class VideoJsAdapter implements PlayerAdapter {
         // which arrives here and must not wipe the count deciding what is left.
         this.ladder.noteSourceLoaded();
 
+        this.dropCarriedTextTracks();
+
         if (!isVideoJsEngineSupported()) {
             if (src.isBlob) {
                 // Munged content (encrypted / capped / angle-pinned) simply
@@ -209,13 +217,15 @@ export class VideoJsAdapter implements PlayerAdapter {
                 throw error;
             }
             // Best effort: hand the untouched URL to the platform player.
-            this.player.src({ src: src.url });
+            this.playerSource = { src: src.url };
+            this.player.src({ ...this.playerSource });
             return;
         }
 
         this.armSourceHooks();
         this.retireAudioTracks();
-        this.player.src({ src: src.url, type: HLS_MIME_TYPE });
+        this.playerSource = { src: src.url, type: HLS_MIME_TYPE };
+        this.player.src({ ...this.playerSource });
         // Deliberately not awaiting readiness: the wrapper drives playback off
         // adapter events, and a load that never becomes ready is an error, not
         // a promise to hang on.
@@ -250,7 +260,8 @@ export class VideoJsAdapter implements PlayerAdapter {
         this.cancelDeferredSeek();
         this.armSourceHooks();
         this.retireAudioTracks();
-        this.player.src({ src: src.url, type: HLS_MIME_TYPE });
+        this.playerSource = { src: src.url, type: HLS_MIME_TYPE };
+        this.player.src({ ...this.playerSource });
 
         if (seekTo > 0) this.seek(seekTo);
         // `play()` answers `undefined` on techs with no promise support, so the
@@ -314,6 +325,48 @@ export class VideoJsAdapter implements PlayerAdapter {
             this.player.off(event, handler);
         }
         this.sourceHookHandlers = [];
+    }
+
+    /**
+     * Drops the text tracks another tech is carrying, before a source hands the
+     * player back to Html5.
+     *
+     * video.js carries text tracks from one tech to the next as JSON, cues and
+     * all, and puts the cues back with `addCue` — which a native text track,
+     * as Safari's are, refuses when handed a plain object. So VHS's metadata
+     * track, filled by an HLS source and carried through YouTube, threw in the
+     * middle of the swap back to Html5. The swap was never finished: the tech
+     * was left without its event wiring, `changingSrc_` stayed set, and every
+     * play after it waited on a load that had already happened. The tracks
+     * belong to a source long gone; this one's are added after it loads.
+     */
+    private dropCarriedTextTracks(): void {
+        if ((this.player as unknown as { techName_?: string }).techName_ === 'Html5') return;
+        const tech = vhsTech(this.player) as { clearTracks?(types: string): void } | null;
+        tech?.clearTracks?.('text');
+    }
+
+    /**
+     * Puts video.js's record of its source back to the one this adapter set,
+     * when video.js has lost it.
+     *
+     * video.js keeps that record (`currentSource()`) and trusts it: `play()`
+     * refuses to start without one, and `load()` rebuilds the engine from it.
+     * It rewrites it from every `sourceset` the tech reports once no source
+     * change is under way, skipping VHS's MediaSource URL only when the
+     * player's own source is not a blob — a guess that fails for a munged
+     * master, which always is one. A tech built on the way back from YouTube
+     * reports, once it is ready, the empty source it started with, so the
+     * record became empty, and in Safari every play that followed rebuilt the
+     * engine from nothing: "No compatible source was found for this media".
+     */
+    private keepSourceRecorded(): void {
+        const source = this.playerSource;
+        // video.js types `currentSource()` as a Tech; it is a source object.
+        const recorded = this.player.currentSource() as unknown as { src?: string };
+        if (!source || recorded.src === source.src) return;
+        (this.player as unknown as { updateSourceCaches_(source: object): void })
+            .updateSourceCaches_({ ...source });
     }
 
 
@@ -631,6 +684,7 @@ export class VideoJsAdapter implements PlayerAdapter {
         // The tech is created with the first source and can be swapped by a
         // later one (YouTube), so the stall verdicts are re-subscribed per load.
         add('loadstart', () => this.stallSignals.attach(vhsTech(this.player)));
+        add('sourceset', () => this.keepSourceRecorded());
         add('durationchange', () => this.emit('durationchange', { duration: this.getDuration() }));
         add('progress', () => this.emitProgress());
         add('playing', () => this.emit('playing', undefined));
@@ -797,6 +851,7 @@ export class VideoJsAdapter implements PlayerAdapter {
         this.removeRemoteTextTracks();
         this.keyBytes = null;
         this.lastSource = null;
+        this.playerSource = null;
     }
 
     destroy(): void {

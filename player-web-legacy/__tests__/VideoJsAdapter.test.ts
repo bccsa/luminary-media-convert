@@ -527,13 +527,28 @@ describe('VideoJsAdapter — coming back from YouTube', () => {
     function fromYouTube(options: VideoJsAdapterOptions = {}) {
         vi.stubGlobal('MediaSource', class {});
         const network = vi.fn(() => 'network');
-        const youtube = {};
+        const youtube = {
+            // VHS's metadata track, filled by the HLS source played before YouTube.
+            textTracks: [{ kind: 'metadata', cues: [{ startTime: 0, endTime: 6 }] }] as unknown[],
+            clearTracks: vi.fn(() => {
+                youtube.textTracks = [];
+            }),
+        };
         const html5 = { vhs: { xhr: network } as Record<string, any> };
         let tech: unknown = youtube;
+        let carried: unknown[] = [];
+        let recorded: { src?: string; type?: string } = {};
         const p = fakePlayer({
             techName_: 'Youtube',
             tech: vi.fn(() => tech),
-            src: vi.fn(() => {
+            currentSource: () => recorded,
+            updateSourceCaches_: (next: typeof recorded) => {
+                recorded = next;
+            },
+            src: vi.fn((next: typeof recorded) => {
+                recorded = next;
+                // unloadTech_: what the next tech is handed of this one's tracks.
+                carried = youtube.textTracks;
                 tech = false;
                 // loadTech_: the new tech's constructor sets the source, and
                 // VHS announces its handler from in there.
@@ -544,7 +559,7 @@ describe('VideoJsAdapter — coming back from YouTube', () => {
         });
         const a = new VideoJsAdapter(p, options);
         adapters.push(a);
-        return { p, a, html5, network };
+        return { p, a, html5, network, youtube, carried: () => carried };
     }
 
     afterEach(() => {
@@ -567,5 +582,45 @@ describe('VideoJsAdapter — coming back from YouTube', () => {
         expect(network).not.toHaveBeenCalled();
         expect(new Uint8Array(keyCallback.mock.calls[0]![1].response)).toHaveLength(16);
         expect(live.resolveLive).toHaveBeenCalledWith('luminary://live/1', expect.any(AbortSignal));
+    });
+
+    it('carries no text tracks out of the YouTube tech', async () => {
+        // Html5 puts carried cues back with `addCue`, which Safari's native
+        // tracks refuse: the swap threw half-way, and every play after it
+        // waited on a load that had already happened.
+        const { a, youtube, carried } = fromYouTube();
+
+        await a.loadSource(source);
+
+        expect(youtube.clearTracks).toHaveBeenCalledWith('text');
+        expect(carried()).toEqual([]);
+    });
+
+    it('leaves the text tracks alone when the player is on Html5 already', async () => {
+        // No tech is swapped, so nothing is carried: the tracks are the
+        // playing handler's own.
+        vi.stubGlobal('MediaSource', class {});
+        const tech = { vhs: {}, clearTracks: vi.fn() };
+        const a = new VideoJsAdapter(fakePlayer({ techName_: 'Html5', tech: vi.fn(() => tech) }));
+        adapters.push(a);
+
+        await a.loadSource(source);
+
+        expect(tech.clearTracks).not.toHaveBeenCalled();
+    });
+
+    it("puts back the record of its source that the new tech's first sourceset wipes", async () => {
+        // video.js trusts that record: `play()` will not start without one,
+        // and in Safari it rebuilds the engine from it — from nothing, which
+        // is "No compatible source was found for this media".
+        const { p, a } = fromYouTube();
+        await a.loadSource(source);
+
+        // The Html5 tech, once ready, reports the empty source it was built
+        // with, and video.js records that over the one it was given.
+        p.updateSourceCaches_({ src: '' });
+        p.fire('sourceset');
+
+        expect(p.currentSource()).toEqual({ src: 'blob:master', type: 'application/x-mpegURL' });
     });
 });
