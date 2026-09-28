@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { aspectWidthForHeight, fpsAdjustedBitrateKbps, ladderFor } from './ladder';
+import {
+    aspectWidthForHeight,
+    fpsAdjustedBitrateKbps,
+    ladderFor,
+    nextRenditionRung,
+} from './ladder';
 import type { VideoTrackInfo } from './types';
 
 describe('fpsAdjustedBitrateKbps', () => {
@@ -139,7 +144,9 @@ describe('ladderFor', () => {
     });
 
     it('still caps an oversized source at 4K', () => {
-        expect(rungs(track({ width: 7680, height: 4320 }))[0]).toBe('3840x2160');
+        expect(rungs(track({ width: 7680, height: 4320 }))[0]).toBe(
+            '3840x2160'
+        );
     });
 
     it('falls back to the source itself when it is below every rung', () => {
@@ -181,8 +188,18 @@ describe('ladderFor', () => {
         // Measured against the table's own 16:9 width instead, a 4:3 720x540
         // top rung came out cheaper than the 640x480 under it.
         for (const t of [
-            track({ width: 720, height: 576, displayWidth: 1024, displayHeight: 576 }),
-            track({ width: 720, height: 480, displayWidth: 720, displayHeight: 540 }),
+            track({
+                width: 720,
+                height: 576,
+                displayWidth: 1024,
+                displayHeight: 576,
+            }),
+            track({
+                width: 720,
+                height: 480,
+                displayWidth: 720,
+                displayHeight: 540,
+            }),
         ]) {
             const budgets = ladderFor(t).map((r) => r.bitrateKbps);
             expect(budgets[0]).toBeGreaterThan(budgets[1]);
@@ -200,5 +217,53 @@ describe('ladderFor', () => {
                 })
             )[0].label
         ).toBe('576p');
+    });
+});
+
+/**
+ * The default a hand-added rendition opens on. It used to be a fixed 854x480,
+ * which is the suggested ladder's own 480p rung on any 16:9 source — so the
+ * button's commonest use added a duplicate of a rung already there.
+ */
+describe('nextRenditionRung', () => {
+    const heightsOf = (t: VideoTrackInfo) => ladderFor(t).map((r) => r.height);
+
+    it('fills the tallest gap when the ladder is missing a rung', () => {
+        const t = track();
+        const used = heightsOf(t).filter((h) => h !== 720);
+        expect(nextRenditionRung(t, used).height).toBe(720);
+    });
+
+    it('never repeats a height already in the ladder', () => {
+        const t = track();
+        const used = heightsOf(t);
+        expect(used).not.toContain(nextRenditionRung(t, used).height);
+    });
+
+    it('steps below the lowest rung once every standard one is taken', () => {
+        // The usual case: the suggested ladder already holds every rung.
+        const t = track();
+        const used = heightsOf(t);
+        const next = nextRenditionRung(t, used);
+        expect(next.height).toBe(72);
+        expect(next.height % 2).toBe(0);
+        // Priced by pixel count against the 144p rung above it.
+        expect(next.bitrateKbps).toBe(38);
+    });
+
+    it('keeps halving until it finds a free height', () => {
+        const t = track();
+        const next = nextRenditionRung(t, [...heightsOf(t), 72, 36]);
+        expect(next.height).toBe(18);
+    });
+
+    it('stays inside the source when the source is short', () => {
+        const t = track({ width: 640, height: 360 });
+        expect(nextRenditionRung(t, []).height).toBe(360);
+        expect(nextRenditionRung(t, [360]).height).toBe(240);
+    });
+
+    it('falls back to the standard table with no track to size against', () => {
+        expect(nextRenditionRung(undefined, []).height).toBe(2160);
     });
 });

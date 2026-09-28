@@ -14,6 +14,7 @@ import {
     aspectWidthForHeight,
     fpsAdjustedBitrateKbps,
     ladderFor,
+    nextRenditionRung,
 } from './ladder';
 import { displayDimensionsOf } from './aspect';
 import {
@@ -170,16 +171,26 @@ function mapTierToGroupId(standardGroupId: string, tierIds: string[]): string {
     );
 }
 
-function reanalyzeVideo() {
-    // By display area, not coded area: two angles of the same picture size
-    // should sort together whatever shape their samples are.
-    const displayArea = (t: VideoTrackInfo) => {
-        const d = displayDimensionsOf(t);
-        return d.width * d.height;
-    };
-    const sortedVideoTracks = [...editableVideoTracks].sort(
+// By display area, not coded area: two angles of the same picture size should
+// sort together whatever shape their samples are.
+function displayArea(t: VideoTrackInfo): number {
+    const d = displayDimensionsOf(t);
+    return d.width * d.height;
+}
+
+function videoTracksByDisplayArea(): VideoTrackInfo[] {
+    return [...editableVideoTracks].sort(
         (a, b) => displayArea(b) - displayArea(a)
     );
+}
+
+/** The angle a hand-added rendition is sized against. */
+function tallestVideoTrack(): VideoTrackInfo | undefined {
+    return videoTracksByDisplayArea()[0];
+}
+
+function reanalyzeVideo() {
+    const sortedVideoTracks = videoTracksByDisplayArea();
 
     const newGroups = buildSuggestedAudioGroups(
         editableAudioTracks,
@@ -235,7 +246,10 @@ function reanalyzeVideo() {
                     display.height
                 ),
                 height: rung.height,
-                videoBitrateKbps: fpsAdjustedBitrateKbps(rung.bitrateKbps, track.frameRate ?? 30),
+                videoBitrateKbps: fpsAdjustedBitrateKbps(
+                    rung.bitrateKbps,
+                    track.frameRate ?? 30
+                ),
                 copyStream: false,
                 audioGroupId,
                 vbr: true,
@@ -317,14 +331,23 @@ function loadPreviousTrackLabels() {
 }
 
 function addVideoRendition() {
-    const defaultGroupId = audioGroups[0]?.id ?? 'hd';
+    const track = tallestVideoTrack();
+    const display = displayDimensionsOf(track);
+    const rung = nextRenditionRung(
+        track,
+        videoRenditions.map((r) => r.height)
+    );
     videoRenditions.push({
-        width: 854,
-        height: 480,
-        videoBitrateKbps: 1000,
+        width: aspectWidthForHeight(rung.height, display.width, display.height),
+        height: rung.height,
+        videoBitrateKbps: fpsAdjustedBitrateKbps(
+            rung.bitrateKbps,
+            track?.frameRate ?? 30
+        ),
         copyStream: false,
-        audioGroupId: defaultGroupId,
-        label: '480p',
+        audioGroupId: audioGroups[0]?.id ?? 'hd',
+        // Left unset, like every suggested rung: the name falls back to the
+        // height, which is what keeps the stream directories apart.
         vbr: true,
     });
 }
@@ -466,9 +489,10 @@ function channelLabel(ch: number): string {
     return `${ch}ch`;
 }
 
-const CHANNEL_OPTIONS: readonly SelectMenuOption[] = [1, 2, 6, 8].map(
-    (ch) => ({ value: ch, label: channelLabel(ch) }),
-);
+const CHANNEL_OPTIONS: readonly SelectMenuOption[] = [1, 2, 6, 8].map((ch) => ({
+    value: ch,
+    label: channelLabel(ch),
+}));
 
 const videoSourceOptions = computed<SelectMenuOption[]>(() =>
     editableVideoTracks.map((t) => ({
@@ -480,7 +504,7 @@ const videoSourceOptions = computed<SelectMenuOption[]>(() =>
                     ? `${t.bitrateKbps} kbps`
                     : 'bitrate n/a'
             })`,
-    })),
+    }))
 );
 
 const audioSourceOptions = computed<SelectMenuOption[]>(() =>
@@ -494,11 +518,11 @@ const audioSourceOptions = computed<SelectMenuOption[]>(() =>
         ]
             .filter(Boolean)
             .join(' '),
-    })),
+    }))
 );
 
 const audioGroupSelectOptions = computed<SelectMenuOption[]>(() =>
-    uniqueAudioGroupOptions.value.map((o) => ({ value: o.id, label: o.label })),
+    uniqueAudioGroupOptions.value.map((o) => ({ value: o.id, label: o.label }))
 );
 
 const canSubmit = computed(() => {
@@ -991,7 +1015,9 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                                         <td class="ecf-lt-td">
                                             <SelectMenu
                                                 v-model="r.audioGroupId"
-                                                :options="audioGroupSelectOptions"
+                                                :options="
+                                                    audioGroupSelectOptions
+                                                "
                                                 class="ecf-select-inline"
                                                 aria-label="Audio group"
                                             />
@@ -1337,5 +1363,5 @@ defineExpose({ editableAudioTracks, buildEncodeConfig, getCanSubmit });
                 }}
             </button>
         </div>
-</div>
+    </div>
 </template>
