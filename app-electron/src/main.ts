@@ -4,6 +4,7 @@ import {
     dialog,
     ipcMain,
     Menu,
+    net,
     safeStorage,
     shell,
 } from 'electron';
@@ -23,6 +24,7 @@ import {
 import { showLicences } from './licences';
 import { candidateBinaries, resolveFfmpegBinary } from './ffmpeg-location';
 import { resolveWindowTarget } from './window-target';
+import { type AvailableUpdate, checkForUpdate } from './update-check';
 
 const PROTOCOL = 'luminary-convert';
 
@@ -62,6 +64,11 @@ interface Settings {
      * look like a broken source file.
      */
     ffmpegDir?: string | null;
+    /**
+     * A release the user said to stop mentioning. Only that version: the next
+     * one is announced again, so "skip" never quietly becomes "never".
+     */
+    skippedVersion?: string | null;
 }
 
 const settingsPath = (): string =>
@@ -77,6 +84,7 @@ async function loadSettings(): Promise<void> {
             allowedOrigins: parsed.allowedOrigins ?? [],
             deniedOrigins: parsed.deniedOrigins ?? [],
             ffmpegDir: parsed.ffmpegDir ?? null,
+            skippedVersion: parsed.skippedVersion ?? null,
         };
     } catch {
         // No settings yet, or unreadable: start from "trust nothing", which is
@@ -418,6 +426,100 @@ async function chooseFfmpegDirectory(): Promise<void> {
     await applyFfmpegDirectory(dir);
 }
 
+/* ------------------------------------------------------------------ *
+ * New releases
+ * ------------------------------------------------------------------ */
+
+/** Long enough that the window, and anything the CMS opened, comes first. */
+const STARTUP_UPDATE_CHECK_DELAY_MS = 5_000;
+
+/**
+ * Tell the user a newer release is on GitHub, and send them to it.
+ *
+ * `manual` is the menu item. At startup a failure or an up-to-date answer says
+ * nothing — an offline machine is ordinary — and a skipped version stays
+ * skipped. Asked for, every outcome gets an answer, a skipped version
+ * included, since asking is how someone changes their mind about one.
+ */
+async function checkForUpdates(manual: boolean): Promise<void> {
+    let update: AvailableUpdate | null;
+    try {
+        update = await checkForUpdate({
+            currentVersion: app.getVersion(),
+            platform: process.platform,
+            arch: process.arch,
+            fetch: (url, init) => net.fetch(url, init),
+        });
+    } catch (err) {
+        console.warn('Update check failed:', err);
+        if (manual) {
+            await queueDialog(() =>
+                dialog.showMessageBox({
+                    type: 'warning',
+                    message: 'Could not check for updates',
+                    detail: 'GitHub could not be reached. Check your connection and try again.',
+                    buttons: ['OK'],
+                })
+            );
+        }
+        return;
+    }
+
+    if (!update) {
+        if (manual) {
+            await queueDialog(() =>
+                dialog.showMessageBox({
+                    type: 'info',
+                    message: 'You have the latest version',
+                    detail: `Luminary Media Convert ${app.getVersion()} is the newest release.`,
+                    buttons: ['OK'],
+                })
+            );
+        }
+        return;
+    }
+
+    if (!manual && settings.skippedVersion === update.version) return;
+    await promptForUpdate(update);
+}
+
+async function promptForUpdate(update: AvailableUpdate): Promise<void> {
+    await queueDialog(async () => {
+        const options: Electron.MessageBoxOptions = {
+            type: 'info',
+            title: 'Update available',
+            message: `Luminary Media Convert ${update.version} is available`,
+            detail:
+                `You have version ${app.getVersion()}. Download the new version ` +
+                `and install it over this one — your settings and trusted sites are kept.` +
+                // An encode in flight dies with the app, and the installer asks
+                // for exactly that.
+                `\n\nFinish any encode in progress before you install.`,
+            buttons: [
+                'Download',
+                'Release Notes',
+                'Later',
+                'Skip This Version',
+            ],
+            defaultId: 0,
+            cancelId: 2,
+            noLink: true,
+        };
+        const win =
+            mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+        const { response } = win
+            ? await dialog.showMessageBox(win, options)
+            : await dialog.showMessageBox(options);
+
+        if (response === 0) await shell.openExternal(update.downloadUrl);
+        else if (response === 1) await shell.openExternal(update.releaseUrl);
+        else if (response === 3) {
+            settings.skippedVersion = update.version;
+            await saveSettings();
+        }
+    });
+}
+
 /**
  * The application menu.
  *
@@ -515,6 +617,10 @@ function buildMenu(): void {
 
     // Ellipsis: it asks before it acts.
     const maintenanceItems: Electron.MenuItemConstructorOptions[] = [
+        {
+            label: 'Check for Updates…',
+            click: () => void checkForUpdates(true),
+        },
         {
             label: 'Clear Working Files…',
             click: () => void clearWorkingFiles(),
@@ -751,6 +857,15 @@ async function start(): Promise<void> {
 
     buildMenu();
     createWindow();
+
+    // Only a packaged build: from source, the version in package.json says
+    // nothing about which code is running.
+    if (app.isPackaged) {
+        setTimeout(
+            () => void checkForUpdates(false),
+            STARTUP_UPDATE_CHECK_DELAY_MS
+        );
+    }
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) createWindow();
