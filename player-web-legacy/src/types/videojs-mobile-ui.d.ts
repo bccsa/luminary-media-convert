@@ -40,3 +40,18 @@ declare module 'video.js/dist/types/player' {
         mobileUi(options?: MobileUiOptions): void;
     }
 }
+
+/**
+ * The Screen Orientation Lock API (`lock`/`unlock`) is a separate, far-less-
+ * supported draft from the base Screen Orientation API that lib.dom.d.ts
+ * declares — TypeScript dropped it years ago. videojs-mobile-ui calls
+ * `screen.orientation.lock()` directly (unguarded, in one code path — see the
+ * `installMobileUi` comment in `LuminaryPlayer.vue`), so this player needs the
+ * same surface to feature-detect and stub it for browsers, like iOS Safari,
+ * that implement `screen.orientation` but not `.lock()`.
+ */
+declare global {
+    interface ScreenOrientation {
+        lock(orientation: string): Promise<void>;
+    }
+}
