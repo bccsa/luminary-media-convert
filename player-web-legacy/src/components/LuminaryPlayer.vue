@@ -574,6 +574,14 @@ async function installMobileUi(instance: Player): Promise<void> {
     await import('videojs-mobile-ui');
     if (player.value !== instance) return;
     if (typeof instance.mobileUi !== 'function') return;
+    // videojs-mobile-ui's rotationHandler feature-detects screen.orientation.lock,
+    // but its `fullscreenchange` listener calls it unconditionally — throws on iOS
+    // Safari, which implements screen.orientation but not .lock(). Stub a rejecting
+    // lock() so the plugin's own `.catch()` absorbs it like a real refusal would.
+    if (screen.orientation && typeof screen.orientation.lock !== 'function') {
+        screen.orientation.lock = () =>
+            Promise.reject(new DOMException('screen.orientation.lock is not supported', 'NotSupportedError'));
+    }
     instance.mobileUi({
         fullscreen: {
             enterOnRotate: true,
