@@ -6,8 +6,8 @@ URI scheme, before `bridge.ts` freezes at protocol v1.
 ## Setup
 
 - **Device:** iPhone 13 Pro, over Wi-Fi to a MinIO on the LAN (plain http).
-- **Stream:** from this encoder at `feat/native-ios-spike`:
-  - 10 minutes long
+- **Stream:** from this encoder at `feat/native-ios-spike`, encoded twice,
+  10 minutes and 2 hours long, both with:
   - two camera angles (`TYPE=VIDEO` groups "Wide" and "Mirror")
   - five H.264 VBR renditions per angle (1080p to 240p)
   - two audio tiers, each carrying four languages
@@ -32,7 +32,7 @@ URI scheme, before `bridge.ts` freezes at protocol v1.
 | Does the key work from memory? | **Yes**, 16 bytes under any content type, with the explicit IV from each playlist. |
 | Do in-memory answers skew the bandwidth estimate? | **No.** Only segment requests are counted (below). |
 | Are the `CODECS` attributes right? | **Yes** (below). |
-| Time from load to first frame, 2-hour source | *Pending: the 2-hour encode is running.* |
+| Time from load to first frame, 2-hour source | **145–341 ms**; an angle switch 252–357 ms (below). |
 
 ### Content types
 
@@ -98,16 +98,25 @@ because the API documents a UTI there. No change to `bridge.ts`.
   - 240p: `avc1.640015` (2.1)
 - **AVPlayer accepted every variant** of both angles.
 
-### Timings (10-minute source, LAN)
+### Timings (LAN)
 
 **From `replaceCurrentItem` to the new item's first decoded frame**, measured
-with an `AVPlayerItemVideoOutput` on that item:
+with an `AVPlayerItemVideoOutput` on that item. Audio only is measured to its
+playhead moving.
 
-| Mode | Wide (first load) | Mirror (angle switch) | Audio only (playhead moving) |
-|---|---|---|---|
-| uti | 139 ms | 218 ms | 131 ms |
-| mime | 127 ms | 240 ms | 135 ms |
-| none | 103 ms | 197 ms | 201 ms |
+| Source | Mode | Wide (first load) | Mirror (angle switch) | Audio only |
+|---|---|---|---|---|
+| 10 min | uti | 139 ms | 218 ms | 131 ms |
+| 10 min | mime | 127 ms | 240 ms | 135 ms |
+| 10 min | none | 103 ms | 197 ms | 201 ms |
+| 2 h | uti | 341 ms | 252 ms | 194 ms |
+| 2 h | mime | 145 ms | 357 ms | 122 ms |
+| 2 h | none | 183 ms | 300 ms | 149 ms |
+
+**Twelve times longer playlists cost roughly 50–200 ms.** At 2 hours each
+media playlist is ~127 KB, against ~11 KB at 10 minutes. AVPlayer reads only
+what a load needs: the master, one audio playlist and two video playlists
+(~385 KB at 2 hours), not all fourteen.
 
 **Buffering:** AVPlayer buffered ~15–20 minutes of media (audio and video
 counted separately) within about 12 s on the LAN. Chunk warming matters on a
@@ -123,16 +132,27 @@ CDN edge, not here.
 | Mirror | 6 | 58 KiB | a new master and that angle's 5 video playlists; the audio is reused |
 | Audio only | 1 | 2 KiB | the master |
 
-**Media playlists grow linearly with duration.** A 2-hour source should
-therefore send about 1.7 MB on its first load. The 2-hour run measures this,
-and the time it costs, next.
+**Media playlists grow linearly with duration**, and the 2-hour source
+confirms it:
+
+| Visit | Assets | 10 min | 2 h |
+|---|---|---|---|
+| Wide (first load) | 14 | 147 KiB | 1,667 KiB |
+| Mirror | 6 | 58 KiB | 652 KiB |
+| Audio only | 1 | 2 KiB | 2 KiB |
+
+The munge itself took 87 ms in Node for the 2-hour master.
+
+**Not measured here: carrying 1.7 MB across Capacitor.** The spike bundles the
+payload, so the transfer itself is untested. Phase 1b measures it, from `load`
+through the plugin, on the same source.
 
 ## What changes in `bridge.ts`
 
 - **Nothing breaking.** Content types, the key and the URI scheme all work as
   drafted.
-- **Two notes to add to the router's obligations** (and to plan 04's `route`
-  scenarios):
-  1. A request may carry no `contentInformationRequest`, and must still be
-     answered.
-  2. `contentType` is mapped to a UTI natively.
+- **Two obligations are now written down in `bridge.ts`.** They also belong in
+  plan 04's `route` scenarios:
+  1. `ASSET_URI_PREFIX`: a request may ask for data alone, without asking for
+     the content type, and must still be answered.
+  2. `BridgeAsset.contentType`: a MIME type, which native maps to a UTI on iOS.
