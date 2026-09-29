@@ -9,9 +9,11 @@
  * every consumer to tidy one screen. So it is configurable, and the default is
  * what the library did before this option existed.
  *
- * The skip interval is configurable for the same reason: 15 s suits a lecture
+ * The skip interval is configurable for the same reason: 10 s suits a lecture
  * and 30 s a sermon, and the consumer knows which it is shipping. Back and
- * forward are separate values because they are commonly asymmetric.
+ * forward are separate values because they are commonly asymmetric. The
+ * defaults are 10 s, because this player matches the Luminary app's chrome
+ * and that is what it ships.
  */
 export interface PlayerControlsOptions {
     /**
@@ -20,20 +22,67 @@ export interface PlayerControlsOptions {
      */
     audioMenu: boolean;
     /**
+     * Show the audio/video toggle in the top-right corner. Only ever visible
+     * when there is somewhere for it to go, whatever this says: the stream must
+     * carry the synthesized audio-only rendering, and — when audio-only is what
+     * is playing — a real video angle to come back to.
+     */
+    audioVideoToggle: boolean;
+    /**
+     * Show the subtitles / captions menu.
+     *
+     * Only ever visible when the source carries text tracks, whatever this says
+     * — video.js hides the button itself while there are none. It is an option
+     * regardless, because "invisible in today's content" is not the same promise
+     * as "absent": an app that has never had this control does not want one
+     * appearing the first time a stream ships a caption track.
+     */
+    subtitlesMenu: boolean;
+    /**
      * Seconds the skip-back button moves. `0` removes the button, which is the
      * honest way to say "this player does not skip" — a button that moves
      * nowhere is worse than no button.
+     *
+     * video.js ships skip-button icons for 5, 10 and 30 seconds only, and hides
+     * a button configured for anything else outright. Rather than lose the
+     * control, an off-set value is snapped to the nearest of {5, 10, 30} — for
+     * the icon *and* for the seek, which are the same number: the snapped value
+     * is what is handed to video.js. So `15` is a 10-second button that seeks
+     * 10 seconds, not a 15-second jump behind a "10" label. Stay on {5, 10, 30}
+     * to get exactly what is asked for.
      */
     skipBackSeconds: number;
-    /** Seconds the skip-forward button moves. `0` removes the button. */
+    /** Seconds the skip-forward button moves. `0` removes the button; the same snapping to {5, 10, 30} applies. */
     skipForwardSeconds: number;
+    /**
+     * Show the controls while the player is windowed.
+     *
+     * `false` leaves the windowed frame bare, for a host that drives playback
+     * from its own interface — the encoder, whose trim timeline and its
+     * shortcuts are the whole transport:
+     *
+     * - no control bar, big play button, audio/video toggle or video.js dialog,
+     *   so nothing on the frame can take focus or a key — a focused video.js
+     *   control swallows every key but Tab, which would be the host's shortcuts;
+     * - a click on the picture does nothing, and a double-click toggles
+     *   fullscreen.
+     *
+     * Fullscreen shows every control regardless, because the host's interface
+     * is out of view there. The coming-soon and error panels are states rather
+     * than controls and show either way, as do subtitles, which are the
+     * picture's.
+     */
+    windowedControls: boolean;
 }
 
 /** The behaviour the library had before any of this was configurable. */
 export const DEFAULT_CONTROLS: PlayerControlsOptions = {
     audioMenu: true,
-    skipBackSeconds: 15,
-    skipForwardSeconds: 15,
+    audioVideoToggle: true,
+    subtitlesMenu: true,
+    skipBackSeconds: 10,
+    skipForwardSeconds: 10,
+    windowedControls: true,
 };
 
 /**
@@ -53,8 +102,11 @@ export function mergeControls(
     const merged = { ...DEFAULT_CONTROLS };
     if (!partial) return merged;
 
-    if (typeof partial.audioMenu === 'boolean') {
-        merged.audioMenu = partial.audioMenu;
+    for (const key of ['audioMenu', 'audioVideoToggle', 'subtitlesMenu', 'windowedControls'] as const) {
+        const value = partial[key];
+        if (typeof value === 'boolean') {
+            merged[key] = value;
+        }
     }
     for (const key of ['skipBackSeconds', 'skipForwardSeconds'] as const) {
         const value = partial[key];

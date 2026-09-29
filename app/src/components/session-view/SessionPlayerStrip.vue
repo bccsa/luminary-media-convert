@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import {
     LuminaryPlayer,
     usePlayerState,
+    type PlayerControlsOptions,
 } from '@luminary-media-converter/player-web';
 import type {
     PlayerControllerApi,
@@ -36,6 +37,14 @@ const emit = defineEmits<{
     playingChange: [playing: boolean];
     durationChange: [d: number];
 }>();
+
+/**
+ * A bare frame while windowed: the trim timeline and its shortcuts are the whole
+ * transport, so the picture carries no controls, and nothing on it can take a
+ * key those shortcuts listen for. Fullscreen, where the timeline is out of view,
+ * shows the player's own. Read once, when the player is built.
+ */
+const playerControls: Partial<PlayerControlsOptions> = { windowedControls: false };
 
 const playerShellRef = ref<HTMLElement | null>(null);
 const luminaryPlayerRef = ref<InstanceType<typeof LuminaryPlayer> | null>(null);
@@ -90,7 +99,7 @@ const showPlayerAudioSelect = computed(
     () => playerAudioOptions.value.length > 1
 );
 
-/** There is a picture to make full screen. */
+/** There is something playable to make full screen. */
 const canPlay = computed(() => state.value.lifecycle === 'ready');
 
 const showPlaybackControlsRow = computed(
@@ -102,7 +111,10 @@ const showPlaybackControlsRow = computed(
         canPlay.value
 );
 
-/** The player exposes fullscreen; it deliberately draws no button for it. */
+/**
+ * The way into fullscreen, beside the other playback controls: the bare frame
+ * has no button of its own. A double-click on the picture does the same.
+ */
 function enterFullscreen(): void {
     void luminaryPlayerRef.value?.enterFullscreen();
 }
@@ -353,44 +365,16 @@ defineExpose({
                             : 'w-full overflow-hidden rounded-xl bg-black shadow-lg shadow-black/20 ring-1 ring-black/10 dark:ring-white/5'
                     "
                 >
-                    <LuminaryPlayer ref="luminaryPlayerRef" :source="source">
-                        <!--
-                            Audio-only renderings have nothing to show, so the
-                            black rectangle gets a glyph rather than looking
-                            like a player that failed to start.
-                        -->
-                        <div
-                            v-if="state.isAudioOnly"
-                            class="flex h-full w-full items-center justify-center"
-                        >
-                            <svg
-                                class="h-16 w-16 text-slate-600"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="1.5"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                aria-hidden="true"
-                            >
-                                <path d="M4 16V11a8 8 0 0 1 16 0v5" />
-                                <rect
-                                    x="2"
-                                    y="14"
-                                    width="4"
-                                    height="7"
-                                    rx="2"
-                                />
-                                <rect
-                                    x="18"
-                                    y="14"
-                                    width="4"
-                                    height="7"
-                                    rx="2"
-                                />
-                            </svg>
-                        </div>
-                    </LuminaryPlayer>
+                    <!--
+                        No slot content: an audio-only rendering gets the
+                        player's own black frame and glyph, which — unlike
+                        anything slotted here — go fullscreen with the picture.
+                    -->
+                    <LuminaryPlayer
+                        ref="luminaryPlayerRef"
+                        :source="source"
+                        :controls="playerControls"
+                    />
                 </div>
                 <!--
                     Below-player rows: the session actions (Start encoding,
@@ -485,9 +469,9 @@ defineExpose({
                             />
                         </span>
                         <!--
-                            The player draws no chrome over the picture, so the
-                            way in sits with the other playback controls. It
-                            also answers a double-click on the video itself.
+                            The frame is bare while windowed, so the way in sits
+                            with the other playback controls. A double-click on
+                            the picture does the same.
                         -->
                         <button
                             v-if="canPlay"
@@ -593,23 +577,27 @@ defineExpose({
     aspect-ratio: 16 / 9;
     max-height: 100%;
 }
-.session-trim-player-shell :deep(.lmp-root) {
+/*
+ * The player sizes itself 16:9 off its width, and so does its video.js box. The
+ * shell is 16:9 too, until a short window or a wide split caps its height — then
+ * the player would overflow it and the shell would clip its bottom edge. Fill
+ * the shell instead.
+ */
+.session-trim-player-shell :deep(.lmpl-root) {
     height: 100%;
+}
+.session-trim-player-shell :deep(.lmpl-video-player) {
+    aspect-ratio: auto;
 }
 /*
  * `cover` fills the 16/9 strip with a source that is not 16:9, which is what
  * this shell wants — but entering fullscreen does not move the element out of
- * the shell, so the rule kept matching and filled a screen-shaped box instead,
+ * the shell, so the rule would keep matching and fill a screen-shaped box,
  * cropping everything outside the overlap. Fullscreen has to letterbox; that is
- * the point of it. The player marks itself either way, so exclude both forms.
+ * the point of it. video.js marks its fullscreen element `.vjs-fullscreen`.
  */
-.session-trim-player-shell :deep(.lmp-video) {
-    height: 100%;
+.session-trim-player-shell :deep(.video-js:not(.vjs-fullscreen) .vjs-tech) {
     object-fit: cover;
-}
-.session-trim-player-shell :deep(.lmp-root:fullscreen .lmp-video),
-.session-trim-player-shell :deep(.lmp-root.lmp-is-fullscreen .lmp-video) {
-    object-fit: contain;
 }
 
 /* Force split-list SegmentEditor to fill the full aside height. */

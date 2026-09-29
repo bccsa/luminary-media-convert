@@ -1111,10 +1111,80 @@ function handleEscape(e: KeyboardEvent) {
  */
 function onWindowEscape(e: KeyboardEvent) {
     if (e.key !== 'Escape' || props.keyboardScope === 'global') return;
+    if (pageIsFullscreen()) return;
     handleEscape(e);
 }
 
+/**
+ * The keys that only move playback: play/pause, stepping and seeking, and the
+ * held 1/2/3 that size a step. While the page is fullscreen this editor is out
+ * of view, and these are all it answers — a mark, a cut, an undo or a zoom made
+ * where nobody can see it is an edit nobody meant.
+ */
+const TRANSPORT_KEYS = new Set([
+    ' ',
+    'k',
+    'K',
+    'j',
+    'J',
+    'l',
+    'L',
+    'ArrowLeft',
+    'ArrowRight',
+    'Home',
+    'End',
+    ',',
+    '.',
+    '1',
+    '2',
+    '3',
+]);
+
+function isTransportKey(e: KeyboardEvent): boolean {
+    if (!TRANSPORT_KEYS.has(e.key)) return false;
+    // ⌘/Ctrl chords belong to the app and the browser, not to playback.
+    if (e.metaKey || e.ctrlKey) return false;
+    // Alt+←/→ nudges the selected edge: an edit, arrows or not.
+    return !(e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight'));
+}
+
+/** Anything on the page is fullscreen — the player, as it stands. */
+function pageIsFullscreen(): boolean {
+    return typeof document !== 'undefined' && document.fullscreenElement != null;
+}
+
+/** The global scope's window listener; stands down while fullscreen, see below. */
+function onGlobalKeyDown(e: KeyboardEvent) {
+    if (pageIsFullscreen()) return;
+    onKeyDown(e);
+}
+
+/**
+ * The global scope's transport keys while fullscreen, taken in the capture
+ * phase — before the focused element sees them.
+ *
+ * In fullscreen the player's own controls are up, and one that has been
+ * clicked keeps focus. A focused video.js control swallows every key but Tab,
+ * so in the bubble phase the transport keys would never reach the window; and
+ * a key that did get through would act twice — Space on a focused button plays
+ * and pauses at once, a digit on the focused seek bar jumps to 10%. So a
+ * transport key is claimed here and goes no further, handled or not. Only the
+ * player is visible in fullscreen, so this cannot pre-empt the app's own
+ * dialogs or dropdowns; an open menu inside the player (audio, speed) keeps its
+ * own keys.
+ */
+function onFullscreenKeyDownCapture(e: KeyboardEvent) {
+    if (!pageIsFullscreen() || !isTransportKey(e)) return;
+    const target = e.target instanceof Element ? e.target : null;
+    if (target?.closest('[role="menu"]')) return;
+    onKeyDown(e);
+    e.stopPropagation();
+}
+
 function onKeyDown(e: KeyboardEvent) {
+    // Fullscreen hides this editor; see TRANSPORT_KEYS.
+    if (pageIsFullscreen() && !isTransportKey(e)) return;
+
     const target = e.target as HTMLElement | null;
     const isTyping =
         target &&
@@ -1608,10 +1678,12 @@ const thumbnailStripTiles = computed(() => {
 watch(
     () => props.keyboardScope,
     (scope) => {
-        window.removeEventListener('keydown', onKeyDown);
+        window.removeEventListener('keydown', onGlobalKeyDown);
+        window.removeEventListener('keydown', onFullscreenKeyDownCapture, true);
         window.removeEventListener('keyup', onKeyUp);
         if (scope === 'global') {
-            window.addEventListener('keydown', onKeyDown);
+            window.addEventListener('keydown', onGlobalKeyDown);
+            window.addEventListener('keydown', onFullscreenKeyDownCapture, true);
             window.addEventListener('keyup', onKeyUp);
         }
     },
@@ -1800,7 +1872,8 @@ onBeforeUnmount(() => {
     thumbnailFetchAbort = null;
     cancelAnimationFrame(rafId);
     if (waveformFrame != null) cancelAnimationFrame(waveformFrame);
-    window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('keydown', onGlobalKeyDown);
+    window.removeEventListener('keydown', onFullscreenKeyDownCapture, true);
     window.removeEventListener('keyup', onKeyUp);
     window.removeEventListener('keydown', onWindowEscape);
 
