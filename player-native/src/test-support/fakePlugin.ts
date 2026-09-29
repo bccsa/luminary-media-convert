@@ -24,6 +24,8 @@ export interface RecordedCall {
 
 type Listener = (event: never) => void;
 
+export type ScriptedAnswer = { result: unknown } | { rejects: BridgeErrorCode };
+
 export const DEFAULT_CAPABILITIES: BridgeCapabilities = {
     variantSwitching: false,
     pictureInPicture: false,
@@ -46,6 +48,8 @@ export class FakePlugin implements LuminaryPlayerPlugin {
     info: BridgeInfo;
     /** What `resumed()` answers; a spec sets it before triggering a resume. */
     resumeResult: ResumeResult | null = null;
+    /** Answers a call before the defaults do; `undefined` falls through to them. */
+    script: ((method: string, args: unknown) => ScriptedAnswer | undefined) | null = null;
     private readonly listeners = new Map<string, Set<Listener>>();
     private readonly failures = new Map<string, BridgeErrorCode>();
     private players = 0;
@@ -92,6 +96,12 @@ export class FakePlugin implements LuminaryPlayerPlugin {
 
     private record<T>(method: string, args: unknown, answer: T): Promise<T> {
         this.calls.push({ method, args });
+        const scripted = this.script?.(method, args);
+        if (scripted) {
+            return 'rejects' in scripted
+                ? Promise.reject(new FakeRejection(scripted.rejects))
+                : Promise.resolve(scripted.result as T);
+        }
         const code = this.failures.get(method);
         return code ? Promise.reject(new FakeRejection(code)) : Promise.resolve(answer);
     }
@@ -116,8 +126,8 @@ export class FakePlugin implements LuminaryPlayerPlugin {
     destroy = (args: unknown) => this.record('destroy', args, undefined);
 
     resumed = (args: unknown) => {
-        if (!this.resumeResult) throw new Error('FakePlugin: set resumeResult first');
-        return this.record('resumed', args, this.resumeResult);
+        if (!this.resumeResult && !this.script) throw new Error('FakePlugin: set resumeResult first');
+        return this.record('resumed', args, this.resumeResult as ResumeResult);
     };
 
     addListener = <E extends BridgeEventName>(

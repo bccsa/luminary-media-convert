@@ -1,0 +1,163 @@
+{
+ "scenario": "15-second-create-replaces-first.json",
+ "ops": [
+  {
+   "op": "start",
+   "capabilities": {
+    "variantSwitching": false,
+    "pictureInPicture": false,
+    "renderText": false,
+    "live": false,
+    "chunkWarming": false,
+    "backgroundAudio": false,
+    "maxPlayers": 1
+   }
+  },
+  {
+   "op": "call",
+   "method": "getInfo",
+   "args": {},
+   "result": {
+    "resolved": {
+     "protocolVersion": 1,
+     "platform": "android",
+     "capabilities": {
+      "variantSwitching": false,
+      "pictureInPicture": false,
+      "renderText": false,
+      "live": false,
+      "chunkWarming": false,
+      "backgroundAudio": false,
+      "maxPlayers": 1
+     }
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "reset",
+   "args": {},
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "call",
+   "method": "create",
+   "args": {
+    "protocolVersion": 1,
+    "skipBackSeconds": 10,
+    "skipForwardSeconds": 10
+   },
+   "result": {
+    "resolved": {
+     "playerId": "player-1"
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "load",
+   "args": {
+    "playerId": "player-1",
+    "loadId": "load1",
+    "generation": 1,
+    "masterUri": "luminary://asset/1/2.m3u8",
+    "assets": [
+     {
+      "uri": "luminary://asset/1/1.m3u8",
+      "contentType": "application/vnd.apple.mpegurl",
+      "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+     },
+     {
+      "uri": "luminary://asset/1/2.m3u8",
+      "contentType": "application/vnd.apple.mpegurl",
+      "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+     }
+    ],
+    "recovery": {
+     "escalationWindowMs": 10000,
+     "maxReloadAttempts": 3,
+     "reloadDelaysMs": [
+      2000,
+      4000,
+      8000
+     ]
+    }
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "audiotracks-updated",
+     "payload": {
+      "tracks": [],
+      "activeId": null,
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    }
+   ]
+  },
+  {
+   "op": "call",
+   "method": "create",
+   "args": {
+    "protocolVersion": 1,
+    "skipBackSeconds": 10,
+    "skipForwardSeconds": 10
+   },
+   "result": {
+    "resolved": {
+     "playerId": "player-2"
+    }
+   }
+  },
+  {
+   "op": "engine",
+   "signal": "readyToPlay",
+   "args": {
+    "duration": 120
+   }
+  },
+  {
+   "op": "advanceClock",
+   "seconds": 1
+  },
+  {
+   "op": "drainEvents",
+   "events": []
+  },
+  {
+   "op": "call",
+   "method": "play",
+   "args": {
+    "playerId": "player-1"
+   },
+   "result": {
+    "rejected": {
+     "code": "unknown-player",
+     "message": "No player player-1"
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "play",
+   "args": {
+    "playerId": "player-2"
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": []
+  }
+ ]
+}

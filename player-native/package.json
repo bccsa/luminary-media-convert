@@ -14,8 +14,10 @@
     },
     "files": [
         "dist",
-        "ios",
-        "android",
+        "android/src/main/",
+        "android/build.gradle",
+        "ios/Sources",
+        "Package.swift",
         "*.podspec"
     ],
     "capacitor": {
@@ -30,6 +32,7 @@
         "build": "tsc -p tsconfig.json",
         "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
         "test": "vitest run",
+        "conformance:transcripts": "UPDATE_TRANSCRIPTS=1 vitest run src/conformance.reference.spec.ts",
         "typecheck": "tsc -p tsconfig.spec.json",
         "test:watch": "vitest"
     },
@@ -40,7 +43,9 @@
         "@capacitor/core": "^8.0.0"
     },
     "devDependencies": {
+        "@capacitor/android": "^8.5.2",
         "@capacitor/core": "^8.5.2",
+        "@capacitor/ios": "^8.5.2",
         "typescript": "~5.7.0",
         "vitest": "^3.0.0"
     }

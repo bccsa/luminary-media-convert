@@ -1,0 +1,87 @@
+{
+    "name": "reset destroys the players an earlier JavaScript context left behind",
+    "steps": [
+        {"drive": {"start": {}}},
+        {"call": {"method": "getInfo", "result": {"protocolVersion": 1}}},
+        {"call": {"method": "reset"}},
+        {
+            "call": {
+                "method": "create",
+                "args": {"protocolVersion": 1, "skipBackSeconds": 10, "skipForwardSeconds": 10},
+                "result": {"playerId": "$orphan"}
+            }
+        },
+        {
+            "call": {
+                "method": "load",
+                "args": {
+                    "playerId": "$orphan",
+                    "loadId": "$load1",
+                    "generation": 1,
+                    "masterUri": "luminary://asset/1/2.m3u8",
+                    "assets": [
+                        {
+                            "uri": "luminary://asset/1/1.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+                        },
+                        {
+                            "uri": "luminary://asset/1/2.m3u8",
+                            "contentType": "application/vnd.apple.mpegurl",
+                            "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+                        }
+                    ],
+                    "recovery": {
+                        "escalationWindowMs": 10000,
+                        "maxReloadAttempts": 3,
+                        "reloadDelaysMs": [2000, 4000, 8000]
+                    }
+                }
+            },
+            "only": "native"
+        },
+        {
+            "event": {
+                "name": "audiotracks-updated",
+                "payload": {"playerId": "$orphan", "loadId": "$load1", "tracks": [], "activeId": null}
+            },
+            "only": "native"
+        },
+        {"engine": {"signal": "readyToPlay", "duration": 120}},
+        {
+            "event": {
+                "name": "durationchange",
+                "payload": {"playerId": "$orphan", "loadId": "$load1", "duration": 120}
+            },
+            "only": "native"
+        },
+        {
+            "event": {
+                "name": "loadedmetadata",
+                "payload": {"playerId": "$orphan", "loadId": "$load1", "duration": 120}
+            },
+            "only": "native"
+        },
+        {
+            "note": "A WebView reload: module state starts over, the old player is abandoned, never destroyed.",
+            "drive": {"start": {"freshContext": true}}
+        },
+        {"call": {"method": "getInfo", "result": {"protocolVersion": 1}}},
+        {"call": {"method": "reset"}},
+        {"expectNoEvents": true, "note": "A destroyed player says nothing, not even on its way out."},
+        {
+            "call": {"method": "play", "args": {"playerId": "$orphan"}, "rejects": "unknown-player"},
+            "only": "native"
+        },
+        {
+            "call": {
+                "method": "create",
+                "args": {"protocolVersion": 1, "skipBackSeconds": 10, "skipForwardSeconds": 10},
+                "result": {"playerId": "$player"}
+            }
+        },
+        {"engine": {"signal": "playing"}},
+        {"advanceClock": 1.0},
+        {"expectNoEvents": true}
+    ]
+}
