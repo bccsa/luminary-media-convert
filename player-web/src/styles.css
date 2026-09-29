@@ -1,63 +1,438 @@
 /*
- * Plain CSS with custom properties for theming — no Tailwind (library
- * package), same approach as segment-editor/src/styles.css. Every knob is a
- * `--lmp-*` variable an implementing app can override on `.lmp-root`.
+ * The Luminary skin.
+ *
+ * A plain-CSS port of the app's `VideoPlayer.css`, whose rules are written in
+ * Tailwind `@apply` — expanded here because a library cannot ask its consumers
+ * to run Tailwind, and because the values matter more than the notation. Where
+ * the app writes `!important`, so does this: every rule below is overriding
+ * `video-js.css`, which ships its own opinions at equal or higher specificity,
+ * and dropping the flags produces a player that is *almost* the app's, which is
+ * the one outcome worth nothing.
+ *
+ * Injection order is set in `index.ts`: video.js, then videojs-mobile-ui, then
+ * this file.
+ *
+ * Structure this is written against (see `LuminaryPlayer.vue`):
+ *
+ *     .lmpl-root                 relative frame, 16:9, host's poster behind
+ *       img.lmpl-poster          the artwork, covering the frame
+ *       .lmpl-video-player       absolute inset-0 — the video.js mount
+ *         video.video-js
+ *       .lmpl-slot               host overlay
+ *       .lmpl-panel              coming-soon / error surfaces
+ *       .lmpl-av-toggle          audio / video switch, top right
+ *
+ * Dark mode follows the app's convention: a `.dark` class on an ancestor, not
+ * `prefers-color-scheme`, because the host owns that decision and its player
+ * must not disagree with the page around it.
  */
-.lmp-root {
-    --lmp-bg: #000000;
-    --lmp-text: #ffffff;
-    --lmp-text-dim: rgba(255, 255, 255, 0.72);
-    --lmp-surface: rgba(9, 9, 11, 0.72);
-    --lmp-surface-strong: rgba(9, 9, 11, 0.88);
-    --lmp-border: rgba(255, 255, 255, 0.16);
-    --lmp-accent: #ffffff;
-    --lmp-track: rgba(255, 255, 255, 0.3);
-    /* Buffered-ahead: between the played white and the unloaded track, and
-       nearer the track — it marks what is ready, not what has been watched. */
-    --lmp-buffer: rgba(255, 255, 255, 0.55);
-    --lmp-radius: 10px;
-    --lmp-radius-sm: 6px;
-    --lmp-font: inherit;
-    --lmp-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-    --lmp-control-size: 44px;
-    --lmp-transition: 180ms ease;
+
+.lmpl-root {
+    /* Only the surfaces this package draws itself are themable; the video.js
+       chrome below is the app's, deliberately hard-coded to match it. */
+    --lmpl-text: #ffffff;
+    --lmpl-surface: rgba(9, 9, 11, 0.72);
+    --lmpl-surface-strong: rgba(9, 9, 11, 0.88);
+    --lmpl-border: rgba(255, 255, 255, 0.16);
+    --lmpl-radius-sm: 6px;
+    --lmpl-transition: 180ms ease;
 
     position: relative;
     display: block;
     width: 100%;
-    background: var(--lmp-bg);
-    color: var(--lmp-text);
-    font-family: var(--lmp-font);
+    aspect-ratio: 16 / 9;
     overflow: hidden;
+    background: transparent;
+    color: var(--lmpl-text);
     box-sizing: border-box;
 }
 
-.lmp-root:fullscreen,
-.lmp-root.lmp-is-fullscreen {
-    width: 100%;
-    height: 100%;
+@media (min-width: 768px) {
+    .lmpl-root {
+        border-radius: 0.5rem;
+    }
 }
 
-.lmp-video {
+/* --- Poster behind a transparent player ---------------------------------- */
+
+.lmpl-poster {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+@media (min-width: 768px) {
+    .lmpl-poster {
+        border-radius: 0.5rem;
+    }
+}
+
+/* The keep-alive element is machinery, never a control. */
+.lmpl-keep-alive {
+    display: none;
+}
+
+/* --- The video.js surface ------------------------------------------------ */
+
+.lmpl-root .lmpl-video-player {
+    position: absolute;
+    inset: 0;
+    aspect-ratio: 16 / 9;
+    background-color: transparent !important;
+}
+
+.lmpl-root .video-js {
+    width: 100%;
+    height: 100%;
+    background-color: transparent !important;
+}
+
+@media (min-width: 768px) {
+    .lmpl-root .lmpl-video,
+    .lmpl-root .lmpl-video-player .vjs-tech,
+    .lmpl-root .lmpl-video-player .vjs-tech iframe,
+    .lmpl-root .lmpl-video-player .vjs-poster img {
+        border-radius: 0.5rem !important;
+    }
+}
+
+.lmpl-root .lmpl-video-player .vjs-poster img {
+    object-fit: cover;
+}
+
+/* The YouTube tech renders an iframe in place of the video element; without
+   this it keeps its own intrinsic size inside the tech box. */
+.lmpl-root .lmpl-video-player .vjs-tech iframe {
+    width: 100% !important;
+    height: 100% !important;
+    display: block !important;
+    border-radius: inherit !important;
+}
+
+/* --- Big play button ----------------------------------------------------- */
+
+.lmpl-root .lmpl-video-player .vjs-big-play-button {
+    border: none !important;
+    background-color: rgba(39, 39, 42, 0.6);
+    font-size: 1.875rem !important;
+    line-height: 2.25rem !important;
+}
+
+.lmpl-root .lmpl-video-player .vjs-big-play-button span {
+    font-size: 3rem !important;
+    line-height: 1 !important;
+}
+
+/*
+ * YouTube mode.
+ *
+ * The control-bar children are fixed when the player is constructed and the
+ * same player can be handed a YouTube source later, so picture-in-picture
+ * cannot be left out of the list — it is hidden here instead, along with the
+ * big play button the YouTube iframe draws for itself. `.vjs-youtube` is added
+ * by the plugin.
+ */
+.lmpl-root .lmpl-video-player .video-js.vjs-youtube .vjs-big-play-button,
+.lmpl-root .lmpl-video-player .video-js.vjs-youtube .vjs-picture-in-picture-control {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
+
+/* --- Control bar over the whole picture ---------------------------------- */
+
+/*
+ * The bar is the surface, not a strip along the bottom: it fills the player and
+ * carries a 30% scrim, and every control below is positioned absolutely inside
+ * it. This is also why the auto-hide is hand-rolled (see `vjs/autoHide.ts`) —
+ * the pointer is never off the control bar, so video.js's own hover rule never
+ * fires.
+ */
+.lmpl-root .lmpl-video-player .vjs-control-bar {
+    position: relative !important;
+    height: 100% !important;
+    width: 100% !important;
+    background-color: rgba(0, 0, 0, 0.3) !important;
+}
+
+@media (min-width: 768px) {
+    .lmpl-root .lmpl-video-player .vjs-control-bar {
+        border-radius: 0.5rem;
+    }
+}
+
+.lmpl-root .lmpl-video-player .vjs-has-started .vjs-control-bar {
     display: block;
-    width: 100%;
-    height: 100%;
-    background: var(--lmp-bg);
 }
 
-.lmp-slot {
+.lmpl-root .lmpl-video-player .vjs-control {
+    float: left !important;
+    height: 2.75rem !important;
+    width: 2.75rem !important;
+    font-size: 0.875rem !important;
+    line-height: 1.25rem !important;
+    outline: 2px solid transparent !important;
+    outline-offset: 2px !important;
+}
+
+.lmpl-root .lmpl-video-player .vjs-play-control {
+    position: absolute !important;
+    inset: 0 !important;
+    margin: auto !important;
+    height: 6rem !important;
+    width: 6rem !important;
+    font-size: 1.875rem !important;
+    line-height: 2.25rem !important;
+}
+
+/*
+ * Skip circles, flanking the play button at ±100px.
+ *
+ * All three of video.js's icon intervals are listed because the interval is
+ * configurable (`PlayerControlsOptions.skipBackSeconds` / `skipForwardSeconds`)
+ * and the class carries it — a player configured to move 30 s would otherwise
+ * put unstyled buttons in the control-bar flow.
+ */
+.lmpl-root .lmpl-video-player .vjs-skip-backward-5,
+.lmpl-root .lmpl-video-player .vjs-skip-backward-10,
+.lmpl-root .lmpl-video-player .vjs-skip-backward-30,
+.lmpl-root .lmpl-video-player .vjs-skip-forward-5,
+.lmpl-root .lmpl-video-player .vjs-skip-forward-10,
+.lmpl-root .lmpl-video-player .vjs-skip-forward-30 {
+    position: absolute !important;
+    display: flex;
+    height: 3.5rem !important;
+    width: 3.5rem !important;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    border: none !important;
+    color: #ffffff;
+    outline: 2px solid transparent !important;
+    outline-offset: 2px !important;
+    top: 50% !important;
+    transform: translateY(-75%) !important;
+}
+
+.lmpl-root .lmpl-video-player .vjs-skip-backward-5,
+.lmpl-root .lmpl-video-player .vjs-skip-backward-10,
+.lmpl-root .lmpl-video-player .vjs-skip-backward-30 {
+    left: calc(50% - 100px);
+}
+
+.lmpl-root .lmpl-video-player .vjs-skip-forward-5,
+.lmpl-root .lmpl-video-player .vjs-skip-forward-10,
+.lmpl-root .lmpl-video-player .vjs-skip-forward-30 {
+    right: calc(50% - 100px);
+}
+
+.lmpl-root .lmpl-video-player .vjs-skip-backward-5 span,
+.lmpl-root .lmpl-video-player .vjs-skip-backward-10 span,
+.lmpl-root .lmpl-video-player .vjs-skip-backward-30 span,
+.lmpl-root .lmpl-video-player .vjs-skip-forward-5 span,
+.lmpl-root .lmpl-video-player .vjs-skip-forward-10 span,
+.lmpl-root .lmpl-video-player .vjs-skip-forward-30 span {
+    font-size: 1.25rem !important;
+    line-height: 1.75rem !important;
+}
+
+/* Live has nothing to skip to and no rate to change. */
+.lmpl-root .lmpl-video-player .vjs-live .vjs-skip-backward-5,
+.lmpl-root .lmpl-video-player .vjs-live .vjs-skip-backward-10,
+.lmpl-root .lmpl-video-player .vjs-live .vjs-skip-backward-30,
+.lmpl-root .lmpl-video-player .vjs-live .vjs-skip-forward-5,
+.lmpl-root .lmpl-video-player .vjs-live .vjs-skip-forward-10,
+.lmpl-root .lmpl-video-player .vjs-live .vjs-skip-forward-30,
+.lmpl-root .lmpl-video-player .vjs-live .vjs-playback-rate {
+    display: none !important;
+}
+
+/* --- Audio-only ----------------------------------------------------------- */
+
+/*
+ * video.js does two things in audio-only mode: it hides the tech, which is
+ * exactly right — there are no frames, and a visible `<video>` paints its own
+ * surface over the host's artwork — and it collapses the player to the height of
+ * a stock control bar, which is wrong here. This skin's control bar *is* the
+ * frame, drawn over the whole picture, so the height goes back.
+ */
+.lmpl-root .lmpl-video-player .video-js.vjs-audio-only-mode {
+    height: 100% !important;
+    width: 100% !important;
+}
+
+/*
+ * With no picture behind it, the progress bar reads as a bar rather than as an
+ * overlay, and square ends look like a rendering fault.
+ */
+.lmpl-root .lmpl-video-player .vjs-audio-only-mode .vjs-play-progress,
+.lmpl-root .lmpl-video-player .vjs-audio-only-mode .vjs-load-progress {
+    border-radius: 9999px !important;
+}
+
+/* --- Progress, live readout, fullscreen ---------------------------------- */
+
+.lmpl-root .lmpl-video-player .vjs-progress-control,
+.lmpl-root .lmpl-video-player .vjs-live-control {
+    position: absolute !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    padding-left: 0.5rem !important;
+    padding-right: 0 !important;
+}
+
+/* 40px is the fullscreen button's corner, which the bar must not run under. */
+.lmpl-root .lmpl-video-player .vjs-progress-control {
+    width: calc(100% - 40px) !important;
+    touch-action: none;
+}
+
+.lmpl-root .lmpl-video-player .vjs-live-display {
+    padding: 0.75rem;
+    padding-left: 0.5rem;
+}
+
+.lmpl-root .lmpl-video-player .vjs-slider {
+    border-radius: 9999px !important;
+    touch-action: none;
+}
+
+.lmpl-root .lmpl-video-player .vjs-slider-bar,
+.lmpl-root .lmpl-video-player .vjs-play-progress,
+.lmpl-root .lmpl-video-player .vjs-load-progress {
+    border-radius: 9999px !important;
+}
+
+.lmpl-root .lmpl-video-player .vjs-fullscreen-control {
+    position: absolute !important;
+    bottom: 0 !important;
+    right: 0 !important;
+}
+
+/* --- Menus (audio tracks, playback rate) --------------------------------- */
+
+.lmpl-root .lmpl-video-player .vjs-menu {
+    left: 2.75rem !important;
+    top: 0 !important;
+    outline: 2px solid transparent !important;
+    outline-offset: 2px !important;
+}
+
+.lmpl-root .lmpl-video-player .vjs-menu-content {
+    top: 1rem !important;
+    z-index: 10;
+    height: fit-content !important;
+    border-radius: 0.375rem;
+    background-color: #fafafa !important;
+    box-shadow:
+        0 10px 15px -3px rgb(0 0 0 / 0.1),
+        0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+.lmpl-root .lmpl-video-player .vjs-menu-item {
+    padding: 0.75rem !important;
+    font-size: 0.875rem !important;
+    line-height: 1.25rem !important;
+    width: 100% !important;
+    outline: 2px solid transparent !important;
+    outline-offset: 2px !important;
+}
+
+.lmpl-root .lmpl-video-player .vjs-menu-item-text {
+    color: #18181b;
+}
+
+.lmpl-root .lmpl-video-player .vjs-selected,
+.lmpl-root .lmpl-video-player .vjs-selected:focus {
+    background-color: #d4d4d8 !important;
+    font-weight: 700;
+}
+
+/* Hovering an unselected item must not read as a selection. */
+.lmpl-root .lmpl-video-player .video-js :not(.vjs-selected):focus {
+    background-color: transparent !important;
+}
+
+.lmpl-root .lmpl-video-player .vjs-menu-button {
+    outline: 2px solid transparent !important;
+    outline-offset: 2px !important;
+}
+
+.dark .lmpl-root .lmpl-video-player .vjs-menu-content {
+    background-color: #52525b !important;
+    color: #f1f5f9;
+}
+
+.dark .lmpl-root .lmpl-video-player .vjs-menu-item-text {
+    color: #f1f5f9;
+}
+
+.dark .lmpl-root .lmpl-video-player .vjs-selected,
+.dark .lmpl-root .lmpl-video-player .vjs-selected:focus {
+    background-color: #71717a !important;
+}
+
+/* Volume needs a pointer to be worth its space; below 768px there isn't one. */
+.lmpl-root .lmpl-video-player .vjs-volume-control {
+    display: none;
+}
+
+@media (min-width: 768px) {
+    .lmpl-root .lmpl-video-player .vjs-volume-control {
+        display: block;
+    }
+}
+
+/* --- Spinner ------------------------------------------------------------- */
+
+/*
+ * Suppressed entirely, the app's decision: with the scrim over the whole
+ * picture and a 96px play button in the middle, a spinner behind them reads as
+ * a second, contradictory state rather than as feedback.
+ */
+.lmpl-root .lmpl-video-player .vjs-loading-spinner,
+.lmpl-root .lmpl-video-player .vjs-loading-spinner:before,
+.lmpl-root .lmpl-video-player .vjs-loading-spinner:after,
+.lmpl-root .lmpl-video-player .vjs-waiting .vjs-loading-spinner,
+.lmpl-root .lmpl-video-player .vjs-waiting:before,
+.lmpl-root .lmpl-video-player .vjs-waiting:after {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+}
+
+.lmpl-root .lmpl-video-player .vjs-waiting {
+    background: none !important;
+}
+
+/*
+ * iOS Safari renders the tech element 1px below its absolutely positioned
+ * container, leaving a hairline gap at the top and an overhang at the bottom.
+ * Same feature query the app uses to isolate it.
+ */
+@supports (-webkit-touch-callout: none) {
+    .lmpl-root .lmpl-video-player {
+        transform: translateY(-1px);
+    }
+}
+
+/* --- Host overlay slot --------------------------------------------------- */
+
+.lmpl-slot {
     position: absolute;
     inset: 0;
     pointer-events: none;
 }
 
-.lmp-slot > * {
+.lmpl-slot > * {
     pointer-events: auto;
 }
 
-/* --- Status / error panels ---------------------------------------------- */
+/* --- Status / error panels ----------------------------------------------- */
 
-.lmp-panel {
+.lmpl-panel {
     position: absolute;
     inset: 0;
     display: flex;
@@ -67,391 +442,85 @@
     gap: 0.875rem;
     padding: 1.5rem;
     text-align: center;
-    background: var(--lmp-surface);
+    background: var(--lmpl-surface);
     box-sizing: border-box;
+    z-index: 3;
 }
 
-.lmp-panel-text {
+.lmpl-panel-text {
     margin: 0;
     font-size: 1rem;
     line-height: 1.4;
-    color: var(--lmp-text);
+    color: var(--lmpl-text);
 }
 
-.lmp-btn {
+.lmpl-btn {
     appearance: none;
-    border: 1px solid var(--lmp-border);
-    border-radius: var(--lmp-radius-sm);
+    border: 1px solid var(--lmpl-border);
+    border-radius: var(--lmpl-radius-sm);
     background: transparent;
-    color: var(--lmp-text);
+    color: var(--lmpl-text);
     font: inherit;
     padding: 0.45rem 0.9rem;
     cursor: pointer;
-    transition: background var(--lmp-transition);
+    transition: background var(--lmpl-transition);
 }
 
-.lmp-btn:hover,
-.lmp-btn:focus-visible {
+.lmpl-btn:hover,
+.lmpl-btn:focus-visible {
     background: rgba(255, 255, 255, 0.12);
 }
 
-/* --- Fullscreen affordance ---------------------------------------------- */
+/* --- Audio / video toggle ------------------------------------------------ */
 
-.lmp-icon-btn {
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: var(--lmp-control-size);
-    min-height: var(--lmp-control-size);
+.lmpl-av-toggle {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 4;
+    display: flex;
     padding: 0;
     border: none;
-    border-radius: 50%;
-    background: var(--lmp-surface);
-    color: var(--lmp-text);
+    border-radius: 0.5rem;
+    background-color: rgba(113, 113, 122, 0.7);
     cursor: pointer;
-    transition: background var(--lmp-transition), opacity var(--lmp-transition);
 }
 
-.lmp-icon-btn:hover,
-.lmp-icon-btn:focus-visible {
-    background: var(--lmp-surface-strong);
+.lmpl-av-half {
+    display: flex;
+    padding: 0.25rem;
+    border-radius: 0.5rem;
+    background-color: transparent;
 }
 
-.lmp-icon-btn svg {
-    width: 22px;
-    height: 22px;
+.lmpl-av-half-active {
+    background-color: rgba(24, 24, 27, 0.6);
+}
+
+.lmpl-av-icon {
     display: block;
-    fill: currentColor;
+    height: 1.5rem;
+    width: 1.5rem;
+    /* Inactive is legible against the pill, not invisible — the half that is
+       off is still the affordance telling a viewer the other mode exists. */
+    color: #27272a;
 }
 
-/* --- Fullscreen controls overlay ---------------------------------------- */
-
-.lmp-fs {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    opacity: 1;
-    transition: opacity var(--lmp-transition);
-}
-
-.lmp-fs.lmp-fs-hidden {
-    opacity: 0;
-    pointer-events: none;
-}
-
-/* Dismissal sits apart from the transport, top right, where a full-screen
-   thing is closed — and clear of the notch on a landscape phone. */
-.lmp-fs-top {
-    display: flex;
-    justify-content: flex-end;
-    padding: calc(0.75rem + env(safe-area-inset-top, 0px)) calc(0.75rem + env(safe-area-inset-right, 0px))
-        0.75rem 0.75rem;
-    background: linear-gradient(to bottom, var(--lmp-surface-strong), transparent);
-}
-
-.lmp-fs-center {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    /* Wide enough to separate three targets on a phone, where they are hit with
-       a thumb rather than pointed at. */
-    gap: clamp(1.25rem, 6vw, 3rem);
-}
-
-.lmp-fs-center .lmp-icon-btn {
-    min-width: calc(var(--lmp-control-size) * 1.6);
-    min-height: calc(var(--lmp-control-size) * 1.6);
-}
-
-.lmp-fs-center .lmp-icon-btn svg {
-    width: 34px;
-    height: 34px;
-}
-
-/*
- * Skip buttons read as siblings of play/pause: same circle and same surface,
- * a slightly smaller glyph, so the centre of the cluster is still the control a
- * viewer reaches for first. They keep the full 44px minimum target regardless —
- * `--lmp-control-size` is a floor, and going below it would trade a touch
- * target for a visual nicety.
- */
-.lmp-fs-center .lmp-fs-skip svg {
-    width: 30px;
-    height: 30px;
-}
-
-/*
- * The interval sits inside the ring, which is what makes these read as "back
- * fifteen" rather than as two anonymous arrows. Sized in user units against the
- * 24-unit viewBox so it tracks the icon, not the root font size. The whole SVG
- * is aria-hidden — the button already carries the interval as a sentence, and
- * it must not be announced twice.
- */
-.lmp-fs-skip-num {
-    font-size: 9.2px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.2px;
-    text-anchor: middle;
-    fill: currentColor;
-}
-
-.lmp-fs-bar {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    padding: 2rem 1rem calc(2.75rem + env(safe-area-inset-bottom, 0px));
-    background: linear-gradient(to top, var(--lmp-surface-strong), transparent);
-}
-
-.lmp-fs-scrub-row {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-}
-
-/*
- * Full white and larger than a caption: these are the one thing on the bar a
- * viewer reads rather than operates, and dimming them made them furniture.
- * Tabular figures and a fixed minimum stop the row twitching as digits change.
- */
-.lmp-fs-time {
-    font-family: var(--lmp-font-mono);
-    font-size: 0.9375rem;
-    font-weight: 600;
-    color: var(--lmp-text);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
-    min-width: 4.5em;
-}
-
-.lmp-fs-time-duration {
-    text-align: right;
-}
-
-/*
- * Three stacked bands — the rest, buffered-ahead, played — each a pill with
- * rounded caps, drawn largest to smallest so every cap stays visible.
- *
- * Not the input's own pseudo-elements: WebKit offers nothing for the value
- * region, neither engine offers anything for buffered, and none of them can be
- * given a cap independent of the track. So the bands are plain elements and the
- * input lies over them at full size.
- *
- * Each band's width is the position of the *handle centre* at that ratio, not a
- * raw percentage: an input insets its thumb by half its width at each end, so
- * the handle travels `100% - thumb`. Measuring against the full width leaves
- * the handle ahead of the fill through the first half of the video and behind
- * it through the second, meeting only at the midpoint.
- */
-.lmp-fs-scrub {
-    --lmp-thumb: 15px;
-    --lmp-bar: 5px;
-    --lmp-played-x: calc(
-        var(--lmp-thumb) / 2 + (100% - var(--lmp-thumb)) * var(--lmp-progress, 0)
-    );
-    --lmp-buffered-x: calc(
-        var(--lmp-thumb) / 2 + (100% - var(--lmp-thumb)) * var(--lmp-buffered, 0)
-    );
-
-    position: relative;
-    flex: 1;
-    /* Taller than the bar: the rest is thumb room and grab area. A 5px-tall
-       pointer target is not one. */
-    height: 18px;
-    display: flex;
-    align-items: center;
-}
-
-/*
- * Scrub preview: above the bar, out of the flow.
- *
- * Absolute so that showing it cannot move the bar by a pixel — the bar's
- * geometry is what the drag arithmetic is calibrated against, and a preview
- * that reflowed its own reference would make the frame lag the pointer.
- *
- * `left` is set inline as a percentage of the bar; the translate centres it on
- * that point, and the margins keep it on screen at either extreme.
- */
-.lmp-fs-scrub-preview {
-    position: absolute;
-    bottom: calc(100% + 10px);
-    transform: translateX(-50%);
-    z-index: 2;
-    pointer-events: none;
-}
-
-.lmp-fs-scrub-track,
-.lmp-fs-scrub-buffered,
-.lmp-fs-scrub-played {
-    position: absolute;
-    left: 0;
-    height: var(--lmp-bar);
-    border-radius: calc(var(--lmp-bar) / 2);
-    /* Decoration only — every pointer event belongs to the input above. */
-    pointer-events: none;
-}
-
-.lmp-fs-scrub-track {
-    right: 0;
-    background: var(--lmp-track);
-}
-
-.lmp-fs-scrub-buffered {
-    width: var(--lmp-buffered-x);
-    background: var(--lmp-buffer);
-}
-
-.lmp-fs-scrub-played {
-    width: var(--lmp-played-x);
-    background: var(--lmp-accent);
-}
-
-/*
- * The input keeps every behaviour and paints none of it: transparent track, the
- * bands below showing through, and only its thumb drawn.
- */
-.lmp-fs-scrubber {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    margin: 0;
-    appearance: none;
-    background: transparent;
-    cursor: pointer;
-}
-
-.lmp-fs-scrubber::-webkit-slider-runnable-track {
-    height: var(--lmp-bar);
-    background: transparent;
-}
-
-.lmp-fs-scrubber::-moz-range-track,
-.lmp-fs-scrubber::-moz-range-progress {
-    height: var(--lmp-bar);
-    background: transparent;
-}
-
-/*
- * The handle appears on approach, not at rest.
- *
- * At rest the bar is a readout — a progress line across the picture — and a dot
- * riding it is one more thing drawn over the video for no purpose. It is needed
- * the moment the bar becomes a control, which is when a pointer arrives or the
- * keyboard focuses it.
- */
-.lmp-fs-scrubber::-webkit-slider-thumb {
-    appearance: none;
-    width: var(--lmp-thumb);
-    height: var(--lmp-thumb);
-    border: none;
-    border-radius: 50%;
-    background: var(--lmp-accent);
-    /* Straddles the bar rather than sitting on it. */
-    margin-top: calc((var(--lmp-bar) - var(--lmp-thumb)) / 2);
-    transform: scale(0);
-    transition: transform var(--lmp-transition);
-}
-
-.lmp-fs-scrubber::-moz-range-thumb {
-    width: var(--lmp-thumb);
-    height: var(--lmp-thumb);
-    border: none;
-    border-radius: 50%;
-    background: var(--lmp-accent);
-    transform: scale(0);
-    transition: transform var(--lmp-transition);
-}
-
-.lmp-fs-scrubber:hover::-webkit-slider-thumb,
-.lmp-fs-scrubber:focus-visible::-webkit-slider-thumb,
-.lmp-fs-scrubber:active::-webkit-slider-thumb {
-    transform: scale(1);
-}
-
-.lmp-fs-scrubber:hover::-moz-range-thumb,
-.lmp-fs-scrubber:focus-visible::-moz-range-thumb,
-.lmp-fs-scrubber:active::-moz-range-thumb {
-    transform: scale(1);
-}
-
-/* A handle that never appears is worse than one that appears instantly. */
-@media (prefers-reduced-motion: reduce) {
-    .lmp-fs-scrubber::-webkit-slider-thumb,
-    .lmp-fs-scrubber::-moz-range-thumb {
-        transition: none;
-    }
-}
-
-/* Track menus, inline at the trailing end of the scrubber row. */
-.lmp-fs-menus {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    flex-shrink: 0;
-}
-
-/*
- * A `<select>` is the one element here that otherwise announces itself as a
- * form control sitting on a video. `appearance: none` had already removed the
- * bevel; what was left was a bare box with no affordance and a 26px hit area.
- *
- * So: a pill to match the icon buttons, a drawn chevron — a background image,
- * since `::after` does not render on a select — and room for it on the trailing
- * edge. Not `--lmp-control-size` for the height: a menu is not a target of the
- * same weight as the transport, and matching it would make this row heavier
- * than the scrubber above it.
- */
-.lmp-fs-select {
-    appearance: none;
-    min-height: 32px;
-    border: 1px solid var(--lmp-border);
-    border-radius: 9999px;
-    background-color: var(--lmp-surface);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffffff'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 0.4rem center;
-    background-size: 16px 16px;
-    color: var(--lmp-text);
-    font: inherit;
-    font-size: 0.8125rem;
-    line-height: 1;
-    padding: 0.3rem 1.6rem 0.3rem 0.75rem;
-    cursor: pointer;
-    transition: background-color var(--lmp-transition);
-}
-
-.lmp-fs-select:hover,
-.lmp-fs-select:focus-visible {
-    background-color: var(--lmp-surface-strong);
-}
-
-/*
- * The dropdown itself is drawn by the platform and inherits none of the above,
- * so its options would be dark-on-dark wherever the OS renders a light menu.
- * Naming the colours on the option is the only reach we have into it.
- */
-.lmp-fs-select option {
-    background: #18181b;
+.lmpl-av-half-active .lmpl-av-icon {
     color: #ffffff;
 }
 
-/*
- * Windowed scrub preview.
- *
- * The one thing this player draws over the picture outside fullscreen, and only
- * when a host explicitly asks by binding `previewTime` — see the prop's own
- * note for why that rule matters. Bottom-centre, clear of the video's own edges.
- */
-.lmp-windowed-preview {
-    position: absolute;
-    bottom: 12px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 3;
-    pointer-events: none;
+/* Quick to arrive, unhurried to leave: the toggle appears with the controls and
+   lingers past them, the app's asymmetry. */
+.lmpl-fade-enter-active {
+    transition: opacity 100ms ease-out;
+}
+
+.lmpl-fade-leave-active {
+    transition: opacity 500ms ease-in;
+}
+
+.lmpl-fade-enter-from,
+.lmpl-fade-leave-to {
+    opacity: 0;
 }

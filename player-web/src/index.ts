@@ -1,85 +1,116 @@
 /*
- * Deprecated: superseded by `@luminary-media-converter/player-web-legacy`,
- * whose `LuminaryPlayer` takes the same props and slots and exposes the same
- * surface. Moving is an import change plus a visual one — video.js draws its
- * full control bar over the picture, where this package draws none outside
- * fullscreen.
- *
- * Kept building only because the encoder app still uses it; it gets no new
- * work. Its own exports carry `@deprecated`, naming the replacement where
- * there is one. The `player-core` re-export does not: that package is current,
- * and is better imported directly.
+ * The stylesheets — vendor first, then the skin — are pulled in from
+ * `LuminaryPlayer.vue`'s style block rather than from here, so that no `.css`
+ * specifier reaches the emitted declarations. See the comment on that block.
  */
 export * from '@luminary-media-converter/player-core';
 
-export {
-    /** @deprecated Use `LuminaryPlayer` from `player-web-legacy`. */
-    default as LuminaryPlayer,
-} from './components/LuminaryPlayer.vue';
-export {
-    /** @deprecated No replacement: video.js draws the controls in `player-web-legacy`. */
-    default as FullscreenControls,
-} from './components/FullscreenControls.vue';
+export { default as LuminaryPlayer } from './components/LuminaryPlayer.vue';
+export { default as AudioVideoToggle } from './components/AudioVideoToggle.vue';
 
-// The web's serving layer, which `player-core` now requires a host to supply.
+// The web's serving layer. `player-core` requires one and defaults to nothing,
+// so a host building its own controller needs this — and a native shell
+// implements `ServeStrategy` in its place.
 export {
-    /** @deprecated Use `BlobServeStrategy` from `player-web-legacy`. */
     BlobServeStrategy,
+    type BlobServeStrategyOptions,
 } from './serve/BlobServeStrategy';
+export {
+    LIVE_PLAYLIST_URI_PREFIX,
+    isLivePlaylistUri,
+    type LivePlaylistSource,
+} from './serve/livePlaylistUri';
 
 export {
-    /** @deprecated Use `VideoJsAdapter` from `player-web-legacy`. */
-    HlsJsAdapter,
-    /** @deprecated Use `UnsupportedBrowserError` from `player-web-legacy`. */
+    VideoJsAdapter,
     UnsupportedBrowserError,
-    /** @deprecated hls.js only; `player-web-legacy` has `installMemoryKeyXhr` for VHS. */
-    createMemoryKeyLoader,
-    /** @deprecated Use `isVideoJsEngineSupported` from `player-web-legacy`. */
-    isHlsEngineSupported,
-    /** @deprecated Use `VideoJsAdapterOptions` from `player-web-legacy`. */
-    type HlsJsAdapterOptions,
-} from './adapter/HlsJsAdapter';
+    isVideoJsEngineSupported,
+    type VideoJsAdapterOptions,
+} from './adapter/VideoJsAdapter';
 
-// A copy of `player-web-legacy`'s warming loop, which is the reference a
-// native adapter is ported from. HlsJsAdapter owns its own instance.
+// The VHS request-factory seam and the policies on it. Exported because
+// they are the pieces most likely to need swapping out if a video.js upgrade
+// moves VHS's request factory — see the README's note on flipping
+// `keyDelivery` to 'url'.
+export { wrapVhsXhr, vhsHandler, vhsTech } from './adapter/vhsXhrSeam';
+export { installMemoryKeyXhr } from './adapter/vhsKeyInterceptor';
+export { installLivePlaylistXhr } from './adapter/vhsLivePlaylistInterceptor';
 export {
-    /** @deprecated Use `ChunkPrefetcher` from `player-web-legacy`, the reference this copies. */
+    installByteRangeTimeout,
+    byteRangeBackstopMs,
+    BYTE_RANGE_TIMEOUT_MULTIPLIER,
+    BYTE_RANGE_TIMEOUT_FALLBACK_MS,
+} from './adapter/vhsRequestTimeout';
+
+// Stall detection is VHS's; this reads its verdicts. Exported, with the clock
+// it counts on, as part of the set a native adapter is ported from.
+export {
+    VhsStallSignals,
+    UNKNOWN_WAITING_STRIKES,
+    UNKNOWN_WAITING_WINDOW_MS,
+    type VhsStallSignalHooks,
+    type VhsStallSignalOptions,
+    type UsageEventTarget,
+} from './adapter/vhsStallSignals';
+export { monotonicNow } from './drivers/clock';
+
+// The recovery ladder, whole. Exported because it IS the porting unit: a native
+// adapter whose engine has no retry policy of its own ports this file, and one
+// whose engine does (ExoPlayer) satisfies the same obligation with that instead.
+export {
+    RecoveryLadder,
+    type RecoveryLadderHooks,
+    type RecoveryLadderOptions,
+    type RecoveryReason,
+} from './drivers/RecoveryLadder';
+
+// Exported as the reference warming loop a native adapter is ported from, not
+// because a host has any reason to construct one: the adapter owns its own.
+export {
     ChunkPrefetcher,
-    /** @deprecated Use `ChunkPrefetcherHooks` from `player-web-legacy`. */
     type ChunkPrefetcherHooks,
-    /** @deprecated Use `ChunkPrefetcherOptions` from `player-web-legacy`. */
     type ChunkPrefetcherOptions,
 } from './adapter/chunkWarming';
 
 export {
-    /** @deprecated Use `DEFAULT_MESSAGES` from `player-web-legacy`. */
     DEFAULT_MESSAGES,
-    /** @deprecated Use `formatSeconds` from `player-web-legacy`. */
     formatSeconds,
-    /** @deprecated Use `mergeMessages` from `player-web-legacy`. */
     mergeMessages,
-    /** @deprecated Use `PlayerMessages` from `player-web-legacy`. */
     type PlayerMessages,
 } from './messages';
 
 export {
-    /** @deprecated Use `DEFAULT_CONTROLS` from `player-web-legacy`, whose skips default to 10 s, not 15. */
     DEFAULT_CONTROLS,
-    /** @deprecated Use `mergeControls` from `player-web-legacy`. */
     mergeControls,
-    /** @deprecated Use `PlayerControlsOptions` from `player-web-legacy`. */
     type PlayerControlsOptions,
 } from './controls';
 
+export { usePlayerState } from './composables/usePlayerState';
+
+// The video.js construction options and the pieces of the skin that are
+// behaviour rather than CSS. A host embedding the player through its own
+// video.js instance builds the same options from the same function — and, as
+// `LuminaryPlayer` does, calls `preferYouTubeTech` before setting a YouTube
+// source, since the options list only the tech that is always loaded.
 export {
-    /** @deprecated Use `usePlayerState` from `player-web-legacy`. */
-    usePlayerState,
-} from './composables/usePlayerState';
+    buildVideoJsOptions,
+    preferYouTubeTech,
+    snapSkipSeconds,
+    SKIP_ICON_SECONDS,
+    YOUTUBE_TECH,
+    type VideoJsOptions,
+} from './vjs/playerOptions';
+export { installAutoHide, AUTO_HIDE_MS } from './vjs/autoHide';
+export { TRANSPARENT_POSTER } from './vjs/poster';
+export { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from './vjs/keepAlive';
+
+// Mode detection and language matching: pure, and both are decisions a host may
+// need to make before it has a player (which source goes to which component,
+// which language it will ask for).
+export { isYouTubeUrl, extractYouTubeId, toVideoJsYouTubeUrl } from './youtube';
+export { singleFlight } from './singleFlight';
 export {
-    /** @deprecated No replacement: `player-web-legacy` leaves rotation to `videojs-mobile-ui`. */
-    useFullscreenOrientation,
-    /** @deprecated No replacement; see `useFullscreenOrientation`. */
-    type FullscreenMode,
-    /** @deprecated No replacement; see `useFullscreenOrientation`. */
-    type UseFullscreenOrientation,
-} from './composables/useFullscreenOrientation';
+    findPreferredTrack,
+    matchesPreferredLanguage,
+    type LanguageTaggedTrack,
+} from './audioTrackLanguage';

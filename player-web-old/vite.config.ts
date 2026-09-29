@@ -15,14 +15,7 @@ export default defineConfig({
             fileName: 'index',
         },
         rollupOptions: {
-            external: [
-                'vue',
-                'video.js',
-                'videojs-mobile-ui',
-                'videojs-youtube',
-                'iso-639-2',
-                '@luminary-media-converter/player-core',
-            ],
+            external: ['vue', 'hls.js', '@luminary-media-converter/player-core'],
             output: {
                 globals: { vue: 'Vue' },
             },

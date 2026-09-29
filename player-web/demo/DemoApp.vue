@@ -1,26 +1,35 @@
 <script setup lang="ts">
 /**
- * Dev-only harness for the reference player.
+ * Dev-only harness for the legacy (Video.js) player.
  *
- * Paste any master playlist URL (plain or LMCENC-encrypted, byte-range or
- * not) and an optional 32-hex-char session key, and it plays through the real
- * `LuminaryPlayer` → `PlayerController` → `HlsJsAdapter` path — the same code
- * the encoder app ships. Useful for eyeballing output the app has no session
- * for, and for watching chunk warming fire in the network tab.
+ * Paste any master playlist URL — plain or LMCENC-encrypted, byte-range or not
+ * — plus an optional 32-hex-char session key, and it plays through the real
+ * `LuminaryPlayer` → `PlayerController` → `VideoJsAdapter` path, in the Luminary
+ * app's chrome. A YouTube URL in the same field switches the component into
+ * YouTube mode, where the LMC pipeline is bypassed entirely.
  *
- * Not shipped anywhere: served only by `npm -w player-web run demo`.
+ * Unlike the `player-web` harness there is no host transport here: this player
+ * draws a full control bar over the picture, which is the whole point of it.
+ * The selectors below remain, because they drive `setAngle` / `setQuality` /
+ * `setAudioTrack` through the video.js path.
+ *
+ * Not shipped anywhere: served only by `npm -w player-web-legacy run demo`.
  */
 import { computed, reactive, ref, shallowRef, watchEffect } from 'vue';
 import type { PlayerSource } from '@luminary-media-converter/player-core';
+import { isYouTubeUrl } from '../src/youtube';
 import LuminaryPlayer from '../src/components/LuminaryPlayer.vue';
 
-const STORAGE_KEY = 'luminary-player-demo';
+const STORAGE_KEY = 'luminary-legacy-player-demo';
 
 const saved = (() => {
     try {
         return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') as {
             url?: string;
             keyHex?: string;
+            poster?: string;
+            preferredLanguage?: string;
+            prefetchDebug?: boolean;
         };
     } catch {
         return {};
@@ -30,14 +39,23 @@ const saved = (() => {
 const form = reactive({
     url: saved.url ?? '',
     keyHex: saved.keyHex ?? '',
+    poster: saved.poster ?? '',
+    preferredLanguage: saved.preferredLanguage ?? '',
     // Default ON here: watching the warming work is half of what this
     // harness is for. The library default is off.
-    prefetchDebug: (saved as { prefetchDebug?: boolean }).prefetchDebug ?? true,
+    prefetchDebug: saved.prefetchDebug ?? true,
 });
 
 const source = shallowRef<PlayerSource | null>(null);
+const poster = ref('');
+const preferredLanguage = ref('');
 const player = ref<InstanceType<typeof LuminaryPlayer> | null>(null);
 const formError = ref('');
+
+const controllerOptions = shallowRef<{ prefetch: { debug: boolean } }>({
+    prefetch: { debug: form.prefetchDebug },
+});
+const playerKey = ref(0);
 
 function load() {
     const url = form.url.trim();
@@ -47,30 +65,38 @@ function load() {
         return;
     }
     if (keyHex && !/^[0-9a-f]{32}$/.test(keyHex)) {
-        formError.value =
-            'The key must be 32 hex characters (16-byte AES-128 key).';
+        formError.value = 'The key must be 32 hex characters (16-byte AES-128 key).';
         return;
     }
     formError.value = '';
     localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ url, keyHex, prefetchDebug: form.prefetchDebug }),
+        JSON.stringify({
+            url,
+            keyHex,
+            poster: form.poster.trim(),
+            preferredLanguage: form.preferredLanguage.trim(),
+            prefetchDebug: form.prefetchDebug,
+        }),
     );
-    // Controller options are read once at construction, so bump the key to
-    // remount the player when they change between loads.
-    controllerOptions.value = {
-        prefetch: { debug: form.prefetchDebug },
-    };
-    playerKey.value++;
+    // Controller options are read once at construction, so a change to them is
+    // the one thing that needs a remount — and only then. Every other Load
+    // leaves the component mounted and lets the `source` watch reload in place,
+    // which is the path a host actually takes and therefore the one worth
+    // exercising here (mode switches, angle rebuilds, the load-generation
+    // guard); remounting unconditionally would hide all of it behind a fresh
+    // player every time.
+    if (form.prefetchDebug !== controllerOptions.value.prefetch.debug) {
+        controllerOptions.value = { prefetch: { debug: form.prefetchDebug } };
+        playerKey.value++;
+    }
+    poster.value = form.poster.trim();
+    preferredLanguage.value = form.preferredLanguage.trim();
     source.value = { masterUrl: url, ...(keyHex ? { keyHex } : {}) };
 }
 
-const controllerOptions = shallowRef<{ prefetch: { debug: boolean } }>({
-    prefetch: { debug: form.prefetchDebug },
-});
-const playerKey = ref(0);
-
 const state = computed(() => player.value?.state ?? null);
+const youtubeMode = computed(() => isYouTubeUrl(source.value?.masterUrl ?? ''));
 
 // Selector models kept in sync with the player's own idea of what is active.
 const angleModel = ref('');
@@ -82,39 +108,6 @@ watchEffect(() => {
     qualityModel.value = state.value?.activeQualityId ?? 'auto';
     audioModel.value = state.value?.activeAudioTrackId ?? '';
 });
-
-// Transport — the player deliberately draws no chrome outside fullscreen,
-// so the harness provides its own, the way a host app would.
-const scrubbing = ref(false);
-const scrubPosition = ref(0);
-
-const progressValue = computed(() =>
-    scrubbing.value ? scrubPosition.value : (state.value?.currentTime ?? 0),
-);
-
-/** Buffered extent shaded into the range track, host-side. */
-const progressStyle = computed(() => {
-    const duration = state.value?.duration || 1;
-    const played = (progressValue.value / duration) * 100;
-    const buffered = ((state.value?.bufferedEnd ?? 0) / duration) * 100;
-    return {
-        background: `linear-gradient(to right,
-            #2563eb 0% ${played}%,
-            #4b5563 ${played}% ${Math.max(played, buffered)}%,
-            #27272a ${Math.max(played, buffered)}% 100%)`,
-    };
-});
-
-function onScrub(event: Event) {
-    scrubbing.value = true;
-    scrubPosition.value = Number((event.target as HTMLInputElement).value);
-}
-
-function onScrubEnd() {
-    if (!scrubbing.value) return;
-    player.value?.controller?.seek(scrubPosition.value);
-    scrubbing.value = false;
-}
 
 function onAngle() {
     void player.value?.controller?.setAngle(angleModel.value);
@@ -131,11 +124,12 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
 
 <template>
     <main class="demo">
-        <h1>Luminary reference player — test harness</h1>
+        <h1>Luminary legacy (Video.js) player — test harness</h1>
 
         <form class="demo-form" @submit.prevent="load">
             <label>
-                Master playlist URL
+                Master playlist URL — or a YouTube link, which switches the
+                player into YouTube mode
                 <input
                     v-model="form.url"
                     type="text"
@@ -152,6 +146,24 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                     spellcheck="false"
                 />
             </label>
+            <label>
+                Poster image URL (optional) — drawn behind the transparent player
+                <input
+                    v-model="form.poster"
+                    type="text"
+                    placeholder="https://example.com/artwork.jpg"
+                    spellcheck="false"
+                />
+            </label>
+            <label>
+                Preferred audio language (optional) — "en", "eng" or "en-US"
+                <input
+                    v-model="form.preferredLanguage"
+                    type="text"
+                    placeholder="en"
+                    spellcheck="false"
+                />
+            </label>
             <label class="demo-check">
                 <input v-model="form.prefetchDebug" type="checkbox" />
                 Log chunk warming to the console (applies on Load)
@@ -165,42 +177,22 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                 ref="player"
                 :key="playerKey"
                 :source="source"
+                :poster="poster || undefined"
+                :preferred-language="preferredLanguage || undefined"
                 :controller-options="controllerOptions"
             />
 
-            <div v-if="state" class="demo-transport">
-                <button
-                    type="button"
-                    class="demo-play"
-                    @click="player?.controller?.togglePlay()"
-                >
-                    {{ state.playing ? 'Pause' : 'Play' }}
-                </button>
-                <span class="demo-time">{{ fmt(progressValue) }}</span>
-                <input
-                    class="demo-progress"
-                    type="range"
-                    min="0"
-                    :max="state.duration || 0"
-                    step="0.1"
-                    :value="progressValue"
-                    :style="progressStyle"
-                    @input="onScrub"
-                    @change="onScrubEnd"
-                    @pointerup="onScrubEnd"
-                />
-                <span class="demo-time">{{ fmt(state.duration) }}</span>
-            </div>
+            <p v-if="youtubeMode" class="demo-hint">
+                YouTube mode: the LMC pipeline is bypassed, so the exposed
+                controller is <code>null</code> and the state readout below stays
+                at its initial values. The chrome is fully functional.
+            </p>
 
-            <div v-if="state" class="demo-controls">
+            <div v-if="state && !youtubeMode" class="demo-controls">
                 <label v-if="(state.angles?.length ?? 0) > 1">
                     Angle
                     <select v-model="angleModel" @change="onAngle">
-                        <option
-                            v-for="a in state.angles"
-                            :key="a.id"
-                            :value="a.id"
-                        >
+                        <option v-for="a in state.angles" :key="a.id" :value="a.id">
                             {{ a.name }}
                         </option>
                     </select>
@@ -209,11 +201,7 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                     Quality
                     <select v-model="qualityModel" @change="onQuality">
                         <option value="auto">auto</option>
-                        <option
-                            v-for="q in state.qualities"
-                            :key="q.id"
-                            :value="q.id"
-                        >
+                        <option v-for="q in state.qualities" :key="q.id" :value="q.id">
                             {{ q.label }}
                         </option>
                     </select>
@@ -221,18 +209,12 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                 <label v-if="(state.audioTracks?.length ?? 0) > 1">
                     Audio
                     <select v-model="audioModel" @change="onAudio">
-                        <option
-                            v-for="t in state.audioTracks"
-                            :key="t.id"
-                            :value="t.id"
-                        >
+                        <option v-for="t in state.audioTracks" :key="t.id" :value="t.id">
                             {{ t.label || t.id }}
                         </option>
                     </select>
                 </label>
-                <button type="button" @click="player?.enterFullscreen()">
-                    Fullscreen
-                </button>
+                <button type="button" @click="player?.enterFullscreen()">Fullscreen</button>
             </div>
 
             <dl v-if="state" class="demo-state">
@@ -242,23 +224,26 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                 </div>
                 <div>
                     <dt>time</dt>
-                    <dd>
-                        {{ fmt(state.currentTime) }} /
-                        {{ fmt(state.duration) }} s
-                    </dd>
+                    <dd>{{ fmt(state.currentTime) }} / {{ fmt(state.duration) }} s</dd>
                 </div>
                 <div>
                     <dt>buffered to</dt>
                     <dd>{{ fmt(state.bufferedEnd) }} s</dd>
                 </div>
+                <div>
+                    <dt>audio only</dt>
+                    <dd>{{ state.isAudioOnly }}</dd>
+                </div>
                 <div v-if="state.error">
                     <dt>error</dt>
-                    <dd>{{ state.error.code }}: {{ state.error.detail }}</dd>
+                    <dd>{{ state.error.code }}: {{ state.error.message }}</dd>
                 </div>
             </dl>
 
             <p class="demo-hint">
-                Chunk warming: watch the network tab for a single
+                Encrypted output should produce <em>no</em> request carrying the
+                key and no <code>luminary://</code> request at all — the key is
+                served to VHS from memory. Chunk warming shows up as a single
                 <code>Range: bytes=0-65535</code> request per
                 <code>media/…</code> chunk, fired as the buffer front nears the
                 previous chunk's end.
@@ -324,54 +309,6 @@ body {
     align-items: center;
     gap: 0.5rem !important;
     flex-direction: row;
-}
-.demo-transport {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin-top: 0.75rem;
-}
-.demo-play {
-    min-width: 4.5rem;
-    padding: 0.45rem 0;
-    border: 1px solid #444;
-    border-radius: 6px;
-    background: #333;
-    color: #fff;
-    font: inherit;
-    cursor: pointer;
-}
-.demo-time {
-    font-size: 0.8rem;
-    font-variant-numeric: tabular-nums;
-    color: #aaa;
-    min-width: 3.2rem;
-    text-align: center;
-}
-.demo-progress {
-    flex: 1;
-    height: 6px;
-    appearance: none;
-    -webkit-appearance: none;
-    border-radius: 3px;
-    outline: none;
-    cursor: pointer;
-}
-.demo-progress::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: #fff;
-    border: none;
-}
-.demo-progress::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: #fff;
-    border: none;
 }
 .demo-controls {
     display: flex;

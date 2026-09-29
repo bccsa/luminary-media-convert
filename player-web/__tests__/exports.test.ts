@@ -3,7 +3,7 @@ import * as core from '@luminary-media-converter/player-core';
 import * as pkg from '../src/index';
 
 /**
- * The runtime surface of `@luminary-media-converter/player-web-legacy`.
+ * The runtime surface of `@luminary-media-converter/player-web`.
  *
  * The Luminary app consumes this package through a submodule, and a symbol that
  * disappears from it is found at the app's next build, not here. So its own
@@ -60,7 +60,7 @@ const OWN_RUNTIME_EXPORTS = [
     'wrapVhsXhr',
 ];
 
-describe('player-web-legacy exports', () => {
+describe('player-web exports', () => {
     it('exports exactly its own public surface, by name', () => {
         const own = Object.keys(pkg).filter((name) => !(name in core));
 

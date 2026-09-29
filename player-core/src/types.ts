@@ -5,7 +5,8 @@
  * extraction, quality capping, key handling, decryption), playback policy
  * (recovery, coming-soon polling) and a framework-free state
  * store. It drives an engine through the {@link PlayerAdapter} interface —
- * hls.js on the web today, AVPlayer / ExoPlayer in a Capacitor shell later.
+ * video.js (VHS) on the web today, AVPlayer / ExoPlayer in a Capacitor shell
+ * later.
  *
  * Implementing projects (the media encoder app, the Luminary app, …) talk to
  * {@link PlayerController} only; they never touch the adapter or the engine.
@@ -144,8 +145,8 @@ export interface PlayerSource {
 // ---------------------------------------------------------------------------
 
 // Imported for use below and re-exported, so a consumer can type a preview
-// without also depending on `hls/` — `player-web` draws these and has no other
-// reason to know that package exists.
+// without also depending on `hls-core` — `player-web-old` drew these and had no
+// other reason to know that package exists.
 import type { ThumbnailSpriteCue } from '@luminary-media-converter/hls-core';
 export type { ThumbnailSpriteCue };
 
@@ -515,7 +516,7 @@ export interface ChunkWarmOptions {
  * with it: ExoPlayer's `LoadErrorHandlingPolicy` is precisely a
  * retry-count-plus-backoff policy, and re-implementing ours beside it would be
  * two ladders fighting. A platform with no equivalent — AVPlayer — ports the
- * reference module, `player-web-legacy/src/drivers/RecoveryLadder.ts`, which
+ * reference module, `player-web/src/drivers/RecoveryLadder.ts`, which
  * is self-contained for that reason.
  */
 export interface PlayerAdapter {
@@ -641,8 +642,8 @@ export interface PlayerAdapter {
      * bridge; the schedules themselves are plain data and serialize fine.
      *
      * Reference implementation:
-     * `player-web-legacy/src/adapter/chunkWarming.ts` (`ChunkPrefetcher`),
-     * wired up in `player-web-legacy/src/adapter/VideoJsAdapter.ts`. Prose
+     * `player-web/src/adapter/chunkWarming.ts` (`ChunkPrefetcher`),
+     * wired up in `player-web/src/adapter/VideoJsAdapter.ts`. Prose
      * versions, for porting: `docs/chunk-warming.md` for the loop itself, and
      * `docs/suspension-safe-playback.md` for the rule it is one case of.
      */

@@ -143,7 +143,7 @@ export interface HlsJsAdapterOptions {
  *
  * Owns intra-source ABR (`levels`/`currentLevel`), audio-track selection,
  * native `<track>` rendering and the recovery obligation on `PlayerAdapter`,
- * which it meets with a copy of `player-web-legacy`'s {@link RecoveryLadder}.
+ * which it meets with a copy of `player-web`'s {@link RecoveryLadder}.
  */
 export class HlsJsAdapter implements PlayerAdapter {
     readonly capabilities: AdapterCapabilities = {
@@ -253,10 +253,9 @@ export class HlsJsAdapter implements PlayerAdapter {
      * involvement. hls.js re-parses the manifest and rebuilds its buffers, and
      * the custom key loader is part of the instance, so nothing needs re-arming.
      *
-     * Life support, like the rest of this package: it satisfies the contract so
-     * the workspace builds and the encoder app keeps working, and stops there.
-     * The ladder that would call it repeatedly, with backoff, lives in
-     * `player-web-legacy` — see `docs/suspension-safe-playback.md`.
+     * Frozen, like the rest of this package: it satisfies the contract and
+     * stops there. The ladder that would call it repeatedly, with backoff,
+     * lives in `player-web` — see `docs/suspension-safe-playback.md`.
      */
     async reattach(): Promise<void> {
         const src = this.lastSource;
