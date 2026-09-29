@@ -85,8 +85,10 @@ describe('audio-only', () => {
 
         await publish(snapshot({ activeAngleId: AUDIO_ONLY_ANGLE_ID }));
 
-        expect(player.current.audioOnlyMode).toHaveBeenCalledWith(true);
         expect(player.current.audioPosterMode).toHaveBeenCalledWith(true);
+        // One mode only: video.js turns audio-only mode off whenever poster
+        // mode goes on, and audio-only mode collapses the player to a bar.
+        expect(player.current.audioOnlyMode).not.toHaveBeenCalled();
         wrapper.unmount();
     });
 
@@ -97,7 +99,7 @@ describe('audio-only', () => {
 
         await publish(snapshot({ isAudioOnly: true }));
 
-        expect(player.current.audioOnlyMode).toHaveBeenCalledWith(true);
+        expect(player.current.audioPosterMode).toHaveBeenCalledWith(true);
         wrapper.unmount();
     });
 
@@ -108,7 +110,6 @@ describe('audio-only', () => {
         vi.clearAllMocks();
         await publish(snapshot({ activeAngleId: 'cam1' }));
 
-        expect(player.current.audioOnlyMode).toHaveBeenCalledWith(false);
         expect(player.current.audioPosterMode).toHaveBeenCalledWith(false);
         wrapper.unmount();
     });
@@ -121,7 +122,7 @@ describe('audio-only', () => {
         await publish(snapshot({ playing: true }));
         await publish(snapshot({ playing: false }));
 
-        expect(player.current.audioOnlyMode).not.toHaveBeenCalled();
+        expect(player.current.audioPosterMode).not.toHaveBeenCalled();
         wrapper.unmount();
     });
 
@@ -129,7 +130,7 @@ describe('audio-only', () => {
         // video.js rejects these before the player is ready; the next state
         // change asks again.
         const wrapper = await mountPlayer();
-        player.current.audioOnlyMode = vi.fn(() => Promise.reject(new Error('not ready')));
+        player.current.audioPosterMode = vi.fn(() => Promise.reject(new Error('not ready')));
 
         await expect(publish(snapshot({ activeAngleId: AUDIO_ONLY_ANGLE_ID }))).resolves.toBeUndefined();
         wrapper.unmount();
