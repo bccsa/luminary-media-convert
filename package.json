@@ -10,12 +10,13 @@
         "player-core",
         "player-web",
         "player-web-old",
+        "player-native",
         "cms-mock",
         "app-electron"
     ],
     "scripts": {
-        "ci:libs": "npm ci --include-workspace-root -w hls-core -w encode-config -w player-core -w player-web",
-        "build:libs": "npm -w hls-core run build && npm -w encode-config run build && npm -w player-core run build && npm -w player-web run build",
+        "ci:libs": "npm ci --include-workspace-root -w hls-core -w encode-config -w player-core -w player-web -w player-native",
+        "build:libs": "npm -w hls-core run build && npm -w encode-config run build && npm -w player-core run build && npm -w player-web run build && npm -w player-native run build",
         "build:bundled": "npm run build:libs && npm -w api run build && npm -w app run build",
         "predev": "npm run build:libs",
         "dev": "npm run predev && concurrently -k -n ecfg,hls,pcor,plyw,api,app -c green,white,cyan,yellow,blue,magenta \"npm -w encode-config run dev\" \"npm -w hls-core run dev\" \"npm -w player-core run dev\" \"npm -w player-web run dev\" \"npm -w api run dev\" \"npm -w app run dev\"",
