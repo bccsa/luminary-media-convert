@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Dev-only harness for the legacy (Video.js) player.
+ * Dev-only harness for the player (Video.js).
  *
  * Paste any master playlist URL — plain or LMCENC-encrypted, byte-range or not
  * — plus an optional 32-hex-char session key, and it plays through the real
@@ -8,17 +8,19 @@
  * app's chrome. A YouTube URL in the same field switches the component into
  * YouTube mode, where the LMC pipeline is bypassed entirely.
  *
- * Unlike the `player-web` harness there is no host transport here: this player
- * draws a full control bar over the picture, which is the whole point of it.
- * The selectors below remain, because they drive `setAngle` / `setQuality` /
- * `setAudioTrack` through the video.js path.
+ * There is no host transport here: this player draws a full control bar over
+ * the picture — unless "Bare when windowed" is ticked, which is how the encoder
+ * embeds it, and then fullscreen (double-click) is where the controls are. The
+ * selectors below drive `setAngle` / `setQuality` / `setAudioTrack` through
+ * the video.js path.
  *
- * Not shipped anywhere: served only by `npm -w player-web-legacy run demo`.
+ * Not shipped anywhere: served only by `npm -w player-web run demo`.
  */
 import { computed, reactive, ref, shallowRef, watchEffect } from 'vue';
 import type { PlayerSource } from '@luminary-media-converter/player-core';
 import { isYouTubeUrl } from '../src/youtube';
 import LuminaryPlayer from '../src/components/LuminaryPlayer.vue';
+import type { PlayerImage } from '../src/image';
 
 const STORAGE_KEY = 'luminary-legacy-player-demo';
 
@@ -28,8 +30,10 @@ const saved = (() => {
             url?: string;
             keyHex?: string;
             poster?: string;
+            posterFallback?: string;
             preferredLanguage?: string;
             prefetchDebug?: boolean;
+            bare?: boolean;
         };
     } catch {
         return {};
@@ -40,14 +44,17 @@ const form = reactive({
     url: saved.url ?? '',
     keyHex: saved.keyHex ?? '',
     poster: saved.poster ?? '',
+    posterFallback: saved.posterFallback ?? '',
     preferredLanguage: saved.preferredLanguage ?? '',
     // Default ON here: watching the warming work is half of what this
     // harness is for. The library default is off.
     prefetchDebug: saved.prefetchDebug ?? true,
+    // How the encoder embeds the player: nothing on the frame until fullscreen.
+    bare: saved.bare ?? false,
 });
 
 const source = shallowRef<PlayerSource | null>(null);
-const poster = ref('');
+const poster = shallowRef<PlayerImage | undefined>(undefined);
 const preferredLanguage = ref('');
 const player = ref<InstanceType<typeof LuminaryPlayer> | null>(null);
 const formError = ref('');
@@ -55,7 +62,23 @@ const formError = ref('');
 const controllerOptions = shallowRef<{ prefetch: { debug: boolean } }>({
     prefetch: { debug: form.prefetchDebug },
 });
+const controls = shallowRef({ windowedControls: !form.bare });
 const playerKey = ref(0);
+
+/**
+ * One field holds either a single URL or a srcset, told apart by the width (or
+ * density) descriptors a srcset carries; the fallback rides alongside.
+ */
+function toImage(value: string, fallback: string): PlayerImage | undefined {
+    const text = value.trim();
+    const last = fallback.trim();
+    if (!text && !last) return undefined;
+    const isSrcset = /\s\d+(\.\d+)?[wx]\s*(,|$)/.test(text);
+    return {
+        ...(text ? (isSrcset ? { srcset: text } : { src: text }) : {}),
+        ...(last ? { fallback: last } : {}),
+    };
+}
 
 function load() {
     const url = form.url.trim();
@@ -75,22 +98,29 @@ function load() {
             url,
             keyHex,
             poster: form.poster.trim(),
+            posterFallback: form.posterFallback.trim(),
             preferredLanguage: form.preferredLanguage.trim(),
             prefetchDebug: form.prefetchDebug,
+            bare: form.bare,
         }),
     );
-    // Controller options are read once at construction, so a change to them is
-    // the one thing that needs a remount — and only then. Every other Load
+    // Controller options and `controls` are read once at construction, so a
+    // change to either is what needs a remount — and only then. Every other Load
     // leaves the component mounted and lets the `source` watch reload in place,
     // which is the path a host actually takes and therefore the one worth
     // exercising here (mode switches, angle rebuilds, the load-generation
     // guard); remounting unconditionally would hide all of it behind a fresh
     // player every time.
-    if (form.prefetchDebug !== controllerOptions.value.prefetch.debug) {
+    const windowedControls = !form.bare;
+    if (
+        form.prefetchDebug !== controllerOptions.value.prefetch.debug ||
+        windowedControls !== controls.value.windowedControls
+    ) {
         controllerOptions.value = { prefetch: { debug: form.prefetchDebug } };
+        controls.value = { windowedControls };
         playerKey.value++;
     }
-    poster.value = form.poster.trim();
+    poster.value = toImage(form.poster, form.posterFallback);
     preferredLanguage.value = form.preferredLanguage.trim();
     source.value = { masterUrl: url, ...(keyHex ? { keyHex } : {}) };
 }
@@ -124,7 +154,7 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
 
 <template>
     <main class="demo">
-        <h1>Luminary legacy (Video.js) player — test harness</h1>
+        <h1>Luminary player (Video.js) — test harness</h1>
 
         <form class="demo-form" @submit.prevent="load">
             <label>
@@ -147,11 +177,21 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                 />
             </label>
             <label>
-                Poster image URL (optional) — drawn behind the transparent player
+                Poster (optional) — a URL, or a srcset: "a-640.jpg 640w, a-1280.jpg 1280w".
+                Also what audio-only shows, under the glyph
                 <input
                     v-model="form.poster"
                     type="text"
                     placeholder="https://example.com/artwork.jpg"
+                    spellcheck="false"
+                />
+            </label>
+            <label>
+                Poster fallback (optional) — shown if the poster cannot load
+                <input
+                    v-model="form.posterFallback"
+                    type="text"
+                    placeholder="https://example.com/fallback.jpg"
                     spellcheck="false"
                 />
             </label>
@@ -168,6 +208,11 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                 <input v-model="form.prefetchDebug" type="checkbox" />
                 Log chunk warming to the console (applies on Load)
             </label>
+            <label class="demo-check">
+                <input v-model="form.bare" type="checkbox" />
+                Bare when windowed — no controls outside fullscreen; double-click
+                for fullscreen, as the encoder embeds it (applies on Load)
+            </label>
             <button type="submit">Load</button>
             <p v-if="formError" class="demo-error">{{ formError }}</p>
         </form>
@@ -177,7 +222,8 @@ const fmt = (n: number | undefined) => (n ?? 0).toFixed(1);
                 ref="player"
                 :key="playerKey"
                 :source="source"
-                :poster="poster || undefined"
+                :poster="poster"
+                :controls="controls"
                 :preferred-language="preferredLanguage || undefined"
                 :controller-options="controllerOptions"
             />

@@ -43,6 +43,27 @@ export interface VideoJsOptions {
         children: string[];
         skipButtons: { forward?: number; backward?: number };
     };
+    /**
+     * The double-click is never video.js's — `LuminaryPlayer` takes it on the
+     * whole frame. The click is overridden only for a bare frame; see
+     * {@link bareFrameClick}.
+     */
+    userActions: {
+        click?: boolean | ((this: Player, event: Event) => void);
+        doubleClick: false;
+    };
+}
+
+/**
+ * A click on the picture for a bare windowed frame (`windowedControls: false`):
+ * play or pause in fullscreen only. Windowed, the host's own interface is the
+ * transport, and a frame that also answered clicks would be a second one.
+ */
+function bareFrameClick(this: Player): void {
+    if (!this.isFullscreen()) return;
+    // video.js's own default, including its silence on a refused play.
+    if (this.paused()) void Promise.resolve(this.play()).catch(() => {});
+    else this.pause();
 }
 
 /**
@@ -197,6 +218,14 @@ export function buildVideoJsOptions(controls: PlayerControlsOptions): VideoJsOpt
                 ...(forward ? { forward } : {}),
                 ...(backward ? { backward } : {}),
             },
+        },
+        userActions: {
+            // video.js listens on the tech alone and refuses anything inside the
+            // control bar — which in this skin is the whole frame, so once the
+            // bar is up nothing could toggle fullscreen, least of all leave it.
+            // `LuminaryPlayer` handles the double-click on the frame instead.
+            doubleClick: false,
+            ...(controls.windowedControls ? {} : { click: bareFrameClick }),
         },
     };
 }

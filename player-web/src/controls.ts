@@ -12,8 +12,8 @@
  * The skip interval is configurable for the same reason: 10 s suits a lecture
  * and 30 s a sermon, and the consumer knows which it is shipping. Back and
  * forward are separate values because they are commonly asymmetric. The
- * defaults are 10 s here rather than `player-web`'s 15, because this player
- * exists to match the Luminary app's chrome and that is what it ships.
+ * defaults are 10 s, because this player matches the Luminary app's chrome
+ * and that is what it ships.
  */
 export interface PlayerControlsOptions {
     /**
@@ -54,6 +54,25 @@ export interface PlayerControlsOptions {
     skipBackSeconds: number;
     /** Seconds the skip-forward button moves. `0` removes the button; the same snapping to {5, 10, 30} applies. */
     skipForwardSeconds: number;
+    /**
+     * Show the controls while the player is windowed.
+     *
+     * `false` leaves the windowed frame bare, for a host that drives playback
+     * from its own interface — the encoder, whose trim timeline and its
+     * shortcuts are the whole transport:
+     *
+     * - no control bar, big play button, audio/video toggle or video.js dialog,
+     *   so nothing on the frame can take focus or a key — a focused video.js
+     *   control swallows every key but Tab, which would be the host's shortcuts;
+     * - a click on the picture does nothing, and a double-click toggles
+     *   fullscreen.
+     *
+     * Fullscreen shows every control regardless, because the host's interface
+     * is out of view there. The coming-soon and error panels are states rather
+     * than controls and show either way, as do subtitles, which are the
+     * picture's.
+     */
+    windowedControls: boolean;
 }
 
 /** The behaviour the library had before any of this was configurable. */
@@ -63,6 +82,7 @@ export const DEFAULT_CONTROLS: PlayerControlsOptions = {
     subtitlesMenu: true,
     skipBackSeconds: 10,
     skipForwardSeconds: 10,
+    windowedControls: true,
 };
 
 /**
@@ -82,7 +102,7 @@ export function mergeControls(
     const merged = { ...DEFAULT_CONTROLS };
     if (!partial) return merged;
 
-    for (const key of ['audioMenu', 'audioVideoToggle', 'subtitlesMenu'] as const) {
+    for (const key of ['audioMenu', 'audioVideoToggle', 'subtitlesMenu', 'windowedControls'] as const) {
         const value = partial[key];
         if (typeof value === 'boolean') {
             merged[key] = value;

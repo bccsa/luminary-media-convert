@@ -1,4 +1,4 @@
-# @luminary-media-converter/player-web-legacy
+# @luminary-media-converter/player-web
 
 The Luminary app's **Video.js 8** player, wired to this repo's playback stack.
 
@@ -8,38 +8,31 @@ inside chrome that is visually and behaviourally the app's existing player. That
 is the point of the package: the migration to the Luminary player stack can
 happen without the viewer seeing a different player on the day it lands.
 
-It is a sibling of [`player-web`](../player-web), not a replacement:
-
-|                     | `player-web`                         | `player-web-legacy`                        |
-| ------------------- | ------------------------------------ | ------------------------------------------ |
-| Engine              | hls.js on a bare `<video>`           | Video.js 8 (VHS), pinned 8.23.4            |
-| Chrome              | none windowed; own fullscreen UI     | Video.js control bar, Luminary skin        |
-| Contract            | `PlayerController` + `LuminaryPlayer` | identical                                  |
-| Extras              | scrub thumbnails                     | poster, preferred audio language, YouTube  |
-
 Everything below the component — munging, LMCENC decryption, angle extraction,
-quality capping, recovery, chunk warming — is `player-core`, shared with
-`player-web`. Only the engine binding differs.
+quality capping, recovery, chunk warming — is `player-core`. This package is the
+engine binding and the chrome. It replaced an hls.js test implementation, which
+survives, frozen and unbuilt, as `player-web-old`.
 
 ## Using it
 
 ```vue
 <script setup lang="ts">
-import { LuminaryPlayer } from '@luminary-media-converter/player-web-legacy';
-import type { PlayerSource } from '@luminary-media-converter/player-web-legacy';
+import { LuminaryPlayer } from '@luminary-media-converter/player-web';
+import type { PlayerImage, PlayerSource } from '@luminary-media-converter/player-web';
 
 const source: PlayerSource = {
     masterUrl: 'https://cdn.example.com/media/<id>/master.m3u8',
     keyHex: '…', // 32 hex chars, for encrypted output
 };
+
+const poster: PlayerImage = {
+    srcset: 'https://cdn.example.com/art-640.webp 640w, https://cdn.example.com/art-1280.webp 1280w',
+    fallback: '/img/fallback.jpg', // bundled with the app, so always there
+};
 </script>
 
 <template>
-    <LuminaryPlayer
-        :source="source"
-        poster="https://cdn.example.com/art.jpg"
-        preferred-language="en"
-    />
+    <LuminaryPlayer :source="source" :poster="poster" preferred-language="en" />
 </template>
 ```
 
@@ -52,18 +45,62 @@ host does about CSS.
 
 ### Props
 
-| Prop                | Type                        | Notes                                                                      |
-| ------------------- | --------------------------- | -------------------------------------------------------------------------- |
-| `source`            | `PlayerSource`              | Required. Assigning a new object reloads.                                  |
-| `poster`            | `string`                    | Legacy-only. Drawn *behind* a transparent player, covering the frame.      |
-| `preferredLanguage` | `string`                    | Legacy-only. Both sides canonicalize, so `en`/`eng` and `ger`/`deu` match either spelling. A manual selection suspends it until the prop or the source changes. |
-| `messages`          | `Partial<PlayerMessages>`   | Strings this component draws. Video.js localizes its own chrome.           |
-| `controls`          | `Partial<PlayerControlsOptions>` | Audio menu, audio/video toggle, skip intervals. Read once, at mount.  |
-| `controllerOptions` | `PlayerControllerOptions`   | Chunk-warming prefetch tuning and debug logging.                           |
+| Prop                | Type                             | Notes |
+| ------------------- | -------------------------------- | ----- |
+| `source`            | `PlayerSource`                   | Required. Assigning a new object reloads. |
+| `poster`            | `string \| PlayerImage`          | Artwork under the picture until the first frame, and while audio-only (under an always-drawn musical-note glyph; black with no poster) — windowed and in fullscreen. |
+| `preferredLanguage` | `string`                         | Both sides canonicalize, so `en`/`eng` and `ger`/`deu` match either spelling. A manual selection suspends it until the prop or the source changes. |
+| `messages`          | `Partial<PlayerMessages>`        | Strings this component draws. Video.js localizes its own chrome. |
+| `controls`          | `Partial<PlayerControlsOptions>` | Audio menu, audio/video toggle, subtitles menu, skip intervals, `windowedControls`. Read once, at mount. |
+| `controllerOptions` | `PlayerControllerOptions`        | Chunk-warming prefetch tuning and debug logging. |
 
-Exposed: `{ controller, state, enterFullscreen, exitFullscreen }`. Slots:
-default (`{ state, controller }`), `coming-soon` (`{ state }`), `error`
-(`{ state, error, retry }`) — the same as `player-web`'s.
+Exposed: `{ controller, state, enterFullscreen, exitFullscreen, seek, play, pause }`.
+Slots: default (`{ state, controller }`), `coming-soon` (`{ state }`), `error`
+(`{ state, error, retry }`). Events: `timeupdate`, `loadedmetadata`, `ended` —
+raised in YouTube mode too, where there is no controller.
+
+A double-click anywhere on the frame toggles fullscreen, in and out, except on
+a control (a button, slider, menu or dialog). The player handles it rather than
+video.js, whose own handler refuses anything inside the control bar — and this
+skin's control bar is the whole frame.
+
+### Artwork: `PlayerImage`
+
+```ts
+interface PlayerImage {
+    srcset?: string; // as for <img srcset>: "url 640w, url 1280w"
+    sizes?: string; // as for <img sizes>; default: the player's width, 100vw in fullscreen
+    src?: string; // a single URL, alone or beside srcset
+    fallback?: string; // shown if the image fails to load — offline and uncached, say
+}
+```
+
+A bare URL is shorthand for `{ src }`. The player draws the image itself, as an
+`<img>` inside video.js's element — so it goes fullscreen with the picture —
+rather than through video.js's poster, which takes one URL and knows nothing of
+`srcset`. The shape describes an image, not a video.js option, so it survives a
+change of engine.
+
+A `srcset` is what keeps artwork up offline: the browser picks by size and pixel
+ratio, and can settle for a width it already holds. A host with Luminary's
+`ImageDto` builds one the way `LImageProvider` does — the file collection whose
+`aspectRatio` is closest to 16:9, each file as `${bucketUrl}/${filename} ${width}w`
+— and passes one of its bundled `fallbackImageUrls` as `fallback`.
+
+### A bare windowed frame: `controls.windowedControls`
+
+For a host that drives playback from its own interface — the encoder, whose trim
+timeline and shortcuts are the whole transport — `:controls="{ windowedControls: false }"`
+leaves the windowed frame bare:
+
+- no control bar, big play button, audio/video toggle or video.js dialog, so
+  nothing on the frame can take focus or a key (a focused video.js control
+  swallows every key but Tab — the host's shortcuts);
+- a click on the picture does nothing; a double-click toggles fullscreen;
+- fullscreen shows every control, since the host's interface is out of view
+  there — the host's way in is `enterFullscreen()`, or the double-click;
+- the coming-soon and error panels are states, not controls, and still show; so
+  do subtitles.
 
 ### Dark mode
 
@@ -90,13 +127,19 @@ npm run build:libs
 cd ../..
 
 npm install \
-  file:vendor/luminary-media-convert/hls \
+  file:vendor/luminary-media-convert/hls-core \
   file:vendor/luminary-media-convert/player-core \
-  file:vendor/luminary-media-convert/player-web-legacy
+  file:vendor/luminary-media-convert/player-web
 ```
 
 Then swap the app's `VideoPlayer.vue` internals for `LuminaryPlayer`, passing
-`hlsUrl` as `masterUrl` and the saved `hlsKey` as `keyHex`.
+`hlsUrl` as `masterUrl` and the saved `hlsKey` as `keyHex`, and the content's
+image as `poster` (see *Artwork* above) rather than an `LImage` behind the player
+— which never reaches fullscreen.
+
+This package was called `player-web-legacy` until it replaced the hls.js one: a
+checkout from before the rename installs `file:…/player-web-legacy` and imports
+`@luminary-media-converter/player-web-legacy`, and both change here.
 
 **Every submodule update repeats the build step.** `dist/` is not committed, so
 `git submodule update` alone leaves the app importing a package with no build
@@ -204,18 +247,19 @@ Video.js ships skip-button icons for those three values only, and hides a skip
 button configured to anything else. `controls.skipBackSeconds` /
 `skipForwardSeconds` are therefore snapped to the nearest of them, so the label
 and the jump always agree; `0` removes the button outright. The default is 10,
-matching the Luminary app (`player-web` defaults to 15).
+matching the Luminary app.
 
 ## Development
 
 ```bash
-npm -w player-web-legacy run build   # dist/index.js + declarations
-npm -w player-web-legacy run dev     # watch build (js + d.ts)
-npm -w player-web-legacy run demo    # test harness on http://localhost:5182
+npm -w player-web run build   # dist/index.js + declarations
+npm -w player-web run dev     # watch build (js + d.ts)
+npm -w player-web run demo    # test harness on http://localhost:5182
 ```
 
 The demo plays any master URL through the real component: paste a plain or
-encrypted master (plus its 32-hex key), a poster URL, a preferred language, or a
-YouTube link. With prefetch debug on it logs the chunk-warming schedule to the
+encrypted master (plus its 32-hex key), a poster (a URL or a srcset, with a
+fallback), a preferred language, or a YouTube link, and tick "Bare when
+windowed" to see the frame the encoder embeds. With prefetch debug on it logs the chunk-warming schedule to the
 console. For an encrypted session, the check that matters is the network panel:
 no request carrying the key, and no `luminary://` request at all.

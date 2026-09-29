@@ -14,10 +14,10 @@
  *
  * Structure this is written against (see `LuminaryPlayer.vue`):
  *
- *     .lmpl-root                 relative frame, 16:9, host's poster behind
- *       img.lmpl-poster          the artwork, covering the frame
+ *     .lmpl-root                 relative frame, 16:9
  *       .lmpl-video-player       absolute inset-0 — the video.js mount
- *         video.video-js
+ *         div.video-js           the player (what goes fullscreen)
+ *           .lmpl-artwork        the poster (audio-only too), under everything
  *       .lmpl-slot               host overlay
  *       .lmpl-panel              coming-soon / error surfaces
  *       .lmpl-av-toggle          audio / video switch, top right
@@ -53,20 +53,53 @@
     }
 }
 
-/* --- Poster behind a transparent player ---------------------------------- */
+/* --- Artwork: the poster, before the first frame and while audio-only ---- */
 
-.lmpl-poster {
+/*
+ * Drawn by the component inside video.js's element rather than behind it, so it
+ * goes fullscreen with the picture. `isolation` makes the player its own
+ * stacking context and -1 puts the layer under everything video.js draws
+ * whatever their DOM order, which a tech swap changes: the new tech is
+ * prepended, and would otherwise land underneath. The tech paints nothing until
+ * its first frame, so the poster shows through until then; while audio-only the
+ * tech is hidden and the poster, under its glyph, is what there is.
+ */
+.lmpl-root .video-js {
+    isolation: isolate;
+}
+
+.lmpl-artwork {
     position: absolute;
     inset: 0;
+    z-index: -1;
+    overflow: hidden;
+    border-radius: inherit;
+    pointer-events: none;
+}
+
+/* Audio-only with no artwork is black, not whatever is behind the player. */
+.lmpl-artwork-audio {
+    background-color: #000;
+}
+
+.lmpl-artwork-img {
+    display: block;
     width: 100%;
     height: 100%;
     object-fit: cover;
 }
 
-@media (min-width: 768px) {
-    .lmpl-poster {
-        border-radius: 0.5rem;
-    }
+/* Beneath the controls like the rest of the layer, so the centre play button
+   covers it rather than the other way round. */
+.lmpl-audio-glyph {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 4rem;
+    height: 4rem;
+    transform: translate(-50%, -50%);
+    color: rgba(255, 255, 255, 0.85);
+    filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.55));
 }
 
 /* The keep-alive element is machinery, never a control. */
@@ -249,27 +282,27 @@
     display: none !important;
 }
 
-/* --- Audio-only ----------------------------------------------------------- */
+/* --- Bare windowed frame (controls.windowedControls: false) --------------- */
 
 /*
- * video.js does two things in audio-only mode: it hides the tech, which is
- * exactly right — there are no frames, and a visible `<video>` paints its own
- * surface over the host's artwork — and it collapses the player to the height of
- * a stock control bar, which is wrong here. This skin's control bar *is* the
- * frame, drawn over the whole picture, so the height goes back.
+ * The host drives playback from its own interface, so the windowed frame carries
+ * nothing a pointer or a key can reach. `display: none` rather than a fade,
+ * because a faded control still takes focus, and a focused video.js control
+ * swallows every key but Tab — which is to say the host's shortcuts.
+ * `.vjs-fullscreen` puts every control back: in fullscreen the host's interface
+ * is out of view.
  */
-.lmpl-root .lmpl-video-player .video-js.vjs-audio-only-mode {
-    height: 100% !important;
-    width: 100% !important;
+.lmpl-root.lmpl-windowed-bare .video-js:not(.vjs-fullscreen) .vjs-control-bar,
+.lmpl-root.lmpl-windowed-bare .video-js:not(.vjs-fullscreen) .vjs-big-play-button,
+.lmpl-root.lmpl-windowed-bare .video-js:not(.vjs-fullscreen) .vjs-modal-dialog {
+    display: none !important;
 }
 
-/*
- * With no picture behind it, the progress bar reads as a bar rather than as an
- * overlay, and square ends look like a rendering fault.
- */
-.lmpl-root .lmpl-video-player .vjs-audio-only-mode .vjs-play-progress,
-.lmpl-root .lmpl-video-player .vjs-audio-only-mode .vjs-load-progress {
-    border-radius: 9999px !important;
+/* video.js's own poster — always the transparent one — covers the picture until
+   the first play and starts playback when clicked. Windowed, a click does
+   nothing, so clicks go through it. */
+.lmpl-root.lmpl-windowed-bare .video-js:not(.vjs-fullscreen) .vjs-poster {
+    pointer-events: none;
 }
 
 /* --- Progress, live readout, fullscreen ---------------------------------- */

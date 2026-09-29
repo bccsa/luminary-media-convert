@@ -1,15 +1,15 @@
 <script setup lang="ts">
 /**
- * The legacy player: `player-core` playback inside the Luminary app's Video.js
- * chrome.
+ * The Luminary web player: `player-core` playback inside the Luminary app's
+ * Video.js chrome.
  *
- * Same contract as `player-web`'s `LuminaryPlayer` — same props, same slots,
- * same `defineExpose` surface, plus the legacy-only additions each marked as
- * such — so an app can swap one for the other. What differs is who draws the
- * controls: here video.js owns the whole chrome, in
- * every mode, and this component's CSS repositions its stock components into
- * the Luminary skin. There is no custom fullscreen overlay and no double-tap
- * gesture, because video.js already has both.
+ * video.js owns the chrome and this component's CSS repositions its stock
+ * components into the Luminary skin. By default the controls show in every
+ * mode; a host that drives playback from its own interface asks for a bare
+ * windowed frame (`controls.windowedControls: false`) and gets them only in
+ * fullscreen, where its interface is out of view. The poster — which is also
+ * what an audio-only rendering shows — is drawn here too, inside video.js's
+ * element, so it goes fullscreen with the picture.
  *
  * Two source modes:
  *
@@ -26,7 +26,7 @@
  * position, the metadata point and the end of the source are raised as events
  * instead, and `seek` is exposed to move to a saved one. That surface is the
  * same in both modes, which is what lets a host persist a resume point without
- * caring which engine is behind the picture. Legacy-only.
+ * caring which engine is behind the picture.
  *
  * A YouTube player that cannot load raises the same error panel (and `error`
  * slot) as the pipeline does, as a `network` error: a network blocking YouTube,
@@ -53,6 +53,7 @@ import { TRANSPARENT_POSTER } from '../vjs/poster';
 import { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from '../vjs/keepAlive';
 import { retryYouTubeApi, watchYouTubeApi, whenYouTubeApiSettles } from '../vjs/youtubeApi';
 import { findPreferredTrack } from '../audioTrackLanguage';
+import { imageAttempts, toPlayerImage, type PlayerImageInput } from '../image';
 import { isYouTubeUrl, toVideoJsYouTubeUrl } from '../youtube';
 import { singleFlight } from '../singleFlight';
 import AudioVideoToggle from './AudioVideoToggle.vue';
@@ -79,20 +80,23 @@ interface Props {
      */
     controls?: Partial<PlayerControlsOptions>;
     /**
-     * Artwork drawn *behind* the picture, filling the frame until the first
-     * video frame arrives.
+     * Artwork under the picture — windowed and in fullscreen alike. It covers
+     * the frame until the first video frame arrives, and for as long as the
+     * audio-only rendering plays, under a musical-note glyph that is always
+     * drawn then. With no poster, audio-only is black under the glyph.
      *
-     * Legacy-only, and not part of the `player-web` contract. It is a plain
-     * `<img>` under a transparent player rather than video.js's own poster,
-     * because video.js letterboxes a poster inside the video box while the
-     * Luminary app covers the whole frame with it.
+     * A URL, or a {@link PlayerImage}: a `srcset` the browser picks from by
+     * size (and can satisfy from what it has cached, offline), and a `fallback`
+     * for when the image cannot load. It is this component's own `<img>` rather
+     * than video.js's poster, which takes one URL, knows nothing of `srcset`
+     * and letterboxes where the Luminary app covers the frame.
      */
-    poster?: string;
+    poster?: PlayerImageInput;
     /**
      * Language to select automatically among the stream's audio tracks, as a
      * two- or three-letter code (`en`, `eng`, `en-US` — all normalized).
      *
-     * Legacy-only, and matched leniently on purpose: browsers disagree about
+     * Matched leniently on purpose: browsers disagree about
      * whether a track's language is two-letter, three-letter terminological or
      * three-letter bibliographic. See `audioTrackLanguage.ts`.
      *
@@ -134,8 +138,7 @@ interface Props {
      * YouTube round trip swaps the tech, and the element video.js was mounted
      * on is detached by then. The default implementation ignores it (every
      * video.js API hangs off the player, not the element); it is handed over
-     * only to keep the signature identical to `player-web`'s, so one test
-     * harness drives both.
+     * for a test seam that wants the live element.
      */
     createController?: (video: HTMLVideoElement) => PlayerControllerApi;
 }
@@ -185,6 +188,16 @@ const videoEl = ref<HTMLVideoElement | null>(null);
 const keepAliveEl = ref<HTMLAudioElement | null>(null);
 const player = shallowRef<Player | null>(null);
 const controller = shallowRef<PlayerControllerApi | null>(null);
+
+/**
+ * video.js's own element — what goes fullscreen, and where the artwork is
+ * drawn so that it goes with it. Set once the player exists.
+ */
+const playerEl = shallowRef<HTMLElement | null>(null);
+const isFullscreen = ref(false);
+/** The player's rendered width in CSS px, for the artwork's default `sizes`. */
+const frameWidth = ref(0);
+let frameObserver: ResizeObserver | null = null;
 
 /**
  * True while the current source is a YouTube URL — see the module comment.
@@ -532,12 +545,24 @@ onMounted(() => {
 
     const instance = videojs(element, buildVideoJsOptions(mergedControls.value));
     player.value = instance;
+    const frame = instance.el() as HTMLElement;
+    playerEl.value = frame;
 
     void installMobileUi(instance);
 
-    // Transparent, so the host's poster shows through instead of video.js's
-    // black box. See `vjs/poster.ts`.
+    // Transparent: the artwork is this component's own layer, and video.js's
+    // poster would draw a black box over it. See `vjs/poster.ts`.
     instance.poster(TRANSPARENT_POSTER);
+
+    instance.on('fullscreenchange', onFullscreenChange);
+    // The double-click is this component's in every mode; see onFrameDoubleClick.
+    frame.addEventListener('dblclick', onFrameDoubleClick);
+    if (typeof ResizeObserver !== 'undefined') {
+        frameObserver = new ResizeObserver(([entry]) => {
+            if (entry) frameWidth.value = entry.contentRect.width;
+        });
+        frameObserver.observe(frame);
+    }
 
     removeAutoHide = installAutoHide(instance);
 
@@ -633,6 +658,11 @@ onBeforeUnmount(() => {
     engineAudioTracks?.off('change', onEngineAudioTrackChange);
     engineAudioTracks = null;
 
+    frameObserver?.disconnect();
+    frameObserver = null;
+    playerEl.value?.removeEventListener('dblclick', onFrameDoubleClick);
+    playerEl.value = null;
+
     // Order matters: the adapter detaches its handlers from a live player, and
     // a disposed player throws at the first of them.
     controller.value?.destroy();
@@ -680,9 +710,10 @@ function retry(): void {
 // --- fullscreen -----------------------------------------------------------
 
 /**
- * video.js owns fullscreen here — including the rotation handling from
- * `videojs-mobile-ui` — so these are thin pass-throughs kept for contract
- * parity with `player-web`, where a host places its own fullscreen button.
+ * video.js owns fullscreen — including the rotation handling from
+ * `videojs-mobile-ui` — so these are thin pass-throughs: the way in for a host
+ * with its own fullscreen button, which a bare windowed frame
+ * (`controls.windowedControls: false`) has no other button for.
  */
 async function enterFullscreen(): Promise<void> {
     try {
@@ -694,6 +725,53 @@ async function enterFullscreen(): Promise<void> {
 
 function exitFullscreen(): void {
     void player.value?.exitFullscreen();
+}
+
+/**
+ * A double-click toggles fullscreen anywhere on the frame, in both directions —
+ * the picture, the scrim the controls sit on, and the audio-only artwork.
+ *
+ * Not video.js's own handler, which listens on the tech alone and refuses
+ * anything inside the control bar. In this skin the control bar *is* the frame
+ * (see `styles.css`), so whenever it is up — in fullscreen, that is all the time
+ * the video is paused, and on every double-click, whose first click wakes it —
+ * that rule refused every double-click there was, and fullscreen could not be
+ * left that way. What is refused here is a double-click on an actual control:
+ * a button, a slider, a menu or a dialog, where it is two presses of that
+ * control rather than a gesture on the picture. (The big play button is the one
+ * control video.js does not class `vjs-control`.)
+ */
+function onFrameDoubleClick(event: MouseEvent): void {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('.vjs-control, .vjs-big-play-button, .vjs-menu, .vjs-modal-dialog')) {
+        return;
+    }
+    if (frameIsFullscreen()) exitFullscreen();
+    else void enterFullscreen();
+}
+
+/**
+ * Read off the class the bare-frame CSS keys on, so the script and the styles
+ * cannot disagree. video.js subscribes to `fullscreenchange` before anyone else
+ * does and sets the class there, so by the time a handler of ours runs it is
+ * already current.
+ */
+function frameIsFullscreen(): boolean {
+    return playerEl.value?.classList.contains('vjs-fullscreen') ?? false;
+}
+
+/**
+ * Tracks fullscreen for the artwork's `sizes` — and, on a bare frame, hands the
+ * keyboard back on the way out. A video.js control clicked in fullscreen keeps
+ * focus once it is hidden again, and a focused video.js control swallows every
+ * key but Tab: the host's shortcuts would stay dead until something else took
+ * focus.
+ */
+function onFullscreenChange(): void {
+    isFullscreen.value = frameIsFullscreen();
+    if (isFullscreen.value || mergedControls.value.windowedControls) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && playerEl.value?.contains(active)) active.blur();
 }
 
 // --- media surface --------------------------------------------------------
@@ -766,6 +844,9 @@ function onTimeUpdate(): void {
  */
 const showAudioVideoToggle = computed(() => {
     if (!mergedControls.value.audioVideoToggle) return false;
+    // It sits outside video.js's fullscreen element, so a bare frame — no
+    // controls while windowed — never has a place to show it.
+    if (!mergedControls.value.windowedControls) return false;
     if (isYouTube.value || controller.value === null) return false;
 
     const snapshot = state.value;
@@ -796,12 +877,13 @@ const isAudioOnly = computed(
  * about what is drawn. Without this the engine is still an ordinary video
  * player that happens to have been handed a stream with no video track, so the
  * `<video>` element stays laid out and paints its own surface — a coloured
- * rectangle over the host's artwork, sized to the stream rather than the frame.
+ * rectangle over the artwork, sized to the stream rather than the frame.
  *
- * `audioOnlyMode` is what hides the tech (`vjs-audio-only-mode .vjs-tech` is
- * `display: none` in video.js's own stylesheet) and `audioPosterMode` is what
- * puts the artwork in its place. Both, because either alone leaves half of the
- * swap done.
+ * `audioPosterMode` hides the tech and keeps video.js's poster up — the
+ * transparent one, so what the frame shows is the artwork layer beneath it.
+ * Not `audioOnlyMode` as well: video.js makes the two exclusive (turning poster
+ * mode on turns audio-only mode off), and audio-only mode collapses the player
+ * to the height of a control bar besides.
  *
  * Failures are swallowed: video.js rejects these before the player is ready,
  * and the watcher runs again on the next state change, which is sooner than
@@ -810,17 +892,57 @@ const isAudioOnly = computed(
 watch(isAudioOnly, (audioOnly) => {
     const instance = player.value;
     if (!instance) return;
-    void Promise.resolve(instance.audioOnlyMode(audioOnly)).catch(() => {});
     void Promise.resolve(instance.audioPosterMode(audioOnly)).catch(() => {});
 });
+
+// --- artwork ----------------------------------------------------------------
+
+/** What the artwork layer draws, before the first frame and while audio-only. */
+const artworkImage = computed(() => toPlayerImage(props.poster));
+
+/** The image first, then its fallback; see `imageAttempts`. */
+const artworkAttempts = computed(() => imageAttempts(artworkImage.value));
+const artworkAttemptIndex = ref(0);
+
+/**
+ * A different image starts again from its first attempt. Keyed on content
+ * rather than identity, so a host re-rendering with an equal object literal
+ * does not send an image that already failed round again.
+ */
+watch(
+    () => JSON.stringify(artworkAttempts.value),
+    () => {
+        artworkAttemptIndex.value = 0;
+    },
+);
+
+const artworkAttempt = computed(() => artworkAttempts.value[artworkAttemptIndex.value] ?? null);
+
+/** Onto the fallback, and past it to nothing: a broken-image glyph is worse. */
+function onArtworkError(): void {
+    artworkAttemptIndex.value += 1;
+}
+
+/**
+ * The host's `sizes`, or the frame's own width — and `100vw` in fullscreen, so
+ * the browser can reach for a larger candidate when the frame becomes the
+ * screen.
+ */
+const artworkSizes = computed(() => {
+    const given = artworkImage.value?.sizes;
+    if (given) return given;
+    if (isFullscreen.value || frameWidth.value <= 0) return '100vw';
+    return `${Math.round(frameWidth.value)}px`;
+});
+
+/** Drawn at all: there is artwork, or the audio-only frame needs its black and its glyph. */
+const showArtworkLayer = computed(() => isAudioOnly.value || artworkAttempt.value !== null);
 
 defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, pause });
 </script>
 
 <template>
-    <div class="lmpl-root">
-        <img v-if="poster" class="lmpl-poster" :src="poster" alt="" />
-
+    <div class="lmpl-root" :class="{ 'lmpl-windowed-bare': !mergedControls.windowedControls }">
         <div class="lmpl-video-player">
             <video
                 ref="videoEl"
@@ -831,6 +953,47 @@ defineExpose({ controller, state, enterFullscreen, exitFullscreen, seek, play, p
                 preload="auto"
             ></video>
         </div>
+
+        <!--
+            Inside video.js's element, so the artwork goes fullscreen with the
+            picture; `.lmpl-artwork` is how it stays under everything video.js
+            draws there.
+        -->
+        <Teleport v-if="playerEl" :to="playerEl">
+            <div
+                v-if="showArtworkLayer"
+                class="lmpl-artwork"
+                :class="{ 'lmpl-artwork-audio': isAudioOnly }"
+                aria-hidden="true"
+            >
+                <img
+                    v-if="artworkAttempt"
+                    :key="artworkAttemptIndex"
+                    class="lmpl-artwork-img"
+                    :srcset="artworkAttempt.srcset"
+                    :sizes="artworkAttempt.srcset ? artworkSizes : undefined"
+                    :src="artworkAttempt.src"
+                    alt=""
+                    draggable="false"
+                    @error="onArtworkError"
+                />
+                <!-- heroicons 24/solid "musical-note", as on the audio/video toggle -->
+                <svg
+                    v-if="isAudioOnly"
+                    class="lmpl-audio-glyph"
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    aria-hidden="true"
+                >
+                    <path
+                        fill-rule="evenodd"
+                        d="M19.952 1.651a.75.75 0 0 1 .298.599V16.303a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V6.994l-9 2.572v9.737a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.402-4.909l2.31-.66a1.5 1.5 0 0 0 1.088-1.442V5.25a.75.75 0 0 1 .544-.721l10.5-3a.75.75 0 0 1 .658.122Z"
+                        clip-rule="evenodd"
+                    />
+                </svg>
+            </div>
+        </Teleport>
 
         <!-- Keeps the iOS audio session open across a re-source; see vjs/keepAlive.ts. -->
         <audio
