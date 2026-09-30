@@ -105,7 +105,9 @@ final class EngineRun {
         await expect("playing", within: 10, since: mark)
 
         // Seek, pause, resume snapshot, destroy.
-        call("seek", player.merging(["position": .number(600)]) { $1 })
+        // The middle of the stream, whatever its length.
+        let middle = ((engine?.snapshot().duration ?? 0) ?? 0) / 2
+        call("seek", player.merging(["position": .number(middle.rounded())]) { $1 })
         await expect("seeked", within: 10)
         call("pause", player)
         await expect("pause", within: 5)
