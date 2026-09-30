@@ -44,8 +44,11 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
   scenarios pass on the real `PlayerRegistry` over a `FakeEngine` (`swift test`). It follows
   Android's two structural choices: `Engine.hasVideo`, and `EventSink` owning the emission rules.
   The harness calls `PlayerRegistry.call`, the decode path the plugin will use.
+- **`UriRouter` is the `AVAssetResourceLoaderDelegate`,** answering on its own serial queue.
+  It follows the spike's findings: it reports the content type as a UTI, answers a request that
+  asks for data alone, and honours the requested range. `CoreTests` pins each rule, and loads a
+  real `AVURLAsset` through it on macOS.
 - **Still open in 1a:**
-  - `UriRouter`'s `AVAssetResourceLoaderDelegate`, on its own serial queue;
   - `LuminaryPlayerPlugin` (the Capacitor shim);
   - the podspec.
 

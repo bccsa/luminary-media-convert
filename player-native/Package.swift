@@ -16,6 +16,11 @@ let package = Package(
             path: "ios/Sources/LuminaryPlayerCore"
         ),
         .testTarget(
+            name: "CoreTests",
+            dependencies: ["LuminaryPlayerCore"],
+            path: "ios/Tests/Core"
+        ),
+        .testTarget(
             name: "Conformance",
             dependencies: ["LuminaryPlayerCore"],
             path: "ios/Tests/Conformance"
