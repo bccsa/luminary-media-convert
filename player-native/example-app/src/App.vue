@@ -115,6 +115,8 @@ function onLoadedmetadata(): void {
 }
 
 const polling = setInterval(() => probe.observe(observe()), 100);
+// For a debugger attached over DevTools (a phone's WebView included): what the probe sees, live.
+(window as unknown as { __lab: object }).__lab = { probe, observe, handle };
 onBeforeUnmount(() => clearInterval(polling));
 
 /** Measures the load the lab just started, without waiting on it. */
