@@ -14,6 +14,11 @@ struct SpikeApp: App {
                     if CommandLine.arguments.contains("-autorun") {
                         await model.autorun(secondsPerVisit: 8)
                     }
+                    // `-engine` drives the real plugin core (PlayerRegistry → AVPlayerEngine)
+                    // through the calls JavaScript sends.
+                    if CommandLine.arguments.contains("-engine"), let payload = model.payload {
+                        await EngineRun(payload: payload, view: model.controller, log: model.log).run()
+                    }
                 }
         }
     }

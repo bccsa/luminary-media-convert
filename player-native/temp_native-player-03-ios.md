@@ -54,6 +54,19 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
 
   `LuminaryPlayerCore` imports no Capacitor, UIKit or AVKit, so the scenarios run with
   `swift test` on macOS. These three sit on top of it, in a target of their own.
+- **Phase 1b: `AVPlayerEngine` built, and it plays on the device.** It sits in `LuminaryPlayerCore`
+  and ports `ExoEngine` signal for signal. The one difference is that there is no separate time
+  observer: `EventSink` owns the 4 Hz `timeupdate`, as on Android. Full-screen goes through a
+  `FullscreenPresenter` protocol; the `AVPlayerViewController` implementation comes with the plugin
+  target. The spike's `-engine` mode drove the real `PlayerRegistry` → `AVPlayerEngine` through the
+  bridge's own calls on an iPhone 13 Pro, with the encrypted 2-hour stream:
+  - first `load` to `playing` in 1.3 s; an angle switch in 294 ms;
+  - `timeupdate` at 4 Hz, and `progress` at 1 Hz;
+  - audio switch, seek, pause, `resumed` and `destroy` all behave as the contract says, with no
+    events after `destroy`.
+- **Follow-up: audio options are listed per tier.** AVPlayer lists each language once per audio
+  group (HD and SD), which gives 8 options for 4 languages, the second set suffixed `#n`. Agree
+  with Dirk to list one per language.
 - **Still to agree with Dirk:** packaging (SwiftPM and a podspec from the same sources), and the
   `warmChunks` shape (`ChunkBoundary[][]`, as `bridge.ts` says and both native sides validate).
 

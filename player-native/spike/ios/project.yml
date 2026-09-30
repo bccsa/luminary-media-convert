@@ -10,12 +10,18 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1"
+packages:
+  LuminaryPlayer:
+    path: ../..
 targets:
   Spike:
     type: application
     platform: iOS
     sources:
       - path: Spike
+    dependencies:
+      - package: LuminaryPlayer
+        product: LuminaryPlayerCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.bccsa.luminary.player-spike
