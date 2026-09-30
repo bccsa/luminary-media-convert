@@ -9,20 +9,26 @@
  * arguments are kept, so the spike can replay angle switches with the
  * incremental asset sets the adapter really sends.
  *
- * Usage: node make-payload.mjs <masterUrl> <keyHex> [out.json]
+ * Usage: node make-payload.mjs [--android] <masterUrl> <keyHex> [out.json]
+ * `--android` reports Android's capabilities and writes into the Android spike's
+ * assets instead of the iOS bundle.
  * Build `player-core` and `player-native` first (`npm run build:libs`).
  */
 
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { PlayerController } from '@luminary-media-converter/player-core';
 import { AssetBatch } from '../dist/assetBatch.js';
 import { NativeBridgeAdapter } from '../dist/NativeBridgeAdapter.js';
 import { NativeServeStrategy } from '../dist/NativeServeStrategy.js';
 
-const [masterUrl, keyHex, out = new URL('./ios/Spike/payload.json', import.meta.url).pathname] =
-    process.argv.slice(2);
+const android = process.argv.includes('--android');
+const defaultOut = android ? './android/app/src/main/assets/payload.json' : './ios/Spike/payload.json';
+const [masterUrl, keyHex, out = new URL(defaultOut, import.meta.url).pathname] = process.argv
+    .slice(2)
+    .filter((arg) => arg !== '--android');
 if (!masterUrl) {
-    console.error('Usage: node make-payload.mjs <masterUrl> <keyHex> [out.json]');
+    console.error('Usage: node make-payload.mjs [--android] <masterUrl> <keyHex> [out.json]');
     process.exit(1);
 }
 
@@ -37,10 +43,10 @@ const plugin = new Proxy(
 
 const info = {
     protocolVersion: 1,
-    platform: 'ios',
+    platform: android ? 'android' : 'ios',
     capabilities: {
-        variantSwitching: false,
-        pictureInPicture: true,
+        variantSwitching: android,
+        pictureInPicture: !android,
         renderText: false,
         live: false,
         chunkWarming: false,
@@ -81,6 +87,7 @@ const payload = {
         assets: load.assets,
     })),
 };
+mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, JSON.stringify(payload));
 
 console.log(`munge: ${mungeMs} ms; wrote ${out}`);

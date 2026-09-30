@@ -16,7 +16,8 @@ import androidx.media3.ui.PlayerView
 
 /**
  * A full-window [PlayerView] over the WebView: system bars hidden, orientation following the
- * sensor, the back gesture leaving it. The view only borrows the player; dismissing hands it back.
+ * sensor, and both the back gesture and the view's own full-screen button leaving it. The view only
+ * borrows the player; dismissing hands it back.
  */
 @OptIn(UnstableApi::class)
 class FullscreenPresenter(private val activity: () -> Activity?) {
@@ -27,14 +28,19 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
 
     val isPresented: Boolean get() = view != null
 
-    /** False when already presented, or there is no activity to present in. */
-    fun present(player: Player, onBack: () -> Unit): Boolean {
+    /**
+     * False when already presented, or there is no activity to present in. [onLeave] is the
+     * viewer asking to leave; the caller decides what that means and dismisses.
+     */
+    fun present(player: Player, onLeave: () -> Unit): Boolean {
         if (view != null) return false
         val activity = activity() ?: return false
         val view = PlayerView(activity).apply {
             setBackgroundColor(Color.BLACK)
             keepScreenOn = true
             this.player = player
+            setFullscreenButtonState(true)
+            setFullscreenButtonClickListener { onLeave() }
         }
         (activity.window.decorView as ViewGroup).addView(
             view,
@@ -48,7 +54,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         }
         if (activity is ComponentActivity) {
             backCallback = object : OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() = onBack()
+                override fun handleOnBackPressed() = onLeave()
             }.also { activity.onBackPressedDispatcher.addCallback(it) }
         }
         this.view = view

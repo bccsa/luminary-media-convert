@@ -182,15 +182,15 @@ class ExoEngine(
     }
 
     override fun enterFullscreen() {
-        if (presenter.present(player, onBack = ::leaveFullscreenByGesture)) events.presentationChanged("fullscreen")
+        if (presenter.present(player, onLeave = ::leaveFullscreenByViewer)) events.presentationChanged("fullscreen")
     }
 
     override fun exitFullscreen() {
         if (presenter.dismiss()) events.presentationChanged("inline")
     }
 
-    /** The back gesture leaves full-screen the way `exitFullscreen` does, pause included. */
-    private fun leaveFullscreenByGesture() {
+    /** The back gesture or the exit button leaves full-screen the way `exitFullscreen` does, pause included. */
+    private fun leaveFullscreenByViewer() {
         exitFullscreen()
         if (hasVideo) player.pause()
     }
