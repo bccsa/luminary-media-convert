@@ -42,8 +42,12 @@ export const PROTOCOL_VERSION = 1;
  * `load` or `putAssets`, answered from memory with its `contentType`.
  *
  * - A missing asset fails as not-found and is never retried.
+ * - A request may ask for data alone, without asking for the content type —
+ *   AVFoundation asks for an audio playlist again that way — and is answered
+ *   the same.
  * - A generation is never evicted while in use. Within one generation the
- *   munge reuses media-playlist URLs, so an angle switch sends only a new
+ *   munge reuses media-playlist URLs: a switch sends a new master plus the
+ *   playlists of an angle not shown before, and a return to one only the
  *   master. After `releaseAssets`, a generation is purged once a load of a
  *   newer one has taken over.
  * - In-memory answers must not count toward the engine's bandwidth estimate.
@@ -120,7 +124,10 @@ export interface BridgeInfo {
 export interface BridgeAsset {
     /** `luminary://asset/<generation>/<n>.<ext>` */
     uri: string;
-    /** `application/vnd.apple.mpegurl` or `text/vtt`. */
+    /**
+     * `application/vnd.apple.mpegurl` or `text/vtt`. A MIME type, which native
+     * maps to whatever its loader reports: a UTI on iOS (`UTType(mimeType:)`).
+     */
     contentType: string;
     text: string;
 }
