@@ -9,9 +9,6 @@ import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
-import okhttp3.OkHttpClient
-import org.bccsa.luminary.player.engine.ExoEngine
-import org.bccsa.luminary.player.engine.FullscreenPresenter
 
 /**
  * The bridge's native end: decode and validate, then the main thread, then [PlayerRegistry].
@@ -23,10 +20,7 @@ class LuminaryPlayerPlugin : Plugin() {
     private lateinit var registry: PlayerRegistry
 
     override fun load() {
-        val engines = EngineFactory { router, clock, options ->
-            ExoEngine(context, router, clock, options, FullscreenPresenter { activity })
-        }
-        registry = PlayerRegistry(CAPABILITIES, MainLooperClock(), HttpUpstream(sharedHttpClient), engines) { name, payload ->
+        registry = exoPlayerRegistry(context, { activity }) { name, payload ->
             notifyListeners(name, JSObject(payload.toString()))
         }
     }
@@ -69,12 +63,5 @@ class LuminaryPlayerPlugin : Plugin() {
                 call.reject(error.message ?: error.javaClass.simpleName, BridgeErrorCode.ENGINE.wire)
             }
         }
-    }
-
-    private companion object {
-        val CAPABILITIES = BridgeCapabilities(variantSwitching = true)
-
-        /** One per app, shared by every player's `UriRouter`. */
-        val sharedHttpClient: OkHttpClient by lazy { OkHttpClient() }
     }
 }

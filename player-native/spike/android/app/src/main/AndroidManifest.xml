@@ -5,6 +5,7 @@
 
     <!-- Debug-only spike: the segments come from a MinIO on the LAN over http. -->
     <application
+        android:name=".SpikeApp"
         android:label="LMC Spike"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="true">
@@ -18,5 +19,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".BridgeActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:exported="false"
+            android:screenOrientation="portrait" />
     </application>
 </manifest>
