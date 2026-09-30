@@ -349,9 +349,15 @@ export interface AdapterCapabilities {
      * 'url': the wrapper falls back to rewriting key URIs to a blob URL.
      */
     keyDelivery: 'memory' | 'url';
-    /** Supports pinning a specific variant via setVariant(). */
+    /**
+     * Supports pinning a specific variant via setVariant(). Without it the
+     * wrapper turns a quality choice into a reload with a height cap.
+     */
     variantSwitching: boolean;
-    /** Can render WebVTT text tracks handed over via setTextTracks(). */
+    /**
+     * Can render WebVTT text tracks handed over via setTextTracks(). Without it
+     * the wrapper neither fetches side-loaded subtitles nor offers them.
+     */
     renderText: boolean;
 }
 
@@ -711,7 +717,15 @@ export interface PlayerControllerApi {
 
     /** Re-munges and reloads, preserving position and play state. */
     setAngle(id: string): Promise<void>;
-    /** Pins a rendition within the capped set; `'auto'` re-enables ABR. No reload. */
+    /**
+     * Chooses a rendition within the capped set; `'auto'` re-enables ABR.
+     *
+     * An engine that can pin a variant is asked to, with no reload. One that
+     * cannot (`variantSwitching: false`, AVPlayer) is reloaded with the chosen
+     * height as a cap, keeping position and play state, and its ABR stays at
+     * or below it; the choice holds across angle switches until `'auto'` or
+     * the next `load()`.
+     */
     setQuality(id: string | 'auto'): void;
     /**
      * Selects an audio track and keeps it selected until the next `load()`.
