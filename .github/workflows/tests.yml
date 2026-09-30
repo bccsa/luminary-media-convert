@@ -112,8 +112,8 @@ jobs:
     # The native halves of the bridge conformance scenarios (player-native/conformance).
     # The runner steps prove each runner reads the shared files and drives a harness
     # exactly as the TypeScript runner does. The scenario step is the platform's own
-    # verdict, and stays red until its PlayerRegistry runs on a FakeEngine (phase 1a):
-    # a platform does not conform until it runs them, so they fail rather than skip.
+    # verdict against its PlayerRegistry on a FakeEngine (phase 1a); a platform without
+    # one fails every scenario rather than skipping it.
     conformance-android:
         name: Conformance (Android)
         runs-on: ubuntu-latest
@@ -147,6 +147,12 @@ jobs:
               run: >-
                   ./gradlew testDebugUnitTest --console=plain
                   --tests 'org.bccsa.luminary.player.conformance.ConformanceTest'
+
+            - name: Engine and routing (ExoPlayer over the encrypted byte-range fixture)
+              run: >-
+                  ./gradlew testDebugUnitTest --console=plain
+                  --tests 'org.bccsa.luminary.player.UriRouterTest'
+                  --tests 'org.bccsa.luminary.player.engine.*'
 
     conformance-ios:
         name: Conformance (iOS)

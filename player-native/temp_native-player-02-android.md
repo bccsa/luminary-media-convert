@@ -13,6 +13,31 @@
 ships on both platforms together; see the parity rules in
 [the overview](temp_native-player-00-overview.md).
 
+## Status (2026-09-29)
+
+- **Phase 1a: done.** The overview's native structure is in
+  `android/src/main/java/org/bccsa/luminary/player/`. `makeConformanceHarness()`
+  runs the real `PlayerRegistry` on a `FakeEngine`, and all 16 v1 scenarios pass.
+  The plugin and the harness share one decode path: the plugin only stringifies
+  `call.data` and hands it to `PlayerRegistry.call`.
+- **Phase 1b: built, and not yet tried on a device.** `engine/ExoEngine.kt`,
+  `engine/FullscreenPresenter.kt` and `engine/ErrorMapping.kt` are in place.
+  `ExoEngineTest` plays an encrypted, byte-range fMP4 fixture to the end through
+  `UriRouter` on a real ExoPlayer (Media3's test renderers). The fixture comes
+  from `src/test/make-encrypted-fixture.py`.
+- **Step 0 (the device spike) is still open.** It still has to measure load to
+  first frame on a 2-hour, wide-ladder source, and check real decoders.
+- **To agree with Johan:**
+  - `Engine` gained `val hasVideo`. `PlayerHost` needs it for the
+    `exitFullscreen` rule, and scenario 14 pins that rule.
+  - `EventSink` carries the engine-facing signals (`readyToPlay`, `playing`,
+    `paused`, `seeked`, `bufferedTo`, …). It owns the rules the reference keeps
+    in `PlayerHost`: `durationchange` only on a change, and `variants-updated`
+    only with `variantSwitching`.
+  - The reference's `warmChunks` shape says `schedules` is an array of objects.
+    `bridge.ts` says `ChunkBoundary[][]`, and Kotlin validates that. No scenario
+    reaches this yet.
+
 Everything here lives in `player-native/android/`. It builds the native structure
 from [the overview](temp_native-player-00-overview.md#native-structure-both-platforms-the-same-names-file-for-file)
 in Kotlin, then the real `Engine` behind it. It never changes `bridge.ts` or the

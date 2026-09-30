@@ -1,6 +1,9 @@
 ext {
     junitVersion = project.hasProperty('junitVersion') ? rootProject.ext.junitVersion : '4.13.2'
     kotlinxSerializationVersion = '1.8.1'
+    media3Version = '1.11.1'
+    androidxAppCompatVersion = project.hasProperty('androidxAppCompatVersion') ? rootProject.ext.androidxAppCompatVersion : '1.7.1'
+    robolectricVersion = '4.17'
 }
 
 buildscript {
@@ -36,7 +39,10 @@ android {
         targetCompatibility JavaVersion.VERSION_21
     }
     testOptions {
+        unitTests.includeAndroidResources = true
         unitTests.all {
+            // Robolectric reaches into FileDescriptor internals, which newer JDKs close by default.
+            jvmArgs '--add-opens=java.base/jdk.internal.access=ALL-UNNAMED', '--add-opens=java.base/java.io=ALL-UNNAMED'
             // The conformance runner reads ../conformance from here; show every scenario's verdict.
             testLogging {
                 events 'passed', 'skipped', 'failed'
@@ -60,6 +66,17 @@ repositories {
 dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
     implementation project(':capacitor-android')
+    // The plugin and the conformance harness decode calls through the same JsonElement path.
+    implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:$kotlinxSerializationVersion"
+    implementation "androidx.media3:media3-exoplayer:$media3Version"
+    implementation "androidx.media3:media3-exoplayer-hls:$media3Version"
+    implementation "androidx.media3:media3-datasource-okhttp:$media3Version"
+    implementation "androidx.media3:media3-ui:$media3Version"
+    // Capacitor declares it as implementation, so it is not on this module's classpath.
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     testImplementation "junit:junit:$junitVersion"
-    testImplementation "org.jetbrains.kotlinx:kotlinx-serialization-json:$kotlinxSerializationVersion"
+    testImplementation "org.robolectric:robolectric:$robolectricVersion"
+    testImplementation "androidx.media3:media3-test-utils:$media3Version"
+    testImplementation "androidx.media3:media3-test-utils-robolectric:$media3Version"
+    testImplementation "com.squareup.okhttp3:mockwebserver:4.12.0"
 }
