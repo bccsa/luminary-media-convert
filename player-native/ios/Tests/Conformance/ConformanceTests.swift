@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import LuminaryPlayerCore
 
 private let scenarioFiles = (try? ScenarioRunner.loadScenarios()) ?? []
 

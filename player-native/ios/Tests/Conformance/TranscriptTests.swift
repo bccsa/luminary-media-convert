@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import LuminaryPlayerCore
 
 /// Answers from the reference native side's recorded conversation
 /// (`conformance/selftest/transcripts/`), and records a mismatch the moment this runner

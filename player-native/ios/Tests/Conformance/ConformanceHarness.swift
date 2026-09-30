@@ -1,3 +1,5 @@
+import LuminaryPlayerCore
+
 /// The test seam plan 03 builds for the conformance runner: a `PlayerRegistry` wired to a
 /// `FakeEngine` and a virtual clock. The Kotlin interface has the same members;
 /// `conformance/README.md` describes each one.

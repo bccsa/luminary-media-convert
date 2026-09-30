@@ -1,3 +1,5 @@
+import LuminaryPlayerCore
+
 /// Refs and matchers for conformance scenarios: a port of
 /// `src/test-support/conformance/match.ts`, held to `conformance/selftest/match-cases.json`.
 /// The rules are in `conformance/README.md`.

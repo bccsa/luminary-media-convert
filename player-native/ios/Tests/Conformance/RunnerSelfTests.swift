@@ -1,4 +1,5 @@
 import Testing
+import LuminaryPlayerCore
 
 /// A harness that answers from a script, for pinning the runner itself: a runner that
 /// passes everything proves nothing.

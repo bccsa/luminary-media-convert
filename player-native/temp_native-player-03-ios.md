@@ -34,6 +34,22 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
 | `live` | `false` until phase 4 |
 | `chunkWarming` | `false` until phase 5 |
 
+## Status (2026-09-30)
+
+- **Step 0: done.** On an iPhone 13 Pro, AVPlayer played this encoder's encrypted, two-angle,
+  byte-range fMP4 output with every playlist and the key answered from memory. Results are in
+  `spike/FINDINGS.md`.
+- **Phase 1a: done.** The native structure is in `ios/Sources/LuminaryPlayerCore/`, ported file
+  for file from the Kotlin tree, and all 16 v1 scenarios pass on the real `PlayerRegistry` over a
+  `FakeEngine` (`swift test`). It follows Android's two structural choices: `Engine.hasVideo`,
+  and `EventSink` owning the emission rules. It also has one shared decode path: the harness calls
+  `PlayerRegistry.call`, as the plugin will.
+- **`LuminaryPlayerCore` imports no Capacitor, UIKit or AVKit,** so the scenarios run with
+  `swift test` on macOS. The Capacitor plugin target, the podspec and `AVPlayerEngine` sit on top
+  of it, in phase 1b.
+- **Still to agree with Dirk:** packaging (SwiftPM and a podspec from the same sources), and the
+  `warmChunks` shape (`ChunkBoundary[][]`, as `bridge.ts` says and both native sides validate).
+
 ## What carries over from the original "AVPlayer plugin design"
 
 - **`PlayerSession`**: one `AVPlayer`, reused through `replaceCurrentItem`. It is

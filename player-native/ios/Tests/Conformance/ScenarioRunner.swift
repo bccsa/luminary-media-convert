@@ -1,4 +1,5 @@
 import Foundation
+import LuminaryPlayerCore
 
 /// The native side of a conformance scenario, replayed against a ``ConformanceHarness``.
 /// Mirrors `src/test-support/conformance/{load,tsRunner}.ts`; `conformance/README.md` is normative.
