@@ -46,6 +46,8 @@ export interface NativePlayerOptions {
 export interface NativePlayer {
     controller: PlayerController;
     adapter: NativeBridgeAdapter;
+    /** For the host component's own calls (`enterFullscreen`) and events (`presentationchange`). */
+    playerId: string;
 }
 
 /** A bridge failure JavaScript raises itself, with the same codes native uses. */
@@ -86,7 +88,7 @@ export async function createNativePlayer(
     });
 
     watchForeground(adapter, options.onAppResume);
-    return { controller, adapter };
+    return { controller, adapter, playerId };
 }
 
 function handshake(plugin: LuminaryPlayerPlugin): Promise<BridgeInfo> {

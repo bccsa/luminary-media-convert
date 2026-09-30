@@ -11,6 +11,7 @@
         "player-web",
         "player-web-old",
         "player-native",
+        "player-native/example-app",
         "cms-mock",
         "app-electron"
     ],
