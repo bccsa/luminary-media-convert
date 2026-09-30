@@ -38,6 +38,26 @@ ships on both platforms together; see the parity rules in
     `bridge.ts` says `ChunkBoundary[][]`, and Kotlin validates that. No scenario
     reaches this yet.
 
+- **Phase 2: built on Android, not yet seen on a device.** All of it is in the plugin, so the
+  Player Lab and the spike get it too.
+  - **Full-screen controls follow `player-web`'s skin** (`engine/SkinControls.kt`): a 30% scrim,
+    a 96 dp play / pause with the skip circles at ±100 dp, a slim progress bar that leaves the
+    corner to the exit button, the audio and rate menus top left, and no spinner. They fade after
+    3 s of playing, a tap shows or hides them, and a double tap or the back gesture leaves.
+  - **Skips are 5, 10 or 30 s,** snapped from `skipBackSeconds` / `skipForwardSeconds` exactly as
+    `snapSkipSeconds` does in `player-web`, so a label and its jump agree. `0` means no button.
+  - **The notification and lock screen get skip buttons** through an in-process `MediaSession`
+    (`media3-session`), with the same seconds. It has no title or artwork yet: `nowPlaying` reaches
+    `PlayerHost`, but `Engine.load` does not carry it. Keeping the session alive with the screen
+    locked is the background service, phase 3b.
+  - **Audio-only has no view.** `enterFullscreen` does nothing for an item with no video track,
+    and a view raised before the tracks were known comes down when they show none.
+  - **Play at the end restarts from 0** and emits `seeked`, as iOS does.
+  - **To agree with Johan.** A rate or language chosen in native full-screen is not heard by
+    JavaScript: the bridge has no `ratechange` event, and `NativeBridgeAdapter` drops `activeId`
+    from `audiotracks-updated`. Both need a protocol addition with a plan 04 scenario. Until then
+    the controller's state can disagree with what the viewer chose.
+
 Everything here lives in `player-native/android/`. It builds the native structure
 from [the overview](temp_native-player-00-overview.md#native-structure-both-platforms-the-same-names-file-for-file)
 in Kotlin, then the real `Engine` behind it. It never changes `bridge.ts` or the

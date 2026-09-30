@@ -1,5 +1,6 @@
 package org.bccsa.luminary.player.engine
 
+import android.app.PendingIntent
 import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -13,9 +14,13 @@ import androidx.media3.common.Timeline
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.common.util.Util
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.session.CommandButton
+import androidx.media3.session.MediaSession
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToLong
 import org.bccsa.luminary.player.AudioTrack
 import org.bccsa.luminary.player.Cancellable
@@ -40,15 +45,32 @@ class ExoEngine(
 ) : Engine, Player.Listener {
     override lateinit var events: EventSink
 
+    /** What the full-screen controls and the notification skip by; snapped onto what the skin can draw. */
+    private val skin = SkinOptions(options.skipBackSeconds, options.skipForwardSeconds)
+
     private val player: ExoPlayer = player ?: ExoPlayer.Builder(context.applicationContext)
         .setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
             /* handleAudioFocus= */ true,
         )
         .setHandleAudioBecomingNoisy(true)
-        .setSeekBackIncrementMs((options.skipBackSeconds * 1000).roundToLong().coerceAtLeast(1))
-        .setSeekForwardIncrementMs((options.skipForwardSeconds * 1000).roundToLong().coerceAtLeast(1))
+        .setSeekBackIncrementMs((skin.back ?: DEFAULT_SKIP_SECONDS) * 1000L)
+        .setSeekForwardIncrementMs((skin.forward ?: DEFAULT_SKIP_SECONDS) * 1000L)
         .build()
+
+    /**
+     * The system's view of this player: the lock screen and the media notification, with skip
+     * buttons that jump by the same seconds the full-screen controls do. It lives in this process
+     * for now; keeping it alive with the screen locked is the background service's job.
+     */
+    private val session: MediaSession = MediaSession.Builder(context.applicationContext, this.player)
+        .setId("luminary-player-${SESSIONS.incrementAndGet()}")
+        .setMediaButtonPreferences(skipButtons(skin))
+        .apply { openAppIntent(context.applicationContext)?.let(::setSessionActivity) }
+        .build()
+
+    /** The system-facing session, for tests to read what the lock screen would be offered. */
+    internal val mediaSession: MediaSession get() = session
 
     private val mediaSources = HlsMediaSource.Factory(router)
     private var mediaItem: MediaItem? = null
@@ -106,7 +128,10 @@ class ExoEngine(
         reportedBufferedEnd = -1.0
     }
 
-    override fun play() = player.play()
+    /** As a video element does: playing at the end starts again from the beginning. */
+    override fun play() {
+        Util.handlePlayButtonAction(player)
+    }
 
     override fun pause() = player.pause()
 
@@ -182,8 +207,13 @@ class ExoEngine(
     }
 
     override fun enterFullscreen() {
-        if (presenter.present(player, onLeave = ::leaveFullscreenByViewer)) events.presentationChanged("fullscreen")
+        // Audio-only has no view. Until the tracks are known the item is presumed to have one, and
+        // the view is taken down again if it turns out not to (see `onTracksChanged`).
+        if (knownAudioOnly(player.currentTracks)) return
+        if (presenter.present(player, ::leaveFullscreenByViewer, skin)) events.presentationChanged("fullscreen")
     }
+
+    private fun knownAudioOnly(tracks: Tracks) = !tracks.isEmpty && !tracks.containsType(C.TRACK_TYPE_VIDEO)
 
     override fun exitFullscreen() {
         if (presenter.dismiss()) events.presentationChanged("inline")
@@ -200,6 +230,7 @@ class ExoEngine(
         poll = null
         presenter.dismiss()
         player.removeListener(this)
+        session.release()
         player.release()
     }
 
@@ -266,6 +297,10 @@ class ExoEngine(
     }
 
     override fun onTracksChanged(tracks: Tracks) {
+        if (presenter.isPresented && knownAudioOnly(tracks)) {
+            presenter.dismiss()
+            events.presentationChanged("inline")
+        }
         val audio = mutableListOf<AudioTrack>()
         var activeAudio: String? = null
         val variants = mutableListOf<Variant>()
@@ -303,6 +338,38 @@ class ExoEngine(
 
     private companion object {
         const val POLL_PERIOD = 0.25
+        const val DEFAULT_SKIP_SECONDS = 10
+
+        /** A media session's id must be unique in the process, and a player may be created again. */
+        val SESSIONS = AtomicInteger()
+
+        /** Seek back / forward on the notification and lock screen, labelled with the skin's seconds. */
+        fun skipButtons(skin: SkinOptions): List<CommandButton> = listOfNotNull(
+            skin.back?.let { seconds ->
+                CommandButton.Builder(
+                    when (seconds) {
+                        5 -> CommandButton.ICON_SKIP_BACK_5
+                        10 -> CommandButton.ICON_SKIP_BACK_10
+                        else -> CommandButton.ICON_SKIP_BACK_30
+                    },
+                ).setPlayerCommand(Player.COMMAND_SEEK_BACK).setDisplayName("Back $seconds seconds").build()
+            },
+            skin.forward?.let { seconds ->
+                CommandButton.Builder(
+                    when (seconds) {
+                        5 -> CommandButton.ICON_SKIP_FORWARD_5
+                        10 -> CommandButton.ICON_SKIP_FORWARD_10
+                        else -> CommandButton.ICON_SKIP_FORWARD_30
+                    },
+                ).setPlayerCommand(Player.COMMAND_SEEK_FORWARD).setDisplayName("Forward $seconds seconds").build()
+            },
+        )
+
+        /** Tapping the notification brings the app back. */
+        fun openAppIntent(context: Context): PendingIntent? {
+            val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return null
+            return PendingIntent.getActivity(context, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        }
 
         fun variantOf(format: Format): Variant {
             val height = format.height.takeIf { it != Format.NO_VALUE }

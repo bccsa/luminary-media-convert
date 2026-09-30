@@ -41,11 +41,13 @@ class ExoEngineTest {
     private val upstream = FixtureUpstream("encrypted-byterange")
     private val player: ExoPlayer = TestExoPlayerBuilder(context).build()
     private val events = mutableListOf<Pair<String, JsonObject>>()
+    private var lastRouter: UriRouter? = null
     private val registry = PlayerRegistry(
         BridgeCapabilities(variantSwitching = true),
         VirtualClock(),
         HttpUpstream(OkHttpClient()),
         EngineFactory { router, clock, options ->
+            lastRouter = router
             ExoEngine(context, router, clock, options, FullscreenPresenter { null }, player)
         },
     ) { name, payload -> events += name to payload }
@@ -56,7 +58,7 @@ class ExoEngineTest {
         put("skipForwardSeconds", 10)
     }).jsonObject.getValue("playerId").jsonPrimitive.content
 
-    private val router: UriRouter get() = registry.current!!.router
+    private val router: UriRouter get() = lastRouter!!
 
     @After
     fun tearDown() {

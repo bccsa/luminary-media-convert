@@ -23,10 +23,6 @@ class PlayerRegistry(
     private val destroyed = HashSet<String>()
     private var created = 0
 
-    /** The most recently created player, which the conformance harness drives and routes through. */
-    var current: PlayerHost? = null
-        private set
-
     /** Resolves with the call's JSON answer, or throws [BridgeRejection]. */
     fun call(method: String, args: JsonObject): JsonElement {
         val needs = BridgeCall.capabilityOf(method)
@@ -106,7 +102,6 @@ class PlayerRegistry(
             playerId, clock, capabilities.variantSwitching, upstream, options, engineFactory, emit,
         )
         players[playerId] = host
-        current = host
         return buildJsonObject { put("playerId", playerId) }
     }
 

@@ -20,8 +20,11 @@ private class RegistryHarness : ConformanceHarness {
     private val engines = mutableMapOf<UriRouter, FakeEngine>()
     private var registry: PlayerRegistry? = null
 
+    /** The most recently created player's router, kept here so the registry need not remember destroyed players. */
+    private var lastRouter: UriRouter? = null
+
     override fun start(capabilities: JsonObject) {
-        val factory = EngineFactory { router, clock, _ -> FakeEngine(clock, engineCalls).also { engines[router] = it } }
+        val factory = EngineFactory { router, clock, _ -> FakeEngine(clock, engineCalls).also { engines[router] = it; lastRouter = router } }
         registry = PlayerRegistry(BridgeCapabilities.fromJson(capabilities), clock, upstream = null, factory) { name, payload ->
             events += buildJsonObject {
                 put("name", name)
@@ -37,8 +40,8 @@ private class RegistryHarness : ConformanceHarness {
     }
 
     override fun engine(signal: String, args: JsonObject) {
-        val player = started().current ?: throw IllegalStateException("No engine: create a player first")
-        engines.getValue(player.router).signal(signal, args)
+        val router = lastRouter ?: throw IllegalStateException("No engine: create a player first")
+        engines.getValue(router).signal(signal, args)
     }
 
     override fun advanceClock(seconds: Double) = clock.advance(seconds)
@@ -48,8 +51,8 @@ private class RegistryHarness : ConformanceHarness {
     override fun drainEngineCalls(): List<JsonObject> = engineCalls.toList().also { engineCalls.clear() }
 
     override fun route(uri: String): RouteResult {
-        val player = started().current ?: return RouteResult.Failed("not-found")
-        return when (val route = player.router.route(uri)) {
+        val router = lastRouter ?: return RouteResult.Failed("not-found")
+        return when (val route = router.route(uri)) {
             is UriRouter.Route.Served -> RouteResult.Served(route.bytes, route.contentType)
             is UriRouter.Route.Failed -> RouteResult.Failed(route.code)
         }
