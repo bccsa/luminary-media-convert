@@ -126,6 +126,8 @@ export class VideoJsAdapter implements PlayerAdapter {
     private prefetcher: ChunkPrefetcher | null = null;
     private keyBytes: Uint8Array | null = null;
     private sourceHookHandlers: [string, () => void][] = [];
+    /** Every VHS handler already wrapped: an announcement may repeat, a wrap must not. */
+    private readonly wrappedHandlers = new WeakSet<object>();
     private readonly stallSignals: VhsStallSignals;
     private readonly ladder: RecoveryLadder;
     /** The source currently attached — what {@link reattach} re-prepares against. */
@@ -296,11 +298,20 @@ export class VideoJsAdapter implements PlayerAdapter {
      * that source went to the network: a live source's playlists, an encrypted
      * one's key. The handler is reachable a microtask later, and the one request
      * out by then is the master's, which no wrapper answers.
+     *
+     * The listeners stay until the next source arms its own, and each handler is
+     * wrapped once. `src()` builds its handler later, so when loads outrun it the
+     * previous source's announcement can arrive after this one armed: a one-shot
+     * arming spent itself on that, and this source's handler went unwrapped, its key
+     * request reached the network, and VHS excluded every rendition.
      */
     private armSourceHooks(): void {
         this.disarmSourceHooks();
         const keyBytes = this.keyBytes;
         const wrap = (): void => {
+            const handler = vhsHandler(this.player);
+            if (!handler || this.wrappedHandlers.has(handler)) return;
+            this.wrappedHandlers.add(handler);
             installByteRangeTimeout(this.player);
             if (this.capabilities.keyDelivery === 'memory') {
                 installMemoryKeyXhr(this.player, () => keyBytes);
@@ -310,7 +321,6 @@ export class VideoJsAdapter implements PlayerAdapter {
             }
         };
         const install = (): void => {
-            this.disarmSourceHooks();
             if (vhsHandler(this.player)) wrap();
             else queueMicrotask(wrap);
         };
@@ -323,7 +333,7 @@ export class VideoJsAdapter implements PlayerAdapter {
             ['loadstart', install],
         ];
         for (const [event, handler] of this.sourceHookHandlers) {
-            this.player.one(event, handler);
+            this.player.on(event, handler);
         }
     }
 

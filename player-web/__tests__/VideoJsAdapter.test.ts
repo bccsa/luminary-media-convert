@@ -379,6 +379,38 @@ describe('VideoJsAdapter — live playlists', () => {
         expect(network).not.toHaveBeenCalled();
     });
 
+    it("wraps the last source's handler though an earlier source's announcement arrives in between", async () => {
+        // player.src() builds its handler later. When loads outrun it, the superseded source's
+        // announcement spent the one-shot arming meant for the next, whose handler then went
+        // unwrapped: its key request reached the network, and VHS excluded every rendition.
+        const { p, a, tech } = setup();
+        await a.loadSource(source);
+        await a.loadSource({ ...source, url: 'blob:next' });
+        p.fire('xhr-hooks-ready');
+        p.fire('loadstart');
+
+        const next = vi.fn(() => 'network');
+        tech.vhs = { xhr: next };
+        p.fire('xhr-hooks-ready');
+        const callback = vi.fn();
+        tech.vhs.xhr({ uri: LUMINARY_KEY_PLACEHOLDER_URI }, callback);
+        await settle();
+
+        expect(next).not.toHaveBeenCalled();
+        expect(new Uint8Array(callback.mock.calls[0]![1].response)).toHaveLength(16);
+    });
+
+    it('wraps each handler once, however often it is announced', async () => {
+        const { p, a, tech } = setup();
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+        const wrapped = tech.vhs.xhr;
+        p.fire('loadstart');
+        p.fire('xhr-hooks-ready');
+
+        expect(tech.vhs.xhr).toBe(wrapped);
+    });
+
     it("answers a handler's key requests with its own source's key, whatever came next", async () => {
         const { p, a, tech } = setup();
         await a.loadSource(source);
