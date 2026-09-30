@@ -13,7 +13,12 @@ let package = Package(
     targets: [
         .target(
             name: "LuminaryPlayerCore",
-            path: "ios/Sources/LuminaryPlayerCore"
+            path: "ios/Sources/LuminaryPlayerCore",
+            // AVFoundation's actor annotations differ between SDKs (Xcode 16 marks
+            // AVPlayerItem.currentMediaSelection main-actor, later SDKs do not), and Swift 6
+            // mode turns each difference into an error. The engine is main-thread only by
+            // contract, so Swift 5 mode keeps those differences as warnings.
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
             name: "CoreTests",
