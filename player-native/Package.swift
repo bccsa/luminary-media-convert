@@ -9,6 +9,7 @@ let package = Package(
     platforms: [.iOS(.v15), .macOS(.v14)],
     products: [
         .library(name: "LuminaryPlayerCore", targets: ["LuminaryPlayerCore"]),
+        .library(name: "LuminaryPlayerUI", targets: ["LuminaryPlayerUI"]),
     ],
     targets: [
         .target(
@@ -18,6 +19,14 @@ let package = Package(
             // AVPlayerItem.currentMediaSelection main-actor, later SDKs do not), and Swift 6
             // mode turns each difference into an error. The engine is main-thread only by
             // contract, so Swift 5 mode keeps those differences as warnings.
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // The iOS views over the core: UIKit and AVKit, so its sources compile to nothing on
+        // macOS and `swift test` is unaffected.
+        .target(
+            name: "LuminaryPlayerUI",
+            dependencies: ["LuminaryPlayerCore"],
+            path: "ios/Sources/LuminaryPlayerUI",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(

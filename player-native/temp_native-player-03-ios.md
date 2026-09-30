@@ -39,7 +39,7 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
 - **Step 0: done.** On an iPhone 13 Pro, AVPlayer played this encoder's encrypted, two-angle,
   byte-range fMP4 output with every playlist and the key answered from memory. Results are in
   `spike/FINDINGS.md`.
-- **Phase 1a: the core is done; three items remain.** The native structure is in
+- **Phase 1a: the core is done; two items remain.** The native structure is in
   `ios/Sources/LuminaryPlayerCore/`, ported file for file from the Kotlin tree, and all 16 v1
   scenarios pass on the real `PlayerRegistry` over a `FakeEngine` (`swift test`). It follows
   Android's two structural choices: `Engine.hasVideo`, and `EventSink` owning the emission rules.
@@ -53,17 +53,35 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
   - the podspec.
 
   `LuminaryPlayerCore` imports no Capacitor, UIKit or AVKit, so the scenarios run with
-  `swift test` on macOS. These three sit on top of it, in a target of their own.
+  `swift test` on macOS. The plugin sits on top of it, in a target of its own. The core builds in
+  Swift 5 language mode, because AVFoundation's actor annotations differ between SDKs (Xcode 16
+  marks `AVPlayerItem.currentMediaSelection` main-actor, later SDKs do not). In Swift 6 mode each
+  difference is an error, and one failed CI. The tests stay in Swift 6 mode.
 - **Phase 1b: `AVPlayerEngine` built, and it plays on the device.** It sits in `LuminaryPlayerCore`
   and ports `ExoEngine` signal for signal. The one difference is that there is no separate time
-  observer: `EventSink` owns the 4 Hz `timeupdate`, as on Android. Full-screen goes through a
-  `FullscreenPresenter` protocol; the `AVPlayerViewController` implementation comes with the plugin
-  target. The spike's `-engine` mode drove the real `PlayerRegistry` → `AVPlayerEngine` through the
+  observer: `EventSink` owns the 4 Hz `timeupdate`, as on Android. The spike's `-engine` mode drove the real `PlayerRegistry` → `AVPlayerEngine` through the
   bridge's own calls on an iPhone 13 Pro, with the encrypted 2-hour stream:
   - first `load` to `playing` in 1.3 s; an angle switch in 294 ms;
   - `timeupdate` at 4 Hz, and `progress` at 1 Hz;
   - audio switch, seek, pause, `resumed` and `destroy` all behave as the contract says, with no
     events after `destroy`.
+- **Minimal full-screen: done, and verified on the device.** The presenter is named
+  `FullscreenPresenter`, Android's name, rather than this plan's `PlayerPresenter`. It is a protocol
+  in the core, implemented by `PlayerViewControllerPresenter` in the iOS-only `LuminaryPlayerUI`
+  target. That implementation presents an `AVPlayerViewController` over a view controller it is
+  handed (the plugin will pass the bridge's), so it waits on nothing. On the device, through the
+  bridge:
+  - `enterFullscreen` and `exitFullscreen` emit `presentationchange`, and leaving pauses;
+  - a viewer closing the view does the same.
+
+  Two device findings are built in:
+  - each view reports only its own dismissal, because one still animating out otherwise ended the
+    full-screen that replaced it;
+  - the player is detached before dismissing, because `AVPlayerViewController` pauses its player
+    as it disappears, which stalled a full-screen that followed.
+
+  Known: `play` within about 50 ms of `exitFullscreen`, while the dismissal is still animating,
+  shows a `pause` blip between `waiting` and `playing`. PiP is phase 2.
 - **Follow-up: audio options are listed per tier.** AVPlayer lists each language once per audio
   group (HD and SD), which gives 8 options for 4 languages, the second set suffixed `#n`. Agree
   with Dirk to list one per language.

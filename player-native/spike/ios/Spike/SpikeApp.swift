@@ -16,8 +16,15 @@ struct SpikeApp: App {
                     }
                     // `-engine` drives the real plugin core (PlayerRegistry → AVPlayerEngine)
                     // through the calls JavaScript sends.
-                    if CommandLine.arguments.contains("-engine"), let payload = model.payload {
-                        await EngineRun(payload: payload, view: model.controller, log: model.log).run()
+                    // Its own task: full-screen covers this view, and SwiftUI cancels a covered
+                    // view's `.task`, which would cut every wait in the run short.
+                    // Once per launch: the view's `.task` fires again each time full-screen
+                    // uncovers it.
+                    if CommandLine.arguments.contains("-engine"), !EngineRun.started, let payload = model.payload {
+                        EngineRun.started = true
+                        Task { @MainActor in
+                            await EngineRun(payload: payload, view: model.controller, log: model.log).run()
+                        }
                     }
                 }
         }

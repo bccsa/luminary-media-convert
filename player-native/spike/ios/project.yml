@@ -22,6 +22,8 @@ targets:
     dependencies:
       - package: LuminaryPlayer
         product: LuminaryPlayerCore
+      - package: LuminaryPlayer
+        product: LuminaryPlayerUI
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.bccsa.luminary.player-spike

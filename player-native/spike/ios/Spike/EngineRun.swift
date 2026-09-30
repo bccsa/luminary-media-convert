@@ -1,12 +1,16 @@
 import AVFoundation
 import AVKit
 import LuminaryPlayerCore
+import LuminaryPlayerUI
+import UIKit
 
 /// Phase 1b on the device: the real `PlayerRegistry` → `PlayerHost` → `UriRouter` →
 /// `AVPlayerEngine`, driven through `PlayerRegistry.call` with the calls JavaScript sends, and
 /// every event it emits logged. Launched with `-engine`.
 @MainActor
 final class EngineRun {
+    static var started = false
+
     private let payload: Payload
     private let view: AVPlayerViewController
     private let log: (String) -> Void
@@ -30,7 +34,8 @@ final class EngineRun {
             capabilities: capabilities,
             clock: clock,
             engineFactory: { [weak self] router, clock, options in
-                let engine = AVPlayerEngine(router: router, clock: clock, options: options, presenter: nil)
+                let presenter = PlayerViewControllerPresenter(host: { Self.rootViewController() })
+                let engine = AVPlayerEngine(router: router, clock: clock, options: options, presenter: presenter)
                 self?.engine = engine
                 self?.view.player = engine.player
                 return engine
@@ -71,6 +76,33 @@ final class EngineRun {
             await expect("playing", within: 20)
             await wait(3)
         }
+
+        // Full-screen through the bridge: in, and out again.
+        var mark = events.count
+        call("enterFullscreen", player)
+        await expect("presentationchange", within: 5, since: mark)
+        await wait(3)
+        mark = events.count
+        call("exitFullscreen", player)
+        await expect("presentationchange", within: 5, since: mark)
+        await expect("pause", within: 5, since: mark)
+
+        // Full-screen again, closed by the viewer this time: the view is dismissed directly,
+        // not through the bridge, as its close button would.
+        mark = events.count
+        call("play", player)
+        await expect("playing", within: 10, since: mark)
+        mark = events.count
+        call("enterFullscreen", player)
+        await expect("presentationchange", within: 5, since: mark)
+        await wait(3)
+        mark = events.count
+        Self.rootViewController()?.presentedViewController?.dismiss(animated: true)
+        await expect("presentationchange", within: 5, since: mark)
+        await expect("pause", within: 5, since: mark)
+        mark = events.count
+        call("play", player)
+        await expect("playing", within: 10, since: mark)
 
         // Seek, pause, resume snapshot, destroy.
         call("seek", player.merging(["position": .number(600)]) { $1 })
@@ -128,24 +160,30 @@ final class EngineRun {
     private func received(_ name: String, _ payload: [String: JSON]) {
         let at = Date().timeIntervalSince(started)
         events.append((name, payload, at))
-        var shown = payload
-        shown["playerId"] = nil
+        let shown = payload
+        var summary = shown
         if name == "audiotracks-updated", case .array(let tracks)? = payload["tracks"] {
-            shown["tracks"] = .string("\(tracks.count) tracks: " + tracks.compactMap { $0["id"]?.stringValue }.joined(separator: ", "))
+            summary["tracks"] = .string("\(tracks.count) tracks: " + tracks.compactMap { $0["id"]?.stringValue }.joined(separator: ", "))
         }
         if name != "timeupdate" {
-            log(String(format: "event   %6.0f ms  %@ %@", at * 1000, name, JSON.object(shown).description))
+            log(String(format: "event   %6.0f ms  %@ %@", at * 1000, name, JSON.object(summary).description))
         }
     }
 
-    private func expect(_ name: String, within seconds: Double) async {
-        let from = events.count
+    private func expect(_ name: String, within seconds: Double, since mark: Int? = nil) async {
+        let from = mark ?? events.count
         let deadline = Date().addingTimeInterval(seconds)
         while Date() < deadline {
             if events[from...].contains(where: { $0.name == name }) { return }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
         log("check   NO \(name) within \(Int(seconds)) s")
+    }
+
+    private static func rootViewController() -> UIViewController? {
+        UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow }
+            .first?.rootViewController
     }
 
     private func wait(_ seconds: Double) async {
