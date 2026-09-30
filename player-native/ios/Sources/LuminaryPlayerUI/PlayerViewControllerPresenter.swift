@@ -1,7 +1,10 @@
 #if canImport(UIKit)
 import AVKit
-import LuminaryPlayerCore
 import UIKit
+// One module in the pod, separate modules in the Swift package.
+#if canImport(LuminaryPlayerCore)
+import LuminaryPlayerCore
+#endif
 
 /// The iOS ``FullscreenPresenter``: an `AVPlayerViewController` presented full-screen over the
 /// host's view controller (the Capacitor bridge's, in the app). The view only borrows the engine's

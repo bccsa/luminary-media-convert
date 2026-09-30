@@ -197,23 +197,3 @@ final class EngineRun {
         return true
     }
 }
-
-/// The app's clock: monotonic seconds, timers on the main queue.
-final class MainQueueClock: Clock {
-    private final class Timer: Cancellable {
-        let item: DispatchWorkItem
-        init(_ item: DispatchWorkItem) { self.item = item }
-        func cancel() { item.cancel() }
-    }
-
-    func now() -> Double {
-        Double(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000
-    }
-
-    func schedule(_ delaySeconds: Double, _ run: @escaping () -> Void) -> Cancellable {
-        nonisolated(unsafe) let run = run
-        let item = DispatchWorkItem { run() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delaySeconds, execute: item)
-        return Timer(item)
-    }
-}

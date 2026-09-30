@@ -24,6 +24,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var lastStatus: AVPlayer.TimeControlStatus = .paused
     private var rate = 1.0
     private var metadataSent = false
+    /// The item played to its end. Judged by the end notification, not the position: an item's
+    /// last frame can sit short of its reported duration.
+    private var ended = false
     private var failed = false
     private var stalled = false
     private var reportedBufferedEnd = -1.0
@@ -71,6 +74,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         guard let masterUri, let url = URL(string: masterUri) else { return }
         detachItem()
         metadataSent = false
+        ended = false
         failed = false
         stalled = false
         reportedBufferedEnd = -1
@@ -100,7 +104,16 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
 
     // MARK: Transport
 
+    /// A finished item plays again from the start, as a video element does. AVPlayer would stay
+    /// at the end and wait there.
     public func play() {
+        if ended {
+            ended = false
+            player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+                guard finished else { return }
+                DispatchQueue.main.async { self?.events?.seeked() }
+            }
+        }
         if rate == 1 {
             player.play()
         } else {
@@ -113,6 +126,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     }
 
     public func seek(position: Double, exact: Bool) {
+        ended = false
         let tolerance: CMTime = exact ? .zero : .positiveInfinity
         player.seek(to: Self.time(position), toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] finished in
             guard finished else { return }
@@ -188,7 +202,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         let center = NotificationCenter.default
         itemNotifications = [
             center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) {
-                [weak self] _ in self?.events?.ended()
+                [weak self] _ in
+                self?.ended = true
+                self?.events?.ended()
             },
             center.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item, queue: .main) {
                 [weak self] note in
@@ -250,7 +266,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             events?.playing()
         case .paused:
             // Reaching the end pauses the player too; that is `ended`, not a pause.
-            if !atEnd { events?.paused() }
+            if !ended && !atEnd { events?.paused() }
         case .waitingToPlayAtSpecifiedRate:
             if player.reasonForWaitingToPlay != .noItemToPlay { events?.buffering() }
         @unknown default:

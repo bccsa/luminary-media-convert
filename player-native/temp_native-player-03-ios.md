@@ -48,9 +48,19 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
   It follows the spike's findings: it reports the content type as a UTI, answers a request that
   asks for data alone, and honours the requested range. `CoreTests` pins each rule, and loads a
   real `AVURLAsset` through it on macOS.
-- **Still open in 1a:**
-  - `LuminaryPlayerPlugin` (the Capacitor shim);
-  - the podspec.
+- **Plugin shim and podspec: done.**
+  - `ios/Sources/LuminaryPlayerPlugin/LuminaryPlayerPlugin.swift` is the Capacitor shim. As on
+    Android, every method hands `call.options` to `PlayerRegistry.call` on the main thread,
+    rejects with the bridge's codes, and sends events through `notifyListeners`.
+  - `LuminaryMediaConverterPlayerNative.podspec` packages the core, the UI and the shim as one
+    module for CocoaPods hosts. Capacitor names the pod after the npm package.
+  - The Swift package keeps the core and the UI only: Capacitor's Swift package is iOS-only, and
+    `swift test` builds every target on macOS.
+  - Verified in Dirk's Player Lab, which now has `ios/`, on the device: `createNativePlayer` in
+    the web view drives AVPlayer through the plugin. A scripted run measured load 84 ms, play
+    562 ms, angle switches of 475 ms (playing) and 363 ms (paused), and full-screen in and out.
+- **Play at the end restarts from 0,** as a video element does, and emits `seeked`; AVPlayer
+  would otherwise stay at the end. Android needs the same rule.
 
   `LuminaryPlayerCore` imports no Capacitor, UIKit or AVKit, so the scenarios run with
   `swift test` on macOS. The plugin sits on top of it, in a target of its own. The core builds in

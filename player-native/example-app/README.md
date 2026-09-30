@@ -56,6 +56,25 @@ The native build bakes this machine's LAN address in as `VITE_LAB_ORIGIN`. Set i
 yourself if the address is the wrong one. Debug builds allow cleartext HTTP (in
 `android/app/src/debug/AndroidManifest.xml`), so a LAN MinIO works as well.
 
+**On an iPhone:**
+
+1. Keep the dev server running, as for Android.
+2. Run `npm -w player-native/example-app run ios`. This builds the native target,
+   syncs (CocoaPods installs the plugin from `LuminaryMediaConverterPlayerNative.podspec`),
+   and opens Xcode. Pick your team under Signing, then press Run.
+
+Things to know:
+
+- **Xcode must be signed in to an Apple ID.** It needs the account to create a
+  profile for `org.bccsa.luminary.playerlab`.
+- **Give the Lab its own app ID.** Installing it under another app's ID carries that
+  app's saved scene state over. When that was a SwiftUI app, the Lab opened on a
+  black screen. Uninstalling clears it.
+- **Cleartext HTTP is allowed** (`NSAllowsArbitraryLoads` in `ios/App/App/Info.plist`),
+  so a LAN MinIO works. It is a debug-only app.
+- **Native mode plays full-screen.** Inline native video is deferred, as the plans
+  decide.
+
 ## The health board
 
 The strip at the bottom shows one of **All good**, **Slow**, **Broken** or

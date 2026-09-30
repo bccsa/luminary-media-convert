@@ -11,7 +11,8 @@
         "build:native": "vue-tsc --noEmit && VITE_NATIVE_IMPL_DIR=native-plugins vite build",
         "android": "npm run build:native && cap sync android && cap open android",
         "typecheck": "vue-tsc --noEmit",
-        "test": "vitest run"
+        "test": "vitest run",
+        "ios": "npm run build:native && cap sync ios && cap open ios"
     },
     "dependencies": {
         "@capacitor/app": "^8.1.1",
@@ -24,6 +25,7 @@
     "devDependencies": {
         "@capacitor/android": "^8.5.2",
         "@capacitor/cli": "^8.5.2",
+        "@capacitor/ios": "^8.5.2",
         "@vitejs/plugin-vue": "^5.2.0",
         "typescript": "~5.7.0",
         "vite": "^6.0.0",
