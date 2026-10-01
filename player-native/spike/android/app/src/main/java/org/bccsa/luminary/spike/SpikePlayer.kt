@@ -210,6 +210,28 @@ class SpikePlayer(context: Context, val payload: Payload?, private val log: (Str
         log("format  audio ${format.id} lang=${format.language} ${format.codecs} at ${elapsed()} ms")
     }
 
+    override fun onVideoDecoderInitialized(
+        eventTime: AnalyticsListener.EventTime,
+        decoderName: String,
+        initializedTimestampMs: Long,
+        initializationDurationMs: Long,
+    ) {
+        log("decoder video $decoderName (${decoderKind(decoderName)}) in $initializationDurationMs ms, at ${elapsed()} ms")
+    }
+
+    override fun onAudioDecoderInitialized(
+        eventTime: AnalyticsListener.EventTime,
+        decoderName: String,
+        initializedTimestampMs: Long,
+        initializationDurationMs: Long,
+    ) {
+        log("decoder audio $decoderName (${decoderKind(decoderName)}) in $initializationDurationMs ms, at ${elapsed()} ms")
+    }
+
+    /** Android's own software codecs carry these prefixes; anything else is the vendor's. */
+    private fun decoderKind(name: String) =
+        if (name.startsWith("c2.android.") || name.startsWith("OMX.google.")) "software" else "hardware"
+
     override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
         this.droppedFrames += droppedFrames
     }
