@@ -21,6 +21,7 @@ import { ChunkPrefetcher } from './chunkWarming';
 import type { LivePlaylistSource } from '../serve/livePlaylistUri';
 import { installMemoryKeyXhr } from './vhsKeyInterceptor';
 import { installLivePlaylistXhr } from './vhsLivePlaylistInterceptor';
+import { attachMediaSourceBySrc } from './vhsDirectSource';
 import { installByteRangeTimeout } from './vhsRequestTimeout';
 import { VhsStallSignals } from './vhsStallSignals';
 import { vhsHandler, vhsTech } from './vhsXhrSeam';
@@ -325,6 +326,7 @@ export class VideoJsAdapter implements PlayerAdapter {
             else queueMicrotask(wrap);
         };
         const onHooksReady = (): void => {
+            attachMediaSourceBySrc(this.player);
             this.clearReplacedSources();
             install();
         };
@@ -369,14 +371,14 @@ export class VideoJsAdapter implements PlayerAdapter {
      *
      * On Safari and iOS, VHS attaches its MediaSource through `<source>`
      * elements — its own URL, and the playlist's for AirPlay — rather than
-     * `src`, and never removes them. An element already playing does not look
-     * at a `<source>` added to it, so each new source's were stacked behind the
-     * last one's and never chosen: an angle switch, the audio toggle, a
-     * recovery re-attach or a new load played the old stream out to its end
-     * and stopped. `xhr-hooks-ready` falls between the two, with the old handler
-     * disposed and the new one not yet attached. A tech built for this source,
-     * on the way back from YouTube, has a fresh element, and is not reachable
-     * at this point anyway.
+     * `src`, and never removes them, unless `attachMediaSourceBySrc` reached
+     * the tech first. It cannot for the first source on a tech built on the
+     * way back from YouTube, which is not reachable at `xhr-hooks-ready`, so
+     * that source's elements are still there when the next one comes. An
+     * element already playing does not look at a `<source>` added to it, and
+     * the ones left behind point at a disposed handler's MediaSource.
+     * `xhr-hooks-ready` falls between the two, with the old handler disposed
+     * and the new one not yet attached.
      */
     private clearReplacedSources(): void {
         const tech = vhsTech(this.player) as { el?(): Element | null; reset?(): void } | null;

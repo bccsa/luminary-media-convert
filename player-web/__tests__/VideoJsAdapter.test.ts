@@ -720,6 +720,33 @@ describe('VideoJsAdapter — changing source in Safari', () => {
         expect(sourcesOf(video)).toEqual(['blob:media-source-2', 'blob:angle-2']);
     });
 
+    it('has VHS attach every MediaSource through `src`', async () => {
+        // Through `<source>` elements, WebKit's resource selection carried on
+        // into the swapped pair after a source change and loaded the playlist,
+        // which it cannot play: the element sat with no source.
+        const { p, a, tech } = setup();
+        Object.setPrototypeOf(tech, { addSourceElement: vi.fn() });
+
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+        expect(typeof (tech as { addSourceElement?: unknown }).addSourceElement).not.toBe('function');
+
+        await a.loadSource({ ...source, url: 'blob:angle-2' });
+        p.fire('xhr-hooks-ready');
+        expect(typeof (tech as { addSourceElement?: unknown }).addSourceElement).not.toBe('function');
+    });
+
+    it('leaves a tech VHS is not driving alone', async () => {
+        const { p, a, tech } = setup();
+        const addSourceElement = vi.fn();
+        Object.assign(tech, { vhs: undefined, addSourceElement });
+
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+
+        expect((tech as { addSourceElement?: unknown }).addSourceElement).toBe(addSourceElement);
+    });
+
     it('leaves an element given its source through `src` alone', async () => {
         // Everywhere else VHS sets `src`, which the next handler's replaces.
         const { p, a, video, tech } = setup();
