@@ -43,6 +43,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         self.clock = clock
         self.presenter = presenter
         super.init()
+        // The stream's DEFAULT=YES audio, as on the web, not the phone's language preferences.
+        player.appliesMediaSelectionCriteriaAutomatically = false
         statusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
             DispatchQueue.main.async { self?.timeControlStatusChanged() }
         }
@@ -318,14 +320,12 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private func audioGroupLoaded(_ group: AVMediaSelectionGroup?, in item: AVPlayerItem) {
         guard let group else { return }
         audioGroup = group
-        var seen: Set<String> = []
-        audioOptions = group.options.enumerated().map { index, option in
-            // The rendition's NAME; the same master gives the same ids after a reattach.
-            let name = option.displayName
-            let id = seen.insert(name).inserted ? name : "\(name)#\(index)"
-            return (id, option)
-        }
+        let options = group.options
+        let keys = options.map(Self.audioKey)
+        audioOptions = AudioRenditions.tracks(keys: keys).map { ($0.id, options[$0.index]) }
         if let restore = restoreAudioId, let option = audioOptions.first(where: { $0.id == restore })?.option {
+            item.select(option, in: group)
+        } else if let option = group.defaultOption {
             item.select(option, in: group)
         }
         restoreAudioId = nil
@@ -335,8 +335,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// The empty list on load / reattach is ``PlayerHost``'s; the engine reports only a real one.
     private func reportAudio() {
         guard let item, let group = audioGroup, !audioOptions.isEmpty else { return }
-        let selected = item.currentMediaSelection.selectedMediaOption(in: group)
-        let activeId = audioOptions.first { $0.option == selected }?.id
+        // The track the selected rendition belongs to, whichever tier is playing.
+        let selected = item.currentMediaSelection.selectedMediaOption(in: group).map(Self.audioKey)
+        let activeId = audioOptions.first { $0.id == selected }?.id
         let ids = audioOptions.map(\.id)
         if let reported = reportedAudio, reported.ids == ids, reported.activeId == activeId { return }
         reportedAudio = (ids, activeId)
@@ -344,6 +345,10 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             audioOptions.map { AudioTrack(id: $0.id, lang: $0.option.extendedLanguageTag, label: $0.option.displayName) },
             activeId: activeId
         )
+    }
+
+    private static func audioKey(_ option: AVMediaSelectionOption) -> String {
+        AudioRenditions.key(language: option.extendedLanguageTag, name: option.displayName)
     }
 
     // MARK: The buffered end, sampled on the clock; EventSink holds `progress` to 1 Hz

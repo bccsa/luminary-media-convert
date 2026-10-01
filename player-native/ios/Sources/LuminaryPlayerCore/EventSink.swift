@@ -69,11 +69,13 @@ public final class EventSink {
     /// The item is ready: `durationchange` if it changed, then `loadedmetadata`.
     public func readyToPlay(duration: Double?) {
         durationChanged(duration)
-        send("loadedmetadata", ["duration": Self.wire(duration)])
+        send("loadedmetadata", ["duration": Self.wire(self.duration)])
     }
 
-    /// Nil while unbounded (live).
-    public func durationChanged(_ duration: Double?) {
+    /// Nil while unbounded (live). In whole milliseconds: AVPlayer refines the duration as it
+    /// loads, and the sub-millisecond part tells the host nothing.
+    public func durationChanged(_ reported: Double?) {
+        let duration = reported.map { ($0 * 1000).rounded() / 1000 }
         if duration == self.duration { return }
         self.duration = duration
         send("durationchange", ["duration": Self.wire(duration)])

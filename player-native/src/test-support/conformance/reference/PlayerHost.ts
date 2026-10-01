@@ -95,7 +95,10 @@ export class PlayerHost implements EngineListener {
 
     // EngineListener: the engine's signals, turned into events.
 
-    readyToPlay(duration: number | null): void {
+    readyToPlay(reported: number | null): void {
+        // Whole milliseconds: an engine refines the duration as it loads, and the
+        // sub-millisecond part tells the host nothing.
+        const duration = reported === null ? null : Math.round(reported * 1000) / 1000;
         if (duration !== this.duration) {
             this.duration = duration;
             this.sink.send('durationchange', { duration });

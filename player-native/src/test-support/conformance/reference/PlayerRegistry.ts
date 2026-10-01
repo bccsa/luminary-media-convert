@@ -80,7 +80,8 @@ const SHAPES: Record<string, { fields: Record<string, Shape>; optional?: Record<
     setVariant: { fields: { ...PLAYER, id: 'string' } },
     setAudioTrack: { fields: { ...PLAYER, id: 'string' } },
     warmChunks: {
-        fields: { ...PLAYER, loadId: 'string', schedules: { array: 'object' }, leadSeconds: 'number', warmBytes: 'number' },
+        // ChunkBoundary[][]: an array of schedules, each an array of boundaries.
+        fields: { ...PLAYER, loadId: 'string', schedules: { array: { array: 'object' } }, leadSeconds: 'number', warmBytes: 'number' },
     },
     enterFullscreen: { fields: PLAYER },
     exitFullscreen: { fields: PLAYER },

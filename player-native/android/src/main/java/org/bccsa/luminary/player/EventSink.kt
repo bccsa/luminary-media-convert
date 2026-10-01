@@ -57,13 +57,17 @@ class EventSink(
     // What the engine reports.
 
     /** The item is ready: `durationchange` if it changed, then `loadedmetadata`. */
-    fun readyToPlay(duration: Double?) {
-        durationChanged(duration)
+    fun readyToPlay(reported: Double?) {
+        durationChanged(reported)
         send("loadedmetadata", buildJsonObject { put("duration", duration) })
     }
 
-    /** Null while unbounded (live). */
-    fun durationChanged(duration: Double?) {
+    /**
+     * Null while unbounded (live). In whole milliseconds: an engine refines the duration as it
+     * loads, and the sub-millisecond part tells the host nothing.
+     */
+    fun durationChanged(reported: Double?) {
+        val duration = reported?.let { Math.round(it * 1000) / 1000.0 }
         if (duration == this.duration) return
         this.duration = duration
         send("durationchange", buildJsonObject { put("duration", duration) })

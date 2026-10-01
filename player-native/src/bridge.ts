@@ -5,7 +5,8 @@
  * This file is the single source of truth. Each native side mirrors these
  * types by hand (`BridgeTypes`), and `conformance/*.json` is their executable
  * form: a change here bumps {@link PROTOCOL_VERSION} if it breaks anything, and
- * lands with both mirrors and a matching scenario in the same change.
+ * lands with both mirrors and a matching scenario in the same change. v1 is
+ * frozen: anything that breaks it is v2.
  *
  * ### Conventions
  *
@@ -226,6 +227,7 @@ export interface LuminaryPlayerPlugin {
     releaseAssets(args: { playerId: string; generation: number }): Promise<void>;
     /** Rebuilds the engine from the assets it holds, restoring position, rate and tracks. */
     reattach(args: { playerId: string; loadId: string }): Promise<void>;
+    /** After `ended`, restarts from 0 and emits `seeked`, as a media element does. */
     play(args: { playerId: string }): Promise<void>;
     pause(args: { playerId: string }): Promise<void>;
     /** `exact` defaults to false, which lets the engine snap to a keyframe. */
@@ -266,7 +268,11 @@ export interface LuminaryPlayerPlugin {
 export interface BridgeEventMap {
     /** 4 Hz while playing, plus once on seek and once on pause. */
     timeupdate: { currentTime: number };
-    /** On change. 0 until known; `null` while unbounded (live). */
+    /**
+     * On change, in whole milliseconds: an engine refines the duration as it
+     * loads, and the sub-millisecond part is not a change. 0 until known;
+     * `null` while unbounded (live).
+     */
     durationchange: { duration: number | null };
     /** At most 1 Hz. The end of the buffered range containing the playhead. */
     progress: { bufferedEnd: number };
@@ -291,10 +297,14 @@ export interface BridgeEventMap {
     'variants-updated': { variants: AdapterVariant[] };
     /**
      * An empty list first on every `load` / `reattach`, then the new list once
-     * the engine has it.
+     * the engine has it. One track per language: renditions sharing a
+     * `LANGUAGE` across audio groups (a tier per video quality) are one
+     * track, and the engine moves between them as the variant changes; a
+     * rendition with no language is a track of its own. A fresh load starts on
+     * the stream's `DEFAULT=YES` rendition, not the device's language.
      */
     'audiotracks-updated': { tracks: AdapterAudioTrack[]; activeId: string | null };
-    /** Once per load, when the duration and seekable range are known. */
+    /** Once per load, when the duration and seekable range are known. Whole milliseconds, as `durationchange`. */
     loadedmetadata: { duration: number | null };
     /** On a presentation change. `inline` means not presented. */
     presentationchange: { state: 'inline' | 'fullscreen' | 'pip' };
