@@ -76,6 +76,8 @@ export class HealthProbe {
 
     private pending = new Set<Pending>();
     private lastTimeupdateAt = 0;
+    /** When playback last started; a pause stops `timeupdate`, so a gap is counted from here at the earliest. */
+    private playingSince = 0;
     private quietUntil = 0;
     private lastErrorKey = '';
     private started = false;
@@ -121,6 +123,7 @@ export class HealthProbe {
     }
 
     observe(observation: Observation): void {
+        if (observation.playing && !this.data.last?.playing) this.playingSince = performance.now();
         this.data.last = observation;
         const error = observation.state?.error;
         const key = error ? `${error.code}:${error.message}` : '';
@@ -141,7 +144,7 @@ export class HealthProbe {
         const last = this.data.last;
         const now = performance.now();
         if (!last?.playing || now < this.quietUntil || this.lastTimeupdateAt === 0) return;
-        const gap = now - this.lastTimeupdateAt;
+        const gap = now - Math.max(this.lastTimeupdateAt, this.playingSince);
         if (gap > FROZEN_MS) {
             this.data.freezes++;
             this.lastTimeupdateAt = now;
