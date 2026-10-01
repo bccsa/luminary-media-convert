@@ -11,7 +11,7 @@
         "build:native": "vue-tsc --noEmit && VITE_NATIVE_IMPL_DIR=native-plugins vite build",
         "android": "npm run build:native && cap sync android && cap open android",
         "typecheck": "vue-tsc --noEmit",
-        "test": "vitest run",
+        "test": "vitest run --passWithNoTests",
         "ios": "npm run build:native && cap sync ios && cap open ios"
     },
     "dependencies": {
