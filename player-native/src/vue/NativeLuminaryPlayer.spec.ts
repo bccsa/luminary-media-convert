@@ -153,6 +153,78 @@ describe('NativeLuminaryPlayer', () => {
         expect(plugin.methods()).not.toContain('load');
     });
 
+    describe('the preferred audio language', () => {
+        const TRACKS = [
+            { id: 'en', lang: 'en', label: 'English' },
+            { id: 'fr', lang: 'fr', label: 'Français' },
+            { id: 'es', lang: 'es', label: 'Español' },
+        ];
+
+        /** Native's track list, as the engine announces it, with `activeId` selected. */
+        async function announce(plugin: FakePlugin, activeId: string, tracks = TRACKS): Promise<void> {
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+            plugin.emit(
+                'audiotracks-updated',
+                { playerId: load.playerId, loadId: load.loadId },
+                { tracks, activeId },
+            );
+            await flush();
+            await nextTick();
+            await flush();
+        }
+
+        const picks = (plugin: FakePlugin) => plugin.argsOf<{ id: string }>('setAudioTrack').map((args) => args.id);
+
+        it('selects the preferred language when the tracks arrive, however it is spelled', async () => {
+            const { plugin } = await mountPlayer({ preferredLanguage: 'fra' });
+            await ready(plugin);
+
+            await announce(plugin, 'en');
+
+            expect(picks(plugin)).toEqual(['fr']);
+        });
+
+        it('leaves the selection alone when no track is in the preferred language', async () => {
+            const { plugin } = await mountPlayer({ preferredLanguage: 'de' });
+            await ready(plugin);
+
+            await announce(plugin, 'en');
+
+            expect(picks(plugin)).toEqual([]);
+        });
+
+        it("stands down once the viewer picks another language in the native menu", async () => {
+            const { plugin, exposed } = await mountPlayer({ preferredLanguage: 'fr' });
+            await ready(plugin);
+            await announce(plugin, 'en');
+            await announce(plugin, 'fr');
+
+            // The viewer picks Spanish in AVKit's menu: native reports it, unasked.
+            await announce(plugin, 'es');
+
+            // Native already plays it, so nothing is sent back; and French is not put back.
+            expect(picks(plugin)).toEqual(['fr']);
+            expect(exposed.state.activeAudioTrackId).toBe('es');
+
+            // Nor later, when a new list arrives with the viewer's language still on.
+            await announce(plugin, 'es', [...TRACKS, { id: 'de', lang: 'de', label: 'Deutsch' }]);
+            expect(picks(plugin)).toEqual(['fr']);
+        });
+
+        it('applies a new preference even after the viewer chose', async () => {
+            const { plugin, wrapper } = await mountPlayer({ preferredLanguage: 'fr' });
+            await ready(plugin);
+            await announce(plugin, 'en');
+            await announce(plugin, 'fr');
+            await announce(plugin, 'es');
+
+            await wrapper.setProps({ preferredLanguage: 'en' });
+            await flush();
+
+            expect(picks(plugin).at(-1)).toBe('en');
+        });
+    });
+
     it('destroys the native player when unmounted', async () => {
         const { plugin, wrapper } = await mountPlayer();
 

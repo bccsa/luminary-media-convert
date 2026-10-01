@@ -20,6 +20,7 @@ import {
 } from 'vue';
 import {
     createInitialState,
+    findPreferredTrack,
     type PlayerController,
     type PlayerError,
     type PlayerSource,
@@ -61,8 +62,9 @@ export const NativeLuminaryPlayer = defineComponent({
         source: { type: Object as PropType<PlayerSource>, required: true },
         poster: { type: String, default: undefined },
         /**
-         * Accepted for the web player's surface; not applied yet. The native list starts on the
-         * stream's `DEFAULT=YES` audio until language matching is shared with the web player.
+         * The audio language to select, matched as the web player matches it (`en`, `eng` and
+         * `en-US` are one language). Applied when the track list arrives, until the viewer picks
+         * another; a new source or a new preference applies it again.
          */
         preferredLanguage: { type: String, default: undefined },
         /** What the lock screen and Control Center show. The poster is the artwork when it has none. */
@@ -163,6 +165,46 @@ export const NativeLuminaryPlayer = defineComponent({
             teardowns.splice(0).forEach((teardown) => teardown());
             controller.value?.destroy();
         });
+
+        // --- preferred audio language: the web player's rule ---------------------------------
+
+        /** The track the rule last selected, and whether the viewer has since picked another. */
+        let autoAppliedTrackId: string | null = null;
+        let preferredSuspended = false;
+
+        function applyPreferredLanguage(): void {
+            const active = controller.value;
+            const preferred = props.preferredLanguage;
+            if (preferredSuspended || !active || !preferred) return;
+            const current = state.value;
+            const target = findPreferredTrack(current.audioTracks, preferred);
+            if (!target) return;
+            autoAppliedTrackId = target;
+            if (target !== current.activeAudioTrackId) active.setAudioTrack(target);
+        }
+
+        // Declared before the watchers that apply, so a new preference is applied rather than
+        // swallowed by a suspension the old one earned.
+        watch([() => props.source, () => props.preferredLanguage], () => {
+            preferredSuspended = false;
+            autoAppliedTrackId = null;
+        });
+
+        // A selection among the tracks already on offer that the rule did not make, and that is
+        // not the preferred language either, is the viewer's: stand down. An active track that
+        // arrives with a new list is the engine's default, not a choice.
+        watch(
+            [() => state.value.activeAudioTrackId, () => state.value.audioTracks],
+            ([id, tracks], [, previousTracks]) => {
+                if (tracks !== previousTracks || preferredSuspended || !id) return;
+                const preferred = props.preferredLanguage;
+                if (!preferred || id === autoAppliedTrackId) return;
+                if (id === findPreferredTrack(tracks, preferred)) return;
+                preferredSuspended = true;
+            },
+        );
+
+        watch([() => state.value.audioTracks, () => props.preferredLanguage], applyPreferredLanguage);
 
         function play() {
             return controller.value?.play();
