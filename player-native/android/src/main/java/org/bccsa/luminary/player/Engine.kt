@@ -5,7 +5,8 @@ package org.bccsa.luminary.player
  * sent them; everything the engine has to say goes through [events].
  */
 interface Engine {
-    fun load(masterUri: String, startPosition: Double?)
+    /** [nowPlaying] is what the lock screen and the notification show for this item. */
+    fun load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?)
 
     /** Same assets; restore position, rate and tracks. */
     fun reattach()

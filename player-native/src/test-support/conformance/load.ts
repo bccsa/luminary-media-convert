@@ -165,4 +165,5 @@ export const ENGINE_SIGNALS = new Set([
     'failed',
     'bufferedTo',
     'position',
+    'rate',
 ]);

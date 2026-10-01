@@ -301,9 +301,17 @@ export interface BridgeEventMap {
      * `LANGUAGE` across audio groups (a tier per video quality) are one
      * track, and the engine moves between them as the variant changes; a
      * rendition with no language is a track of its own. A fresh load starts on
-     * the stream's `DEFAULT=YES` rendition, not the device's language.
+     * the stream's `DEFAULT=YES` rendition, not the device's language. Again
+     * whenever the selection changes — a `setAudioTrack`, or the viewer's pick
+     * in native UI — with the new `activeId`.
      */
     'audiotracks-updated': { tracks: AdapterAudioTrack[]; activeId: string | null };
+    /**
+     * On change: a `setRate`, or the viewer's pick in native UI. Never on
+     * `load`, since the rate outlives the item, and never for a pause, which
+     * leaves the rate as it was.
+     */
+    ratechange: { rate: number };
     /** Once per load, when the duration and seekable range are known. Whole milliseconds, as `durationchange`. */
     loadedmetadata: { duration: number | null };
     /** On a presentation change. `inline` means not presented. */
@@ -332,6 +340,7 @@ export const BRIDGE_EVENT_NAMES: readonly BridgeEventName[] = [
     'reload-requested',
     'variants-updated',
     'audiotracks-updated',
+    'ratechange',
     'loadedmetadata',
     'presentationchange',
 ];

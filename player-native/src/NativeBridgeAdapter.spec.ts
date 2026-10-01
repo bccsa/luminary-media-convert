@@ -294,6 +294,67 @@ describe('NativeBridgeAdapter — audio tracks', () => {
     });
 });
 
+describe('NativeBridgeAdapter — viewer choices', () => {
+    const tracks = [
+        { id: 'en', lang: 'en', label: 'English' },
+        { id: 'fr', lang: 'fr', label: 'Français' },
+    ];
+
+    it('takes the default of a new list for nobody\'s choice', async () => {
+        const { controller, adapter, plugin, emitNow } = await setup();
+        await controller.load({ masterUrl: MASTER_URL });
+        emitNow('audiotracks-updated', { tracks, activeId: 'en' });
+        controller.setAudioTrack('fr');
+        emitNow('audiotracks-updated', { tracks, activeId: 'fr' });
+
+        await adapter.reattach();
+        emitNow('audiotracks-updated', { tracks, activeId: 'en' });
+        await flush();
+
+        expect(controller.getState().activeAudioTrackId).toBe('fr');
+        expect(plugin.argsOf('setAudioTrack').at(-1)).toEqual({ playerId: PLAYER_ID, id: 'fr' });
+    });
+
+    it('lets a rejected call go, so the viewer\'s next pick still counts', async () => {
+        const { controller, plugin, reports, emitNow } = await setup();
+        await controller.load({ masterUrl: MASTER_URL });
+        plugin.failWith('setRate', 'unknown-player');
+        controller.setPlaybackRate(2);
+        await flush();
+        expect(reports).toEqual(['setRate']);
+
+        emitNow('ratechange', { rate: 1.5 });
+        expect(controller.getState().playbackRate).toBe(1.5);
+    });
+
+    it('drops what it was waiting for once native has answered a resume', async () => {
+        const { controller, adapter, plugin, currentLoadId, emitNow } = await setup();
+        await controller.load({ masterUrl: MASTER_URL });
+        controller.setPlaybackRate(2);
+        plugin.resumeResult = {
+            loadId: currentLoadId(),
+            snapshot: { currentTime: 0, duration: 120, bufferedEnd: 0, playing: false },
+        };
+
+        // The answer to setRate was lost while JavaScript was suspended.
+        await adapter.resume();
+        emitNow('ratechange', { rate: 1.5 });
+        expect(controller.getState().playbackRate).toBe(1.5);
+    });
+
+    it('stops relaying once destroyed', async () => {
+        const { controller, adapter, emitNow } = await setup();
+        await controller.load({ masterUrl: MASTER_URL });
+        const choices: unknown[] = [];
+        adapter.onViewerChoice((choice) => choices.push(choice));
+
+        emitNow('ratechange', { rate: 1.5 });
+        adapter.destroy();
+        emitNow('ratechange', { rate: 2 });
+        expect(choices).toEqual([{ kind: 'rate', rate: 1.5 }]);
+    });
+});
+
 describe('NativeBridgeAdapter — capabilities', () => {
     it('declines variant pinning and warming when native does', async () => {
         const { adapter, plugin } = await setup();

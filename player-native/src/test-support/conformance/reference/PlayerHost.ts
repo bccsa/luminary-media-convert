@@ -19,6 +19,8 @@ export class PlayerHost implements EngineListener {
     private generation = 0;
     private loadId: string | null = null;
     private duration: number | null = 0;
+    /** A new player plays at 1; a load keeps whatever rate the last one had. */
+    private rate = 1;
 
     constructor(
         readonly playerId: string,
@@ -142,5 +144,12 @@ export class PlayerHost implements EngineListener {
 
     bufferedTo(end: number): void {
         this.sink.progress(end);
+    }
+
+    /** Only on a change, whoever made it. */
+    rateChanged(rate: number): void {
+        if (rate === this.rate) return;
+        this.rate = rate;
+        this.sink.send('ratechange', { rate });
     }
 }

@@ -87,6 +87,12 @@ export async function createNativePlayer(
         serveStrategy,
     });
 
+    // What the viewer picks in native full-screen becomes the controller's
+    // choice too, so its state agrees and the next attach keeps it.
+    adapter.onViewerChoice((choice) => {
+        if (choice.kind === 'audio') controller.setAudioTrack(choice.id);
+        else controller.setPlaybackRate(choice.rate);
+    });
     watchForeground(adapter, options.onAppResume);
     return { controller, adapter, playerId };
 }

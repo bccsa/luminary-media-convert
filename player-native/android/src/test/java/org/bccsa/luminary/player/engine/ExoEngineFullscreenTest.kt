@@ -72,7 +72,7 @@ class ExoEngineFullscreenTest {
     }
 
     /** Loads [master] (a video master, or an audio-only media playlist) and waits for the item. */
-    private fun load(audioOnly: Boolean, waitForReady: Boolean = true) {
+    private fun load(audioOnly: Boolean, waitForReady: Boolean = true, nowPlaying: JsonObject? = null) {
         registry.call("load", buildJsonObject {
             put("playerId", playerId)
             put("loadId", "load1")
@@ -89,6 +89,7 @@ class ExoEngineFullscreenTest {
                 put("maxReloadAttempts", 3)
                 put("reloadDelaysMs", buildJsonArray { add(JsonPrimitive(2000)) })
             })
+            if (nowPlaying != null) put("nowPlaying", nowPlaying)
         })
         if (waitForReady) TestPlayerRunHelper.advance(player).untilState(Player.STATE_READY)
     }
@@ -162,6 +163,38 @@ class ExoEngineFullscreenTest {
         } finally {
             engine.destroy()
         }
+    }
+
+    @Test
+    fun `the lock screen and notification show what JavaScript sent with the load`() {
+        create()
+        load(audioOnly = false, nowPlaying = buildJsonObject {
+            put("title", "Episode 12")
+            put("subtitle", "Sunday service")
+            put("artworkUrl", "https://cdn.example.com/poster.jpg")
+        })
+
+        val metadata = engine!!.mediaSession.player.mediaMetadata
+        assertEquals("Episode 12", metadata.title.toString())
+        assertEquals("Sunday service", metadata.artist.toString())
+        assertEquals("https://cdn.example.com/poster.jpg", metadata.artworkUri.toString())
+    }
+
+    @Test
+    fun `a rate reaches JavaScript once per change, as the number it would have asked for`() {
+        create()
+        load(audioOnly = false)
+
+        // As the skin's rate menu sets it: 0.7f reads back as 0.699999988.
+        player.setPlaybackSpeed(0.7f)
+        player.setPlaybackSpeed(0.7f)
+        registry.call("setRate", buildJsonObject {
+            put("playerId", playerId)
+            put("rate", 1.5)
+        })
+
+        val rates = events.filter { it.first == "ratechange" }.map { it.second["rate"]!!.jsonPrimitive.content.toDouble() }
+        assertEquals(listOf(0.7, 1.5), rates)
     }
 
     @Test

@@ -18,6 +18,7 @@ export interface EngineListener {
     tracks(tracks: Json, activeId: Json): void;
     variants(variants: Json): void;
     bufferedTo(end: number): void;
+    rateChanged(rate: number): void;
 }
 
 export interface EngineSnapshot {
@@ -142,6 +143,11 @@ export class FakeEngine {
                 return;
             case 'position':
                 this.setPosition(args.position as number);
+                return;
+            case 'rate':
+                this.setPosition(this.position());
+                this.rate = args.rate as number;
+                this.listener?.rateChanged(this.rate);
                 return;
             case 'failed':
                 throw new Error('failed: the recovery ladder arrives in phase 3');

@@ -13,7 +13,7 @@
 ships on both platforms together; see the parity rules in
 [the overview](temp_native-player-00-overview.md).
 
-## Status (2026-09-29)
+## Status (2026-10-01)
 
 - **Phase 1a: done.** The overview's native structure is in
   `android/src/main/java/org/bccsa/luminary/player/`. `makeConformanceHarness()`
@@ -25,8 +25,10 @@ ships on both platforms together; see the parity rules in
   `ExoEngineTest` plays an encrypted, byte-range fMP4 fixture to the end through
   `UriRouter` on a real ExoPlayer (Media3's test renderers). The fixture comes
   from `src/test/make-encrypted-fixture.py`.
-- **Step 0 (the device spike) is still open.** It still has to measure load to
-  first frame on a 2-hour, wide-ladder source, and check real decoders.
+- **Step 0 (the device spike) is still open: it needs a run on a device.** The spike logs the
+  first frame and, now, which decoder ExoPlayer picked and whether it is hardware
+  (`decoder video …` in `adb logcat -s LmcSpike`). Record a payload from a 2-hour, wide-ladder
+  source with `make-payload.mjs --android`, then run `--ez autorun true`.
 - **To agree with Johan:**
   - `Engine` gained `val hasVideo`. `PlayerHost` needs it for the
     `exitFullscreen` rule, and scenario 14 pins that rule.
@@ -47,16 +49,19 @@ ships on both platforms together; see the parity rules in
   - **Skips are 5, 10 or 30 s,** snapped from `skipBackSeconds` / `skipForwardSeconds` exactly as
     `snapSkipSeconds` does in `player-web`, so a label and its jump agree. `0` means no button.
   - **The notification and lock screen get skip buttons** through an in-process `MediaSession`
-    (`media3-session`), with the same seconds. It has no title or artwork yet: `nowPlaying` reaches
-    `PlayerHost`, but `Engine.load` does not carry it. Keeping the session alive with the screen
-    locked is the background service, phase 3b.
+    (`media3-session`), with the same seconds, and show `nowPlaying`: `Engine.load` carries it into
+    the item's `MediaMetadata` (title, subtitle as artist, artwork the session fetches). Keeping the
+    session alive with the screen locked is the background service, phase 3b.
   - **Audio-only has no view.** `enterFullscreen` does nothing for an item with no video track,
     and a view raised before the tracks were known comes down when they show none.
   - **Play at the end restarts from 0** and emits `seeked`, as iOS does.
-  - **To agree with Johan.** A rate or language chosen in native full-screen is not heard by
-    JavaScript: the bridge has no `ratechange` event, and `NativeBridgeAdapter` drops `activeId`
-    from `audiotracks-updated`. Both need a protocol addition with a plan 04 scenario. Until then
-    the controller's state can disagree with what the viewer chose.
+  - **A rate or language chosen in native full-screen reaches the controller.** The bridge gained
+    a `ratechange` event (additive, so no protocol bump); `NativeBridgeAdapter` now reads `activeId`
+    and tells a viewer's pick from the answer to its own call, and `createNativePlayer` hands the
+    pick to the controller. Scenario 17 pins it; the TS and Kotlin runners pass it, and the Swift
+    runner fails it until iOS adds its half (the `rate` signal in `FakeEngine`, `EventSink.rateChanged`).
+    `ExoEngine` rounds the speed to three decimals, since ExoPlayer keeps it as a float. **For Johan
+    to review** (bridge owner, iOS).
 
 Everything here lives in `player-native/android/`. It builds the native structure
 from [the overview](temp_native-player-00-overview.md#native-structure-both-platforms-the-same-names-file-for-file)

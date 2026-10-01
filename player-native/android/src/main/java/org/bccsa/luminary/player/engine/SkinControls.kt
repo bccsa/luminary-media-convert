@@ -24,6 +24,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.OptIn
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
@@ -65,6 +68,7 @@ internal class SkinControls(
     private var menuOpen = false
     private var shown = true
     private var attached = false
+    private var safe = Insets.NONE
 
     private val hide = Runnable { if (canHide()) setShown(false) }
     private val tick = object : Runnable {
@@ -137,6 +141,13 @@ internal class SkinControls(
         rateButton.contentDescription = "Playback rate"
         exitButton.contentDescription = "Exit full screen"
         addView(menuLayer, LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        // The scrim stays edge to edge; the controls on it stay clear of the system's.
+        ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
+            safe = safeInsets(insets)
+            padClearOfSystem()
+            insets
+        }
+        addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> padClearOfSystem() }
         refresh()
     }
 
@@ -144,6 +155,7 @@ internal class SkinControls(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        ViewCompat.requestApplyInsets(this)
         attached = true
         player.addListener(this)
         refresh()
@@ -350,6 +362,36 @@ internal class SkinControls(
         rightMargin = if (side < 0) dp(72) else 0
         topMargin = 0
         bottomMargin = dp(14)
+    }
+
+    /**
+     * Where the system draws or takes touches: the bars where they are when shown (full-screen
+     * hides them, but a swipe or three-button navigation brings them back over the picture), the
+     * camera cutout, and the edges whose swipes the system always claims.
+     */
+    private fun safeInsets(insets: WindowInsetsCompat): Insets = Insets.max(
+        insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars()),
+        Insets.max(
+            insets.getInsets(WindowInsetsCompat.Type.displayCutout()),
+            insets.getInsets(WindowInsetsCompat.Type.mandatorySystemGestures()),
+        ),
+    )
+
+    /**
+     * The insets are the window's, and this view may already sit inside them (the window can keep
+     * it below a camera cutout), so only the part it overlaps is padded.
+     */
+    private fun padClearOfSystem() {
+        val window = rootView
+        val at = IntArray(2).also(::getLocationInWindow)
+        val left = (safe.left - at[0]).coerceAtLeast(0)
+        val top = (safe.top - at[1]).coerceAtLeast(0)
+        val right = (safe.right - (window.width - at[0] - width)).coerceAtLeast(0)
+        val bottom = (safe.bottom - (window.height - at[1] - height)).coerceAtLeast(0)
+        // Padding only when it changes: setting it lays the view out again.
+        if (panel.paddingLeft != left || panel.paddingTop != top || panel.paddingRight != right || panel.paddingBottom != bottom) {
+            panel.setPadding(left, top, right, bottom)
+        }
     }
 
     private fun Glyph.tap(action: () -> Unit) = apply {

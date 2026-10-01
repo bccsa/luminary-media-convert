@@ -14,6 +14,7 @@ import org.bccsa.luminary.player.AudioTrack
 import org.bccsa.luminary.player.Clock
 import org.bccsa.luminary.player.Engine
 import org.bccsa.luminary.player.EventSink
+import org.bccsa.luminary.player.NowPlaying
 import org.bccsa.luminary.player.Snapshot
 import org.bccsa.luminary.player.Variant
 
@@ -38,7 +39,7 @@ class FakeEngine(
 
     // Commands: recorded, never acted on.
 
-    override fun load(masterUri: String, startPosition: Double?) {
+    override fun load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?) {
         record("load") {
             put("masterUri", masterUri)
             if (startPosition != null) put("startPosition", startPosition)
@@ -124,6 +125,11 @@ class FakeEngine(
                 events.bufferedTo(bufferedEnd)
             }
             "position" -> setPosition(args.getValue("position").number())
+            "rate" -> {
+                setPosition(position())
+                rate = args.getValue("rate").number()
+                events.rateChanged(rate)
+            }
             "failed" -> error("failed: the recovery ladder arrives in phase 3")
             else -> error("Unknown engine signal $signal")
         }

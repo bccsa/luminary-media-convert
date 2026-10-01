@@ -2,13 +2,16 @@ package org.bccsa.luminary.player.engine
 
 import android.app.PendingIntent
 import android.content.Context
+import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.TrackSelectionOverride
@@ -28,6 +31,7 @@ import org.bccsa.luminary.player.Clock
 import org.bccsa.luminary.player.CreateOptions
 import org.bccsa.luminary.player.Engine
 import org.bccsa.luminary.player.EventSink
+import org.bccsa.luminary.player.NowPlaying
 import org.bccsa.luminary.player.Snapshot
 import org.bccsa.luminary.player.UriRouter
 import org.bccsa.luminary.player.Variant
@@ -91,8 +95,12 @@ class ExoEngine(
     override val hasVideo: Boolean
         get() = player.currentTracks.isEmpty || player.currentTracks.containsType(C.TRACK_TYPE_VIDEO)
 
-    override fun load(masterUri: String, startPosition: Double?) {
-        val item = MediaItem.Builder().setUri(masterUri).setMimeType(MimeTypes.APPLICATION_M3U8).build()
+    override fun load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?) {
+        val item = MediaItem.Builder()
+            .setUri(masterUri)
+            .setMimeType(MimeTypes.APPLICATION_M3U8)
+            .setMediaMetadata(metadataOf(nowPlaying))
+            .build()
         mediaItem = item
         beginItem()
         // The controller hands its audio choice back once the new list arrives.
@@ -176,17 +184,10 @@ class ExoEngine(
     }
 
     override fun setAudioTrack(id: String) {
-        for (group in player.currentTracks.groups) {
-            if (group.type != C.TRACK_TYPE_AUDIO) continue
-            for (i in 0 until group.length) {
-                if (audioIdOf(group.getTrackFormat(i), i) == id) {
-                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-                        .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, i))
-                        .build()
-                    return
-                }
-            }
-        }
+        val track = audioTracksOf(player.currentTracks).firstOrNull { it.id == id } ?: return
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setOverrideForType(TrackSelectionOverride(track.group.mediaTrackGroup, track.index))
+            .build()
     }
 
     override fun snapshot(): Snapshot {
@@ -303,19 +304,17 @@ class ExoEngine(
         }
         val audio = mutableListOf<AudioTrack>()
         var activeAudio: String? = null
+        for (track in audioTracksOf(tracks)) {
+            if (!track.group.isTrackSupported(track.index)) continue
+            val format = track.group.getTrackFormat(track.index)
+            audio += AudioTrack(track.id, format.language, format.label ?: format.language ?: track.id)
+            if (track.group.isTrackSelected(track.index)) activeAudio = track.id
+        }
         val variants = mutableListOf<Variant>()
         for (group in tracks.groups) {
+            if (group.type != C.TRACK_TYPE_VIDEO) continue
             for (i in 0 until group.length) {
-                if (!group.isTrackSupported(i)) continue
-                val format = group.getTrackFormat(i)
-                when (group.type) {
-                    C.TRACK_TYPE_AUDIO -> {
-                        val id = audioIdOf(format, i)
-                        audio += AudioTrack(id, format.language, format.label ?: format.language ?: id)
-                        if (group.isTrackSelected(i)) activeAudio = id
-                    }
-                    C.TRACK_TYPE_VIDEO -> variants += variantOf(format)
-                }
+                if (group.isTrackSupported(i)) variants += variantOf(group.getTrackFormat(i))
             }
         }
 
@@ -329,6 +328,10 @@ class ExoEngine(
             reportedVariants = variants
             events.variants(variants)
         }
+    }
+
+    override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
+        events.rateChanged(rateOf(playbackParameters.speed))
     }
 
     override fun onPlayerError(error: PlaybackException) {
@@ -378,7 +381,22 @@ class ExoEngine(
             return Variant("${height ?: 0}_$bandwidth", height, bandwidth)
         }
 
-        /** HLS names an audio rendition `<GROUP-ID>:<NAME>`, which survives a reattach. */
-        fun audioIdOf(format: Format, index: Int): String = format.id ?: "audio-$index"
+        /** The session reads the item's metadata for the lock screen; it fetches the artwork itself. */
+        fun metadataOf(nowPlaying: NowPlaying?): MediaMetadata {
+            if (nowPlaying == null) return MediaMetadata.EMPTY
+            return MediaMetadata.Builder()
+                .setTitle(nowPlaying.title)
+                .setDisplayTitle(nowPlaying.title)
+                .setArtist(nowPlaying.subtitle)
+                .setSubtitle(nowPlaying.subtitle)
+                .setArtworkUri(nowPlaying.artworkUrl?.let(Uri::parse))
+                .build()
+        }
+
+        /**
+         * ExoPlayer keeps the speed as a float, so 0.7 reads back as 0.699999988; rounded, it is
+         * the number JavaScript asked for, which is how it recognises the answer to its own call.
+         */
+        fun rateOf(speed: Float): Double = Math.round(speed * 1000.0) / 1000.0
     }
 }

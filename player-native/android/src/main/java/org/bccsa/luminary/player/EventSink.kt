@@ -20,6 +20,8 @@ class EventSink(
     private var loadId: String? = null
     private var silent = false
     private var duration: Double? = 0.0
+    /** A new player plays at 1; a load keeps whatever rate the last one had. */
+    private var rate = 1.0
     private var tick: Cancellable? = null
     private var lastProgressAt: Double? = null
     private var heldProgress: Double? = null
@@ -128,6 +130,13 @@ class EventSink(
                 heldProgress = null
             }
         }
+    }
+
+    /** Only on a change, whoever made it: a `setRate`, or the viewer in native UI. */
+    fun rateChanged(rate: Double) {
+        if (rate == this.rate) return
+        this.rate = rate
+        send("ratechange", buildJsonObject { put("rate", rate) })
     }
 
     /** Only on the engine's own verdict, never from a timer. */

@@ -16,6 +16,12 @@
  * spent the obligation. What does need JavaScript — rebuilding a munged source —
  * reaches the controller as `reload-requested`, either live or, when native
  * held it through a suspension, from {@link NativeBridgeAdapter.resume}.
+ *
+ * Native full-screen has its own audio and speed menus, and the adapter
+ * contract has no event that tells the controller what a viewer chose there.
+ * So the adapter tells them apart from echoes of its own calls and hands them
+ * to {@link NativeBridgeAdapter.onViewerChoice}, the way `player-web`'s
+ * component relays video.js's menus.
  */
 
 import {
@@ -44,6 +50,9 @@ import {
     type Snapshot,
 } from './bridge.js';
 import type { AssetBatch } from './assetBatch.js';
+
+/** A choice the viewer made in native UI, which the controller has not heard of. */
+export type ViewerChoice = { kind: 'audio'; id: string } | { kind: 'rate'; rate: number };
 
 export interface NativeBridgeAdapterOptions {
     plugin: LuminaryPlayerPlugin;
@@ -76,6 +85,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     private readonly emitter = new Emitter<AdapterEventMap>();
     private readonly listeners: Promise<PluginListenerHandle>[] = [];
     private readonly teardowns: Unsubscribe[] = [];
+    private readonly choiceListeners = new Set<(choice: ViewerChoice) => void>();
 
     private loadCount = 0;
     /** The load events are accepted for; null until the first. */
@@ -85,6 +95,18 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     private duration = 0;
     private variants: AdapterVariant[] = [];
     private audioTracks: AdapterAudioTrack[] = [];
+    /** The selection native last reported for this load. */
+    private nativeAudioId: string | null = null;
+    /**
+     * A `setAudioTrack` sent and not yet reported back. Native reports every
+     * change, its own and the viewer's, so until this one comes back a change
+     * is taken for a step towards it rather than for a viewer's choice.
+     */
+    private requestedAudioId: string | null = null;
+    /** Native's rate. It outlives a load, so a load does not reset it. */
+    private nativeRate = 1;
+    /** A `setRate` sent and not yet reported back; see {@link requestedAudioId}. */
+    private requestedRate: number | null = null;
     private resuming: Promise<void> | null = null;
     private destroyed = false;
 
@@ -123,6 +145,16 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     /** Lock-screen and notification metadata, sent with every load that follows. */
     setNowPlaying(nowPlaying: NowPlaying | undefined): void {
         this.nowPlaying = nowPlaying;
+    }
+
+    /**
+     * Hears the choices a viewer makes in native UI: an audio language or a
+     * speed. The controller has to adopt them (`setAudioTrack`,
+     * `setPlaybackRate`), or its state and the next attach would undo them.
+     */
+    onViewerChoice(listener: (choice: ViewerChoice) => void): Unsubscribe {
+        this.choiceListeners.add(listener);
+        return () => this.choiceListeners.delete(listener);
     }
 
     /** Runs once, on {@link destroy}. */
@@ -167,6 +199,8 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         this.duration = 0;
         this.variants = [];
         this.audioTracks = [];
+        this.nativeAudioId = null;
+        this.requestedAudioId = null;
         this.emitter.emit('audiotracks-updated', undefined);
         return loadId;
     }
@@ -194,7 +228,14 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     }
 
     setPlaybackRate(rate: number): void {
-        this.send('setRate', this.plugin.setRate({ playerId: this.playerId, rate }));
+        // Native already plays at it: the viewer chose it there, and this is
+        // the controller adopting that choice.
+        if (this.requestedRate === null && rate === this.nativeRate) return;
+        this.requestedRate = rate;
+        this.plugin.setRate({ playerId: this.playerId, rate }).catch((error: unknown) => {
+            if (this.requestedRate === rate) this.requestedRate = null;
+            this.report('setRate', error);
+        });
     }
 
     getCurrentTime(): number {
@@ -226,10 +267,13 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         // Empty until this load's list arrives, which is when a choice can
         // mean a track of this source rather than of the one outgoing.
         if (!this.audioTracks.some((track) => track.id === id)) return;
-        this.send(
-            'setAudioTrack',
-            this.plugin.setAudioTrack({ playerId: this.playerId, id }),
-        );
+        // Already selected there, as with the rate.
+        if (this.requestedAudioId === null && id === this.nativeAudioId) return;
+        this.requestedAudioId = id;
+        this.plugin.setAudioTrack({ playerId: this.playerId, id }).catch((error: unknown) => {
+            if (this.requestedAudioId === id) this.requestedAudioId = null;
+            this.report('setAudioTrack', error);
+        });
     }
 
     /**
@@ -302,6 +346,11 @@ export class NativeBridgeAdapter implements PlayerAdapter {
             return;
         }
         if (this.destroyed || result.loadId !== this.loadId) return;
+        // Native has applied every call made before this one. An answer to them
+        // that was lost while suspended must not hold back the viewer's next
+        // choice for good.
+        this.requestedAudioId = null;
+        this.requestedRate = null;
         this.applySnapshot(result.snapshot);
         if (result.pendingReload) {
             this.emitter.emit('reload-requested', result.pendingReload);
@@ -386,8 +435,31 @@ export class NativeBridgeAdapter implements PlayerAdapter {
                 return;
             }
             case 'audiotracks-updated': {
-                this.audioTracks = (event as BridgeEvent<'audiotracks-updated'>).tracks;
+                const { tracks, activeId } = event as BridgeEvent<'audiotracks-updated'>;
+                const previous = this.audioTracks;
+                const previousId = this.nativeAudioId;
+                this.audioTracks = tracks;
+                this.nativeAudioId = activeId;
                 this.emitter.emit('audiotracks-updated', undefined);
+                if (this.requestedAudioId !== null) {
+                    if (activeId === this.requestedAudioId) this.requestedAudioId = null;
+                    return;
+                }
+                // A new list comes with the engine's own default selected,
+                // which nobody chose; only a move within the same list is a pick.
+                if (activeId !== null && activeId !== previousId && sameIds(previous, tracks)) {
+                    this.choose({ kind: 'audio', id: activeId });
+                }
+                return;
+            }
+            case 'ratechange': {
+                const { rate } = event as BridgeEvent<'ratechange'>;
+                this.nativeRate = rate;
+                if (this.requestedRate !== null) {
+                    if (rate === this.requestedRate) this.requestedRate = null;
+                    return;
+                }
+                this.choose({ kind: 'rate', rate });
                 return;
             }
             // For the host component, which listens on the plugin itself.
@@ -401,10 +473,15 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     // Teardown
     // -----------------------------------------------------------------------
 
+    private choose(choice: ViewerChoice): void {
+        for (const listener of [...this.choiceListeners]) listener(choice);
+    }
+
     destroy(): void {
         if (this.destroyed) return;
         this.destroyed = true;
         this.emitter.clear();
+        this.choiceListeners.clear();
         for (const teardown of this.teardowns.splice(0)) teardown();
         for (const listener of this.listeners) {
             void listener.then((handle) => handle.remove()).catch(() => undefined);
@@ -415,4 +492,8 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     private send(method: string, call: Promise<unknown>): void {
         call.catch((error: unknown) => this.report(method, error));
     }
+}
+
+function sameIds(a: readonly AdapterAudioTrack[], b: readonly AdapterAudioTrack[]): boolean {
+    return a.length > 0 && a.length === b.length && a.every((track, i) => track.id === b[i]?.id);
 }

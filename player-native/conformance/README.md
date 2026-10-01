@@ -201,6 +201,7 @@ It holds a `position`, a `duration`, a `bufferedEnd`, a `playing` flag, a
 | `failed` | `category`, `code`, `message` | The engine failed. Reserved for the phase 3 recovery scenarios; the v1 reference refuses it |
 | `bufferedTo` | `end` | The buffered range around the playhead now ends at `end` |
 | `position` | `position` | The position jumped without a seek |
+| `rate` | `rate` | The rate is now `rate`: the answer to a `setRate`, or the viewer's pick in native UI |
 
 Adding a signal is a change to this format, and to both fakes in the same
 change.
@@ -251,6 +252,9 @@ so that virtual time gives exactly one right answer:
   on `paused`, a `timeupdate` then `pause`.
 - **`progress`:** at most one per 1 s of clock. A change inside the window is
   held, and the latest value goes out when the window ends.
+- **`ratechange`** is emitted on a `rate` signal only when the rate differs
+  from the player's last one. A new player starts at 1, and a `load` or
+  `reattach` keeps the rate.
 - **`exitFullscreen`** calls `pause` on the engine, unless the item has no
   video (`hasVideo: false`).
 - **`destroy`** zeroes the key, drops every asset, and cancels the player's
