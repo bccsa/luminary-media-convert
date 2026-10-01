@@ -107,6 +107,10 @@ final class FakeEngine: Engine {
             events?.bufferedTo(bufferedEnd)
         case "position":
             setPosition(args["position"]?.numberValue ?? 0)
+        case "rate":
+            setPosition(position())
+            rate = args["rate"]?.numberValue ?? 1
+            events?.rateChanged(rate)
         case "failed":
             preconditionFailure("failed: the recovery ladder arrives in phase 3")
         default:

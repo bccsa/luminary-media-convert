@@ -106,7 +106,7 @@ private let bridgeErrorCodes: Set<String> = [
 /// The `FakeEngine` vocabulary; adding a signal is a change to the format.
 public let engineSignals: Set<String> = [
     "readyToPlay", "playing", "paused", "buffering", "seeked", "ended",
-    "tracks", "variants", "failed", "bufferedTo", "position",
+    "tracks", "variants", "failed", "bufferedTo", "position", "rate",
 ]
 
 private func stepKind(_ step: [String: JSON]) throws -> String {

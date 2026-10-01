@@ -58,8 +58,7 @@ ships on both platforms together; see the parity rules in
   - **A rate or language chosen in native full-screen reaches the controller.** The bridge gained
     a `ratechange` event (additive, so no protocol bump); `NativeBridgeAdapter` now reads `activeId`
     and tells a viewer's pick from the answer to its own call, and `createNativePlayer` hands the
-    pick to the controller. Scenario 17 pins it; the TS and Kotlin runners pass it, and the Swift
-    runner fails it until iOS adds its half (the `rate` signal in `FakeEngine`, `EventSink.rateChanged`).
+    pick to the controller. Scenario 18 pins it, and all three runners pass it.
     `ExoEngine` rounds the speed to three decimals, since ExoPlayer keeps it as a float. **For Johan
     to review** (bridge owner, iOS).
 

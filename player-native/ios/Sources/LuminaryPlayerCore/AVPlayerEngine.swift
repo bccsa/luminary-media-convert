@@ -21,6 +21,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var itemObservations: [NSKeyValueObservation] = []
     private var itemNotifications: [NSObjectProtocol] = []
     private var statusObservation: NSKeyValueObservation?
+    private var rateObservations: [NSKeyValueObservation] = []
     private var lastStatus: AVPlayer.TimeControlStatus = .paused
     private var rate = 1.0
     private var metadataSent = false
@@ -51,6 +52,15 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         player.appliesMediaSelectionCriteriaAutomatically = false
         statusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
             DispatchQueue.main.async { self?.timeControlStatusChanged() }
+        }
+        // AVKit's speed menu sets the player's rate, and its default rate when paused.
+        rateObservations.append(player.observe(\.rate, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.playerRateChanged() }
+        })
+        if #available(iOS 16.0, macOS 13.0, *) {
+            rateObservations.append(player.observe(\.defaultRate, options: [.new]) { [weak self] player, _ in
+                DispatchQueue.main.async { self?.viewerPickedRate(Double(player.defaultRate)) }
+            })
         }
         // Video goes on as audio in the background, and into picture in picture where it can.
         player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
@@ -169,8 +179,31 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     }
 
     public func setRate(_ rate: Double) {
-        self.rate = rate
-        if player.rate != 0 { player.rate = Float(rate) }
+        self.rate = Self.rounded(rate)
+        if #available(iOS 16.0, macOS 13.0, *) { player.defaultRate = Float(self.rate) }
+        if player.rate != 0 { player.rate = Float(self.rate) }
+        events?.rateChanged(self.rate)
+        publishPlayback()
+    }
+
+    /// A pause sets the rate to 0, which is not a rate change.
+    private func playerRateChanged() {
+        viewerPickedRate(Double(player.rate))
+    }
+
+    /// A rate the player reports that is not the one asked for: the viewer's pick in AVKit.
+    private func viewerPickedRate(_ reported: Double) {
+        guard reported > 0 else { return }
+        let picked = Self.rounded(reported)
+        guard picked != rate else { return }
+        rate = picked
+        events?.rateChanged(rate)
+        publishPlayback()
+    }
+
+    /// Three decimals: AVPlayer keeps the rate as a float.
+    private static func rounded(_ rate: Double) -> Double {
+        (rate * 1000).rounded() / 1000
     }
 
     /// Never reached: AVPlayer cannot pin a rendition, so `variantSwitching` is false and the
@@ -226,6 +259,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         _ = presenter?.dismiss()
         statusObservation?.invalidate()
         statusObservation = nil
+        rateObservations.forEach { $0.invalidate() }
+        rateObservations = []
         detachItem()
         player.pause()
         player.replaceCurrentItem(with: nil)

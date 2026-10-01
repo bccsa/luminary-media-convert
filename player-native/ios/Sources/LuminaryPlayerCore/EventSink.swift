@@ -17,6 +17,8 @@ public final class EventSink {
     private var loadId: String?
     private var silent = false
     private var duration: Double? = 0
+    /// A new player plays at 1; a load keeps whatever rate the last one had.
+    private var rate = 1.0
     private var tick: Cancellable?
     private var lastProgressAt: Double?
     private var heldProgress: Double?
@@ -79,6 +81,13 @@ public final class EventSink {
         if duration == self.duration { return }
         self.duration = duration
         send("durationchange", ["duration": Self.wire(duration)])
+    }
+
+    /// Only on a change, whoever made it: a `setRate`, or the viewer in native UI.
+    public func rateChanged(_ rate: Double) {
+        if rate == self.rate { return }
+        self.rate = rate
+        send("ratechange", ["rate": .number(rate)])
     }
 
     public func playing() {

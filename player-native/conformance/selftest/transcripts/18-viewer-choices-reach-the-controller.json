@@ -1,5 +1,5 @@
 {
- "scenario": "17-viewer-choices-reach-the-controller.json",
+ "scenario": "18-viewer-choices-reach-the-controller.json",
  "ops": [
   {
    "op": "start",
