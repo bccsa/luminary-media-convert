@@ -254,6 +254,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         nowPlaying = nil
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
         interruptionObserver = nil
+        deactivateAudioSession()
         poll?.cancel()
         poll = nil
         _ = presenter?.dismiss()
@@ -413,7 +414,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         audioOptions = AudioRenditions.tracks(keys: keys).map { ($0.id, options[$0.index]) }
         if let restore = restoreAudioId, let option = audioOptions.first(where: { $0.id == restore })?.option {
             item.select(option, in: group)
-        } else if let option = group.defaultOption {
+        } else if let option = group.defaultOption ?? audioOptions.first?.option {
+            // A master that marks no DEFAULT=YES starts on its first track, as the web does.
             item.select(option, in: group)
         }
         restoreAudioId = nil
@@ -447,7 +449,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         nowPlaying?.update(
             duration: metadataSent ? duration() : 0,
             elapsed: elapsed.isFinite ? elapsed : 0,
-            rate: player.timeControlStatus == .playing ? rate : 0
+            // Waiting for data is still playing, as far as the viewer is concerned.
+            rate: player.timeControlStatus == .paused ? 0 : rate
         )
     }
 
@@ -457,6 +460,14 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .moviePlayback)
         try? session.setActive(true)
+        #endif
+    }
+
+    /// Hands the audio back: another app the session interrupted (music, a podcast) may resume.
+    /// Only on destroy; a pause keeps the session, so the lock screen keeps its controls.
+    private func deactivateAudioSession() {
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         #endif
     }
 

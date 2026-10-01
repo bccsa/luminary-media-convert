@@ -32,9 +32,9 @@ final class NowPlayingController {
         let center = MPRemoteCommandCenter.shared()
         register(center.playCommand) { _ in commands.play() }
         register(center.pauseCommand) { _ in commands.pause() }
-        register(center.togglePlayPauseCommand) { _ in
+        register(center.togglePlayPauseCommand) { [weak self] _ in
             // The center's own idea of the state: the rate this controller last published.
-            if (self.info[MPNowPlayingInfoPropertyPlaybackRate] as? Double ?? 0) > 0 {
+            if (self?.info[MPNowPlayingInfoPropertyPlaybackRate] as? Double ?? 0) > 0 {
                 commands.pause()
             } else {
                 commands.play()
@@ -86,9 +86,14 @@ final class NowPlayingController {
         publish()
     }
 
+    /// The command center outlives this controller: a player freed without ``clear()`` must not
+    /// leave its handlers behind.
+    deinit {
+        removeTargets()
+    }
+
     func clear() {
-        for (command, target) in registered { command.removeTarget(target) }
-        registered = []
+        removeTargets()
         artworkTask?.cancel()
         artworkTask = nil
         info = [:]
@@ -96,6 +101,11 @@ final class NowPlayingController {
     }
 
     // MARK: Internals
+
+    private func removeTargets() {
+        for (command, target) in registered { command.removeTarget(target) }
+        registered = []
+    }
 
     private func publish() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
