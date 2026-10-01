@@ -31,7 +31,10 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var stalled = false
     private var reportedBufferedEnd = -1.0
     private var poll: Cancellable?
-    private var remoteSkips: RemoteSkips?
+    private var nowPlaying: NowPlayingController?
+    private var interruptionObserver: NSObjectProtocol?
+    /// Playing when an interruption began, so it resumes when the system says it may.
+    private var playingBeforeInterruption = false
 
     private var audioGroup: AVMediaSelectionGroup?
     private var audioOptions: [(id: String, option: AVMediaSelectionOption)] = []
@@ -49,8 +52,16 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         statusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
             DispatchQueue.main.async { self?.timeControlStatusChanged() }
         }
+        // Video goes on as audio in the background, and into picture in picture where it can.
+        player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
         let skin = SkinOptions(skipBackSeconds: options.skipBackSeconds, skipForwardSeconds: options.skipForwardSeconds)
-        remoteSkips = RemoteSkips(skin: skin) { [weak self] seconds in self?.skip(by: seconds) }
+        nowPlaying = NowPlayingController(skin: skin, commands: .init(
+            play: { [weak self] in self?.play() },
+            pause: { [weak self] in self?.pause() },
+            seek: { [weak self] position in self?.seek(position: position, exact: false) },
+            skip: { [weak self] seconds in self?.skip(by: seconds) }
+        ))
+        observeInterruptions()
     }
 
     /// True until the tracks say otherwise. A track that has not reported its type yet may be
@@ -64,9 +75,10 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
 
     // MARK: Source
 
-    public func load(masterUri: String, startPosition: Double?) {
+    public func load(masterUri: String, startPosition: Double?, nowPlaying metadata: NowPlaying?) {
         self.masterUri = masterUri
         restoreAudioId = nil
+        nowPlaying?.setMetadata(metadata)
         attach(startAt: startPosition)
     }
 
@@ -116,6 +128,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// A finished item plays again from the start, as a video element does. AVPlayer would stay
     /// at the end and wait there.
     public func play() {
+        activateAudioSession()
         if ended {
             ended = false
             player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
@@ -139,7 +152,10 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         let tolerance: CMTime = exact ? .zero : .positiveInfinity
         player.seek(to: Self.time(position), toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] finished in
             guard finished else { return }
-            DispatchQueue.main.async { self?.events?.seeked() }
+            DispatchQueue.main.async {
+                self?.events?.seeked()
+                self?.publishPlayback()
+            }
         }
     }
 
@@ -201,8 +217,10 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     }
 
     public func destroy() {
-        remoteSkips?.remove()
-        remoteSkips = nil
+        nowPlaying?.clear()
+        nowPlaying = nil
+        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
+        interruptionObserver = nil
         poll?.cancel()
         poll = nil
         _ = presenter?.dismiss()
@@ -263,11 +281,13 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// A view raised before the tracks were known comes down once they show no video. Playback
     /// goes on: only the empty view leaves.
     private func tracksChanged() {
+        nowPlaying?.setHasVideo(hasVideo)
         if !hasVideo { exitFullscreen() }
     }
 
     private func durationChanged() {
         if metadataSent { events?.durationChanged(duration()) } else { announceMetadata() }
+        publishPlayback()
     }
 
     /// Once per load, when the duration is known, or known to be unbounded.
@@ -291,6 +311,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         let status = player.timeControlStatus
         guard status != lastStatus else { return }
         lastStatus = status
+        publishPlayback()
         switch status {
         case .playing:
             if stalled {
@@ -381,6 +402,51 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
 
     private static func audioKey(_ option: AVMediaSelectionOption) -> String {
         AudioRenditions.key(language: option.extendedLanguageTag, name: option.displayName)
+    }
+
+    // MARK: Now playing, the audio session and interruptions
+
+    /// Where playback stands, for Control Center and the lock screen.
+    private func publishPlayback() {
+        let elapsed = player.currentTime().seconds
+        nowPlaying?.update(
+            duration: metadataSent ? duration() : 0,
+            elapsed: elapsed.isFinite ? elapsed : 0,
+            rate: player.timeControlStatus == .playing ? rate : 0
+        )
+    }
+
+    /// A playback session: it plays with the ringer switched off, and on with the screen locked.
+    private func activateAudioSession() {
+        #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .moviePlayback)
+        try? session.setActive(true)
+        #endif
+    }
+
+    /// A call or an alarm pauses playback; it resumes afterwards when the system says it should.
+    /// Unplugged headphones need nothing here: AVPlayer pauses, and `pause` follows.
+    private func observeInterruptions() {
+        #if os(iOS)
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+            switch type {
+            case .began:
+                self.playingBeforeInterruption = self.lastStatus != .paused
+            case .ended:
+                let options = (note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt)
+                    .map(AVAudioSession.InterruptionOptions.init(rawValue:)) ?? []
+                if self.playingBeforeInterruption, options.contains(.shouldResume) { self.play() }
+                self.playingBeforeInterruption = false
+            @unknown default:
+                break
+            }
+        }
+        #endif
     }
 
     // MARK: The buffered end, sampled on the clock; EventSink holds `progress` to 1 Hz

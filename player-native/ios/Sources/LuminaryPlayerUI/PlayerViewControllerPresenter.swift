@@ -45,6 +45,9 @@ public final class PlayerViewControllerPresenter: NSObject, FullscreenPresenter 
         controller.modalPresentationStyle = .fullScreen
         controller.allowsPictureInPicturePlayback = true
         controller.canStartPictureInPictureAutomaticallyFromInline = true
+        // The engine publishes Now Playing whether or not this view is up; two publishers would
+        // overwrite each other.
+        controller.updatesNowPlayingInfoCenter = false
         controller.delegate = self
         // Each view reports only its own disappearance, and only while it is the one presented:
         // a view still animating out must not end the presentation that replaced it, and a view

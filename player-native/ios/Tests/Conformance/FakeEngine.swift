@@ -23,7 +23,7 @@ final class FakeEngine: Engine {
 
     // MARK: Commands: recorded, never acted on
 
-    func load(masterUri: String, startPosition: Double?) {
+    func load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?) {
         var args: [String: JSON] = ["masterUri": .string(masterUri)]
         if let startPosition { args["startPosition"] = .number(startPosition) }
         record("load", args)

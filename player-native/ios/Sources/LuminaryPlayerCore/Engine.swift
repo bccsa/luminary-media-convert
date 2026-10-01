@@ -1,7 +1,8 @@
 /// The only AVFoundation seam, the same on Android. Commands arrive on the main thread in the
 /// order JavaScript sent them; everything the engine has to say goes through ``events``.
 public protocol Engine: AnyObject {
-    func load(masterUri: String, startPosition: Double?)
+    /// `nowPlaying` is what the lock screen and Control Center show for the item.
+    func load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?)
 
     /// Same assets; restore position, rate and tracks.
     func reattach()
