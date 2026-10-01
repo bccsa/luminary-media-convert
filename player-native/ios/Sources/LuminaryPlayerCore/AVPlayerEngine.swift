@@ -31,6 +31,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var stalled = false
     private var reportedBufferedEnd = -1.0
     private var poll: Cancellable?
+    private var remoteSkips: RemoteSkips?
 
     private var audioGroup: AVMediaSelectionGroup?
     private var audioOptions: [(id: String, option: AVMediaSelectionOption)] = []
@@ -48,11 +49,17 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         statusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
             DispatchQueue.main.async { self?.timeControlStatusChanged() }
         }
+        let skin = SkinOptions(skipBackSeconds: options.skipBackSeconds, skipForwardSeconds: options.skipForwardSeconds)
+        remoteSkips = RemoteSkips(skin: skin) { [weak self] seconds in self?.skip(by: seconds) }
     }
 
+    /// True until the tracks say otherwise. A track that has not reported its type yet may be
+    /// video: AVPlayer rebuilds the list on a seek past the buffer, and for a moment it shows none.
     public var hasVideo: Bool {
         guard let tracks = item?.tracks, !tracks.isEmpty else { return true }
-        return MainActor.assumeIsolated { tracks.contains { $0.assetTrack?.mediaType == .video } }
+        return MainActor.assumeIsolated {
+            tracks.contains { $0.assetTrack == nil || $0.assetTrack?.mediaType == .video }
+        }
     }
 
     // MARK: Source
@@ -136,6 +143,15 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         }
     }
 
+    /// A lock-screen skip: the playhead moved by `seconds`, kept inside the item.
+    private func skip(by seconds: Double) {
+        let now = player.currentTime().seconds
+        guard now.isFinite else { return }
+        var target = max(0, now + seconds)
+        if let duration = duration(), duration > 0 { target = min(target, duration) }
+        seek(position: target, exact: false)
+    }
+
     public func setRate(_ rate: Double) {
         self.rate = rate
         if player.rate != 0 { player.rate = Float(rate) }
@@ -163,14 +179,19 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
 
     // MARK: Presentation
 
+    /// Audio-only has no view: there is nothing to show full-screen.
     public func enterFullscreen() {
-        guard let presenter else { return }
-        let presented = presenter.present(player) { [weak self] in self?.leaveFullscreenByViewer() }
-        if presented { events?.presentationChanged("fullscreen") }
+        guard let presenter, hasVideo else { return }
+        let presented = presenter.present(
+            player,
+            onLeave: { [weak self] in self?.leaveFullscreenByViewer() },
+            onPresentation: { [weak self] presentation in self?.events?.presentationChanged(presentation.rawValue) }
+        )
+        if presented { events?.presentationChanged(Presentation.fullscreen.rawValue) }
     }
 
     public func exitFullscreen() {
-        if presenter?.dismiss() == true { events?.presentationChanged("inline") }
+        if presenter?.dismiss() == true { events?.presentationChanged(Presentation.inline.rawValue) }
     }
 
     /// The viewer leaving full-screen does what `exitFullscreen` does, pause included.
@@ -180,6 +201,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     }
 
     public func destroy() {
+        remoteSkips?.remove()
+        remoteSkips = nil
         poll?.cancel()
         poll = nil
         _ = presenter?.dismiss()
@@ -199,6 +222,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             },
             item.observe(\.duration, options: [.new]) { [weak self] _, _ in
                 DispatchQueue.main.async { self?.durationChanged() }
+            },
+            item.observe(\.tracks, options: [.new]) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.tracksChanged() }
             },
         ]
         let center = NotificationCenter.default
@@ -232,6 +258,12 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         default:
             break
         }
+    }
+
+    /// A view raised before the tracks were known comes down once they show no video. Playback
+    /// goes on: only the empty view leaves.
+    private func tracksChanged() {
+        if !hasVideo { exitFullscreen() }
     }
 
     private func durationChanged() {

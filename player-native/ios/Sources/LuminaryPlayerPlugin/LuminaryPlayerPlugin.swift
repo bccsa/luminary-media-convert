@@ -23,8 +23,12 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         "enterFullscreen", "exitFullscreen", "resumed", "destroy",
     ].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) }
 
-    /// AVPlayer cannot pin a rendition; picture in picture arrives with the phase 2 presenter.
-    private static let capabilities = BridgeCapabilities()
+    /// AVPlayer cannot pin a rendition; it does picture in picture.
+    private static let capabilities: BridgeCapabilities = {
+        var capabilities = BridgeCapabilities()
+        capabilities.pictureInPicture = true
+        return capabilities
+    }()
 
     private var registry: PlayerRegistry?
 

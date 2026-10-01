@@ -34,7 +34,7 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
 | `live` | `false` until phase 4 |
 | `chunkWarming` | `false` until phase 5 |
 
-## Status (2026-09-30)
+## Status (2026-10-01)
 
 - **Step 0: done.** On an iPhone 13 Pro, AVPlayer played this encoder's encrypted, two-angle,
   byte-range fMP4 output with every playlist and the key answered from memory. Results are in
@@ -91,12 +91,29 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
     as it disappears, which stalled a full-screen that followed.
 
   Known: `play` within about 50 ms of `exitFullscreen`, while the dismissal is still animating,
-  shows a `pause` blip between `waiting` and `playing`. PiP is phase 2.
-- **Follow-up: audio options are listed per tier.** AVPlayer lists each language once per audio
-  group (HD and SD), which gives 8 options for 4 languages, the second set suffixed `#n`. Agree
-  with Dirk to list one per language.
-- **Still to agree with Dirk:** packaging (SwiftPM and a podspec from the same sources), and the
-  `warmChunks` shape (`ChunkBoundary[][]`, as `bridge.ts` says and both native sides validate).
+  shows a `pause` blip between `waiting` and `playing`.
+- **Protocol v1: frozen with Dirk.** The bridge lists one audio track per language
+  (`AudioRenditions`: the encoder names the tiers apart, "HD Audio eng" and "SD Audio eng", so the
+  key is `LANGUAGE`), and a load starts on the stream's `DEFAULT=YES` rendition: the player no
+  longer applies the device's language preferences. AVKit's own full-screen audio menu still
+  lists every rendition, twice for a two-tier ladder; its API offers no filter.
+- **Phase 2: done, and verified on the device.**
+  - **Picture in picture.** AVKit takes the full-screen view down when picture in picture starts;
+    that is not the viewer leaving, so playback goes on. Returning to full-screen puts the same
+    view back; closing picture in picture is leaving, and pauses. `presentationchange` reports
+    `pip`, and `getInfo()` reports `pictureInPicture: true`. A host needs `audio` in
+    `UIBackgroundModes` for the system to offer picture in picture; the Player Lab declares it.
+  - **Lock-screen and Control Center skips** (`RemoteSkips`), 5, 10 or 30 s snapped from
+    `CreateOptions` by `SkipSeconds`, a port of Android's. A direction with no seconds has no
+    button.
+  - **Audio-only has no view.** `enterFullscreen` does nothing without video, and a view raised
+    before the tracks were known comes down once they show none. A track that has not reported
+    its type counts as video: a seek past the buffer rebuilds AVPlayer's track list, and for a
+    moment only the sound track reports, which closed the view on a Control Center skip.
+  - **Not yet:** play and pause in Control Center work only while AVKit's view is presented,
+    because AVKit drives Now Playing. Our own Now Playing (title, artwork, play and pause) is
+    phase 3b.
+- **Still to agree with Dirk:** packaging (SwiftPM and a podspec from the same sources).
 
 ## What carries over from the original "AVPlayer plugin design"
 

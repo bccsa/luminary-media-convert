@@ -12,10 +12,16 @@ import LuminaryPlayerCore
 ///
 /// The viewer closing it (its close button, or swiping it down) is reported through `onLeave`,
 /// and the engine then dismisses it the way `exitFullscreen` does, pause included.
-public final class PlayerViewControllerPresenter: FullscreenPresenter {
+///
+/// Picture in picture: starting it, AVKit takes the view down itself, which is not the viewer
+/// leaving. The view is kept, and put back when the viewer returns from picture in picture;
+/// closing picture in picture is leaving.
+public final class PlayerViewControllerPresenter: NSObject, FullscreenPresenter {
     private let host: () -> UIViewController?
     private var controller: LeavingPlayerViewController?
     private var onLeave: (() -> Void)?
+    private var onPresentation: ((Presentation) -> Void)?
+    private var inPictureInPicture = false
     /// A dismissal still animating; UIKit refuses to present until it has finished.
     private var dismissing = false
     private var presentWhenDismissed: (() -> Void)?
@@ -25,30 +31,35 @@ public final class PlayerViewControllerPresenter: FullscreenPresenter {
         self.host = host
     }
 
-    public func present(_ player: AVPlayer, onLeave: @escaping () -> Void) -> Bool {
+    public func present(
+        _ player: AVPlayer,
+        onLeave: @escaping () -> Void,
+        onPresentation: @escaping (Presentation) -> Void
+    ) -> Bool {
         guard controller == nil, host() != nil else { return false }
+        // Picture in picture is offered only to a playback session.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
 
         let controller = LeavingPlayerViewController()
         controller.player = player
         controller.modalPresentationStyle = .fullScreen
-        // Picture in picture arrives with the phase 2 presenter.
-        controller.allowsPictureInPicturePlayback = false
+        controller.allowsPictureInPicturePlayback = true
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
+        controller.delegate = self
         // Each view reports only its own disappearance, and only while it is the one presented:
-        // a view still animating out must not end the presentation that replaced it.
+        // a view still animating out must not end the presentation that replaced it, and a view
+        // AVKit took down for picture in picture has not been left.
         controller.onDisappear = { [weak self, weak controller] in
-            guard let self, let controller, self.controller === controller else { return }
+            guard let self, let controller, self.controller === controller, !self.inPictureInPicture else { return }
             self.onLeave?()
         }
         self.controller = controller
         self.onLeave = onLeave
+        self.onPresentation = onPresentation
 
         let show = { [weak self] in
-            guard let self, self.controller === controller, var presenter = self.host() else { return }
-            // Present over whatever the host is already presenting.
-            while let presented = presenter.presentedViewController, !presented.isBeingDismissed {
-                presenter = presented
-            }
-            presenter.present(controller, animated: true)
+            guard let self, self.controller === controller else { return }
+            self.show(controller, completion: nil)
         }
         if dismissing { presentWhenDismissed = show } else { show() }
         return true
@@ -60,10 +71,13 @@ public final class PlayerViewControllerPresenter: FullscreenPresenter {
         // leaving.
         self.controller = nil
         onLeave = nil
+        onPresentation = nil
+        inPictureInPicture = false
         presentWhenDismissed = nil
         // Detached before it goes: AVPlayerViewController pauses its player as it disappears,
         // which would otherwise land on a player that is already playing again, or shown full-
-        // screen once more. Measured on the device, not assumed.
+        // screen once more. Measured on the device, not assumed. Detaching also ends picture in
+        // picture.
         controller.player = nil
         guard controller.presentingViewController != nil else { return true }
         dismissing = true
@@ -75,6 +89,49 @@ public final class PlayerViewControllerPresenter: FullscreenPresenter {
             show?()
         }
         return true
+    }
+
+    /// Presents over whatever the host is already presenting.
+    private func show(_ controller: UIViewController, completion: (() -> Void)?) {
+        guard var presenter = host() else {
+            completion?()
+            return
+        }
+        while let presented = presenter.presentedViewController, !presented.isBeingDismissed {
+            presenter = presented
+        }
+        presenter.present(controller, animated: true, completion: completion)
+    }
+}
+
+extension PlayerViewControllerPresenter: AVPlayerViewControllerDelegate {
+    public func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
+        guard playerViewController === controller else { return }
+        inPictureInPicture = true
+        onPresentation?(.pip)
+    }
+
+    /// The viewer returning to full-screen from picture in picture: the view comes back.
+    public func playerViewController(
+        _ playerViewController: AVPlayerViewController,
+        restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
+    ) {
+        guard playerViewController === controller, playerViewController.presentingViewController == nil else {
+            completionHandler(true)
+            return
+        }
+        show(playerViewController) { completionHandler(true) }
+    }
+
+    /// Back in full-screen when the view was restored; closing picture in picture is leaving.
+    public func playerViewControllerDidStopPictureInPicture(_ playerViewController: AVPlayerViewController) {
+        guard playerViewController === controller else { return }
+        inPictureInPicture = false
+        if playerViewController.presentingViewController != nil {
+            onPresentation?(.fullscreen)
+        } else {
+            onLeave?()
+        }
     }
 }
 
