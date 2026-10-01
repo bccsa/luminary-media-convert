@@ -110,7 +110,7 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
     before the tracks were known comes down once they show none. A track that has not reported
     its type counts as video: a seek past the buffer rebuilds AVPlayer's track list, and for a
     moment only the sound track reports, which closed the view on a Control Center skip.
-- **Phase 3b: built, and verified on the device, except interruptions.**
+- **Phase 3b: done, and verified on the device.**
   - `NowPlayingController` is the one publisher of Now Playing, presented or not: AVKit's view
     is told not to publish its own (`updatesNowPlayingInfoCenter = false`). It shows `nowPlaying`
     (title, subtitle, artwork fetched from `artworkUrl`) with duration, elapsed time and rate,
@@ -120,8 +120,8 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
     (`audiovisualBackgroundPlaybackPolicy = .continuesIfPossible`). Audio-only plays on with the
     screen locked, controlled from the lock screen.
   - An interruption resumes on `.shouldResume` when playback was running as it began; unplugged
-    headphones need nothing, since AVPlayer pauses and `pause` follows. Interruptions are not yet
-    tried on the device.
+    headphones need nothing, since AVPlayer pauses and `pause` follows. Tried with a timer: audio-only
+    paused when it rang and resumed when it was stopped.
   - `backgroundAudio` is on, together with Android (parity-gated).
   - The Player Lab sets no `nowPlaying` yet: how a host passes a title and artwork is part of the
     host component, which moves into `player-native` with the integration.
