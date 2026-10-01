@@ -23,10 +23,11 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         "enterFullscreen", "exitFullscreen", "resumed", "destroy",
     ].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) }
 
-    /// AVPlayer cannot pin a rendition; it does picture in picture.
+    /// AVPlayer cannot pin a rendition; it does picture in picture, and plays on with the screen locked.
     private static let capabilities: BridgeCapabilities = {
         var capabilities = BridgeCapabilities()
         capabilities.pictureInPicture = true
+        capabilities.backgroundAudio = true
         return capabilities
     }()
 

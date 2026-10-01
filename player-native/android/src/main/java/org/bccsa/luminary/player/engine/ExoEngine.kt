@@ -23,6 +23,12 @@ import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToLong
 import org.bccsa.luminary.player.AudioTrack
@@ -46,6 +52,8 @@ class ExoEngine(
     private val presenter: FullscreenPresenter,
     /** Tests pass a `TestExoPlayerBuilder`'s player; the app lets the engine build its own. */
     player: ExoPlayer? = null,
+    /** Whether the app is in the foreground; tests pass their own. */
+    private val appLifecycle: Lifecycle = ProcessLifecycleOwner.get().lifecycle,
 ) : Engine, Player.Listener {
     override lateinit var events: EventSink
 
@@ -58,20 +66,32 @@ class ExoEngine(
             /* handleAudioFocus= */ true,
         )
         .setHandleAudioBecomingNoisy(true)
+        // The screen may lock mid-stream; the Wi-Fi has to stay up for the next segment.
+        .setWakeMode(C.WAKE_MODE_NETWORK)
         .setSeekBackIncrementMs((skin.back ?: DEFAULT_SKIP_SECONDS) * 1000L)
         .setSeekForwardIncrementMs((skin.forward ?: DEFAULT_SKIP_SECONDS) * 1000L)
         .build()
 
     /**
      * The system's view of this player: the lock screen and the media notification, with skip
-     * buttons that jump by the same seconds the full-screen controls do. It lives in this process
-     * for now; keeping it alive with the screen locked is the background service's job.
+     * buttons that jump by the same seconds the full-screen controls do. [PlaybackService] hosts
+     * it, which is what keeps it playing with the screen locked.
      */
     private val session: MediaSession = MediaSession.Builder(context.applicationContext, this.player)
         .setId("luminary-player-${SESSIONS.incrementAndGet()}")
         .setMediaButtonPreferences(skipButtons(skin))
+        .setCallback(SessionCallback)
         .apply { openAppIntent(context.applicationContext)?.let(::setSessionActivity) }
         .build()
+
+    private val appContext = context.applicationContext
+
+    /** In the background only the sound is wanted: the video track goes, and its downloads with it. */
+    private val appVisibility = object : DefaultLifecycleObserver {
+        override fun onStart(owner: LifecycleOwner) = setVideoDisabled(false)
+
+        override fun onStop(owner: LifecycleOwner) = setVideoDisabled(true)
+    }
 
     /** The system-facing session, for tests to read what the lock screen would be offered. */
     internal val mediaSession: MediaSession get() = session
@@ -90,7 +110,19 @@ class ExoEngine(
 
     init {
         this.player.addListener(this)
+        appLifecycle.addObserver(appVisibility)
     }
+
+    private fun setVideoDisabled(disabled: Boolean) {
+        if (player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_VIDEO) == disabled) return
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, disabled)
+            .build()
+    }
+
+    /** Whether the video track is off because the app is in the background, for tests. */
+    internal val videoDisabled: Boolean
+        get() = player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_VIDEO)
 
     override val hasVideo: Boolean
         get() = player.currentTracks.isEmpty || player.currentTracks.containsType(C.TRACK_TYPE_VIDEO)
@@ -103,6 +135,7 @@ class ExoEngine(
             .build()
         mediaItem = item
         beginItem()
+        PlaybackService.host(appContext, session)
         // The controller hands its audio choice back once the new list arrives.
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
@@ -230,7 +263,9 @@ class ExoEngine(
         poll?.cancel()
         poll = null
         presenter.dismiss()
+        appLifecycle.removeObserver(appVisibility)
         player.removeListener(this)
+        PlaybackService.release(session)
         session.release()
         player.release()
     }
@@ -337,6 +372,19 @@ class ExoEngine(
     override fun onPlayerError(error: PlaybackException) {
         // Fatal at once until phase 3 puts the recovery ladder in front of it.
         events.error(categoryOf(error), fatal = true, code = error.errorCodeName, message = error.message ?: error.errorCodeName)
+    }
+
+    /** Only this app and the system's own controllers may drive the session; nothing is resumed after a reboot. */
+    private object SessionCallback : MediaSession.Callback {
+        override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult =
+            if (controller.isTrusted) super.onConnect(session, controller) else MediaSession.ConnectionResult.reject()
+
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            isForPlayback: Boolean,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> =
+            Futures.immediateFailedFuture(UnsupportedOperationException("Nothing to resume: the app picks what plays"))
     }
 
     private companion object {

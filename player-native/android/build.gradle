@@ -73,6 +73,8 @@ dependencies {
     implementation "androidx.media3:media3-datasource-okhttp:$media3Version"
     implementation "androidx.media3:media3-ui:$media3Version"
     implementation "androidx.media3:media3-session:$media3Version"
+    // Whether the app is in the foreground: the video track goes while it is not.
+    implementation "androidx.lifecycle:lifecycle-process:2.8.0"
     // Capacitor declares it as implementation, so it is not on this module's classpath.
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     testImplementation "junit:junit:$junitVersion"

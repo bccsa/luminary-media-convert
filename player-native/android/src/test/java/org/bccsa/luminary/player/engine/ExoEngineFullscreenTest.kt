@@ -1,6 +1,10 @@
 package org.bccsa.luminary.player.engine
 
+import android.content.Intent
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
@@ -31,6 +35,7 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 
 /** Presentation on a real ExoPlayer and a real Activity: what has a view, and what the system is offered. */
 @RunWith(RobolectricTestRunner::class)
@@ -43,6 +48,11 @@ class ExoEngineFullscreenTest {
     private val events = mutableListOf<Pair<String, JsonObject>>()
     private var engine: ExoEngine? = null
     private var skipBack = 10.0
+    /** The app's visibility, as `ProcessLifecycleOwner` reports it; it starts in the foreground. */
+    private val app = object : LifecycleOwner {
+        val registry = LifecycleRegistry.createUnsafe(this).apply { currentState = Lifecycle.State.RESUMED }
+        override val lifecycle: Lifecycle get() = registry
+    }
     private var skipForward = 10.0
 
     private val registry by lazy {
@@ -51,7 +61,7 @@ class ExoEngineFullscreenTest {
             VirtualClock(),
             HttpUpstream(OkHttpClient()),
             EngineFactory { router, clock, options ->
-                ExoEngine(context, router, clock, options, presenter, player).also { engine = it }
+                ExoEngine(context, router, clock, options, presenter, player, app.lifecycle).also { engine = it }
             },
         ) { name, payload -> events += name to payload }
     }
@@ -195,6 +205,27 @@ class ExoEngineFullscreenTest {
 
         val rates = events.filter { it.first == "ratechange" }.map { it.second["rate"]!!.jsonPrimitive.content.toDouble() }
         assertEquals(listOf(0.7, 1.5), rates)
+    }
+
+    @Test
+    fun `a load starts the service that keeps playback going with the screen locked`() {
+        create()
+        load(audioOnly = false)
+
+        val started: Intent? = shadowOf(context).nextStartedService
+        assertEquals(PlaybackService::class.java.name, started?.component?.className)
+    }
+
+    @Test
+    fun `in the background the video track goes, and it comes back with the app`() {
+        create()
+        load(audioOnly = false)
+
+        app.registry.currentState = Lifecycle.State.CREATED
+        assertTrue("backgrounded: sound only", engine!!.videoDisabled)
+
+        app.registry.currentState = Lifecycle.State.RESUMED
+        assertFalse("back in front: the picture again", engine!!.videoDisabled)
     }
 
     @Test

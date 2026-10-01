@@ -63,6 +63,20 @@ ships on both platforms together; see the parity rules in
     `ExoEngine` rounds the speed to three decimals, since ExoPlayer keeps it as a float. **For Johan
     to review** (bridge owner, iOS).
 
+- **Phase 3b: built, and verified on the emulator.**
+  - `PlaybackService` (a `MediaSessionService`) hosts the engine's session; the engine keeps the
+    player and the session, and starts the service on a load. Media3 runs it in the foreground
+    (`mediaPlayback`) with the media notification while playing; a media-session notification
+    needs no `POST_NOTIFICATIONS`. The plugin's manifest declares the service and the
+    `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK` and `WAKE_LOCK` permissions.
+  - Wake mode `C.WAKE_MODE_NETWORK`. In the background the video track is disabled (the app's
+    `ProcessLifecycleOwner`), so only audio downloads; it comes back with the app.
+  - The session accepts trusted controllers only, answers playback resumption with nothing, and
+    swiping the app away pauses and stops the service.
+  - On the emulator: playing on in the background and for 25 s locked; pause, play and the
+    forward skip from media buttons while locked; the page catching up on return (`resumed`).
+  - `backgroundAudio` is on, on both platforms together (parity-gated).
+
 Everything here lives in `player-native/android/`. It builds the native structure
 from [the overview](temp_native-player-00-overview.md#native-structure-both-platforms-the-same-names-file-for-file)
 in Kotlin, then the real `Engine` behind it. It never changes `bridge.ts` or the
@@ -76,7 +90,7 @@ through a plan 04 scenario.
 | `variantSwitching` | `true` |
 | `pictureInPicture` | `false` |
 | `renderText` | `false` |
-| `backgroundAudio` | `false` until phase 3b |
+| `backgroundAudio` | `true` (phase 3b) |
 | `live` | `false` until phase 4 |
 | `chunkWarming` | `false` until phase 5 |
 

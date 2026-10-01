@@ -30,7 +30,7 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
 | `variantSwitching` | `false` (AVPlayer can cap bitrate but not pin a rendition; `player-core` turns a quality choice into a reload with a cap) |
 | `pictureInPicture` | `true` |
 | `renderText` | `false` |
-| `backgroundAudio` | `false` until phase 3b |
+| `backgroundAudio` | `true` (phase 3b) |
 | `live` | `false` until phase 4 |
 | `chunkWarming` | `false` until phase 5 |
 
@@ -122,7 +122,7 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
   - An interruption resumes on `.shouldResume` when playback was running as it began; unplugged
     headphones need nothing, since AVPlayer pauses and `pause` follows. Interruptions are not yet
     tried on the device.
-  - `backgroundAudio` stays false until Android passes too (parity-gated).
+  - `backgroundAudio` is on, together with Android (parity-gated).
   - The Player Lab sets no `nowPlaying` yet: how a host passes a title and artwork is part of the
     host component, which moves into `player-native` with the integration.
 - **Still to agree with Dirk:** packaging (SwiftPM and a podspec from the same sources).
