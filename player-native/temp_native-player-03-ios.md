@@ -125,6 +125,23 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
   - `backgroundAudio` is on, together with Android (parity-gated).
   - The Player Lab sets no `nowPlaying` yet: how a host passes a title and artwork is part of the
     host component, which moves into `player-native` with the integration.
+- **Phase 3: the ladder, built and verified on the device; two items open.**
+  - `RecoveryLadder` ports `player-web/src/drivers/RecoveryLadder.ts` on the core's monotonic
+    `Clock`, with unit tests on virtual time. AVPlayer has no in-place repair, so rung 0 is skipped:
+    re-attach at +2 s, then `reload-requested` at +4 s and +8 s, and only then a fatal `error`. The
+    load's `RecoveryPolicy` now reaches the engine.
+  - A failed item no longer reports a pause: the failure is the ladder's, and the controller
+    still sees playback as wanted when it rebuilds the source. The engine keeps the viewer's intent
+    (every play and pause, but not a failure); a re-attach, and the reload the ladder asked for,
+    resume from it, also when playback never got going.
+  - While the app is in the background (the plugin observes it), JavaScript is frozen: a reload
+    asked for then is held and returned by `resumed()`.
+  - On the device: with the stream's server stopped, a 240p switch failed, re-attached, asked for
+    a reload, and played on by itself once the server was back.
+  - **Open:** AVPlayer can wait about a minute before it fails an item; the plan's other inputs
+    (the item's error log, a wedge verdict) would start the ladder sooner. And the phase 3
+    conformance scenarios: Android's rungs differ (ExoPlayer retries itself, then `prepare()`), so
+    where the shared part sits is to agree with Dirk.
 - **Still to agree with Dirk:** packaging (SwiftPM and a podspec from the same sources).
 
 ## What carries over from the original "AVPlayer plugin design"

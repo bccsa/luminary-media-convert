@@ -33,6 +33,13 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var reportedBufferedEnd = -1.0
     private var poll: Cancellable?
     private var nowPlaying: NowPlayingController?
+    private var ladder: RecoveryLadder?
+    /// The app is in the background: JavaScript is frozen, so a reload asked for now is held.
+    private var appSuspended = false
+    private var heldReload: PendingReload?
+    /// Whether playback should be running: every play and pause, whoever made it, but not a
+    /// failure, which stops the player without the viewer asking. A re-attach resumes from it.
+    private var intendedPlaying = false
     private var interruptionObserver: NSObjectProtocol?
     /// Playing when an interruption began, so it resumes when the system says it may.
     private var playingBeforeInterruption = false
@@ -72,6 +79,15 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             skip: { [weak self] seconds in self?.skip(by: seconds) }
         ))
         observeInterruptions()
+        ladder = RecoveryLadder(policy: .default, clock: clock, hooks: .init(
+            // AVPlayer offers no in-place repair: the rung is skipped rather than pretended.
+            recoverInPlace: { _ in false },
+            reattach: { [weak self] in self?.reattach() },
+            requestReload: { [weak self] reason, attempt in self?.requestReload(reason, attempt: attempt) },
+            onExhausted: { [weak self] failure in
+                self?.events?.error(category: failure.category, fatal: true, code: failure.code, message: failure.message)
+            }
+        ))
     }
 
     /// True until the tracks say otherwise. A track that has not reported its type yet may be
@@ -85,11 +101,17 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
 
     // MARK: Source
 
-    public func load(masterUri: String, startPosition: Double?, nowPlaying metadata: NowPlaying?) {
+    public func load(masterUri: String, startPosition: Double?, nowPlaying metadata: NowPlaying?, recovery: RecoveryPolicy) {
         self.masterUri = masterUri
         restoreAudioId = nil
         nowPlaying?.setMetadata(metadata)
+        ladder?.setPolicy(recovery)
+        // The reload the ladder asked for picks up what the viewer asked for, even when playback
+        // never got going: the controller resumes only what it saw playing.
+        let resume = ladder?.pendingReload == true && intendedPlaying
+        ladder?.noteSourceLoaded()
         attach(startAt: startPosition)
+        if resume { play() }
     }
 
     /// The same item again, built from scratch: position is restored here, the rate stays on the
@@ -98,7 +120,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         guard masterUri != nil else { return }
         restoreAudioId = reportedAudio?.activeId
         let position = player.currentTime().seconds
+        let resume = intendedPlaying
         attach(startAt: position.isFinite ? position : nil)
+        if resume { play() }
     }
 
     private func attach(startAt position: Double?) {
@@ -138,6 +162,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// A finished item plays again from the start, as a video element does. AVPlayer would stay
     /// at the end and wait there.
     public func play() {
+        intendedPlaying = true
         activateAudioSession()
         if ended {
             ended = false
@@ -154,6 +179,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     }
 
     public func pause() {
+        intendedPlaying = false
         player.pause()
     }
 
@@ -246,10 +272,13 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// The viewer leaving full-screen does what `exitFullscreen` does, pause included.
     private func leaveFullscreenByViewer() {
         exitFullscreen()
-        if hasVideo { player.pause() }
+        if hasVideo { pause() }
     }
 
     public func destroy() {
+        ladder?.destroy()
+        ladder = nil
+        heldReload = nil
         nowPlaying?.clear()
         nowPlaying = nil
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
@@ -350,14 +379,22 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         publishPlayback()
         switch status {
         case .playing:
+            intendedPlaying = true
+            ladder?.notePlaybackHealthy()
+            heldReload = nil
             if stalled {
                 stalled = false
                 events?.stalled(false)
             }
             events?.playing()
         case .paused:
+            // A failed item stops the player too; that is the ladder's to report, not a pause,
+            // so the controller still knows the viewer was watching when the source is rebuilt.
+            if failed || item?.status == .failed { break }
             // Reaching the end pauses the player too; that is `ended`, not a pause.
-            if !ended && !atEnd { events?.paused() }
+            if ended || atEnd { break }
+            intendedPlaying = false
+            events?.paused()
         case .waitingToPlayAtSpecifiedRate:
             if player.reasonForWaitingToPlay != .noItemToPlay { events?.buffering() }
         @unknown default:
@@ -377,17 +414,31 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         events?.stalled(true)
     }
 
-    /// Fatal at once until phase 3 puts the recovery ladder in front of it; once per item.
+    /// Once per item, into the recovery ladder: fatal only once the ladder is spent.
     private func fail(_ error: Error?) {
         guard !failed else { return }
         failed = true
         let error = error ?? NSError(domain: AVFoundationErrorDomain, code: AVError.unknown.rawValue)
-        events?.error(
-            category: errorCategory(of: error),
-            fatal: true,
-            code: errorCode(of: error),
-            message: error.localizedDescription
-        )
+        ladder?.note(.init(category: errorCategory(of: error), code: errorCode(of: error), message: error.localizedDescription))
+    }
+
+    /// Sent at once while JavaScript can act on it; held for `resumed()` while the app is in the
+    /// background, where nothing is listening.
+    private func requestReload(_ reason: RecoveryLadder.Reason, attempt: Int) {
+        if appSuspended {
+            heldReload = PendingReload(reason: reason.rawValue, attempt: attempt)
+        } else {
+            events?.reloadRequested(reason: reason.rawValue, attempt: attempt)
+        }
+    }
+
+    public func setAppSuspended(_ suspended: Bool) {
+        appSuspended = suspended
+    }
+
+    public func takeHeldReload() -> PendingReload? {
+        defer { heldReload = nil }
+        return heldReload
     }
 
     // MARK: Audio

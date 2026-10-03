@@ -23,7 +23,7 @@ final class FakeEngine: Engine {
 
     // MARK: Commands: recorded, never acted on
 
-    func load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?) {
+    func load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?, recovery: RecoveryPolicy) {
         var args: [String: JSON] = ["masterUri": .string(masterUri)]
         if let startPosition { args["startPosition"] = .number(startPosition) }
         record("load", args)
@@ -43,6 +43,8 @@ final class FakeEngine: Engine {
     func setRate(_ rate: Double) { record("setRate", ["rate": .number(rate)]) }
     func setVariant(_ id: String) { record("setVariant", ["id": .string(id)]) }
     func setAudioTrack(_ id: String) { record("setAudioTrack", ["id": .string(id)]) }
+    func setAppSuspended(_ suspended: Bool) {}
+    func takeHeldReload() -> PendingReload? { nil }
     func enterFullscreen() { record("enterFullscreen") }
     func exitFullscreen() { record("exitFullscreen") }
     func destroy() { record("destroy") }

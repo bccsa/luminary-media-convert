@@ -32,6 +32,7 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
     }()
 
     private var registry: PlayerRegistry?
+    private var lifecycleObservers: [NSObjectProtocol] = []
 
     override public func load() {
         let presenterHost: () -> UIViewController? = { [weak self] in self?.bridge?.viewController }
@@ -50,6 +51,16 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
                 self?.notifyListeners(name, data: JSON.object(payload).anyValue as? [String: Any])
             }
         )
+        // JavaScript is frozen in the background: a reload asked for then waits for `resumed()`.
+        let center = NotificationCenter.default
+        lifecycleObservers = [
+            center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) {
+                [weak self] _ in self?.registry?.setAppSuspended(true)
+            },
+            center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) {
+                [weak self] _ in self?.registry?.setAppSuspended(false)
+            },
+        ]
     }
 
     @objc func getInfo(_ call: CAPPluginCall) { dispatch("getInfo", call) }

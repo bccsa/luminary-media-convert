@@ -45,7 +45,12 @@ public final class PlayerHost {
         assets.put(args.generation, args.assets)
         key.set(hex: args.keyHex)
         beginLoad(args.loadId)
-        engine.load(masterUri: args.masterUri, startPosition: args.startPosition, nowPlaying: args.nowPlaying)
+        engine.load(
+            masterUri: args.masterUri,
+            startPosition: args.startPosition,
+            nowPlaying: args.nowPlaying,
+            recovery: args.recovery
+        )
         assets.purgeReleased(before: args.generation)
     }
 
@@ -76,7 +81,11 @@ public final class PlayerHost {
     }
 
     func resumed() -> ResumeResult {
-        ResumeResult(loadId: loadId, snapshot: engine.snapshot(), pendingReload: nil)
+        ResumeResult(loadId: loadId, snapshot: engine.snapshot(), pendingReload: engine.takeHeldReload())
+    }
+
+    func setAppSuspended(_ suspended: Bool) {
+        engine.setAppSuspended(suspended)
     }
 
     func destroy() {

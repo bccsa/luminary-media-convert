@@ -162,6 +162,11 @@ public final class EventSink {
         ])
     }
 
+    /// The engine needs the munged source rebuilt: the one repair it cannot make itself.
+    public func reloadRequested(reason: String, attempt: Int) {
+        send("reload-requested", ["reason": .string(reason), "attempt": .number(Double(attempt))])
+    }
+
     /// `inline` means not presented.
     public func presentationChanged(_ state: String) {
         send("presentationchange", ["state": .string(state)])

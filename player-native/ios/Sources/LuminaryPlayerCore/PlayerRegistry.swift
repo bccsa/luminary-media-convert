@@ -98,6 +98,11 @@ public final class PlayerRegistry {
         return .object([:])
     }
 
+    /// The app went to the background, or came back: every player hears it.
+    public func setAppSuspended(_ suspended: Bool) {
+        for (_, host) in players { host.setAppSuspended(suspended) }
+    }
+
     private func create(_ options: CreateOptions) throws -> JSON {
         if options.protocolVersion != Double(protocolVersion) {
             throw BridgeRejection(

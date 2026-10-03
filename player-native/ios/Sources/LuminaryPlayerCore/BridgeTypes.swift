@@ -87,6 +87,19 @@ public struct RecoveryPolicy: Sendable {
     public let escalationWindowMs: Double
     public let maxReloadAttempts: Int
     public let reloadDelaysMs: [Double]
+
+    public init(escalationWindowMs: Double, maxReloadAttempts: Int, reloadDelaysMs: [Double]) {
+        self.escalationWindowMs = escalationWindowMs
+        self.maxReloadAttempts = maxReloadAttempts
+        self.reloadDelaysMs = reloadDelaysMs
+    }
+
+    /// `player-core`'s `DEFAULT_RECOVERY_POLICY`, until a load hands over its own.
+    public static let `default` = RecoveryPolicy(
+        escalationWindowMs: 10_000,
+        maxReloadAttempts: 3,
+        reloadDelaysMs: [2_000, 4_000, 8_000]
+    )
 }
 
 public struct BridgeLiveSpec: Sendable {
@@ -139,9 +152,14 @@ public struct Snapshot: Sendable {
     }
 }
 
-public struct PendingReload: Sendable {
+public struct PendingReload: Sendable, Equatable {
     public let reason: String
     public let attempt: Int
+
+    public init(reason: String, attempt: Int) {
+        self.reason = reason
+        self.attempt = attempt
+    }
 }
 
 public struct ResumeResult: Sendable {
