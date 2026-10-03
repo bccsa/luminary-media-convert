@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchesPreferredLanguage, findPreferredTrack } from '../src/audioTrackLanguage';
+import { matchesPreferredLanguage, findPreferredTrack } from './audioTrackLanguage.js';
 
 describe('matchesPreferredLanguage', () => {
     it('matches across the code sets a browser might report', () => {

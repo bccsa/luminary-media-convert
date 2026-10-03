@@ -1,0 +1,39 @@
+# XcodeGen spec for the step-0 spike: `xcodegen` here writes Spike.xcodeproj.
+name: Spike
+options:
+  bundleIdPrefix: org.bccsa.luminary
+  deploymentTarget:
+    iOS: "15.0"
+settings:
+  base:
+    DEVELOPMENT_TEAM: WUNGGU3849
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1"
+packages:
+  LuminaryPlayer:
+    path: ../..
+targets:
+  Spike:
+    type: application
+    platform: iOS
+    sources:
+      - path: Spike
+    dependencies:
+      - package: LuminaryPlayer
+        product: LuminaryPlayerCore
+      - package: LuminaryPlayer
+        product: LuminaryPlayerUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.bccsa.luminary.player-spike
+    info:
+      path: Spike/Info.plist
+      properties:
+        CFBundleDisplayName: LMC Spike
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # Debug-only spike: the segments come from a MinIO on the LAN over http.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: Plays test streams from a MinIO on this network.

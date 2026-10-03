@@ -1,0 +1,229 @@
+{
+ "scenario": "12-resumed-snapshot.json",
+ "ops": [
+  {
+   "op": "start",
+   "capabilities": {
+    "variantSwitching": false,
+    "pictureInPicture": false,
+    "renderText": false,
+    "live": false,
+    "chunkWarming": false,
+    "backgroundAudio": false,
+    "maxPlayers": 1
+   }
+  },
+  {
+   "op": "call",
+   "method": "getInfo",
+   "args": {},
+   "result": {
+    "resolved": {
+     "protocolVersion": 1,
+     "platform": "android",
+     "capabilities": {
+      "variantSwitching": false,
+      "pictureInPicture": false,
+      "renderText": false,
+      "live": false,
+      "chunkWarming": false,
+      "backgroundAudio": false,
+      "maxPlayers": 1
+     }
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "reset",
+   "args": {},
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "call",
+   "method": "create",
+   "args": {
+    "protocolVersion": 1,
+    "skipBackSeconds": 10,
+    "skipForwardSeconds": 10
+   },
+   "result": {
+    "resolved": {
+     "playerId": "player-1"
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "load",
+   "args": {
+    "playerId": "player-1",
+    "loadId": "load1",
+    "generation": 1,
+    "masterUri": "luminary://asset/1/2.m3u8",
+    "assets": [
+     {
+      "uri": "luminary://asset/1/1.m3u8",
+      "contentType": "application/vnd.apple.mpegurl",
+      "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+     },
+     {
+      "uri": "luminary://asset/1/2.m3u8",
+      "contentType": "application/vnd.apple.mpegurl",
+      "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+     }
+    ],
+    "recovery": {
+     "escalationWindowMs": 10000,
+     "maxReloadAttempts": 3,
+     "reloadDelaysMs": [
+      2000,
+      4000,
+      8000
+     ]
+    }
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "audiotracks-updated",
+     "payload": {
+      "tracks": [],
+      "activeId": null,
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    }
+   ]
+  },
+  {
+   "op": "engine",
+   "signal": "readyToPlay",
+   "args": {
+    "duration": 120
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "durationchange",
+     "payload": {
+      "duration": 120,
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    },
+    {
+     "name": "loadedmetadata",
+     "payload": {
+      "duration": 120,
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    }
+   ]
+  },
+  {
+   "op": "call",
+   "method": "play",
+   "args": {
+    "playerId": "player-1"
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "engine",
+   "signal": "playing",
+   "args": {}
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "playing",
+     "payload": {
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    }
+   ]
+  },
+  {
+   "op": "advanceClock",
+   "seconds": 0.5
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "timeupdate",
+     "payload": {
+      "currentTime": 0.25,
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    },
+    {
+     "name": "timeupdate",
+     "payload": {
+      "currentTime": 0.5,
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    }
+   ]
+  },
+  {
+   "op": "engine",
+   "signal": "bufferedTo",
+   "args": {
+    "end": 30
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "progress",
+     "payload": {
+      "bufferedEnd": 30,
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    }
+   ]
+  },
+  {
+   "op": "call",
+   "method": "resumed",
+   "args": {
+    "playerId": "player-1"
+   },
+   "result": {
+    "resolved": {
+     "loadId": "load1",
+     "snapshot": {
+      "currentTime": 0.5,
+      "duration": 120,
+      "bufferedEnd": 30,
+      "playing": true
+     }
+    }
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": []
+  }
+ ]
+}

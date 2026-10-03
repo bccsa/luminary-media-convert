@@ -9,7 +9,8 @@
  * picks. Comparing strings gets the right answer on one platform and the wrong
  * one on the other, which is why this is a function and not `===`.
  *
- * Pure: no DOM, no video.js. The player calls it, tests call it directly.
+ * Pure: no DOM, no engine. Every player picks a language with it, so the web and
+ * native players agree on what a preference matches.
  */
 import { iso6392BTo1, iso6392TTo1 } from 'iso-639-2';
 

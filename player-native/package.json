@@ -1,0 +1,65 @@
+{
+    "name": "@luminary-media-converter/player-native",
+    "version": "0.0.1",
+    "private": true,
+    "license": "Apache-2.0",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        },
+        "./vue": {
+            "types": "./dist/vue/index.d.ts",
+            "default": "./dist/vue/index.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist",
+        "android/src/main/",
+        "android/build.gradle",
+        "ios/Sources",
+        "Package.swift",
+        "*.podspec"
+    ],
+    "capacitor": {
+        "ios": {
+            "src": "ios"
+        },
+        "android": {
+            "src": "android"
+        }
+    },
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+        "test": "vitest run",
+        "conformance:transcripts": "UPDATE_TRANSCRIPTS=1 vitest run src/conformance.reference.spec.ts",
+        "typecheck": "tsc -p tsconfig.spec.json",
+        "test:watch": "vitest"
+    },
+    "dependencies": {
+        "@luminary-media-converter/player-core": "file:../player-core"
+    },
+    "peerDependencies": {
+        "@capacitor/core": "^8.0.0",
+        "vue": "^3.5.0"
+    },
+    "devDependencies": {
+        "@capacitor/android": "^8.5.2",
+        "@capacitor/cli": "^8.5.2",
+        "@capacitor/core": "^8.5.2",
+        "@capacitor/ios": "^8.5.2",
+        "typescript": "~5.7.0",
+        "vitest": "^3.0.0",
+        "vue": "^3.5.0"
+    },
+    "peerDependenciesMeta": {
+        "vue": {
+            "optional": true
+        }
+    }
+}

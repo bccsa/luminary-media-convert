@@ -52,7 +52,7 @@ import { installAutoHide } from '../vjs/autoHide';
 import { TRANSPARENT_POSTER } from '../vjs/poster';
 import { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from '../vjs/keepAlive';
 import { retryYouTubeApi, watchYouTubeApi, whenYouTubeApiSettles } from '../vjs/youtubeApi';
-import { findPreferredTrack } from '../audioTrackLanguage';
+import { findPreferredTrack } from '@luminary-media-converter/player-core';
 import { imageAttempts, toPlayerImage, type PlayerImageInput } from '../image';
 import { isYouTubeUrl, toVideoJsYouTubeUrl } from '../youtube';
 import { singleFlight } from '../singleFlight';
@@ -98,7 +98,7 @@ interface Props {
      *
      * Matched leniently on purpose: browsers disagree about
      * whether a track's language is two-letter, three-letter terminological or
-     * three-letter bibliographic. See `audioTrackLanguage.ts`.
+     * three-letter bibliographic. See `audioTrackLanguage.ts` in `player-core`.
      *
      * Re-applied whenever the track list changes, when the prop changes, on
      * `loadeddata`, and on entering or leaving fullscreen — the last two
