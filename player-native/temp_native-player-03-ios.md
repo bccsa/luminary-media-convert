@@ -138,9 +138,11 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
     asked for then is held and returned by `resumed()`.
   - On the device: with the stream's server stopped, a 240p switch failed, re-attached, asked for
     a reload, and played on by itself once the server was back.
-  - **Open:** AVPlayer can wait about a minute before it fails an item; the plan's other inputs
-    (the item's error log, a wedge verdict) would start the ladder sooner. And the phase 3
-    conformance scenarios: Android's rungs differ (ExoPlayer retries itself, then `prepare()`), so
+  - The item's error log feeds the ladder too, as a wedge: an entry counts only while playback is
+    stuck waiting for data the viewer asked to see, since AVPlayer also logs failures it gets past.
+    On the device the reload came 9 s after play with the server down, where waiting for AVPlayer
+    to fail the item took about 100 s.
+  - **Open:** the phase 3 conformance scenarios: Android's rungs differ (ExoPlayer retries itself, then `prepare()`), so
     where the shared part sits is to agree with Dirk.
 - **Still to agree with Dirk:** packaging (SwiftPM and a podspec from the same sources).
 

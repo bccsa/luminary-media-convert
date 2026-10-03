@@ -327,6 +327,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             center.addObserver(forName: AVPlayerItem.mediaSelectionDidChangeNotification, object: item, queue: .main) {
                 [weak self] _ in self?.reportAudio()
             },
+            center.addObserver(forName: AVPlayerItem.newErrorLogEntryNotification, object: item, queue: .main) {
+                [weak self] _ in self?.errorLogged()
+            },
         ]
     }
 
@@ -420,6 +423,24 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         failed = true
         let error = error ?? NSError(domain: AVFoundationErrorDomain, code: AVError.unknown.rawValue)
         ladder?.note(.init(category: errorCategory(of: error), code: errorCode(of: error), message: error.localizedDescription))
+    }
+
+    /// A request failed. AVPlayer logs failures it gets past too, so an entry counts only while
+    /// playback is stuck waiting for data the viewer asked to see: then it is a wedge, and the
+    /// ladder starts in seconds rather than when AVPlayer gives the item up, which can take a
+    /// minute. A burst of entries buys one rung at a time.
+    private func errorLogged() {
+        guard intendedPlaying, !failed, player.timeControlStatus == .waitingToPlayAtSpecifiedRate,
+              let entry = item?.errorLog()?.events.last else { return }
+        let error = NSError(
+            domain: entry.errorDomain,
+            code: entry.errorStatusCode,
+            userInfo: [NSLocalizedDescriptionKey: entry.errorComment ?? "Request failed"]
+        )
+        ladder?.note(
+            .init(category: errorCategory(of: error), code: errorCode(of: error), message: error.localizedDescription),
+            reason: .wedged
+        )
     }
 
     /// Sent at once while JavaScript can act on it; held for `resumed()` while the app is in the
