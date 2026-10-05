@@ -9,6 +9,24 @@
 **Depends on:** plan 03's phase 2 (the native full-screen presenter) on iOS, and plan 02's on
 Android.
 
+## Status (2026-10-05)
+
+- **iOS full-screen: built, and checked in the Simulator; not yet on the device.**
+  - `LuminaryFullscreenPresenter` replaces `PlayerViewControllerPresenter`: our own view, with
+    the video in an `AVPlayerLayer` and picture in picture through
+    `AVPictureInPictureController`, keeping phase 2's rules.
+  - The rules sit in `FullscreenControls.swift` (core, tested on virtual time): which controls
+    show, the 3 s auto-hide, live, the time text (video.js's `formatTime`) and the speed labels.
+  - The icons are video.js's own glyphs: `ios/scripts/extract-videojs-icons.mjs` writes
+    `VideoJsIcons.swift` from the SVG font video.js ships, and `VideoJsGlyph` draws them.
+  - The viewer's actions go through the engine (`FullscreenCommands`), so its intent and
+    JavaScript's viewer choices stay right. Mute and the subtitles choice stay native for now
+    (step 4).
+  - Measured against `player-web` in the Lab's Web mode at 844×390: play 96 pt, skips 56 pt at
+    ±72 pt and 14 pt up, a 44 pt top row, the progress track 4 pt.
+  - In the Simulator: controls over a playing video, hidden after 3 s, and kept while paused.
+    Picture in picture, the menus, scrubbing, VoiceOver and rotation are for the device pass.
+
 ## Goal
 
 Pressing play in the Capacitor app opens full-screen, as intended. That full-screen is today the

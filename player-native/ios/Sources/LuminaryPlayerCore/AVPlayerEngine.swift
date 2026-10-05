@@ -15,6 +15,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private let router: UriRouter
     private let clock: Clock
     private let presenter: FullscreenPresenter?
+    /// The skip intervals, for the lock screen and the full-screen controls.
+    private let skin: SkinOptions
 
     private var masterUri: String?
     private var item: AVPlayerItem?
@@ -54,6 +56,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         self.router = router
         self.clock = clock
         self.presenter = presenter
+        skin = SkinOptions(skipBackSeconds: options.skipBackSeconds, skipForwardSeconds: options.skipForwardSeconds)
         super.init()
         // The stream's DEFAULT=YES audio, as on the web, not the phone's language preferences.
         player.appliesMediaSelectionCriteriaAutomatically = false
@@ -71,7 +74,6 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         }
         // Video goes on as audio in the background, and into picture in picture where it can.
         player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
-        let skin = SkinOptions(skipBackSeconds: options.skipBackSeconds, skipForwardSeconds: options.skipForwardSeconds)
         nowPlaying = NowPlayingController(skin: skin, commands: .init(
             play: { [weak self] in self?.play() },
             pause: { [weak self] in self?.pause() },
@@ -259,10 +261,24 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         guard let presenter, hasVideo else { return }
         let presented = presenter.present(
             player,
+            commands: fullscreenCommands(),
             onLeave: { [weak self] in self?.leaveFullscreenByViewer() },
             onPresentation: { [weak self] presentation in self?.events?.presentationChanged(presentation.rawValue) }
         )
         if presented { events?.presentationChanged(Presentation.fullscreen.rawValue) }
+    }
+
+    private func fullscreenCommands() -> FullscreenCommands {
+        FullscreenCommands(
+            play: { [weak self] in self?.play() },
+            pause: { [weak self] in self?.pause() },
+            seek: { [weak self] position in self?.seek(position: position, exact: false) },
+            setRate: { [weak self] rate in self?.setRate(rate) },
+            setAudioTrack: { [weak self] id in self?.setAudioTrack(id) },
+            audioTracks: { [weak self] in self?.currentAudio() ?? ([], nil) },
+            playbackWanted: { [weak self] in self?.intendedPlaying ?? false },
+            skin: skin
+        )
     }
 
     public func exitFullscreen() {
@@ -496,16 +512,21 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
 
     /// The empty list on load / reattach is ``PlayerHost``'s; the engine reports only a real one.
     private func reportAudio() {
-        guard let item, let group = audioGroup, !audioOptions.isEmpty else { return }
-        // The track the selected rendition belongs to, whichever tier is playing.
-        let selected = item.currentMediaSelection.selectedMediaOption(in: group).map(Self.audioKey)
-        let activeId = audioOptions.first { $0.id == selected }?.id
-        let ids = audioOptions.map(\.id)
+        guard !audioOptions.isEmpty else { return }
+        let (tracks, activeId) = currentAudio()
+        let ids = tracks.map(\.id)
         if let reported = reportedAudio, reported.ids == ids, reported.activeId == activeId { return }
         reportedAudio = (ids, activeId)
-        events?.audioTracks(
+        events?.audioTracks(tracks, activeId: activeId)
+    }
+
+    /// The audio tracks, and the one the selected rendition belongs to, whichever tier is playing.
+    private func currentAudio() -> (tracks: [AudioTrack], activeId: String?) {
+        guard let item, let group = audioGroup else { return ([], nil) }
+        let selected = item.currentMediaSelection.selectedMediaOption(in: group).map(Self.audioKey)
+        return (
             audioOptions.map { AudioTrack(id: $0.id, lang: $0.option.extendedLanguageTag, label: $0.option.displayName) },
-            activeId: activeId
+            audioOptions.first { $0.id == selected }?.id
         )
     }
 

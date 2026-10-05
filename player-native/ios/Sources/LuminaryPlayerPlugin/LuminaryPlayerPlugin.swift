@@ -44,7 +44,7 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
                     router: router,
                     clock: clock,
                     options: options,
-                    presenter: PlayerViewControllerPresenter(host: presenterHost)
+                    presenter: LuminaryFullscreenPresenter(host: presenterHost)
                 )
             },
             emit: { [weak self] name, payload in
