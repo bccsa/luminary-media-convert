@@ -114,6 +114,12 @@ public struct CreateOptions: Sendable {
     public let protocolVersion: Double
     public let skipBackSeconds: Double
     public let skipForwardSeconds: Double
+
+    public init(protocolVersion: Double, skipBackSeconds: Double, skipForwardSeconds: Double) {
+        self.protocolVersion = protocolVersion
+        self.skipBackSeconds = skipBackSeconds
+        self.skipForwardSeconds = skipForwardSeconds
+    }
 }
 
 public struct LoadArgs: Sendable {

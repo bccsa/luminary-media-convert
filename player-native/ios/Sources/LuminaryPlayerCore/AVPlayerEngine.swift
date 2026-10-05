@@ -36,8 +36,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var poll: Cancellable?
     private var nowPlaying: NowPlayingController?
     private var ladder: RecoveryLadder?
-    /// Whether playback should be running: every play and pause, whoever made it, but not a
-    /// failure, which stops the player without the viewer asking. A re-attach resumes from it.
+    /// Whether playback should be running: every play and pause, whoever made it, and the end
+    /// of the item, which is what the viewer asked for; but not a failure, which stops the player
+    /// without the viewer asking. A re-attach resumes from it.
     private var intendedPlaying = false
     private var interruptionObserver: NSObjectProtocol?
     /// Playing when an interruption began, so it resumes when the system says it may.
@@ -298,7 +299,6 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         nowPlaying = nil
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
         interruptionObserver = nil
-        deactivateAudioSession()
         poll?.cancel()
         poll = nil
         _ = presenter?.dismiss()
@@ -309,6 +309,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         detachItem()
         player.pause()
         player.replaceCurrentItem(with: nil)
+        // After the player has stopped: the session cannot be deactivated under a running one.
+        deactivateAudioSession()
     }
 
     // MARK: What AVFoundation reports
@@ -330,6 +332,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main) {
                 [weak self] _ in
                 self?.ended = true
+                // Done, not paused: the controls offer play, as the web's do at `ended`.
+                self?.intendedPlaying = false
                 self?.events?.ended()
             },
             center.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification, object: item, queue: .main) {
