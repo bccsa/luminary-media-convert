@@ -327,6 +327,20 @@ describe('NativeBridgeAdapter — viewer choices', () => {
         expect(controller.getState().playbackRate).toBe(1.5);
     });
 
+    it('takes a rate native reports for the outgoing load as the answer it was waiting for', async () => {
+        const { controller, plugin, currentLoadId, emit, emitNow } = await setup();
+        await controller.load({ masterUrl: MASTER_URL });
+        const outgoing = currentLoadId();
+        controller.setPlaybackRate(2);
+        await controller.load({ masterUrl: MASTER_URL });
+        emit('ratechange', { playerId: PLAYER_ID, loadId: outgoing }, { rate: 2 });
+
+        // The viewer's own pick, in native full-screen, counts again.
+        emitNow('ratechange', { rate: 1.5 });
+        expect(controller.getState().playbackRate).toBe(1.5);
+        expect(plugin.argsOf('setRate')).toHaveLength(1);
+    });
+
     it('drops what it was waiting for once native has answered a resume', async () => {
         const { controller, adapter, plugin, currentLoadId, emitNow } = await setup();
         await controller.load({ masterUrl: MASTER_URL });

@@ -379,7 +379,16 @@ export class NativeBridgeAdapter implements PlayerAdapter {
 
     private receive<E extends BridgeEventName>(name: E, raw: BridgeEvent<E>): void {
         if (this.destroyed) return;
-        if (raw.playerId !== this.playerId || raw.loadId !== this.loadId) return;
+        if (raw.playerId !== this.playerId) return;
+        // The rate is the player's, not a load's: a change native made just
+        // before a load is stamped with the outgoing load, and dropping it
+        // would strand the request it answers, after which every pick the
+        // viewer makes would be taken for a step towards that request.
+        if (name === 'ratechange') {
+            this.rateChanged((raw as BridgeEvent<'ratechange'>).rate);
+            return;
+        }
+        if (raw.loadId !== this.loadId) return;
         // Narrowed per case below; TypeScript cannot correlate `name` with
         // `raw` through a generic, so the union is recovered by hand.
         const event = raw as BridgeEvent<BridgeEventName>;
@@ -452,21 +461,21 @@ export class NativeBridgeAdapter implements PlayerAdapter {
                 }
                 return;
             }
-            case 'ratechange': {
-                const { rate } = event as BridgeEvent<'ratechange'>;
-                this.nativeRate = rate;
-                if (this.requestedRate !== null) {
-                    if (rate === this.requestedRate) this.requestedRate = null;
-                    return;
-                }
-                this.choose({ kind: 'rate', rate });
-                return;
-            }
             // For the host component, which listens on the plugin itself.
             case 'loadedmetadata':
             case 'presentationchange':
+            case 'ratechange':
                 return;
         }
+    }
+
+    private rateChanged(rate: number): void {
+        this.nativeRate = rate;
+        if (this.requestedRate !== null) {
+            if (rate === this.requestedRate) this.requestedRate = null;
+            return;
+        }
+        this.choose({ kind: 'rate', rate });
     }
 
     // -----------------------------------------------------------------------
