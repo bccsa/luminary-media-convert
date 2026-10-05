@@ -28,6 +28,17 @@ Android.
     in landscape and portrait.
   - On the iPhone 13 Pro (Johan, with Apple's bipbop stream): the controls, the menus, picture in
     picture and rotation work. VoiceOver has not been tried.
+- **Inline (step 3): done, and checked in the Simulator against the web frame.**
+  `NativeLuminaryPlayer` draws `player-web`'s windowed frame: video.js's big play button
+  (90 × 49, `rgba(39,39,42,0.6)`, 9 px corners, the font's own play glyph), the poster at full
+  opacity, the centred audio-only note, the audio / video toggle with the web's rules, and the
+  "Coming soon" and error panels with "Try again". It takes the web's `messages` (the same keys
+  and defaults) and a `controls.audioVideoToggle`, and the `coming-soon` and `error` slots.
+- **Errors in full-screen: decided and done.** Full-screen closes on a fatal error, so the inline
+  error panel shows: native does it when its recovery gives up (it works while JavaScript is
+  frozen), and the component does it for an error raised in JavaScript, such as a reload that
+  cannot fetch. Checked in the Simulator: a reload with the server down closed full-screen onto
+  "This video could not be played." and "Try again".
 
 ## Goal
 
@@ -91,8 +102,8 @@ Not shown, as on the web: a title, a quality menu, an angle selector.
 - Live: skip and speed are hidden.
 - Entering full-screen turns to landscape, then follows how the phone is held (decision 5). In
   portrait the controls keep the screen's edges, the picture letterboxed between them.
-- Errors: to be agreed. The web shows video.js's error dialog in full-screen. Proposal: native
-  closes full-screen and shows the inline error panel, where "Try again" already works.
+- Errors: full-screen closes, and the inline error panel shows the message and "Try again". The
+  web shows video.js's error dialog in full-screen instead.
 
 ## Steps
 
@@ -144,6 +155,5 @@ Each is a `bridge.ts` change with a plan 04 scenario, and a protocol bump if it 
 
 ## Open
 
-- Errors in full-screen (above).
 - The exact look of the time and the spinner, which the web has no model for: proposed as white
   text in the controls' 14 px size, and a white ring at the play button's size.

@@ -87,6 +87,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             reattach: { [weak self] in self?.reattach() },
             requestReload: { [weak self] reason, attempt in self?.requestReload(reason, attempt: attempt) },
             onExhausted: { [weak self] failure in
+                // Full-screen would hold a frozen picture: the viewer is taken back to the page,
+                // where the host shows the error and the way to try again (plan 05).
+                self?.exitFullscreen()
                 self?.events?.error(category: failure.category, fatal: true, code: failure.code, message: failure.message)
             }
         ))

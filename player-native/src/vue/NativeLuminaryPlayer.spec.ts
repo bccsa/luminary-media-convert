@@ -141,7 +141,7 @@ describe('NativeLuminaryPlayer', () => {
         expect(plugin.methods()).toEqual(expect.arrayContaining(['enterFullscreen', 'exitFullscreen']));
     });
 
-    it('holds the play button while the native player could not start', async () => {
+    it('says so when the native player could not start, with nothing to retry', async () => {
         vi.stubGlobal('fetch', makeFetch(routesFor(SIMPLE_MASTER)).fetchImpl);
         const plugin = new FakePlugin();
         plugin.failWith('create', 'engine');
@@ -149,8 +149,117 @@ describe('NativeLuminaryPlayer', () => {
         wrappers.push(wrapper);
         await flush();
 
-        expect(wrapper.get('button').attributes('disabled')).toBeDefined();
+        expect(wrapper.text()).toContain('This video could not be played.');
+        expect(wrapper.find('button').exists()).toBe(false);
         expect(plugin.methods()).not.toContain('load');
+    });
+
+    describe("player-web's panels", () => {
+        /** A fatal error from native, after the ladder: what the viewer is told. */
+        async function fail(plugin: FakePlugin, category: 'network' | 'media' | 'other'): Promise<void> {
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+            plugin.emit(
+                'error',
+                { playerId: load.playerId, loadId: load.loadId },
+                { category, fatal: true, code: 'NSURLErrorDomain:-1009', message: 'offline' },
+            );
+            await flush();
+            await nextTick();
+        }
+
+        it('shows the error and tries again from it, as the web player does', async () => {
+            const { plugin, wrapper } = await mountPlayer();
+            await ready(plugin);
+            await fail(plugin, 'network');
+
+            expect(wrapper.text()).toContain('The video could not be reached. Check your connection.');
+            const loads = plugin.argsOf<LoadArgs>('load').length;
+            await wrapper.get('button').trigger('click');
+            await flush();
+            expect(plugin.argsOf<LoadArgs>('load').length).toBe(loads + 1);
+        });
+
+        it('leaves full-screen on an error, so the panel shows', async () => {
+            const { plugin } = await mountPlayer();
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+            plugin.emit('presentationchange', { playerId: load.playerId, loadId: load.loadId }, { state: 'fullscreen' });
+            await flush();
+            await fail(plugin, 'network');
+
+            expect(plugin.methods()).toContain('exitFullscreen');
+        });
+
+        it('leaves an inline player as it is on an error', async () => {
+            const { plugin } = await mountPlayer();
+            await ready(plugin);
+            await fail(plugin, 'network');
+
+            expect(plugin.methods()).not.toContain('exitFullscreen');
+        });
+
+        it('takes the texts a host passes', async () => {
+            const { plugin, wrapper } = await mountPlayer({ messages: { errorMedia: 'Échec', retry: 'Réessayer' } });
+            await ready(plugin);
+            await fail(plugin, 'media');
+
+            expect(wrapper.text()).toContain('Échec');
+            expect(wrapper.get('button').text()).toBe('Réessayer');
+        });
+
+        it('lets a host replace the error panel', async () => {
+            vi.stubGlobal('fetch', makeFetch(routesFor(SIMPLE_MASTER)).fetchImpl);
+            const plugin = new FakePlugin();
+            const wrapper = mount(NativeLuminaryPlayer, {
+                props: { source: { masterUrl: MASTER_URL }, plugin },
+                slots: { error: '<p class="mine">Custom</p>' },
+            });
+            wrappers.push(wrapper);
+            await flush();
+            await flush();
+            await ready(plugin);
+            await fail(plugin, 'other');
+
+            expect(wrapper.find('.mine').exists()).toBe(true);
+            expect(wrapper.text()).not.toContain('This video could not be played.');
+        });
+
+        it('says "Coming soon" while the master is not published yet', async () => {
+            vi.stubGlobal('fetch', makeFetch({}).fetchImpl);
+            const plugin = new FakePlugin();
+            const wrapper = mount(NativeLuminaryPlayer, { props: { source: { masterUrl: MASTER_URL }, plugin } });
+            wrappers.push(wrapper);
+            await flush();
+            await flush();
+
+            expect(wrapper.text()).toContain('Coming soon');
+        });
+    });
+
+    describe("player-web's audio / video toggle", () => {
+        const toggle = (wrapper: VueWrapper) => wrapper.find('button[aria-label="Play audio only"], button[aria-label="Play video"]');
+
+        it('switches to audio only and back', async () => {
+            const { plugin, wrapper } = await mountPlayer();
+            await ready(plugin);
+            expect(toggle(wrapper).attributes('aria-label')).toBe('Play audio only');
+
+            await toggle(wrapper).trigger('click');
+            await flush();
+            await ready(plugin);
+            expect(toggle(wrapper).attributes('aria-label')).toBe('Play video');
+
+            await toggle(wrapper).trigger('click');
+            await flush();
+            await ready(plugin);
+            expect(toggle(wrapper).attributes('aria-label')).toBe('Play audio only');
+        });
+
+        it('is gone when the host switches it off', async () => {
+            const { plugin, wrapper } = await mountPlayer({ controls: { audioVideoToggle: false } });
+            await ready(plugin);
+            expect(toggle(wrapper).exists()).toBe(false);
+        });
     });
 
     describe('the preferred audio language', () => {

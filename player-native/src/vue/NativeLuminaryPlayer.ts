@@ -19,6 +19,7 @@ import {
     type PropType,
 } from 'vue';
 import {
+    AUDIO_ONLY_ANGLE_ID,
     createInitialState,
     findPreferredTrack,
     type PlayerController,
@@ -30,6 +31,8 @@ import {
 import type { LuminaryPlayerPlugin, NowPlaying } from '../bridge.js';
 import { createNativePlayer, type NativePlayer } from '../createNativePlayer.js';
 import { LuminaryPlayer } from '../plugin.js';
+import { DEFAULT_NATIVE_MESSAGES, errorMessage, type NativePlayerMessages } from './messages.js';
+import { VIDEOJS_PLAY_PATH, VIDEOJS_UNITS_PER_EM } from './videoJsIcons.js';
 
 export type NativePresentation = 'inline' | 'fullscreen' | 'pip';
 
@@ -53,8 +56,17 @@ export interface NativeLuminaryPlayerExposed {
     exitFullscreen(): Promise<void>;
 }
 
-const PLAY_ICON = 'M8 5.5v13l10.5-6.5z';
-const NOTE_ICON = 'M12 3v10.55A4 4 0 1 0 14 17V7h4V3z';
+/** What a host can switch off, as `player-web`'s `controls` prop. */
+export interface NativeLuminaryPlayerControls {
+    /** The audio / video toggle at the top right. Default true. */
+    audioVideoToggle: boolean;
+}
+
+// heroicons, as `player-web` draws them: 24/outline "film" and 24/solid "musical-note".
+const FILM_ICON =
+    'M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h1.5C5.496 19.5 6 18.996 6 18.375m-3.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-1.5A1.125 1.125 0 0 1 18 18.375M20.625 4.5H3.375m17.25 0c.621 0 1.125.504 1.125 1.125M20.625 4.5h-1.5C18.504 4.5 18 5.004 18 5.625m3.75 0v1.5c0 .621-.504 1.125-1.125 1.125M3.375 4.5c-.621 0-1.125.504-1.125 1.125M3.375 4.5h1.5C5.496 4.5 6 5.004 6 5.625m-3.75 0v1.5c0 .621.504 1.125 1.125 1.125m0 0h1.5m-1.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m1.5-3.75C5.496 8.25 6 7.746 6 7.125v-1.5M4.875 8.25C5.496 8.25 6 8.754 6 9.375v1.5m0-5.25v5.25m0-5.25C6 5.004 6.504 4.5 7.125 4.5h9.75c.621 0 1.125.504 1.125 1.125m1.125 2.625h1.5m-1.5 0A1.125 1.125 0 0 1 18 7.125v-1.5m1.125 2.625c-.621 0-1.125.504-1.125 1.125v1.5m2.625-2.625c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125M18 5.625v5.25M7.125 12h9.75m-9.75 0A1.125 1.125 0 0 1 6 10.875M7.125 12C6.504 12 6 12.504 6 13.125m0-2.25C6 11.496 5.496 12 4.875 12M18 10.875c0 .621-.504 1.125-1.125 1.125M18 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m-12 5.25v-5.25m0 5.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125m-12 0v-1.5c0-.621-.504-1.125-1.125-1.125M18 18.375v-5.25m0 5.25v-1.5c0-.621.504-1.125 1.125-1.125M18 13.125v1.5c0 .621.504 1.125 1.125 1.125M18 13.125c0-.621.504-1.125 1.125-1.125M6 13.125v1.5c0 .621-.504 1.125-1.125 1.125M6 13.125C6 12.504 5.496 12 4.875 12m-1.5 0h1.5m-1.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M19.125 12h1.5m0 0c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h1.5m14.25 0h1.5';
+const NOTE_ICON =
+    'M19.952 1.651a.75.75 0 0 1 .298.599V16.303a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.403-4.909l2.311-.66a1.5 1.5 0 0 0 1.088-1.442V6.994l-9 2.572v9.737a3 3 0 0 1-2.176 2.884l-1.32.377a2.553 2.553 0 1 1-1.402-4.909l2.31-.66a1.5 1.5 0 0 0 1.088-1.442V5.25a.75.75 0 0 1 .544-.721l10.5-3a.75.75 0 0 1 .658.122Z';
 
 export const NativeLuminaryPlayer = defineComponent({
     name: 'NativeLuminaryPlayer',
@@ -69,6 +81,10 @@ export const NativeLuminaryPlayer = defineComponent({
         preferredLanguage: { type: String, default: undefined },
         /** What the lock screen and Control Center show. The poster is the artwork when it has none. */
         nowPlaying: { type: Object as PropType<NowPlaying>, default: undefined },
+        /** Strings to override, as `player-web`'s `messages` prop. */
+        messages: { type: Object as PropType<Partial<NativePlayerMessages>>, default: undefined },
+        /** Controls to switch off, as `player-web`'s `controls` prop. */
+        controls: { type: Object as PropType<Partial<NativeLuminaryPlayerControls>>, default: undefined },
         /** The plugin to drive; the Capacitor one unless a host supplies another. */
         plugin: { type: Object as PropType<LuminaryPlayerPlugin>, default: () => LuminaryPlayer },
         /** See `NativePlayerOptions.onAppResume`. */
@@ -226,65 +242,215 @@ export const NativeLuminaryPlayer = defineComponent({
             if (!state.value.isAudioOnly) await enterFullscreen();
         }
 
+        // An error leaves full-screen on a frozen picture: back to the page, where the error panel
+        // says what happened and offers to try again (plan 05). Native does the same when its own
+        // recovery gives up; this covers an error raised here, such as a reload that cannot fetch.
+        watch(
+            () => state.value.lifecycle,
+            (lifecycle) => {
+                if (lifecycle === 'error' && presentation.value !== 'inline') void exitFullscreen();
+            },
+        );
+
+        /** Loads the source again: the error panel's "Try again", as on the web. */
+        function retry() {
+            void controller.value?.load(props.source);
+        }
+
         expose({ controller, state, play, pause, seek, enterFullscreen, exitFullscreen });
 
-        return () =>
-            h('div', { class: 'native-luminary-player', style: STYLES.root }, [
+        // --- the audio / video toggle: `player-web`'s AudioVideoToggle ----------------------
+
+        const messages = computed<NativePlayerMessages>(() => ({ ...DEFAULT_NATIVE_MESSAGES, ...props.messages }));
+        const isAudio = computed(
+            () => state.value.isAudioOnly || state.value.activeAngleId === AUDIO_ONLY_ANGLE_ID,
+        );
+        /** The last real angle seen playing: where the video half returns to. */
+        let previousAngleId: string | null = null;
+        watch(
+            () => state.value.activeAngleId,
+            (id) => {
+                if (id && id !== AUDIO_ONLY_ANGLE_ID) previousAngleId = id;
+            },
+            { immediate: true },
+        );
+
+        /** Shown when there is an audio-only pseudo-angle, and a video one to come back to. */
+        const showToggle = computed(() => {
+            if (props.controls?.audioVideoToggle === false || controller.value === null) return false;
+            const current = state.value;
+            if (current.lifecycle !== 'ready') return false;
+            if (!current.angles.some((angle) => angle.id === AUDIO_ONLY_ANGLE_ID)) return false;
+            return !isAudio.value || current.angles.some((angle) => angle.id !== AUDIO_ONLY_ANGLE_ID);
+        });
+
+        function toggleAudioVideo() {
+            const active = controller.value;
+            if (!active) return;
+            if (!isAudio.value) {
+                void active.setAngle(AUDIO_ONLY_ANGLE_ID);
+                return;
+            }
+            const angles = state.value.angles.filter((angle) => angle.id !== AUDIO_ONLY_ANGLE_ID);
+            const target = previousAngleId ?? angles.find((angle) => angle.isDefault)?.id ?? angles[0]?.id;
+            if (target) void active.setAngle(target);
+        }
+
+        function toggle() {
+            const half = (active: boolean, icon: ReturnType<typeof h>) =>
+                h('span', { style: { ...STYLES.toggleHalf, ...(active ? STYLES.toggleHalfActive : {}) } }, [icon]);
+            const color = (active: boolean) => (active ? '#ffffff' : '#27272a');
+            return h(
+                'button',
+                {
+                    type: 'button',
+                    'aria-label': isAudio.value ? messages.value.videoModeLabel : messages.value.audioModeLabel,
+                    style: STYLES.toggle,
+                    onClick: toggleAudioVideo,
+                },
+                [
+                    half(!isAudio.value, heroicon(FILM_ICON, { ...STYLES.toggleIcon, color: color(!isAudio.value) }, 'stroke')),
+                    half(isAudio.value, heroicon(NOTE_ICON, { ...STYLES.toggleIcon, color: color(isAudio.value) }, 'fill')),
+                ],
+            );
+        }
+
+        function panel() {
+            const current = state.value;
+            if (current.lifecycle === 'waiting-for-master') {
+                return (
+                    slots['coming-soon']?.({ state: current }) ??
+                    h('div', { style: STYLES.panel }, [h('p', { style: STYLES.panelText }, messages.value.comingSoon)])
+                );
+            }
+            if (current.lifecycle === 'error') {
+                return (
+                    slots.error?.({ state: current, error: current.error, retry }) ??
+                    h('div', { style: STYLES.panel }, [
+                        h('p', { style: STYLES.panelText }, errorMessage(messages.value, current.error)),
+                        // Retrying needs a player; one that could not be created has nothing to retry with.
+                        controller.value
+                            ? h('button', { type: 'button', style: STYLES.retry, onClick: retry }, messages.value.retry)
+                            : null,
+                    ])
+                );
+            }
+            return null;
+        }
+
+        return () => {
+            const ready = state.value.lifecycle === 'ready';
+            return h('div', { class: 'native-luminary-player', style: STYLES.root }, [
                 props.poster ? h('img', { src: props.poster, alt: '', style: STYLES.poster }) : null,
                 // Audio-only shows the poster under a note, as the web player does.
-                state.value.isAudioOnly ? icon(NOTE_ICON, STYLES.glyph) : null,
-                h(
-                    'button',
-                    {
-                        type: 'button',
-                        'aria-label': 'Play',
-                        disabled: state.value.lifecycle !== 'ready',
-                        style: { ...STYLES.play, opacity: state.value.lifecycle === 'ready' ? 1 : 0.4 },
-                        onClick: () => void playFromPoster(),
-                    },
-                    [icon(PLAY_ICON, STYLES.playIcon)],
-                ),
-                slots.default?.({ state: state.value, presentation: presentation.value }),
+                state.value.isAudioOnly ? heroicon(NOTE_ICON, STYLES.glyph, 'fill') : null,
+                ready
+                    ? h(
+                          'button',
+                          {
+                              type: 'button',
+                              'aria-label': messages.value.play,
+                              style: STYLES.play,
+                              onClick: () => void playFromPoster(),
+                          },
+                          [playGlyph()],
+                      )
+                    : null,
+                h('div', { style: STYLES.slot }, slots.default?.({ state: state.value, presentation: presentation.value })),
+                panel(),
+                showToggle.value ? toggle() : null,
             ]);
+        };
     },
 });
 
-function icon(path: string, style: Record<string, string>) {
-    return h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true', style }, [h('path', { d: path })]);
+/** A heroicon: the outline set strokes, the solid set fills. */
+function heroicon(path: string, style: Record<string, string>, paint: 'stroke' | 'fill') {
+    const attributes =
+        paint === 'stroke'
+            ? { fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }
+            : { fill: 'currentColor', 'fill-rule': 'evenodd', 'clip-rule': 'evenodd' };
+    return h('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true', style }, [h('path', { d: path, ...attributes })]);
 }
 
+/** video.js's play glyph, in font units with y upwards, flipped into the SVG's y-down box. */
+function playGlyph() {
+    const em = VIDEOJS_UNITS_PER_EM;
+    return h('svg', { viewBox: `0 0 ${em} ${em}`, 'aria-hidden': 'true', style: STYLES.playIcon }, [
+        h('path', { d: VIDEOJS_PLAY_PATH, transform: `matrix(1 0 0 -1 0 ${em})`, fill: '#ffffff' }),
+    ]);
+}
+
+/** `player-web`'s windowed frame, measured at phone width (plan 05): `styles.css` and video.js. */
 const STYLES = {
     root: { position: 'relative', aspectRatio: '16 / 9', background: '#000', overflow: 'hidden' },
-    poster: {
-        position: 'absolute',
-        inset: '0',
-        width: '100%',
-        height: '100%',
-        objectFit: 'cover',
-        opacity: '0.8',
-    },
+    poster: { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'cover' },
     glyph: {
         position: 'absolute',
-        inset: '22% auto auto 50%',
-        transform: 'translateX(-50%)',
+        top: '50%',
+        left: '50%',
         width: '4rem',
         height: '4rem',
-        fill: 'rgba(255, 255, 255, 0.85)',
+        transform: 'translate(-50%, -50%)',
+        color: 'rgba(255, 255, 255, 0.85)',
         filter: 'drop-shadow(0 1px 6px rgba(0, 0, 0, 0.55))',
     },
+    // video.js's big play button: 3 × 1.63332 em at 30 px, corners 0.3 em, the skin's colour.
     play: {
         position: 'absolute',
-        inset: '50% auto auto 50%',
+        top: '50%',
+        left: '50%',
+        width: '90px',
+        height: '49px',
         transform: 'translate(-50%, -50%)',
-        width: '72px',
-        height: '72px',
         border: 'none',
-        borderRadius: '50%',
-        background: 'rgba(28, 28, 30, 0.9)',
-        fill: '#fff',
+        borderRadius: '9px',
+        background: 'rgba(39, 39, 42, 0.6)',
         display: 'grid',
         placeItems: 'center',
         padding: '0',
+        cursor: 'pointer',
     },
-    playIcon: { width: '36px', height: '36px' },
+    playIcon: { width: '48px', height: '48px' },
+    slot: { position: 'absolute', inset: '0', pointerEvents: 'none' },
+    panel: {
+        position: 'absolute',
+        inset: '0',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '0.875rem',
+        padding: '1.5rem',
+        textAlign: 'center',
+        background: 'rgba(9, 9, 11, 0.72)',
+        boxSizing: 'border-box',
+        zIndex: '3',
+    },
+    panelText: { margin: '0', fontSize: '1rem', lineHeight: '1.4', color: '#fff' },
+    retry: {
+        appearance: 'none',
+        border: '1px solid rgba(255, 255, 255, 0.16)',
+        borderRadius: '6px',
+        background: 'transparent',
+        color: '#fff',
+        font: 'inherit',
+        padding: '0.45rem 0.9rem',
+        cursor: 'pointer',
+    },
+    toggle: {
+        position: 'absolute',
+        top: '0.5rem',
+        right: '0.5rem',
+        zIndex: '4',
+        display: 'flex',
+        padding: '0',
+        border: 'none',
+        borderRadius: '0.5rem',
+        backgroundColor: 'rgba(113, 113, 122, 0.7)',
+        cursor: 'pointer',
+    },
+    toggleHalf: { display: 'flex', padding: '0.25rem', borderRadius: '0.5rem', backgroundColor: 'transparent' },
+    toggleHalfActive: { backgroundColor: 'rgba(24, 24, 27, 0.6)' },
+    toggleIcon: { display: 'block', height: '1.5rem', width: '1.5rem' },
 } satisfies Record<string, Record<string, string>>;
