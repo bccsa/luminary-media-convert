@@ -11,7 +11,7 @@ Android.
 
 ## Status (2026-10-05)
 
-- **iOS full-screen: built, and checked in the Simulator; not yet on the device.**
+- **iOS full-screen: built, and working on the iPhone; VoiceOver still to check.**
   - `LuminaryFullscreenPresenter` replaces `PlayerViewControllerPresenter`: our own view, with
     the video in an `AVPlayerLayer` and picture in picture through
     `AVPictureInPictureController`, keeping phase 2's rules.
@@ -24,8 +24,10 @@ Android.
     (step 4).
   - Measured against `player-web` in the Lab's Web mode at 844×390: play 96 pt, skips 56 pt at
     ±72 pt and 14 pt up, a 44 pt top row, the progress track 4 pt.
-  - In the Simulator: controls over a playing video, hidden after 3 s, and kept while paused.
-    Picture in picture, the menus, scrubbing, VoiceOver and rotation are for the device pass.
+  - In the Simulator: controls over a playing video, hidden after 3 s, and kept while paused,
+    in landscape and portrait.
+  - On the iPhone 13 Pro (Johan, with Apple's bipbop stream): the controls, the menus, picture in
+    picture and rotation work. VoiceOver has not been tried.
 
 ## Goal
 
