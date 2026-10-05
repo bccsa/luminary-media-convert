@@ -482,7 +482,14 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         this.destroyed = true;
         this.emitter.clear();
         this.choiceListeners.clear();
-        for (const teardown of this.teardowns.splice(0)) teardown();
+        // A host's teardown that throws must not keep native playing.
+        for (const teardown of this.teardowns.splice(0)) {
+            try {
+                teardown();
+            } catch (error) {
+                this.report('destroy', error);
+            }
+        }
         for (const listener of this.listeners) {
             void listener.then((handle) => handle.remove()).catch(() => undefined);
         }

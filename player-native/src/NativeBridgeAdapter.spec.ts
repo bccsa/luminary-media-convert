@@ -481,4 +481,19 @@ describe('NativeBridgeAdapter — destroy', () => {
         expect(plugin.listenerCount()).toBe(0);
         expect(() => emitNow('timeupdate', { currentTime: 5 })).not.toThrow();
     });
+
+    it('still destroys the native player when a host teardown throws', async () => {
+        const { controller, adapter, plugin, reports } = await setup();
+        await controller.load({ masterUrl: MASTER_URL });
+        adapter.onDestroy(() => {
+            throw new TypeError('handle.then is not a function');
+        });
+
+        controller.destroy();
+        await flush();
+
+        expect(plugin.methods().slice(-2)).toEqual(['releaseAssets', 'destroy']);
+        expect(plugin.listenerCount()).toBe(0);
+        expect(reports).toEqual(['destroy']);
+    });
 });
