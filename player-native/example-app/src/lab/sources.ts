@@ -40,6 +40,11 @@ export function presets(): LabSource[] {
             label: 'Apple bipbop · fMP4, many languages',
             masterUrl: 'https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8',
         },
+        {
+            id: 'angel-one',
+            label: 'Angel One · 5 audio languages, 4 subtitles (Shaka demo)',
+            masterUrl: 'https://storage.googleapis.com/shaka-demo-assets/angel-one-hls/hls.m3u8',
+        },
         { id: 'custom', label: 'Custom URL', masterUrl: '' },
     ];
 }
