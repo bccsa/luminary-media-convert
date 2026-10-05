@@ -14,7 +14,10 @@
 /// It lives beside the engine because a locked screen freezes JavaScript while AVPlayer keeps
 /// playing: a ladder in the web view would be frozen exactly when it is needed. Its timers run on
 /// the ``Clock``, which is monotonic, so an error that recurs the instant playback resumes is
-/// seen as recurring rather than fresh. Main thread only.
+/// seen as recurring rather than fresh. A reload asked for while the app is suspended is held
+/// here for `resumed()`, where nothing was listening; it goes with everything else the ladder
+/// forgets, so a resume never rebuilds a source the ladder has reported as failed. Main thread
+/// only.
 public final class RecoveryLadder {
     public enum Reason: String, Sendable {
         case wedged, fatal
@@ -67,6 +70,11 @@ public final class RecoveryLadder {
     private var triedInPlace = false
     private var timer: Cancellable?
     private var stopped = false
+    /// Every rung spent and the failure reported: the next failure that counts is one after
+    /// playback moved again.
+    private var exhausted = false
+    private var suspended = false
+    private var held: PendingReload?
     /// A reload asked for and not yet answered by playback moving again.
     public private(set) var pendingReload = false
 
@@ -83,7 +91,7 @@ public final class RecoveryLadder {
 
     /// A failure the engine could not get past.
     public func note(_ failure: Failure, reason: Reason = .fatal) {
-        guard !stopped else { return }
+        guard !stopped, !exhausted else { return }
         let at = clock.now()
         let recurring = lastCategory == failure.category && (at - lastAt) * 1000 <= policy.escalationWindowMs
         lastCategory = failure.category
@@ -99,13 +107,18 @@ public final class RecoveryLadder {
     }
 
     /// Playback is moving again. Everything resets, including a reload still outstanding: it
-    /// either arrived and worked, or stopped mattering.
+    /// either arrived and worked, or stopped mattering. A rung still scheduled is dropped too:
+    /// it would rebuild a player that has recovered.
     public func notePlaybackHealthy() {
         lastCategory = nil
         lastAt = 0
         attempts = 0
         triedInPlace = false
+        exhausted = false
         pendingReload = false
+        held = nil
+        timer?.cancel()
+        timer = nil
     }
 
     /// A source was loaded. Resets the ladder, unless this is the reload the ladder asked for:
@@ -115,11 +128,23 @@ public final class RecoveryLadder {
         notePlaybackHealthy()
     }
 
+    /// The app went to the background (true) or came back (false).
+    public func setAppSuspended(_ suspended: Bool) {
+        self.suspended = suspended
+    }
+
+    /// The reload held while the app was in the background, handed over once.
+    public func takeHeldReload() -> PendingReload? {
+        defer { held = nil }
+        return held
+    }
+
     public func destroy() {
         stopped = true
         timer?.cancel()
         timer = nil
         pendingReload = false
+        held = nil
     }
 
     private func climb(_ failure: Failure, reason: Reason) {
@@ -127,8 +152,10 @@ public final class RecoveryLadder {
         guard timer == nil else { return }
 
         if attempts >= policy.maxReloadAttempts {
-            // Nothing is outstanding once the ladder has given up.
+            // Nothing is outstanding once the ladder has given up, and it is reported once.
+            exhausted = true
             pendingReload = false
+            held = nil
             hooks.onExhausted(failure)
             return
         }
@@ -147,9 +174,14 @@ public final class RecoveryLadder {
                 return
             }
             // Rung 2 and up. Remembered before it is raised, so the source JavaScript rebuilds
-            // keeps the count.
+            // keeps the count. Raised at once while JavaScript can act on it; held while the
+            // app is in the background.
             self.pendingReload = true
-            self.hooks.requestReload(reason, attempt + 1)
+            if self.suspended {
+                self.held = PendingReload(reason: reason.rawValue, attempt: attempt + 1)
+            } else {
+                self.hooks.requestReload(reason, attempt + 1)
+            }
         }
     }
 }

@@ -36,9 +36,6 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var poll: Cancellable?
     private var nowPlaying: NowPlayingController?
     private var ladder: RecoveryLadder?
-    /// The app is in the background: JavaScript is frozen, so a reload asked for now is held.
-    private var appSuspended = false
-    private var heldReload: PendingReload?
     /// Whether playback should be running: every play and pause, whoever made it, but not a
     /// failure, which stops the player without the viewer asking. A re-attach resumes from it.
     private var intendedPlaying = false
@@ -85,7 +82,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             // AVPlayer offers no in-place repair: the rung is skipped rather than pretended.
             recoverInPlace: { _ in false },
             reattach: { [weak self] in self?.reattach() },
-            requestReload: { [weak self] reason, attempt in self?.requestReload(reason, attempt: attempt) },
+            requestReload: { [weak self] reason, attempt in self?.events?.reloadRequested(reason: reason.rawValue, attempt: attempt) },
             onExhausted: { [weak self] failure in
                 // Full-screen would hold a frozen picture: the viewer is taken back to the page,
                 // where the host shows the error and the way to try again (plan 05).
@@ -297,7 +294,6 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     public func destroy() {
         ladder?.destroy()
         ladder = nil
-        heldReload = nil
         nowPlaying?.clear()
         nowPlaying = nil
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
@@ -403,7 +399,6 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         case .playing:
             intendedPlaying = true
             ladder?.notePlaybackHealthy()
-            heldReload = nil
             if stalled {
                 stalled = false
                 events?.stalled(false)
@@ -462,23 +457,12 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         )
     }
 
-    /// Sent at once while JavaScript can act on it; held for `resumed()` while the app is in the
-    /// background, where nothing is listening.
-    private func requestReload(_ reason: RecoveryLadder.Reason, attempt: Int) {
-        if appSuspended {
-            heldReload = PendingReload(reason: reason.rawValue, attempt: attempt)
-        } else {
-            events?.reloadRequested(reason: reason.rawValue, attempt: attempt)
-        }
-    }
-
     public func setAppSuspended(_ suspended: Bool) {
-        appSuspended = suspended
+        ladder?.setAppSuspended(suspended)
     }
 
     public func takeHeldReload() -> PendingReload? {
-        defer { heldReload = nil }
-        return heldReload
+        ladder?.takeHeldReload()
     }
 
     // MARK: Audio

@@ -139,6 +139,88 @@ struct RecoveryLadderTests {
         #expect(!ladder.pendingReload)
     }
 
+    @Test("a rung scheduled before playback recovered does not fire")
+    func healthyCancelsRung() {
+        let recorder = Recorder()
+        let ladder = ladder(recorder)
+        ladder.note(failure)
+        recorder.clock.advance(1)
+
+        ladder.notePlaybackHealthy()
+        recorder.clock.advance(10)
+
+        #expect(recorder.steps == ["in-place"])
+    }
+
+    @Test("a rung scheduled before another source loaded does not fire")
+    func sourceLoadedCancelsRung() {
+        let recorder = Recorder()
+        let ladder = ladder(recorder)
+        ladder.note(failure)
+        recorder.clock.advance(1)
+
+        ladder.noteSourceLoaded()
+        recorder.clock.advance(10)
+
+        #expect(recorder.steps == ["in-place"])
+    }
+
+    @Test("reports the failure once; the next failure that counts is after playback moved again")
+    func exhaustedOnce() {
+        let recorder = Recorder()
+        let ladder = ladder(recorder, policy: RecoveryPolicy(escalationWindowMs: 10_000, maxReloadAttempts: 1, reloadDelaysMs: [1_000]))
+        ladder.note(failure)
+        recorder.clock.advance(1)
+        ladder.note(failure)
+        ladder.note(failure)
+        ladder.note(failure)
+        #expect(recorder.steps == ["in-place", "reattach@1.0", "exhausted:network-error"])
+
+        ladder.notePlaybackHealthy()
+        ladder.note(failure)
+        #expect(recorder.steps.last == "in-place")
+    }
+
+    @Test("a reload asked for while the app is suspended is held for the resume, once")
+    func heldWhileSuspended() {
+        let recorder = Recorder()
+        let ladder = ladder(recorder)
+        ladder.note(failure)
+        recorder.clock.advance(2)
+        ladder.setAppSuspended(true)
+        ladder.note(failure)
+        recorder.clock.advance(4)
+
+        #expect(recorder.steps == ["in-place", "reattach@2.0"])
+        #expect(ladder.pendingReload)
+        #expect(ladder.takeHeldReload() == PendingReload(reason: "fatal", attempt: 2))
+        #expect(ladder.takeHeldReload() == nil)
+    }
+
+    @Test("a held reload is dropped once the failure is reported, and once playback moves again")
+    func heldDropped() {
+        let recorder = Recorder()
+        let policy = RecoveryPolicy(escalationWindowMs: 10_000, maxReloadAttempts: 2, reloadDelaysMs: [1_000])
+        let ladder = ladder(recorder, policy: policy)
+        ladder.setAppSuspended(true)
+        ladder.note(failure)
+        recorder.clock.advance(1)
+        ladder.note(failure)
+        recorder.clock.advance(1)
+        ladder.note(failure)
+        #expect(recorder.steps.last == "exhausted:network-error")
+        #expect(ladder.takeHeldReload() == nil)
+
+        let again = self.ladder(recorder, policy: policy)
+        again.setAppSuspended(true)
+        again.note(failure)
+        recorder.clock.advance(1)
+        again.note(failure)
+        recorder.clock.advance(1)
+        again.notePlaybackHealthy()
+        #expect(again.takeHeldReload() == nil)
+    }
+
     @Test("a destroyed ladder does nothing more")
     func destroyed() {
         let recorder = Recorder()
