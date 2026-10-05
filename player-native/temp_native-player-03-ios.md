@@ -167,6 +167,22 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
   - **Open:** a device run once the permission is back, the conformance harness's route result
     (it has no shape for a live answer), and Android's `LiveDataSource`. `live` turns on only when
     both platforms pass.
+- **Phase 5: built and unit-tested; `chunkWarming` stays `false`.**
+  - `ChunkWarmer` ports `player-web/src/adapter/chunkWarming.ts` and the nine rules of
+    `docs/chunk-warming.md`: a 1 s tick on the core's `Clock` reads `max(bufferedEnd,
+    currentTime)`, warms the next chunk object within `leadSeconds` with `Range: bytes=0-…`
+    through `URLSession`, at most once each, never a chain's first, swallowing every failure, and
+    stops once nothing is left. Its tests port `chunkWarming.test.ts` case for case.
+  - `PlayerHost` keeps one warmer per load (a reattach keeps it), ignores a call for a load it
+    replaced, and stops it on the next load and on destroy.
+  - `NativeLuminaryPlayer` no longer turns warming off: whether the adapter warms is native's
+    `chunkWarming` capability, as for every other parity-gated feature.
+  - In the Simulator, with the capability switched on locally and the forward buffer held to
+    5 s: the Sample's `angle0_1.m4s` and `audio_1.m4s` were warmed on the first tick (206, 65 536
+    bytes each), and the ticker stopped. Without that limit the 2-minute Sample is buffered whole
+    from a local server before the first tick, and there is nothing ahead to warm.
+  - **Open:** a run behind a byte-range CDN, where warming earns its keep, and Android's
+    `ChunkWarmer.kt`. `chunkWarming` turns on only when both platforms pass.
 - **Still to agree with Dirk:** packaging (SwiftPM and a podspec from the same sources).
 
 ## What carries over from the original "AVPlayer plugin design"

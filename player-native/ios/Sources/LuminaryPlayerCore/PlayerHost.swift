@@ -1,4 +1,5 @@
-/// One player: its ``AssetStore``, ``KeyHolder``, ``UriRouter``, ``Engine`` and ``EventSink``.
+/// One player: its ``AssetStore``, ``KeyHolder``, ``UriRouter``, ``Engine``, ``EventSink`` and
+/// ``ChunkWarmer``.
 /// Main thread only.
 public final class PlayerHost {
     public let playerId: String
@@ -9,7 +10,11 @@ public final class PlayerHost {
     private let assets: AssetStore
     private let key: KeyHolder
     private let sink: EventSink
+    private let clock: Clock
+    private let warmFetch: ChunkWarmer.Fetch
     private var loadId: String?
+    /// Warms the current load's chunks; a new load gets a new one, a reattach keeps it.
+    private var warmer: ChunkWarmer?
 
     init(
         playerId: String,
@@ -17,7 +22,8 @@ public final class PlayerHost {
         variantSwitching: Bool,
         options: CreateOptions,
         engineFactory: EngineFactory,
-        emit: @escaping EventSink.Emit
+        emit: @escaping EventSink.Emit,
+        warmFetch: @escaping ChunkWarmer.Fetch
     ) {
         let assets = AssetStore()
         let key = KeyHolder()
@@ -28,6 +34,8 @@ public final class PlayerHost {
         self.key = key
         self.router = router
         self.engine = engine
+        self.clock = clock
+        self.warmFetch = warmFetch
         sink = EventSink(
             playerId: playerId,
             clock: clock,
@@ -42,6 +50,9 @@ public final class PlayerHost {
     /// new one.
     func load(_ args: LoadArgs) {
         generation = args.generation
+        // A new source: whatever was warming belongs to the one it replaces.
+        warmer?.stop()
+        warmer = nil
         assets.put(args.generation, args.assets)
         key.set(hex: args.keyHex)
         beginLoad(args.loadId)
@@ -74,6 +85,19 @@ public final class PlayerHost {
         assets.putLive(generation, uri, spec)
     }
 
+    /// For the current load only: a call for one it replaced is ignored.
+    func warmChunks(loadId: String, schedules: [JSON], leadSeconds: Double, warmBytes: Double) {
+        guard loadId == self.loadId else { return }
+        let boundaries = ChunkBoundary.schedules(schedules)
+        if warmer == nil {
+            warmer = ChunkWarmer(clock: clock, watermark: { [weak engine] in
+                guard let snapshot = engine?.snapshot() else { return .nan }
+                return max(snapshot.bufferedEnd, snapshot.currentTime)
+            }, fetch: warmFetch)
+        }
+        warmer?.start(boundaries, leadSeconds: leadSeconds, warmBytes: Int(warmBytes))
+    }
+
     func releaseAssets(_ generation: Int) {
         assets.release(generation)
     }
@@ -93,6 +117,8 @@ public final class PlayerHost {
     }
 
     func destroy() {
+        warmer?.stop()
+        warmer = nil
         sink.close()
         key.zero()
         assets.clear()

@@ -109,7 +109,6 @@ export const NativeLuminaryPlayer = defineComponent({
                 created = await createNativePlayer({
                     plugin: props.plugin,
                     onAppResume: props.onAppResume,
-                    controller: { prefetch: { enabled: false } },
                 });
             } catch (error) {
                 startError.value = {

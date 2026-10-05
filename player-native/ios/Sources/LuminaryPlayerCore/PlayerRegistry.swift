@@ -8,6 +8,7 @@ public final class PlayerRegistry {
     private let clock: Clock
     private let engineFactory: EngineFactory
     private let emit: EventSink.Emit
+    private let warmFetch: ChunkWarmer.Fetch
 
     /// Insertion order, so the oldest player is the first to go when `maxPlayers` is reached.
     private var players: [(id: String, host: PlayerHost)] = []
@@ -21,12 +22,14 @@ public final class PlayerRegistry {
         capabilities: BridgeCapabilities,
         clock: Clock,
         engineFactory: @escaping EngineFactory,
-        emit: @escaping EventSink.Emit
+        emit: @escaping EventSink.Emit,
+        warmFetch: @escaping ChunkWarmer.Fetch = ChunkWarmer.urlSessionFetch
     ) {
         self.capabilities = capabilities
         self.clock = clock
         self.engineFactory = engineFactory
         self.emit = emit
+        self.warmFetch = warmFetch
     }
 
     /// Resolves with the call's JSON answer, or throws a ``BridgeRejection``.
@@ -79,6 +82,8 @@ public final class PlayerRegistry {
         case .load(let args): player.load(args)
         case .putAssets(_, let generation, let assets): player.putAssets(generation, assets)
         case .putLive(_, let generation, let uri, let spec): player.putLive(generation, uri, spec)
+        case .warmChunks(_, let loadId, let schedules, let leadSeconds, let warmBytes):
+            player.warmChunks(loadId: loadId, schedules: schedules, leadSeconds: leadSeconds, warmBytes: warmBytes)
         case .releaseAssets(_, let generation): player.releaseAssets(generation)
         case .reattach(_, let loadId): player.reattach(loadId: loadId)
         case .play: engine.play()
@@ -90,9 +95,6 @@ public final class PlayerRegistry {
         case .enterFullscreen: engine.enterFullscreen()
         case .exitFullscreen: player.exitFullscreen()
         case .resumed: return player.resumed().json
-        // Refused by its capability until phase 5 turns it on.
-        case .warmChunks:
-            throw BridgeRejection(.unsupported, "not implemented on this device")
         case .getInfo, .reset, .create, .destroy:
             preconditionFailure("handled by the registry")
         }
@@ -123,7 +125,8 @@ public final class PlayerRegistry {
             variantSwitching: capabilities.variantSwitching,
             options: options,
             engineFactory: engineFactory,
-            emit: emit
+            emit: emit,
+            warmFetch: warmFetch
         )
         players.append((playerId, host))
         current = host
