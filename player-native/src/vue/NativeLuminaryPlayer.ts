@@ -49,7 +49,8 @@ export interface NativeLuminaryPlayerSlotProps {
 export interface NativeLuminaryPlayerExposed {
     readonly controller: PlayerController | null;
     readonly state: Readonly<PlayerState>;
-    play(): Promise<void> | undefined;
+    /** Resolves false when playback was refused, as the web player's does; it never rejects. */
+    play(): Promise<boolean>;
     pause(): void;
     seek(seconds: number): void;
     enterFullscreen(): Promise<void>;
@@ -221,8 +222,17 @@ export const NativeLuminaryPlayer = defineComponent({
 
         watch([() => state.value.audioTracks, () => props.preferredLanguage], applyPreferredLanguage);
 
-        function play() {
-            return controller.value?.play();
+        /**
+         * As `player-web`'s: a refusal is an outcome, not an exception, so the caller can leave
+         * the poster up rather than handle a rejection. `void player.play()` is how hosts call it.
+         */
+        async function play(): Promise<boolean> {
+            try {
+                await controller.value?.play();
+                return true;
+            } catch {
+                return false;
+            }
         }
         function pause() {
             controller.value?.pause();
@@ -230,11 +240,16 @@ export const NativeLuminaryPlayer = defineComponent({
         function seek(seconds: number) {
             controller.value?.seek(seconds);
         }
+        // A refused presentation is reported, not thrown: a player another create has replaced
+        // rejects every call, and nothing on the page would catch it.
         async function enterFullscreen() {
-            if (native.value) await props.plugin.enterFullscreen({ playerId: native.value.playerId });
+            if (native.value) await report('enterFullscreen', props.plugin.enterFullscreen({ playerId: native.value.playerId }));
         }
         async function exitFullscreen() {
-            if (native.value) await props.plugin.exitFullscreen({ playerId: native.value.playerId });
+            if (native.value) await report('exitFullscreen', props.plugin.exitFullscreen({ playerId: native.value.playerId }));
+        }
+        function report(method: string, call: Promise<void>): Promise<void> {
+            return call.catch((error: unknown) => console.warn(`[luminary-native] ${method} failed`, error));
         }
         /** Video plays in native full-screen; audio-only has no view, so it just plays where it is. */
         async function playFromPoster() {

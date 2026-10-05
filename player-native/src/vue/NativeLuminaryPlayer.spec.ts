@@ -141,6 +141,22 @@ describe('NativeLuminaryPlayer', () => {
         expect(plugin.methods()).toEqual(expect.arrayContaining(['enterFullscreen', 'exitFullscreen']));
     });
 
+    it('reports a refused play as false and a refused presentation as a warning, never a rejection', async () => {
+        const { plugin, exposed, wrapper } = await mountPlayer();
+        await ready(plugin);
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        plugin.failWith('play', 'engine');
+        plugin.failWith('enterFullscreen', 'unknown-player');
+
+        await expect(exposed.play()).resolves.toBe(false);
+        await exposed.enterFullscreen();
+        await wrapper.get('button').trigger('click');
+        await flush();
+
+        expect(warn).toHaveBeenCalledWith('[luminary-native] enterFullscreen failed', expect.anything());
+        warn.mockRestore();
+    });
+
     it('says so when the native player could not start, with nothing to retry', async () => {
         vi.stubGlobal('fetch', makeFetch(routesFor(SIMPLE_MASTER)).fetchImpl);
         const plugin = new FakePlugin();
@@ -188,6 +204,22 @@ describe('NativeLuminaryPlayer', () => {
             await fail(plugin, 'network');
 
             expect(plugin.methods()).toContain('exitFullscreen');
+        });
+
+        it('reports an exit from full-screen that native refuses on an error', async () => {
+            const { plugin } = await mountPlayer();
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+            plugin.emit('presentationchange', { playerId: load.playerId, loadId: load.loadId }, { state: 'fullscreen' });
+            await flush();
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+            plugin.failWith('exitFullscreen', 'unknown-player');
+
+            await fail(plugin, 'network');
+            await flush();
+
+            expect(warn).toHaveBeenCalledWith('[luminary-native] exitFullscreen failed', expect.anything());
+            warn.mockRestore();
         });
 
         it('leaves an inline player as it is on an error', async () => {
