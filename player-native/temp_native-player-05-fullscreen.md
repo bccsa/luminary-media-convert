@@ -38,12 +38,14 @@ web player's design, so a viewer gets the same player on the web and in the app.
 
 1. **Copy `player-web`'s full-screen exactly**, then fill what native lacks: the **current time
    and duration**, and a **buffering spinner**. **`player-web` does not change:** these two are
-   native-only additions, and the only intended difference from the web.
+   native-only additions. Decisions 2 and 5 are the other intended differences.
 2. **Volume:** native shows a **mute button only**; the phone's hardware buttons set the volume.
    The web keeps its slider.
 3. **Android is Dirk's**, built from the spec below. This plan does not schedule it.
 4. **No HTML controls over the native video:** they would stop answering whenever JavaScript is
    frozen, and they raise the problem inline video was deferred for (see the overview).
+5. **Orientation (2026-10-05):** full-screen opens in landscape, then follows the phone, as
+   Apple's player did. This differs from `player-web`, which locks to landscape.
 
 ## The spec
 
@@ -85,7 +87,8 @@ Not shown, as on the web: a title, a quality menu, an angle selector.
 - A tap shows hidden controls; a tap on the picture while they show hides them.
 - A double-tap leaves full-screen.
 - Live: skip and speed are hidden.
-- Entering full-screen turns to landscape and locks there; leaving releases it.
+- Entering full-screen turns to landscape, then follows how the phone is held (decision 5). In
+  portrait the controls keep the screen's edges, the picture letterboxed between them.
 - Errors: to be agreed. The web shows video.js's error dialog in full-screen. Proposal: native
   closes full-screen and shows the inline error panel, where "Try again" already works.
 
@@ -133,7 +136,7 @@ Each is a `bridge.ts` change with a plan 04 scenario, and a protocol bump if it 
 ### 5. Checking that it matches
 
 - The Lab's Web and Native modes, side by side, compared against the step 1 screenshots, state by
-  state; the time and the spinner are the expected differences.
+  state; the time, the spinner, mute only and the orientation are the expected differences.
 - The controls model's rules in unit tests.
 - A device pass: every control, picture in picture in and out, rotation, VoiceOver, live, audio-only.
 

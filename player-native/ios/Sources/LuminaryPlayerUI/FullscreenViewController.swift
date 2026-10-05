@@ -74,13 +74,13 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
 
-    /// Landscape, as `player-web` locks it on entering full-screen, where the app allows it.
+    /// Whatever the app allows: full-screen follows how the phone is held. Unlike `player-web`,
+    /// which locks to landscape on entering full-screen.
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        let allowed = UIApplication.shared.supportedInterfaceOrientations(for: view.window)
-        let landscape = allowed.intersection(.landscape)
-        return landscape.isEmpty ? allowed : landscape
+        UIApplication.shared.supportedInterfaceOrientations(for: view.window)
     }
 
+    /// It opens in landscape, where the app allows it.
     override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
         supportedInterfaceOrientations.contains(.landscapeRight) ? .landscapeRight : super.preferredInterfaceOrientationForPresentation
     }
