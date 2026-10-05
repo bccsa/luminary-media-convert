@@ -78,6 +78,7 @@ public final class PlayerRegistry {
         switch call {
         case .load(let args): player.load(args)
         case .putAssets(_, let generation, let assets): player.putAssets(generation, assets)
+        case .putLive(_, let generation, let uri, let spec): player.putLive(generation, uri, spec)
         case .releaseAssets(_, let generation): player.releaseAssets(generation)
         case .reattach(_, let loadId): player.reattach(loadId: loadId)
         case .play: engine.play()
@@ -89,8 +90,8 @@ public final class PlayerRegistry {
         case .enterFullscreen: engine.enterFullscreen()
         case .exitFullscreen: player.exitFullscreen()
         case .resumed: return player.resumed().json
-        // Refused by their capability until phases 4 and 5 turn them on.
-        case .putLive, .warmChunks:
+        // Refused by its capability until phase 5 turns it on.
+        case .warmChunks:
             throw BridgeRejection(.unsupported, "not implemented on this device")
         case .getInfo, .reset, .create, .destroy:
             preconditionFailure("handled by the registry")

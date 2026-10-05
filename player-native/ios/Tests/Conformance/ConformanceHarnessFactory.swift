@@ -64,6 +64,9 @@ private final class RegistryHarness: ConformanceHarness {
         switch player.router.route(uri) {
         case .served(let bytes, let contentType): return .served(bytes: bytes, contentType: contentType)
         case .failed(let code): return .failed(code: code)
+        case .live, .unanswered:
+            // A route result has no shape for these yet; it arrives with the phase 4 scenarios.
+            preconditionFailure("no conformance scenario routes \(uri)")
         }
     }
 

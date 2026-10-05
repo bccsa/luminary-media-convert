@@ -144,6 +144,21 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
     to fail the item took about 100 s.
   - **Open:** the phase 3 conformance scenarios: Android's rungs differ (ExoPlayer retries itself, then `prepare()`), so
     where the shared part sits is to agree with Dirk.
+- **Phase 4: the native half built and unit-tested; `live` stays `false`.**
+  - `LiveResolver` answers `luminary://live/<n>` with one read per AVPlayer request, ported from
+    `resolveLivePlaylist`: `URLSession` with every cache bypassed, LMCENC decrypted with
+    CommonCrypto, `key-required` for an AES-128 key with no key URI, then the rewrite.
+  - `MediaPlaylistRewrite.swift` ports `rewriteMediaPlaylist` line for line. It splits by UTF-16
+    unit, because as Swift characters `\r\n` is one and a CRLF playlist would never split.
+  - `AssetStore` keeps live specs by generation, purged with the assets. The router cancels a
+    read when AVPlayer cancels the request, finishes a failed read with its code and the upstream
+    status, and leaves a released address unanswered. The registry handles `putLive`.
+  - Tests port `live.spec.ts` and `rewrite-media.spec.ts` case for case. There are no shared
+    fixture files: `player-core/src/test-support/fixtures/` does not exist, so the cases carry
+    their playlists, as the TypeScript ones do.
+  - **Open:** `NativeServeStrategy.serveLive` (it sends `putLive`), a device run against a real
+    live stream, the conformance harness's route result (it has no shape for a live answer), and
+    Android's `LiveDataSource`. `live` turns on only when both platforms pass.
 - **Still to agree with Dirk:** packaging (SwiftPM and a podspec from the same sources).
 
 ## What carries over from the original "AVPlayer plugin design"

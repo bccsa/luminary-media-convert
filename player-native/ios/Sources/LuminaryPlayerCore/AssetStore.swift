@@ -1,7 +1,8 @@
 import Foundation
 
 /// generation → uri → (bytes, contentType): the munged text JavaScript sent, answered from
-/// memory. Read from the resource loader's queue while the main thread writes it.
+/// memory, and generation → uri → the live specs `putLive` registered. Read from the resource
+/// loader's queue while the main thread writes it.
 public final class AssetStore: @unchecked Sendable {
     public struct Asset: Sendable {
         public let bytes: [UInt8]
@@ -10,6 +11,7 @@ public final class AssetStore: @unchecked Sendable {
 
     private let lock = NSLock()
     private var generations: [Int: [String: Asset]] = [:]
+    private var liveSpecs: [Int: [String: BridgeLiveSpec]] = [:]
     private var released: Set<Int> = []
 
     public init() {}
@@ -33,6 +35,21 @@ public final class AssetStore: @unchecked Sendable {
         return nil
     }
 
+    public func putLive(_ generation: Int, _ uri: String, _ spec: BridgeLiveSpec) {
+        lock.lock()
+        defer { lock.unlock() }
+        liveSpecs[generation, default: [:]][uri] = spec
+    }
+
+    public func live(_ uri: String) -> BridgeLiveSpec? {
+        lock.lock()
+        defer { lock.unlock() }
+        for store in liveSpecs.values {
+            if let spec = store[uri] { return spec }
+        }
+        return nil
+    }
+
     /// Marks a generation for purging; it stays answerable until a newer load has taken over.
     public func release(_ generation: Int) {
         lock.lock()
@@ -45,7 +62,10 @@ public final class AssetStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         let purged = released.filter { $0 < current }
-        for generation in purged { generations[generation] = nil }
+        for generation in purged {
+            generations[generation] = nil
+            liveSpecs[generation] = nil
+        }
         released.subtract(purged)
     }
 
@@ -53,6 +73,7 @@ public final class AssetStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         generations.removeAll()
+        liveSpecs.removeAll()
         released.removeAll()
     }
 }

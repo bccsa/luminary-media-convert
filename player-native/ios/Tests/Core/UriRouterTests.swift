@@ -42,6 +42,7 @@ private func makeRouter(key: String? = keyHex) -> UriRouter {
 /// A request as AVFoundation would make it, recording how it was answered.
 private final class FakeRequest: LoadingRequest {
     let uri: String?
+    var id: ObjectIdentifier { ObjectIdentifier(self) }
     let wantsContentInformation: Bool
     let dataRange: (offset: Int64, length: Int?)?
 

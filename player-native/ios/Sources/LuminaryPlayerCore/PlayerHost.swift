@@ -70,6 +70,10 @@ public final class PlayerHost {
         self.assets.put(generation, assets)
     }
 
+    func putLive(_ generation: Int, _ uri: String, _ spec: BridgeLiveSpec) {
+        assets.putLive(generation, uri, spec)
+    }
+
     func releaseAssets(_ generation: Int) {
         assets.release(generation)
     }
