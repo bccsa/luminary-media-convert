@@ -7,7 +7,7 @@ import { AssetBatch } from './assetBatch.js';
 import { NativeServeStrategy } from './NativeServeStrategy.js';
 import { FakePlugin } from './test-support/fakePlugin.js';
 
-function setup() {
+function setup({ live = false } = {}) {
     const plugin = new FakePlugin();
     const batch = new AssetBatch();
     const reports: string[] = [];
@@ -15,6 +15,7 @@ function setup() {
         plugin,
         playerId: 'player-1',
         batch,
+        live,
         report: (method) => reports.push(method),
     });
     return { plugin, batch, strategy, reports };
@@ -85,5 +86,62 @@ describe('NativeServeStrategy', () => {
         await Promise.resolve();
         await Promise.resolve();
         expect(reports).toEqual(['releaseAssets']);
+    });
+
+    describe('live', () => {
+        const spec = {
+            url: 'https://live.example.com/channel/chunks.m3u8',
+            baseUrl: 'https://live.example.com/channel/chunks.m3u8',
+            keyUri: 'luminary://key',
+            keyBytes: new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
+            refreshSec: 4,
+        };
+
+        it('offers no serveLive unless native reports live', () => {
+            expect(setup().strategy.serveLive).toBeUndefined();
+            expect(setup({ live: true }).strategy.serveLive).toBeTypeOf('function');
+        });
+
+        it('registers the spec with native at once, its key as hex, under a fresh address', () => {
+            const { plugin, strategy } = setup({ live: true });
+            strategy.release();
+            const asset = strategy.serve('#EXTM3U\n', PLAYLIST_CONTENT_TYPE);
+            const live = strategy.serveLive!(spec);
+
+            expect(asset).toBe('luminary://asset/1/1.m3u8');
+            expect(live).toBe('luminary://live/2');
+            expect(plugin.argsOf('putLive')).toEqual([
+                {
+                    playerId: 'player-1',
+                    generation: 1,
+                    uri: live,
+                    spec: {
+                        url: spec.url,
+                        baseUrl: spec.baseUrl,
+                        keyUri: 'luminary://key',
+                        keyHex: '000102030405060708090a0b0c0d0e0f',
+                        refreshSec: 4,
+                    },
+                },
+            ]);
+        });
+
+        it('releases a generation whose only delivery was a live spec', () => {
+            const { plugin, strategy } = setup({ live: true });
+            strategy.serveLive!({ ...spec, keyUri: undefined, keyBytes: undefined });
+            strategy.release();
+            expect(plugin.argsOf('releaseAssets')).toEqual([
+                { playerId: 'player-1', generation: 0 },
+            ]);
+        });
+
+        it('reports a failed putLive rather than throwing it', async () => {
+            const { plugin, strategy, reports } = setup({ live: true });
+            plugin.failWith('putLive', 'unsupported');
+            strategy.serveLive!(spec);
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(reports).toEqual(['putLive']);
+        });
     });
 });

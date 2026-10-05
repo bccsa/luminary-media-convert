@@ -13,17 +13,20 @@
  * `keyDelivery: 'url'`, and this shell delivers keys from memory, so binary
  * content here is a programming error and is refused rather than mangled.
  *
- * There is no `serveLive` yet: its absence is what makes the pipeline refuse a
- * live source with `live-unsupported`. It arrives with `putLive` once both
- * platforms turn `live` on.
+ * `serveLive` exists only when native reports `live`: its absence is what
+ * makes the pipeline refuse a live source with `live-unsupported`. A live spec
+ * crosses at once with `putLive`, ahead of the load that names it, since native
+ * reads the playlist itself on every engine request.
  */
 
 import {
     PLAYLIST_CONTENT_TYPE,
     VTT_CONTENT_TYPE,
+    bytesToHex,
+    type LivePlaylistSpec,
     type ServeStrategy,
 } from '@luminary-media-converter/player-core';
-import { assetUri, type LuminaryPlayerPlugin } from './bridge.js';
+import { LIVE_URI_PREFIX, assetUri, type LuminaryPlayerPlugin } from './bridge.js';
 import type { AssetBatch } from './assetBatch.js';
 
 const EXTENSIONS: Record<string, 'm3u8' | 'vtt'> = {
@@ -35,7 +38,9 @@ export interface NativeServeStrategyOptions {
     plugin: LuminaryPlayerPlugin;
     playerId: string;
     batch: AssetBatch;
-    /** Where a failed `releaseAssets` is reported; it is never retried. */
+    /** Native's `live` capability: whether to offer `serveLive` at all. */
+    live: boolean;
+    /** Where a failed `releaseAssets` or `putLive` is reported; it is never retried. */
     report: (method: string, error: unknown) => void;
 }
 
@@ -43,7 +48,12 @@ export class NativeServeStrategy implements ServeStrategy {
     /** Never reset, so an address is never reused, across generations or within one. */
     private counter = 0;
 
-    constructor(private readonly options: NativeServeStrategyOptions) {}
+    /** Present only when native answers `luminary://live/`. */
+    readonly serveLive?: (spec: LivePlaylistSpec) => string;
+
+    constructor(private readonly options: NativeServeStrategyOptions) {
+        if (options.live) this.serveLive = (spec) => this.registerLive(spec);
+    }
 
     serve(content: string | Uint8Array, contentType: string): string {
         if (typeof content !== 'string') {
@@ -58,6 +68,27 @@ export class NativeServeStrategy implements ServeStrategy {
         const { batch } = this.options;
         const uri = assetUri(batch.generation, ++this.counter, extension);
         batch.add({ uri, contentType, text: content });
+        return uri;
+    }
+
+    private registerLive(spec: LivePlaylistSpec): string {
+        const { plugin, playerId, batch, report } = this.options;
+        const uri = `${LIVE_URI_PREFIX}${++this.counter}`;
+        batch.markDelivered();
+        plugin
+            .putLive({
+                playerId,
+                generation: batch.generation,
+                uri,
+                spec: {
+                    url: spec.url,
+                    baseUrl: spec.baseUrl,
+                    keyUri: spec.keyUri,
+                    keyHex: spec.keyBytes ? bytesToHex(spec.keyBytes) : undefined,
+                    refreshSec: spec.refreshSec,
+                },
+            })
+            .catch((error: unknown) => report('putLive', error));
         return uri;
     }
 

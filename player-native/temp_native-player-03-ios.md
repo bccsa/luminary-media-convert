@@ -156,9 +156,17 @@ Baseline: iOS 15.0, Capacitor 8, CocoaPods.
   - Tests port `live.spec.ts` and `rewrite-media.spec.ts` case for case. There are no shared
     fixture files: `player-core/src/test-support/fixtures/` does not exist, so the cases carry
     their playlists, as the TypeScript ones do.
-  - **Open:** `NativeServeStrategy.serveLive` (it sends `putLive`), a device run against a real
-    live stream, the conformance harness's route result (it has no shape for a live answer), and
-    Android's `LiveDataSource`. `live` turns on only when both platforms pass.
+  - `NativeServeStrategy.serveLive` exists only when native reports `live`, and sends `putLive`
+    at once, ahead of the load that names it. A failed live read carries its transport error.
+  - **Verified in the iOS Simulator** (iOS 26.5) with `live` switched on locally: the Lab's Live
+    source (`example-app/scripts/live-stream.sh`, a looping AES-128 stream with a 24 s window,
+    served by the dev server at `/live/`) played past 40 s, with the playlist re-read nine times,
+    each read successful. Not yet on the iPhone: after a reinstall, iOS blocked the app's native
+    requests to the Mac ("Local network prohibited") and neither asked again nor listed the app
+    under Local Network, even after a restart. The web view was not blocked.
+  - **Open:** a device run once the permission is back, the conformance harness's route result
+    (it has no shape for a live answer), and Android's `LiveDataSource`. `live` turns on only when
+    both platforms pass.
 - **Still to agree with Dirk:** packaging (SwiftPM and a podspec from the same sources).
 
 ## What carries over from the original "AVPlayer plugin design"

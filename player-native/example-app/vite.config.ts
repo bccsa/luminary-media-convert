@@ -1,4 +1,5 @@
-import { networkInterfaces } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
+import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
@@ -35,6 +36,8 @@ export default defineConfig({
         vue(),
         buildTargetVirtuals(),
         sampleStream(at('../spike/android/app/src/main/assets/stream')),
+        // Where `scripts/live-stream.sh` writes; the same default on both sides.
+        sampleStream(process.env.LAB_LIVE_DIR ?? path.join(tmpdir(), 'luminary-lab-live'), '/live'),
     ],
     resolve: {
         alias: {

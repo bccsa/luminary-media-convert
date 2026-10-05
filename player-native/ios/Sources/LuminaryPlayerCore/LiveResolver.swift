@@ -3,8 +3,8 @@ import Foundation
 
 /// Why a read of a live playlist failed, with the bridge's error codes.
 public enum LiveFailure: Error, Equatable, Sendable {
-    /// Transport failure, or a non-2xx answer carrying its status.
-    case fetchFailed(status: Int?)
+    /// A non-2xx answer carrying its status, or a transport failure carrying its error.
+    case fetchFailed(status: Int?, underlying: NSError? = nil)
     /// LMCENC with no key, or an AES-128 key with no key URI to point it at.
     case keyRequired
     /// Decryption failed, or decrypted to something that is not a playlist: the wrong key.
@@ -38,8 +38,8 @@ public enum LiveResolver {
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
-            if error != nil {
-                completion(.failure(.fetchFailed(status: nil)))
+            if let error {
+                completion(.failure(.fetchFailed(status: nil, underlying: error as NSError)))
             } else if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
                 completion(.failure(.fetchFailed(status: http.statusCode)))
             } else {

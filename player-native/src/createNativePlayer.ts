@@ -81,7 +81,13 @@ export async function createNativePlayer(
     const adapter = new NativeBridgeAdapter({ plugin, playerId, info, batch, report });
     await adapter.ready();
 
-    const serveStrategy = new NativeServeStrategy({ plugin, playerId, batch, report });
+    const serveStrategy = new NativeServeStrategy({
+        plugin,
+        playerId,
+        batch,
+        live: info.capabilities.live,
+        report,
+    });
     const controller = new PlayerController(adapter, {
         ...options.controller,
         serveStrategy,

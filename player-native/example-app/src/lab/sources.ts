@@ -1,6 +1,9 @@
 /** `make-sample-stream.py`'s key: bundled with the stream it opens, so it protects nothing. */
 export const SAMPLE_KEY = '6c756d696e6172792d737069a4e2c0de';
 
+/** `scripts/live-stream.sh`'s key, answered from memory as `luminary://key`. */
+export const LIVE_KEY = '6c756d696e6172792d6c697665a4e2c0';
+
 export const DEFAULT_YOUTUBE = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
 
 export interface LabSource {
@@ -25,6 +28,12 @@ export function presets(): LabSource[] {
             label: 'Sample · encrypted byte-range, 2 angles, 4 languages',
             masterUrl: `${labOrigin()}/sample/master.m3u8`,
             keyHex: SAMPLE_KEY,
+        },
+        {
+            id: 'live',
+            label: 'Live · AES-128, from scripts/live-stream.sh',
+            masterUrl: `${labOrigin()}/live/master.m3u8`,
+            keyHex: LIVE_KEY,
         },
         {
             id: 'bipbop',

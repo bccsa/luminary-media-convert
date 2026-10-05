@@ -37,6 +37,11 @@ export class AssetBatch {
         return assets;
     }
 
+    /** Something of this generation reached native another way (`putLive`). */
+    markDelivered(): void {
+        this.delivered = true;
+    }
+
     /**
      * Drops pending assets that will never be sent, such as side-loaded
      * subtitles handed to an engine that cannot render them.

@@ -138,9 +138,13 @@ public final class UriRouter: NSObject, AVAssetResourceLoaderDelegate, @unchecke
         let code: ErrorCode
         var userInfo: [String: Any] = [NSLocalizedDescriptionKey: "\(failure.code): \(url)"]
         switch failure {
-        case .fetchFailed(let status):
+        case .fetchFailed(let status, let underlying):
             code = .fetchFailed
             if let status { userInfo[Self.statusKey] = status }
+            if let underlying {
+                userInfo[NSUnderlyingErrorKey] = underlying
+                userInfo[NSLocalizedDescriptionKey] = "\(failure.code): \(url): \(underlying.localizedDescription)"
+            }
         case .keyRequired: code = .keyRequired
         case .decryptFailed: code = .decryptFailed
         case .invalidContent: code = .invalidContent
