@@ -55,6 +55,11 @@ import { retryYouTubeApi, watchYouTubeApi, whenYouTubeApiSettles } from '../vjs/
 import { findPreferredTrack } from '@luminary-media-converter/player-core';
 import { imageAttempts, toPlayerImage, type PlayerImageInput } from '../image';
 import { isYouTubeUrl, toVideoJsYouTubeUrl } from '../youtube';
+import {
+    YOUTUBE_FRAME_TECH,
+    registerYoutubeFrameTech,
+    setYoutubeFrameEmbedUrl,
+} from '../vjs/YoutubeFrameTech';
 import { singleFlight } from '../singleFlight';
 import AudioVideoToggle from './AudioVideoToggle.vue';
 
@@ -92,6 +97,12 @@ interface Props {
      * and letterboxes where the Luminary app covers the frame.
      */
     poster?: PlayerImageInput;
+    /**
+     * An HTTPS-hosted copy of `embed/youtube-embed.html`. Used for YouTube when
+     * the page itself is not http(s) (Capacitor iOS), where YouTube refuses the
+     * embed with error 153 because it sees a `capacitor://` Referer.
+     */
+    youtubeEmbedUrl?: string;
     /**
      * Language to select automatically among the stream's audio tracks, as a
      * two- or three-letter code (`en`, `eng`, `en-US` — all normalized).
@@ -337,6 +348,16 @@ async function loadSource(source: PlayerSource): Promise<void> {
         if (controller.value) {
             controller.value.destroy();
             controller.value = null;
+        }
+        if (props.youtubeEmbedUrl && !/^https?:$/.test(location.protocol)) {
+            registerYoutubeFrameTech();
+            setYoutubeFrameEmbedUrl(props.youtubeEmbedUrl);
+            const order: string[] = instance.options_.techOrder;
+            if (order[0] !== YOUTUBE_FRAME_TECH) {
+                instance.options_.techOrder = [YOUTUBE_FRAME_TECH, ...order];
+            }
+            instance.src({ type: 'video/youtube', src: toVideoJsYouTubeUrl(source.masterUrl) });
+            return;
         }
         // A new YouTube source, or the error panel's retry, tries the API
         // again if it failed; the queued player is handed it if it loads.

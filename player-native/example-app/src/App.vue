@@ -28,10 +28,14 @@ const saved = (() => {
     }
 })();
 const available = service.modes.filter((m) => m.available).map((m) => m.id);
-const mode = ref<PlaybackMode>(available.includes(saved.mode as PlaybackMode) ? (saved.mode as PlaybackMode) : available[0]!);
+// `VITE_LAB_MODE` picks the first mode in a build with no one to tap a tab (a simulator run).
+const firstMode = saved.mode ?? (import.meta.env.VITE_LAB_MODE as string | undefined);
+const mode = ref<PlaybackMode>(available.includes(firstMode as PlaybackMode) ? (firstMode as PlaybackMode) : available[0]!);
 const presetId = ref(saved.presetId ?? 'sample');
 const customUrl = ref(saved.customUrl ?? '');
 const customKey = ref(saved.customKey ?? '');
+/** An HTTPS-served embed page, for a WebView whose own origin YouTube refuses (iOS). */
+const youtubeEmbedUrl = import.meta.env.VITE_YOUTUBE_EMBED_URL as string | undefined;
 const youtubeUrl = ref(saved.youtubeUrl ?? DEFAULT_YOUTUBE);
 watch([mode, presetId, customUrl, customKey, youtubeUrl], () =>
     localStorage.setItem(STORAGE, JSON.stringify({
@@ -248,6 +252,7 @@ watch(latency, (value) => {
                 :key="`${mode}-${playerKey}`"
                 ref="player"
                 :source="source"
+                :youtube-embed-url="youtubeEmbedUrl"
                 @timeupdate="onTimeupdate"
                 @loadedmetadata="onLoadedmetadata"
             />
