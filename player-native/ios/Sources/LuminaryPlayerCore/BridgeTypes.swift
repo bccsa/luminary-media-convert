@@ -244,7 +244,7 @@ public enum BridgeCall: Sendable {
     case setRate(playerId: String, rate: Double)
     case setVariant(playerId: String, id: String)
     case setAudioTrack(playerId: String, id: String)
-    case warmChunks(playerId: String, loadId: String, schedules: [JSON], leadSeconds: Double, warmBytes: Double)
+    case warmChunks(playerId: String, loadId: String, schedules: [JSON], leadSeconds: Double, warmBytes: Int)
     case enterFullscreen(playerId: String)
     case exitFullscreen(playerId: String)
     case resumed(playerId: String)
@@ -347,7 +347,7 @@ public enum BridgeCall: Sendable {
                 loadId: try args.string("loadId"),
                 schedules: schedules,
                 leadSeconds: try args.number("leadSeconds"),
-                warmBytes: try args.number("warmBytes")
+                warmBytes: try args.count("warmBytes")
             )
         case "enterFullscreen": return .enterFullscreen(playerId: try args.string("playerId"))
         case "exitFullscreen": return .exitFullscreen(playerId: try args.string("playerId"))
@@ -381,7 +381,7 @@ public enum BridgeCall: Sendable {
             startPosition: startPosition,
             recovery: RecoveryPolicy(
                 escalationWindowMs: try recovery.number("escalationWindowMs"),
-                maxReloadAttempts: Int(try recovery.number("maxReloadAttempts")),
+                maxReloadAttempts: try recovery.count("maxReloadAttempts"),
                 reloadDelaysMs: delays
             ),
             nowPlaying: try nowPlaying.map {
@@ -471,11 +471,17 @@ private struct Args {
     }
 
     func generation() throws -> Int {
-        let generation = try number("generation")
-        guard generation >= 0, generation.rounded() == generation, generation <= Double(Int32.max) else {
-            throw invalid("generation is a non-negative integer")
+        try count("generation")
+    }
+
+    /// A non-negative integer that fits: `Int(Double)` traps past 2^63, and a count past
+    /// `Int32.max` names nothing a player has.
+    func count(_ key: String) throws -> Int {
+        let value = try number(key)
+        guard value >= 0, value.rounded() == value, value <= Double(Int32.max) else {
+            throw invalid("\(key) is a non-negative integer")
         }
-        return Int(generation)
+        return Int(value)
     }
 
     /// Every asset must be addressed to `generation`.

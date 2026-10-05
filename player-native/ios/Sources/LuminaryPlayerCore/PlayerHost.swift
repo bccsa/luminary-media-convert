@@ -86,7 +86,7 @@ public final class PlayerHost {
     }
 
     /// For the current load only: a call for one it replaced is ignored.
-    func warmChunks(loadId: String, schedules: [JSON], leadSeconds: Double, warmBytes: Double) {
+    func warmChunks(loadId: String, schedules: [JSON], leadSeconds: Double, warmBytes: Int) {
         guard loadId == self.loadId else { return }
         let boundaries = ChunkBoundary.schedules(schedules)
         if warmer == nil {
@@ -95,7 +95,7 @@ public final class PlayerHost {
                 return max(snapshot.bufferedEnd, snapshot.currentTime)
             }, fetch: warmFetch)
         }
-        warmer?.start(boundaries, leadSeconds: leadSeconds, warmBytes: Int(warmBytes))
+        warmer?.start(boundaries, leadSeconds: leadSeconds, warmBytes: warmBytes)
     }
 
     func releaseAssets(_ generation: Int) {
