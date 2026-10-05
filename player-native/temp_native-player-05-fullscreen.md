@@ -4,7 +4,7 @@
 > `player-core`, `player-web` and the new `player-native` plugin live). Paths in
 > the host apps are prefixed with `bccsa/luminary` or `luminary-deployment`.
 
-**Owner:** Johan (the spec, the web additions and iOS). **Android:** Dirk, from the same spec.
+**Owner:** Johan (the spec and iOS). **Android:** Dirk, from the same spec.
 
 **Depends on:** plan 03's phase 2 (the native full-screen presenter) on iOS, and plan 02's on
 Android.
@@ -18,9 +18,9 @@ web player's design, so a viewer gets the same player on the web and in the app.
 
 ## Decisions (2026-10-05)
 
-1. **Copy `player-web`'s full-screen exactly**, then add what it lacks: the **current time and
-   duration**, and a **buffering spinner**. They are added to `player-web` too, first, so the two
-   stay the same and the web is the reference.
+1. **Copy `player-web`'s full-screen exactly**, then fill what native lacks: the **current time
+   and duration**, and a **buffering spinner**. **`player-web` does not change:** these two are
+   native-only additions, and the only intended difference from the web.
 2. **Volume:** native shows a **mute button only**; the phone's hardware buttons set the volume.
    The web keeps its slider.
 3. **Android is Dirk's**, built from the spec below. This plan does not schedule it.
@@ -30,8 +30,8 @@ web player's design, so a viewer gets the same player on the web and in the app.
 ## The spec
 
 The reference both platforms build to. Measured from `player-web` (`src/styles.css`,
-`src/vjs/playerOptions.ts`, `src/vjs/autoHide.ts`, `src/components/LuminaryPlayer.vue`). Where
-the web changes in step 1, the spec changes with it.
+`src/vjs/playerOptions.ts`, `src/vjs/autoHide.ts`, `src/components/LuminaryPlayer.vue`), which
+stays as it is. Rows marked *(native only)* are the additions of decision 1.
 
 ### Layout
 
@@ -40,14 +40,14 @@ the web changes in step 1, the spec changes with it.
 | Centre | Play/pause | 96 px square |
 | Centre | Skip back, skip forward | Either side of play/pause, 100 px from the centre, 56 px circles. 10 s by default, snapped to 5/10/30; 0 removes the button |
 | Bottom | Progress bar | Full width but the exit button; rounded; played and loaded |
-| Bottom | Time *(new)* | Current time and duration. Live shows `LIVE` instead |
+| Bottom | Time *(native only)* | Current time and duration, left of the progress bar. Live shows `LIVE` instead |
 | Bottom right | Exit full-screen | |
 | Top left, one row | Audio language | Only with 2+ tracks |
 | Top left | Picture in picture | |
 | Top left | Subtitles | Only when the source has subtitles |
 | Top left | Speed | 0.5, 0.7, 1, 1.5 |
 | Top left | Mute | Native: mute only (decision 2) |
-| Centre *(new)* | Buffering spinner | While waiting for data the viewer asked to see |
+| Centre *(native only)* | Buffering spinner | In place of play/pause, while waiting for data the viewer asked to see |
 
 Not shown, as on the web: a title, a quality menu, an angle selector.
 
@@ -73,13 +73,7 @@ Not shown, as on the web: a title, a quality menu, an angle selector.
 
 ## Steps
 
-### 1. The web additions (`player-web`)
-
-Add the time display and the buffering spinner to the full-screen skin: the spinner is
-suppressed today (`styles.css`, `.vjs-loading-spinner`). It changes the look of the app's web
-player too, so it lands as its own change, checked in the browser and in `bccsa/luminary`.
-
-### 2. The spec as files
+### 1. The spec as files
 
 - This plan's spec section, kept current.
 - The icons as vector files (PDF for iOS, vector drawables for Android), exported from
@@ -87,7 +81,7 @@ player too, so it lands as its own change, checked in the browser and in `bccsa/
 - A screenshot of each web state in the Lab: paused, playing, controls hidden, each menu open,
   buffering, live, audio-only.
 
-### 3. iOS: our own full-screen
+### 2. iOS: our own full-screen
 
 - **A new `FullscreenPresenter`** in `LuminaryPlayerUI`, replacing `PlayerViewControllerPresenter`:
   a view controller with the video in an `AVPlayerLayer` and our controls over it. The engine
@@ -102,12 +96,12 @@ player too, so it lands as its own change, checked in the browser and in `bccsa/
 - **To redo by hand,** which AVKit gave for free: VoiceOver labels (`player-web`'s
   `messages.ts` has the texts), the landscape lock, scrubbing on the progress bar.
 
-### 4. Inline (`NativeLuminaryPlayer`)
+### 3. Inline (`NativeLuminaryPlayer`)
 
 The poster and play button take `player-web`'s exact style: the big play button's
 `rgba(39,39,42,0.6)` circle and its icon, and the audio-only glyph.
 
-### 5. Bridge changes (agree with Dirk)
+### 4. Bridge changes (agree with Dirk)
 
 Speed and audio language already come back to JavaScript as viewer choices. Still missing:
 
@@ -118,14 +112,15 @@ Speed and audio language already come back to JavaScript as viewer choices. Stil
 
 Each is a `bridge.ts` change with a plan 04 scenario, and a protocol bump if it breaks anything.
 
-### 6. Checking that it matches
+### 5. Checking that it matches
 
-- The Lab's Web and Native modes, side by side, compared against the step 2 screenshots, state by
-  state.
+- The Lab's Web and Native modes, side by side, compared against the step 1 screenshots, state by
+  state; the time and the spinner are the expected differences.
 - The controls model's rules in unit tests.
 - A device pass: every control, picture in picture in and out, rotation, VoiceOver, live, audio-only.
 
 ## Open
 
 - Errors in full-screen (above).
-- Where the time sits on the bottom row, settled in step 1 on the web.
+- The exact look of the time and the spinner, which the web has no model for: proposed as white
+  text in the controls' 14 px size, and a white ring at the play button's size.
