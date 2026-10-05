@@ -15,7 +15,14 @@ import {
     getStoredContentPreset,
     saveContentPreset,
 } from './layoutStorage';
-import { CONTENT_PRESETS, sourceCapKbps, suggestLadder } from './ladder';
+import {
+    CONTENT_PRESETS,
+    aspectWidthForHeight,
+    fpsAdjustedBitrateKbps,
+    nextRenditionRung,
+    sourceCapKbps,
+    suggestLadder,
+} from './ladder';
 import { displayDimensionsOf } from './aspect';
 import {
     buildSuggestedAudioGroups,
@@ -547,35 +554,40 @@ function loadPreviousTrackLabels() {
 
 function addVideoRendition() {
     const defaultGroupId = audioGroups[0]?.id ?? 'hd';
-    // Priced from the source instead of a fixed 854x480 @ 1000: that width is
-    // 16:9's and that bitrate is the old table's, so on a 4:3 or a low-bitrate
-    // source the added row opened at a shape and a budget the source never had.
-    // The 480p rung where the ladder reaches it, the smallest rung otherwise —
-    // a source below 480p has no 480p to offer. Found by short side, so a
-    // portrait source's 480x854 counts.
+    // A rung the ladder does not already hold. Opened on the 480p rung it
+    // duplicated that rung to the byte on any 16:9 source — the button's
+    // commonest use was a second encode of a picture size already there, and
+    // two renditions of one size share a stream directory, so the later one
+    // overwrote the earlier. Width and budget come from the source: the
+    // suggested rung where there is one at that height, the source's own shape
+    // and the table's pixel-count curve where the height is a step below.
     const track = editableVideoTracks[0];
     const rungs = track ? suggestLadder(track, contentFactor.value) : [];
-    const rung =
-        rungs.find((r) => Math.min(r.width, r.height) === 480) ??
-        rungs[rungs.length - 1];
-    const base = rung?.bitrateKbps ?? 1000;
+    const next = nextRenditionRung(
+        track,
+        videoRenditions.map((r) => r.height)
+    );
+    const suggested = rungs.find((r) => r.height === next.height);
+    const display = displayDimensionsOf(track);
+    const base =
+        suggested?.bitrateKbps ??
+        fpsAdjustedBitrateKbps(next.bitrateKbps, track?.frameRate ?? 30);
     videoRenditions.push({
-        width: rung?.width ?? 854,
-        height: rung?.height ?? 480,
+        width:
+            suggested?.width ??
+            aspectWidthForHeight(next.height, display.width, display.height),
+        height: next.height,
         videoBitrateKbps: base,
         copyStream: false,
         audioGroupId: defaultGroupId,
-        // Named for the size it actually is. The API falls back to
-        // `${height}p` when there is no label, so this is the same directory
-        // for a row that really is 480p — and the right one for a row that is
-        // not, which a literal '480p' would have misnamed in S3.
-        label: rung ? `${rung.height}p` : '480p',
+        // Left unset, like every suggested rung: the name falls back to the
+        // height, which is what keeps the stream directories apart.
         vbr: true,
     });
     ladderBaseKbps.push(base);
     // At the dial's current level, not the raw suggestion: with the max moved
-    // to 3000, a 480p rung added at its suggested 535 would sit a third below
-    // the 480p rung already in the ladder.
+    // to 3000, a rung added at its suggested number would sit a third below
+    // the one already in the ladder.
     joinLadder(videoRenditions.length - 1);
 }
 
