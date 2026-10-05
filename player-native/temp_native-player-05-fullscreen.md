@@ -6,6 +6,19 @@
 
 **Owner:** Johan (the spec and iOS). **Android:** Dirk, from the same spec.
 
+**Android already has a version:** Dirk built `SkinControls.kt` in Android phase 2 (`78ef2ac`,
+`9342e57`), drawn to `player-web`'s skin before this plan was written. It differs from iOS, and
+the two are to be brought together:
+
+| | Android (`SkinControls.kt`) | iOS (`LuminaryPlayerUI`) |
+|---|---|---|
+| Icons | drawn by hand | video.js's own glyphs (`extract-videojs-icons.mjs`) |
+| Top row | audio, speed | audio, picture in picture, subtitles, speed, mute |
+| Time, spinner | none | both (decision 1) |
+| Skip circles | ±100 dp from the centre | ±72 pt, as measured from the web |
+| Controls act on | the player | the engine (`FullscreenCommands`) |
+| Orientation | follows the phone | follows the phone |
+
 **Depends on:** plan 03's phase 2 (the native full-screen presenter) on iOS, and plan 02's on
 Android.
 
@@ -57,8 +70,9 @@ web player's design, so a viewer gets the same player on the web and in the app.
 3. **Android is Dirk's**, built from the spec below. This plan does not schedule it.
 4. **No HTML controls over the native video:** they would stop answering whenever JavaScript is
    frozen, and they raise the problem inline video was deferred for (see the overview).
-5. **Orientation (2026-10-05):** full-screen opens in landscape, then follows the phone, as
-   Apple's player did. This differs from `player-web`, which locks to landscape.
+5. **Orientation (2026-10-05):** full-screen opens the way the phone is held and follows it, on
+   both platforms (Android's `SCREEN_ORIENTATION_FULL_SENSOR`). This differs from `player-web`,
+   which locks to landscape.
 
 ## The spec
 
@@ -100,8 +114,8 @@ Not shown, as on the web: a title, a quality menu, an angle selector.
 - A tap shows hidden controls; a tap on the picture while they show hides them.
 - A double-tap leaves full-screen.
 - Live: skip and speed are hidden.
-- Entering full-screen turns to landscape, then follows how the phone is held (decision 5). In
-  portrait the controls keep the screen's edges, the picture letterboxed between them.
+- Full-screen opens the way the phone is held and follows it (decision 5). In portrait the
+  controls keep the screen's edges, the picture letterboxed between them.
 - Errors: full-screen closes, and the inline error panel shows the message and "Try again". The
   web shows video.js's error dialog in full-screen instead.
 
