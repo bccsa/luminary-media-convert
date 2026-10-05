@@ -186,6 +186,40 @@ working on the encoder and the wrong thing in a consumer's image build.
 The workspace list in `ci:libs` is the one in `build:libs`. Adding a library
 means adding it to both, which is why they sit next to each other.
 
+### Consuming it as a git submodule
+
+This is how [bccsa/luminary](https://github.com/bccsa/luminary) does it: the
+repository is a submodule at `luminary-media-convert/`, and both its `app/` and
+`cms/` depend on `file:../luminary-media-convert/player-web-legacy`. A `file:`
+dependency resolves to the package's `main`, which is `dist/index.js` — and
+`dist/` is not in this repository. **So the libraries have to be built before the
+consumer is installed, not after:**
+
+```bash
+git submodule update --init --recursive
+
+cd luminary-media-convert
+npm run ci:libs
+npm run build:libs
+
+cd ../app && npm ci      # only now does the file: dependency have an entry point
+```
+
+Install the consumer first and nothing complains until its first build, which
+fails with `Failed to resolve entry for package …` — a missing build reported as
+a broken dependency. This order is the one in the consumer's CI workflows and in
+its Dockerfiles.
+
+**Re-run `build:libs` after every submodule bump.** Moving the pointer changes
+the sources underneath a `dist/` that git does not track and therefore does not
+update; the stale build stays in place and keeps loading, and nothing says so.
+
+**Give the player one Vue.** `vue` is a peer dependency here, but a symlinked
+`file:` dependency resolves its imports from its own tree — so it finds
+`luminary-media-convert/node_modules/vue` rather than the consumer's copy, and
+two Vue instances means reactivity and `provide`/`inject` break across the
+boundary. In Vite, `resolve.dedupe: ["vue"]`; elsewhere, the equivalent alias.
+
 ## Licensing
 
 Licensed per directory rather than repository-wide, because the pieces are not
