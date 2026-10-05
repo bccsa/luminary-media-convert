@@ -745,7 +745,8 @@ async function enterFullscreen(): Promise<void> {
 }
 
 function exitFullscreen(): void {
-    void player.value?.exitFullscreen();
+    // video.js rejects leaving a fullscreen nothing is in, and nobody would catch it.
+    if (player.value?.isFullscreen()) void player.value.exitFullscreen();
 }
 
 /**

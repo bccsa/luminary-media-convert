@@ -94,6 +94,7 @@ export function fakePlayer(overrides: Record<string, unknown> = {}) {
         dispose: vi.fn(),
         requestFullscreen: vi.fn(() => Promise.resolve()),
         exitFullscreen: vi.fn(),
+        isFullscreen: vi.fn(() => false),
         fire: (name: string, payload?: unknown) =>
             (handlers.get(name) ?? []).forEach((f) => f(payload)),
         handlers,
