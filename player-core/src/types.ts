@@ -113,6 +113,14 @@ export interface PlayerSource {
     maxHeight?: number;
     /** Start position in seconds for the initial load. */
     startPosition?: number;
+    /**
+     * The angle the load starts on, instead of the master's default. With
+     * `AUDIO_ONLY_ANGLE_ID` the load fetches no video at all, which is what a
+     * host offering "start as audio" needs: starting on video and switching
+     * away would already have downloaded some. An id the master does not have
+     * falls back to the default.
+     */
+    startAngleId?: string;
     /** Carry the previous source's position into this load. */
     preservePosition?: boolean;
     sidecars?: {

@@ -288,7 +288,11 @@ export class PlayerController implements PlayerControllerApi {
         info: MasterInfo,
     ): Promise<void> {
         this.master = info;
-        const angleId = defaultAngleId(info.angles);
+        const requested = this.source?.startAngleId;
+        const angleId =
+            requested && info.angles.some((angle) => angle.id === requested)
+                ? requested
+                : defaultAngleId(info.angles);
 
         this.store.setState({
             lifecycle: 'loading',

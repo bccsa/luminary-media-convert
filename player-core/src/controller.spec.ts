@@ -1148,6 +1148,27 @@ describe('PlayerController — default angle', () => {
         await controller.load({ masterUrl: MASTER_URL });
         expect(controller.getState().activeAngleId).toBe(DEFAULT_ANGLE_ID);
     });
+
+    it('starts on the angle a source asks for: audio only, fetching no video', async () => {
+        const { controller, calls } = setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL, startAngleId: AUDIO_ONLY_ANGLE_ID });
+
+        expect(controller.getState().activeAngleId).toBe(AUDIO_ONLY_ANGLE_ID);
+        expect(controller.getState().isAudioOnly).toBe(true);
+        expect(calls.some((url) => url.includes('angle'))).toBe(false);
+    });
+
+    it('starts on another camera a source asks for', async () => {
+        const { controller } = setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL, startAngleId: 'angle_1' });
+        expect(controller.getState().activeAngleId).toBe('angle_1');
+    });
+
+    it('falls back to the default for an angle the master does not have', async () => {
+        const { controller } = setup(multiAngleRoutes);
+        await controller.load({ masterUrl: MASTER_URL, startAngleId: 'angle_9' });
+        expect(controller.getState().activeAngleId).toBe('angle_0');
+    });
 });
 
 describe('PlayerController — scrub thumbnails', () => {
