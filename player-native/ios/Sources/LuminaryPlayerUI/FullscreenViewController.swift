@@ -49,7 +49,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     private var state = FullscreenControlsState()
     private var layout: FullscreenControlsLayout?
     private var menu: FullscreenMenu?
-    private var subtitles: (group: AVMediaSelectionGroup, options: [AVMediaSelectionOption])?
+    /// The subtitles of the item playing, which a reattach or a load replaces.
+    private var subtitles: (item: AVPlayerItem, group: AVMediaSelectionGroup, options: [AVMediaSelectionOption])?
     /// Where the viewer is dragging the progress bar to, until they let go.
     private var scrubbing: Double?
     /// The speed while paused, when the player's rate reads 0.
@@ -63,7 +64,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         self.texts = texts
         visibility = FullscreenControlsVisibility(clock: clock)
         super.init(nibName: nil, bundle: nil)
-        if player.rate > 0 { rate = Double(player.rate) }
+        if player.rate > 0 { rate = roundedRate(Double(player.rate)) }
     }
 
     @available(*, unavailable)
@@ -130,7 +131,6 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         view.addGestureRecognizer(tap)
 
         visibility.onChange = { [weak self] visible in self?.showControls(visible) }
-        loadSubtitles()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -197,11 +197,23 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
             player.observe(\.timeControlStatus) { [weak self] _, _ in DispatchQueue.main.async { self?.refresh() } },
             player.observe(\.rate) { [weak self] player, _ in
                 DispatchQueue.main.async {
-                    if player.rate > 0 { self?.rate = Double(player.rate) }
+                    if player.rate > 0 { self?.rate = roundedRate(Double(player.rate)) }
                     self?.refresh()
                 }
             },
+            player.observe(\.currentItem, options: [.initial, .new]) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.itemChanged() }
+            },
         ]
+    }
+
+    /// A reattach or a load gives the player a new item, whose subtitles are its own.
+    private func itemChanged() {
+        guard subtitles?.item !== player.currentItem else { return }
+        subtitles = nil
+        if menu?.tag == subtitlesButton.hash { closeMenu() }
+        loadSubtitles()
+        refresh()
     }
 
     private func stopObserving() {
@@ -367,7 +379,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
     }
 
     private func subtitleItems() -> [FullscreenMenu.Item] {
-        guard let subtitles, let item = player.currentItem else { return [] }
+        guard let subtitles, subtitles.item === player.currentItem else { return [] }
+        let item = subtitles.item
         let selected = item.currentMediaSelection.selectedMediaOption(in: subtitles.group)
         let off = FullscreenMenu.Item(title: texts.subtitlesOff, selected: selected == nil) { [weak self] in
             item.select(nil, in: subtitles.group)
@@ -385,7 +398,13 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         let reopen = menu?.tag != button.hash
         closeMenu()
         guard reopen, !items.isEmpty else { return }
-        let menu = FullscreenMenu(items: items)
+        // A pick is a touch like any other: the controls stay another 3 s, then hide.
+        let menu = FullscreenMenu(items: items.map { item in
+            .init(title: item.title, selected: item.selected) { [weak self] in
+                item.pick()
+                self?.visibility.touched()
+            }
+        })
         menu.tag = button.hash
         self.menu = menu
         controls.addSubview(menu)
@@ -409,14 +428,16 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     // MARK: Subtitles
 
-    /// The source's own subtitles, the ones a viewer can choose: not forced-only tracks.
+    /// The item's own subtitles, the ones a viewer can choose: not forced-only tracks. Kept with
+    /// the item they belong to, so a group is never applied to an item it was not read from.
     private func loadSubtitles() {
-        guard let asset = player.currentItem?.asset else { return }
+        guard let item = player.currentItem else { return }
         Task { @MainActor [weak self] in
-            guard let group = try? await asset.loadMediaSelectionGroup(for: .legible) else { return }
+            guard let group = try? await item.asset.loadMediaSelectionGroup(for: .legible),
+                  let self, self.player.currentItem === item else { return }
             let options = group.options.filter { !$0.hasMediaCharacteristic(.containsOnlyForcedSubtitles) }
-            self?.subtitles = (group, options)
-            self?.refresh()
+            self.subtitles = (item, group, options)
+            self.refresh()
         }
     }
 }

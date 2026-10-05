@@ -56,6 +56,12 @@ public struct FullscreenControlsLayout: Equatable {
 /// The speeds `player-web` offers (`playerOptions.ts`).
 public let fullscreenRates: [Double] = [0.5, 0.7, 1, 1.5]
 
+/// AVPlayer keeps the rate as a float, so 0.7 comes back as 0.699999988: three decimals is what
+/// the menu's speeds are compared to, and what JavaScript is told.
+public func roundedRate(_ rate: Double) -> Double {
+    (rate * 1000).rounded() / 1000
+}
+
 /// `1x`, `0.5x`, `1.5x`: video.js's rate label.
 public func rateLabel(_ rate: Double) -> String {
     let rounded = (rate * 100).rounded() / 100

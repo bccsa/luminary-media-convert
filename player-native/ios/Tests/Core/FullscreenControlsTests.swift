@@ -84,6 +84,12 @@ struct FullscreenControlsTextTests {
     func rates() {
         #expect(fullscreenRates.map(rateLabel) == ["0.5x", "0.7x", "1x", "1.5x"])
     }
+
+    @Test("a speed read back from the player's float is the speed that was set")
+    func roundTripsFloat() {
+        #expect(roundedRate(Double(Float(0.7))) == 0.7)
+        #expect(fullscreenRates.allSatisfy { roundedRate(Double(Float($0))) == $0 })
+    }
 }
 
 @Suite("Full-screen controls: auto-hide")

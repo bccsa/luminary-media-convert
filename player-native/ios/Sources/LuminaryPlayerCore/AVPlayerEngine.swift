@@ -208,7 +208,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     }
 
     public func setRate(_ rate: Double) {
-        self.rate = Self.rounded(rate)
+        self.rate = roundedRate(rate)
         if #available(iOS 16.0, macOS 13.0, *) { player.defaultRate = Float(self.rate) }
         if player.rate != 0 { player.rate = Float(self.rate) }
         events?.rateChanged(self.rate)
@@ -223,16 +223,11 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// A rate the player reports that is not the one asked for: the viewer's pick in AVKit.
     private func viewerPickedRate(_ reported: Double) {
         guard reported > 0 else { return }
-        let picked = Self.rounded(reported)
+        let picked = roundedRate(reported)
         guard picked != rate else { return }
         rate = picked
         events?.rateChanged(rate)
         publishPlayback()
-    }
-
-    /// Three decimals: AVPlayer keeps the rate as a float.
-    private static func rounded(_ rate: Double) -> Double {
-        (rate * 1000).rounded() / 1000
     }
 
     /// Never reached: AVPlayer cannot pin a rendition, so `variantSwitching` is false and the
