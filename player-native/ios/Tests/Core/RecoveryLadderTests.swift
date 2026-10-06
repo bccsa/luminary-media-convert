@@ -221,6 +221,74 @@ struct RecoveryLadderTests {
         #expect(again.takeHeldReload() == nil)
     }
 
+    @Test("a policy handed over mid-climb keeps the rung already scheduled and governs the next")
+    func policyChangedMidClimb() {
+        let recorder = Recorder()
+        let ladder = ladder(recorder)
+
+        ladder.note(failure)
+        // One attempt is allowed from here on, and the rung scheduled under the old delays stays.
+        ladder.setPolicy(RecoveryPolicy(escalationWindowMs: 10_000, maxReloadAttempts: 1, reloadDelaysMs: [10_000]))
+        recorder.clock.advance(2)
+        ladder.note(failure)
+
+        #expect(recorder.steps == ["in-place", "reattach@2.0", "exhausted:network-error"])
+    }
+
+    @Test("fewer delays than attempts: the last delay repeats")
+    func shortDelayList() {
+        let recorder = Recorder()
+        let ladder = ladder(recorder, policy: RecoveryPolicy(escalationWindowMs: 10_000, maxReloadAttempts: 3, reloadDelaysMs: [1_000]))
+
+        ladder.note(failure)
+        recorder.clock.advance(1)
+        ladder.note(failure)
+        recorder.clock.advance(1)
+        ladder.note(failure)
+        recorder.clock.advance(1)
+        ladder.note(failure)
+
+        #expect(recorder.steps == [
+            "in-place",
+            "reattach@1.0",
+            "reload(fatal,2)@2.0",
+            "reload(fatal,3)@3.0",
+            "exhausted:network-error",
+        ])
+    }
+
+    @Test("no delays at all: every rung is taken as soon as the clock moves")
+    func noDelays() {
+        let recorder = Recorder()
+        let ladder = ladder(recorder, policy: RecoveryPolicy(escalationWindowMs: 10_000, maxReloadAttempts: 2, reloadDelaysMs: []))
+
+        ladder.note(failure)
+        recorder.clock.advance(0)
+        ladder.note(failure)
+        recorder.clock.advance(0)
+
+        #expect(recorder.steps == ["in-place", "reattach@0.0", "reload(fatal,2)@0.0"])
+    }
+
+    @Test("no attempts allowed: the failure is reported at once, after the in-place repair had its turn")
+    func noAttempts() {
+        let recorder = Recorder()
+        let ladder = ladder(recorder, policy: RecoveryPolicy(escalationWindowMs: 10_000, maxReloadAttempts: 0, reloadDelaysMs: [1_000]))
+
+        ladder.note(failure)
+        recorder.clock.advance(30)
+
+        #expect(recorder.steps == ["in-place", "exhausted:network-error"])
+        #expect(!ladder.pendingReload)
+
+        // And a repair that took still ends it there.
+        let repaired = Recorder()
+        repaired.inPlaceAnswer = true
+        let other = self.ladder(repaired, policy: RecoveryPolicy(escalationWindowMs: 10_000, maxReloadAttempts: 0, reloadDelaysMs: []))
+        other.note(failure)
+        #expect(repaired.steps == ["in-place"])
+    }
+
     @Test("a destroyed ladder does nothing more")
     func destroyed() {
         let recorder = Recorder()

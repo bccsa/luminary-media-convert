@@ -188,6 +188,17 @@ struct LiveResolverTests {
         #expect(text.contains("#EXT-X-KEY:METHOD=NONE\n"))
     }
 
+    @Test("a key line naming no method, or an empty one, is no key either: the read goes through and the line is left as written")
+    func methodMissingOrEmptyIsNoKey() throws {
+        for keyLine in [#"#EXT-X-KEY:URI="k""#, #"#EXT-X-KEY:METHOD=,URI="k""#, "#EXT-X-KEY:METHOD=NONE"] {
+            let playlist = liveWindow(100).replacingOccurrences(
+                of: "#EXTINF:4,\nl_100", with: "\(keyLine)\n#EXTINF:4,\nl_100"
+            )
+            let text = try resolve(spec(), FakeUpstream([liveUrl: body(playlist)])).get()
+            #expect(text.contains("\(keyLine)\n"), "\(keyLine) was rewritten")
+        }
+    }
+
     @Test("fails with key-required on an LMCENC playlist when there is no key")
     func keyRequiredForLmcenc() {
         let result = resolve(spec(), FakeUpstream([liveUrl: .body(lmcenc(liveWindow(100)))]))
