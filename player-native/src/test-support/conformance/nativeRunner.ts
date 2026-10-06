@@ -17,6 +17,8 @@ export const DEFAULT_CAPABILITIES: JsonObject = {
     chunkWarming: false,
     backgroundAudio: false,
     inlineVideo: false,
+    muting: false,
+    subtitleSelection: false,
     maxPlayers: 1,
 };
 

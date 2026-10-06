@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import AVFoundation
+import AVKit
 import UIKit
 import WebKit
 // One module in the pod, separate modules in the Swift package.
@@ -22,6 +23,8 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     private var suspended = false
     private weak var player: AVPlayer?
     public var onRotatedToLandscape: (() -> Void)?
+    public var onPictureInPicture: ((Bool) -> Void)?
+    private var pictureInPicture: AVPictureInPictureController?
     private var rotationObserver: NSObjectProtocol?
     private var frameObservation: NSKeyValueObservation?
     /// What the web view looked like before it was made see-through.
@@ -79,6 +82,20 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         )
     }
 
+    /// From the inline layer: the picture continues in its own window, and the page goes on.
+    public func startPictureInPicture() -> Bool {
+        guard let layer = videoView?.playerLayer, !suspended,
+              AVPictureInPictureController.isPictureInPictureSupported() else { return false }
+        if pictureInPicture == nil || pictureInPicture?.playerLayer !== layer {
+            pictureInPicture = AVPictureInPictureController(playerLayer: layer)
+            pictureInPicture?.delegate = self
+        }
+        guard let pictureInPicture, pictureInPicture.isPictureInPicturePossible,
+              !pictureInPicture.isPictureInPictureActive else { return false }
+        pictureInPicture.startPictureInPicture()
+        return true
+    }
+
     public func setSuspended(_ suspended: Bool) {
         self.suspended = suspended
         guard let layer = videoView?.playerLayer else { return }
@@ -120,6 +137,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     }
 
     private func tearDown() {
+        pictureInPicture = nil
         frameObservation = nil
         videoView?.playerLayer.player = nil
         videoView?.removeFromSuperview()
@@ -130,6 +148,19 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
             webView.scrollView.backgroundColor = restore.scrollBackground
         }
         restore = nil
+    }
+}
+#endif
+
+#if canImport(UIKit)
+extension LuminaryInlinePresenter: AVPictureInPictureControllerDelegate {
+    /// Said once the picture is in its own window, not when it was asked for: it can still refuse.
+    public func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
+        onPictureInPicture?(true)
+    }
+
+    public func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
+        onPictureInPicture?(false)
     }
 }
 #endif

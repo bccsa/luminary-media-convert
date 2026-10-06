@@ -93,6 +93,9 @@ public final class PlayerRegistry {
         case .setVariant(_, let id): engine.setVariant(id)
         case .setAudioTrack(_, let id): engine.setAudioTrack(id)
         case .setInlineFrame(_, let frame): player.setInlineFrame(frame)
+        case .setMuted(_, let muted): engine.setMuted(muted)
+        case .setSubtitleTrack(_, let label): engine.setSubtitleTrack(label)
+        case .startPictureInPicture: engine.startPictureInPicture()
         case .enterFullscreen: engine.enterFullscreen()
         case .exitFullscreen: player.exitFullscreen()
         case .resumed: return player.resumed().json

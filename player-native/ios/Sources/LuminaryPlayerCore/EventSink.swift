@@ -83,6 +83,15 @@ public final class EventSink {
         send("durationchange", ["duration": Self.wire(duration)])
     }
 
+    private var muted = false
+
+    /// Only on a change, whoever made it: a `setMuted`, or the viewer in native UI.
+    public func mutedChanged(_ muted: Bool) {
+        if muted == self.muted { return }
+        self.muted = muted
+        send("mutedchange", ["muted": .bool(muted)])
+    }
+
     /// Only on a change, whoever made it: a `setRate`, or the viewer in native UI.
     public func rateChanged(_ rate: Double) {
         if rate == self.rate { return }

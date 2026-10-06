@@ -27,6 +27,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var itemNotifications: [NSObjectProtocol] = []
     private var statusObservation: NSKeyValueObservation?
     private var rateObservations: [NSKeyValueObservation] = []
+    /// Full-screen holds the picture: picture in picture starts from its view, not the inline one.
+    private var presentation = Presentation.inline
     private var lastStatus: AVPlayer.TimeControlStatus = .paused
     private var rate = 1.0
     private var metadataSent = false
@@ -80,6 +82,10 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
                 DispatchQueue.main.async { self?.viewerPickedRate(Double(player.defaultRate)) }
             })
         }
+        rateObservations.append(player.observe(\.isMuted, options: [.new]) { [weak self] player, _ in
+            let muted = player.isMuted
+            DispatchQueue.main.async { self?.events?.mutedChanged(muted) }
+        })
         // Video goes on as audio in the background, and into picture in picture where it can.
         player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
         nowPlaying = NowPlayingController(skin: skin, commands: .init(
@@ -91,6 +97,11 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         observeInterruptions()
         // Turning the phone sideways while a landscape video plays in the page opens full-screen,
         // as a video app does; a portrait video, a paused one and audio stay where they are.
+        inline?.onPictureInPicture = { [weak self] active in
+            // Started from the inline picture, which stays the picture's source: nothing lets go
+            // of the player, and `inline` is what the page goes back to.
+            self?.events?.presentationChanged((active ? Presentation.pip : Presentation.inline).rawValue)
+        }
         inline?.onRotatedToLandscape = { [weak self] in
             guard let self, self.hasVideo, self.intendedPlaying, self.videoIsLandscape else { return }
             self.enterFullscreen()
@@ -274,6 +285,40 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
 
     // MARK: Presentation
 
+    public func setMuted(_ muted: Bool) {
+        player.isMuted = muted
+    }
+
+    /// The subtitle the master lists under `label`: matched against an option's name or language.
+    public func setSubtitleTrack(_ label: String?) {
+        guard let item else { return }
+        let expected = ObjectIdentifier(item)
+        let loaded: @Sendable (AVMediaSelectionGroup?, (any Error)?) -> Void = { [weak self] group, _ in
+            nonisolated(unsafe) let group = group
+            DispatchQueue.main.async {
+                guard let self, let item = self.item, ObjectIdentifier(item) == expected, let group else { return }
+                guard let label else { return item.select(nil, in: group) }
+                let option = group.options.first { option in
+                    option.displayName == label || option.extendedLanguageTag == label
+                        || option.locale?.languageCode == label
+                }
+                if let option { item.select(option, in: group) }
+            }
+        }
+        MainActor.assumeIsolated {
+            item.asset.loadMediaSelectionGroup(for: .legible, completionHandler: loaded)
+        }
+    }
+
+    /// From the full-screen view while it holds the picture, otherwise from the inline one.
+    public func startPictureInPicture() {
+        if presentation == .fullscreen {
+            _ = presenter?.startPictureInPicture()
+        } else {
+            _ = inline?.startPictureInPicture()
+        }
+    }
+
     public func setInlineFrame(_ frame: InlineFrame?) {
         inlineFrame = frame
         inline?.setFrame(frame, player: player)
@@ -282,6 +327,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// Whichever of full-screen and picture in picture holds the picture, the inline view has
     /// none; it takes the player back when both are gone.
     private func presentationDidChange(_ presentation: Presentation) {
+        self.presentation = presentation
         inline?.setSuspended(presentation != .inline)
         events?.presentationChanged(presentation.rawValue)
     }

@@ -203,6 +203,35 @@ describe('NativeLuminaryPlayer', () => {
         warn.mockRestore();
     });
 
+    describe('muting and picture in picture, for a host that draws its own controls', () => {
+        it('follows what native says about muting, and passes the host\'s choice on', async () => {
+            const { plugin, exposed } = await mountPlayer({ plugin: new FakePlugin({ muting: true, pictureInPicture: true }) });
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+
+            expect(exposed.canMute).toBe(true);
+            expect(exposed.muted).toBe(false);
+            plugin.emit('mutedchange', { playerId: load.playerId, loadId: load.loadId }, { muted: true });
+            await flush();
+            expect(exposed.muted).toBe(true);
+
+            exposed.setMuted(false);
+            exposed.startPictureInPicture();
+            expect(plugin.argsOf('setMuted').at(-1)).toEqual({ playerId: load.playerId, muted: false });
+            expect(plugin.methods()).toContain('startPictureInPicture');
+        });
+
+        it('says what native cannot do', async () => {
+            const { plugin, exposed } = await mountPlayer();
+            await ready(plugin);
+
+            expect(exposed.canMute).toBe(false);
+            expect(exposed.canPictureInPicture).toBe(false);
+            exposed.setMuted(true);
+            expect(plugin.methods()).not.toContain('setMuted');
+        });
+    });
+
     describe('video inside the page', () => {
         const RECT = { left: 0, top: 72, width: 390, height: 219, right: 390, bottom: 291, x: 0, y: 72 } as DOMRect;
 

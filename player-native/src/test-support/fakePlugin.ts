@@ -34,6 +34,8 @@ export const DEFAULT_CAPABILITIES: BridgeCapabilities = {
     chunkWarming: false,
     backgroundAudio: false,
     inlineVideo: false,
+    muting: false,
+    subtitleSelection: false,
     maxPlayers: 1,
 };
 
@@ -123,6 +125,9 @@ export class FakePlugin implements LuminaryPlayerPlugin {
     setAudioTrack = (args: unknown) => this.record('setAudioTrack', args, undefined);
     warmChunks = (args: unknown) => this.record('warmChunks', args, undefined);
     setInlineFrame = (args: unknown) => this.record('setInlineFrame', args, undefined);
+    setMuted = (args: unknown) => this.record('setMuted', args, undefined);
+    setSubtitleTrack = (args: unknown) => this.record('setSubtitleTrack', args, undefined);
+    startPictureInPicture = (args: unknown) => this.record('startPictureInPicture', args, undefined);
     enterFullscreen = (args: unknown) => this.record('enterFullscreen', args, undefined);
     exitFullscreen = (args: unknown) => this.record('exitFullscreen', args, undefined);
     destroy = (args: unknown) => this.record('destroy', args, undefined);

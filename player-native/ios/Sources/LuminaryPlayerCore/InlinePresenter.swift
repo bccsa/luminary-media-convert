@@ -26,6 +26,12 @@ public protocol InlinePresenter: AnyObject {
     /// whether that opens full-screen (it plays, and its picture is wider than tall).
     var onRotatedToLandscape: (() -> Void)? { get set }
 
+    /// Starts picture in picture from the inline picture. False when there is none to start from.
+    func startPictureInPicture() -> Bool
+
+    /// Picture in picture started from the inline picture has started (true) or ended (false).
+    var onPictureInPicture: ((Bool) -> Void)? { get set }
+
     /// Full-screen or picture in picture holds the picture: the inline view lets go of the player
     /// (true) and takes it back (false). The frame it was given stays.
     func setSuspended(_ suspended: Bool)

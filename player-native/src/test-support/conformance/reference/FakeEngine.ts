@@ -20,6 +20,7 @@ export interface EngineListener {
     variants(variants: Json): void;
     bufferedTo(end: number): void;
     rateChanged(rate: number): void;
+    mutedChanged(muted: boolean): void;
 }
 
 export interface EngineSnapshot {
@@ -76,6 +77,15 @@ export class FakeEngine {
     }
     setAudioTrack(id: string): void {
         this.record({ method: 'setAudioTrack', id });
+    }
+    setMuted(muted: boolean): void {
+        this.record({ method: 'setMuted', muted });
+    }
+    setSubtitleTrack(label: string | null): void {
+        this.record(label === null ? { method: 'setSubtitleTrack' } : { method: 'setSubtitleTrack', label });
+    }
+    startPictureInPicture(): void {
+        this.record({ method: 'startPictureInPicture' });
     }
     setInlineFrame(frame: InlineFrame | null): void {
         this.record(frame ? { method: 'setInlineFrame', ...frame } : { method: 'setInlineFrame' });
@@ -152,6 +162,9 @@ export class FakeEngine {
                 this.setPosition(this.position());
                 this.rate = args.rate as number;
                 this.listener?.rateChanged(this.rate);
+                return;
+            case 'muted':
+                this.listener?.mutedChanged(args.muted as boolean);
                 return;
             case 'failed':
                 throw new Error('failed: the recovery ladder arrives in phase 3');

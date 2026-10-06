@@ -1,18 +1,18 @@
 {
- "scenario": "03-create-load-play.json",
+ "scenario": "22-muting-subtitles-pip.json",
  "ops": [
   {
    "op": "start",
    "capabilities": {
     "variantSwitching": false,
-    "pictureInPicture": false,
+    "pictureInPicture": true,
     "renderText": false,
     "live": false,
     "chunkWarming": false,
     "backgroundAudio": false,
     "inlineVideo": false,
-    "muting": false,
-    "subtitleSelection": false,
+    "muting": true,
+    "subtitleSelection": true,
     "maxPlayers": 1
    }
   },
@@ -26,14 +26,14 @@
      "platform": "android",
      "capabilities": {
       "variantSwitching": false,
-      "pictureInPicture": false,
+      "pictureInPicture": true,
       "renderText": false,
       "live": false,
       "chunkWarming": false,
       "backgroundAudio": false,
       "inlineVideo": false,
-      "muting": false,
-      "subtitleSelection": false,
+      "muting": true,
+      "subtitleSelection": true,
       "maxPlayers": 1
      }
     }
@@ -110,36 +110,40 @@
    ]
   },
   {
-   "op": "engine",
-   "signal": "readyToPlay",
+   "op": "call",
+   "method": "setMuted",
    "args": {
-    "duration": 120
+    "playerId": "player-1",
+    "muted": true
+   },
+   "result": {
+    "resolved": {}
    }
   },
   {
-   "op": "drainEvents",
-   "events": [
-    {
-     "name": "durationchange",
-     "payload": {
-      "duration": 120,
-      "playerId": "player-1",
-      "loadId": "load1"
-     }
-    },
-    {
-     "name": "loadedmetadata",
-     "payload": {
-      "duration": 120,
-      "playerId": "player-1",
-      "loadId": "load1"
-     }
-    }
-   ]
+   "op": "call",
+   "method": "setSubtitleTrack",
+   "args": {
+    "playerId": "player-1",
+    "label": "Français"
+   },
+   "result": {
+    "resolved": {}
+   }
   },
   {
    "op": "call",
-   "method": "play",
+   "method": "setSubtitleTrack",
+   "args": {
+    "playerId": "player-1"
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "call",
+   "method": "startPictureInPicture",
    "args": {
     "playerId": "player-1"
    },
@@ -155,21 +159,35 @@
      "masterUri": "luminary://asset/1/2.m3u8"
     },
     {
-     "method": "play"
+     "method": "setMuted",
+     "muted": true
+    },
+    {
+     "method": "setSubtitleTrack",
+     "label": "Français"
+    },
+    {
+     "method": "setSubtitleTrack"
+    },
+    {
+     "method": "startPictureInPicture"
     }
    ]
   },
   {
    "op": "engine",
-   "signal": "playing",
-   "args": {}
+   "signal": "muted",
+   "args": {
+    "muted": true
+   }
   },
   {
    "op": "drainEvents",
    "events": [
     {
-     "name": "playing",
+     "name": "mutedchange",
      "payload": {
+      "muted": true,
       "playerId": "player-1",
       "loadId": "load1"
      }
@@ -177,29 +195,49 @@
    ]
   },
   {
-   "op": "advanceClock",
-   "seconds": 0.5
+   "op": "engine",
+   "signal": "muted",
+   "args": {
+    "muted": true
+   }
+  },
+  {
+   "op": "engine",
+   "signal": "muted",
+   "args": {
+    "muted": false
+   }
   },
   {
    "op": "drainEvents",
    "events": [
     {
-     "name": "timeupdate",
+     "name": "mutedchange",
      "payload": {
-      "currentTime": 0.25,
-      "playerId": "player-1",
-      "loadId": "load1"
-     }
-    },
-    {
-     "name": "timeupdate",
-     "payload": {
-      "currentTime": 0.5,
+      "muted": false,
       "playerId": "player-1",
       "loadId": "load1"
      }
     }
    ]
+  },
+  {
+   "op": "call",
+   "method": "setMuted",
+   "args": {
+    "playerId": "player-1",
+    "muted": "yes"
+   },
+   "result": {
+    "rejected": {
+     "code": "invalid-argument",
+     "message": "setMuted.muted is not a valid boolean"
+    }
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": []
   },
   {
    "op": "drainEvents",

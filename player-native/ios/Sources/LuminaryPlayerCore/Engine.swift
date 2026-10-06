@@ -29,6 +29,15 @@ public protocol Engine: AnyObject {
     /// The reload held while the app was in the background, handed over once; `resumed()` returns it.
     func takeHeldReload() -> PendingReload?
 
+    /// Mutes or unmutes; reported as `mutedchange` whoever changes it.
+    func setMuted(_ muted: Bool)
+
+    /// Selects the subtitle listed under `label` (its name, else its language); nil turns them off.
+    func setSubtitleTrack(_ label: String?)
+
+    /// Starts picture in picture from the picture that is showing; nothing when none is.
+    func startPictureInPicture()
+
     /// Shows the video in the page, in this frame of the web view, or hides it (nil).
     func setInlineFrame(_ frame: InlineFrame?)
 

@@ -93,6 +93,9 @@ const SHAPES: Record<string, { fields: Record<string, Shape>; optional?: Record<
         fields: PLAYER,
         optional: { frame: { fields: { x: 'number', y: 'number', width: 'number', height: 'number' } } },
     },
+    setMuted: { fields: { ...PLAYER, muted: 'boolean' } },
+    setSubtitleTrack: { fields: PLAYER, optional: { label: 'string' } },
+    startPictureInPicture: { fields: PLAYER },
     enterFullscreen: { fields: PLAYER },
     exitFullscreen: { fields: PLAYER },
     resumed: { fields: PLAYER },
@@ -162,6 +165,9 @@ const CAPABILITY_OF: Record<string, string> = {
     putLive: 'live',
     warmChunks: 'chunkWarming',
     setInlineFrame: 'inlineVideo',
+    setMuted: 'muting',
+    setSubtitleTrack: 'subtitleSelection',
+    startPictureInPicture: 'pictureInPicture',
 };
 
 export class PlayerRegistry {
@@ -243,6 +249,15 @@ export class PlayerRegistry {
                 break;
             case 'setAudioTrack':
                 player.engine.setAudioTrack(args.id as string);
+                break;
+            case 'setMuted':
+                player.engine.setMuted(args.muted as boolean);
+                break;
+            case 'setSubtitleTrack':
+                player.engine.setSubtitleTrack((args.label as string | undefined) ?? null);
+                break;
+            case 'startPictureInPicture':
+                player.engine.startPictureInPicture();
                 break;
             case 'setInlineFrame':
                 player.setInlineFrame((args.frame as unknown as InlineFrame | undefined) ?? null);

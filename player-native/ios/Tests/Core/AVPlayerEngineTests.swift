@@ -19,6 +19,8 @@ private final class RecordingPresenter: FullscreenPresenter {
         return true
     }
 
+    func startPictureInPicture() -> Bool { false }
+
     func dismiss() -> Bool {
         defer { presented = false }
         return presented

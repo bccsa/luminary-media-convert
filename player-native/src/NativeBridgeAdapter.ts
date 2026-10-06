@@ -74,6 +74,12 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     readonly capabilities: AdapterCapabilities;
     /** Native can draw the video in the page, in the frame {@link setInlineFrame} names. */
     readonly inlineVideo: boolean;
+    /** Native mutes through {@link setMuted}. */
+    readonly muting: boolean;
+    /** Native shows and selects the master's subtitles. */
+    readonly subtitleSelection: boolean;
+    /** Native can start picture in picture. */
+    readonly pictureInPicture: boolean;
     /**
      * Present only when native runs the warming loop: the controller calls it
      * through `?.`, so leaving it undefined is how the capability is declined.
@@ -123,6 +129,9 @@ export class NativeBridgeAdapter implements PlayerAdapter {
 
         const { capabilities } = options.info;
         this.inlineVideo = capabilities.inlineVideo === true;
+        this.muting = capabilities.muting === true;
+        this.subtitleSelection = capabilities.subtitleSelection === true;
+        this.pictureInPicture = capabilities.pictureInPicture === true;
         this.capabilities = {
             nativeHls: false,
             keyDelivery: 'memory',
@@ -320,7 +329,32 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         this.batch.discard(tracks.map((track) => track.blobUrl));
     }
 
-    setActiveTextTrack(): void {}
+    /**
+     * Native renders the subtitles the master carries, so the choice goes there; side-loaded ones
+     * are not rendered natively. The id is the master's `m:<group>:<name or language>`, and what
+     * native matches is that last part, the label the menu shows.
+     */
+    setActiveTextTrack(id: string | null): void {
+        if (!this.subtitleSelection || this.destroyed) return;
+        const label = id === null ? null : id.split(':').slice(2).join(':');
+        if (id !== null && !id.startsWith('m:')) return;
+        this.send(
+            'setSubtitleTrack',
+            this.plugin.setSubtitleTrack({ playerId: this.playerId, ...(label ? { label } : {}) }),
+        );
+    }
+
+    /** Mutes or unmutes. A no-op where native cannot: the call would be refused. */
+    setMuted(muted: boolean): void {
+        if (!this.muting || this.destroyed) return;
+        this.send('setMuted', this.plugin.setMuted({ playerId: this.playerId, muted }));
+    }
+
+    /** Starts picture in picture from the picture that is showing. */
+    startPictureInPicture(): void {
+        if (!this.pictureInPicture || this.destroyed) return;
+        this.send('startPictureInPicture', this.plugin.startPictureInPicture({ playerId: this.playerId }));
+    }
 
     // -----------------------------------------------------------------------
     // Chunk warming
@@ -506,6 +540,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
             case 'loadedmetadata':
             case 'presentationchange':
             case 'ratechange':
+            case 'mutedchange':
                 return;
         }
     }

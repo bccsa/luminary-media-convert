@@ -63,6 +63,13 @@ export interface NativeLuminaryPlayerExposed {
     readonly state: Readonly<PlayerState>;
     /** Native draws the video in this component's frame; see the `inline` prop. */
     readonly inlineActive: boolean;
+    /** Native is muted, as it last said. */
+    readonly muted: boolean;
+    /** What native can do for the controls a host draws itself. */
+    readonly canMute: boolean;
+    readonly canPictureInPicture: boolean;
+    setMuted(muted: boolean): void;
+    startPictureInPicture(): void;
     /** Resolves false when playback was refused, as the web player's does; it never rejects. */
     play(): Promise<boolean>;
     pause(): void;
@@ -128,6 +135,7 @@ export const NativeLuminaryPlayer = defineComponent({
         const live = shallowRef<Readonly<PlayerState>>(createInitialState());
         const startError = shallowRef<PlayerError | null>(null);
         const presentation = shallowRef<NativePresentation>('inline');
+        const muted = shallowRef(false);
         const controller = computed<PlayerController | null>(() => native.value?.controller ?? null);
 
         /** The controller's state; a player that could not even be created says so the same way. */
@@ -192,6 +200,10 @@ export const NativeLuminaryPlayer = defineComponent({
                 props.plugin.addListener('loadedmetadata', (payload) => mine(payload) && emit('loadedmetadata')),
                 props.plugin.addListener('presentationchange', (payload) => {
                     if (mine(payload)) presentation.value = payload.state;
+                }),
+                // Muting is the player's, not a load's, and the viewer changes it in native UI too.
+                props.plugin.addListener('mutedchange', (payload) => {
+                    if (mine(payload)) muted.value = payload.muted;
                 }),
             ];
             teardowns.push(() => listeners.forEach((listening) => void listening.then((listener) => listener.remove())));
@@ -368,7 +380,30 @@ export const NativeLuminaryPlayer = defineComponent({
             void controller.value?.load(props.source);
         }
 
-        expose({ controller, state, inlineActive, play, pause, seek, enterFullscreen, exitFullscreen });
+        const canMute = computed(() => native.value?.adapter.muting === true);
+        const canPictureInPicture = computed(() => native.value?.adapter.pictureInPicture === true);
+        function setMuted(next: boolean): void {
+            native.value?.adapter.setMuted(next);
+        }
+        function startPictureInPicture(): void {
+            native.value?.adapter.startPictureInPicture();
+        }
+
+        expose({
+            controller,
+            state,
+            inlineActive,
+            muted,
+            canMute,
+            canPictureInPicture,
+            setMuted,
+            startPictureInPicture,
+            play,
+            pause,
+            seek,
+            enterFullscreen,
+            exitFullscreen,
+        });
 
         // --- the audio / video toggle: `player-web`'s AudioVideoToggle ----------------------
 

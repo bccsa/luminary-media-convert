@@ -62,6 +62,8 @@ export class SimulatedNativePlugin implements LuminaryPlayerPlugin {
             chunkWarming: false,
             backgroundAudio: false,
             inlineVideo: false,
+            muting: false,
+            subtitleSelection: false,
             maxPlayers: 1,
             ...capabilities,
         };
@@ -107,6 +109,9 @@ export class SimulatedNativePlugin implements LuminaryPlayerPlugin {
     resumed = (args: { playerId: string }) => this.call<ResumeResult>('resumed', args);
     destroy = (args: { playerId: string }) => this.call<void>('destroy', args);
 
+    setMuted = (args: Parameters<LuminaryPlayerPlugin['setMuted']>[0]) => this.call<void>('setMuted', args);
+    setSubtitleTrack = (args: Parameters<LuminaryPlayerPlugin['setSubtitleTrack']>[0]) => this.call<void>('setSubtitleTrack', args);
+    startPictureInPicture = (args: Parameters<LuminaryPlayerPlugin['startPictureInPicture']>[0]) => this.call<void>('startPictureInPicture', args);
     setInlineFrame = (args: Parameters<LuminaryPlayerPlugin['setInlineFrame']>[0]) => this.call<void>('setInlineFrame', args);
     enterFullscreen = async (args: { playerId: string }) => {
         await this.call<void>('enterFullscreen', args);

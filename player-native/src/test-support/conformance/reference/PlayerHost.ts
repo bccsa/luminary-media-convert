@@ -154,6 +154,15 @@ export class PlayerHost implements EngineListener {
         this.sink.progress(end);
     }
 
+    private muted = false;
+
+    /** Only on a change, whoever made it. */
+    mutedChanged(muted: boolean): void {
+        if (muted === this.muted) return;
+        this.muted = muted;
+        this.sink.send('mutedchange', { muted });
+    }
+
     /** Only on a change, whoever made it. */
     rateChanged(rate: number): void {
         if (rate === this.rate) return;

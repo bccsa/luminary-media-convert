@@ -40,6 +40,8 @@ const CAPABILITIES = new Set([
     'chunkWarming',
     'backgroundAudio',
     'inlineVideo',
+    'muting',
+    'subtitleSelection',
     'maxPlayers',
 ]);
 
@@ -167,4 +169,5 @@ export const ENGINE_SIGNALS = new Set([
     'bufferedTo',
     'position',
     'rate',
+    'muted',
 ]);

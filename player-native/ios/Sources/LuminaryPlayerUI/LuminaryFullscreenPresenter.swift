@@ -74,6 +74,12 @@ public final class LuminaryFullscreenPresenter: NSObject, FullscreenPresenter {
         return true
     }
 
+    public func startPictureInPicture() -> Bool {
+        guard controller != nil, let pictureInPicture, pictureInPicture.isPictureInPicturePossible else { return false }
+        pictureInPicture.startPictureInPicture()
+        return true
+    }
+
     public func dismiss() -> Bool {
         guard let controller else { return false }
         // Cleared first, so nothing this dismissal causes is read as the viewer leaving.

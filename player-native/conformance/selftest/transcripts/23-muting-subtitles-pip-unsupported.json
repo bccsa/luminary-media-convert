@@ -1,5 +1,5 @@
 {
- "scenario": "21-exit-fullscreen-inline-keeps-playing.json",
+ "scenario": "23-muting-subtitles-pip-unsupported.json",
  "ops": [
   {
    "op": "start",
@@ -10,7 +10,7 @@
     "live": false,
     "chunkWarming": false,
     "backgroundAudio": false,
-    "inlineVideo": true,
+    "inlineVideo": false,
     "muting": false,
     "subtitleSelection": false,
     "maxPlayers": 1
@@ -31,7 +31,7 @@
       "live": false,
       "chunkWarming": false,
       "backgroundAudio": false,
-      "inlineVideo": true,
+      "inlineVideo": false,
       "muting": false,
       "subtitleSelection": false,
       "maxPlayers": 1
@@ -63,78 +63,47 @@
   },
   {
    "op": "call",
-   "method": "setInlineFrame",
+   "method": "setMuted",
    "args": {
     "playerId": "player-1",
-    "frame": {
-     "x": 0,
-     "y": 72,
-     "width": 390,
-     "height": 219
-    }
+    "muted": true
    },
    "result": {
-    "resolved": {}
+    "rejected": {
+     "code": "unsupported",
+     "message": "setMuted needs muting"
+    }
    }
   },
   {
    "op": "call",
-   "method": "exitFullscreen",
+   "method": "setSubtitleTrack",
    "args": {
     "playerId": "player-1"
    },
    "result": {
-    "resolved": {}
+    "rejected": {
+     "code": "unsupported",
+     "message": "setSubtitleTrack needs subtitleSelection"
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "startPictureInPicture",
+   "args": {
+    "playerId": "player-1"
+   },
+   "result": {
+    "rejected": {
+     "code": "unsupported",
+     "message": "startPictureInPicture needs pictureInPicture"
+    }
    }
   },
   {
    "op": "drainEngineCalls",
-   "calls": [
-    {
-     "method": "setInlineFrame",
-     "x": 0,
-     "y": 72,
-     "width": 390,
-     "height": 219
-    },
-    {
-     "method": "exitFullscreen"
-    }
-   ]
-  },
-  {
-   "op": "call",
-   "method": "setInlineFrame",
-   "args": {
-    "playerId": "player-1"
-   },
-   "result": {
-    "resolved": {}
-   }
-  },
-  {
-   "op": "call",
-   "method": "exitFullscreen",
-   "args": {
-    "playerId": "player-1"
-   },
-   "result": {
-    "resolved": {}
-   }
-  },
-  {
-   "op": "drainEngineCalls",
-   "calls": [
-    {
-     "method": "setInlineFrame"
-    },
-    {
-     "method": "exitFullscreen"
-    },
-    {
-     "method": "pause"
-    }
-   ]
+   "calls": []
   },
   {
    "op": "drainEvents",

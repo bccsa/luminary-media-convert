@@ -60,6 +60,9 @@ public protocol FullscreenPresenter: AnyObject {
         onPresentation: @escaping (Presentation) -> Void
     ) -> Bool
 
+    /// Starts picture in picture from the full-screen view. False when none is presented.
+    func startPictureInPicture() -> Bool
+
     /// False when nothing was presented.
     func dismiss() -> Bool
 }

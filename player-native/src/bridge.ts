@@ -116,6 +116,13 @@ export interface BridgeCapabilities {
      * (transparent) web view. Without it video shows in full-screen only. Parity-gated.
      */
     inlineVideo: boolean;
+    /** Mutes through `setMuted`, and reports `mutedchange`. Parity-gated. */
+    muting: boolean;
+    /**
+     * Shows and selects the subtitles the master carries (`TYPE=SUBTITLES`) through
+     * `setSubtitleTrack`. Parity-gated.
+     */
+    subtitleSelection: boolean;
     /** 1 in v1: a second `create` destroys the first player. */
     maxPlayers: number;
 }
@@ -264,6 +271,20 @@ export interface LuminaryPlayerPlugin {
      * view shows none, and it comes back with it. A frame has a positive width and height.
      */
     setInlineFrame(args: { playerId: string; frame?: InlineFrame }): Promise<void>;
+    /** `unsupported` unless `muting`. Mutes or unmutes; the volume is the device's. */
+    setMuted(args: { playerId: string; muted: boolean }): Promise<void>;
+    /**
+     * `unsupported` unless `subtitleSelection`. Selects the subtitle the master lists under
+     * `label` (its NAME, else its LANGUAGE), matched against a native option's name or language;
+     * absent turns subtitles off.
+     */
+    setSubtitleTrack(args: { playerId: string; label?: string }): Promise<void>;
+    /**
+     * `unsupported` unless `pictureInPicture`. Starts picture in picture from the picture that is
+     * showing (inline, or full-screen); a no-op where there is none or one is already up.
+     * `presentationchange` says when it has started.
+     */
+    startPictureInPicture(args: { playerId: string }): Promise<void>;
     enterFullscreen(args: { playerId: string }): Promise<void>;
     /**
      * Pauses, unless the current item has no video track (audio-only), or its video is shown in
@@ -335,6 +356,8 @@ export interface BridgeEventMap {
      * leaves the rate as it was.
      */
     ratechange: { rate: number };
+    /** On change: a `setMuted`, or the viewer's pick in native UI. Not on `load`: muting outlives the item. */
+    mutedchange: { muted: boolean };
     /** Once per load, when the duration and seekable range are known. Whole milliseconds, as `durationchange`. */
     loadedmetadata: { duration: number | null };
     /** On a presentation change. `inline` means not presented. */
@@ -364,6 +387,7 @@ export const BRIDGE_EVENT_NAMES: readonly BridgeEventName[] = [
     'variants-updated',
     'audiotracks-updated',
     'ratechange',
+    'mutedchange',
     'loadedmetadata',
     'presentationchange',
 ];

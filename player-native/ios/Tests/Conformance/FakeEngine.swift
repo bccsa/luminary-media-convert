@@ -45,6 +45,12 @@ final class FakeEngine: Engine {
     func setAudioTrack(_ id: String) { record("setAudioTrack", ["id": .string(id)]) }
     func setAppSuspended(_ suspended: Bool) {}
     func takeHeldReload() -> PendingReload? { nil }
+    func setMuted(_ muted: Bool) { record("setMuted", ["muted": .bool(muted)]) }
+    func setSubtitleTrack(_ label: String?) {
+        guard let label else { return record("setSubtitleTrack") }
+        record("setSubtitleTrack", ["label": .string(label)])
+    }
+    func startPictureInPicture() { record("startPictureInPicture") }
     func setInlineFrame(_ frame: InlineFrame?) {
         guard let frame else { return record("setInlineFrame") }
         record("setInlineFrame", [
@@ -115,6 +121,8 @@ final class FakeEngine: Engine {
             events?.bufferedTo(bufferedEnd)
         case "position":
             setPosition(args["position"]?.numberValue ?? 0)
+        case "muted":
+            if case .bool(let muted)? = args["muted"] { events?.mutedChanged(muted) }
         case "rate":
             setPosition(position())
             rate = args["rate"]?.numberValue ?? 1

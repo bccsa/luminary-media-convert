@@ -11,6 +11,8 @@
     "chunkWarming": false,
     "backgroundAudio": false,
     "inlineVideo": true,
+    "muting": false,
+    "subtitleSelection": false,
     "maxPlayers": 1
    }
   },
@@ -30,6 +32,8 @@
       "chunkWarming": false,
       "backgroundAudio": false,
       "inlineVideo": true,
+      "muting": false,
+      "subtitleSelection": false,
       "maxPlayers": 1
      }
     }

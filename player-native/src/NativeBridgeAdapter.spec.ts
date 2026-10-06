@@ -497,6 +497,52 @@ describe('NativeBridgeAdapter — resume', () => {
     });
 });
 
+describe('NativeBridgeAdapter — muting, subtitles and picture in picture', () => {
+    it('sends each call where native supports it', async () => {
+        const { controller, adapter, plugin } = await setup(simpleRoutes, {
+            muting: true,
+            subtitleSelection: true,
+            pictureInPicture: true,
+        });
+        await controller.load({ masterUrl: MASTER_URL });
+
+        adapter.setMuted(true);
+        adapter.startPictureInPicture();
+        controller.setSubtitleTrack('m:subs:Français');
+        controller.setSubtitleTrack(null);
+
+        expect(plugin.argsOf('setMuted')).toEqual([{ playerId: PLAYER_ID, muted: true }]);
+        expect(plugin.argsOf('startPictureInPicture')).toEqual([{ playerId: PLAYER_ID }]);
+        expect(plugin.argsOf('setSubtitleTrack')).toEqual([
+            { playerId: PLAYER_ID, label: 'Français' },
+            { playerId: PLAYER_ID },
+        ]);
+    });
+
+    it('keeps a label that has a colon of its own, and ignores a side-loaded track', async () => {
+        const { controller, plugin } = await setup(simpleRoutes, { subtitleSelection: true });
+        await controller.load({ masterUrl: MASTER_URL });
+
+        controller.setSubtitleTrack('m:subs:English: SDH');
+        controller.setSubtitleTrack('s:sidecar:en');
+
+        expect(plugin.argsOf('setSubtitleTrack')).toEqual([{ playerId: PLAYER_ID, label: 'English: SDH' }]);
+    });
+
+    it('asks for nothing native would refuse', async () => {
+        const { controller, adapter, plugin } = await setup();
+        await controller.load({ masterUrl: MASTER_URL });
+
+        adapter.setMuted(true);
+        adapter.startPictureInPicture();
+        controller.setSubtitleTrack('m:subs:Français');
+
+        expect(plugin.methods()).not.toContain('setMuted');
+        expect(plugin.methods()).not.toContain('startPictureInPicture');
+        expect(plugin.methods()).not.toContain('setSubtitleTrack');
+    });
+});
+
 describe('NativeBridgeAdapter — a live media playlist', () => {
     const LIVE_PLAYLIST = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:7\n#EXTINF:4,\nseg7.ts\n';
 
