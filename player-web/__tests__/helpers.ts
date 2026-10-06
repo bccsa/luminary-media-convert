@@ -8,8 +8,6 @@ import { vi } from 'vitest';
  */
 export function fakePlayer(overrides: Record<string, unknown> = {}) {
     const handlers = new Map<string, ((e?: unknown) => void)[]>();
-    /** What `one` actually subscribed for each listener, so `off` can remove it by the original. */
-    const onceOf = new Map<(e?: unknown) => void, (e?: unknown) => void>();
     // videojs-contrib-quality-levels: `enabled` is a getter/setter function on
     // each level, and the adapter identifies a level by height (or bitrate).
     const levels = Object.assign(
@@ -68,22 +66,11 @@ export function fakePlayer(overrides: Record<string, unknown> = {}) {
             (Array.isArray(name) ? name : [name]).forEach((n) =>
                 handlers.set(n, [...(handlers.get(n) ?? []), fn]),
             ),
-        // Like video.js: `one` runs once and removes itself, and `off` removes. A fake that
-        // kept every listener hid the adapter spending a one-shot arming on the wrong source.
         one: (name: string | string[], fn: (e?: unknown) => void) =>
-            (Array.isArray(name) ? name : [name]).forEach((n) => {
-                const once = (e?: unknown) => {
-                    handlers.set(n, (handlers.get(n) ?? []).filter((f) => f !== once));
-                    fn(e);
-                };
-                onceOf.set(fn, once);
-                handlers.set(n, [...(handlers.get(n) ?? []), once]);
-            }),
-        off: vi.fn((name: string | string[], fn: (e?: unknown) => void) =>
             (Array.isArray(name) ? name : [name]).forEach((n) =>
-                handlers.set(n, (handlers.get(n) ?? []).filter((f) => f !== fn && f !== onceOf.get(fn))),
+                handlers.set(n, [...(handlers.get(n) ?? []), fn]),
             ),
-        ),
+        off: vi.fn(),
         // The surface the component drives that the adapter does not.
         el: vi.fn(() => document.createElement('div')),
         poster: vi.fn(),
@@ -94,7 +81,6 @@ export function fakePlayer(overrides: Record<string, unknown> = {}) {
         dispose: vi.fn(),
         requestFullscreen: vi.fn(() => Promise.resolve()),
         exitFullscreen: vi.fn(),
-        isFullscreen: vi.fn(() => false),
         fire: (name: string, payload?: unknown) =>
             (handlers.get(name) ?? []).forEach((f) => f(payload)),
         handlers,

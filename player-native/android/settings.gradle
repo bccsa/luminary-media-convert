@@ -1,4 +1,0 @@
-// A standalone build of the plugin, for its own tests. Dependencies are hoisted
-// to the monorepo root, so capacitor-android is two levels up.
-include ':capacitor-android'
-project(':capacitor-android').projectDir = new File('../../node_modules/@capacitor/android/capacitor')

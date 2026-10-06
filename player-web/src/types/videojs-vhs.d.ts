@@ -83,8 +83,6 @@ export interface VhsPlaylistLoader {
 export interface VhsHandler {
     xhr: VhsXhrFactory;
     playlists?: VhsPlaylistLoader;
-    /** The throughput estimate ABR starts from and keeps updating, in bits per second. */
-    bandwidth?: number;
     [key: string]: unknown;
 }
 

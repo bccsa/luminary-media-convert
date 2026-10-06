@@ -111,26 +111,8 @@ export interface PlayerSource {
      * or below the cap, the single lowest rendition above it is kept.
      */
     maxHeight?: number;
-    /**
-     * The host's own measure of the connection, in bits per second, for the
-     * engine's adaptive logic to START from rather than guess: the host holds a
-     * measurement the engine has not made yet (the first segment is the one
-     * that costs). A HINT — an engine corrects it with what it measures and
-     * may ignore it, and one that has already measured this device's real
-     * throughput prefers its own. Not a cap: {@link maxHeight} is the cap.
-     * Absent or non-positive: no hint.
-     */
-    bandwidthEstimate?: number;
     /** Start position in seconds for the initial load. */
     startPosition?: number;
-    /**
-     * The angle the load starts on, instead of the master's default. With
-     * `AUDIO_ONLY_ANGLE_ID` the load fetches no video at all, which is what a
-     * host offering "start as audio" needs: starting on video and switching
-     * away would already have downloaded some. An id the master does not have
-     * falls back to the default.
-     */
-    startAngleId?: string;
     /** Carry the previous source's position into this load. */
     preservePosition?: boolean;
     sidecars?: {
@@ -367,15 +349,9 @@ export interface AdapterCapabilities {
      * 'url': the wrapper falls back to rewriting key URIs to a blob URL.
      */
     keyDelivery: 'memory' | 'url';
-    /**
-     * Supports pinning a specific variant via setVariant(). Without it the
-     * wrapper turns a quality choice into a reload with a height cap.
-     */
+    /** Supports pinning a specific variant via setVariant(). */
     variantSwitching: boolean;
-    /**
-     * Can render WebVTT text tracks handed over via setTextTracks(). Without it
-     * the wrapper neither fetches side-loaded subtitles nor offers them.
-     */
+    /** Can render WebVTT text tracks handed over via setTextTracks(). */
     renderText: boolean;
 }
 
@@ -386,8 +362,6 @@ export interface AdapterSource {
     isBlob: boolean;
     /** Raw session key for 'memory' key delivery. */
     keyHex?: string;
-    /** {@link PlayerSource.bandwidthEstimate}, passed on only when it is a usable number. */
-    bandwidthEstimate?: number;
     /**
      * The recovery ladder's tuning for this source, already resolved — the
      * adapter is handed decisions, never a partial bag whose defaults it would
@@ -737,15 +711,7 @@ export interface PlayerControllerApi {
 
     /** Re-munges and reloads, preserving position and play state. */
     setAngle(id: string): Promise<void>;
-    /**
-     * Chooses a rendition within the capped set; `'auto'` re-enables ABR.
-     *
-     * An engine that can pin a variant is asked to, with no reload. One that
-     * cannot (`variantSwitching: false`, AVPlayer) is reloaded with the chosen
-     * height as a cap, keeping position and play state, and its ABR stays at
-     * or below it; the choice holds across angle switches until `'auto'` or
-     * the next `load()`.
-     */
+    /** Pins a rendition within the capped set; `'auto'` re-enables ABR. No reload. */
     setQuality(id: string | 'auto'): void;
     /**
      * Selects an audio track and keeps it selected until the next `load()`.

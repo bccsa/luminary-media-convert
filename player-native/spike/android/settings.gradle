@@ -1,9 +1,0 @@
-// Step 0 of plan 02: a bare app playing this encoder's output through the plugin's real UriRouter.
-rootProject.name = 'lmc-spike'
-include ':app'
-
-// The plugin module under test, and what it builds against (hoisted to the monorepo root).
-include ':luminary-player'
-project(':luminary-player').projectDir = new File('../../android')
-include ':capacitor-android'
-project(':capacitor-android').projectDir = new File('../../../node_modules/@capacitor/android/capacitor')

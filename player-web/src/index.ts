@@ -108,8 +108,13 @@ export { installAutoHide, AUTO_HIDE_MS } from './vjs/autoHide';
 export { TRANSPARENT_POSTER } from './vjs/poster';
 export { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from './vjs/keepAlive';
 
-// Mode detection: pure, and a decision a host may need to make before it has a
-// player (which source goes to which component). Language matching comes with
-// player-core above, which every player shares.
+// Mode detection and language matching: pure, and both are decisions a host may
+// need to make before it has a player (which source goes to which component,
+// which language it will ask for).
 export { isYouTubeUrl, extractYouTubeId, toVideoJsYouTubeUrl } from './youtube';
 export { singleFlight } from './singleFlight';
+export {
+    findPreferredTrack,
+    matchesPreferredLanguage,
+    type LanguageTaggedTrack,
+} from './audioTrackLanguage';

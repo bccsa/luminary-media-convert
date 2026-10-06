@@ -341,10 +341,6 @@ function makeResponse(status: number, body?: string | Uint8Array): Response {
 export interface FakeAdapterOptions {
     keyDelivery?: 'memory' | 'url';
     nativeHls?: boolean;
-    /** Default true, as on the web. */
-    variantSwitching?: boolean;
-    /** Default true, as on the web. */
-    renderText?: boolean;
     variants?: AdapterVariant[];
     audioTracks?: AdapterAudioTrack[];
     recoverResult?: boolean;
@@ -385,8 +381,8 @@ export class FakeAdapter implements PlayerAdapter {
         this.capabilities = {
             nativeHls: options.nativeHls ?? false,
             keyDelivery: options.keyDelivery ?? 'memory',
-            variantSwitching: options.variantSwitching ?? true,
-            renderText: options.renderText ?? true,
+            variantSwitching: true,
+            renderText: true,
         };
         this.variants = options.variants ?? [];
         this.audioTracks = options.audioTracks ?? [];

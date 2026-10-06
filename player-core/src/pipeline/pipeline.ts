@@ -121,14 +121,6 @@ export interface MungeOptions {
     /** `null` → the master's default angle; {@link AUDIO_ONLY_ANGLE_ID} → audio only. */
     angleId: string | null;
     maxHeight?: number;
-    /**
-     * A viewer's quality choice, for an engine that cannot pin a rendition
-     * (`variantSwitching: false`): the served master keeps only renditions at
-     * or below it, applied after `maxHeight`. `qualities` is still listed from
-     * the `maxHeight`-capped master, so the choices on offer do not shrink to
-     * the one that was chosen.
-     */
-    selectHeight?: number;
 }
 
 /** One media playlist read while munging, as it was before the rewrite. */
@@ -162,10 +154,7 @@ export interface MungeResult {
      * warming is meaningless for such a source and disables itself.
      */
     isLive: boolean;
-    /**
-     * The renditions on offer, as derived from the playlist text: after
-     * `maxHeight`, before `selectHeight`.
-     */
+    /** Post-cap renditions, as derived from the playlist text. */
     qualities: Quality[];
     isAudioOnly: boolean;
     /** The playlist text actually handed to the engine (specs assert on it). */
@@ -295,9 +284,8 @@ export async function mungeSource(
     ctx: PipelineContext,
 ): Promise<MungeResult> {
     const narrowedText = narrow(info, options.angleId);
-    const offered = applyQualityCap(narrowedText, options.maxHeight);
-    const qualities = info.isMaster ? listQualities(offered) : [];
-    const capped = applyQualityCap(offered, options.selectHeight);
+    const capped = applyQualityCap(narrowedText, options.maxHeight);
+    const qualities = info.isMaster ? listQualities(capped) : [];
     const isAudioOnly =
         options.angleId === AUDIO_ONLY_ANGLE_ID ||
         info.nativelyAudioOnly ||

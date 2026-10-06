@@ -86,11 +86,6 @@ export class RecoveryLadder {
     private triedInPlace = false;
     private timer: ReturnType<typeof setTimeout> | null = null;
     private stopped = false;
-    /**
-     * Every rung spent and the failure reported: the next failure that counts
-     * is one after playback moved again.
-     */
-    private exhausted = false;
     /** A re-munge asked for and not yet answered by playback moving again. */
     private pendingReload: {
         reason: RecoveryReason;
@@ -120,7 +115,7 @@ export class RecoveryLadder {
      * an engine that is still trying has not failed yet.
      */
     note(payload: AdapterErrorPayload, reason: RecoveryReason = 'fatal'): void {
-        if (this.stopped || this.exhausted || !payload.fatal) return;
+        if (this.stopped || !payload.fatal) return;
 
         const at = this.now();
         const recurring =
@@ -142,17 +137,14 @@ export class RecoveryLadder {
 
     /**
      * Playback is moving again. Everything resets, including any re-munge still
-     * outstanding — it either arrived and worked, or stopped mattering — and a
-     * rung still scheduled, which would rebuild an engine that has recovered.
+     * outstanding — it either arrived and worked, or stopped mattering.
      */
     notePlaybackHealthy(): void {
         this.lastCategory = null;
         this.lastAt = 0;
         this.attempts = 0;
         this.triedInPlace = false;
-        this.exhausted = false;
         this.pendingReload = null;
-        this.clearTimer();
     }
 
     /**
@@ -203,9 +195,7 @@ export class RecoveryLadder {
 
         if (this.attempts >= this.policy.maxReloadAttempts) {
             // Nothing is outstanding once the ladder has given up: a resume
-            // must not rebuild a source that has been reported as failed. And
-            // it is reported once.
-            this.exhausted = true;
+            // must not rebuild a source that has been reported as failed.
             this.pendingReload = null;
             this.hooks.onExhausted(payload);
             return;
