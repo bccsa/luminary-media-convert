@@ -18,7 +18,6 @@ import LuminaryPlayerCore
 /// leaving.
 public final class LuminaryFullscreenPresenter: NSObject, FullscreenPresenter {
     private let host: () -> UIViewController?
-    private let texts: FullscreenTexts
     private let clock: Clock
     private var controller: FullscreenViewController?
     private var pictureInPicture: AVPictureInPictureController?
@@ -29,15 +28,15 @@ public final class LuminaryFullscreenPresenter: NSObject, FullscreenPresenter {
     private var presentWhenDismissed: (() -> Void)?
 
     /// `host` is asked for the view controller to present over each time full-screen begins.
-    public init(host: @escaping () -> UIViewController?, texts: FullscreenTexts = .init(), clock: Clock = MainQueueClock()) {
+    public init(host: @escaping () -> UIViewController?, clock: Clock = MainQueueClock()) {
         self.host = host
-        self.texts = texts
         self.clock = clock
     }
 
     public func present(
         _ player: AVPlayer,
         commands: FullscreenCommands,
+        texts: FullscreenTexts,
         onLeave: @escaping () -> Void,
         onPresentation: @escaping (Presentation) -> Void
     ) -> Bool {

@@ -96,7 +96,7 @@ const SHAPES: Record<string, { fields: Record<string, Shape>; optional?: Record<
     setMuted: { fields: { ...PLAYER, muted: 'boolean' } },
     setSubtitleTrack: { fields: PLAYER, optional: { label: 'string' } },
     startPictureInPicture: { fields: PLAYER },
-    enterFullscreen: { fields: PLAYER },
+    enterFullscreen: { fields: PLAYER, optional: { texts: 'object' } },
     exitFullscreen: { fields: PLAYER },
     resumed: { fields: PLAYER },
     destroy: { fields: PLAYER },
@@ -141,6 +141,11 @@ function checkValues(method: string, args: JsonObject): void {
     if (typeof args.startPosition === 'number' && args.startPosition < 0) invalid('startPosition is not negative');
     if (method === 'seek' && (args.position as number) < 0) invalid('position is not negative');
     if (method === 'setRate' && !((args.rate as number) > 0)) invalid('rate is positive');
+    if (method === 'enterFullscreen' && args.texts) {
+        for (const [key, value] of Object.entries(args.texts as Record<string, Json>)) {
+            if (typeof value !== 'string') invalid(`texts.${key} is a string`);
+        }
+    }
     if (method === 'setInlineFrame' && args.frame) {
         const frame = args.frame as Record<string, number>;
         if (!(frame.width > 0 && frame.height > 0)) invalid('frame has a positive width and height');
@@ -263,7 +268,7 @@ export class PlayerRegistry {
                 player.setInlineFrame((args.frame as unknown as InlineFrame | undefined) ?? null);
                 break;
             case 'enterFullscreen':
-                player.engine.enterFullscreen();
+                player.engine.enterFullscreen((args.texts as Record<string, string> | undefined) ?? null);
                 break;
             case 'exitFullscreen':
                 player.exitFullscreen();

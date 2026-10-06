@@ -56,6 +56,7 @@ public protocol FullscreenPresenter: AnyObject {
     func present(
         _ player: AVPlayer,
         commands: FullscreenCommands,
+        texts: FullscreenTexts,
         onLeave: @escaping () -> Void,
         onPresentation: @escaping (Presentation) -> Void
     ) -> Bool

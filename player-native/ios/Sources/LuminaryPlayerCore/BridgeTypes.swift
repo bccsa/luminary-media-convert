@@ -258,7 +258,7 @@ public enum BridgeCall: Sendable {
     case setMuted(playerId: String, muted: Bool)
     case setSubtitleTrack(playerId: String, label: String?)
     case startPictureInPicture(playerId: String)
-    case enterFullscreen(playerId: String)
+    case enterFullscreen(playerId: String, texts: [String: String]?)
     case exitFullscreen(playerId: String)
     case resumed(playerId: String)
     case destroy(playerId: String)
@@ -272,7 +272,7 @@ public enum BridgeCall: Sendable {
              .reattach(let id, _), .play(let id), .pause(let id), .seek(let id, _, _),
              .setRate(let id, _), .setVariant(let id, _), .setAudioTrack(let id, _),
              .warmChunks(let id, _, _, _, _), .setInlineFrame(let id, _), .setMuted(let id, _),
-             .setSubtitleTrack(let id, _), .startPictureInPicture(let id), .enterFullscreen(let id), .exitFullscreen(let id),
+             .setSubtitleTrack(let id, _), .startPictureInPicture(let id), .enterFullscreen(let id, _), .exitFullscreen(let id),
              .resumed(let id), .destroy(let id):
             return id
         }
@@ -387,7 +387,17 @@ public enum BridgeCall: Sendable {
         case "setSubtitleTrack":
             return .setSubtitleTrack(playerId: try args.string("playerId"), label: try args.optionalString("label"))
         case "startPictureInPicture": return .startPictureInPicture(playerId: try args.string("playerId"))
-        case "enterFullscreen": return .enterFullscreen(playerId: try args.string("playerId"))
+        case "enterFullscreen":
+            var texts: [String: String]? = nil
+            if let object = try args.optionalObject("texts") {
+                var strings: [String: String] = [:]
+                for (key, value) in object.json {
+                    guard case .string(let text) = value else { throw object.invalid("texts.\(key) is a string") }
+                    strings[key] = text
+                }
+                texts = strings
+            }
+            return .enterFullscreen(playerId: try args.string("playerId"), texts: texts)
         case "exitFullscreen": return .exitFullscreen(playerId: try args.string("playerId"))
         case "resumed": return .resumed(playerId: try args.string("playerId"))
         case "destroy": return .destroy(playerId: try args.string("playerId"))

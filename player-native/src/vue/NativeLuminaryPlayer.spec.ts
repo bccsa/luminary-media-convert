@@ -203,6 +203,26 @@ describe('NativeLuminaryPlayer', () => {
         warn.mockRestore();
     });
 
+    describe('the texts native full-screen says', () => {
+        it('are the host\'s messages as they are when full-screen opens, and native\'s English where there are none', async () => {
+            const { plugin, wrapper, exposed } = await mountPlayer({ messages: { exitFullscreen: 'Quitter le plein écran' } });
+            await ready(plugin);
+
+            await exposed.enterFullscreen();
+            const first = plugin.argsOf<{ texts: Record<string, string> }>('enterFullscreen').at(-1)!.texts;
+            expect(first.exitFullscreen).toBe('Quitter le plein écran');
+            expect(first.playbackRate).toBe('Playback Rate');
+            expect(first.skipBack).toBe('Skip back {seconds} seconds');
+
+            // The language changed: the next full-screen says it.
+            await wrapper.setProps({ messages: { exitFullscreen: 'Exit fullscreen now' } });
+            await exposed.enterFullscreen();
+            expect(plugin.argsOf<{ texts: Record<string, string> }>('enterFullscreen').at(-1)!.texts.exitFullscreen).toBe(
+                'Exit fullscreen now',
+            );
+        });
+    });
+
     describe('muting and picture in picture, for a host that draws its own controls', () => {
         it('follows what native says about muting, and passes the host\'s choice on', async () => {
             const { plugin, exposed } = await mountPlayer({ plugin: new FakePlugin({ muting: true, pictureInPicture: true }) });

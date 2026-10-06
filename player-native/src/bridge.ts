@@ -127,6 +127,24 @@ export interface BridgeCapabilities {
     maxPlayers: number;
 }
 
+/** The strings of native full-screen. Each is optional: native has an English default. */
+export interface FullscreenTexts {
+    play?: string;
+    pause?: string;
+    seek?: string;
+    skipBack?: string;
+    skipForward?: string;
+    exitFullscreen?: string;
+    audioMenu?: string;
+    subtitlesMenu?: string;
+    subtitlesOff?: string;
+    pictureInPicture?: string;
+    playbackRate?: string;
+    mute?: string;
+    unmute?: string;
+    loading?: string;
+}
+
 /** A rectangle in the web view's coordinates, in CSS pixels. */
 export interface InlineFrame {
     x: number;
@@ -285,7 +303,12 @@ export interface LuminaryPlayerPlugin {
      * `presentationchange` says when it has started.
      */
     startPictureInPicture(args: { playerId: string }): Promise<void>;
-    enterFullscreen(args: { playerId: string }): Promise<void>;
+    /**
+     * `texts` are what the full-screen controls say (VoiceOver labels, menu entries), in the
+     * language the host speaks: native keeps its English default for any it is not given, and
+     * for all of them when there are none. `{seconds}` in the skip texts is the interval.
+     */
+    enterFullscreen(args: { playerId: string; texts?: FullscreenTexts }): Promise<void>;
     /**
      * Pauses, unless the current item has no video track (audio-only), or its video is shown in
      * the page (`setInlineFrame` set a frame): leaving full-screen goes back to a picture that plays.

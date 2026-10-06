@@ -184,6 +184,29 @@ public struct FullscreenTexts: Equatable {
 
     public init() {}
 
+    /// The English defaults, with the strings JavaScript sent over the top: the host's language.
+    /// A key native does not know is ignored, one it was not given keeps its default.
+    public init(overriding texts: [String: String]) {
+        self.init()
+        func take(_ key: String, into field: inout String) {
+            if let value = texts[key], !value.isEmpty { field = value }
+        }
+        take("play", into: &play)
+        take("pause", into: &pause)
+        take("seek", into: &seek)
+        take("skipBack", into: &skipBack)
+        take("skipForward", into: &skipForward)
+        take("exitFullscreen", into: &exitFullscreen)
+        take("audioMenu", into: &audioMenu)
+        take("subtitlesMenu", into: &subtitlesMenu)
+        take("subtitlesOff", into: &subtitlesOff)
+        take("pictureInPicture", into: &pictureInPicture)
+        take("playbackRate", into: &playbackRate)
+        take("mute", into: &mute)
+        take("unmute", into: &unmute)
+        take("loading", into: &loading)
+    }
+
     public func skipBack(_ seconds: Int) -> String { skipBack.replacingOccurrences(of: "{seconds}", with: "\(seconds)") }
     public func skipForward(_ seconds: Int) -> String { skipForward.replacingOccurrences(of: "{seconds}", with: "\(seconds)") }
 }

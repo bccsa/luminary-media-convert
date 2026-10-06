@@ -10,6 +10,7 @@ private final class RecordingPresenter: FullscreenPresenter {
     func present(
         _ player: AVPlayer,
         commands: FullscreenCommands,
+        texts: FullscreenTexts,
         onLeave: @escaping () -> Void,
         onPresentation: @escaping (Presentation) -> Void
     ) -> Bool {
@@ -48,7 +49,7 @@ struct AVPlayerEngineTests {
     func endedIsNotPlaying() throws {
         let (engine, presenter) = make()
         engine.play()
-        engine.enterFullscreen()
+        engine.enterFullscreen(texts: nil)
         let commands = try #require(presenter.commands)
         #expect(commands.playbackWanted())
 
@@ -65,7 +66,7 @@ struct AVPlayerEngineTests {
     func pauseAndFailure() throws {
         let (engine, presenter) = make()
         engine.play()
-        engine.enterFullscreen()
+        engine.enterFullscreen(texts: nil)
         let commands = try #require(presenter.commands)
 
         commands.pause()

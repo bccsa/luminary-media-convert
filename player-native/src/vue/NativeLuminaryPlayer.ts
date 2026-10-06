@@ -32,7 +32,7 @@ import {
 import type { LuminaryPlayerPlugin, NowPlaying } from '../bridge.js';
 import { createNativePlayer, type NativePlayer } from '../createNativePlayer.js';
 import { LuminaryPlayer } from '../plugin.js';
-import { DEFAULT_NATIVE_MESSAGES, errorMessage, type NativePlayerMessages } from './messages.js';
+import { DEFAULT_NATIVE_MESSAGES, errorMessage, fullscreenTexts, type NativePlayerMessages } from './messages.js';
 import { VIDEOJS_PLAY_PATH, VIDEOJS_UNITS_PER_EM } from './videoJsIcons.js';
 
 export type NativePresentation = 'inline' | 'fullscreen' | 'pip';
@@ -348,7 +348,11 @@ export const NativeLuminaryPlayer = defineComponent({
         // A refused presentation is reported, not thrown: a player another create has replaced
         // rejects every call, and nothing on the page would catch it.
         async function enterFullscreen() {
-            if (native.value) await report('enterFullscreen', props.plugin.enterFullscreen({ playerId: native.value.playerId }));
+            if (native.value) {
+                // The texts as they are now, so a language change shows the next time full-screen opens.
+                const texts = fullscreenTexts(messages.value);
+                await report('enterFullscreen', props.plugin.enterFullscreen({ playerId: native.value.playerId, texts }));
+            }
         }
         async function exitFullscreen() {
             if (native.value) await report('exitFullscreen', props.plugin.exitFullscreen({ playerId: native.value.playerId }));

@@ -171,3 +171,21 @@ struct FullscreenControlsVisibilityTests {
         #expect(!visibility.visible)
     }
 }
+
+@Suite("Full-screen texts")
+struct FullscreenTextsTests {
+    @Test("the host's strings override the English ones; the rest stay English")
+    func overriding() {
+        let texts = FullscreenTexts(overriding: ["exitFullscreen": "Quitter le plein écran", "skipBack": "Reculer de {seconds} secondes"])
+        #expect(texts.exitFullscreen == "Quitter le plein écran")
+        #expect(texts.skipBack(10) == "Reculer de 10 secondes")
+        #expect(texts.playbackRate == "Playback Rate")
+        #expect(texts.skipForward(10) == "Skip forward 10 seconds")
+    }
+
+    @Test("an empty string, or a key native does not know, changes nothing")
+    func ignoresWhatItCannotUse() {
+        let texts = FullscreenTexts(overriding: ["mute": "", "volume": "Volume"])
+        #expect(texts == FullscreenTexts())
+    }
+}

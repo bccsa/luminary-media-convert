@@ -113,7 +113,7 @@ export class SimulatedNativePlugin implements LuminaryPlayerPlugin {
     setSubtitleTrack = (args: Parameters<LuminaryPlayerPlugin['setSubtitleTrack']>[0]) => this.call<void>('setSubtitleTrack', args);
     startPictureInPicture = (args: Parameters<LuminaryPlayerPlugin['startPictureInPicture']>[0]) => this.call<void>('startPictureInPicture', args);
     setInlineFrame = (args: Parameters<LuminaryPlayerPlugin['setInlineFrame']>[0]) => this.call<void>('setInlineFrame', args);
-    enterFullscreen = async (args: { playerId: string }) => {
+    enterFullscreen = async (args: Parameters<LuminaryPlayerPlugin['enterFullscreen']>[0]) => {
         await this.call<void>('enterFullscreen', args);
         this.dispatch('presentationchange', { playerId: args.playerId, state: 'fullscreen' });
     };

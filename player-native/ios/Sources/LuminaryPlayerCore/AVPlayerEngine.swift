@@ -27,6 +27,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var itemNotifications: [NSObjectProtocol] = []
     private var statusObservation: NSKeyValueObservation?
     private var rateObservations: [NSKeyValueObservation] = []
+    private var fullscreenTexts = FullscreenTexts()
     /// Full-screen holds the picture: picture in picture starts from its view, not the inline one.
     private var presentation = Presentation.inline
     private var lastStatus: AVPlayer.TimeControlStatus = .paused
@@ -104,7 +105,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         }
         inline?.onRotatedToLandscape = { [weak self] in
             guard let self, self.hasVideo, self.intendedPlaying, self.videoIsLandscape else { return }
-            self.enterFullscreen()
+            self.enterFullscreen(texts: nil)
         }
         ladder = RecoveryLadder(policy: .default, clock: clock, hooks: .init(
             // AVPlayer offers no in-place repair: the rung is skipped rather than pretended.
@@ -332,12 +333,15 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         events?.presentationChanged(presentation.rawValue)
     }
 
-    /// Audio-only has no view: there is nothing to show full-screen.
-    public func enterFullscreen() {
+    /// Audio-only has no view: there is nothing to show full-screen. The texts are the last the
+    /// host sent, so a turn of the phone that opens full-screen on its own speaks the same language.
+    public func enterFullscreen(texts: [String: String]?) {
+        if let texts { fullscreenTexts = FullscreenTexts(overriding: texts) }
         guard let presenter, hasVideo else { return }
         let presented = presenter.present(
             player,
             commands: fullscreenCommands(),
+            texts: fullscreenTexts,
             onLeave: { [weak self] in self?.leaveFullscreenByViewer() },
             onPresentation: { [weak self] presentation in self?.presentationDidChange(presentation) }
         )

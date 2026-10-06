@@ -57,7 +57,10 @@ final class FakeEngine: Engine {
             "x": .number(frame.x), "y": .number(frame.y), "width": .number(frame.width), "height": .number(frame.height),
         ])
     }
-    func enterFullscreen() { record("enterFullscreen") }
+    func enterFullscreen(texts: [String: String]?) {
+        guard let texts else { return record("enterFullscreen") }
+        record("enterFullscreen", ["texts": .object(texts.mapValues { JSON.string($0) })])
+    }
     func exitFullscreen() { record("exitFullscreen") }
     func destroy() { record("destroy") }
 

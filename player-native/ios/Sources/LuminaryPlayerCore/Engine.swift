@@ -41,7 +41,8 @@ public protocol Engine: AnyObject {
     /// Shows the video in the page, in this frame of the web view, or hides it (nil).
     func setInlineFrame(_ frame: InlineFrame?)
 
-    func enterFullscreen()
+    /// `texts` are what the controls say, in the host's language; nil keeps the last, or English.
+    func enterFullscreen(texts: [String: String]?)
     func exitFullscreen()
     func destroy()
 

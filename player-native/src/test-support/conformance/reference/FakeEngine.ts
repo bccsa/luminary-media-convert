@@ -90,8 +90,8 @@ export class FakeEngine {
     setInlineFrame(frame: InlineFrame | null): void {
         this.record(frame ? { method: 'setInlineFrame', ...frame } : { method: 'setInlineFrame' });
     }
-    enterFullscreen(): void {
-        this.record({ method: 'enterFullscreen' });
+    enterFullscreen(texts: Record<string, string> | null = null): void {
+        this.record(texts ? { method: 'enterFullscreen', texts } : { method: 'enterFullscreen' });
     }
     exitFullscreen(): void {
         this.record({ method: 'exitFullscreen' });
