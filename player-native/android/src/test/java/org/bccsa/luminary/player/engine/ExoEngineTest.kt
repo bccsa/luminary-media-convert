@@ -262,9 +262,19 @@ class ExoEngineTest {
     }
 
     @Test
+    fun `a load starts with subtitles off, whatever the master's default says`() {
+        load("load1", KEY_HEX)
+
+        assertTrue(player.trackSelectionParameters.disabledTrackTypes.contains(androidx.media3.common.C.TRACK_TYPE_TEXT))
+    }
+
+    @Test
     fun `subtitles off disables the text renderer, and an unknown label changes nothing`() {
         load("load1", KEY_HEX)
         TestPlayerRunHelper.advance(player).untilState(Player.STATE_READY)
+        // A load leaves them off; showing one is the page's to ask for.
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_TEXT, false).build()
 
         call("setSubtitleTrack", "label" to "Klingon")
         assertTrue(!player.trackSelectionParameters.disabledTrackTypes.contains(androidx.media3.common.C.TRACK_TYPE_TEXT))

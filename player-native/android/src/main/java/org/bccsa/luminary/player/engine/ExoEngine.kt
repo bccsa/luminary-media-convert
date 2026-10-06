@@ -191,7 +191,9 @@ class ExoEngine(
         // The controller hands its audio choice back once the new list arrives.
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            // The page's subtitle choice is the truth: off until it picks one, whatever the master's default says.
             .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
             .setPreferredAudioLanguage(null)
             .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
             .build()

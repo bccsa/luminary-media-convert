@@ -275,6 +275,10 @@ watch(latency, (value) => {
             <button class="capsule" type="button" @click="skip(-10)">−10 s</button>
             <button class="capsule" type="button" @click="skip(10)">+10 s</button>
             <button class="capsule" type="button" @click="player?.enterFullscreen()">Full screen</button>
+            <button v-if="player?.canMute" class="capsule" type="button" @click="player.setMuted?.(!player.muted)">
+                {{ player.muted ? 'Unmute' : 'Mute' }}
+            </button>
+            <button v-if="player?.canPictureInPicture" class="capsule" type="button" @click="player.startPictureInPicture?.()">PiP</button>
         </div>
 
         <template v-if="state">
@@ -314,6 +318,27 @@ watch(latency, (value) => {
                     :class="{ 'capsule--prominent': track.id === state.activeAudioTrackId }"
                     type="button"
                     @click="setAudio(track.id)"
+                >
+                    {{ track.label }}
+                </button>
+            </div>
+            <div v-if="state.subtitleTracks.length" class="group">
+                <span class="group__label">Subtitles</span>
+                <button
+                    class="capsule"
+                    :class="{ 'capsule--prominent': state.activeSubtitleTrackId === null }"
+                    type="button"
+                    @click="player?.controller?.setSubtitleTrack(null)"
+                >
+                    Off
+                </button>
+                <button
+                    v-for="track in state.subtitleTracks"
+                    :key="track.id"
+                    class="capsule"
+                    :class="{ 'capsule--prominent': track.id === state.activeSubtitleTrackId }"
+                    type="button"
+                    @click="player?.controller?.setSubtitleTrack(track.id)"
                 >
                     {{ track.label }}
                 </button>

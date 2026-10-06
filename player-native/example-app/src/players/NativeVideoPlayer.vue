@@ -47,6 +47,11 @@ defineExpose({
     seek: (seconds: number) => inner.value?.seek(seconds),
     enterFullscreen: () => inner.value?.enterFullscreen(),
     exitFullscreen: () => inner.value?.exitFullscreen(),
+    muted: computed(() => inner.value?.muted ?? false),
+    canMute: computed(() => inner.value?.canMute ?? false),
+    canPictureInPicture: computed(() => inner.value?.canPictureInPicture ?? false),
+    setMuted: (muted: boolean) => inner.value?.setMuted(muted),
+    startPictureInPicture: () => inner.value?.startPictureInPicture(),
 });
 </script>
 

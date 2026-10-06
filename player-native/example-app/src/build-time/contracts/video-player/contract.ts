@@ -30,6 +30,12 @@ export interface PlayerHandle {
     seek(seconds: number): void;
     enterFullscreen(): void | Promise<void>;
     exitFullscreen(): void | Promise<void>;
+    /** Only the native component has these: what native does for controls the host draws itself. */
+    readonly muted?: boolean;
+    readonly canMute?: boolean;
+    readonly canPictureInPicture?: boolean;
+    setMuted?(muted: boolean): void;
+    startPictureInPicture?(): void;
 }
 
 /**
