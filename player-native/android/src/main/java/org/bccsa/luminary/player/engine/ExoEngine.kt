@@ -288,27 +288,15 @@ class ExoEngine(
         }
     }
 
-    override fun setSubtitleTrack(label: String?) {
-        val builder = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT)
-        if (label == null) {
-            player.trackSelectionParameters = builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
-            return
-        }
-        // The name the master lists it under, else its language, as `bridge.ts` says.
-        val options = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
-            .flatMap { group -> (0 until group.length).filter(group::isTrackSupported).map { group to it } }
-        val match = options.firstOrNull { (group, i) -> group.getTrackFormat(i).label == label }
-            ?: options.firstOrNull { (group, i) -> group.getTrackFormat(i).language == label }
-            ?: return
-        player.trackSelectionParameters = builder
-            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-            .setOverrideForType(TrackSelectionOverride(match.first.mediaTrackGroup, match.second))
-            .build()
-    }
+    override fun setSubtitleTrack(label: String?) = selectSubtitle(player, label)
 
-    // Picture in picture and the video shown in the page are not built on Android yet: their
-    // capabilities are off, so the registry refuses the calls before they reach here.
-    override fun startPictureInPicture() {}
+    /** Needs the system's picture in picture and an activity that allows it; the registry refuses the call otherwise. */
+    override fun startPictureInPicture() {
+        if (!hasVideo) return
+        // The small window shows the full-screen view's picture: take the picture there first.
+        if (!presenter.isPresented) enterFullscreen(null)
+        presenter.startPictureInPicture()
+    }
 
     /** Where the page shows the picture, while it does. */
     private var inlineFrame: InlineFrame? = null
@@ -358,7 +346,9 @@ class ExoEngine(
         // Audio-only has no view. Until the tracks are known the item is presumed to have one, and
         // the view is taken down again if it turns out not to (see `onTracksChanged`).
         if (knownAudioOnly(player.currentTracks)) return
-        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts)) presentationDidChange("fullscreen")
+        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts, ::presentationDidChange)) {
+            presentationDidChange("fullscreen")
+        }
     }
 
     private fun knownAudioOnly(tracks: Tracks) = !tracks.isEmpty && !tracks.containsType(C.TRACK_TYPE_VIDEO)

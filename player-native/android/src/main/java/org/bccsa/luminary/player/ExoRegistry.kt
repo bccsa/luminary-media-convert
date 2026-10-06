@@ -40,8 +40,10 @@ fun exoPlayerRegistry(
             inline = InlinePresenter(webView, activity),
         )
     }
+    // Picture in picture needs the system's support and an activity that has opted in.
+    val pictureInPicture = activity()?.let(FullscreenPresenter::pictureInPictureAvailable) ?: false
     return PlayerRegistry(
-        ANDROID_CAPABILITIES, MainLooperClock(), HttpUpstream(sharedHttpClient), engines, OkHttpLiveFetch(sharedHttpClient),
+        ANDROID_CAPABILITIES.copy(pictureInPicture = pictureInPicture), MainLooperClock(), HttpUpstream(sharedHttpClient), engines, OkHttpLiveFetch(sharedHttpClient),
         OkHttpWarmFetch(sharedHttpClient), emit,
     )
 }

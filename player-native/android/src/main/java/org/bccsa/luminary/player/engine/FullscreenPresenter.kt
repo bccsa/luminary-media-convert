@@ -1,7 +1,18 @@
 package org.bccsa.luminary.player.engine
 
 import android.app.Activity
+import android.app.PictureInPictureParams
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Rational
+import androidx.core.util.Consumer
+import androidx.core.app.OnPictureInPictureModeChangedProvider
+import androidx.core.app.PictureInPictureModeChangedInfo
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import android.graphics.Color
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -31,6 +42,35 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
     private var savedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     private var controls: SkinControls? = null
     private var surface: PlayerView? = null
+    private var onLeave: (() -> Unit)? = null
+    private var onPresentation: ((String) -> Unit)? = null
+    private var player: Player? = null
+    private val main = Handler(Looper.getMainLooper())
+    private var settle: Runnable? = null
+
+    /** The system's word on the picture's small window; the activity is the one that is in it. */
+    private val pipListener = Consumer<PictureInPictureModeChangedInfo> { info ->
+        val controls = controls ?: return@Consumer
+        settle?.let(main::removeCallbacks)
+        if (info.isInPictureInPictureMode) {
+            controls.setPictureInPicture(true)
+            onPresentation?.invoke("pip")
+            return@Consumer
+        }
+        // Leaving the small window is either the viewer expanding it (the activity comes back to the
+        // front: full-screen again) or closing it (the activity goes to the background: that is leaving).
+        val check = Runnable {
+            val back = (host as? LifecycleOwner)?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true
+            if (back) {
+                controls.setPictureInPicture(false)
+                onPresentation?.invoke("fullscreen")
+            } else {
+                onLeave?.invoke()
+            }
+        }
+        settle = check
+        main.postDelayed(check, PIP_SETTLE_MS)
+    }
 
     val isPresented: Boolean get() = view != null
 
@@ -43,6 +83,8 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         onLeave: () -> Unit,
         skin: SkinOptions = SkinOptions(),
         texts: FullscreenTexts = FullscreenTexts(),
+        /** `pip` when the picture has moved to its own small window, `fullscreen` when it is back. */
+        onPresentation: (String) -> Unit = {},
     ): Boolean {
         if (view != null) return false
         val activity = activity() ?: return false
@@ -53,7 +95,11 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
             setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
             this.player = player
         }
-        val controls = SkinControls(activity, player, skin, texts, onLeave)
+        val controls = SkinControls(
+            activity, player, skin, texts,
+            onPictureInPicture = if (pictureInPictureAvailable(activity)) ({ startPictureInPicture() }) else null,
+            onLeave = onLeave,
+        )
         val view = FrameLayout(activity).apply {
             setBackgroundColor(Color.BLACK)
             keepScreenOn = true
@@ -75,6 +121,10 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
                 override fun handleOnBackPressed() = onLeave()
             }.also { activity.onBackPressedDispatcher.addCallback(it) }
         }
+        this.onLeave = onLeave
+        this.onPresentation = onPresentation
+        this.player = player
+        (activity as? OnPictureInPictureModeChangedProvider)?.addOnPictureInPictureModeChangedListener(pipListener)
         this.view = view
         this.host = activity
         this.controls = controls
@@ -82,10 +132,39 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         return true
     }
 
+    /**
+     * Moves the picture to its own small window, which shows this view's picture alone. False when
+     * nothing is presented or the system will not.
+     */
+    fun startPictureInPicture(): Boolean {
+        val activity = host ?: return false
+        val view = view ?: return false
+        if (!pictureInPictureAvailable(activity) || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        val size = player?.videoSize
+        val ratio = if (size != null && size.width > 0 && size.height > 0) {
+            Rational(size.width, size.height)
+        } else {
+            Rational(16, 9)
+        }
+        // The system refuses what is wider than 2.39:1 or taller than 1:2.39.
+        val clamped = if (ratio.toFloat() > MAX_RATIO) Rational(239, 100) else if (ratio.toFloat() < 1 / MAX_RATIO) Rational(100, 239) else ratio
+        return try {
+            activity.enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(clamped).build())
+        } catch (refused: IllegalStateException) {
+            false
+        } catch (refused: IllegalArgumentException) {
+            false
+        }
+    }
+
     /** False when nothing was presented. */
     fun dismiss(): Boolean {
         val view = view ?: return false
         val activity = host
+        settle?.let(main::removeCallbacks)
+        settle = null
+        (activity as? OnPictureInPictureModeChangedProvider)?.removeOnPictureInPictureModeChangedListener(pipListener)
+        // Taking the view down while it is in the small window ends it.
         backCallback?.remove()
         backCallback = null
         surface?.player = null
@@ -99,9 +178,32 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
         this.host = null
         this.controls = null
         this.surface = null
+        this.onLeave = null
+        this.onPresentation = null
+        this.player = null
         return true
     }
 
     /** The controls currently on screen, for tests. */
     internal fun skinControls(): SkinControls? = controls
+
+    companion object {
+        private const val PIP_SETTLE_MS = 300L
+        private const val MAX_RATIO = 2.39f
+
+        /** `ActivityInfo.FLAG_SUPPORTS_PICTURE_IN_PICTURE`: set by `android:supportsPictureInPicture`, and not in the public API. */
+        private const val FLAG_SUPPORTS_PICTURE_IN_PICTURE = 0x400000
+
+        /** The system has picture in picture, and this activity has said it may be put in one. */
+        fun pictureInPictureAvailable(activity: Activity): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+            if (!activity.packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return false
+            return try {
+                val info = activity.packageManager.getActivityInfo(activity.componentName, 0)
+                info.flags and FLAG_SUPPORTS_PICTURE_IN_PICTURE != 0
+            } catch (missing: PackageManager.NameNotFoundException) {
+                false
+            }
+        }
+    }
 }

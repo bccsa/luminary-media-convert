@@ -54,6 +54,8 @@ internal class SkinControls(
     private val player: Player,
     private val options: SkinOptions,
     private val texts: FullscreenTexts = FullscreenTexts(),
+    /** Starts picture in picture; no button when null. */
+    private val onPictureInPicture: (() -> Unit)? = null,
     private val onLeave: () -> Unit,
 ) : FrameLayout(context), Player.Listener {
     private val main = Handler(Looper.getMainLooper())
@@ -64,12 +66,15 @@ internal class SkinControls(
     private val back: Glyph?
     private val forward: Glyph?
     private val audioButton = Glyph(context, VideoJsIcons.audio, ICON_DP)
+    private val pipButton = Glyph(context, VideoJsIcons.pictureInPictureEnter, ICON_DP)
+    private val subtitlesButton = Glyph(context, VideoJsIcons.subtitles, ICON_DP)
     private val rateButton = Glyph(context, null, ICON_DP)
     private val muteButton = Glyph(context, VideoJsIcons.volumeHigh, ICON_DP)
     private val exitButton = Glyph(context, VideoJsIcons.fullscreenExit, ICON_DP)
     private val time = TextView(context)
     private var volumeBeforeMute = 1f
     private val scrubber = Scrubber(context, ::seekToFraction) { if (menuOpen) closeMenu() }
+    private var inPictureInPicture = false
     private var menuOpen = false
     private var shown = true
     private var attached = false
@@ -86,11 +91,13 @@ internal class SkinControls(
         override fun onDown(e: MotionEvent) = true
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+            if (inPictureInPicture) return true
             if (menuOpen) closeMenu() else setShown(!shown)
             return true
         }
 
         override fun onDoubleTap(e: MotionEvent): Boolean {
+            if (inPictureInPicture) return true
             onLeave()
             return true
         }
@@ -104,6 +111,8 @@ internal class SkinControls(
         // Top left: the audio menu, then the rate menu, floated left as the skin's control bar does.
         val top = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         top.addView(audioButton.tap { openAudioMenu() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        top.addView(pipButton.tap { onPictureInPicture?.invoke() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        top.addView(subtitlesButton.tap { openSubtitlesMenu() }, LinearLayout.LayoutParams(dp(44), dp(44)))
         top.addView(rateButton.tap { openRateMenu() }, LinearLayout.LayoutParams(dp(44), dp(44)))
         top.addView(muteButton.tap { toggleMute() }, LinearLayout.LayoutParams(dp(44), dp(44)))
         panel.addView(top, LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.START))
@@ -144,6 +153,9 @@ internal class SkinControls(
         audioButton.contentDescription = texts.audioMenu
         rateButton.contentDescription = texts.playbackRate
         muteButton.contentDescription = texts.mute
+        pipButton.contentDescription = texts.pictureInPicture
+        subtitlesButton.contentDescription = texts.subtitlesMenu
+        pipButton.visibility = if (onPictureInPicture != null) VISIBLE else GONE
         spinner.contentDescription = texts.loading
         exitButton.contentDescription = texts.exitFullscreen
         addView(menuLayer, LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -191,6 +203,17 @@ internal class SkinControls(
 
     override fun onTracksChanged(tracks: Tracks) = refresh()
 
+    /**
+     * While the picture is in its own small window the controls would cover it: nothing but the
+     * picture shows, and a tap does not bring them back until full-screen returns.
+     */
+    fun setPictureInPicture(active: Boolean) {
+        inPictureInPicture = active
+        panel.visibility = if (active) GONE else VISIBLE
+        menuLayer.visibility = if (active) GONE else VISIBLE
+        if (active) closeMenu() else setShown(true)
+    }
+
     override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) = refresh()
 
     override fun onVolumeChanged(volume: Float) = refresh()
@@ -217,6 +240,8 @@ internal class SkinControls(
         // Invisible, not gone: the bar is what keeps the exit button in the corner.
         scrubber.visibility = if (isLive) INVISIBLE else VISIBLE
         audioButton.visibility = if (audioTracks().size > 1) VISIBLE else GONE
+        // video.js shows its subtitles button only when the source has subtitles.
+        subtitlesButton.visibility = if (subtitleChoicesOf(player.currentTracks).isNotEmpty()) VISIBLE else GONE
 
         val speed = player.playbackParameters.speed
         rateButton.label = "${formatRate(speed)}x"
@@ -273,6 +298,8 @@ internal class SkinControls(
 
     private fun setShown(show: Boolean) {
         shown = show
+        // In its small window the picture has no controls; they come back with full-screen.
+        if (inPictureInPicture) return
         main.removeCallbacks(hide)
         panel.animate().cancel()
         if (show) {
@@ -295,6 +322,13 @@ internal class SkinControls(
     private fun openAudioMenu() {
         val choices = audioTracks()
         openMenu(audioButton, choices.map { it.label to it.selected }) { index -> selectAudio(player, choices[index]) }
+    }
+
+    private fun openSubtitlesMenu() {
+        val choices = subtitleChoicesOf(player.currentTracks)
+        val off = C.TRACK_TYPE_TEXT in player.trackSelectionParameters.disabledTrackTypes || choices.none { it.selected }
+        val rows = listOf(texts.subtitlesOff to off) + choices.map { it.label to (!off && it.selected) }
+        openMenu(subtitlesButton, rows) { index -> selectSubtitle(player, if (index == 0) null as SubtitleChoice? else choices[index - 1]) }
     }
 
     private fun openRateMenu() {
