@@ -13,19 +13,22 @@ public final class KeyHolder: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         zeroLocked()
-        guard let hex else { return }
+        guard let hex, hex.utf8.count % 2 == 0 else { return }
         var bytes = [UInt8]()
-        bytes.reserveCapacity(hex.count / 2)
+        bytes.reserveCapacity(hex.utf8.count / 2)
         var index = hex.startIndex
         while index < hex.endIndex {
             let next = hex.index(index, offsetBy: 2)
-            bytes.append(UInt8(hex[index..<next], radix: 16) ?? 0)
+            // Anything that is not hex is no key, not a key of zeros.
+            guard let byte = UInt8(hex[index..<next], radix: 16) else { return }
+            bytes.append(byte)
             index = next
         }
         key = bytes
     }
 
-    /// A copy, so a reader holding it cannot see the zeroing or keep the original alive.
+    /// The key's bytes. A reader that holds them past a zeroing keeps its own copy until it lets
+    /// go: the zeroing reaches the holder's bytes, which is best effort, not DRM.
     public func copy() -> [UInt8]? {
         lock.lock()
         defer { lock.unlock() }

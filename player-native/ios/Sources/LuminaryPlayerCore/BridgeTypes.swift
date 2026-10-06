@@ -338,8 +338,14 @@ public enum BridgeCall: Sendable {
                 guard case .array(let boundaries) = schedule else {
                     throw args.invalid("schedules[\(i)] is not an array")
                 }
-                for (j, boundary) in boundaries.enumerated() where boundary.objectValue == nil {
-                    throw args.invalid("schedules[\(i)][\(j)] is not an object")
+                for (j, boundary) in boundaries.enumerated() {
+                    // Complete, or refused: a dropped boundary would merge its neighbours and warm
+                    // the wrong chunk.
+                    guard boundary.objectValue != nil else { throw args.invalid("schedules[\(i)][\(j)] is not an object") }
+                    guard boundary["url"]?.stringValue != nil, boundary["start"]?.numberValue != nil,
+                          boundary["end"]?.numberValue != nil else {
+                        throw args.invalid("schedules[\(i)][\(j)] has no url, start and end")
+                    }
                 }
             }
             return .warmChunks(
@@ -402,8 +408,12 @@ private func finiteNumber(_ value: JSON?) -> Double? {
     return number
 }
 
-private func isKeyHex(_ value: String) -> Bool {
-    value.count == 32 && value.allSatisfy(\.isHexDigit)
+/// ASCII hex only: `Character.isHexDigit` also accepts the fullwidth digits, which decode to
+/// nothing and would be served as a key of zeros.
+public func isKeyHex(_ value: String) -> Bool {
+    value.utf8.count == 32 && value.utf8.allSatisfy {
+        ($0 >= 0x30 && $0 <= 0x39) || ($0 >= 0x41 && $0 <= 0x46) || ($0 >= 0x61 && $0 <= 0x66)
+    }
 }
 
 /// Reads one JSON object's fields as `bridge.ts` declares them; any mismatch is `invalid-argument`.

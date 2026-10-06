@@ -63,3 +63,42 @@ struct BridgeTypesTests {
         #expect(bytes == 65_536)
     }
 }
+
+@Suite("Bridge arguments: keys and schedules")
+struct BridgeKeyAndScheduleTests {
+    @Test("a key is 32 ASCII hex characters: fullwidth digits are refused")
+    func asciiHexOnly() {
+        #expect(isKeyHex("00112233445566778899aabbccddeeff"))
+        #expect(isKeyHex("00112233445566778899AABBCCDDEEFF"))
+        #expect(!isKeyHex(String(repeating: "Ａ", count: 32)))
+        #expect(!isKeyHex("0011223344556677889900112233445g"))
+        #expect(!isKeyHex("0011"))
+    }
+
+    @Test("a key that does not decode is no key, not a key of zeros")
+    func holderRefusesBadHex() {
+        let holder = KeyHolder()
+        holder.set(hex: "00112233445566778899aabbccddeeff")
+        #expect(holder.copy()?.count == 16)
+        holder.set(hex: String(repeating: "Ａ", count: 32))
+        #expect(holder.copy() == nil)
+        holder.set(hex: "abc")
+        #expect(holder.copy() == nil)
+    }
+
+    @Test("a schedule with an incomplete boundary is refused, not thinned out")
+    func incompleteBoundary() {
+        func warm(_ boundary: JSON) -> BridgeErrorCode? {
+            do {
+                _ = try BridgeCall.decode("warmChunks", [
+                    "playerId": .string("p"), "loadId": .string("l"), "leadSeconds": .number(60), "warmBytes": .number(1024),
+                    "schedules": .array([.array([boundary])]),
+                ])
+                return nil
+            } catch let rejection as BridgeRejection { return rejection.code } catch { return nil }
+        }
+        #expect(warm(.object(["url": .string("u"), "start": .number(0), "end": .number(20)])) == nil)
+        #expect(warm(.object(["url": .string("u"), "start": .number(0)])) == .invalidArgument)
+        #expect(warm(.object(["url": .number(5), "start": .number(0), "end": .number(20)])) == .invalidArgument)
+    }
+}

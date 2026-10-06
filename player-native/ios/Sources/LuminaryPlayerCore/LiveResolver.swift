@@ -115,7 +115,8 @@ enum Lmcenc {
 
     /// The plaintext, or nil when the key is malformed or decryption fails.
     static func decrypt(_ bytes: Data, keyHex: String) -> Data? {
-        guard isEncrypted(bytes), let key = hexBytes(keyHex), key.count == kCCKeySizeAES128 else { return nil }
+        guard isEncrypted(bytes), var key = hexBytes(keyHex), key.count == kCCKeySizeAES128 else { return nil }
+        defer { for i in key.indices { key[i] = 0 } }
         let iv = Array(bytes.dropFirst(magic.count).prefix(ivLength))
         let ciphertext = Array(bytes.dropFirst(magic.count + ivLength))
         var plain = [UInt8](repeating: 0, count: ciphertext.count + kCCBlockSizeAES128)
