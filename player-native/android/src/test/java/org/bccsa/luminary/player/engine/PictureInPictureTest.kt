@@ -73,6 +73,67 @@ class PictureInPictureTest {
     }
 
     @Test
+    fun `expanded, it is full-screen again however long the activity takes to come back`() {
+        present()
+        pictureInPicture(true)
+        // An activity in the small window is paused; the expand animation leaves it so for a moment.
+        controller.pause()
+
+        pictureInPicture(false)
+        settle()
+        assertEquals(listOf("pip"), presentations)
+        assertEquals(0, left)
+
+        controller.resume()
+        assertEquals(listOf("pip", "fullscreen"), presentations)
+        assertEquals(0, left)
+    }
+
+    @Test
+    fun `closed after a moment, it is leaving once it has stayed stopped`() {
+        present()
+        pictureInPicture(true)
+        controller.pause()
+
+        pictureInPicture(false)
+        controller.stop()
+        assertEquals("a stop alone is not yet the answer", 0, left)
+        settle()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1500))
+
+        assertEquals(listOf("pip"), presentations)
+        assertEquals(1, left)
+    }
+
+    @Test
+    fun `an activity already stopped when the small window ends is expanded if it comes back`() {
+        present()
+        pictureInPicture(true)
+        controller.pause().stop()
+
+        pictureInPicture(false)
+        assertEquals("a stopped activity is not yet the answer", 0, left)
+        controller.start().resume()
+
+        assertEquals(listOf("pip", "fullscreen"), presentations)
+        assertEquals(0, left)
+    }
+
+    @Test
+    fun `an activity stopped and started on the way to expanded is expanded`() {
+        present()
+        pictureInPicture(true)
+        controller.pause()
+
+        pictureInPicture(false)
+        controller.stop()
+        controller.start().resume()
+
+        assertEquals(listOf("pip", "fullscreen"), presentations)
+        assertEquals(0, left)
+    }
+
+    @Test
     fun `closed, it is leaving`() {
         present()
         pictureInPicture(true)
@@ -81,6 +142,7 @@ class PictureInPictureTest {
 
         pictureInPicture(false)
         settle()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1500))
 
         assertEquals(listOf("pip"), presentations)
         assertEquals(1, left)

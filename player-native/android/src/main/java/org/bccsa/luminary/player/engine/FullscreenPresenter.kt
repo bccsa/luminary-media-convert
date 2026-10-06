@@ -12,6 +12,7 @@ import androidx.core.util.Consumer
 import androidx.core.app.OnPictureInPictureModeChangedProvider
 import androidx.core.app.PictureInPictureModeChangedInfo
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import android.graphics.Color
 import android.view.ViewGroup
@@ -51,25 +52,57 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
     /** The system's word on the picture's small window; the activity is the one that is in it. */
     private val pipListener = Consumer<PictureInPictureModeChangedInfo> { info ->
         val controls = controls ?: return@Consumer
-        settle?.let(main::removeCallbacks)
+        stopWatching()
         if (info.isInPictureInPictureMode) {
             controls.setPictureInPicture(true)
             onPresentation?.invoke("pip")
             return@Consumer
         }
-        // Leaving the small window is either the viewer expanding it (the activity comes back to the
-        // front: full-screen again) or closing it (the activity goes to the background: that is leaving).
-        val check = Runnable {
-            val back = (host as? LifecycleOwner)?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true
-            if (back) {
-                controls.setPictureInPicture(false)
-                onPresentation?.invoke("fullscreen")
-            } else {
-                onLeave?.invoke()
+        decideAfterSmallWindow(controls)
+    }
+
+    private var watching: LifecycleEventObserver? = null
+
+    /**
+     * Leaving the small window is either the viewer expanding it (the activity comes back to the
+     * front: full-screen again) or closing it (the activity goes to the background: that is
+     * leaving). The activity's lifecycle says which once it settles: an expanded one ends up
+     * resumed (some devices stop and start it on the way there, so a stop alone says nothing), a
+     * closed one is left stopped.
+     */
+    private fun decideAfterSmallWindow(controls: SkinControls) {
+        val owner = host as? LifecycleOwner
+        fun expanded() {
+            controls.setPictureInPicture(false)
+            onPresentation?.invoke("fullscreen")
+        }
+        if (owner == null) return expanded()
+        val state = owner.lifecycle.currentState
+        if (state.isAtLeast(Lifecycle.State.RESUMED)) return expanded()
+        // Paused, as an activity in the small window is, or even stopped for the moment (some
+        // devices stop it while expanding): wait for it to come back or stay away.
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                stopWatching()
+                expanded()
             }
         }
-        settle = check
-        main.postDelayed(check, PIP_SETTLE_MS)
+        watching = observer
+        owner.lifecycle.addObserver(observer)
+        // No resume in time: an activity that is still on screen was expanded, one that is stopped was closed.
+        val fallback = Runnable {
+            stopWatching()
+            if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) expanded() else onLeave?.invoke()
+        }
+        settle = fallback
+        main.postDelayed(fallback, PIP_SETTLE_MS)
+    }
+
+    private fun stopWatching() {
+        settle?.let(main::removeCallbacks)
+        settle = null
+        watching?.let { (host as? LifecycleOwner)?.lifecycle?.removeObserver(it) }
+        watching = null
     }
 
     val isPresented: Boolean get() = view != null
@@ -161,8 +194,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
     fun dismiss(): Boolean {
         val view = view ?: return false
         val activity = host
-        settle?.let(main::removeCallbacks)
-        settle = null
+        stopWatching()
         (activity as? OnPictureInPictureModeChangedProvider)?.removeOnPictureInPictureModeChangedListener(pipListener)
         // Taking the view down while it is in the small window ends it.
         backCallback?.remove()
@@ -188,7 +220,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
     internal fun skinControls(): SkinControls? = controls
 
     companion object {
-        private const val PIP_SETTLE_MS = 300L
+        private const val PIP_SETTLE_MS = 1500L
         private const val MAX_RATIO = 2.39f
 
         /** `ActivityInfo.FLAG_SUPPORTS_PICTURE_IN_PICTURE`: set by `android:supportsPictureInPicture`, and not in the public API. */
