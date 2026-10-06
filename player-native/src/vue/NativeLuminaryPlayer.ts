@@ -61,6 +61,8 @@ export interface NativeLuminaryPlayerSlotProps {
 export interface NativeLuminaryPlayerExposed {
     readonly controller: PlayerController | null;
     readonly state: Readonly<PlayerState>;
+    /** Native draws the video in this component's frame; see the `inline` prop. */
+    readonly inlineActive: boolean;
     /** Resolves false when playback was refused, as the web player's does; it never rejects. */
     play(): Promise<boolean>;
     pause(): void;
@@ -366,7 +368,7 @@ export const NativeLuminaryPlayer = defineComponent({
             void controller.value?.load(props.source);
         }
 
-        expose({ controller, state, play, pause, seek, enterFullscreen, exitFullscreen });
+        expose({ controller, state, inlineActive, play, pause, seek, enterFullscreen, exitFullscreen });
 
         // --- the audio / video toggle: `player-web`'s AudioVideoToggle ----------------------
 
