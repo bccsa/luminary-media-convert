@@ -23,6 +23,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     private weak var player: AVPlayer?
     public var onRotatedToLandscape: (() -> Void)?
     private var rotationObserver: NSObjectProtocol?
+    private var frameObservation: NSKeyValueObservation?
     /// What the web view looked like before it was made see-through.
     private var restore: (opaque: Bool, background: UIColor?, scrollBackground: UIColor?)?
 
@@ -58,18 +59,45 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
             return
         }
         let view = videoView ?? makeVideoView(in: container, below: webView)
-        // The page's coordinates are the web view's: its own origin, then the frame.
-        view.frame = CGRect(
-            x: webView.frame.minX + frame.x, y: webView.frame.minY + frame.y,
-            width: frame.width, height: frame.height
-        )
+        // The web view moves too (the status bar's resize after a turn): the picture follows it.
+        if frameObservation == nil {
+            frameObservation = webView.observe(\.frame) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.layout() }
+            }
+        }
+        layout()
         makeTransparent(webView)
         view.playerLayer.player = suspended ? nil : player
     }
 
+    /// The page's coordinates are the web view's: its own origin, then the frame.
+    private func layout() {
+        guard let frame, let webView = webView(), let view = videoView else { return }
+        view.frame = CGRect(
+            x: webView.frame.minX + frame.x, y: webView.frame.minY + frame.y,
+            width: frame.width, height: frame.height
+        )
+    }
+
     public func setSuspended(_ suspended: Bool) {
         self.suspended = suspended
-        videoView?.playerLayer.player = suspended ? nil : player
+        guard let layer = videoView?.playerLayer else { return }
+        guard !suspended else {
+            layer.player = nil
+            return
+        }
+        // Taking the picture back after full-screen: the layer is attached afresh, and again once
+        // the dismissal has settled and the page has turned back, as a layer that was attached
+        // while the view was still moving can come back showing nothing.
+        layout()
+        layer.player = nil
+        for delay in [0.0, 0.6] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, !self.suspended, let layer = self.videoView?.playerLayer else { return }
+                self.layout()
+                layer.player = self.player
+            }
+        }
     }
 
     private func makeVideoView(in container: UIView, below webView: UIView) -> PlayerLayerView {
@@ -92,6 +120,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     }
 
     private func tearDown() {
+        frameObservation = nil
         videoView?.playerLayer.player = nil
         videoView?.removeFromSuperview()
         videoView = nil
