@@ -474,7 +474,14 @@ export class NativeBridgeAdapter implements PlayerAdapter {
                 }
                 // A new list comes with the engine's own default selected,
                 // which nobody chose; only a move within the same list is a pick.
-                if (activeId !== null && activeId !== previousId && sameIds(previous, tracks)) {
+                // From nothing to something is native settling on its default, as it does after
+                // a load or a reattach, not a pick.
+                if (
+                    activeId !== null &&
+                    previousId !== null &&
+                    activeId !== previousId &&
+                    sameIds(previous, tracks)
+                ) {
                     this.choose({ kind: 'audio', id: activeId });
                 }
                 return;

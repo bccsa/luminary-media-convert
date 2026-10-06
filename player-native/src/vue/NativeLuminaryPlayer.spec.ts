@@ -86,6 +86,52 @@ describe('NativeLuminaryPlayer', () => {
         });
     });
 
+    it('takes the poster as player-web does: a URL, or what the browser chooses between, with a fallback', async () => {
+        const image = { src: 'https://cdn.example.com/p.jpg', srcset: 'https://cdn.example.com/p-2x.jpg 2x', sizes: '100vw', fallback: 'https://cdn.example.com/f.jpg' };
+        const { plugin, wrapper } = await mountPlayer({ poster: image, nowPlaying: { title: 'Episode 12' } });
+
+        expect(plugin.argsOf<LoadArgs>('load')[0]!.nowPlaying?.artworkUrl).toBe('https://cdn.example.com/p.jpg');
+        const img = wrapper.get('img');
+        expect(img.attributes('srcset')).toBe(image.srcset);
+        expect(img.attributes('sizes')).toBe('100vw');
+
+        await img.trigger('error');
+        expect(wrapper.get('img').attributes('src')).toBe(image.fallback);
+        expect(wrapper.get('img').attributes('srcset')).toBeUndefined();
+    });
+
+    it('keeps the default text where a host passes an undefined one', async () => {
+        const { plugin, wrapper } = await mountPlayer({ messages: { retry: undefined, errorMedia: 'Échec' } });
+        await ready(plugin);
+        const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+        plugin.emit('error', { playerId: load.playerId, loadId: load.loadId }, { category: 'media', code: 'x', message: 'x', fatal: true });
+        await flush();
+        await nextTick();
+
+        expect(wrapper.text()).toContain('Échec');
+        expect(wrapper.get('button').text()).toBe('Try again');
+    });
+
+    it('hands the host\'s controller options to the controller', async () => {
+        const fetched: string[] = [];
+        const fetchImpl = (async (input: RequestInfo | URL) => {
+            fetched.push(String(input));
+            return new Response(SIMPLE_MASTER, { status: 200 });
+        }) as typeof fetch;
+        vi.stubGlobal('fetch', () => {
+            throw new Error('the global fetch must not be used');
+        });
+        const plugin = new FakePlugin();
+        const wrapper = mount(NativeLuminaryPlayer, {
+            props: { source: { masterUrl: MASTER_URL }, plugin, controllerOptions: { fetchImpl } },
+        });
+        wrappers.push(wrapper);
+        await flush();
+        await flush();
+
+        expect(fetched).toContain(MASTER_URL);
+    });
+
     it('keeps artwork the host gave', async () => {
         const { plugin } = await mountPlayer({
             poster: 'https://cdn.example.com/poster.jpg',
@@ -220,6 +266,21 @@ describe('NativeLuminaryPlayer', () => {
 
             expect(warn).toHaveBeenCalledWith('[luminary-native] exitFullscreen failed', expect.anything());
             warn.mockRestore();
+        });
+
+        it('leaves full-screen when a new source is not published yet, so "Coming soon" shows', async () => {
+            const { plugin, wrapper } = await mountPlayer();
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+            plugin.emit('presentationchange', { playerId: load.playerId, loadId: load.loadId }, { state: 'fullscreen' });
+            await flush();
+
+            await wrapper.setProps({ source: { masterUrl: `${BASE}/not-yet.m3u8` } });
+            await flush();
+            await flush();
+
+            expect(wrapper.text()).toContain('Coming soon');
+            expect(plugin.methods()).toContain('exitFullscreen');
         });
 
         it('leaves an inline player as it is on an error', async () => {

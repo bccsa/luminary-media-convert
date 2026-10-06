@@ -23,6 +23,7 @@ import {
     createInitialState,
     findPreferredTrack,
     type PlayerController,
+    type PlayerControllerOptions,
     type PlayerError,
     type PlayerSource,
     type PlayerState,
@@ -35,6 +36,17 @@ import { DEFAULT_NATIVE_MESSAGES, errorMessage, type NativePlayerMessages } from
 import { VIDEOJS_PLAY_PATH, VIDEOJS_UNITS_PER_EM } from './videoJsIcons.js';
 
 export type NativePresentation = 'inline' | 'fullscreen' | 'pip';
+
+/**
+ * A poster as `player-web` takes it: a URL, or what the browser can choose between. `src` is the
+ * image the lock screen gets as artwork; `fallback` covers a failed load.
+ */
+export interface NativePosterImage {
+    src?: string;
+    srcset?: string;
+    sizes?: string;
+    fallback?: string;
+}
 
 /** What the default slot is handed, for a host drawing its own overlay on the poster. */
 export interface NativeLuminaryPlayerSlotProps {
@@ -73,7 +85,7 @@ export const NativeLuminaryPlayer = defineComponent({
     name: 'NativeLuminaryPlayer',
     props: {
         source: { type: Object as PropType<PlayerSource>, required: true },
-        poster: { type: String, default: undefined },
+        poster: { type: [String, Object] as PropType<string | NativePosterImage>, default: undefined },
         /**
          * The audio language to select, matched as the web player matches it (`en`, `eng` and
          * `en-US` are one language). Applied when the track list arrives, until the viewer picks
@@ -84,6 +96,8 @@ export const NativeLuminaryPlayer = defineComponent({
         nowPlaying: { type: Object as PropType<NowPlaying>, default: undefined },
         /** Strings to override, as `player-web`'s `messages` prop. */
         messages: { type: Object as PropType<Partial<NativePlayerMessages>>, default: undefined },
+        /** What the controller is given, as `player-web`'s `controllerOptions`: `fetchImpl`, prefetch. */
+        controllerOptions: { type: Object as PropType<Partial<PlayerControllerOptions>>, default: undefined },
         /** Controls to switch off, as `player-web`'s `controls` prop. */
         controls: { type: Object as PropType<Partial<NativeLuminaryPlayerControls>>, default: undefined },
         /** The plugin to drive; the Capacitor one unless a host supplies another. */
@@ -111,10 +125,16 @@ export const NativeLuminaryPlayer = defineComponent({
             startError.value ? { ...live.value, lifecycle: 'error', error: startError.value } : live.value,
         );
 
+        /** The one URL the poster stands for: what the lock screen can show. */
+        const posterUrl = computed<string | undefined>(() => {
+            const poster = props.poster;
+            return typeof poster === 'string' ? poster : (poster?.src ?? poster?.fallback);
+        });
+
         const nowPlaying = computed<NowPlaying | undefined>(() => {
             const given = props.nowPlaying;
             if (!given) return undefined;
-            return given.artworkUrl || !props.poster ? given : { ...given, artworkUrl: props.poster };
+            return given.artworkUrl || !posterUrl.value ? given : { ...given, artworkUrl: posterUrl.value };
         });
 
         let unmounted = false;
@@ -126,6 +146,7 @@ export const NativeLuminaryPlayer = defineComponent({
                 created = await createNativePlayer({
                     plugin: props.plugin,
                     onAppResume: props.onAppResume,
+                    controller: props.controllerOptions,
                 });
             } catch (error) {
                 startError.value = {
@@ -257,13 +278,16 @@ export const NativeLuminaryPlayer = defineComponent({
             if (!state.value.isAudioOnly) await enterFullscreen();
         }
 
-        // An error leaves full-screen on a frozen picture: back to the page, where the error panel
-        // says what happened and offers to try again (plan 05). Native does the same when its own
-        // recovery gives up; this covers an error raised here, such as a reload that cannot fetch.
+        // An error, or a source that is not published yet, leaves full-screen on a frozen picture:
+        // back to the page, where the panel says what happened (plan 05). Native does the same when
+        // its own recovery gives up; this covers what is raised here, such as a reload that cannot
+        // fetch, or a new source that is still being encoded.
         watch(
             () => state.value.lifecycle,
             (lifecycle) => {
-                if (lifecycle === 'error' && presentation.value !== 'inline') void exitFullscreen();
+                if ((lifecycle === 'error' || lifecycle === 'waiting-for-master') && presentation.value !== 'inline') {
+                    void exitFullscreen();
+                }
             },
         );
 
@@ -276,7 +300,16 @@ export const NativeLuminaryPlayer = defineComponent({
 
         // --- the audio / video toggle: `player-web`'s AudioVideoToggle ----------------------
 
-        const messages = computed<NativePlayerMessages>(() => ({ ...DEFAULT_NATIVE_MESSAGES, ...props.messages }));
+        // Only strings override: a sparse i18n object with an undefined entry keeps the default,
+        // as `player-web`'s `mergeMessages` does.
+        const messages = computed<NativePlayerMessages>(() => {
+            const merged = { ...DEFAULT_NATIVE_MESSAGES };
+            for (const key of Object.keys(DEFAULT_NATIVE_MESSAGES) as (keyof NativePlayerMessages)[]) {
+                const value = props.messages?.[key];
+                if (typeof value === 'string') merged[key] = value;
+            }
+            return merged;
+        });
         const isAudio = computed(
             () => state.value.isAudioOnly || state.value.activeAngleId === AUDIO_ONLY_ANGLE_ID,
         );
@@ -353,10 +386,24 @@ export const NativeLuminaryPlayer = defineComponent({
             return null;
         }
 
+        // The poster's attributes, with the fallback swapped in once the image fails to load.
+        const posterBroken = shallowRef(false);
+        watch(() => props.poster, () => (posterBroken.value = false));
+        const poster = computed(() => {
+            const given = props.poster;
+            if (!given) return null;
+            if (typeof given === 'string') return { src: given };
+            if (posterBroken.value) return given.fallback ? { src: given.fallback } : null;
+            return { src: given.src ?? given.fallback, srcset: given.srcset, sizes: given.sizes };
+        });
+        function posterFailed(): void {
+            posterBroken.value = true;
+        }
+
         return () => {
             const ready = state.value.lifecycle === 'ready';
             return h('div', { class: 'native-luminary-player', style: STYLES.root }, [
-                props.poster ? h('img', { src: props.poster, alt: '', style: STYLES.poster }) : null,
+                poster.value ? h('img', { ...poster.value, alt: '', style: STYLES.poster, onError: posterFailed }) : null,
                 // Audio-only shows the poster under a note, as the web player does.
                 state.value.isAudioOnly ? heroicon(NOTE_ICON, STYLES.glyph, 'fill') : null,
                 ready

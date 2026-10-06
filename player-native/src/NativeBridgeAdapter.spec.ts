@@ -300,6 +300,20 @@ describe('NativeBridgeAdapter — viewer choices', () => {
         { id: 'fr', lang: 'fr', label: 'Français' },
     ];
 
+    it('takes native settling on a selection it had not reported before for nobody\'s choice', async () => {
+        const { controller, adapter, emitNow } = await setup();
+        await controller.load({ masterUrl: MASTER_URL });
+        const choices: unknown[] = [];
+        adapter.onViewerChoice((choice) => choices.push(choice));
+        emitNow('audiotracks-updated', { tracks, activeId: null });
+        emitNow('audiotracks-updated', { tracks, activeId: 'en' });
+        expect(choices).toEqual([]);
+
+        // A move from one real selection to another is a pick.
+        emitNow('audiotracks-updated', { tracks, activeId: 'fr' });
+        expect(choices).toEqual([{ kind: 'audio', id: 'fr' }]);
+    });
+
     it('takes the default of a new list for nobody\'s choice', async () => {
         const { controller, adapter, plugin, emitNow } = await setup();
         await controller.load({ masterUrl: MASTER_URL });
