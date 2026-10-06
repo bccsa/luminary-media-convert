@@ -204,6 +204,13 @@ export interface LoadArgs {
     /** Assets of this generation not yet sent; the rest arrived through `putAssets`. */
     assets: BridgeAsset[];
     keyHex?: string;
+    /**
+     * `PlayerSource.bandwidthEstimate`: the host's connection measure in bits
+     * per second, a hint an engine may start its adaptive logic from (ExoPlayer's
+     * `DefaultBandwidthMeter.setInitialBitrateEstimate`). An engine with no way
+     * to seed one, AVPlayer among them, ignores it; absent means no hint.
+     */
+    bandwidthEstimate?: number;
     startPosition?: number;
     /** Resolved by `player-core`: native applies it, never defaults it. */
     recovery: RecoveryPolicy;

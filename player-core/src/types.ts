@@ -111,6 +111,16 @@ export interface PlayerSource {
      * or below the cap, the single lowest rendition above it is kept.
      */
     maxHeight?: number;
+    /**
+     * The host's own measure of the connection, in bits per second, for the
+     * engine's adaptive logic to START from rather than guess: the host holds a
+     * measurement the engine has not made yet (the first segment is the one
+     * that costs). A HINT — an engine corrects it with what it measures and
+     * may ignore it, and one that has already measured this device's real
+     * throughput prefers its own. Not a cap: {@link maxHeight} is the cap.
+     * Absent or non-positive: no hint.
+     */
+    bandwidthEstimate?: number;
     /** Start position in seconds for the initial load. */
     startPosition?: number;
     /**
@@ -376,6 +386,8 @@ export interface AdapterSource {
     isBlob: boolean;
     /** Raw session key for 'memory' key delivery. */
     keyHex?: string;
+    /** {@link PlayerSource.bandwidthEstimate}, passed on only when it is a usable number. */
+    bandwidthEstimate?: number;
     /**
      * The recovery ladder's tuning for this source, already resolved — the
      * adapter is handed decisions, never a partial bag whose defaults it would

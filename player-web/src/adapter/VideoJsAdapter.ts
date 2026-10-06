@@ -24,6 +24,7 @@ import { installLivePlaylistXhr } from './vhsLivePlaylistInterceptor';
 import { attachMediaSourceBySrc } from './vhsDirectSource';
 import { installByteRangeTimeout } from './vhsRequestTimeout';
 import { VhsStallSignals } from './vhsStallSignals';
+import { seedBandwidth } from './vhsBandwidthSeed';
 import { vhsHandler, vhsTech } from './vhsXhrSeam';
 
 /** The MIME type that routes a source to VHS rather than to the native tech. */
@@ -309,11 +310,13 @@ export class VideoJsAdapter implements PlayerAdapter {
     private armSourceHooks(): void {
         this.disarmSourceHooks();
         const keyBytes = this.keyBytes;
+        const bandwidthEstimate = this.lastSource?.bandwidthEstimate;
         const wrap = (): void => {
             const handler = vhsHandler(this.player);
             if (!handler || this.wrappedHandlers.has(handler)) return;
             this.wrappedHandlers.add(handler);
             installByteRangeTimeout(this.player);
+            seedBandwidth(handler, bandwidthEstimate);
             if (this.capabilities.keyDelivery === 'memory') {
                 installMemoryKeyXhr(this.player, () => keyBytes);
             }

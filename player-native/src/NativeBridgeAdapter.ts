@@ -202,6 +202,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
             masterUri: this.masterUriFor(src.url),
             assets: this.batch.take(),
             ...(src.keyHex ? { keyHex: src.keyHex } : {}),
+            ...(src.bandwidthEstimate ? { bandwidthEstimate: src.bandwidthEstimate } : {}),
             recovery: src.recovery,
             ...(this.nowPlaying ? { nowPlaying: this.nowPlaying } : {}),
         });

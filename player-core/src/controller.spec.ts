@@ -116,6 +116,19 @@ describe('PlayerController — load', () => {
         expect(state.qualities.map((q) => q.id)).toEqual(['720', '480']);
     });
 
+    it('hands the host\'s bandwidth estimate to the engine as a hint, only when usable', async () => {
+        const { adapter, controller } = setup(simpleRoutes);
+        const spy = vi.spyOn(adapter, 'loadSource');
+
+        await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: 2_500_000 });
+        expect(spy.mock.calls.at(-1)![0].bandwidthEstimate).toBe(2_500_000);
+
+        for (const unusable of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
+            await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: unusable });
+            expect(spy.mock.calls.at(-1)![0]).not.toHaveProperty('bandwidthEstimate');
+        }
+    });
+
     it('seeks to startPosition without autoplaying', async () => {
         const { adapter, controller } = setup(simpleRoutes);
         await controller.load({ masterUrl: MASTER_URL, startPosition: 42 });

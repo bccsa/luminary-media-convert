@@ -117,6 +117,16 @@ describe('NativeBridgeAdapter — load', () => {
         expect(media.every((asset) => asset.text.includes('URI="luminary://key"'))).toBe(true);
     });
 
+    it('passes the host\'s bandwidth estimate along as a hint, and omits it when there is none', async () => {
+        const { controller, loads } = await setup();
+        await controller.load({ masterUrl: MASTER_URL, bandwidthEstimate: 3_000_000 });
+        await controller.load({ masterUrl: MASTER_URL });
+
+        const [withHint, without] = loads();
+        expect(withHint!.bandwidthEstimate).toBe(3_000_000);
+        expect(without).not.toHaveProperty('bandwidthEstimate');
+    });
+
     it('sends only what is new on an angle switch within the generation', async () => {
         const { controller, loads, plugin } = await setup(multiAngleRoutes);
         await controller.load({ masterUrl: MASTER_URL });

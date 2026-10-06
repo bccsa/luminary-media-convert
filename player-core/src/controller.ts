@@ -350,8 +350,12 @@ export class PlayerController implements PlayerControllerApi {
         // The policy is completed here rather than in the pipeline: it is the
         // controller that resolves a source's overrides, and the adapter that
         // runs the ladder on the result.
+        const bandwidth = this.source?.bandwidthEstimate;
         await this.adapter.loadSource({
             ...(source ?? munged!.source),
+            ...(bandwidth && bandwidth > 0 && Number.isFinite(bandwidth)
+                ? { bandwidthEstimate: bandwidth }
+                : {}),
             recovery: this.policy,
         });
         if (generation !== this.generation) return;

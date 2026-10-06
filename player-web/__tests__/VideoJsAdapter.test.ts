@@ -280,6 +280,26 @@ describe('VideoJsAdapter — live playlists', () => {
         return { p, a, tech, network };
     }
 
+    it('starts VHS from the host\'s bandwidth estimate once its handler exists', async () => {
+        const { p, a, tech } = setup();
+        tech.vhs.bandwidth = 4_194_304;
+        await a.loadSource({ ...source, bandwidthEstimate: 1_200_000 });
+        p.fire('xhr-hooks-ready');
+        await settle();
+
+        expect(tech.vhs.bandwidth).toBe(1_200_000);
+    });
+
+    it('leaves VHS\'s own estimate alone when the host gave none', async () => {
+        const { p, a, tech } = setup();
+        tech.vhs.bandwidth = 4_194_304;
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+        await settle();
+
+        expect(tech.vhs.bandwidth).toBe(4_194_304);
+    });
+
     const liveSource = () => ({ resolveLive: vi.fn(() => Promise.resolve('#EXTM3U\n')) });
 
     afterEach(() => {
