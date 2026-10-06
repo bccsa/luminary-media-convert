@@ -183,6 +183,40 @@ class SkinControlsTest {
     }
 
     @Test
+    fun `at the end of the item the button says play, and it plays again from the start`() {
+        val controls = controls()
+        player.playWhenReady = true
+        player.seekTo(29_999)
+        TestPlayerRunHelper.advance(player).untilState(Player.STATE_ENDED)
+        idle(300)
+
+        // Playback is still "wanted" at the end; the button must not read it as playing.
+        assertNotNull(controls.find("Play"))
+        assertNull(controls.find("Pause"))
+        controls.find("Play")!!.performClick()
+        assertTrue(player.currentPosition < 1_000)
+    }
+
+    @Test
+    fun `0_7x shows selected, though the player keeps the speed as a float`() {
+        val controls = controls()
+        player.setPlaybackSpeed(0.7f)
+        controls.find("Playback rate")!!.performClick()
+
+        // The chosen row is the one drawn on a grey; the others have no background.
+        val chosen = ArrayList<View>().also { collectTexts(controls, it) }
+            .filterIsInstance<android.widget.TextView>()
+            .filter { it.background is android.graphics.drawable.ColorDrawable && it.text.toString().endsWith("x") }
+            .map { it.text.toString() }
+        assertEquals(listOf("0.7x"), chosen)
+    }
+
+    private fun collectTexts(view: View, into: MutableList<View>) {
+        into += view
+        if (view is android.view.ViewGroup) for (i in 0 until view.childCount) collectTexts(view.getChildAt(i), into)
+    }
+
+    @Test
     fun `the skip circles sit 72 dp either side of the middle, and a little above it`() {
         val controls = controls()
         val density = activity.resources.displayMetrics.density

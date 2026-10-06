@@ -43,8 +43,9 @@ ships on both platforms together; see the parity rules in
 - **Phase 2: built on Android, not yet seen on a device.** All of it is in the plugin, so the
   Player Lab and the spike get it too.
   - **Full-screen controls follow `player-web`'s skin** (`engine/SkinControls.kt`): a 30% scrim,
-    a 96 dp play / pause with the skip circles at ±100 dp, a slim progress bar that leaves the
-    corner to the exit button, the audio and rate menus top left, and no spinner. They fade after
+    a 96 dp play / pause with the skip circles at ±72 dp, a slim progress bar that leaves the
+    corner to the exit button, the audio and rate menus top left (the time, the spinner and mute
+    came later, see below). They fade after
     3 s of playing, a tap shows or hides them, and a double tap or the back gesture leaves.
   - **Skips are 5, 10 or 30 s,** snapped from `skipBackSeconds` / `skipForwardSeconds` exactly as
     `snapSkipSeconds` does in `player-web`, so a label and its jump agree. `0` means no button.
@@ -76,6 +77,36 @@ ships on both platforms together; see the parity rules in
     forward skip from media buttons while locked; the page catching up on return (`resumed`).
   - `backgroundAudio` is on, on both platforms together (parity-gated).
 
+- **Phases 3, 4, 5 and the full-screen skin: built, with the iOS findings of plan 07 in them, and
+  verified on a phone (2026-10-06).**
+  - **Phase 3, the recovery ladder** (`RecoveryLadder.kt`, ported from the Swift one with plan 07's
+    A5 to A7 fixes: a rung is dropped when playback recovers, the failure is reported once, a held
+    reload goes with it). Rung 0 is ExoPlayer's `prepare()`, rung 1 a re-attach, then
+    `reload-requested`, held while the app is in the background and handed back by `resumed()`.
+    A decoder-init failure or a missing asset skips the repairs a re-attach would make.
+    ExoPlayer's loader retries stay short (two, spaced by `reloadDelaysMs`): the ladder only sees
+    what ExoPlayer has given up on, so the two do not stack. `stalled` comes from ExoPlayer going
+    from READY back to BUFFERING with nothing asked of it. The wedge heuristic of the iOS engine
+    (an error log read as a stall) has no Android counterpart, because ExoPlayer's own load
+    errors already end in a `PlaybackException`. `maxReloadAttempts` and `warmBytes` are bounded
+    like iOS (A9).
+  - **Phase 4, live** (`LiveResolver.kt`, `MediaPlaylistRewrite.kt`, `LiveDataSource` in
+    `UriRouter.kt`): one read per ExoPlayer playlist request, LMCENC decrypted, AES-128 refused
+    without a key URI, the rewrite resolving URIs by RFC 3986 on the strings, a 10 s read
+    timeout, and plan 07's B2, B3, B4 and B5 in from the start. A released address waits until
+    the engine cancels it. A live address holds its key as bytes, zeroed when its generation is
+    purged. A failed read reaches the engine as the status a direct request would have met.
+  - **Phase 5, chunk warming** (`ChunkWarmer.kt`): the nine rules of `docs/chunk-warming.md`,
+    the loop on the main looper's clock, the request through the shared OkHttp client.
+  - **Full-screen skin:** video.js's own glyphs (`extract-videojs-icons.mjs` writes
+    `VideoJsIcons.kt` too), the time text, a spinner that stands in for play / pause while waiting,
+    and a mute button. Plan 07's C3 (a tap on another control closes a menu) is in, and the rate
+    button reports its value to a screen reader (C4). Picture in picture and subtitles are not
+    built: no plan schedules them for Android yet.
+  - **Still open on Android:** `requestHeaders` is decoded and dropped, as on iOS (C9);
+    the engine's controls act on the player directly rather than through an engine-level command
+    object, which is fine while no state lives only in the engine.
+
 Everything here lives in `player-native/android/`. It builds the native structure
 from [the overview](temp_native-player-00-overview.md#native-structure-both-platforms-the-same-names-file-for-file)
 in Kotlin, then the real `Engine` behind it. It never changes `bridge.ts` or the
@@ -90,8 +121,8 @@ through a plan 04 scenario.
 | `pictureInPicture` | `false` |
 | `renderText` | `false` |
 | `backgroundAudio` | `true` (phase 3b) |
-| `live` | `false` until phase 4 |
-| `chunkWarming` | `false` until phase 5 |
+| `live` | `true` (phase 4) |
+| `chunkWarming` | `true` (phase 5) |
 
 ## Step 0: device spike (before the bridge freezes)
 
