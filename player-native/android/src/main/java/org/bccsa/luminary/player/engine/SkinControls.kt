@@ -288,32 +288,11 @@ internal class SkinControls(
 
     // Menus.
 
-    private fun audioTracks(): List<Pair<String, Boolean>> = buildList {
-        for (group in player.currentTracks.groups) {
-            if (group.type != C.TRACK_TYPE_AUDIO) continue
-            for (i in 0 until group.length) {
-                if (!group.isTrackSupported(i)) continue
-                val format = group.getTrackFormat(i)
-                add((format.label ?: format.language ?: "Track ${size + 1}") to group.isTrackSelected(i))
-            }
-        }
-    }
+    private fun audioTracks() = audioChoicesOf(player.currentTracks)
 
     private fun openAudioMenu() {
-        val choices = mutableListOf<Pair<String, Boolean>>()
-        val overrides = mutableListOf<TrackSelectionOverride>()
-        for (group in player.currentTracks.groups) {
-            if (group.type != C.TRACK_TYPE_AUDIO) continue
-            for (i in 0 until group.length) {
-                if (!group.isTrackSupported(i)) continue
-                val format = group.getTrackFormat(i)
-                choices += (format.label ?: format.language ?: "Track ${choices.size + 1}") to group.isTrackSelected(i)
-                overrides += TrackSelectionOverride(group.mediaTrackGroup, i)
-            }
-        }
-        openMenu(audioButton, choices) { index ->
-            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setOverrideForType(overrides[index]).build()
-        }
+        val choices = audioTracks()
+        openMenu(audioButton, choices.map { it.label to it.selected }) { index -> selectAudio(player, choices[index]) }
     }
 
     private fun openRateMenu() {

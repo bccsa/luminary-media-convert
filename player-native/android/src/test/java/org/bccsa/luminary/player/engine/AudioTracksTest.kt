@@ -43,4 +43,62 @@ class AudioTracksTest {
 
         assertEquals(listOf("aud:English", "audio-1"), audioTracksOf(tracks).map { it.id })
     }
+
+    private fun rendition(language: String?, label: String, id: String) = Tracks.Group(
+        TrackGroup(
+            Format.Builder().setId(id).setLanguage(language).setLabel(label).setSampleMimeType(MimeTypes.AUDIO_AAC).build(),
+        ),
+        false,
+        intArrayOf(C.FORMAT_HANDLED),
+        booleanArrayOf(false),
+    )
+
+    @Test
+    fun `a language offered by every audio group is one track, in the order languages first appear`() {
+        // Three groups (mono, stereo, hq), each with the same languages: 6 renditions, 2 tracks.
+        val tracks = Tracks(
+            listOf(
+                rendition("eng", "English", "mono:eng"), rendition("fra", "Française", "mono:fra"),
+                rendition("eng", "English", "stereo:eng"), rendition("fra", "Française", "stereo:fra"),
+                rendition("eng", "English", "hq:eng"), rendition("fra", "Française", "hq:fra"),
+            ),
+        )
+
+        val choices = audioChoicesOf(tracks)
+
+        assertEquals(listOf("mono:eng", "mono:fra"), choices.map { it.id })
+        assertEquals(listOf("English", "Française"), choices.map { it.label })
+        assertEquals(3, choices.first().members.size)
+    }
+
+    @Test
+    fun `renditions with no language are told apart by their label`() {
+        val tracks = Tracks(listOf(rendition(null, "Commentary", "a"), rendition(null, "Original", "b"), rendition(null, "Commentary", "c")))
+
+        assertEquals(listOf("a", "b"), audioChoicesOf(tracks).map { it.id })
+    }
+
+    @Test
+    fun `choosing a language asks for it by preference, so it follows the variant, and a track with no language is pinned`() {
+        val player = androidx.media3.test.utils.TestExoPlayerBuilder(org.robolectric.RuntimeEnvironment.getApplication()).build()
+        try {
+            val tracks = Tracks(listOf(rendition("eng", "English", "a:eng"), rendition("fra", "Française", "a:fra"), rendition(null, "Original", "o")))
+            val (english, french, original) = audioChoicesOf(tracks)
+
+            selectAudio(player, french)
+            // Media3 normalises language tags, as it does when it matches them.
+            assertEquals(listOf("fr"), player.trackSelectionParameters.preferredAudioLanguages)
+            assertEquals(0, player.trackSelectionParameters.overrides.size)
+
+            selectAudio(player, original)
+            assertEquals(emptyList<String>(), player.trackSelectionParameters.preferredAudioLanguages)
+            assertEquals(1, player.trackSelectionParameters.overrides.size)
+
+            selectAudio(player, english)
+            assertEquals(listOf("en"), player.trackSelectionParameters.preferredAudioLanguages)
+            assertEquals(0, player.trackSelectionParameters.overrides.size)
+        } finally {
+            player.release()
+        }
+    }
 }

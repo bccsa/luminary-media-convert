@@ -184,6 +184,7 @@ class ExoEngine(
         // The controller hands its audio choice back once the new list arrives.
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .setPreferredAudioLanguage(null)
             .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
             .build()
         val source = mediaSources.createMediaSource(item)
@@ -268,10 +269,8 @@ class ExoEngine(
     }
 
     override fun setAudioTrack(id: String) {
-        val track = audioTracksOf(player.currentTracks).firstOrNull { it.id == id } ?: return
-        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-            .setOverrideForType(TrackSelectionOverride(track.group.mediaTrackGroup, track.index))
-            .build()
+        val choice = audioChoicesOf(player.currentTracks).firstOrNull { it.id == id } ?: return
+        selectAudio(player, choice)
     }
 
     override fun snapshot(): Snapshot {
@@ -410,14 +409,9 @@ class ExoEngine(
             presenter.dismiss()
             events.presentationChanged("inline")
         }
-        val audio = mutableListOf<AudioTrack>()
-        var activeAudio: String? = null
-        for (track in audioTracksOf(tracks)) {
-            if (!track.group.isTrackSupported(track.index)) continue
-            val format = track.group.getTrackFormat(track.index)
-            audio += AudioTrack(track.id, format.language, format.label ?: format.language ?: track.id)
-            if (track.group.isTrackSelected(track.index)) activeAudio = track.id
-        }
+        val choices = audioChoicesOf(tracks)
+        val audio = choices.map { AudioTrack(it.id, it.language, it.label) }
+        val activeAudio = choices.firstOrNull { it.selected }?.id
         val variants = mutableListOf<Variant>()
         for (group in tracks.groups) {
             if (group.type != C.TRACK_TYPE_VIDEO) continue
