@@ -1,16 +1,18 @@
 package org.bccsa.luminary.player
 
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 
 /** One player: its [AssetStore], [KeyHolder], [UriRouter], [Engine] and [EventSink]. Main thread only. */
 class PlayerHost(
     val playerId: String,
-    clock: Clock,
+    private val clock: Clock,
     variantSwitching: Boolean,
     upstream: HttpUpstream?,
     options: CreateOptions,
     engineFactory: EngineFactory,
     liveFetch: LiveFetch?,
+    private val warmFetch: WarmFetch,
     emit: (name: String, payload: JsonObject) -> Unit,
 ) {
     private val assets = AssetStore()
@@ -23,9 +25,15 @@ class PlayerHost(
         private set
     private var loadId: String? = null
 
+    /** Warms the current load's chunks; a new load gets a new one, a reattach keeps it. */
+    private var warmer: ChunkWarmer? = null
+
     /** Assets → key → engine; the generations it replaces are purged once the engine has the new one. */
     fun load(args: LoadArgs) {
         generation = args.generation
+        // A new source: whatever was warming belongs to the one it replaces.
+        warmer?.stop()
+        warmer = null
         assets.put(args.generation, args.assets)
         key.set(args.keyHex)
         beginLoad(args.loadId)
@@ -49,6 +57,21 @@ class PlayerHost(
 
     fun putLive(generation: Int, uri: String, spec: BridgeLiveSpec) = assets.putLive(generation, uri, LiveSpec.of(spec))
 
+    /** For the current load only: a call for one it replaced is ignored. */
+    fun warmChunks(loadId: String, schedules: JsonArray, leadSeconds: Double, warmBytes: Int) {
+        if (loadId != this.loadId) return
+        val boundaries = ChunkBoundary.schedules(schedules)
+        val warmer = warmer ?: ChunkWarmer(
+            clock,
+            {
+                val snapshot = engine.snapshot()
+                maxOf(snapshot.bufferedEnd, snapshot.currentTime)
+            },
+            warmFetch,
+        ).also { warmer = it }
+        warmer.start(boundaries, leadSeconds, warmBytes)
+    }
+
     fun releaseAssets(generation: Int) = assets.release(generation)
 
     /** Pauses, unless the item has no video: audio keeps playing when full-screen goes away. */
@@ -60,6 +83,8 @@ class PlayerHost(
     fun resumed(): ResumeResult = ResumeResult(loadId, engine.snapshot(), pendingReload = engine.takeHeldReload())
 
     fun destroy() {
+        warmer?.stop()
+        warmer = null
         sink.close()
         key.zero()
         assets.clear()

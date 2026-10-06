@@ -1,6 +1,7 @@
 package org.bccsa.luminary.player
 
 import kotlinx.serialization.json.JsonElement
+import okhttp3.OkHttpClient
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -19,6 +20,8 @@ class PlayerRegistry(
     private val engineFactory: EngineFactory,
     /** How live playlists are read; the router's own OkHttp read when null. */
     private val liveFetch: LiveFetch? = null,
+    /** How a warm request is sent. */
+    private val warmFetch: WarmFetch = OkHttpWarmFetch(OkHttpClient()),
     private val emit: (name: String, payload: JsonObject) -> Unit,
 ) {
     private val players = LinkedHashMap<String, PlayerHost>()
@@ -82,9 +85,8 @@ class PlayerRegistry(
             is BridgeCall.ExitFullscreen -> player.exitFullscreen()
             is BridgeCall.Resumed -> return player.resumed().toJson()
             is BridgeCall.PutLive -> player.putLive(call.generation, call.uri, call.spec)
-            // Refused by its capability until phase 5 turns it on.
             is BridgeCall.WarmChunks ->
-                throw BridgeRejection(BridgeErrorCode.UNSUPPORTED, "not implemented on this device")
+                player.warmChunks(call.loadId, call.schedules, call.leadSeconds, call.warmBytes)
             BridgeCall.GetInfo, BridgeCall.Reset, is BridgeCall.Create, is BridgeCall.Destroy ->
                 error("handled by the registry")
         }
@@ -102,7 +104,7 @@ class PlayerRegistry(
         while (players.size >= capabilities.maxPlayers) destroy(players.keys.first())
         val playerId = "player-${++created}"
         val host = PlayerHost(
-            playerId, clock, capabilities.variantSwitching, upstream, options, engineFactory, liveFetch, emit,
+            playerId, clock, capabilities.variantSwitching, upstream, options, engineFactory, liveFetch, warmFetch, emit,
         )
         players[playerId] = host
         return buildJsonObject { put("playerId", playerId) }
