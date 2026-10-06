@@ -50,6 +50,83 @@ class SkinControlsTest {
     fun tearDown() = player.release()
 
     @Test
+    fun `the time reads position over duration and follows the player`() {
+        val controls = controls()
+        player.seekTo(7_400)
+        idle(300)
+        assertTrue(controls.texts().contains("0:07 / 0:30"))
+    }
+
+    @Test
+    fun `mute silences the player and says unmute, and a second tap brings the volume back`() {
+        val controls = controls()
+        player.volume = 0.6f
+
+        controls.find("Mute")!!.performClick()
+        assertEquals(0f, player.volume, 0f)
+        assertNotNull(controls.find("Unmute"))
+
+        controls.find("Unmute")!!.performClick()
+        assertEquals(0.6f, player.volume, 0f)
+        assertNotNull(controls.find("Mute"))
+    }
+
+    @Test
+    fun `the spinner stands in for play while waiting for data the viewer asked for`() {
+        // A source that never finishes preparing keeps the player in BUFFERING.
+        val stuck: ExoPlayer = TestExoPlayerBuilder(activity).build()
+        try {
+            stuck.setMediaSource(FakeMediaSource(null))
+            stuck.prepare()
+            stuck.playWhenReady = true
+            assertEquals(Player.STATE_BUFFERING, stuck.playbackState)
+            val controls = SkinControls(activity, stuck, SkinOptions()) {}.also { activity.setContentView(it) }
+
+            assertEquals(View.VISIBLE, controls.anyView("Loading").visibility)
+            // Playback is wanted, so the button that is stood in for says Pause.
+            assertEquals(View.INVISIBLE, controls.anyView("Pause").visibility)
+        } finally {
+            stuck.release()
+        }
+    }
+
+    @Test
+    fun `no spinner while ready, and play is back`() {
+        val controls = controls()
+        assertEquals(View.GONE, controls.anyView("Loading").visibility)
+        assertEquals(View.VISIBLE, controls.anyView("Play").visibility)
+    }
+
+    @Test
+    fun `a tap on another control closes an open menu`() {
+        val controls = controls()
+        controls.find("Playback rate")!!.performClick()
+        assertTrue(controls.hasMenuOpen)
+
+        controls.find("Mute")!!.performClick()
+        assertFalse(controls.hasMenuOpen)
+    }
+
+    @Test
+    fun `the rate button says its value to a screen reader`() {
+        val controls = controls()
+        val description = androidx.core.view.ViewCompat.getStateDescription(controls.find("Playback rate")!!)
+        assertEquals("1x", description?.toString())
+    }
+
+    private fun SkinControls.texts(): List<String> =
+        ArrayList<View>().also { collect(this, it) }.filterIsInstance<android.widget.TextView>().map { it.text.toString() }
+
+    /** By exact description, hidden or not: `find` only sees what is visible. */
+    private fun SkinControls.anyView(description: String): View =
+        ArrayList<View>().also { collect(this, it) }.first { it.contentDescription?.toString() == description }
+
+    private fun collect(view: View, into: MutableList<View>) {
+        into += view
+        if (view is android.view.ViewGroup) for (i in 0 until view.childCount) collect(view.getChildAt(i), into)
+    }
+
+    @Test
     fun `the skip circles carry the seconds the options snap to`() {
         val controls = controls(SkinOptions(skipBackSeconds = 30.0, skipForwardSeconds = 7.0))
 

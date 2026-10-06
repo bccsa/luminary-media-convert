@@ -36,10 +36,11 @@ import androidx.media3.common.util.Util
 import kotlin.math.roundToLong
 
 /**
- * The full-screen controls, drawn to `player-web`'s skin (`styles.css`): a 30% scrim over the whole
- * picture, a 96 dp play / pause in the middle flanked by the skip circles at ±100 dp, a slim
- * progress bar along the bottom that leaves the corner to the exit button, and the audio and rate
- * menus at the top left. No spinner (the skin suppresses it), and the controls fade after three
+ * The full-screen controls, drawn to `player-web`'s skin (`styles.css`) with video.js's own glyphs: a
+ * 30% scrim over the whole picture, a 96 dp play / pause in the middle flanked by the skip circles
+ * at ±72 dp, a slim progress bar along the bottom with the time before it and the exit button
+ * after it, and the audio, rate and mute buttons at the top left. A spinner takes the place of
+ * play / pause while waiting for data the viewer asked for, and the controls fade after three
  * seconds of playing.
  *
  * A tap shows or hides them; a double tap leaves full-screen, as the web component's own
@@ -57,14 +58,17 @@ internal class SkinControls(
     private val main = Handler(Looper.getMainLooper())
     private val panel = FrameLayout(context)
     private val menuLayer = FrameLayout(context)
-    private val play = Glyph(context, Glyph.Kind.PLAY)
+    private val play = Glyph(context, VideoJsIcons.play, PLAY_ICON_DP)
+    private val spinner = Spinner(context)
     private val back: Glyph?
     private val forward: Glyph?
-    private val audioButton = Glyph(context, Glyph.Kind.AUDIO)
-    private val rateButton = Glyph(context, Glyph.Kind.RATE)
-    private val exitButton = Glyph(context, Glyph.Kind.EXIT)
-    private val live = TextView(context)
-    private val scrubber = Scrubber(context, ::seekToFraction)
+    private val audioButton = Glyph(context, VideoJsIcons.audio, ICON_DP)
+    private val rateButton = Glyph(context, null, ICON_DP)
+    private val muteButton = Glyph(context, VideoJsIcons.volumeHigh, ICON_DP)
+    private val exitButton = Glyph(context, VideoJsIcons.fullscreenExit, ICON_DP)
+    private val time = TextView(context)
+    private var volumeBeforeMute = 1f
+    private val scrubber = Scrubber(context, ::seekToFraction) { if (menuOpen) closeMenu() }
     private var menuOpen = false
     private var shown = true
     private var attached = false
@@ -100,45 +104,46 @@ internal class SkinControls(
         val top = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
         top.addView(audioButton.tap { openAudioMenu() }, LinearLayout.LayoutParams(dp(44), dp(44)))
         top.addView(rateButton.tap { openRateMenu() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        top.addView(muteButton.tap { toggleMute() }, LinearLayout.LayoutParams(dp(44), dp(44)))
         panel.addView(top, LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.TOP or Gravity.START))
 
         // Middle: play / pause, with the skip circles at ±100 dp from the centre, a little above it.
         panel.addView(play.tap { playOrPause() }, LayoutParams(dp(96), dp(96), Gravity.CENTER))
+        panel.addView(spinner, LayoutParams(dp(96), dp(96), Gravity.CENTER))
         back = options.back?.let { seconds ->
-            Glyph(context, Glyph.Kind.SKIP_BACK, seconds).tap { skip(-seconds) }.also {
+            Glyph(context, skipGlyph(seconds, back = true), SKIP_ICON_DP).tap { skip(-seconds) }.also {
                 it.contentDescription = "Back $seconds seconds"
                 panel.addView(it, skipParams(-1))
             }
         }
         forward = options.forward?.let { seconds ->
-            Glyph(context, Glyph.Kind.SKIP_FORWARD, seconds).tap { skip(seconds) }.also {
+            Glyph(context, skipGlyph(seconds, back = false), SKIP_ICON_DP).tap { skip(seconds) }.also {
                 it.contentDescription = "Forward $seconds seconds"
                 panel.addView(it, skipParams(1))
             }
         }
 
-        // Bottom: the bar runs to 40 dp short of the corner, which belongs to the exit button.
-        panel.addView(
-            scrubber,
-            LayoutParams(MATCH_PARENT, dp(44), Gravity.BOTTOM).apply {
-                leftMargin = dp(8)
-                rightMargin = dp(40)
-            },
-        )
-        live.apply {
-            text = "LIVE"
+        // Bottom: the time, the bar, then the exit button. Live has `LIVE` and no bar.
+        time.apply {
             setTextColor(Color.WHITE)
             textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_VERTICAL
-            visibility = GONE
+            setPadding(dp(16), 0, dp(10), 0)
+            setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), 0x80000000.toInt())
         }
-        panel.addView(live, LayoutParams(WRAP_CONTENT, dp(44), Gravity.BOTTOM or Gravity.START).apply { leftMargin = dp(16) })
-        panel.addView(exitButton.tap { onLeave() }, LayoutParams(dp(44), dp(44), Gravity.BOTTOM or Gravity.END))
+        val bottom = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(time, LinearLayout.LayoutParams(WRAP_CONTENT, dp(44)))
+            addView(scrubber, LinearLayout.LayoutParams(0, dp(44), 1f).apply { rightMargin = dp(8) })
+            addView(exitButton.tap { onLeave() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        }
+        panel.addView(bottom, LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
 
         play.contentDescription = "Play"
         audioButton.contentDescription = "Audio language"
         rateButton.contentDescription = "Playback rate"
+        muteButton.contentDescription = "Mute"
+        spinner.contentDescription = "Loading"
         exitButton.contentDescription = "Exit full screen"
         addView(menuLayer, LayoutParams(MATCH_PARENT, MATCH_PARENT))
         // The scrim stays edge to edge; the controls on it stay clear of the system's.
@@ -187,6 +192,8 @@ internal class SkinControls(
 
     override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) = refresh()
 
+    override fun onVolumeChanged(volume: Float) = refresh()
+
     private fun playingChanged() {
         refresh()
         if (Util.shouldShowPlayButton(player)) setShown(true) else scheduleHide()
@@ -195,20 +202,32 @@ internal class SkinControls(
     /** Everything drawn, from the player's state. */
     private fun refresh() {
         val showPlay = Util.shouldShowPlayButton(player)
-        play.kind = if (showPlay) Glyph.Kind.PLAY else Glyph.Kind.PAUSE
+        play.glyph = if (showPlay) VideoJsIcons.play else VideoJsIcons.pause
         play.contentDescription = if (showPlay) "Play" else "Pause"
+
+        // Waiting for data the viewer asked to see: the spinner stands in for play / pause.
+        val waiting = player.playWhenReady && player.playbackState == Player.STATE_BUFFERING
+        spinner.visibility = if (waiting) VISIBLE else GONE
+        play.visibility = if (waiting) INVISIBLE else VISIBLE
 
         val isLive = player.isCurrentMediaItemLive
         // Live has nothing to skip to and no rate to change.
         listOfNotNull(back, forward, rateButton).forEach { it.visibility = if (isLive) GONE else VISIBLE }
-        live.visibility = if (isLive) VISIBLE else GONE
         scrubber.visibility = if (isLive) GONE else VISIBLE
         audioButton.visibility = if (audioTracks().size > 1) VISIBLE else GONE
 
         val speed = player.playbackParameters.speed
         rateButton.label = "${formatRate(speed)}x"
+        ViewCompat.setStateDescription(rateButton, rateButton.label)
+
+        val muted = player.volume == 0f
+        muteButton.glyph = if (muted) VideoJsIcons.volumeMute else VideoJsIcons.volumeHigh
+        muteButton.contentDescription = if (muted) "Unmute" else "Mute"
 
         val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
+        val label = timeText(isLive, player.currentPosition / 1000.0, (duration ?: 0L) / 1000.0)
+        if (time.text.toString() != label) time.text = label
+
         if (duration != null) scrubber.show(player.currentPosition.toDouble() / duration, player.bufferedPosition.toDouble() / duration)
     }
 
@@ -216,6 +235,16 @@ internal class SkinControls(
 
     private fun playOrPause() {
         if (Util.shouldShowPlayButton(player)) Util.handlePlayButtonAction(player) else Util.handlePauseButtonAction(player)
+        scheduleHide()
+    }
+
+    private fun toggleMute() {
+        if (player.volume == 0f) {
+            player.volume = volumeBeforeMute
+        } else {
+            volumeBeforeMute = player.volume
+            player.volume = 0f
+        }
         scheduleHide()
     }
 
@@ -394,9 +423,13 @@ internal class SkinControls(
         }
     }
 
+    /** Tapping a control closes an open menu, as video.js's menus close when they lose focus. */
     private fun Glyph.tap(action: () -> Unit) = apply {
         isClickable = true
-        setOnClickListener { action() }
+        setOnClickListener {
+            if (menuOpen) closeMenu()
+            action()
+        }
     }
 
     private fun dp(value: Int) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), resources.displayMetrics).toInt()
@@ -412,12 +445,28 @@ internal class SkinControls(
         private const val TICK_MS = 250L
         private const val MENU_WIDTH = 132
         private const val SCRIM = 0x4D000000
+
+        // video.js draws an icon at 1.8 em: the controls' 25, the play button's 54, the skips' 36.
+        const val ICON_DP = 25
+        const val PLAY_ICON_DP = 54
+        const val SKIP_ICON_DP = 36
+
+        /** video.js's `replay-N` / `forward-N` glyph for the seconds the options snapped to. */
+        fun skipGlyph(seconds: Int, back: Boolean): VideoJsGlyph = when (seconds) {
+            5 -> if (back) VideoJsIcons.replay5 else VideoJsIcons.forward5
+            10 -> if (back) VideoJsIcons.replay10 else VideoJsIcons.forward10
+            else -> if (back) VideoJsIcons.replay30 else VideoJsIcons.forward30
+        }
     }
 }
 
 /** The slim progress bar: played white over buffered over the track, video.js's colours. */
 @SuppressLint("ViewConstructor", "ClickableViewAccessibility")
-private class Scrubber(context: Context, private val onSeek: (Double) -> Unit) : View(context) {
+private class Scrubber(
+    context: Context,
+    private val onSeek: (Double) -> Unit,
+    private val onTouch: () -> Unit,
+) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private var played = 0.0
     private var buffered = 0.0
@@ -452,6 +501,7 @@ private class Scrubber(context: Context, private val onSeek: (Double) -> Unit) :
         val fraction = (event.x / width).toDouble().coerceIn(0.0, 1.0)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) onTouch()
                 parent.requestDisallowInterceptTouchEvent(true)
                 dragging = true
                 dragAt = fraction
@@ -468,14 +518,14 @@ private class Scrubber(context: Context, private val onSeek: (Double) -> Unit) :
     }
 }
 
-/** The skin's icons, drawn rather than bundled. */
+/** One of the skin's controls: a video.js glyph, or the rate's text, centred in the view. */
 @SuppressLint("ViewConstructor")
-private class Glyph(context: Context, kind: Kind, private val seconds: Int = 0) : View(context) {
-    enum class Kind { PLAY, PAUSE, SKIP_BACK, SKIP_FORWARD, AUDIO, RATE, EXIT }
-
-    var kind = kind
+private class Glyph(context: Context, glyph: VideoJsGlyph?, private val iconDp: Int) : View(context) {
+    var glyph = glyph
         set(value) {
+            if (field === value) return
             field = value
+            cached = null
             invalidate()
         }
     var label = ""
@@ -484,95 +534,93 @@ private class Glyph(context: Context, kind: Kind, private val seconds: Int = 0) 
             invalidate()
         }
 
+    private var cached: Path? = null
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
-    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
-        typeface = Typeface.DEFAULT_BOLD
         textAlign = Paint.Align.CENTER
     }
 
     override fun onDraw(canvas: Canvas) {
-        val s = minOf(width, height).toFloat()
-        val cx = width / 2f
-        val cy = height / 2f
-        fun x(f: Float) = cx + (f - 0.5f) * s
-        fun y(f: Float) = cy + (f - 0.5f) * s
+        val density = resources.displayMetrics.density
+        val size = iconDp * density
         // Legible over any picture, as the skin's drop shadow makes it.
-        fill.setShadowLayer(s * 0.05f, 0f, s * 0.02f, 0x80000000.toInt())
-        stroke.setShadowLayer(s * 0.05f, 0f, s * 0.02f, 0x80000000.toInt())
-        when (kind) {
-            Kind.PLAY -> {
-                fill.pathEffect = CornerPathEffect(s * 0.05f)
-                canvas.drawPath(Path().apply {
-                    moveTo(x(0.36f), y(0.26f))
-                    lineTo(x(0.36f), y(0.74f))
-                    lineTo(x(0.76f), y(0.5f))
-                    close()
-                }, fill)
-                fill.pathEffect = null
-            }
-            Kind.PAUSE -> {
-                val r = s * 0.03f
-                canvas.drawRoundRect(RectF(x(0.33f), y(0.27f), x(0.46f), y(0.73f)), r, r, fill)
-                canvas.drawRoundRect(RectF(x(0.54f), y(0.27f), x(0.67f), y(0.73f)), r, r, fill)
-            }
-            Kind.SKIP_BACK, Kind.SKIP_FORWARD -> {
-                val back = kind == Kind.SKIP_BACK
-                val r = s * 0.30f
-                stroke.strokeWidth = s * 0.06f
-                val oval = RectF(cx - r, cy - r, cx + r, cy + r)
-                // A ring open at the top, with the arrow pointing into the gap.
-                if (back) canvas.drawArc(oval, -80f, 300f, false, stroke) else canvas.drawArc(oval, -100f, -300f, false, stroke)
-                val tip = if (back) cx - s * 0.12f else cx + s * 0.12f
-                val base = if (back) cx + s * 0.02f else cx - s * 0.02f
-                canvas.drawPath(Path().apply {
-                    moveTo(tip, cy - r)
-                    lineTo(base, cy - r - s * 0.09f)
-                    lineTo(base, cy - r + s * 0.09f)
-                    close()
-                }, fill)
-                text.textSize = s * 0.27f
-                canvas.drawText(seconds.toString(), cx, cy - (text.descent() + text.ascent()) / 2, text)
-            }
-            Kind.RATE -> {
-                text.textSize = s * 0.32f
-                canvas.drawText(label, cx, cy - (text.descent() + text.ascent()) / 2, text)
-            }
-            Kind.AUDIO -> {
-                // A speaker with two waves.
-                fill.pathEffect = CornerPathEffect(s * 0.03f)
-                canvas.drawPath(Path().apply {
-                    moveTo(x(0.26f), y(0.42f))
-                    lineTo(x(0.38f), y(0.42f))
-                    lineTo(x(0.52f), y(0.28f))
-                    lineTo(x(0.52f), y(0.72f))
-                    lineTo(x(0.38f), y(0.58f))
-                    lineTo(x(0.26f), y(0.58f))
-                    close()
-                }, fill)
-                fill.pathEffect = null
-                stroke.strokeWidth = s * 0.045f
-                canvas.drawArc(RectF(x(0.40f), y(0.36f), x(0.66f), y(0.64f)), -45f, 90f, false, stroke)
-                canvas.drawArc(RectF(x(0.42f), y(0.24f), x(0.78f), y(0.76f)), -45f, 90f, false, stroke)
-            }
-            Kind.EXIT -> {
-                // Four corners pointing inward: video.js's fullscreen-exit.
-                stroke.strokeWidth = s * 0.06f
-                fun corner(px: Float, py: Float, dx: Float, dy: Float) {
-                    canvas.drawLine(x(px), y(py), x(px + dx), y(py), stroke)
-                    canvas.drawLine(x(px), y(py), x(px), y(py + dy), stroke)
+        fill.setShadowLayer(size * 0.06f, 0f, size * 0.03f, 0x80000000.toInt())
+        val icon = glyph
+        if (icon == null) {
+            // video.js's rate label: 1.5 em of 0.875 rem.
+            text.textSize = RATE_TEXT_DP * density
+            text.setShadowLayer(size * 0.06f, 0f, size * 0.03f, 0x80000000.toInt())
+            canvas.drawText(label, width / 2f, height / 2f - (text.descent() + text.ascent()) / 2, text)
+            return
+        }
+        val path = cached ?: icon.path(size).also { cached = it }
+        canvas.save()
+        canvas.translate((width - size) / 2, (height - size) / 2)
+        canvas.drawPath(path, fill)
+        canvas.restore()
+    }
+
+    private companion object {
+        const val RATE_TEXT_DP = 21
+    }
+}
+
+/** A white ring, three quarters round, turning: the buffering spinner, at the play button's size. */
+@SuppressLint("ViewConstructor")
+private class Spinner(context: Context) : View(context) {
+    private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+    private var turning: android.animation.ObjectAnimator? = null
+
+    init {
+        isClickable = false
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val density = resources.displayMetrics.density
+        val side = minOf(width, height) * 0.6f
+        ring.strokeWidth = 4 * density
+        val inset = 2 * density
+        val left = (width - side) / 2 + inset
+        val top = (height - side) / 2 + inset
+        canvas.drawArc(RectF(left, top, left + side - 2 * inset, top + side - 2 * inset), 0f, 270f, false, ring)
+    }
+
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        if (changedView === this) updateTurning()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        updateTurning()
+    }
+
+    /** Only while shown and attached: an animator left running would keep the view alive. */
+    override fun onDetachedFromWindow() {
+        turning?.cancel()
+        turning = null
+        super.onDetachedFromWindow()
+    }
+
+    private fun updateTurning() {
+        if (isShown && isAttachedToWindow) {
+            if (turning == null) {
+                turning = android.animation.ObjectAnimator.ofFloat(this, ROTATION, 0f, 360f).apply {
+                    duration = 1000
+                    repeatCount = android.animation.ValueAnimator.INFINITE
+                    interpolator = android.view.animation.LinearInterpolator()
+                    start()
                 }
-                corner(0.40f, 0.40f, -0.14f, -0.14f)
-                corner(0.60f, 0.40f, 0.14f, -0.14f)
-                corner(0.40f, 0.60f, -0.14f, 0.14f)
-                corner(0.60f, 0.60f, 0.14f, 0.14f)
             }
+        } else {
+            turning?.cancel()
+            turning = null
         }
     }
 }
