@@ -64,7 +64,11 @@ private func lmcenc(_ plaintext: String, keyHex: String = keyHex) -> Data {
         key, key.count, iv, plain, plain.count, &out, out.count, &written
     )
     precondition(status == kCCSuccess)
-    return Data(Array("LMCENC01".utf8) + iv + out.prefix(written))
+    // In steps: one long `+` chain is more than the compiler on CI's older Xcode will type-check.
+    var wrapped = Array("LMCENC01".utf8)
+    wrapped += iv
+    wrapped += out.prefix(written)
+    return Data(wrapped)
 }
 
 /// Answers from `routes`, recording every read and every cancel.
