@@ -53,6 +53,7 @@ internal class SkinControls(
     context: Context,
     private val player: Player,
     private val options: SkinOptions,
+    private val texts: FullscreenTexts = FullscreenTexts(),
     private val onLeave: () -> Unit,
 ) : FrameLayout(context), Player.Listener {
     private val main = Handler(Looper.getMainLooper())
@@ -112,13 +113,13 @@ internal class SkinControls(
         panel.addView(spinner, LayoutParams(dp(96), dp(96), Gravity.CENTER))
         back = options.back?.let { seconds ->
             Glyph(context, skipGlyph(seconds, back = true), SKIP_ICON_DP).tap { skip(-seconds) }.also {
-                it.contentDescription = "Back $seconds seconds"
+                it.contentDescription = texts.skipBack(seconds)
                 panel.addView(it, skipParams(-1))
             }
         }
         forward = options.forward?.let { seconds ->
             Glyph(context, skipGlyph(seconds, back = false), SKIP_ICON_DP).tap { skip(seconds) }.also {
-                it.contentDescription = "Forward $seconds seconds"
+                it.contentDescription = texts.skipForward(seconds)
                 panel.addView(it, skipParams(1))
             }
         }
@@ -139,12 +140,12 @@ internal class SkinControls(
         }
         panel.addView(bottom, LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
 
-        play.contentDescription = "Play"
-        audioButton.contentDescription = "Audio language"
-        rateButton.contentDescription = "Playback rate"
-        muteButton.contentDescription = "Mute"
-        spinner.contentDescription = "Loading"
-        exitButton.contentDescription = "Exit full screen"
+        play.contentDescription = texts.play
+        audioButton.contentDescription = texts.audioMenu
+        rateButton.contentDescription = texts.playbackRate
+        muteButton.contentDescription = texts.mute
+        spinner.contentDescription = texts.loading
+        exitButton.contentDescription = texts.exitFullscreen
         addView(menuLayer, LayoutParams(MATCH_PARENT, MATCH_PARENT))
         // The scrim stays edge to edge; the controls on it stay clear of the system's.
         ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
@@ -203,7 +204,7 @@ internal class SkinControls(
     private fun refresh() {
         val showPlay = Util.shouldShowPlayButton(player)
         play.glyph = if (showPlay) VideoJsIcons.play else VideoJsIcons.pause
-        play.contentDescription = if (showPlay) "Play" else "Pause"
+        play.contentDescription = if (showPlay) texts.play else texts.pause
 
         // Waiting for data the viewer asked to see: the spinner stands in for play / pause.
         val waiting = player.playWhenReady && player.playbackState == Player.STATE_BUFFERING
@@ -213,7 +214,8 @@ internal class SkinControls(
         val isLive = player.isCurrentMediaItemLive
         // Live has nothing to skip to and no rate to change.
         listOfNotNull(back, forward, rateButton).forEach { it.visibility = if (isLive) GONE else VISIBLE }
-        scrubber.visibility = if (isLive) GONE else VISIBLE
+        // Invisible, not gone: the bar is what keeps the exit button in the corner.
+        scrubber.visibility = if (isLive) INVISIBLE else VISIBLE
         audioButton.visibility = if (audioTracks().size > 1) VISIBLE else GONE
 
         val speed = player.playbackParameters.speed
@@ -222,7 +224,7 @@ internal class SkinControls(
 
         val muted = player.volume == 0f
         muteButton.glyph = if (muted) VideoJsIcons.volumeMute else VideoJsIcons.volumeHigh
-        muteButton.contentDescription = if (muted) "Unmute" else "Mute"
+        muteButton.contentDescription = if (muted) texts.unmute else texts.mute
 
         val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
         val label = timeText(isLive, player.currentPosition / 1000.0, (duration ?: 0L) / 1000.0)

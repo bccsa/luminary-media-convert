@@ -132,6 +132,15 @@ class EventSink(
         }
     }
 
+    private var muted = false
+
+    /** Only on a change, whoever made it: a `setMuted`, or the viewer in native UI. */
+    fun mutedChanged(muted: Boolean) {
+        if (muted == this.muted) return
+        this.muted = muted
+        send("mutedchange", buildJsonObject { put("muted", muted) })
+    }
+
     /** Only on a change, whoever made it: a `setRate`, or the viewer in native UI. */
     fun rateChanged(rate: Double) {
         if (rate == this.rate) return

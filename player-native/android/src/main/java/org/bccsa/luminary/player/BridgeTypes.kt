@@ -42,6 +42,9 @@ data class BridgeCapabilities(
     val live: Boolean = false,
     val chunkWarming: Boolean = false,
     val backgroundAudio: Boolean = false,
+    val inlineVideo: Boolean = false,
+    val muting: Boolean = false,
+    val subtitleSelection: Boolean = false,
     val maxPlayers: Int = 1,
 ) {
     fun toJson(): JsonObject = buildJsonObject {
@@ -51,6 +54,9 @@ data class BridgeCapabilities(
         put("live", live)
         put("chunkWarming", chunkWarming)
         put("backgroundAudio", backgroundAudio)
+        put("inlineVideo", inlineVideo)
+        put("muting", muting)
+        put("subtitleSelection", subtitleSelection)
         put("maxPlayers", maxPlayers)
     }
 
@@ -64,6 +70,9 @@ data class BridgeCapabilities(
                 live = flag("live"),
                 chunkWarming = flag("chunkWarming"),
                 backgroundAudio = flag("backgroundAudio"),
+                inlineVideo = flag("inlineVideo"),
+                muting = flag("muting"),
+                subtitleSelection = flag("subtitleSelection"),
                 maxPlayers = (json["maxPlayers"] as? JsonPrimitive)?.doubleOrNull?.toInt() ?: 1,
             )
         }
@@ -90,6 +99,9 @@ data class BridgeLiveSpec(
     val keyHex: String?,
     val refreshSec: Double,
 )
+
+/** A rectangle in the web view's coordinates, in CSS pixels. */
+data class InlineFrame(val x: Double, val y: Double, val width: Double, val height: Double)
 
 data class CreateOptions(val protocolVersion: Double, val skipBackSeconds: Double, val skipForwardSeconds: Double)
 
@@ -190,7 +202,13 @@ sealed interface BridgeCall {
         val leadSeconds: Double,
         val warmBytes: Int,
     ) : BridgeCall
-    data class EnterFullscreen(override val playerId: String) : BridgeCall
+    data class SetInlineFrame(override val playerId: String, val frame: InlineFrame?) : BridgeCall
+    data class SetMuted(override val playerId: String, val muted: Boolean) : BridgeCall
+    data class SetSubtitleTrack(override val playerId: String, val label: String?) : BridgeCall
+    data class StartPictureInPicture(override val playerId: String) : BridgeCall
+
+    /** [texts] are what the controls say in the host's language; null keeps the last, or English. */
+    data class EnterFullscreen(override val playerId: String, val texts: Map<String, String>?) : BridgeCall
     data class ExitFullscreen(override val playerId: String) : BridgeCall
     data class Resumed(override val playerId: String) : BridgeCall
     data class Destroy(override val playerId: String) : BridgeCall
@@ -201,6 +219,10 @@ sealed interface BridgeCall {
             "setVariant" -> BridgeCapabilities::variantSwitching
             "putLive" -> BridgeCapabilities::live
             "warmChunks" -> BridgeCapabilities::chunkWarming
+            "setInlineFrame" -> BridgeCapabilities::inlineVideo
+            "setMuted" -> BridgeCapabilities::muting
+            "setSubtitleTrack" -> BridgeCapabilities::subtitleSelection
+            "startPictureInPicture" -> BridgeCapabilities::pictureInPicture
             else -> null
         }
 
@@ -273,7 +295,19 @@ sealed interface BridgeCall {
                     leadSeconds = args.number("leadSeconds"),
                     warmBytes = args.count("warmBytes"),
                 )
-                "enterFullscreen" -> EnterFullscreen(args.string("playerId"))
+                "setInlineFrame" -> {
+                    val frame = args.optObj("frame")?.let { frame ->
+                        val width = frame.number("width")
+                        val height = frame.number("height")
+                        if (width <= 0 || height <= 0) args.invalid("frame has a positive width and height")
+                        InlineFrame(frame.number("x"), frame.number("y"), width, height)
+                    }
+                    SetInlineFrame(args.string("playerId"), frame)
+                }
+                "setMuted" -> SetMuted(args.string("playerId"), args.optBoolean("muted") ?: args.invalid("muted is required"))
+                "setSubtitleTrack" -> SetSubtitleTrack(args.string("playerId"), args.optString("label"))
+                "startPictureInPicture" -> StartPictureInPicture(args.string("playerId"))
+                "enterFullscreen" -> EnterFullscreen(args.string("playerId"), args.optObj("texts")?.strings())
                 "exitFullscreen" -> ExitFullscreen(args.string("playerId"))
                 "resumed" -> Resumed(args.string("playerId"))
                 "destroy" -> Destroy(args.string("playerId"))
@@ -363,6 +397,13 @@ private class Args(private val json: JsonObject, private val path: String) {
     fun optObj(key: String): Args? {
         val value = present(key) ?: return null
         return Args(value as? JsonObject ?: invalid("$key is not an object"), "$path.$key")
+    }
+
+    /** Every field of this object, each a string. */
+    fun strings(): Map<String, String> = json.mapValues { (key, value) ->
+        val primitive = value as? JsonPrimitive
+        if (primitive == null || !primitive.isString) invalid("texts.$key is a string")
+        primitive.content
     }
 
     fun array(key: String): JsonArray = present(key) as? JsonArray ?: invalid("$key is not an array")

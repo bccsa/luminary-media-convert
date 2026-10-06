@@ -39,6 +39,7 @@ import org.bccsa.luminary.player.Clock
 import org.bccsa.luminary.player.CreateOptions
 import org.bccsa.luminary.player.Engine
 import org.bccsa.luminary.player.EventSink
+import org.bccsa.luminary.player.InlineFrame
 import org.bccsa.luminary.player.NowPlaying
 import org.bccsa.luminary.player.PendingReload
 import org.bccsa.luminary.player.RecoveryLadder
@@ -184,6 +185,7 @@ class ExoEngine(
         // The controller hands its audio choice back once the new list arrives.
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
             .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
             .setPreferredAudioLanguage(null)
             .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
             .build()
@@ -268,6 +270,42 @@ class ExoEngine(
         return false
     }
 
+    /** The volume to give back on unmute. */
+    private var volumeBeforeMute = 1f
+
+    override fun setMuted(muted: Boolean) {
+        if (muted) {
+            if (player.volume > 0f) volumeBeforeMute = player.volume
+            player.volume = 0f
+        } else if (player.volume == 0f) {
+            player.volume = volumeBeforeMute
+        }
+    }
+
+    override fun setSubtitleTrack(label: String?) {
+        val builder = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_TEXT)
+        if (label == null) {
+            player.trackSelectionParameters = builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+            return
+        }
+        // The name the master lists it under, else its language, as `bridge.ts` says.
+        val options = player.currentTracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+            .flatMap { group -> (0 until group.length).filter(group::isTrackSupported).map { group to it } }
+        val match = options.firstOrNull { (group, i) -> group.getTrackFormat(i).label == label }
+            ?: options.firstOrNull { (group, i) -> group.getTrackFormat(i).language == label }
+            ?: return
+        player.trackSelectionParameters = builder
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .setOverrideForType(TrackSelectionOverride(match.first.mediaTrackGroup, match.second))
+            .build()
+    }
+
+    // Picture in picture and the video shown in the page are not built on Android yet: their
+    // capabilities are off, so the registry refuses the calls before they reach here.
+    override fun startPictureInPicture() {}
+
+    override fun setInlineFrame(frame: InlineFrame?) {}
+
     override fun setAudioTrack(id: String) {
         val choice = audioChoicesOf(player.currentTracks).firstOrNull { it.id == id } ?: return
         selectAudio(player, choice)
@@ -290,11 +328,16 @@ class ExoEngine(
         return if (duration == C.TIME_UNSET) 0.0 else duration / 1000.0
     }
 
-    override fun enterFullscreen() {
+    /** What the full-screen controls say; the host's language once it has sent it. */
+    private var texts = FullscreenTexts()
+
+    override fun enterFullscreen(texts: Map<String, String>?) {
+        // A call with no texts keeps the last, or English.
+        if (texts != null) this.texts = FullscreenTexts.from(texts)
         // Audio-only has no view. Until the tracks are known the item is presumed to have one, and
         // the view is taken down again if it turns out not to (see `onTracksChanged`).
         if (knownAudioOnly(player.currentTracks)) return
-        if (presenter.present(player, ::leaveFullscreenByViewer, skin)) events.presentationChanged("fullscreen")
+        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts)) events.presentationChanged("fullscreen")
     }
 
     private fun knownAudioOnly(tracks: Tracks) = !tracks.isEmpty && !tracks.containsType(C.TRACK_TYPE_VIDEO)
@@ -430,6 +473,11 @@ class ExoEngine(
             reportedVariants = variants
             events.variants(variants)
         }
+    }
+
+    override fun onVolumeChanged(volume: Float) {
+        if (volume > 0f) volumeBeforeMute = volume
+        events.mutedChanged(volume == 0f)
     }
 
     override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {

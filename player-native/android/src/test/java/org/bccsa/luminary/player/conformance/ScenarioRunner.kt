@@ -45,6 +45,9 @@ object ScenarioRunner {
         "live" to JsonPrimitive(false),
         "chunkWarming" to JsonPrimitive(false),
         "backgroundAudio" to JsonPrimitive(false),
+        "inlineVideo" to JsonPrimitive(false),
+        "muting" to JsonPrimitive(false),
+        "subtitleSelection" to JsonPrimitive(false),
         "maxPlayers" to JsonPrimitive(1),
     )
 
@@ -107,7 +110,7 @@ private val BRIDGE_ERROR_CODES = setOf(
 /** The `FakeEngine` vocabulary; adding a signal is a change to the format. */
 val ENGINE_SIGNALS = setOf(
     "readyToPlay", "playing", "paused", "buffering", "seeked", "ended",
-    "tracks", "variants", "failed", "bufferedTo", "position", "rate",
+    "tracks", "variants", "failed", "bufferedTo", "position", "rate", "muted",
 )
 
 private fun stepKind(step: JsonObject): String {

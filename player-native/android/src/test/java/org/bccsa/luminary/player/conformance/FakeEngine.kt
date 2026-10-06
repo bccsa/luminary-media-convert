@@ -14,6 +14,7 @@ import org.bccsa.luminary.player.AudioTrack
 import org.bccsa.luminary.player.Clock
 import org.bccsa.luminary.player.Engine
 import org.bccsa.luminary.player.EventSink
+import org.bccsa.luminary.player.InlineFrame
 import org.bccsa.luminary.player.NowPlaying
 import org.bccsa.luminary.player.PendingReload
 import org.bccsa.luminary.player.RecoveryPolicy
@@ -66,7 +67,20 @@ class FakeEngine(
     // The ladder is the real engines' (the unit tests and the Exo tests pin it); the scenarios drive none.
     override fun setAppSuspended(suspended: Boolean) {}
     override fun takeHeldReload(): PendingReload? = null
-    override fun enterFullscreen() = record("enterFullscreen")
+    override fun setMuted(muted: Boolean) = record("setMuted") { put("muted", muted) }
+    override fun setSubtitleTrack(label: String?) = record("setSubtitleTrack") { if (label != null) put("label", label) }
+    override fun startPictureInPicture() = record("startPictureInPicture")
+    override fun setInlineFrame(frame: InlineFrame?) = record("setInlineFrame") {
+        if (frame != null) {
+            put("x", frame.x)
+            put("y", frame.y)
+            put("width", frame.width)
+            put("height", frame.height)
+        }
+    }
+    override fun enterFullscreen(texts: Map<String, String>?) = record("enterFullscreen") {
+        if (texts != null) put("texts", buildJsonObject { texts.forEach { (key, value) -> put(key, value) } })
+    }
     override fun exitFullscreen() = record("exitFullscreen")
     override fun destroy() = record("destroy")
 
@@ -130,6 +144,7 @@ class FakeEngine(
                 events.bufferedTo(bufferedEnd)
             }
             "position" -> setPosition(args.getValue("position").number())
+            "muted" -> (args["muted"] as? JsonPrimitive)?.content?.let { events.mutedChanged(it == "true") }
             "rate" -> {
                 setPosition(position())
                 rate = args.getValue("rate").number()

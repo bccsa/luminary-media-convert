@@ -41,7 +41,20 @@ interface Engine {
     /** The reload held while the app was in the background, handed over once; `resumed()` returns it. */
     fun takeHeldReload(): PendingReload?
 
-    fun enterFullscreen()
+    /** Mutes or unmutes; reported as `mutedchange` whoever changes it. */
+    fun setMuted(muted: Boolean)
+
+    /** Selects the subtitle listed under [label] (its name, else its language); null turns them off. */
+    fun setSubtitleTrack(label: String?)
+
+    /** Starts picture in picture from the picture that is showing; nothing when none is. */
+    fun startPictureInPicture()
+
+    /** Shows the video in the page, in this frame of the web view, or hides it (null). */
+    fun setInlineFrame(frame: InlineFrame?)
+
+    /** [texts] are what the controls say, in the host's language; null keeps the last, or English. */
+    fun enterFullscreen(texts: Map<String, String>?)
 
     fun exitFullscreen()
 

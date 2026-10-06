@@ -45,7 +45,7 @@ class ExoEngineTest {
     private var engine: ExoEngine? = null
     private val clock = VirtualClock()
     private val registry = PlayerRegistry(
-        BridgeCapabilities(variantSwitching = true),
+        BridgeCapabilities(variantSwitching = true, muting = true, subtitleSelection = true),
         clock,
         HttpUpstream(OkHttpClient()),
         EngineFactory { router, clock, options ->
@@ -240,6 +240,37 @@ class ExoEngineTest {
         TestPlayerRunHelper.advance(player).untilState(Player.STATE_READY)
 
         assertTrue(named("stalled").isEmpty())
+    }
+
+    @Test
+    fun `muting silences the player and says so, whoever does it, and unmuting gives the volume back`() {
+        load("load1", KEY_HEX)
+        player.volume = 0.6f
+
+        call("setMuted", "muted" to true)
+        assertEquals(0f, player.volume, 0f)
+        assertEquals(listOf(JsonPrimitive(true)), named("mutedchange").map { it["muted"] })
+
+        call("setMuted", "muted" to false)
+        assertEquals(0.6f, player.volume, 0f)
+        // The viewer muting in native UI is the same change.
+        player.volume = 0f
+        assertEquals(
+            listOf(JsonPrimitive(true), JsonPrimitive(false), JsonPrimitive(true)),
+            named("mutedchange").map { it["muted"] },
+        )
+    }
+
+    @Test
+    fun `subtitles off disables the text renderer, and an unknown label changes nothing`() {
+        load("load1", KEY_HEX)
+        TestPlayerRunHelper.advance(player).untilState(Player.STATE_READY)
+
+        call("setSubtitleTrack", "label" to "Klingon")
+        assertTrue(!player.trackSelectionParameters.disabledTrackTypes.contains(androidx.media3.common.C.TRACK_TYPE_TEXT))
+
+        registry.call("setSubtitleTrack", buildJsonObject { put("playerId", playerId) })
+        assertTrue(player.trackSelectionParameters.disabledTrackTypes.contains(androidx.media3.common.C.TRACK_TYPE_TEXT))
     }
 
     @Test

@@ -28,6 +28,9 @@ class PlayerHost(
     /** Warms the current load's chunks; a new load gets a new one, a reattach keeps it. */
     private var warmer: ChunkWarmer? = null
 
+    /** Where the video is shown inside the page, while it is. */
+    private var inlineFrame: InlineFrame? = null
+
     /** Assets → key → engine; the generations it replaces are purged once the engine has the new one. */
     fun load(args: LoadArgs) {
         generation = args.generation
@@ -74,10 +77,18 @@ class PlayerHost(
 
     fun releaseAssets(generation: Int) = assets.release(generation)
 
-    /** Pauses, unless the item has no video: audio keeps playing when full-screen goes away. */
+    fun setInlineFrame(frame: InlineFrame?) {
+        inlineFrame = frame
+        engine.setInlineFrame(frame)
+    }
+
+    /**
+     * Pauses, unless the item has no video (audio keeps playing when full-screen goes away) or its
+     * video is shown in the page, where it plays on.
+     */
     fun exitFullscreen() {
         engine.exitFullscreen()
-        if (engine.hasVideo) engine.pause()
+        if (engine.hasVideo && inlineFrame == null) engine.pause()
     }
 
     fun resumed(): ResumeResult = ResumeResult(loadId, engine.snapshot(), pendingReload = engine.takeHeldReload())

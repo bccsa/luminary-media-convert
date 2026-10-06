@@ -96,6 +96,8 @@ class LeakTest {
             assertTrue(presenter.dismiss())
         }
         player.pause()
+        // ExoPlayer's own commands finish on its playback thread; measure once they have.
+        TestPlayerRunHelper.advance(player).untilPendingCommandsAreFullyHandled()
 
         assertEquals("still scheduled after the last view was dismissed", emptyList<String>(), ours(pendingOnMainThread()))
         assertTrue("the last full-screen view cannot be freed", freed(last!!))

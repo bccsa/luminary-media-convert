@@ -38,7 +38,12 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
      * False when already presented, or there is no activity to present in. [onLeave] is the
      * viewer asking to leave; the caller decides what that means and dismisses.
      */
-    fun present(player: Player, onLeave: () -> Unit, skin: SkinOptions = SkinOptions()): Boolean {
+    fun present(
+        player: Player,
+        onLeave: () -> Unit,
+        skin: SkinOptions = SkinOptions(),
+        texts: FullscreenTexts = FullscreenTexts(),
+    ): Boolean {
         if (view != null) return false
         val activity = activity() ?: return false
         val surface = PlayerView(activity).apply {
@@ -48,7 +53,7 @@ class FullscreenPresenter(private val activity: () -> Activity?) {
             setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
             this.player = player
         }
-        val controls = SkinControls(activity, player, skin, onLeave)
+        val controls = SkinControls(activity, player, skin, texts, onLeave)
         val view = FrameLayout(activity).apply {
             setBackgroundColor(Color.BLACK)
             keepScreenOn = true

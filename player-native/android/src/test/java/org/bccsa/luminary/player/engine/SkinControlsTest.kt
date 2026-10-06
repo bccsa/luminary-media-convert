@@ -39,7 +39,7 @@ class SkinControlsTest {
     private fun controls(options: SkinOptions = SkinOptions()): SkinControls =
         SkinControls(activity, player, options) { left++ }.also { activity.setContentView(it) }
 
-    /** By exact description: the platform's search is a substring match, and "Play" finds "Playback rate". */
+    /** By exact description: the platform's search is a substring match, and "Play" finds "Playback Rate". */
     private fun SkinControls.find(description: String): View? =
         ArrayList<View>().also { findViewsWithText(it, description, View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION) }
             .firstOrNull { it.contentDescription?.toString() == description }
@@ -98,9 +98,58 @@ class SkinControlsTest {
     }
 
     @Test
+    fun `the controls say what the host sent, and English for the rest`() {
+        val texts = FullscreenTexts.from(
+            mapOf("exitFullscreen" to "Quitter le plein écran", "skipBack" to "Reculer de {seconds} secondes", "mute" to "Couper le son"),
+        )
+        val controls = SkinControls(activity, player, SkinOptions(), texts) {}.also { activity.setContentView(it) }
+
+        assertNotNull(controls.find("Quitter le plein écran"))
+        assertNotNull(controls.find("Reculer de 10 secondes"))
+        assertNotNull(controls.find("Couper le son"))
+        // Not sent: English.
+        assertNotNull(controls.find("Skip forward 10 seconds"))
+    }
+
+    @Test
+    fun `on live the exit button stays in the corner, the time says LIVE, and skip and rate are gone`() {
+        val live: ExoPlayer = TestExoPlayerBuilder(activity).build()
+        try {
+            val window = FakeTimeline.TimelineWindowDefinition.Builder().setLive(true).setDynamic(true).setDurationUs(androidx.media3.common.C.TIME_UNSET).build()
+            live.setMediaSource(FakeMediaSource(FakeTimeline(window)))
+            live.prepare()
+            TestPlayerRunHelper.advance(live).untilState(Player.STATE_READY)
+            val controls = SkinControls(activity, live, SkinOptions()) {}.also { activity.setContentView(it) }
+            val density = activity.resources.displayMetrics.density
+            val width = (800 * density).toInt()
+            val height = (400 * density).toInt()
+            controls.measure(
+                View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+            )
+            controls.layout(0, 0, width, height)
+
+            assertTrue(controls.texts().contains("LIVE"))
+            assertNull(controls.find("Skip back 10 seconds"))
+            assertNull(controls.find("Playback Rate"))
+            val exit = controls.find("Exit full screen")!!
+            val rect = android.graphics.Rect().also { exit.getHitRect(it) }
+            var right = rect.right
+            var parent = exit.parent
+            while (parent is View && parent !== controls) {
+                right += (parent as View).left
+                parent = parent.parent
+            }
+            assertTrue("the exit button is at ${right}px of $width", right > width - (60 * density))
+        } finally {
+            live.release()
+        }
+    }
+
+    @Test
     fun `a tap on another control closes an open menu`() {
         val controls = controls()
-        controls.find("Playback rate")!!.performClick()
+        controls.find("Playback Rate")!!.performClick()
         assertTrue(controls.hasMenuOpen)
 
         controls.find("Mute")!!.performClick()
@@ -110,7 +159,7 @@ class SkinControlsTest {
     @Test
     fun `the rate button says its value to a screen reader`() {
         val controls = controls()
-        val description = androidx.core.view.ViewCompat.getStateDescription(controls.find("Playback rate")!!)
+        val description = androidx.core.view.ViewCompat.getStateDescription(controls.find("Playback Rate")!!)
         assertEquals("1x", description?.toString())
     }
 
@@ -130,8 +179,8 @@ class SkinControlsTest {
     fun `the skip circles carry the seconds the options snap to`() {
         val controls = controls(SkinOptions(skipBackSeconds = 30.0, skipForwardSeconds = 7.0))
 
-        assertNotNull(controls.find("Back 30 seconds"))
-        assertNotNull(controls.find("Forward 5 seconds"))
+        assertNotNull(controls.find("Skip back 30 seconds"))
+        assertNotNull(controls.find("Skip forward 5 seconds"))
     }
 
     @Test
@@ -139,9 +188,9 @@ class SkinControlsTest {
         val controls = controls()
         player.seekTo(12_000)
 
-        controls.find("Forward 10 seconds")!!.performClick()
+        controls.find("Skip forward 10 seconds")!!.performClick()
         assertEquals(22_000, player.currentPosition)
-        controls.find("Back 10 seconds")!!.performClick()
+        controls.find("Skip back 10 seconds")!!.performClick()
         assertEquals(12_000, player.currentPosition)
     }
 
@@ -149,11 +198,11 @@ class SkinControlsTest {
     fun `a skip never leaves the item`() {
         val controls = controls()
         player.seekTo(2_000)
-        controls.find("Back 10 seconds")!!.performClick()
+        controls.find("Skip back 10 seconds")!!.performClick()
         assertEquals(0, player.currentPosition)
 
         player.seekTo(28_000)
-        controls.find("Forward 10 seconds")!!.performClick()
+        controls.find("Skip forward 10 seconds")!!.performClick()
         // ExoPlayer reports the last millisecond of an item as its position, never past it.
         assertTrue(player.currentPosition in 29_900..30_000)
     }
@@ -162,8 +211,8 @@ class SkinControlsTest {
     fun `no circle for a direction that skips nowhere`() {
         val controls = controls(SkinOptions(skipBackSeconds = 0.0, skipForwardSeconds = 10.0))
 
-        assertNull(controls.find("Back 10 seconds"))
-        assertNotNull(controls.find("Forward 10 seconds"))
+        assertNull(controls.find("Skip back 10 seconds"))
+        assertNotNull(controls.find("Skip forward 10 seconds"))
     }
 
     @Test
@@ -201,7 +250,7 @@ class SkinControlsTest {
     fun `0_7x shows selected, though the player keeps the speed as a float`() {
         val controls = controls()
         player.setPlaybackSpeed(0.7f)
-        controls.find("Playback rate")!!.performClick()
+        controls.find("Playback Rate")!!.performClick()
 
         // The chosen row is the one drawn on a grey; the others have no background.
         val chosen = ArrayList<View>().also { collectTexts(controls, it) }
@@ -241,8 +290,8 @@ class SkinControlsTest {
             return x to y
         }
 
-        val (backX, backY) = controls.find("Back 10 seconds")!!.centre()
-        val (forwardX, forwardY) = controls.find("Forward 10 seconds")!!.centre()
+        val (backX, backY) = controls.find("Skip back 10 seconds")!!.centre()
+        val (forwardX, forwardY) = controls.find("Skip forward 10 seconds")!!.centre()
         val (playX, playY) = controls.find("Play")!!.centre()
 
         assertEquals(playX - 72 * density, backX, 1f)
@@ -261,7 +310,7 @@ class SkinControlsTest {
     @Test
     fun `the rate menu lists the skin's rates, marks the current one, and applies a choice`() {
         val controls = controls()
-        controls.find("Playback rate")!!.performClick()
+        controls.find("Playback Rate")!!.performClick()
 
         // The menu is a card of one row per rate, the current one bold.
         val items = ArrayList<View>().also { controls.findViewsWithText(it, "1.5x", View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION) }
@@ -306,7 +355,7 @@ class SkinControlsTest {
     fun `an open menu keeps the controls up`() {
         val controls = controls()
         player.play()
-        controls.find("Playback rate")!!.performClick()
+        controls.find("Playback Rate")!!.performClick()
 
         idle(10_000)
         assertTrue(controls.controlsShown)

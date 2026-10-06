@@ -8,7 +8,14 @@ import org.bccsa.luminary.player.engine.ExoEngine
 import org.bccsa.luminary.player.engine.FullscreenPresenter
 
 /** What this platform reports from `getInfo`. */
-val ANDROID_CAPABILITIES = BridgeCapabilities(variantSwitching = true, live = true, chunkWarming = true, backgroundAudio = true)
+val ANDROID_CAPABILITIES = BridgeCapabilities(
+    variantSwitching = true,
+    live = true,
+    chunkWarming = true,
+    backgroundAudio = true,
+    muting = true,
+    subtitleSelection = true,
+)
 
 /** One per app, shared by every player's `UriRouter`. */
 private val sharedHttpClient: OkHttpClient by lazy { OkHttpClient() }
