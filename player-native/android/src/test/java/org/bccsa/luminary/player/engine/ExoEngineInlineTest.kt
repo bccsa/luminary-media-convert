@@ -136,6 +136,38 @@ class ExoEngineInlineTest {
     }
 
     @Test
+    fun `a finished item gets its last frame back with the page's picture, and ends only once`() {
+        load()
+        call("setInlineFrame", "frame" to frame())
+        call("play")
+        TestPlayerRunHelper.advance(player).untilState(Player.STATE_ENDED)
+        call("enterFullscreen")
+
+        call("exitFullscreen")
+        // The quiet seek takes the player through buffering and back to the end.
+        TestPlayerRunHelper.advance(player).untilState(Player.STATE_ENDED)
+        TestPlayerRunHelper.advance(player).untilPendingCommandsAreFullyHandled()
+
+        assertEquals(Player.STATE_ENDED, player.playbackState)
+        assertEquals("the page is told once", 1, events.count { it.first == "ended" })
+        assertEquals("a quiet seek says nothing", 0, events.count { it.first == "seeked" })
+    }
+
+    @Test
+    fun `entering full-screen on a finished item draws its last frame too, and does not end twice`() {
+        load()
+        call("play")
+        TestPlayerRunHelper.advance(player).untilState(Player.STATE_ENDED)
+
+        call("enterFullscreen")
+        TestPlayerRunHelper.advance(player).untilState(Player.STATE_ENDED)
+        TestPlayerRunHelper.advance(player).untilPendingCommandsAreFullyHandled()
+
+        assertEquals(1, events.count { it.first == "ended" })
+        assertEquals(0, events.count { it.first == "seeked" })
+    }
+
+    @Test
     fun `hiding the frame takes the view away, and the web view is as it was`() {
         load()
         call("setInlineFrame", "frame" to frame())

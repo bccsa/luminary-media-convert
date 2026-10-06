@@ -315,6 +315,21 @@ class ExoEngine(
         presentation = state
         inline?.setSuspended(state != "inline")
         events.presentationChanged(state)
+        // Whichever view has the picture now was given a surface with nothing drawn in it.
+        if (state == "fullscreen" || (state == "inline" && inlineFrame != null)) redrawEndedFrame()
+    }
+
+    /** Set while the re-seek below runs, so the `ended` it leads back to is not reported a second time. */
+    private var redrawing = false
+
+    /**
+     * A finished item has no frame in a surface it was just given: ExoPlayer draws none until
+     * something moves. Seeking to where it already is draws the last one, and says nothing to the page.
+     */
+    private fun redrawEndedFrame() {
+        if (player.playbackState != Player.STATE_ENDED) return
+        redrawing = true
+        player.seekTo(player.currentPosition)
     }
 
     override fun setAudioTrack(id: String) {
@@ -428,7 +443,12 @@ class ExoEngine(
                     events.seeked()
                 }
             }
-            Player.STATE_ENDED -> events.ended()
+            Player.STATE_ENDED -> if (redrawing) {
+                redrawing = false
+                seekPending = false
+            } else {
+                events.ended()
+            }
         }
     }
 
@@ -461,7 +481,7 @@ class ExoEngine(
         reason: Int,
     ) {
         // A seek masks the state to BUFFERING; it has finished once the player is READY again.
-        if (reason == Player.DISCONTINUITY_REASON_SEEK) seekPending = true
+        if (reason == Player.DISCONTINUITY_REASON_SEEK && !redrawing) seekPending = true
     }
 
     override fun onTracksChanged(tracks: Tracks) {
