@@ -61,6 +61,7 @@ export class SimulatedNativePlugin implements LuminaryPlayerPlugin {
             live: false,
             chunkWarming: false,
             backgroundAudio: false,
+            inlineVideo: false,
             maxPlayers: 1,
             ...capabilities,
         };
@@ -106,6 +107,7 @@ export class SimulatedNativePlugin implements LuminaryPlayerPlugin {
     resumed = (args: { playerId: string }) => this.call<ResumeResult>('resumed', args);
     destroy = (args: { playerId: string }) => this.call<void>('destroy', args);
 
+    setInlineFrame = (args: Parameters<LuminaryPlayerPlugin['setInlineFrame']>[0]) => this.call<void>('setInlineFrame', args);
     enterFullscreen = async (args: { playerId: string }) => {
         await this.call<void>('enterFullscreen', args);
         this.dispatch('presentationchange', { playerId: args.playerId, state: 'fullscreen' });
