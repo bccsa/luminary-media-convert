@@ -64,6 +64,9 @@ class UriRouter(
         return Route.Failed("not-found")
     }
 
+    /** One read of a live address, resolved as the player's own request would be; throws a [LiveFailure]. */
+    fun readLive(spec: LiveSpec): String = LiveResolver.resolve(spec, liveFetch.start(spec.url))
+
     override fun createDataSource(dataType: Int): DataSource = RoutingDataSource(this)
 
     internal fun sourceFor(dataSpec: DataSpec): DataSource {
