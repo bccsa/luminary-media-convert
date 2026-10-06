@@ -111,8 +111,21 @@ export interface BridgeCapabilities {
     chunkWarming: boolean;
     /** Keeps playing with the screen locked. Parity-gated. */
     backgroundAudio: boolean;
+    /**
+     * Draws the video inside the page, in the frame `setInlineFrame` names, behind the
+     * (transparent) web view. Without it video shows in full-screen only. Parity-gated.
+     */
+    inlineVideo: boolean;
     /** 1 in v1: a second `create` destroys the first player. */
     maxPlayers: number;
+}
+
+/** A rectangle in the web view's coordinates, in CSS pixels. */
+export interface InlineFrame {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
 }
 
 export interface BridgeInfo {
@@ -244,6 +257,13 @@ export interface LuminaryPlayerPlugin {
         leadSeconds: number;
         warmBytes: number;
     }): Promise<void>;
+    /**
+     * `unsupported` unless `inlineVideo`. Shows the video in `frame`, in the web view's own
+     * coordinates (what `getBoundingClientRect()` reports, in CSS pixels), or hides it when
+     * `frame` is absent. While full-screen or picture in picture holds the picture the inline
+     * view shows none, and it comes back with it. A frame has a positive width and height.
+     */
+    setInlineFrame(args: { playerId: string; frame?: InlineFrame }): Promise<void>;
     enterFullscreen(args: { playerId: string }): Promise<void>;
     /** Pauses, unless the current item has no video track (audio-only). */
     exitFullscreen(args: { playerId: string }): Promise<void>;

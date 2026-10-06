@@ -37,6 +37,7 @@ public struct BridgeCapabilities: Sendable {
     public var live = false
     public var chunkWarming = false
     public var backgroundAudio = false
+    public var inlineVideo = false
     public var maxPlayers = 1
 
     public init() {}
@@ -53,6 +54,7 @@ public struct BridgeCapabilities: Sendable {
         live = flag("live")
         chunkWarming = flag("chunkWarming")
         backgroundAudio = flag("backgroundAudio")
+        inlineVideo = flag("inlineVideo")
         maxPlayers = json["maxPlayers"]?.numberValue.map { Int($0) } ?? 1
     }
 
@@ -64,6 +66,7 @@ public struct BridgeCapabilities: Sendable {
             "live": .bool(live),
             "chunkWarming": .bool(chunkWarming),
             "backgroundAudio": .bool(backgroundAudio),
+            "inlineVideo": .bool(inlineVideo),
             "maxPlayers": .number(Double(maxPlayers)),
         ])
     }
@@ -245,6 +248,7 @@ public enum BridgeCall: Sendable {
     case setVariant(playerId: String, id: String)
     case setAudioTrack(playerId: String, id: String)
     case warmChunks(playerId: String, loadId: String, schedules: [JSON], leadSeconds: Double, warmBytes: Int)
+    case setInlineFrame(playerId: String, frame: InlineFrame?)
     case enterFullscreen(playerId: String)
     case exitFullscreen(playerId: String)
     case resumed(playerId: String)
@@ -258,7 +262,7 @@ public enum BridgeCall: Sendable {
         case .putAssets(let id, _, _), .putLive(let id, _, _, _), .releaseAssets(let id, _),
              .reattach(let id, _), .play(let id), .pause(let id), .seek(let id, _, _),
              .setRate(let id, _), .setVariant(let id, _), .setAudioTrack(let id, _),
-             .warmChunks(let id, _, _, _, _), .enterFullscreen(let id), .exitFullscreen(let id),
+             .warmChunks(let id, _, _, _, _), .setInlineFrame(let id, _), .enterFullscreen(let id), .exitFullscreen(let id),
              .resumed(let id), .destroy(let id):
             return id
         }
@@ -270,6 +274,7 @@ public enum BridgeCall: Sendable {
         case "setVariant": return \.variantSwitching
         case "putLive": return \.live
         case "warmChunks": return \.chunkWarming
+        case "setInlineFrame": return \.inlineVideo
         default: return nil
         }
     }
@@ -355,6 +360,14 @@ public enum BridgeCall: Sendable {
                 leadSeconds: try args.number("leadSeconds"),
                 warmBytes: try args.count("warmBytes")
             )
+        case "setInlineFrame":
+            var frame: InlineFrame? = nil
+            if let object = try args.optionalObject("frame") {
+                let (width, height) = (try object.number("width"), try object.number("height"))
+                guard width > 0, height > 0 else { throw args.invalid("frame has a positive width and height") }
+                frame = InlineFrame(x: try object.number("x"), y: try object.number("y"), width: width, height: height)
+            }
+            return .setInlineFrame(playerId: try args.string("playerId"), frame: frame)
         case "enterFullscreen": return .enterFullscreen(playerId: try args.string("playerId"))
         case "exitFullscreen": return .exitFullscreen(playerId: try args.string("playerId"))
         case "resumed": return .resumed(playerId: try args.string("playerId"))

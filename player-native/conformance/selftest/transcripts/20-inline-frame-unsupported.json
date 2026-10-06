@@ -1,5 +1,5 @@
 {
- "scenario": "01-protocol-mismatch.json",
+ "scenario": "20-inline-frame-unsupported.json",
  "ops": [
   {
    "op": "start",
@@ -37,22 +37,48 @@
   },
   {
    "op": "call",
+   "method": "reset",
+   "args": {},
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "call",
    "method": "create",
    "args": {
-    "protocolVersion": 2,
+    "protocolVersion": 1,
     "skipBackSeconds": 10,
     "skipForwardSeconds": 10
    },
    "result": {
-    "rejected": {
-     "code": "protocol-mismatch",
-     "message": "protocol 2; this side speaks 1"
+    "resolved": {
+     "playerId": "player-1"
     }
    }
   },
   {
-   "op": "drainEvents",
-   "events": []
+   "op": "call",
+   "method": "setInlineFrame",
+   "args": {
+    "playerId": "player-1",
+    "frame": {
+     "x": 0,
+     "y": 72,
+     "width": 390,
+     "height": 219
+    }
+   },
+   "result": {
+    "rejected": {
+     "code": "unsupported",
+     "message": "setInlineFrame needs inlineVideo"
+    }
+   }
+  },
+  {
+   "op": "drainEngineCalls",
+   "calls": []
   },
   {
    "op": "drainEvents",

@@ -46,6 +46,7 @@ public enum ScenarioRunner {
         "live": .bool(false),
         "chunkWarming": .bool(false),
         "backgroundAudio": .bool(false),
+        "inlineVideo": .bool(false),
         "maxPlayers": .number(1),
     ]
 

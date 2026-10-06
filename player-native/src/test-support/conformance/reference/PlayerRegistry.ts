@@ -7,7 +7,13 @@
  * generation (`stale-generation`).
  */
 
-import { ASSET_URI_PREFIX, PROTOCOL_VERSION, type BridgeAsset, type BridgeErrorCode } from '../../../bridge.js';
+import {
+    ASSET_URI_PREFIX,
+    PROTOCOL_VERSION,
+    type BridgeAsset,
+    type BridgeErrorCode,
+    type InlineFrame,
+} from '../../../bridge.js';
 import type { CallResult, ConformanceHarness, RouteResult } from '../harness.js';
 import type { Json, JsonObject } from '../scenario.js';
 import { VirtualClock } from './clock.js';
@@ -83,6 +89,10 @@ const SHAPES: Record<string, { fields: Record<string, Shape>; optional?: Record<
         // ChunkBoundary[][]: an array of schedules, each an array of boundaries.
         fields: { ...PLAYER, loadId: 'string', schedules: { array: { array: 'object' } }, leadSeconds: 'number', warmBytes: 'number' },
     },
+    setInlineFrame: {
+        fields: PLAYER,
+        optional: { frame: { fields: { x: 'number', y: 'number', width: 'number', height: 'number' } } },
+    },
     enterFullscreen: { fields: PLAYER },
     exitFullscreen: { fields: PLAYER },
     resumed: { fields: PLAYER },
@@ -128,6 +138,10 @@ function checkValues(method: string, args: JsonObject): void {
     if (typeof args.startPosition === 'number' && args.startPosition < 0) invalid('startPosition is not negative');
     if (method === 'seek' && (args.position as number) < 0) invalid('position is not negative');
     if (method === 'setRate' && !((args.rate as number) > 0)) invalid('rate is positive');
+    if (method === 'setInlineFrame' && args.frame) {
+        const frame = args.frame as Record<string, number>;
+        if (!(frame.width > 0 && frame.height > 0)) invalid('frame has a positive width and height');
+    }
     if (method === 'load' || method === 'putAssets') {
         const prefix = `${ASSET_URI_PREFIX}${String(generation)}/`;
         for (const asset of args.assets as unknown as BridgeAsset[]) {
@@ -147,6 +161,7 @@ const CAPABILITY_OF: Record<string, string> = {
     setVariant: 'variantSwitching',
     putLive: 'live',
     warmChunks: 'chunkWarming',
+    setInlineFrame: 'inlineVideo',
 };
 
 export class PlayerRegistry {
@@ -228,6 +243,9 @@ export class PlayerRegistry {
                 break;
             case 'setAudioTrack':
                 player.engine.setAudioTrack(args.id as string);
+                break;
+            case 'setInlineFrame':
+                player.engine.setInlineFrame((args.frame as InlineFrame | undefined) ?? null);
                 break;
             case 'enterFullscreen':
                 player.engine.enterFullscreen();

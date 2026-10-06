@@ -4,6 +4,7 @@
  * nothing changes until a signal says so.
  */
 
+import type { InlineFrame } from '../../../bridge.js';
 import type { Json, JsonObject } from '../scenario.js';
 import type { VirtualClock } from './clock.js';
 
@@ -75,6 +76,9 @@ export class FakeEngine {
     }
     setAudioTrack(id: string): void {
         this.record({ method: 'setAudioTrack', id });
+    }
+    setInlineFrame(frame: InlineFrame | null): void {
+        this.record(frame ? { method: 'setInlineFrame', ...frame } : { method: 'setInlineFrame' });
     }
     enterFullscreen(): void {
         this.record({ method: 'enterFullscreen' });

@@ -10,6 +10,7 @@
     "live": false,
     "chunkWarming": false,
     "backgroundAudio": false,
+    "inlineVideo": false,
     "maxPlayers": 1
    }
   },
@@ -28,6 +29,7 @@
       "live": false,
       "chunkWarming": false,
       "backgroundAudio": false,
+      "inlineVideo": false,
       "maxPlayers": 1
      }
     }

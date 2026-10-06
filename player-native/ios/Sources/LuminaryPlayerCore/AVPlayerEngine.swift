@@ -15,6 +15,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private let router: UriRouter
     private let clock: Clock
     private let presenter: FullscreenPresenter?
+    private let inline: InlinePresenter?
+    /// Where JavaScript asked for the video, kept for the presenter to take up again.
+    private var inlineFrame: InlineFrame?
     /// The skip intervals, for the lock screen and the full-screen controls.
     private let skin: SkinOptions
 
@@ -50,10 +53,17 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// The audio a reattach restores once the rebuilt item lists it.
     private var restoreAudioId: String?
 
-    public init(router: UriRouter, clock: Clock, options: CreateOptions, presenter: FullscreenPresenter?) {
+    public init(
+        router: UriRouter,
+        clock: Clock,
+        options: CreateOptions,
+        presenter: FullscreenPresenter?,
+        inline: InlinePresenter? = nil
+    ) {
         self.router = router
         self.clock = clock
         self.presenter = presenter
+        self.inline = inline
         skin = SkinOptions(skipBackSeconds: options.skipBackSeconds, skipForwardSeconds: options.skipForwardSeconds)
         super.init()
         // The stream's DEFAULT=YES audio, as on the web, not the phone's language preferences.
@@ -252,6 +262,18 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
 
     // MARK: Presentation
 
+    public func setInlineFrame(_ frame: InlineFrame?) {
+        inlineFrame = frame
+        inline?.setFrame(frame, player: player)
+    }
+
+    /// Whichever of full-screen and picture in picture holds the picture, the inline view has
+    /// none; it takes the player back when both are gone.
+    private func presentationDidChange(_ presentation: Presentation) {
+        inline?.setSuspended(presentation != .inline)
+        events?.presentationChanged(presentation.rawValue)
+    }
+
     /// Audio-only has no view: there is nothing to show full-screen.
     public func enterFullscreen() {
         guard let presenter, hasVideo else { return }
@@ -259,9 +281,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             player,
             commands: fullscreenCommands(),
             onLeave: { [weak self] in self?.leaveFullscreenByViewer() },
-            onPresentation: { [weak self] presentation in self?.events?.presentationChanged(presentation.rawValue) }
+            onPresentation: { [weak self] presentation in self?.presentationDidChange(presentation) }
         )
-        if presented { events?.presentationChanged(Presentation.fullscreen.rawValue) }
+        if presented { presentationDidChange(.fullscreen) }
     }
 
     private func fullscreenCommands() -> FullscreenCommands {
@@ -279,7 +301,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     }
 
     public func exitFullscreen() {
-        if presenter?.dismiss() == true { events?.presentationChanged(Presentation.inline.rawValue) }
+        if presenter?.dismiss() == true { presentationDidChange(.inline) }
     }
 
     /// The viewer leaving full-screen does what `exitFullscreen` does, pause included.
@@ -298,6 +320,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         poll?.cancel()
         poll = nil
         _ = presenter?.dismiss()
+        inline?.setFrame(nil, player: player)
         statusObservation?.invalidate()
         statusObservation = nil
         rateObservations.forEach { $0.invalidate() }

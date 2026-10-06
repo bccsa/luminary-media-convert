@@ -39,6 +39,7 @@ const CAPABILITIES = new Set([
     'live',
     'chunkWarming',
     'backgroundAudio',
+    'inlineVideo',
     'maxPlayers',
 ]);
 

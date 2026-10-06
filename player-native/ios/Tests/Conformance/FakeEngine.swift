@@ -45,6 +45,12 @@ final class FakeEngine: Engine {
     func setAudioTrack(_ id: String) { record("setAudioTrack", ["id": .string(id)]) }
     func setAppSuspended(_ suspended: Bool) {}
     func takeHeldReload() -> PendingReload? { nil }
+    func setInlineFrame(_ frame: InlineFrame?) {
+        guard let frame else { return record("setInlineFrame") }
+        record("setInlineFrame", [
+            "x": .number(frame.x), "y": .number(frame.y), "width": .number(frame.width), "height": .number(frame.height),
+        ])
+    }
     func enterFullscreen() { record("enterFullscreen") }
     func exitFullscreen() { record("exitFullscreen") }
     func destroy() { record("destroy") }

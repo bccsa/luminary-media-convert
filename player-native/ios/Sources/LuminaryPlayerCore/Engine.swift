@@ -29,6 +29,9 @@ public protocol Engine: AnyObject {
     /// The reload held while the app was in the background, handed over once; `resumed()` returns it.
     func takeHeldReload() -> PendingReload?
 
+    /// Shows the video in the page, in this frame of the web view, or hides it (nil).
+    func setInlineFrame(_ frame: InlineFrame?)
+
     func enterFullscreen()
     func exitFullscreen()
     func destroy()
