@@ -68,8 +68,17 @@ export interface NativeLuminaryPlayerExposed {
     /** What native can do for the controls a host draws itself. */
     readonly canMute: boolean;
     readonly canPictureInPicture: boolean;
+    /**
+     * AirPlay devices are around to send playback to, as native last said: a host draws its
+     * AirPlay control only while there is something for it to open.
+     */
+    readonly airPlayAvailable: boolean;
+    /** Playback is going to an AirPlay device. */
+    readonly airPlayActive: boolean;
     setMuted(muted: boolean): void;
     startPictureInPicture(): void;
+    /** Opens the system's AirPlay device list. */
+    showAirPlayPicker(): void;
     /** Resolves false when playback was refused, as the web player's does; it never rejects. */
     play(): Promise<boolean>;
     pause(): void;
@@ -136,6 +145,8 @@ export const NativeLuminaryPlayer = defineComponent({
         const startError = shallowRef<PlayerError | null>(null);
         const presentation = shallowRef<NativePresentation>('inline');
         const muted = shallowRef(false);
+        const airPlayDevices = shallowRef(false);
+        const airPlayActive = shallowRef(false);
         const controller = computed<PlayerController | null>(() => native.value?.controller ?? null);
 
         /** The controller's state; a player that could not even be created says so the same way. */
@@ -204,6 +215,12 @@ export const NativeLuminaryPlayer = defineComponent({
                 // Muting is the player's, not a load's, and the viewer changes it in native UI too.
                 props.plugin.addListener('mutedchange', (payload) => {
                     if (mine(payload)) muted.value = payload.muted;
+                }),
+                // The devices around, and whether playback is on one: the player's, not a load's.
+                props.plugin.addListener('airplaychange', (payload) => {
+                    if (!mine(payload)) return;
+                    airPlayDevices.value = payload.available;
+                    airPlayActive.value = payload.active;
                 }),
             ];
             teardowns.push(() => listeners.forEach((listening) => void listening.then((listener) => listener.remove())));
@@ -392,6 +409,12 @@ export const NativeLuminaryPlayer = defineComponent({
         function startPictureInPicture(): void {
             native.value?.adapter.startPictureInPicture();
         }
+        const airPlayAvailable = computed(
+            () => native.value?.adapter.airPlay === true && airPlayDevices.value,
+        );
+        function showAirPlayPicker(): void {
+            native.value?.adapter.showAirPlayPicker();
+        }
 
         expose({
             controller,
@@ -400,8 +423,11 @@ export const NativeLuminaryPlayer = defineComponent({
             muted,
             canMute,
             canPictureInPicture,
+            airPlayAvailable,
+            airPlayActive,
             setMuted,
             startPictureInPicture,
+            showAirPlayPicker,
             play,
             pause,
             seek,

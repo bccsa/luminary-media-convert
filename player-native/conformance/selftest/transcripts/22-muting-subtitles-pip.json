@@ -13,6 +13,7 @@
     "inlineVideo": false,
     "muting": true,
     "subtitleSelection": true,
+    "airPlay": false,
     "maxPlayers": 1
    }
   },
@@ -34,6 +35,7 @@
       "inlineVideo": false,
       "muting": true,
       "subtitleSelection": true,
+      "airPlay": false,
       "maxPlayers": 1
      }
     }

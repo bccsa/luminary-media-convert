@@ -19,6 +19,7 @@ export const DEFAULT_CAPABILITIES: JsonObject = {
     inlineVideo: false,
     muting: false,
     subtitleSelection: false,
+    airPlay: false,
     maxPlayers: 1,
 };
 

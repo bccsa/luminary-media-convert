@@ -29,6 +29,9 @@ public protocol InlinePresenter: AnyObject {
     /// Starts picture in picture from the inline picture. False when there is none to start from.
     func startPictureInPicture() -> Bool
 
+    /// Opens the system's AirPlay device list over the page. False when there is nowhere to show it.
+    func showRoutePicker() -> Bool
+
     /// Picture in picture started from the inline picture has started (true) or ended (false).
     var onPictureInPicture: ((Bool) -> Void)? { get set }
 

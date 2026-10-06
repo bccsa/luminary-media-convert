@@ -1,5 +1,5 @@
 {
- "scenario": "10-unsupported-capabilities.json",
+ "scenario": "25-airplay.json",
  "ops": [
   {
    "op": "start",
@@ -13,7 +13,7 @@
     "inlineVideo": false,
     "muting": false,
     "subtitleSelection": false,
-    "airPlay": false,
+    "airPlay": true,
     "maxPlayers": 1
    }
   },
@@ -35,7 +35,7 @@
       "inlineVideo": false,
       "muting": false,
       "subtitleSelection": false,
-      "airPlay": false,
+      "airPlay": true,
       "maxPlayers": 1
      }
     }
@@ -113,58 +113,13 @@
   },
   {
    "op": "call",
-   "method": "setVariant",
+   "method": "showAirPlayPicker",
    "args": {
-    "playerId": "player-1",
-    "id": "v1"
+    "playerId": "player-1"
    },
    "result": {
-    "rejected": {
-     "code": "unsupported",
-     "message": "setVariant needs variantSwitching"
-    }
+    "resolved": {}
    }
-  },
-  {
-   "op": "call",
-   "method": "putLive",
-   "args": {
-    "playerId": "player-1",
-    "generation": 1,
-    "uri": "luminary://live/1",
-    "spec": {
-     "url": "https://cdn.example.com/s/live.m3u8",
-     "baseUrl": "https://cdn.example.com/s/",
-     "refreshSec": 4
-    }
-   },
-   "result": {
-    "rejected": {
-     "code": "unsupported",
-     "message": "putLive needs live"
-    }
-   }
-  },
-  {
-   "op": "call",
-   "method": "warmChunks",
-   "args": {
-    "playerId": "player-1",
-    "loadId": "load1",
-    "schedules": [],
-    "leadSeconds": 60,
-    "warmBytes": 1
-   },
-   "result": {
-    "rejected": {
-     "code": "unsupported",
-     "message": "warmChunks needs chunkWarming"
-    }
-   }
-  },
-  {
-   "op": "drainEvents",
-   "events": []
   },
   {
    "op": "drainEngineCalls",
@@ -172,8 +127,100 @@
     {
      "method": "load",
      "masterUri": "luminary://asset/1/2.m3u8"
+    },
+    {
+     "method": "showAirPlayPicker"
     }
    ]
+  },
+  {
+   "op": "engine",
+   "signal": "airplay",
+   "args": {
+    "available": true,
+    "active": false
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "airplaychange",
+     "payload": {
+      "available": true,
+      "active": false,
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    }
+   ]
+  },
+  {
+   "op": "engine",
+   "signal": "airplay",
+   "args": {
+    "available": true,
+    "active": false
+   }
+  },
+  {
+   "op": "engine",
+   "signal": "airplay",
+   "args": {
+    "available": true,
+    "active": true
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "airplaychange",
+     "payload": {
+      "available": true,
+      "active": true,
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    }
+   ]
+  },
+  {
+   "op": "engine",
+   "signal": "airplay",
+   "args": {
+    "available": false,
+    "active": false
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "airplaychange",
+     "payload": {
+      "available": false,
+      "active": false,
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    }
+   ]
+  },
+  {
+   "op": "call",
+   "method": "showAirPlayPicker",
+   "args": {},
+   "result": {
+    "rejected": {
+     "code": "invalid-argument",
+     "message": "showAirPlayPicker.playerId is not a valid string"
+    }
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": []
   },
   {
    "op": "drainEvents",

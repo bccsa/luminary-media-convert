@@ -64,6 +64,7 @@ export class SimulatedNativePlugin implements LuminaryPlayerPlugin {
             inlineVideo: false,
             muting: false,
             subtitleSelection: false,
+            airPlay: false,
             maxPlayers: 1,
             ...capabilities,
         };
@@ -112,6 +113,7 @@ export class SimulatedNativePlugin implements LuminaryPlayerPlugin {
     setMuted = (args: Parameters<LuminaryPlayerPlugin['setMuted']>[0]) => this.call<void>('setMuted', args);
     setSubtitleTrack = (args: Parameters<LuminaryPlayerPlugin['setSubtitleTrack']>[0]) => this.call<void>('setSubtitleTrack', args);
     startPictureInPicture = (args: Parameters<LuminaryPlayerPlugin['startPictureInPicture']>[0]) => this.call<void>('startPictureInPicture', args);
+    showAirPlayPicker = (args: Parameters<LuminaryPlayerPlugin['showAirPlayPicker']>[0]) => this.call<void>('showAirPlayPicker', args);
     setInlineFrame = (args: Parameters<LuminaryPlayerPlugin['setInlineFrame']>[0]) => this.call<void>('setInlineFrame', args);
     enterFullscreen = async (args: Parameters<LuminaryPlayerPlugin['enterFullscreen']>[0]) => {
         await this.call<void>('enterFullscreen', args);

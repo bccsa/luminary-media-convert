@@ -163,6 +163,15 @@ export class PlayerHost implements EngineListener {
         this.sink.send('mutedchange', { muted });
     }
 
+    private airPlay = { available: false, active: false };
+
+    /** Only on a change, whoever made it: a device came or went, or playback moved to or from one. */
+    airPlayChanged(available: boolean, active: boolean): void {
+        if (available === this.airPlay.available && active === this.airPlay.active) return;
+        this.airPlay = { available, active };
+        this.sink.send('airplaychange', { available, active });
+    }
+
     /** Only on a change, whoever made it. */
     rateChanged(rate: number): void {
         if (rate === this.rate) return;

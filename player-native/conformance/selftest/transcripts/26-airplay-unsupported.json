@@ -1,5 +1,5 @@
 {
- "scenario": "23-muting-subtitles-pip-unsupported.json",
+ "scenario": "26-airplay-unsupported.json",
  "ops": [
   {
    "op": "start",
@@ -65,41 +65,14 @@
   },
   {
    "op": "call",
-   "method": "setMuted",
-   "args": {
-    "playerId": "player-1",
-    "muted": true
-   },
-   "result": {
-    "rejected": {
-     "code": "unsupported",
-     "message": "setMuted needs muting"
-    }
-   }
-  },
-  {
-   "op": "call",
-   "method": "setSubtitleTrack",
+   "method": "showAirPlayPicker",
    "args": {
     "playerId": "player-1"
    },
    "result": {
     "rejected": {
      "code": "unsupported",
-     "message": "setSubtitleTrack needs subtitleSelection"
-    }
-   }
-  },
-  {
-   "op": "call",
-   "method": "startPictureInPicture",
-   "args": {
-    "playerId": "player-1"
-   },
-   "result": {
-    "rejected": {
-     "code": "unsupported",
-     "message": "startPictureInPicture needs pictureInPicture"
+     "message": "showAirPlayPicker needs airPlay"
     }
    }
   },

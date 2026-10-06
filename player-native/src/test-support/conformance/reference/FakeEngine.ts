@@ -21,6 +21,7 @@ export interface EngineListener {
     bufferedTo(end: number): void;
     rateChanged(rate: number): void;
     mutedChanged(muted: boolean): void;
+    airPlayChanged(available: boolean, active: boolean): void;
 }
 
 export interface EngineSnapshot {
@@ -86,6 +87,9 @@ export class FakeEngine {
     }
     startPictureInPicture(): void {
         this.record({ method: 'startPictureInPicture' });
+    }
+    showAirPlayPicker(): void {
+        this.record({ method: 'showAirPlayPicker' });
     }
     setInlineFrame(frame: InlineFrame | null): void {
         this.record(frame ? { method: 'setInlineFrame', ...frame } : { method: 'setInlineFrame' });
@@ -165,6 +169,9 @@ export class FakeEngine {
                 return;
             case 'muted':
                 this.listener?.mutedChanged(args.muted as boolean);
+                return;
+            case 'airplay':
+                this.listener?.airPlayChanged(args.available as boolean, args.active as boolean);
                 return;
             case 'failed':
                 throw new Error('failed: the recovery ladder arrives in phase 3');

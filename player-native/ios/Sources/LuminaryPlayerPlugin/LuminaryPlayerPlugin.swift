@@ -20,7 +20,7 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
     public let pluginMethods: [CAPPluginMethod] = [
         "getInfo", "reset", "create", "load", "putAssets", "putLive", "releaseAssets", "reattach",
         "play", "pause", "seek", "setRate", "setVariant", "setAudioTrack", "warmChunks",
-        "setInlineFrame", "setMuted", "setSubtitleTrack", "startPictureInPicture", "enterFullscreen", "exitFullscreen", "resumed", "destroy",
+        "setInlineFrame", "setMuted", "setSubtitleTrack", "startPictureInPicture", "showAirPlayPicker", "enterFullscreen", "exitFullscreen", "resumed", "destroy",
     ].map { CAPPluginMethod(name: $0, returnType: CAPPluginReturnPromise) }
 
     /// AVPlayer cannot pin a rendition; it does picture in picture, and plays on with the screen locked.
@@ -34,6 +34,7 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         capabilities.live = true
         capabilities.muting = true
         capabilities.subtitleSelection = true
+        capabilities.airPlay = true
         return capabilities
     }()
 
@@ -89,6 +90,7 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func setMuted(_ call: CAPPluginCall) { dispatch("setMuted", call) }
     @objc func setSubtitleTrack(_ call: CAPPluginCall) { dispatch("setSubtitleTrack", call) }
     @objc func startPictureInPicture(_ call: CAPPluginCall) { dispatch("startPictureInPicture", call) }
+    @objc func showAirPlayPicker(_ call: CAPPluginCall) { dispatch("showAirPlayPicker", call) }
     @objc func enterFullscreen(_ call: CAPPluginCall) { dispatch("enterFullscreen", call) }
     @objc func exitFullscreen(_ call: CAPPluginCall) { dispatch("exitFullscreen", call) }
     @objc func resumed(_ call: CAPPluginCall) { dispatch("resumed", call) }

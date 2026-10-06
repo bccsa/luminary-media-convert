@@ -36,6 +36,7 @@ export const DEFAULT_CAPABILITIES: BridgeCapabilities = {
     inlineVideo: false,
     muting: false,
     subtitleSelection: false,
+    airPlay: false,
     maxPlayers: 1,
 };
 
@@ -128,6 +129,7 @@ export class FakePlugin implements LuminaryPlayerPlugin {
     setMuted = (args: unknown) => this.record('setMuted', args, undefined);
     setSubtitleTrack = (args: unknown) => this.record('setSubtitleTrack', args, undefined);
     startPictureInPicture = (args: unknown) => this.record('startPictureInPicture', args, undefined);
+    showAirPlayPicker = (args: unknown) => this.record('showAirPlayPicker', args, undefined);
     enterFullscreen = (args: unknown) => this.record('enterFullscreen', args, undefined);
     exitFullscreen = (args: unknown) => this.record('exitFullscreen', args, undefined);
     destroy = (args: unknown) => this.record('destroy', args, undefined);

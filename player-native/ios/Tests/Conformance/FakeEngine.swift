@@ -51,6 +51,7 @@ final class FakeEngine: Engine {
         record("setSubtitleTrack", ["label": .string(label)])
     }
     func startPictureInPicture() { record("startPictureInPicture") }
+    func showAirPlayPicker() { record("showAirPlayPicker") }
     func setInlineFrame(_ frame: InlineFrame?) {
         guard let frame else { return record("setInlineFrame") }
         record("setInlineFrame", [
@@ -126,6 +127,10 @@ final class FakeEngine: Engine {
             setPosition(args["position"]?.numberValue ?? 0)
         case "muted":
             if case .bool(let muted)? = args["muted"] { events?.mutedChanged(muted) }
+        case "airplay":
+            if case .bool(let available)? = args["available"], case .bool(let active)? = args["active"] {
+                events?.airPlayChanged(available: available, active: active)
+            }
         case "rate":
             setPosition(position())
             rate = args["rate"]?.numberValue ?? 1

@@ -123,6 +123,12 @@ export interface BridgeCapabilities {
      * `setSubtitleTrack`. Parity-gated.
      */
     subtitleSelection: boolean;
+    /**
+     * Sends the picture and sound to an AirPlay device: `showAirPlayPicker` opens the system's
+     * device list, and `airplaychange` reports whether there is a device to send to and whether
+     * playback is going to one. Parity-gated.
+     */
+    airPlay: boolean;
     /** 1 in v1: a second `create` destroys the first player. */
     maxPlayers: number;
 }
@@ -311,6 +317,11 @@ export interface LuminaryPlayerPlugin {
      */
     startPictureInPicture(args: { playerId: string }): Promise<void>;
     /**
+     * `unsupported` unless `airPlay`. Opens the system's AirPlay device list for this player; the
+     * viewer's choice is the system's, and `airplaychange` says what came of it.
+     */
+    showAirPlayPicker(args: { playerId: string }): Promise<void>;
+    /**
      * `texts` are what the full-screen controls say (VoiceOver labels, menu entries), in the
      * language the host speaks: native keeps its English default for any it is not given, and
      * for all of them when there are none. `{seconds}` in the skip texts is the interval.
@@ -388,6 +399,11 @@ export interface BridgeEventMap {
     ratechange: { rate: number };
     /** On change: a `setMuted`, or the viewer's pick in native UI. Not on `load`: muting outlives the item. */
     mutedchange: { muted: boolean };
+    /**
+     * On change: another AirPlay device appeared or went (`available`), or playback went to one or
+     * came back (`active`). Not on `load`: the devices around outlive the item.
+     */
+    airplaychange: { available: boolean; active: boolean };
     /** Once per load, when the duration and seekable range are known. Whole milliseconds, as `durationchange`. */
     loadedmetadata: { duration: number | null };
     /** On a presentation change. `inline` means not presented. */
@@ -418,6 +434,7 @@ export const BRIDGE_EVENT_NAMES: readonly BridgeEventName[] = [
     'audiotracks-updated',
     'ratechange',
     'mutedchange',
+    'airplaychange',
     'loadedmetadata',
     'presentationchange',
 ];

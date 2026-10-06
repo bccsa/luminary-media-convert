@@ -49,6 +49,7 @@ public enum ScenarioRunner {
         "inlineVideo": .bool(false),
         "muting": .bool(false),
         "subtitleSelection": .bool(false),
+        "airPlay": .bool(false),
         "maxPlayers": .number(1),
     ]
 
@@ -109,7 +110,7 @@ private let bridgeErrorCodes: Set<String> = [
 /// The `FakeEngine` vocabulary; adding a signal is a change to the format.
 public let engineSignals: Set<String> = [
     "readyToPlay", "playing", "paused", "buffering", "seeked", "ended",
-    "tracks", "variants", "failed", "bufferedTo", "position", "rate", "muted",
+    "tracks", "variants", "failed", "bufferedTo", "position", "rate", "muted", "airplay",
 ]
 
 private func stepKind(_ step: [String: JSON]) throws -> String {

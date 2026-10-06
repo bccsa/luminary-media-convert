@@ -96,6 +96,7 @@ const SHAPES: Record<string, { fields: Record<string, Shape>; optional?: Record<
     setMuted: { fields: { ...PLAYER, muted: 'boolean' } },
     setSubtitleTrack: { fields: PLAYER, optional: { label: 'string' } },
     startPictureInPicture: { fields: PLAYER },
+    showAirPlayPicker: { fields: PLAYER },
     enterFullscreen: { fields: PLAYER, optional: { texts: 'object' } },
     exitFullscreen: { fields: PLAYER },
     resumed: { fields: PLAYER },
@@ -173,6 +174,7 @@ const CAPABILITY_OF: Record<string, string> = {
     setMuted: 'muting',
     setSubtitleTrack: 'subtitleSelection',
     startPictureInPicture: 'pictureInPicture',
+    showAirPlayPicker: 'airPlay',
 };
 
 export class PlayerRegistry {
@@ -263,6 +265,9 @@ export class PlayerRegistry {
                 break;
             case 'startPictureInPicture':
                 player.engine.startPictureInPicture();
+                break;
+            case 'showAirPlayPicker':
+                player.engine.showAirPlayPicker();
                 break;
             case 'setInlineFrame':
                 player.setInlineFrame((args.frame as unknown as InlineFrame | undefined) ?? null);

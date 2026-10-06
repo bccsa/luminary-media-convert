@@ -42,6 +42,7 @@ const CAPABILITIES = new Set([
     'inlineVideo',
     'muting',
     'subtitleSelection',
+    'airPlay',
     'maxPlayers',
 ]);
 
@@ -170,4 +171,5 @@ export const ENGINE_SIGNALS = new Set([
     'position',
     'rate',
     'muted',
+    'airplay',
 ]);

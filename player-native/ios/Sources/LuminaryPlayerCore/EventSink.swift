@@ -92,6 +92,15 @@ public final class EventSink {
         send("mutedchange", ["muted": .bool(muted)])
     }
 
+    private var airPlay = (available: false, active: false)
+
+    /// Only on a change: a device came or went, or playback moved to or from one.
+    public func airPlayChanged(available: Bool, active: Bool) {
+        if available == airPlay.available && active == airPlay.active { return }
+        airPlay = (available, active)
+        send("airplaychange", ["available": .bool(available), "active": .bool(active)])
+    }
+
     /// Only on a change, whoever made it: a `setRate`, or the viewer in native UI.
     public func rateChanged(_ rate: Double) {
         if rate == self.rate { return }

@@ -80,6 +80,8 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     readonly subtitleSelection: boolean;
     /** Native can start picture in picture. */
     readonly pictureInPicture: boolean;
+    /** Native can send playback to an AirPlay device. */
+    readonly airPlay: boolean;
     /**
      * Present only when native runs the warming loop: the controller calls it
      * through `?.`, so leaving it undefined is how the capability is declined.
@@ -132,6 +134,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         this.muting = capabilities.muting === true;
         this.subtitleSelection = capabilities.subtitleSelection === true;
         this.pictureInPicture = capabilities.pictureInPicture === true;
+        this.airPlay = capabilities.airPlay === true;
         this.capabilities = {
             nativeHls: false,
             keyDelivery: 'memory',
@@ -357,6 +360,12 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         this.send('startPictureInPicture', this.plugin.startPictureInPicture({ playerId: this.playerId }));
     }
 
+    /** Opens the system's AirPlay device list. A no-op where native cannot. */
+    showAirPlayPicker(): void {
+        if (!this.airPlay || this.destroyed) return;
+        this.send('showAirPlayPicker', this.plugin.showAirPlayPicker({ playerId: this.playerId }));
+    }
+
     // -----------------------------------------------------------------------
     // Chunk warming
     // -----------------------------------------------------------------------
@@ -542,6 +551,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
             case 'presentationchange':
             case 'ratechange':
             case 'mutedchange':
+            case 'airplaychange':
                 return;
         }
     }

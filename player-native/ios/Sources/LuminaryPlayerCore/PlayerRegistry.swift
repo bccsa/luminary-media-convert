@@ -96,6 +96,7 @@ public final class PlayerRegistry {
         case .setMuted(_, let muted): engine.setMuted(muted)
         case .setSubtitleTrack(_, let label): engine.setSubtitleTrack(label)
         case .startPictureInPicture: engine.startPictureInPicture()
+        case .showAirPlayPicker: engine.showAirPlayPicker()
         case .enterFullscreen(_, let texts): engine.enterFullscreen(texts: texts)
         case .exitFullscreen: player.exitFullscreen()
         case .resumed: return player.resumed().json

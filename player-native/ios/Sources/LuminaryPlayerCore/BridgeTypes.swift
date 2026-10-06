@@ -40,6 +40,7 @@ public struct BridgeCapabilities: Sendable {
     public var inlineVideo = false
     public var muting = false
     public var subtitleSelection = false
+    public var airPlay = false
     public var maxPlayers = 1
 
     public init() {}
@@ -59,6 +60,7 @@ public struct BridgeCapabilities: Sendable {
         inlineVideo = flag("inlineVideo")
         muting = flag("muting")
         subtitleSelection = flag("subtitleSelection")
+        airPlay = flag("airPlay")
         maxPlayers = json["maxPlayers"]?.numberValue.map { Int($0) } ?? 1
     }
 
@@ -73,6 +75,7 @@ public struct BridgeCapabilities: Sendable {
             "inlineVideo": .bool(inlineVideo),
             "muting": .bool(muting),
             "subtitleSelection": .bool(subtitleSelection),
+            "airPlay": .bool(airPlay),
             "maxPlayers": .number(Double(maxPlayers)),
         ])
     }
@@ -258,6 +261,7 @@ public enum BridgeCall: Sendable {
     case setMuted(playerId: String, muted: Bool)
     case setSubtitleTrack(playerId: String, label: String?)
     case startPictureInPicture(playerId: String)
+    case showAirPlayPicker(playerId: String)
     case enterFullscreen(playerId: String, texts: [String: String]?)
     case exitFullscreen(playerId: String)
     case resumed(playerId: String)
@@ -272,7 +276,7 @@ public enum BridgeCall: Sendable {
              .reattach(let id, _), .play(let id), .pause(let id), .seek(let id, _, _),
              .setRate(let id, _), .setVariant(let id, _), .setAudioTrack(let id, _),
              .warmChunks(let id, _, _, _, _), .setInlineFrame(let id, _), .setMuted(let id, _),
-             .setSubtitleTrack(let id, _), .startPictureInPicture(let id), .enterFullscreen(let id, _), .exitFullscreen(let id),
+             .setSubtitleTrack(let id, _), .startPictureInPicture(let id), .showAirPlayPicker(let id), .enterFullscreen(let id, _), .exitFullscreen(let id),
              .resumed(let id), .destroy(let id):
             return id
         }
@@ -288,6 +292,7 @@ public enum BridgeCall: Sendable {
         case "setMuted": return \.muting
         case "setSubtitleTrack": return \.subtitleSelection
         case "startPictureInPicture": return \.pictureInPicture
+        case "showAirPlayPicker": return \.airPlay
         default: return nil
         }
     }
@@ -387,6 +392,7 @@ public enum BridgeCall: Sendable {
         case "setSubtitleTrack":
             return .setSubtitleTrack(playerId: try args.string("playerId"), label: try args.optionalString("label"))
         case "startPictureInPicture": return .startPictureInPicture(playerId: try args.string("playerId"))
+        case "showAirPlayPicker": return .showAirPlayPicker(playerId: try args.string("playerId"))
         case "enterFullscreen":
             var texts: [String: String]? = nil
             if let object = try args.optionalObject("texts") {

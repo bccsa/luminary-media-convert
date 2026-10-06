@@ -252,6 +252,44 @@ describe('NativeLuminaryPlayer', () => {
         });
     });
 
+    describe('AirPlay, for a host that draws its own controls', () => {
+        it('offers the picker only while native says there are devices, and reports casting', async () => {
+            const { plugin, exposed } = await mountPlayer({ plugin: new FakePlugin({ airPlay: true }) });
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+            const ids = { playerId: load.playerId, loadId: load.loadId };
+
+            expect(exposed.airPlayAvailable).toBe(false);
+            plugin.emit('airplaychange', ids, { available: true, active: false });
+            await flush();
+            expect(exposed.airPlayAvailable).toBe(true);
+            expect(exposed.airPlayActive).toBe(false);
+
+            exposed.showAirPlayPicker();
+            expect(plugin.argsOf('showAirPlayPicker').at(-1)).toEqual({ playerId: load.playerId });
+
+            plugin.emit('airplaychange', ids, { available: true, active: true });
+            await flush();
+            expect(exposed.airPlayActive).toBe(true);
+
+            plugin.emit('airplaychange', ids, { available: false, active: false });
+            await flush();
+            expect(exposed.airPlayAvailable).toBe(false);
+        });
+
+        it('says nothing is available where native cannot, whatever it reports', async () => {
+            const { plugin, exposed } = await mountPlayer();
+            await ready(plugin);
+            const load = plugin.argsOf<LoadArgs>('load').at(-1)!;
+
+            plugin.emit('airplaychange', { playerId: load.playerId, loadId: load.loadId }, { available: true, active: false });
+            await flush();
+            expect(exposed.airPlayAvailable).toBe(false);
+            exposed.showAirPlayPicker();
+            expect(plugin.methods()).not.toContain('showAirPlayPicker');
+        });
+    });
+
     describe('video inside the page', () => {
         const RECT = { left: 0, top: 72, width: 390, height: 219, right: 390, bottom: 291, x: 0, y: 72 } as DOMRect;
 

@@ -38,6 +38,10 @@ public protocol Engine: AnyObject {
     /// Starts picture in picture from the picture that is showing; nothing when none is.
     func startPictureInPicture()
 
+    /// Opens the system's AirPlay device list; the devices around and casting are reported through
+    /// ``EventSink/airPlayChanged(available:active:)``.
+    func showAirPlayPicker()
+
     /// Shows the video in the page, in this frame of the web view, or hides it (nil).
     func setInlineFrame(_ frame: InlineFrame?)
 

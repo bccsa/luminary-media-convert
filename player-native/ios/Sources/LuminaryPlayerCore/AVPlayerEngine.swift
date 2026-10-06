@@ -30,6 +30,13 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private var fullscreenTexts = FullscreenTexts()
     /// Full-screen holds the picture: picture in picture starts from its view, not the inline one.
     private var presentation = Presentation.inline
+    #if os(iOS)
+    /// Watches for AirPlay devices while the engine lives: detection costs battery, and the page
+    /// only draws its control while there is a device to send to.
+    private var routeDetector: AVRouteDetector?
+    private var routeObservation: NSKeyValueObservation?
+    private var externalPlaybackObservation: NSKeyValueObservation?
+    #endif
     private var lastStatus: AVPlayer.TimeControlStatus = .paused
     private var rate = 1.0
     private var metadataSent = false
@@ -87,6 +94,18 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             let muted = player.isMuted
             DispatchQueue.main.async { self?.events?.mutedChanged(muted) }
         })
+        #if os(iOS)
+        player.allowsExternalPlayback = true
+        let detector = AVRouteDetector()
+        detector.isRouteDetectionEnabled = true
+        routeDetector = detector
+        routeObservation = detector.observe(\.multipleRoutesDetected, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.reportAirPlay() }
+        }
+        externalPlaybackObservation = player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.reportAirPlay() }
+        }
+        #endif
         // Video goes on as audio in the background, and into picture in picture where it can.
         player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
         nowPlaying = NowPlayingController(skin: skin, commands: .init(
@@ -290,6 +309,20 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         player.isMuted = muted
     }
 
+    /// The system's own device list, over the page.
+    public func showAirPlayPicker() {
+        _ = inline?.showRoutePicker()
+    }
+
+    private func reportAirPlay() {
+        #if os(iOS)
+        events?.airPlayChanged(
+            available: routeDetector?.multipleRoutesDetected ?? false,
+            active: player.isExternalPlaybackActive
+        )
+        #endif
+    }
+
     /// The subtitle the master lists under `label`: matched against an option's name or language.
     public func setSubtitleTrack(_ label: String?) {
         guard let item else { return }
@@ -384,6 +417,14 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         poll = nil
         _ = presenter?.dismiss()
         inline?.setFrame(nil, player: player)
+        #if os(iOS)
+        routeDetector?.isRouteDetectionEnabled = false
+        routeDetector = nil
+        routeObservation?.invalidate()
+        routeObservation = nil
+        externalPlaybackObservation?.invalidate()
+        externalPlaybackObservation = nil
+        #endif
         statusObservation?.invalidate()
         statusObservation = nil
         rateObservations.forEach { $0.invalidate() }

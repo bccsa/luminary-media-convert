@@ -25,6 +25,7 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
     public var onRotatedToLandscape: (() -> Void)?
     public var onPictureInPicture: ((Bool) -> Void)?
     private var pictureInPicture: AVPictureInPictureController?
+    private var routePicker: AVRoutePickerView?
     private var rotationObserver: NSObjectProtocol?
     private var frameObservation: NSKeyValueObservation?
     /// What the web view looked like before it was made see-through.
@@ -96,6 +97,19 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
         return true
     }
 
+    /// Apple's own device list. Its button is a view that has to be in the window to answer, so a
+    /// 1pt picker sits in the web view's container and is pressed on the viewer's behalf.
+    public func showRoutePicker() -> Bool {
+        guard let container = webView()?.superview else { return false }
+        let picker = routePicker ?? AVRoutePickerView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+        picker.prioritizesVideoDevices = true
+        picker.alpha = 0.011
+        if picker.superview !== container { container.addSubview(picker) }
+        routePicker = picker
+        for case let button as UIButton in picker.subviews { button.sendActions(for: .touchUpInside) }
+        return true
+    }
+
     public func setSuspended(_ suspended: Bool) {
         self.suspended = suspended
         guard let layer = videoView?.playerLayer else { return }
@@ -138,6 +152,8 @@ public final class LuminaryInlinePresenter: NSObject, InlinePresenter {
 
     private func tearDown() {
         pictureInPicture = nil
+        routePicker?.removeFromSuperview()
+        routePicker = nil
         frameObservation = nil
         videoView?.playerLayer.player = nil
         videoView?.removeFromSuperview()

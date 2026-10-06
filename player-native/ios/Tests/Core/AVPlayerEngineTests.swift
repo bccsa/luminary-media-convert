@@ -21,6 +21,7 @@ private final class RecordingPresenter: FullscreenPresenter {
     }
 
     func startPictureInPicture() -> Bool { false }
+    func showRoutePicker() -> Bool { false }
 
     func dismiss() -> Bool {
         defer { presented = false }
