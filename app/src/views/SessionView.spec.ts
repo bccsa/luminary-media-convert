@@ -50,6 +50,8 @@ vi.mock('../api', () => ({
 
 import SessionView from './SessionView.vue';
 import SessionPlayerStrip from '../components/session-view/SessionPlayerStrip.vue';
+import SessionOutputPanel from '../components/session-view/SessionOutputPanel.vue';
+import { startEncode } from '../api';
 
 /** A probed session sitting in the pre-encode state, which is where trimming happens. */
 function uploadedSession(overrides: Record<string, unknown> = {}) {
@@ -728,5 +730,55 @@ describe('SessionView', () => {
 
         expect(storyboardUrl).toContain('/api/sessions/sess-1/thumbnails');
         expect(storyboardUrl).toContain('token=');
+    });
+
+    describe('the encode form across a submit', () => {
+        // The form holds the operator's edits — track labels and languages, the
+        // ladder — and nothing else does. Destroying it while the request is in
+        // flight meant a rejected submit rebuilt it from the raw probe.
+        const config = { type: 'video', segmentDuration: 6 };
+
+        it('is the same instance after the encoder rejects the submit', async () => {
+            let reject!: (e: Error) => void;
+            vi.mocked(startEncode).mockReturnValueOnce(
+                new Promise((_, r) => {
+                    reject = r;
+                }) as never
+            );
+            const wrapper = await mountView();
+            const before = wrapper.findComponent(SessionOutputPanel);
+            expect(before.exists()).toBe(true);
+
+            before.vm.$emit('submit', config);
+            await flushPromises();
+
+            const during = wrapper.findComponent(SessionOutputPanel);
+            expect(during.exists()).toBe(true);
+            expect(during.vm).toBe(before.vm);
+
+            reject(new Error('Copy is not possible for track 2'));
+            await flushPromises();
+
+            const after = wrapper.findComponent(SessionOutputPanel);
+            expect(after.exists()).toBe(true);
+            expect(after.vm).toBe(before.vm);
+        });
+
+        it('is hidden, not destroyed, while the request is in flight', async () => {
+            vi.mocked(startEncode).mockReturnValueOnce(
+                new Promise(() => {}) as never
+            );
+            const wrapper = await mountView();
+            const panel = wrapper.findComponent(SessionOutputPanel);
+
+            panel.vm.$emit('submit', config);
+            await flushPromises();
+
+            const strip = wrapper.findComponent({ name: 'SessionPlayerStrip' });
+            expect(strip.exists()).toBe(true);
+            expect(
+                (strip.element.parentElement as HTMLElement).style.display
+            ).toBe('none');
+        });
     });
 });
