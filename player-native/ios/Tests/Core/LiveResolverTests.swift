@@ -313,6 +313,39 @@ struct MediaPlaylistRewriteTests {
         ])
     }
 
+    @Test("resolves as the URL parser does: a trailing space goes, [ ] | stay, spaces and non-ASCII encode")
+    func parserEquivalence() {
+        func resolved(_ uri: String) -> String {
+            rewriteMediaPlaylist("#EXTM3U\n#EXTINF:4,\n\(uri)\n", playlistUrl: base, keyUri: nil)
+                .split(separator: "\n").last.map(String.init) ?? ""
+        }
+        let dir = "https://cdn.example.com/out/session/stream_720/"
+        #expect(resolved("seg.m4s ") == dir + "seg.m4s")
+        #expect(resolved("seg.m4s?a=1&b=[2]|3") == dir + "seg.m4s?a=1&b=[2]|3")
+        #expect(resolved("my seg é.m4s") == dir + "my%20seg%20%C3%A9.m4s")
+        #expect(resolved("/abs/seg.m4s?x=1#frag") == "https://cdn.example.com/abs/seg.m4s?x=1#frag")
+        #expect(resolved("//other.example.com/a/../b/seg.m4s") == "https://other.example.com/b/seg.m4s")
+        #expect(resolved("../../x/./y.m4s") == "https://cdn.example.com/out/x/y.m4s")
+        #expect(resolved("https://CDN.Example.com:443/a.m4s") == "https://cdn.example.com/a.m4s")
+        #expect(resolveReference("x.m4s", against: "HTTPS://CDN.Example.com:443/a/b.m3u8?t=1") == "https://cdn.example.com/a/x.m4s")
+    }
+
+    @Test("a key line naming no method, or an empty one, is no key")
+    func methodlessKey() {
+        #expect(!hasAes128Key("#EXTM3U\n#EXT-X-KEY:URI=\"k\"\n"))
+        #expect(!hasAes128Key("#EXTM3U\n#EXT-X-KEY:METHOD=,URI=\"k\"\n"))
+        #expect(!hasAes128Key("#EXTM3U\n#EXT-X-KEY:METHOD=NONE\n"))
+        #expect(hasAes128Key("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"k\"\n"))
+    }
+
+    @Test("an empty key URI names no key: key lines stay as written, and an AES-128 key needs one")
+    func emptyKeyUri() throws {
+        let key = "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://k/x\"\n#EXTINF:4,\na.m4s\n"
+        #expect(rewriteMediaPlaylist(key, playlistUrl: base, keyUri: "").contains(#"URI="https://k/x""#))
+        let spec = BridgeLiveSpec(url: base, baseUrl: base, keyUri: "", keyHex: nil, refreshSec: 4)
+        #expect(throws: LiveFailure.keyRequired) { try LiveResolver.decode(Data(key.utf8), spec) }
+    }
+
     @Test("keeps a line's carriage return, and the text around it")
     func crlf() {
         let text = "#EXTM3U\r\n#EXTINF:4.000000,\r\nsegment_0.m4s\r\n"

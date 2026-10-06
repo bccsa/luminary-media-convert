@@ -28,6 +28,9 @@ public typealias LiveFetch = @Sendable (
     _ completion: @escaping @Sendable (Result<Data, LiveFailure>) -> Void
 ) -> @Sendable () -> Void
 
+/// How long one read of a live playlist may take, in seconds.
+public let liveReadTimeout: TimeInterval = 10
+
 /// `luminary://live/<n>`, one read per engine request, ported from `resolveLivePlaylist`
 /// (`player-core/src/policy/live.ts`): fetch, decrypt when LMCENC, refuse an AES-128 key with
 /// no key URI, rewrite. No timer: AVPlayer's own refresh drives it, so it keeps a live stream
@@ -37,6 +40,9 @@ public enum LiveResolver {
     public static let urlSessionFetch: LiveFetch = { url, completion in
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        // One hung edge response must not stall the refresh for URLSession's 60 s: a target
+        // duration is a few seconds, and AVPlayer asks again.
+        request.timeoutInterval = liveReadTimeout
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             if let error {
                 completion(.failure(.fetchFailed(status: nil, underlying: error as NSError)))
@@ -78,7 +84,7 @@ public enum LiveResolver {
             guard isPlaylist(bytes) else { throw LiveFailure.invalidContent }
             text = utf8(bytes)
         }
-        if spec.keyUri == nil, hasAes128Key(text) { throw LiveFailure.keyRequired }
+        if (spec.keyUri ?? "").isEmpty, hasAes128Key(text) { throw LiveFailure.keyRequired }
         return rewriteMediaPlaylist(text, playlistUrl: spec.baseUrl, keyUri: spec.keyUri)
     }
 
