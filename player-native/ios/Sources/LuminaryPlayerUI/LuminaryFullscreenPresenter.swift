@@ -85,7 +85,16 @@ public final class LuminaryFullscreenPresenter: NSObject, FullscreenPresenter {
         pictureInPicture?.delegate = nil
         pictureInPicture = nil
         controller.detach()
-        guard controller.presentingViewController != nil else { return true }
+        // Already coming down (stepping aside for picture in picture): that dismissal is the one
+        // in flight, and a second would be refused or leave `dismissing` set for good.
+        guard controller.presentingViewController != nil, !controller.isBeingDismissed else { return true }
+        takeDown(controller)
+        return true
+    }
+
+    /// Every dismissal goes through here, so `dismissing` always ends with the animation and a
+    /// presentation parked behind it runs.
+    private func takeDown(_ controller: UIViewController) {
         dismissing = true
         controller.dismiss(animated: true) { [weak self] in
             guard let self else { return }
@@ -94,7 +103,6 @@ public final class LuminaryFullscreenPresenter: NSObject, FullscreenPresenter {
             self.presentWhenDismissed = nil
             show?()
         }
-        return true
     }
 
     /// Presents over whatever the host is already presenting.
@@ -111,16 +119,21 @@ public final class LuminaryFullscreenPresenter: NSObject, FullscreenPresenter {
 }
 
 extension LuminaryFullscreenPresenter: AVPictureInPictureControllerDelegate {
-    public func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPicture: AVPictureInPictureController) {
+    /// The picture is in its own window now: the full-screen view steps aside, kept for the
+    /// return, and JavaScript is told. Not earlier: picture in picture can still refuse to start,
+    /// and then the view is still up and nothing was said.
+    public func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPicture: AVPictureInPictureController) {
         guard pictureInPicture === self.pictureInPicture else { return }
         onPresentation?(.pip)
+        guard let controller, controller.presentingViewController != nil, !controller.isBeingDismissed else { return }
+        takeDown(controller)
     }
 
-    /// The picture is in its own window now: the full-screen view steps aside, kept for the return.
-    public func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPicture: AVPictureInPictureController) {
-        guard pictureInPicture === self.pictureInPicture, let controller, controller.presentingViewController != nil else { return }
-        controller.dismiss(animated: true)
-    }
+    /// The system declined: full-screen stays as it is, and so does what JavaScript was told.
+    public func pictureInPictureController(
+        _ pictureInPicture: AVPictureInPictureController,
+        failedToStartPictureInPictureWithError error: Error
+    ) {}
 
     /// The viewer returning to full-screen from picture in picture: the view comes back.
     public func pictureInPictureController(

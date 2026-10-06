@@ -270,6 +270,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
             pause: { [weak self] in self?.pause() },
             seek: { [weak self] position in self?.seek(position: position, exact: false) },
             setRate: { [weak self] rate in self?.setRate(rate) },
+            rate: { [weak self] in self?.rate ?? 1 },
             setAudioTrack: { [weak self] id in self?.setAudioTrack(id) },
             audioTracks: { [weak self] in self?.currentAudio() ?? ([], nil) },
             playbackWanted: { [weak self] in self?.intendedPlaying ?? false },

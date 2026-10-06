@@ -12,6 +12,8 @@ public struct FullscreenCommands {
     public var pause: () -> Void
     public var seek: (_ position: Double) -> Void
     public var setRate: (_ rate: Double) -> Void
+    /// The speed playback has, which holds while paused when the player's own rate reads 0.
+    public var rate: () -> Double
     public var setAudioTrack: (_ id: String) -> Void
     /// The tracks the audio menu lists, and the one playing.
     public var audioTracks: () -> (tracks: [AudioTrack], activeId: String?)
@@ -25,6 +27,7 @@ public struct FullscreenCommands {
         pause: @escaping () -> Void,
         seek: @escaping (Double) -> Void,
         setRate: @escaping (Double) -> Void,
+        rate: @escaping () -> Double,
         setAudioTrack: @escaping (String) -> Void,
         audioTracks: @escaping () -> (tracks: [AudioTrack], activeId: String?),
         playbackWanted: @escaping () -> Bool,
@@ -34,6 +37,7 @@ public struct FullscreenCommands {
         self.pause = pause
         self.seek = seek
         self.setRate = setRate
+        self.rate = rate
         self.setAudioTrack = setAudioTrack
         self.audioTracks = audioTracks
         self.playbackWanted = playbackWanted

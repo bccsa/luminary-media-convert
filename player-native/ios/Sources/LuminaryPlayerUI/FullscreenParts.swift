@@ -103,6 +103,9 @@ final class SpinnerView: UIView {
         ring.strokeEnd = 0.75
         layer.addSublayer(ring)
         isUserInteractionEnabled = false
+        // Its label ("Loading") is all VoiceOver has while play/pause is hidden behind it.
+        isAccessibilityElement = true
+        accessibilityTraits = .updatesFrequently
     }
 
     @available(*, unavailable)

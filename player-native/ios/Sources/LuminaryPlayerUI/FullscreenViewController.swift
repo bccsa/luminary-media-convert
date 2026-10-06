@@ -64,7 +64,8 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         self.texts = texts
         visibility = FullscreenControlsVisibility(clock: clock)
         super.init(nibName: nil, bundle: nil)
-        if player.rate > 0 { rate = roundedRate(Double(player.rate)) }
+        // The engine's speed, which is right while paused too; the player's own reads 0 then.
+        rate = commands.rate()
     }
 
     @available(*, unavailable)
@@ -107,6 +108,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         subtitlesButton.glyph = VideoJsIcons.subtitles
         subtitlesButton.accessibilityLabel = texts.subtitlesMenu
         rateButton.accessibilityLabel = texts.playbackRate
+        rateButton.accessibilityValue = rateLabel(rate)
         spinner.accessibilityLabel = texts.loading
         progress.accessibilityLabel = texts.seek
 
@@ -116,9 +118,9 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         on(exitButton) { $0.onLeave?() }
         on(pipButton) { $0.onPictureInPicture?() }
         on(muteButton) { $0.player.isMuted.toggle(); $0.refresh() }
-        on(rateButton) { $0.openMenu(from: $0.rateButton, items: $0.rateItems()) }
-        on(audioButton) { $0.openMenu(from: $0.audioButton, items: $0.audioItems()) }
-        on(subtitlesButton) { $0.openMenu(from: $0.subtitlesButton, items: $0.subtitleItems()) }
+        on(rateButton, opensMenu: true) { $0.openMenu(from: $0.rateButton, items: $0.rateItems()) }
+        on(audioButton, opensMenu: true) { $0.openMenu(from: $0.audioButton, items: $0.audioItems()) }
+        on(subtitlesButton, opensMenu: true) { $0.openMenu(from: $0.subtitlesButton, items: $0.subtitleItems()) }
         progress.onScrub = { [weak self] fraction, ended in self?.scrub(to: fraction, ended: ended) }
 
         let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped))
@@ -262,6 +264,7 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
         pipButton.isHidden = !pictureInPictureAvailable
         rateButton.isHidden = !layout.showsRate
         rateButton.text = rateLabel(next.rate)
+        rateButton.accessibilityValue = rateLabel(next.rate)
         muteButton.glyph = next.muted ? VideoJsIcons.volumeMute : VideoJsIcons.volumeHigh
         muteButton.accessibilityLabel = next.muted ? texts.unmute : texts.mute
 
@@ -295,11 +298,13 @@ final class FullscreenViewController: UIViewController, UIGestureRecognizerDeleg
 
     // MARK: Actions
 
-    /// Every control's action also keeps the controls up for another 3 s.
-    private func on(_ button: UIControl, _ action: @escaping (FullscreenViewController) -> Void) {
+    /// Every control's action also keeps the controls up for another 3 s, and closes an open menu,
+    /// as video.js does when focus leaves it; the buttons that open a menu decide that themselves.
+    private func on(_ button: UIControl, opensMenu: Bool = false, _ action: @escaping (FullscreenViewController) -> Void) {
         button.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             self.visibility.touched()
+            if !opensMenu { self.closeMenu() }
             action(self)
         }, for: .touchUpInside)
     }
