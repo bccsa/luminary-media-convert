@@ -17,6 +17,8 @@ defineProps<{
     source: PlayerSource;
     poster?: string;
     preferredLanguage?: string;
+    /** Native draws the video in the page, behind this component: it draws nothing opaque there. */
+    inline?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -54,6 +56,7 @@ defineExpose({
         :source="source"
         :poster="poster"
         :preferred-language="preferredLanguage"
+        :inline="inline"
         :now-playing="{ title: 'Player Lab' }"
         :plugin="plugin"
         :on-app-resume="onAppResume"

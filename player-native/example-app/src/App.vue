@@ -3,7 +3,7 @@
  * The player lab. It knows the player only through `virtual:video-player`'s contract, as the
  * Luminary app will: `inject(VideoPlayerKey)`, then `<component :is>` of what the service returns.
  */
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch, watchEffect } from 'vue';
 import type { PlayerSource } from '@luminary-media-converter/player-core';
 import { VideoPlayerKey, type PlaybackMode, type PlayerHandle } from '@/build-time/contracts/plugin-registry';
 import { NativePluginKey } from '@/players/nativePlugin';
@@ -32,18 +32,23 @@ const available = service.modes.filter((m) => m.available).map((m) => m.id);
 const firstMode = saved.mode ?? (import.meta.env.VITE_LAB_MODE as string | undefined);
 const mode = ref<PlaybackMode>(available.includes(firstMode as PlaybackMode) ? (firstMode as PlaybackMode) : available[0]!);
 const presetId = ref(saved.presetId ?? 'sample');
+/** Native only: the video is drawn by the platform behind the page, which then leaves its backgrounds clear. */
+const inlineVideo = ref(Boolean(saved.inlineVideo));
+const inlineActive = computed(() => mode.value === 'native' && inlineVideo.value);
+watchEffect(() => document.documentElement.classList.toggle('lab-inline', inlineActive.value));
 const customUrl = ref(saved.customUrl ?? '');
 const customKey = ref(saved.customKey ?? '');
 /** An HTTPS-served embed page, for a WebView whose own origin YouTube refuses (iOS). */
 const youtubeEmbedUrl = import.meta.env.VITE_YOUTUBE_EMBED_URL as string | undefined;
 const youtubeUrl = ref(saved.youtubeUrl ?? DEFAULT_YOUTUBE);
-watch([mode, presetId, customUrl, customKey, youtubeUrl], () =>
+watch([mode, presetId, customUrl, customKey, youtubeUrl, inlineVideo], () =>
     localStorage.setItem(STORAGE, JSON.stringify({
         mode: mode.value,
         presetId: presetId.value,
         customUrl: customUrl.value,
         customKey: customKey.value,
         youtubeUrl: youtubeUrl.value,
+        inlineVideo: inlineVideo.value,
     })),
 );
 
@@ -226,7 +231,7 @@ watch(latency, (value) => {
 </script>
 
 <template>
-    <main class="lab">
+    <main class="lab" :class="{ 'lab--inline': inlineActive }">
         <header class="lab__head">
             <h1>Player Lab</h1>
             <span class="badge">{{ service.target }} build</span>
@@ -246,6 +251,11 @@ watch(latency, (value) => {
             </button>
         </div>
 
+        <label v-if="mode === 'native'" class="inline-toggle">
+            <input v-model="inlineVideo" type="checkbox" />
+            Video in the page (native, behind a see-through page)
+        </label>
+
         <div class="player">
             <component
                 :is="playerComponent"
@@ -253,6 +263,7 @@ watch(latency, (value) => {
                 ref="player"
                 :source="source"
                 :youtube-embed-url="youtubeEmbedUrl"
+                :inline="inlineActive"
                 @timeupdate="onTimeupdate"
                 @loadedmetadata="onLoadedmetadata"
             />
@@ -375,6 +386,20 @@ watch(latency, (value) => {
     color: #8e8e93;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+}
+.inline-toggle {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 13px;
+    color: #3a3a3c;
+}
+/* The page leaves the picture's place clear: everything around it keeps the lab's own background. */
+.lab--inline > *:not(.player) {
+    background: #f2f2f7;
+}
+.lab--inline .player {
+    background: transparent;
 }
 .player {
     background: #000;

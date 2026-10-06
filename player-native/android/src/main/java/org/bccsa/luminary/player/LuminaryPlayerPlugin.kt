@@ -20,7 +20,7 @@ class LuminaryPlayerPlugin : Plugin() {
     private lateinit var registry: PlayerRegistry
 
     override fun load() {
-        registry = exoPlayerRegistry(context, { activity }) { name, payload ->
+        registry = exoPlayerRegistry(context, { activity }, { bridge?.webView }) { name, payload ->
             notifyListeners(name, JSObject(payload.toString()))
         }
     }

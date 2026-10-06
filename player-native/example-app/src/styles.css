@@ -8,6 +8,10 @@
 body {
     margin: 0;
 }
+/* Native draws the video behind the page (App.vue's inline toggle): the page itself is see-through. */
+:root.lab-inline {
+    background: transparent;
+}
 .capsule {
     font: inherit;
     font-size: 15px;

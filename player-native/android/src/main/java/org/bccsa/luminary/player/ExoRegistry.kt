@@ -2,10 +2,12 @@ package org.bccsa.luminary.player
 
 import android.app.Activity
 import android.content.Context
+import android.view.View
 import kotlinx.serialization.json.JsonObject
 import okhttp3.OkHttpClient
 import org.bccsa.luminary.player.engine.ExoEngine
 import org.bccsa.luminary.player.engine.FullscreenPresenter
+import org.bccsa.luminary.player.engine.InlinePresenter
 
 /** What this platform reports from `getInfo`. */
 val ANDROID_CAPABILITIES = BridgeCapabilities(
@@ -15,6 +17,7 @@ val ANDROID_CAPABILITIES = BridgeCapabilities(
     backgroundAudio = true,
     muting = true,
     subtitleSelection = true,
+    inlineVideo = true,
 )
 
 /** One per app, shared by every player's `UriRouter`. */
@@ -27,10 +30,15 @@ private val sharedHttpClient: OkHttpClient by lazy { OkHttpClient() }
 fun exoPlayerRegistry(
     context: Context,
     activity: () -> Activity?,
+    /** The Capacitor bridge's web view, which the picture shown in the page goes behind. */
+    webView: () -> View? = { null },
     emit: (name: String, payload: JsonObject) -> Unit,
 ): PlayerRegistry {
     val engines = EngineFactory { router, clock, options ->
-        ExoEngine(context, router, clock, options, FullscreenPresenter(activity))
+        ExoEngine(
+            context, router, clock, options, FullscreenPresenter(activity),
+            inline = InlinePresenter(webView, activity),
+        )
     }
     return PlayerRegistry(
         ANDROID_CAPABILITIES, MainLooperClock(), HttpUpstream(sharedHttpClient), engines, OkHttpLiveFetch(sharedHttpClient),

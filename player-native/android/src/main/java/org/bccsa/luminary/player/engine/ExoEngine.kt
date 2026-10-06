@@ -60,6 +60,8 @@ class ExoEngine(
     player: ExoPlayer? = null,
     /** Whether the app is in the foreground; tests pass their own. */
     private val appLifecycle: Lifecycle = ProcessLifecycleOwner.get().lifecycle,
+    /** The picture shown in the page; null where there is no web view to put it behind. */
+    private val inline: InlinePresenter? = null,
 ) : Engine, Player.Listener {
     override lateinit var events: EventSink
 
@@ -154,6 +156,10 @@ class ExoEngine(
     init {
         this.player.addListener(this)
         appLifecycle.addObserver(appVisibility)
+        // A phone turned to landscape while the page shows the picture opens it full-screen.
+        inline?.onRotatedToLandscape = {
+            if (inlineFrame != null && presentation == "inline" && hasVideo) enterFullscreen(null)
+        }
     }
 
     private fun setVideoDisabled(disabled: Boolean) {
@@ -304,7 +310,22 @@ class ExoEngine(
     // capabilities are off, so the registry refuses the calls before they reach here.
     override fun startPictureInPicture() {}
 
-    override fun setInlineFrame(frame: InlineFrame?) {}
+    /** Where the page shows the picture, while it does. */
+    private var inlineFrame: InlineFrame? = null
+
+    override fun setInlineFrame(frame: InlineFrame?) {
+        inlineFrame = frame
+        inline?.setFrame(frame, player)
+    }
+
+    /** `inline`, `fullscreen` or `pip`: whichever of the last two holds the picture, the page's view has none. */
+    private var presentation = "inline"
+
+    private fun presentationDidChange(state: String) {
+        presentation = state
+        inline?.setSuspended(state != "inline")
+        events.presentationChanged(state)
+    }
 
     override fun setAudioTrack(id: String) {
         val choice = audioChoicesOf(player.currentTracks).firstOrNull { it.id == id } ?: return
@@ -337,19 +358,22 @@ class ExoEngine(
         // Audio-only has no view. Until the tracks are known the item is presumed to have one, and
         // the view is taken down again if it turns out not to (see `onTracksChanged`).
         if (knownAudioOnly(player.currentTracks)) return
-        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts)) events.presentationChanged("fullscreen")
+        if (presenter.present(player, ::leaveFullscreenByViewer, skin, this.texts)) presentationDidChange("fullscreen")
     }
 
     private fun knownAudioOnly(tracks: Tracks) = !tracks.isEmpty && !tracks.containsType(C.TRACK_TYPE_VIDEO)
 
     override fun exitFullscreen() {
-        if (presenter.dismiss()) events.presentationChanged("inline")
+        if (presenter.dismiss()) presentationDidChange("inline")
     }
 
-    /** The back gesture or the exit button leaves full-screen the way `exitFullscreen` does, pause included. */
+    /**
+     * The back gesture or the exit button leaves full-screen the way `exitFullscreen` does, pause
+     * included, unless the video is shown in the page: it plays on there.
+     */
     private fun leaveFullscreenByViewer() {
         exitFullscreen()
-        if (hasVideo) player.pause()
+        if (hasVideo && inlineFrame == null) player.pause()
     }
 
     override fun destroy() {
@@ -357,6 +381,7 @@ class ExoEngine(
         poll?.cancel()
         poll = null
         presenter.dismiss()
+        inline?.destroy()
         appLifecycle.removeObserver(appVisibility)
         player.removeListener(this)
         PlaybackService.release(session)
@@ -450,7 +475,7 @@ class ExoEngine(
     override fun onTracksChanged(tracks: Tracks) {
         if (presenter.isPresented && knownAudioOnly(tracks)) {
             presenter.dismiss()
-            events.presentationChanged("inline")
+            presentationDidChange("inline")
         }
         val choices = audioChoicesOf(tracks)
         val audio = choices.map { AudioTrack(it.id, it.language, it.label) }
