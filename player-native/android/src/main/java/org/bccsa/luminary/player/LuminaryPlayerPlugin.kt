@@ -50,6 +50,7 @@ class LuminaryPlayerPlugin : Plugin() {
     @PluginMethod fun setMuted(call: PluginCall) = dispatch("setMuted", call)
     @PluginMethod fun setSubtitleTrack(call: PluginCall) = dispatch("setSubtitleTrack", call)
     @PluginMethod fun startPictureInPicture(call: PluginCall) = dispatch("startPictureInPicture", call)
+    @PluginMethod fun showAirPlayPicker(call: PluginCall) = dispatch("showAirPlayPicker", call)
     @PluginMethod fun enterFullscreen(call: PluginCall) = dispatch("enterFullscreen", call)
     @PluginMethod fun exitFullscreen(call: PluginCall) = dispatch("exitFullscreen", call)
     @PluginMethod fun resumed(call: PluginCall) = dispatch("resumed", call)

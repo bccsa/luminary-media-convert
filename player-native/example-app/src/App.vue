@@ -33,7 +33,8 @@ const firstMode = saved.mode ?? (import.meta.env.VITE_LAB_MODE as string | undef
 const mode = ref<PlaybackMode>(available.includes(firstMode as PlaybackMode) ? (firstMode as PlaybackMode) : available[0]!);
 const presetId = ref(saved.presetId ?? 'sample');
 /** Native only: the video is drawn by the platform behind the page, which then leaves its backgrounds clear. */
-const inlineVideo = ref(Boolean(saved.inlineVideo));
+// On by default where native can draw the video in the page: the picture sits in the page like the web and YouTube ones.
+const inlineVideo = ref(saved.inlineVideo === undefined ? true : Boolean(saved.inlineVideo));
 const inlineActive = computed(() => mode.value === 'native' && inlineVideo.value);
 watchEffect(() => document.documentElement.classList.toggle('lab-inline', inlineActive.value));
 const customUrl = ref(saved.customUrl ?? '');
@@ -279,7 +280,12 @@ watch(latency, (value) => {
                 {{ player.muted ? 'Unmute' : 'Mute' }}
             </button>
             <button v-if="player?.canPictureInPicture" class="capsule" type="button" @click="player.startPictureInPicture?.()">PiP</button>
+            <button v-if="player?.canAirPlay" class="capsule" type="button" @click="player.showAirPlayPicker?.()">Cast…</button>
         </div>
+        <p v-if="player?.canAirPlay" class="status">
+            Cast ·
+            {{ player.airPlayActive ? 'playing on a device' : player.airPlayAvailable ? 'a device is in range' : 'no device found yet' }}
+        </p>
 
         <template v-if="state">
             <div v-if="state.angles.length > 1" class="group">
@@ -419,10 +425,7 @@ watch(latency, (value) => {
     font-size: 13px;
     color: #3a3a3c;
 }
-/* The page leaves the picture's place clear: everything around it keeps the lab's own background. */
-.lab--inline > *:not(.player) {
-    background: #f2f2f7;
-}
+/* The page leaves the picture's place clear; the window behind it is the lab's own page colour. */
 .lab--inline .player {
     background: transparent;
 }

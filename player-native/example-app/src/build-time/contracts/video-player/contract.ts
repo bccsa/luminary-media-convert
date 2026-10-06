@@ -34,6 +34,13 @@ export interface PlayerHandle {
     readonly muted?: boolean;
     readonly canMute?: boolean;
     readonly canPictureInPicture?: boolean;
+    /** Native can send playback to a device nearby (Cast on Android, AirPlay on iOS), whether or not one is in range. */
+    readonly canAirPlay?: boolean;
+    /** A device is in range. */
+    readonly airPlayAvailable?: boolean;
+    /** Playback is going to one. */
+    readonly airPlayActive?: boolean;
+    showAirPlayPicker?(): void;
     setMuted?(muted: boolean): void;
     startPictureInPicture?(): void;
 }

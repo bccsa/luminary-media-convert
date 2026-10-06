@@ -63,6 +63,8 @@ class ExoEngine(
     private val appLifecycle: Lifecycle = ProcessLifecycleOwner.get().lifecycle,
     /** The picture shown in the page; null where there is no web view to put it behind. */
     private val inline: InlinePresenter? = null,
+    /** Google Cast, where the host and the device allow it; null otherwise. */
+    private val cast: CastSupport? = null,
 ) : Engine, Player.Listener {
     override lateinit var events: EventSink
 
@@ -162,6 +164,14 @@ class ExoEngine(
     init {
         this.player.addListener(this)
         appLifecycle.addObserver(appVisibility)
+        // Casting is an extra: whatever goes wrong in the Cast SDK must never stop the player from existing.
+        runCatching {
+            cast?.start(object : CastSupport.Listener {
+                override fun routesChanged(available: Boolean, active: Boolean) {
+                    if (::events.isInitialized) events.airPlayChanged(available, active)
+                }
+            })
+        }
         // A new surface in the page has nothing drawn in it, and a finished item draws nothing by itself.
         inline?.onSurfaceCreated = { if (presentation == "inline") redrawEndedFrame() }
         // A phone turned to landscape while the page shows the picture opens it full-screen.
@@ -308,8 +318,10 @@ class ExoEngine(
     override fun setSubtitleTrack(label: String?) = selectSubtitle(player, label)
 
     /** Needs the system's picture in picture and an activity that allows it; the registry refuses the call otherwise. */
-    /** AirPlay is Apple's: the capability is off, and the registry refuses the call before it gets here. */
-    override fun showAirPlayPicker() {}
+    /** The system's list of Cast devices (or, when connected, its controller). The capability is off where there is no Cast. */
+    override fun showAirPlayPicker() {
+        runCatching { cast?.showPicker() }
+    }
 
     override fun startPictureInPicture() {
         if (!hasVideo) return
@@ -402,6 +414,7 @@ class ExoEngine(
     }
 
     override fun destroy() {
+        runCatching { cast?.stop() }
         ladder.destroy()
         poll?.cancel()
         poll = null

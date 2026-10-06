@@ -4,7 +4,7 @@
  * injects (the Capacitor one on a device, the simulated one elsewhere), with the lab's caption
  * drawn over the poster. The exposed surface is the component's, passed through.
  */
-import { computed, inject, shallowRef } from 'vue';
+import { computed, inject, onMounted, ref, shallowRef } from 'vue';
 import { createInitialState, type PlayerSource } from '@luminary-media-converter/player-core';
 import {
     NativeLuminaryPlayer,
@@ -32,6 +32,13 @@ const onAppResume = inject(AppResumeKey, undefined);
 
 const inner = shallowRef<NativeLuminaryPlayerExposed | null>(null);
 
+// Whether native can send playback to a device nearby at all, as the plugin reports it: the host's
+// own control only shows while a device is in range, but the lab always offers it, to look for one.
+const castSupported = ref(false);
+onMounted(() => {
+    void plugin.getInfo().then((info) => (castSupported.value = info.capabilities.airPlay === true)).catch(() => {});
+});
+
 function caption({ state, presentation }: NativeLuminaryPlayerSlotProps): string {
     if (state.lifecycle === 'error') return state.error?.message ?? 'Error';
     if (state.lifecycle !== 'ready') return state.lifecycle;
@@ -50,6 +57,10 @@ defineExpose({
     muted: computed(() => inner.value?.muted ?? false),
     canMute: computed(() => inner.value?.canMute ?? false),
     canPictureInPicture: computed(() => inner.value?.canPictureInPicture ?? false),
+    canAirPlay: castSupported,
+    airPlayAvailable: computed(() => inner.value?.airPlayAvailable ?? false),
+    airPlayActive: computed(() => inner.value?.airPlayActive ?? false),
+    showAirPlayPicker: () => inner.value?.showAirPlayPicker(),
     setMuted: (muted: boolean) => inner.value?.setMuted(muted),
     startPictureInPicture: () => inner.value?.startPictureInPicture(),
 });

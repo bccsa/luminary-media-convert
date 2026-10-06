@@ -134,16 +134,25 @@ class EventSink(
 
     private var airPlay = false to false
 
-    /** Only on a change: another device appeared or went (`available`), or playback went to one or came back (`active`). */
+    /**
+     * Only on a change: another device appeared or went (`available`), or playback went to one or
+     * came back (`active`). The devices around are the player's, not a load's, so this is sent
+     * before the first load too: the SDK often knows long before a source does.
+     */
     fun airPlayChanged(available: Boolean, active: Boolean) {
         if (airPlay == available to active) return
         airPlay = available to active
-        send(
+        if (silent) return
+        emit(
             "airplaychange",
-            buildJsonObject {
-                put("available", available)
-                put("active", active)
-            },
+            JsonObject(
+                buildJsonObject {
+                    put("available", available)
+                    put("active", active)
+                    put("playerId", playerId)
+                    loadId?.let { put("loadId", it) }
+                },
+            ),
         )
     }
 
