@@ -5,6 +5,8 @@ import android.content.ComponentCallbacks
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.Drawable
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
 import androidx.annotation.OptIn
@@ -36,6 +38,9 @@ class InlinePresenter(
     private var restore: Drawable? = null
     private var transparent = false
     private var tracking: View? = null
+
+    /** Called when the view's surface has been created afresh: whatever was drawn in the last one is gone. */
+    var onSurfaceCreated: (() -> Unit)? = null
 
     /** Called when the phone is turned to landscape while the page shows the picture and nothing else holds it. */
     var onRotatedToLandscape: (() -> Unit)? = null
@@ -123,6 +128,15 @@ class InlinePresenter(
         }
         // Below the web view in the draw order, so the page draws over the picture.
         container.addView(view, container.indexOfChild(web), ViewGroup.LayoutParams(1, 1))
+        (view.videoSurfaceView as? SurfaceView)?.holder?.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                onSurfaceCreated?.invoke()
+            }
+
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+
+            override fun surfaceDestroyed(holder: SurfaceHolder) {}
+        })
         videoView = view
         return view
     }
