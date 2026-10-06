@@ -41,6 +41,8 @@ import {
 import type { PluginListenerHandle } from '@capacitor/core';
 import {
     BRIDGE_EVENT_NAMES,
+    LIVE_URI_PREFIX,
+    assetUri,
     fromWireDuration,
     type BridgeEvent,
     type BridgeEventName,
@@ -172,7 +174,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
             playerId: this.playerId,
             loadId,
             generation: this.batch.generation,
-            masterUri: src.url,
+            masterUri: this.masterUriFor(src.url),
             assets: this.batch.take(),
             ...(src.keyHex ? { keyHex: src.keyHex } : {}),
             recovery: src.recovery,
@@ -184,6 +186,22 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         if (this.loadId === null) return;
         const loadId = this.beginLoad();
         await this.plugin.reattach({ playerId: this.playerId, loadId });
+    }
+
+    /**
+     * What native is asked to load. A live source that is one media playlist has no master to
+     * name, and native takes a `luminary://asset/` master only: it is wrapped in a one-variant
+     * master whose variant is the live address, which native resolves on its own.
+     */
+    private masterUriFor(url: string): string {
+        if (!url.startsWith(LIVE_URI_PREFIX)) return url;
+        const uri = assetUri(this.batch.generation, 0, 'm3u8');
+        this.batch.add({
+            uri,
+            contentType: 'application/vnd.apple.mpegurl',
+            text: `#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\n${url}\n`,
+        });
+        return uri;
     }
 
     /**

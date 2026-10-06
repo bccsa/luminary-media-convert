@@ -483,6 +483,22 @@ describe('NativeBridgeAdapter — resume', () => {
     });
 });
 
+describe('NativeBridgeAdapter — a live media playlist', () => {
+    const LIVE_PLAYLIST = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:7\n#EXTINF:4,\nseg7.ts\n';
+
+    it('is loaded through a one-variant master, as native takes a luminary://asset/ master only', async () => {
+        const { controller, plugin, loads } = await setup({ [MASTER_URL]: LIVE_PLAYLIST }, { live: true });
+        await controller.load({ masterUrl: MASTER_URL });
+
+        const load = loads().at(-1)!;
+        expect(load.masterUri).toMatch(/^luminary:\/\/asset\/\d+\/\d+\.m3u8$/);
+        const master = load.assets.find((asset) => asset.uri === load.masterUri)!;
+        const live = plugin.argsOf<{ uri: string }>('putLive').at(-1)!.uri;
+        expect(live.startsWith('luminary://live/')).toBe(true);
+        expect(master.text).toBe(`#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\n${live}\n`);
+    });
+});
+
 describe('NativeBridgeAdapter — destroy', () => {
     it('releases the generation, destroys the native player and stops listening', async () => {
         const { controller, plugin, emitNow } = await setup();
