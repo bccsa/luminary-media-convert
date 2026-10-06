@@ -21,8 +21,10 @@ import { ChunkPrefetcher } from './chunkWarming';
 import type { LivePlaylistSource } from '../serve/livePlaylistUri';
 import { installMemoryKeyXhr } from './vhsKeyInterceptor';
 import { installLivePlaylistXhr } from './vhsLivePlaylistInterceptor';
+import { attachMediaSourceBySrc } from './vhsDirectSource';
 import { installByteRangeTimeout } from './vhsRequestTimeout';
 import { VhsStallSignals } from './vhsStallSignals';
+import { seedBandwidth } from './vhsBandwidthSeed';
 import { vhsHandler, vhsTech } from './vhsXhrSeam';
 
 /** The MIME type that routes a source to VHS rather than to the native tech. */
@@ -126,6 +128,8 @@ export class VideoJsAdapter implements PlayerAdapter {
     private prefetcher: ChunkPrefetcher | null = null;
     private keyBytes: Uint8Array | null = null;
     private sourceHookHandlers: [string, () => void][] = [];
+    /** Every VHS handler already wrapped: an announcement may repeat, a wrap must not. */
+    private readonly wrappedHandlers = new WeakSet<object>();
     private readonly stallSignals: VhsStallSignals;
     private readonly ladder: RecoveryLadder;
     /** The source currently attached — what {@link reattach} re-prepares against. */
@@ -296,12 +300,23 @@ export class VideoJsAdapter implements PlayerAdapter {
      * that source went to the network: a live source's playlists, an encrypted
      * one's key. The handler is reachable a microtask later, and the one request
      * out by then is the master's, which no wrapper answers.
+     *
+     * The listeners stay until the next source arms its own, and each handler is
+     * wrapped once. `src()` builds its handler later, so when loads outrun it the
+     * previous source's announcement can arrive after this one armed: a one-shot
+     * arming spent itself on that, and this source's handler went unwrapped, its key
+     * request reached the network, and VHS excluded every rendition.
      */
     private armSourceHooks(): void {
         this.disarmSourceHooks();
         const keyBytes = this.keyBytes;
+        const bandwidthEstimate = this.lastSource?.bandwidthEstimate;
         const wrap = (): void => {
+            const handler = vhsHandler(this.player);
+            if (!handler || this.wrappedHandlers.has(handler)) return;
+            this.wrappedHandlers.add(handler);
             installByteRangeTimeout(this.player);
+            seedBandwidth(handler, bandwidthEstimate);
             if (this.capabilities.keyDelivery === 'memory') {
                 installMemoryKeyXhr(this.player, () => keyBytes);
             }
@@ -310,11 +325,11 @@ export class VideoJsAdapter implements PlayerAdapter {
             }
         };
         const install = (): void => {
-            this.disarmSourceHooks();
             if (vhsHandler(this.player)) wrap();
             else queueMicrotask(wrap);
         };
         const onHooksReady = (): void => {
+            attachMediaSourceBySrc(this.player);
             this.clearReplacedSources();
             install();
         };
@@ -323,7 +338,7 @@ export class VideoJsAdapter implements PlayerAdapter {
             ['loadstart', install],
         ];
         for (const [event, handler] of this.sourceHookHandlers) {
-            this.player.one(event, handler);
+            this.player.on(event, handler);
         }
     }
 
@@ -359,14 +374,14 @@ export class VideoJsAdapter implements PlayerAdapter {
      *
      * On Safari and iOS, VHS attaches its MediaSource through `<source>`
      * elements — its own URL, and the playlist's for AirPlay — rather than
-     * `src`, and never removes them. An element already playing does not look
-     * at a `<source>` added to it, so each new source's were stacked behind the
-     * last one's and never chosen: an angle switch, the audio toggle, a
-     * recovery re-attach or a new load played the old stream out to its end
-     * and stopped. `xhr-hooks-ready` falls between the two, with the old handler
-     * disposed and the new one not yet attached. A tech built for this source,
-     * on the way back from YouTube, has a fresh element, and is not reachable
-     * at this point anyway.
+     * `src`, and never removes them, unless `attachMediaSourceBySrc` reached
+     * the tech first. It cannot for the first source on a tech built on the
+     * way back from YouTube, which is not reachable at `xhr-hooks-ready`, so
+     * that source's elements are still there when the next one comes. An
+     * element already playing does not look at a `<source>` added to it, and
+     * the ones left behind point at a disposed handler's MediaSource.
+     * `xhr-hooks-ready` falls between the two, with the old handler disposed
+     * and the new one not yet attached.
      */
     private clearReplacedSources(): void {
         const tech = vhsTech(this.player) as { el?(): Element | null; reset?(): void } | null;

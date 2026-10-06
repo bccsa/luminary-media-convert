@@ -52,9 +52,14 @@ import { installAutoHide } from '../vjs/autoHide';
 import { TRANSPARENT_POSTER } from '../vjs/poster';
 import { createKeepAlive, SILENT_AUDIO_DATA_URI, type KeepAlive } from '../vjs/keepAlive';
 import { retryYouTubeApi, watchYouTubeApi, whenYouTubeApiSettles } from '../vjs/youtubeApi';
-import { findPreferredTrack } from '../audioTrackLanguage';
+import { findPreferredTrack } from '@luminary-media-converter/player-core';
 import { imageAttempts, toPlayerImage, type PlayerImageInput } from '../image';
 import { isYouTubeUrl, toVideoJsYouTubeUrl } from '../youtube';
+import {
+    YOUTUBE_FRAME_TECH,
+    registerYoutubeFrameTech,
+    setYoutubeFrameEmbedUrl,
+} from '../vjs/YoutubeFrameTech';
 import { singleFlight } from '../singleFlight';
 import AudioVideoToggle from './AudioVideoToggle.vue';
 
@@ -93,12 +98,18 @@ interface Props {
      */
     poster?: PlayerImageInput;
     /**
+     * An HTTPS-hosted copy of `embed/youtube-embed.html`. Used for YouTube when
+     * the page itself is not http(s) (Capacitor iOS), where YouTube refuses the
+     * embed with error 153 because it sees a `capacitor://` Referer.
+     */
+    youtubeEmbedUrl?: string;
+    /**
      * Language to select automatically among the stream's audio tracks, as a
      * two- or three-letter code (`en`, `eng`, `en-US` — all normalized).
      *
      * Matched leniently on purpose: browsers disagree about
      * whether a track's language is two-letter, three-letter terminological or
-     * three-letter bibliographic. See `audioTrackLanguage.ts`.
+     * three-letter bibliographic. See `audioTrackLanguage.ts` in `player-core`.
      *
      * Re-applied whenever the track list changes, when the prop changes, on
      * `loadeddata`, and on entering or leaving fullscreen — the last two
@@ -337,6 +348,16 @@ async function loadSource(source: PlayerSource): Promise<void> {
         if (controller.value) {
             controller.value.destroy();
             controller.value = null;
+        }
+        if (props.youtubeEmbedUrl && !/^https?:$/.test(location.protocol)) {
+            registerYoutubeFrameTech();
+            setYoutubeFrameEmbedUrl(props.youtubeEmbedUrl);
+            const order: string[] = instance.options_.techOrder;
+            if (order[0] !== YOUTUBE_FRAME_TECH) {
+                instance.options_.techOrder = [YOUTUBE_FRAME_TECH, ...order];
+            }
+            instance.src({ type: 'video/youtube', src: toVideoJsYouTubeUrl(source.masterUrl) });
+            return;
         }
         // A new YouTube source, or the error panel's retry, tries the API
         // again if it failed; the queued player is handed it if it loads.
@@ -724,7 +745,8 @@ async function enterFullscreen(): Promise<void> {
 }
 
 function exitFullscreen(): void {
-    void player.value?.exitFullscreen();
+    // video.js rejects leaving a fullscreen nothing is in, and nobody would catch it.
+    if (player.value?.isFullscreen()) void player.value.exitFullscreen();
 }
 
 /**

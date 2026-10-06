@@ -98,3 +98,8 @@ export {
     parseMasterText,
     substituteMasterRefs,
 } from './pipeline/playlist-text.js';
+export {
+    findPreferredTrack,
+    matchesPreferredLanguage,
+    type LanguageTaggedTrack,
+} from './audioTrackLanguage.js';

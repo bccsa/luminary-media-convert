@@ -280,6 +280,26 @@ describe('VideoJsAdapter — live playlists', () => {
         return { p, a, tech, network };
     }
 
+    it('starts VHS from the host\'s bandwidth estimate once its handler exists', async () => {
+        const { p, a, tech } = setup();
+        tech.vhs.bandwidth = 4_194_304;
+        await a.loadSource({ ...source, bandwidthEstimate: 1_200_000 });
+        p.fire('xhr-hooks-ready');
+        await settle();
+
+        expect(tech.vhs.bandwidth).toBe(1_200_000);
+    });
+
+    it('leaves VHS\'s own estimate alone when the host gave none', async () => {
+        const { p, a, tech } = setup();
+        tech.vhs.bandwidth = 4_194_304;
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+        await settle();
+
+        expect(tech.vhs.bandwidth).toBe(4_194_304);
+    });
+
     const liveSource = () => ({ resolveLive: vi.fn(() => Promise.resolve('#EXTM3U\n')) });
 
     afterEach(() => {
@@ -377,6 +397,38 @@ describe('VideoJsAdapter — live playlists', () => {
 
         expect(live.resolveLive).toHaveBeenCalledTimes(1);
         expect(network).not.toHaveBeenCalled();
+    });
+
+    it("wraps the last source's handler though an earlier source's announcement arrives in between", async () => {
+        // player.src() builds its handler later. When loads outrun it, the superseded source's
+        // announcement spent the one-shot arming meant for the next, whose handler then went
+        // unwrapped: its key request reached the network, and VHS excluded every rendition.
+        const { p, a, tech } = setup();
+        await a.loadSource(source);
+        await a.loadSource({ ...source, url: 'blob:next' });
+        p.fire('xhr-hooks-ready');
+        p.fire('loadstart');
+
+        const next = vi.fn(() => 'network');
+        tech.vhs = { xhr: next };
+        p.fire('xhr-hooks-ready');
+        const callback = vi.fn();
+        tech.vhs.xhr({ uri: LUMINARY_KEY_PLACEHOLDER_URI }, callback);
+        await settle();
+
+        expect(next).not.toHaveBeenCalled();
+        expect(new Uint8Array(callback.mock.calls[0]![1].response)).toHaveLength(16);
+    });
+
+    it('wraps each handler once, however often it is announced', async () => {
+        const { p, a, tech } = setup();
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+        const wrapped = tech.vhs.xhr;
+        p.fire('loadstart');
+        p.fire('xhr-hooks-ready');
+
+        expect(tech.vhs.xhr).toBe(wrapped);
     });
 
     it("answers a handler's key requests with its own source's key, whatever came next", async () => {
@@ -686,6 +738,33 @@ describe('VideoJsAdapter — changing source in Safari', () => {
         p.fire('loadstart');
 
         expect(sourcesOf(video)).toEqual(['blob:media-source-2', 'blob:angle-2']);
+    });
+
+    it('has VHS attach every MediaSource through `src`', async () => {
+        // Through `<source>` elements, WebKit's resource selection carried on
+        // into the swapped pair after a source change and loaded the playlist,
+        // which it cannot play: the element sat with no source.
+        const { p, a, tech } = setup();
+        Object.setPrototypeOf(tech, { addSourceElement: vi.fn() });
+
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+        expect(typeof (tech as { addSourceElement?: unknown }).addSourceElement).not.toBe('function');
+
+        await a.loadSource({ ...source, url: 'blob:angle-2' });
+        p.fire('xhr-hooks-ready');
+        expect(typeof (tech as { addSourceElement?: unknown }).addSourceElement).not.toBe('function');
+    });
+
+    it('leaves a tech VHS is not driving alone', async () => {
+        const { p, a, tech } = setup();
+        const addSourceElement = vi.fn();
+        Object.assign(tech, { vhs: undefined, addSourceElement });
+
+        await a.loadSource(source);
+        p.fire('xhr-hooks-ready');
+
+        expect((tech as { addSourceElement?: unknown }).addSourceElement).toBe(addSourceElement);
     });
 
     it('leaves an element given its source through `src` alone', async () => {

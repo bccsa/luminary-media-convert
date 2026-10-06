@@ -1,0 +1,183 @@
+{
+ "scenario": "10-unsupported-capabilities.json",
+ "ops": [
+  {
+   "op": "start",
+   "capabilities": {
+    "variantSwitching": false,
+    "pictureInPicture": false,
+    "renderText": false,
+    "live": false,
+    "chunkWarming": false,
+    "backgroundAudio": false,
+    "inlineVideo": false,
+    "muting": false,
+    "subtitleSelection": false,
+    "airPlay": false,
+    "maxPlayers": 1
+   }
+  },
+  {
+   "op": "call",
+   "method": "getInfo",
+   "args": {},
+   "result": {
+    "resolved": {
+     "protocolVersion": 1,
+     "platform": "android",
+     "capabilities": {
+      "variantSwitching": false,
+      "pictureInPicture": false,
+      "renderText": false,
+      "live": false,
+      "chunkWarming": false,
+      "backgroundAudio": false,
+      "inlineVideo": false,
+      "muting": false,
+      "subtitleSelection": false,
+      "airPlay": false,
+      "maxPlayers": 1
+     }
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "reset",
+   "args": {},
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "call",
+   "method": "create",
+   "args": {
+    "protocolVersion": 1,
+    "skipBackSeconds": 10,
+    "skipForwardSeconds": 10
+   },
+   "result": {
+    "resolved": {
+     "playerId": "player-1"
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "load",
+   "args": {
+    "playerId": "player-1",
+    "loadId": "load1",
+    "generation": 1,
+    "masterUri": "luminary://asset/1/2.m3u8",
+    "assets": [
+     {
+      "uri": "luminary://asset/1/1.m3u8",
+      "contentType": "application/vnd.apple.mpegurl",
+      "text": "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.0,\nhttps://cdn.example.com/s/v/0.m4s\n#EXT-X-ENDLIST\n"
+     },
+     {
+      "uri": "luminary://asset/1/2.m3u8",
+      "contentType": "application/vnd.apple.mpegurl",
+      "text": "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=854x480\nluminary://asset/1/1.m3u8\n"
+     }
+    ],
+    "recovery": {
+     "escalationWindowMs": 10000,
+     "maxReloadAttempts": 3,
+     "reloadDelaysMs": [
+      2000,
+      4000,
+      8000
+     ]
+    }
+   },
+   "result": {
+    "resolved": {}
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": [
+    {
+     "name": "audiotracks-updated",
+     "payload": {
+      "tracks": [],
+      "activeId": null,
+      "playerId": "player-1",
+      "loadId": "load1"
+     }
+    }
+   ]
+  },
+  {
+   "op": "call",
+   "method": "setVariant",
+   "args": {
+    "playerId": "player-1",
+    "id": "v1"
+   },
+   "result": {
+    "rejected": {
+     "code": "unsupported",
+     "message": "setVariant needs variantSwitching"
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "putLive",
+   "args": {
+    "playerId": "player-1",
+    "generation": 1,
+    "uri": "luminary://live/1",
+    "spec": {
+     "url": "https://cdn.example.com/s/live.m3u8",
+     "baseUrl": "https://cdn.example.com/s/",
+     "refreshSec": 4
+    }
+   },
+   "result": {
+    "rejected": {
+     "code": "unsupported",
+     "message": "putLive needs live"
+    }
+   }
+  },
+  {
+   "op": "call",
+   "method": "warmChunks",
+   "args": {
+    "playerId": "player-1",
+    "loadId": "load1",
+    "schedules": [],
+    "leadSeconds": 60,
+    "warmBytes": 1
+   },
+   "result": {
+    "rejected": {
+     "code": "unsupported",
+     "message": "warmChunks needs chunkWarming"
+    }
+   }
+  },
+  {
+   "op": "drainEvents",
+   "events": []
+  },
+  {
+   "op": "drainEngineCalls",
+   "calls": [
+    {
+     "method": "load",
+     "masterUri": "luminary://asset/1/2.m3u8"
+    }
+   ]
+  },
+  {
+   "op": "drainEvents",
+   "events": []
+  }
+ ]
+}
