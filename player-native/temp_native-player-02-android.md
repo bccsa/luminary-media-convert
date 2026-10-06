@@ -107,6 +107,41 @@ ships on both platforms together; see the parity rules in
     the engine's controls act on the player directly rather than through an engine-level command
     object, which is fine while no state lives only in the engine.
 
+- **The protocol's later additions: built, and seen on a phone (2026-10-06).** Johan's `inlineVideo`,
+  `muting` and `subtitleSelection` capabilities, `setInlineFrame`, `setMuted`, `setSubtitleTrack`,
+  `startPictureInPicture`, `mutedchange` and the `texts` of `enterFullscreen` reach Android's shared layer
+  (decode, capability gates, `PlayerHost`'s keep-playing rule), and scenarios 19 to 24 pass on the
+  Kotlin runner. All four capabilities are on.
+  - **Inline video** (`InlinePresenter.kt`): a `PlayerView` behind the Capacitor web view, in the frame
+    the page names (CSS pixels, the web view's own origin), the web view made see-through while it shows
+    and put back after. It follows the web view, gives the player up while full-screen or picture in
+    picture holds the picture, and a phone turned to landscape opens it full-screen. **The host page has
+    to leave its own backgrounds clear where the picture is** (`html`, `body` and every ancestor of the
+    frame): the Lab's "Video in the page" toggle shows how.
+  - **Picture in picture** (`FullscreenPresenter.kt`): the full-screen view is presented first when the
+    page held the picture, its controls step aside so the system's small window shows the picture
+    alone, and the activity's own callbacks report `pip`. Expanding is full-screen again, closing is
+    leaving; the activity's lifecycle says which once it settles (some devices stop and restart it
+    while expanding, so a stop alone says nothing). **The host activity must declare
+    `android:supportsPictureInPicture="true"`**: without it `pictureInPicture` is reported false and
+    there is no button. The Lab's manifest has it.
+  - **Muting, subtitles, texts.** Muting is the player's volume, restored on unmute. A load starts with
+    subtitles off, and only the page's `setSubtitleTrack` (or the full-screen menu) shows one,
+    so the page's state and the picture agree. The full-screen controls say what the host sent in its
+    language and English for the rest, with iOS's defaults.
+  - **Audio is one track per language**, as `AudioRenditions.swift` does it: a ladder whose audio comes
+    in several groups (a tier per video quality) offers each language once per group, and choosing one
+    is a preference so ExoPlayer follows it across variants.
+  - **A finished item draws its last frame** when the picture changes surface (full-screen in, the page
+    back, a rotation): ExoPlayer draws nothing in a fresh surface once the stream has ended, so the
+    engine seeks to where it already is and says nothing to the page about it.
+  - **The full-screen top row** now matches iOS: audio, picture in picture, subtitles, rate, mute.
+  - **Checked on a phone (CPH2483):** every item above, with the Lab, a live multi-language stream and
+    Angel One (subtitles in two languages), including a landscape turn with the picture in the page.
+    **Not checked on a phone:** PiP without the manifest opt-in (unit tests only), a second device
+    model, and a real host app (the Luminary app, whose own page would have to clear its backgrounds
+    and pass `inline`).
+
 Everything here lives in `player-native/android/`. It builds the native structure
 from [the overview](temp_native-player-00-overview.md#native-structure-both-platforms-the-same-names-file-for-file)
 in Kotlin, then the real `Engine` behind it. It never changes `bridge.ts` or the
