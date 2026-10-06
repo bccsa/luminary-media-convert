@@ -132,6 +132,21 @@ final class NowPlayingController {
         }
     }
 
+    #if canImport(UIKit)
+    /// The middle of the picture, as a square: Control Center and the lock screen draw artwork in
+    /// the proportions it is given, and a post's picture is landscape.
+    static func squared(_ image: UIImage) -> UIImage {
+        let side = min(image.size.width, image.size.height)
+        guard side > 0, image.size.width != image.size.height else { return image }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale
+        let origin = CGPoint(x: -(image.size.width - side) / 2, y: -(image.size.height - side) / 2)
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+            image.draw(at: origin)
+        }
+    }
+    #endif
+
     /// The first of `urls` that gives an image: a post's own picture, else the host's stand-in.
     /// One that does not answer, answers with an error page, or is not an image passes to the next.
     private func loadArtwork(_ urls: [String], generation: Int) {
@@ -150,7 +165,8 @@ final class NowPlayingController {
             }
             DispatchQueue.main.async {
                 guard let self, self.metadataGeneration == generation else { return }
-                self.info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                let square = Self.squared(image)
+                self.info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: square.size) { _ in square }
                 self.publish()
             }
         }
