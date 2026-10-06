@@ -30,6 +30,8 @@ public class LuminaryPlayerPlugin: CAPPlugin, CAPBridgedPlugin {
         capabilities.backgroundAudio = true
         // The picture sits behind the web view; a page that leaves its backgrounds opaque shows none.
         capabilities.inlineVideo = true
+        // Live sources: both platforms pass the live scenarios (Android phase 4, iOS phase 4).
+        capabilities.live = true
         capabilities.muting = true
         capabilities.subtitleSelection = true
         return capabilities
