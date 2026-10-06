@@ -48,6 +48,42 @@ class BridgeTypesTest {
         }
     }
 
+    private fun boundary(vararg fields: Pair<String, kotlinx.serialization.json.JsonElement>) = buildJsonObject {
+        for ((key, value) in fields) put(key, value)
+    }
+
+    private fun warm(boundary: JsonObject) = buildJsonObject {
+        put("playerId", "player-1")
+        put("loadId", "load1")
+        put("schedules", buildJsonArray { add(buildJsonArray { add(boundary) }) })
+        put("leadSeconds", 60)
+        put("warmBytes", 1024)
+    }
+
+    @Test
+    fun `a warming schedule with an incomplete boundary is refused, not thinned out`() {
+        val ok = boundary("url" to JsonPrimitive("u"), "start" to JsonPrimitive(0), "end" to JsonPrimitive(20))
+        BridgeCall.decode("warmChunks", warm(ok))
+        assertInvalid("warmChunks", warm(boundary("url" to JsonPrimitive("u"), "start" to JsonPrimitive(0))))
+        assertInvalid("warmChunks", warm(boundary("url" to JsonPrimitive(5), "start" to JsonPrimitive(0), "end" to JsonPrimitive(20))))
+        assertInvalid("warmChunks", warm(boundary("url" to JsonPrimitive("u"), "start" to JsonPrimitive("0"), "end" to JsonPrimitive(20))))
+    }
+
+    @Test
+    fun `a key is 32 ASCII hex characters, and hex that does not decode is no key`() {
+        val fullwidth = "Ａ".repeat(32)
+        val args = load(JsonPrimitive(3)).let { JsonObject(it + ("keyHex" to JsonPrimitive(fullwidth))) }
+        assertInvalid("load", args)
+
+        val holder = KeyHolder()
+        holder.set("00112233445566778899aabbccddeeff")
+        assertEquals(16, holder.copy()!!.size)
+        holder.set(fullwidth)
+        assertEquals(null, holder.copy())
+        holder.set("abc")
+        assertEquals(null, holder.copy())
+    }
+
     @Test
     fun `counts that fit decode as they are`() {
         val load = BridgeCall.decode("load", load(JsonPrimitive(3))) as BridgeCall.Load

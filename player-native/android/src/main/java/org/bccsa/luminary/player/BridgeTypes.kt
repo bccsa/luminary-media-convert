@@ -261,6 +261,12 @@ sealed interface BridgeCall {
                             val boundaries = schedule as? JsonArray ?: args.invalid("schedules[$i] is not an array")
                             boundaries.forEachIndexed { j, boundary ->
                                 if (boundary !is JsonObject) args.invalid("schedules[$i][$j] is not an object")
+                                // Complete, or refused: a dropped boundary would merge its neighbours and warm
+                                // the wrong chunk.
+                                val url = boundary["url"] as? JsonPrimitive
+                                if (url == null || !url.isString || numberOf(boundary["start"]) == null || numberOf(boundary["end"]) == null) {
+                                    args.invalid("schedules[$i][$j] has no url, start and end")
+                                }
                             }
                         }
                     },
