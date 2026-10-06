@@ -596,6 +596,7 @@ final class ProgressBar: UIView {
 }
 #endif
 
+#if canImport(UIKit)
 /// The system's device list is a sheet over this view: the controls stay while it is up, and run
 /// their timer again once it is gone.
 extension FullscreenViewController: AVRoutePickerViewDelegate {
@@ -607,3 +608,4 @@ extension FullscreenViewController: AVRoutePickerViewDelegate {
         visibility.touched()
     }
 }
+#endif
