@@ -42,6 +42,7 @@ import type { PluginListenerHandle } from '@capacitor/core';
 import {
     BRIDGE_EVENT_NAMES,
     LIVE_URI_PREFIX,
+    type InlineFrame,
     assetUri,
     fromWireDuration,
     type BridgeEvent,
@@ -71,6 +72,8 @@ export interface NativeBridgeAdapterOptions {
 
 export class NativeBridgeAdapter implements PlayerAdapter {
     readonly capabilities: AdapterCapabilities;
+    /** Native can draw the video in the page, in the frame {@link setInlineFrame} names. */
+    readonly inlineVideo: boolean;
     /**
      * Present only when native runs the warming loop: the controller calls it
      * through `?.`, so leaving it undefined is how the capability is declined.
@@ -119,6 +122,7 @@ export class NativeBridgeAdapter implements PlayerAdapter {
         this.report = options.report;
 
         const { capabilities } = options.info;
+        this.inlineVideo = capabilities.inlineVideo === true;
         this.capabilities = {
             nativeHls: false,
             keyDelivery: 'memory',
@@ -142,6 +146,18 @@ export class NativeBridgeAdapter implements PlayerAdapter {
     /** Resolves once every bridge listener is registered, so no event is missed. */
     async ready(): Promise<void> {
         await Promise.all(this.listeners);
+    }
+
+    /**
+     * Shows the video in `frame` (the web view's coordinates, CSS pixels), or hides it. A no-op
+     * where native does not draw inline: the call would be refused.
+     */
+    setInlineFrame(frame: InlineFrame | null): void {
+        if (!this.inlineVideo || this.destroyed) return;
+        this.send(
+            'setInlineFrame',
+            this.plugin.setInlineFrame({ playerId: this.playerId, ...(frame ? { frame } : {}) }),
+        );
     }
 
     /** Lock-screen and notification metadata, sent with every load that follows. */

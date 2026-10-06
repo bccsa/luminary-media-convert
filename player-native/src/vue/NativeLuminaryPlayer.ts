@@ -98,6 +98,14 @@ export const NativeLuminaryPlayer = defineComponent({
         messages: { type: Object as PropType<Partial<NativePlayerMessages>>, default: undefined },
         /** What the controller is given, as `player-web`'s `controllerOptions`: `fetchImpl`, prefetch. */
         controllerOptions: { type: Object as PropType<Partial<PlayerControllerOptions>>, default: undefined },
+        /**
+         * Draw the video in this component's own frame, in the page, where native can (the
+         * `inlineVideo` capability); the component then draws nothing opaque over it: no poster,
+         * no play button, only the error and Coming soon panels. Where native cannot, it is
+         * ignored and the component behaves as it always has (poster, play, native full-screen).
+         * The page must leave everything behind the frame transparent.
+         */
+        inline: { type: Boolean, default: false },
         /** Controls to switch off, as `player-web`'s `controls` prop. */
         controls: { type: Object as PropType<Partial<NativeLuminaryPlayerControls>>, default: undefined },
         /** The plugin to drive; the Capacitor one unless a host supplies another. */
@@ -196,6 +204,68 @@ export const NativeLuminaryPlayer = defineComponent({
         );
         // Takes effect with the next load: the bridge carries it on `load`.
         watch(nowPlaying, (next) => native.value?.adapter.setNowPlaying(next));
+
+        // --- video inside the page ---------------------------------------------------------------
+
+        const rootEl = shallowRef<HTMLElement | null>(null);
+        /** Native draws the video here, and the component stays out of its way. */
+        const inlineActive = computed(() => props.inline && native.value?.adapter.inlineVideo === true);
+        let sentFrame = '';
+        let measureQueued = false;
+
+        /** Tells native where the video goes: this element's frame, or nothing in audio-only. */
+        function sendFrame(): void {
+            measureQueued = false;
+            const adapter = native.value?.adapter;
+            const el = rootEl.value;
+            if (!adapter || !inlineActive.value) return;
+            const rect = el?.getBoundingClientRect();
+            const frame =
+                rect && rect.width > 0 && rect.height > 0 && !state.value.isAudioOnly
+                    ? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
+                    : null;
+            const key = frame ? `${frame.x},${frame.y},${frame.width},${frame.height}` : '';
+            if (key === sentFrame) return;
+            sentFrame = key;
+            adapter.setInlineFrame(frame);
+        }
+        /** At most once per frame: scrolling and transitions report in bursts. */
+        function queueFrame(): void {
+            if (measureQueued) return;
+            measureQueued = true;
+            requestAnimationFrame(sendFrame);
+        }
+
+        const frameWatchers: (() => void)[] = [];
+        watch(
+            [inlineActive, rootEl],
+            ([active, el]) => {
+                frameWatchers.splice(0).forEach((stop) => stop());
+                if (!active || !el) return;
+                const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(queueFrame);
+                observer?.observe(el);
+                window.addEventListener('resize', queueFrame);
+                // Capture: the page scrolls inside containers, which do not bubble `scroll`.
+                window.addEventListener('scroll', queueFrame, true);
+                window.addEventListener('transitionend', queueFrame, true);
+                frameWatchers.push(() => {
+                    observer?.disconnect();
+                    window.removeEventListener('resize', queueFrame);
+                    window.removeEventListener('scroll', queueFrame, true);
+                    window.removeEventListener('transitionend', queueFrame, true);
+                });
+                queueFrame();
+            },
+            { flush: 'post' },
+        );
+        // Audio-only has no picture: the frame goes, and comes back with the video.
+        watch(() => state.value.isAudioOnly, queueFrame);
+
+        onBeforeUnmount(() => {
+            frameWatchers.splice(0).forEach((stop) => stop());
+            native.value?.adapter.setInlineFrame(null);
+            sentFrame = '';
+        });
 
         onBeforeUnmount(() => {
             unmounted = true;
@@ -402,11 +472,14 @@ export const NativeLuminaryPlayer = defineComponent({
 
         return () => {
             const ready = state.value.lifecycle === 'ready';
-            return h('div', { class: 'native-luminary-player', style: STYLES.root }, [
-                poster.value ? h('img', { ...poster.value, alt: '', style: STYLES.poster, onError: posterFailed }) : null,
+            const inline = inlineActive.value;
+            return h('div', { class: 'native-luminary-player', style: inline ? STYLES.rootInline : STYLES.root, ref: rootEl }, [
+                !inline && poster.value
+                    ? h('img', { ...poster.value, alt: '', style: STYLES.poster, onError: posterFailed })
+                    : null,
                 // Audio-only shows the poster under a note, as the web player does.
-                state.value.isAudioOnly ? heroicon(NOTE_ICON, STYLES.glyph, 'fill') : null,
-                ready
+                !inline && state.value.isAudioOnly ? heroicon(NOTE_ICON, STYLES.glyph, 'fill') : null,
+                ready && !inline
                     ? h(
                           'button',
                           {
@@ -446,6 +519,8 @@ function playGlyph() {
 /** `player-web`'s windowed frame, measured at phone width (plan 05): `styles.css` and video.js. */
 const STYLES = {
     root: { position: 'relative', aspectRatio: '16 / 9', background: '#000', overflow: 'hidden' },
+    /** Transparent: native draws the video behind it. */
+    rootInline: { position: 'relative', aspectRatio: '16 / 9', background: 'transparent', overflow: 'hidden' },
     poster: { position: 'absolute', inset: '0', width: '100%', height: '100%', objectFit: 'cover' },
     glyph: {
         position: 'absolute',

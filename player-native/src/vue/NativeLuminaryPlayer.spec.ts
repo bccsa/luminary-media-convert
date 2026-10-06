@@ -38,9 +38,9 @@ async function mountPlayer(
     master: string = SIMPLE_MASTER,
 ): Promise<{ plugin: FakePlugin; wrapper: VueWrapper; exposed: Exposed }> {
     vi.stubGlobal('fetch', makeFetch(routesFor(master)).fetchImpl);
-    const plugin = new FakePlugin();
+    const plugin = (props.plugin as FakePlugin | undefined) ?? new FakePlugin();
     const wrapper = mount(NativeLuminaryPlayer, {
-        props: { source: { masterUrl: MASTER_URL }, plugin, ...props },
+        props: { source: { masterUrl: MASTER_URL }, ...props, plugin },
     });
     wrappers.push(wrapper);
     await flush();
@@ -201,6 +201,64 @@ describe('NativeLuminaryPlayer', () => {
 
         expect(warn).toHaveBeenCalledWith('[luminary-native] enterFullscreen failed', expect.anything());
         warn.mockRestore();
+    });
+
+    describe('video inside the page', () => {
+        const RECT = { left: 0, top: 72, width: 390, height: 219, right: 390, bottom: 291, x: 0, y: 72 } as DOMRect;
+
+        beforeEach(() => {
+            vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+                callback(0);
+                return 0;
+            });
+            vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(RECT);
+        });
+        afterEach(() => vi.restoreAllMocks());
+
+        const frames = (plugin: FakePlugin) => plugin.argsOf<{ frame?: unknown }>('setInlineFrame').map((args) => args.frame);
+
+        it('tells native where the video goes, and draws nothing over it', async () => {
+            const { plugin, wrapper } = await mountPlayer({ inline: true, plugin: new FakePlugin({ inlineVideo: true }), poster: 'https://cdn.example.com/p.jpg' });
+            await ready(plugin);
+            await flush();
+
+            expect(frames(plugin)).toEqual([{ x: 0, y: 72, width: 390, height: 219 }]);
+            expect(wrapper.find('img').exists()).toBe(false);
+            expect(wrapper.find('button[aria-label="Play"]').exists()).toBe(false);
+            expect(wrapper.get('.native-luminary-player').attributes('style')).toContain('background: transparent');
+        });
+
+        it('says it again only when the frame moves', async () => {
+            const { plugin } = await mountPlayer({ inline: true, plugin: new FakePlugin({ inlineVideo: true }) });
+            await ready(plugin);
+            window.dispatchEvent(new Event('resize'));
+            vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ ...RECT, top: 100, y: 100 } as DOMRect);
+            window.dispatchEvent(new Event('resize'));
+
+            expect(frames(plugin)).toEqual([
+                { x: 0, y: 72, width: 390, height: 219 },
+                { x: 0, y: 100, width: 390, height: 219 },
+            ]);
+        });
+
+        it('takes the video away in audio only, and when the component goes', async () => {
+            const { plugin, wrapper } = await mountPlayer({ inline: true, plugin: new FakePlugin({ inlineVideo: true }) }, AUDIO_ONLY_MASTER);
+            await ready(plugin);
+            expect(frames(plugin).at(-1)).toBeUndefined();
+
+            wrapper.unmount();
+            expect(plugin.methods()).toContain('setInlineFrame');
+            expect(frames(plugin).at(-1)).toBeUndefined();
+        });
+
+        it('behaves as it always has where native cannot draw inline', async () => {
+            const { plugin, wrapper } = await mountPlayer({ inline: true, poster: 'https://cdn.example.com/p.jpg' });
+            await ready(plugin);
+
+            expect(plugin.methods()).not.toContain('setInlineFrame');
+            expect(wrapper.find('img').exists()).toBe(true);
+            expect(wrapper.find('button[aria-label="Play"]').exists()).toBe(true);
+        });
     });
 
     it('says so when the native player could not start, with nothing to retry', async () => {
