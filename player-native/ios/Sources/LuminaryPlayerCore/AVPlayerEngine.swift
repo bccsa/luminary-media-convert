@@ -9,8 +9,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     private static let pollPeriod = 0.25
 
     public var events: EventSink?
-    /// Borrowed by the full-screen presenter; never replaced.
-    public let player = AVPlayer()
+    /// Borrowed by the presenters. Replaced only when iOS resets its media services, which leaves
+    /// every AVFoundation object dead: see ``recreatePlayerAfterMediaServicesReset()``.
+    public private(set) var player = AVPlayer()
 
     private let router: UriRouter
     private let clock: Clock
@@ -54,6 +55,7 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// without the viewer asking. A re-attach resumes from it.
     private var intendedPlaying = false
     private var interruptionObserver: NSObjectProtocol?
+    private var mediaServicesObserver: NSObjectProtocol?
     /// Playing when an interruption began, so it resumes when the system says it may.
     private var playingBeforeInterruption = false
 
@@ -76,38 +78,15 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         self.inline = inline
         skin = SkinOptions(skipBackSeconds: options.skipBackSeconds, skipForwardSeconds: options.skipForwardSeconds)
         super.init()
-        // The stream's DEFAULT=YES audio, as on the web, not the phone's language preferences.
-        player.appliesMediaSelectionCriteriaAutomatically = false
-        statusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
-            DispatchQueue.main.async { self?.timeControlStatusChanged() }
-        }
-        // AVKit's speed menu sets the player's rate, and its default rate when paused.
-        rateObservations.append(player.observe(\.rate, options: [.new]) { [weak self] _, _ in
-            DispatchQueue.main.async { self?.playerRateChanged() }
-        })
-        if #available(iOS 16.0, macOS 13.0, *) {
-            rateObservations.append(player.observe(\.defaultRate, options: [.new]) { [weak self] player, _ in
-                DispatchQueue.main.async { self?.viewerPickedRate(Double(player.defaultRate)) }
-            })
-        }
-        rateObservations.append(player.observe(\.isMuted, options: [.new]) { [weak self] player, _ in
-            let muted = player.isMuted
-            DispatchQueue.main.async { self?.events?.mutedChanged(muted) }
-        })
+        observePlayer()
         #if os(iOS)
-        player.allowsExternalPlayback = true
         let detector = AVRouteDetector()
         detector.isRouteDetectionEnabled = true
         routeDetector = detector
         routeObservation = detector.observe(\.multipleRoutesDetected, options: [.new]) { [weak self] _, _ in
             DispatchQueue.main.async { self?.reportAirPlay() }
         }
-        externalPlaybackObservation = player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] _, _ in
-            DispatchQueue.main.async { self?.reportAirPlay() }
-        }
         #endif
-        // Video goes on as audio in the background, and into picture in picture where it can.
-        player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
         nowPlaying = NowPlayingController(skin: skin, commands: .init(
             play: { [weak self] in self?.play() },
             pause: { [weak self] in self?.pause() },
@@ -153,6 +132,73 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         return MainActor.assumeIsolated {
             tracks.contains { $0.assetTrack == nil || $0.assetTrack?.mediaType == .video }
         }
+    }
+
+    // MARK: The player
+
+    /// Everything that belongs to the current `AVPlayer`, so a replacement gets the same wiring.
+    private func observePlayer() {
+        // The stream's DEFAULT=YES audio, as on the web, not the phone's language preferences.
+        player.appliesMediaSelectionCriteriaAutomatically = false
+        statusObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.timeControlStatusChanged() }
+        }
+        // AVKit's speed menu sets the player's rate, and its default rate when paused.
+        rateObservations.append(player.observe(\.rate, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.playerRateChanged() }
+        })
+        if #available(iOS 16.0, macOS 13.0, *) {
+            rateObservations.append(player.observe(\.defaultRate, options: [.new]) { [weak self] player, _ in
+                DispatchQueue.main.async { self?.viewerPickedRate(Double(player.defaultRate)) }
+            })
+        }
+        rateObservations.append(player.observe(\.isMuted, options: [.new]) { [weak self] player, _ in
+            let muted = player.isMuted
+            DispatchQueue.main.async { self?.events?.mutedChanged(muted) }
+        })
+        #if os(iOS)
+        player.allowsExternalPlayback = true
+        externalPlaybackObservation = player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.reportAirPlay() }
+        }
+        #endif
+        // Video goes on as audio in the background, and into picture in picture where it can.
+        player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
+    }
+
+    private func unobservePlayer() {
+        statusObservation?.invalidate()
+        statusObservation = nil
+        rateObservations.forEach { $0.invalidate() }
+        rateObservations = []
+        #if os(iOS)
+        externalPlaybackObservation?.invalidate()
+        externalPlaybackObservation = nil
+        #endif
+    }
+
+    /// iOS resets its media services now and then (the system's media daemon restarts): every
+    /// AVFoundation object is dead afterwards, the player and its item included, and playback
+    /// would stay silent until the app was restarted. A new player takes over: the same wiring,
+    /// the mute, the picture in the page, and the item built again from where the old one was.
+    /// Full-screen held the dead player's picture, so the viewer is taken back to the page.
+    public func recreatePlayerAfterMediaServicesReset() {
+        guard nowPlaying != nil else { return }
+        let position = player.currentTime().seconds
+        let resume = intendedPlaying
+        let muted = player.isMuted
+        restoreAudioId = reportedAudio?.activeId
+        _ = presenter?.dismiss()
+        unobservePlayer()
+        detachItem()
+        player = AVPlayer()
+        observePlayer()
+        player.isMuted = muted
+        inline?.setFrame(inlineFrame, player: player)
+        lastStatus = .paused
+        guard masterUri != nil else { return }
+        attach(startAt: position.isFinite && position > 0 ? position : nil)
+        if resume { play() }
     }
 
     // MARK: Source
@@ -413,6 +459,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         nowPlaying = nil
         if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
         interruptionObserver = nil
+        if let mediaServicesObserver { NotificationCenter.default.removeObserver(mediaServicesObserver) }
+        mediaServicesObserver = nil
         poll?.cancel()
         poll = nil
         _ = presenter?.dismiss()
@@ -422,13 +470,8 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
         routeDetector = nil
         routeObservation?.invalidate()
         routeObservation = nil
-        externalPlaybackObservation?.invalidate()
-        externalPlaybackObservation = nil
         #endif
-        statusObservation?.invalidate()
-        statusObservation = nil
-        rateObservations.forEach { $0.invalidate() }
-        rateObservations = []
+        unobservePlayer()
         detachItem()
         player.pause()
         player.replaceCurrentItem(with: nil)
@@ -682,6 +725,9 @@ public final class AVPlayerEngine: NSObject, Engine, @unchecked Sendable {
     /// Unplugged headphones need nothing here: AVPlayer pauses, and `pause` follows.
     private func observeInterruptions() {
         #if os(iOS)
+        mediaServicesObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.recreatePlayerAfterMediaServicesReset() }
         interruptionObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
         ) { [weak self] note in

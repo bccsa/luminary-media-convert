@@ -46,6 +46,38 @@ struct AVPlayerEngineTests {
         return (engine, presenter)
     }
 
+    @Test("a media services reset gives the engine a new player that carries on as the old one was")
+    func mediaServicesReset() throws {
+        let (engine, presenter) = make()
+        engine.play()
+        engine.setMuted(true)
+        engine.enterFullscreen(texts: nil)
+        #expect(presenter.presented)
+        let old = engine.player
+
+        engine.recreatePlayerAfterMediaServicesReset()
+
+        // A new player, muted as the viewer had it, with the item built again; full-screen held
+        // the dead player's picture, so it is gone.
+        #expect(engine.player !== old)
+        #expect(engine.player.isMuted)
+        #expect(engine.player.currentItem != nil)
+        #expect(!presenter.presented)
+        // The intent to play survived: full-screen opened now offers pause, not play.
+        engine.enterFullscreen(texts: nil)
+        let commands = try #require(presenter.commands)
+        #expect(commands.playbackWanted())
+    }
+
+    @Test("a reset after the engine was destroyed does nothing")
+    func mediaServicesResetAfterDestroy() {
+        let (engine, _) = make()
+        engine.destroy()
+        let old = engine.player
+        engine.recreatePlayerAfterMediaServicesReset()
+        #expect(engine.player === old)
+    }
+
     @Test("the end of the item ends the viewer's intent to play, so full-screen offers play")
     func endedIsNotPlaying() throws {
         let (engine, presenter) = make()
