@@ -17,6 +17,8 @@ class PlayerRegistry(
     private val clock: Clock,
     private val upstream: HttpUpstream?,
     private val engineFactory: EngineFactory,
+    /** How live playlists are read; the router's own OkHttp read when null. */
+    private val liveFetch: LiveFetch? = null,
     private val emit: (name: String, payload: JsonObject) -> Unit,
 ) {
     private val players = LinkedHashMap<String, PlayerHost>()
@@ -79,8 +81,9 @@ class PlayerRegistry(
             is BridgeCall.EnterFullscreen -> engine.enterFullscreen()
             is BridgeCall.ExitFullscreen -> player.exitFullscreen()
             is BridgeCall.Resumed -> return player.resumed().toJson()
-            // Refused by their capability until phases 4 and 5 turn them on.
-            is BridgeCall.PutLive, is BridgeCall.WarmChunks ->
+            is BridgeCall.PutLive -> player.putLive(call.generation, call.uri, call.spec)
+            // Refused by its capability until phase 5 turns it on.
+            is BridgeCall.WarmChunks ->
                 throw BridgeRejection(BridgeErrorCode.UNSUPPORTED, "not implemented on this device")
             BridgeCall.GetInfo, BridgeCall.Reset, is BridgeCall.Create, is BridgeCall.Destroy ->
                 error("handled by the registry")
@@ -99,7 +102,7 @@ class PlayerRegistry(
         while (players.size >= capabilities.maxPlayers) destroy(players.keys.first())
         val playerId = "player-${++created}"
         val host = PlayerHost(
-            playerId, clock, capabilities.variantSwitching, upstream, options, engineFactory, emit,
+            playerId, clock, capabilities.variantSwitching, upstream, options, engineFactory, liveFetch, emit,
         )
         players[playerId] = host
         return buildJsonObject { put("playerId", playerId) }

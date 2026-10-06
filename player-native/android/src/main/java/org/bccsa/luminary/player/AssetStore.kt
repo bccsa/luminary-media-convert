@@ -8,6 +8,7 @@ class AssetStore {
     class Asset(val bytes: ByteArray, val contentType: String)
 
     private val generations = HashMap<Int, HashMap<String, Asset>>()
+    private val liveSpecs = HashMap<Int, HashMap<String, LiveSpec>>()
     private val released = HashSet<Int>()
 
     @Synchronized
@@ -19,6 +20,14 @@ class AssetStore {
     @Synchronized
     fun get(uri: String): Asset? = generations.values.firstNotNullOfOrNull { it[uri] }
 
+    @Synchronized
+    fun putLive(generation: Int, uri: String, spec: LiveSpec) {
+        liveSpecs.getOrPut(generation) { HashMap() }.put(uri, spec)?.zero()
+    }
+
+    @Synchronized
+    fun live(uri: String): LiveSpec? = liveSpecs.values.firstNotNullOfOrNull { it[uri] }
+
     /** Marks a generation for purging; it stays answerable until a newer load has taken over. */
     @Synchronized
     fun release(generation: Int) {
@@ -29,13 +38,18 @@ class AssetStore {
     @Synchronized
     fun purgeReleasedBefore(current: Int) {
         val purged = released.filter { it < current }
-        purged.forEach(generations::remove)
+        purged.forEach {
+            generations.remove(it)
+            liveSpecs.remove(it)?.values?.forEach(LiveSpec::zero)
+        }
         released -= purged.toSet()
     }
 
     @Synchronized
     fun clear() {
         generations.clear()
+        liveSpecs.values.forEach { it.values.forEach(LiveSpec::zero) }
+        liveSpecs.clear()
         released.clear()
     }
 }

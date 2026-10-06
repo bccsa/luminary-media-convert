@@ -8,7 +8,7 @@ import org.bccsa.luminary.player.engine.ExoEngine
 import org.bccsa.luminary.player.engine.FullscreenPresenter
 
 /** What this platform reports from `getInfo`. */
-val ANDROID_CAPABILITIES = BridgeCapabilities(variantSwitching = true, backgroundAudio = true)
+val ANDROID_CAPABILITIES = BridgeCapabilities(variantSwitching = true, live = true, backgroundAudio = true)
 
 /** One per app, shared by every player's `UriRouter`. */
 private val sharedHttpClient: OkHttpClient by lazy { OkHttpClient() }
@@ -25,5 +25,7 @@ fun exoPlayerRegistry(
     val engines = EngineFactory { router, clock, options ->
         ExoEngine(context, router, clock, options, FullscreenPresenter(activity))
     }
-    return PlayerRegistry(ANDROID_CAPABILITIES, MainLooperClock(), HttpUpstream(sharedHttpClient), engines, emit)
+    return PlayerRegistry(
+        ANDROID_CAPABILITIES, MainLooperClock(), HttpUpstream(sharedHttpClient), engines, OkHttpLiveFetch(sharedHttpClient), emit,
+    )
 }

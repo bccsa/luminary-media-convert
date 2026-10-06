@@ -3,12 +3,14 @@ package org.bccsa.luminary.player
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.ParserException
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSourceException
 import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.hls.HlsDataSourceFactory
@@ -27,12 +29,23 @@ class UriRouter(
     private val assets: AssetStore,
     private val key: KeyHolder,
     private val upstream: HttpUpstream?,
+    /** How a live playlist is read; OkHttp unless a test supplies its own. */
+    private val liveFetch: LiveFetch = OkHttpLiveFetch(OkHttpClient()),
 ) : HlsDataSourceFactory {
     sealed interface Route {
         class Served(val bytes: ByteArray, val contentType: String) : Route
 
         /** `not-found` or `key-required`. */
         data class Failed(val code: String) : Route
+
+        /** Read and rewritten per request. */
+        class Live(val spec: LiveSpec) : Route
+
+        /**
+         * A live address that is not registered, or no longer: left open until the engine cancels
+         * it, so a request that outlives its generation never fails the player.
+         */
+        data object Unanswered : Route
     }
 
     /** What the bridge answers from memory; anything else is not the bridge's to answer. */
@@ -44,6 +57,9 @@ class UriRouter(
         if (uri.startsWith(ASSET_URI_PREFIX)) {
             val asset = assets.get(uri) ?: return Route.Failed("not-found")
             return Route.Served(asset.bytes, asset.contentType)
+        }
+        if (uri.startsWith(LIVE_URI_PREFIX)) {
+            return assets.live(uri)?.let(Route::Live) ?: Route.Unanswered
         }
         return Route.Failed("not-found")
     }
@@ -57,6 +73,8 @@ class UriRouter(
                 is Route.Served -> MemoryDataSource(route.bytes)
                 is Route.Failed ->
                     if (route.code == "key-required") throw KeyRequiredException() else throw AssetNotFoundException(uri)
+                is Route.Live -> LiveDataSource(route.spec, liveFetch)
+                Route.Unanswered -> UnansweredDataSource()
             }
         }
         val http = upstream ?: throw AssetNotFoundException(uri)
@@ -120,6 +138,95 @@ private class RoutingDataSource(private val router: UriRouter) : DataSource {
             delegate = null
         }
     }
+}
+
+/**
+ * One read of a live playlist per `open()`, which is one engine request: ExoPlayer's playlist
+ * tracker asks again every target duration, and this answers each ask from the origin afresh.
+ * The failure the engine sees is the one a direct request would have met, so its own retry
+ * policy handles it.
+ */
+@OptIn(UnstableApi::class)
+private class LiveDataSource(private val spec: LiveSpec, private val fetch: LiveFetch) : DataSource {
+    private val listeners = mutableListOf<TransferListener>()
+    @Volatile private var read: LiveRead? = null
+    private var delegate: DataSource? = null
+
+    override fun addTransferListener(transferListener: TransferListener) {
+        listeners += transferListener
+    }
+
+    override fun open(dataSpec: DataSpec): Long {
+        val pending = fetch.start(spec.url)
+        read = pending
+        val text = try {
+            LiveResolver.resolve(spec, pending)
+        } catch (failure: LiveFailure) {
+            throw ioErrorOf(failure, dataSpec)
+        }
+        val source = MemoryDataSource(text.toByteArray(Charsets.UTF_8))
+        listeners.forEach(source::addTransferListener)
+        delegate = source
+        return source.open(dataSpec)
+    }
+
+    private fun ioErrorOf(failure: LiveFailure, dataSpec: DataSpec): IOException = when (failure) {
+        is LiveFailure.FetchFailed ->
+            if (failure.status != null) {
+                HttpDataSource.InvalidResponseCodeException(failure.status, null, null, emptyMap(), dataSpec, ByteArray(0))
+            } else {
+                HttpDataSource.HttpDataSourceException.createForIOException(
+                    (failure.cause as? IOException) ?: IOException(failure.message, failure),
+                    dataSpec,
+                    HttpDataSource.HttpDataSourceException.TYPE_OPEN,
+                )
+            }
+        is LiveFailure.KeyRequired -> KeyRequiredException()
+        is LiveFailure.DecryptFailed, is LiveFailure.InvalidContent ->
+            ParserException.createForMalformedManifest("${failure.code}: ${spec.url}", failure)
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+        checkNotNull(delegate) { "read before open" }.read(buffer, offset, length)
+
+    override fun getUri(): Uri? = delegate?.uri
+
+    override fun getResponseHeaders(): Map<String, List<String>> = emptyMap()
+
+    override fun close() {
+        // The engine abandoning the request abandons the read with it.
+        read?.cancel()
+        read = null
+        try {
+            delegate?.close()
+        } finally {
+            delegate = null
+        }
+    }
+}
+
+/** Never answers: waits until the engine cancels the load, interrupting this thread or closing the source. */
+@OptIn(UnstableApi::class)
+private class UnansweredDataSource : DataSource {
+    private val closed = java.util.concurrent.CountDownLatch(1)
+
+    override fun addTransferListener(transferListener: TransferListener) {}
+
+    override fun open(dataSpec: DataSpec): Long {
+        try {
+            closed.await()
+        } catch (interrupted: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw java.io.InterruptedIOException("released live address ${dataSpec.uri}")
+        }
+        throw java.io.InterruptedIOException("released live address ${dataSpec.uri}")
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int = throw IllegalStateException("never opened")
+
+    override fun getUri(): Uri? = null
+
+    override fun close() = closed.countDown()
 }
 
 /** In-memory answers are not network transfers, so they never reach the bandwidth estimate. */

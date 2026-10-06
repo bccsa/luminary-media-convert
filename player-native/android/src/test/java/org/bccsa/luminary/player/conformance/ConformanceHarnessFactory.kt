@@ -55,6 +55,8 @@ private class RegistryHarness : ConformanceHarness {
         return when (val route = router.route(uri)) {
             is UriRouter.Route.Served -> RouteResult.Served(route.bytes, route.contentType)
             is UriRouter.Route.Failed -> RouteResult.Failed(route.code)
+            // Live reads belong to the live tests; the scenarios route only assets and the key.
+            is UriRouter.Route.Live, UriRouter.Route.Unanswered -> RouteResult.Failed("not-found")
         }
     }
 

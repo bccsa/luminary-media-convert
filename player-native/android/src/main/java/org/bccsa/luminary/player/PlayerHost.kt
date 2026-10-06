@@ -10,11 +10,12 @@ class PlayerHost(
     upstream: HttpUpstream?,
     options: CreateOptions,
     engineFactory: EngineFactory,
+    liveFetch: LiveFetch?,
     emit: (name: String, payload: JsonObject) -> Unit,
 ) {
     private val assets = AssetStore()
     private val key = KeyHolder()
-    val router = UriRouter(assets, key, upstream)
+    val router = if (liveFetch != null) UriRouter(assets, key, upstream, liveFetch) else UriRouter(assets, key, upstream)
     private val sink = EventSink(playerId, clock, variantSwitching, emit) { engine.snapshot().currentTime }
     val engine: Engine = engineFactory.create(router, clock, options).also { it.events = sink }
 
@@ -45,6 +46,8 @@ class PlayerHost(
     }
 
     fun putAssets(generation: Int, assets: List<BridgeAsset>) = this.assets.put(generation, assets)
+
+    fun putLive(generation: Int, uri: String, spec: BridgeLiveSpec) = assets.putLive(generation, uri, LiveSpec.of(spec))
 
     fun releaseAssets(generation: Int) = assets.release(generation)
 

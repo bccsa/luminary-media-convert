@@ -231,7 +231,7 @@ sealed interface BridgeCall {
                         spec = BridgeLiveSpec(
                             url = spec.string("url"),
                             baseUrl = spec.string("baseUrl"),
-                            keyUri = spec.optString("keyUri"),
+                            keyUri = spec.optString("keyUri")?.takeIf { it.isNotEmpty() },
                             keyHex = spec.optKeyHex("keyHex"),
                             refreshSec = spec.number("refreshSec"),
                         ),
