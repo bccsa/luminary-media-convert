@@ -28,7 +28,7 @@ class PlayerHost(
         assets.put(args.generation, args.assets)
         key.set(args.keyHex)
         beginLoad(args.loadId)
-        engine.load(args.masterUri, args.startPosition, args.nowPlaying)
+        engine.load(args.masterUri, args.startPosition, args.nowPlaying, args.recovery)
         assets.purgeReleasedBefore(args.generation)
     }
 
@@ -54,7 +54,7 @@ class PlayerHost(
         if (engine.hasVideo) engine.pause()
     }
 
-    fun resumed(): ResumeResult = ResumeResult(loadId, engine.snapshot(), pendingReload = null)
+    fun resumed(): ResumeResult = ResumeResult(loadId, engine.snapshot(), pendingReload = engine.takeHeldReload())
 
     fun destroy() {
         sink.close()

@@ -42,13 +42,15 @@ class ExoEngineTest {
     private val player: ExoPlayer = TestExoPlayerBuilder(context).build()
     private val events = mutableListOf<Pair<String, JsonObject>>()
     private var lastRouter: UriRouter? = null
+    private var engine: ExoEngine? = null
+    private val clock = VirtualClock()
     private val registry = PlayerRegistry(
         BridgeCapabilities(variantSwitching = true),
-        VirtualClock(),
+        clock,
         HttpUpstream(OkHttpClient()),
         EngineFactory { router, clock, options ->
             lastRouter = router
-            ExoEngine(context, router, clock, options, FullscreenPresenter { null }, player)
+            ExoEngine(context, router, clock, options, FullscreenPresenter { null }, player).also { engine = it }
         },
     ) { name, payload -> events += name to payload }
 
@@ -126,14 +128,118 @@ class ExoEngineTest {
         assertTrue(upstream.requests.filter { it.path!!.startsWith("/media/") }.all { it.getHeader("Range") != null })
     }
 
+    /** One failure of the keyless source, reported by ExoPlayer after its own retries. */
+    private fun failOnce() = TestPlayerRunHelper.advance(player).untilPlayerError()
+
     @Test
-    fun `without the key the load fails, and says so`() {
+    fun `a failed load climbs the ladder before it is fatal`() {
         load("load1", keyHex = null)
         call("play")
-        TestPlayerRunHelper.advance(player).untilPlayerError()
+        failOnce()
+        // Rung 0 was ExoPlayer's own prepare(): nothing is reported yet.
+        assertTrue(named("error").isEmpty())
+        failOnce()
+        clock.advance(2.0)
+        failOnce()
+        clock.advance(2.0)
 
+        // Re-attached once, then the source rebuilt: the one repair only JavaScript can make.
+        assertTrue(named("error").isEmpty())
+        val reload = named("reload-requested").single()
+        assertEquals(JsonPrimitive("fatal"), reload["reason"])
+        assertEquals(JsonPrimitive(2), reload["attempt"])
+    }
+
+    @Test
+    fun `the failure is reported once, when every rung is spent`() {
+        load("load1", keyHex = null)
+        call("play")
+        failOnce()
+        failOnce()
+        clock.advance(2.0)
+        failOnce()
+        clock.advance(2.0)
+        // The controller rebuilds the source, and it fails the same way, twice more.
+        for (attempt in 1..2) {
+            load("rebuilt$attempt", keyHex = null)
+            call("play")
+            failOnce()
+            clock.advance(2.0)
+        }
+        load("rebuilt3", keyHex = null)
+        call("play")
+        failOnce()
+
+        assertEquals(listOf(JsonPrimitive(2), JsonPrimitive(3)), named("reload-requested").map { it["attempt"] })
         val error = named("error").single()
         assertEquals(JsonPrimitive(true), error["fatal"])
+        clock.advance(60.0)
+        assertEquals(1, named("error").size)
+    }
+
+    @Test
+    fun `a reload asked for in the background is held for resumed, and handed over once`() {
+        engine!!.setAppSuspended(true)
+        load("load1", keyHex = null)
+        call("play")
+        failOnce()
+        failOnce()
+        clock.advance(2.0)
+        failOnce()
+        clock.advance(2.0)
+
+        assertTrue(named("reload-requested").isEmpty())
+        val resumed = call("resumed").jsonObject
+        assertEquals(JsonPrimitive("fatal"), resumed.getValue("pendingReload").jsonObject["reason"])
+        assertEquals(JsonPrimitive(2), resumed.getValue("pendingReload").jsonObject["attempt"])
+        assertTrue("pendingReload" !in call("resumed").jsonObject)
+    }
+
+    @Test
+    fun `a rebuilt source that plays ends the climb`() {
+        load("load1", keyHex = null)
+        call("play")
+        failOnce()
+        failOnce()
+        clock.advance(2.0)
+        failOnce()
+        clock.advance(2.0)
+
+        load("rebuilt", KEY_HEX)
+        call("play")
+        TestPlayerRunHelper.advance(player).untilState(Player.STATE_ENDED)
+        clock.advance(60.0)
+
+        assertTrue(named("error").isEmpty())
+        assertEquals(1, named("reload-requested").size)
+    }
+
+    @Test
+    fun `running dry mid-playback is a stall, and playing again ends it`() {
+        load("load1", KEY_HEX)
+        call("play")
+        TestPlayerRunHelper.advance(player).untilState(Player.STATE_READY)
+        assertTrue(named("stalled").isEmpty())
+
+        // ExoPlayer going from READY back to BUFFERING with nothing asked of it is the engine's own verdict.
+        engine!!.onPlaybackStateChanged(Player.STATE_BUFFERING)
+        engine!!.onPlaybackStateChanged(Player.STATE_BUFFERING)
+        assertEquals(listOf(JsonPrimitive(true)), named("stalled").map { it["stalled"] })
+
+        engine!!.onIsPlayingChanged(true)
+        assertEquals(listOf(JsonPrimitive(true), JsonPrimitive(false)), named("stalled").map { it["stalled"] })
+    }
+
+    @Test
+    fun `the first load and a seek are not stalls`() {
+        load("load1", KEY_HEX)
+        call("play")
+        TestPlayerRunHelper.advance(player).untilState(Player.STATE_READY)
+        call("seek", "position" to 1.0, "exact" to true)
+        TestPlayerRunHelper.advance(player).untilPendingCommandsAreFullyHandled()
+        TestPlayerRunHelper.advance(player).untilState(Player.STATE_READY)
+
+        assertTrue(named("stalled").isEmpty())
     }
 
     @Test

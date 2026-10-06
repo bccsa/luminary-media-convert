@@ -21,6 +21,8 @@ import androidx.media3.common.util.Util
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -38,6 +40,9 @@ import org.bccsa.luminary.player.CreateOptions
 import org.bccsa.luminary.player.Engine
 import org.bccsa.luminary.player.EventSink
 import org.bccsa.luminary.player.NowPlaying
+import org.bccsa.luminary.player.PendingReload
+import org.bccsa.luminary.player.RecoveryLadder
+import org.bccsa.luminary.player.RecoveryPolicy
 import org.bccsa.luminary.player.Snapshot
 import org.bccsa.luminary.player.UriRouter
 import org.bccsa.luminary.player.Variant
@@ -88,15 +93,52 @@ class ExoEngine(
 
     /** In the background only the sound is wanted: the video track goes, and its downloads with it. */
     private val appVisibility = object : DefaultLifecycleObserver {
-        override fun onStart(owner: LifecycleOwner) = setVideoDisabled(false)
+        override fun onStart(owner: LifecycleOwner) {
+            setVideoDisabled(false)
+            setAppSuspended(false)
+        }
 
-        override fun onStop(owner: LifecycleOwner) = setVideoDisabled(true)
+        override fun onStop(owner: LifecycleOwner) {
+            setVideoDisabled(true)
+            setAppSuspended(true)
+        }
     }
 
     /** The system-facing session, for tests to read what the lock screen would be offered. */
     internal val mediaSession: MediaSession get() = session
 
+    /** The policy of the source being loaded; the loader's retries and the ladder both read it. */
+    private var recovery = RecoveryPolicy.DEFAULT
+
     private val mediaSources = HlsMediaSource.Factory(router)
+        .setLoadErrorHandlingPolicy(TransientRetryPolicy { recovery })
+
+    /** Before playback is declared over: ExoPlayer's own retries, then this (plan 02, phase 3). */
+    private val ladder = RecoveryLadder(
+        recovery,
+        clock,
+        object : RecoveryLadder.Hooks {
+            // ExoPlayer leaves the player idle on a fatal error; prepare() resumes from where it stopped.
+            override fun recoverInPlace(category: String): Boolean {
+                this@ExoEngine.player.prepare()
+                return true
+            }
+
+            override fun reattach() = this@ExoEngine.reattach()
+
+            override fun requestReload(reason: RecoveryLadder.Reason, attempt: Int) =
+                events.reloadRequested(reason.wire, attempt)
+
+            override fun onExhausted(failure: RecoveryLadder.Failure) {
+                // Full-screen would hold a frozen picture: the viewer is taken back to the page,
+                // where the host shows the error and the way to try again.
+                exitFullscreen()
+                events.error(failure.category, fatal = true, code = failure.code, message = failure.message)
+            }
+        },
+    )
+    private var stalled = false
+    private var wasReady = false
     private var mediaItem: MediaItem? = null
     private var metadataSent = false
     private var seekPending = false
@@ -127,7 +169,10 @@ class ExoEngine(
     override val hasVideo: Boolean
         get() = player.currentTracks.isEmpty || player.currentTracks.containsType(C.TRACK_TYPE_VIDEO)
 
-    override fun load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?) {
+    override fun load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?, recovery: RecoveryPolicy) {
+        this.recovery = recovery
+        ladder.setPolicy(recovery)
+        ladder.noteSourceLoaded()
         val item = MediaItem.Builder()
             .setUri(masterUri)
             .setMimeType(MimeTypes.APPLICATION_M3U8)
@@ -161,7 +206,13 @@ class ExoEngine(
         startPolling()
     }
 
+    override fun setAppSuspended(suspended: Boolean) = ladder.setAppSuspended(suspended)
+
+    override fun takeHeldReload(): PendingReload? = ladder.takeHeldReload()
+
     private fun beginItem() {
+        stalled = false
+        wasReady = false
         metadataSent = false
         seekPending = false
         reportedAudio = null
@@ -260,6 +311,7 @@ class ExoEngine(
     }
 
     override fun destroy() {
+        ladder.destroy()
         poll?.cancel()
         poll = null
         presenter.dismiss()
@@ -302,8 +354,14 @@ class ExoEngine(
     }
 
     override fun onPlaybackStateChanged(playbackState: Int) {
+        val ready = wasReady
+        wasReady = playbackState == Player.STATE_READY || (playbackState == Player.STATE_BUFFERING && ready)
         when (playbackState) {
-            Player.STATE_BUFFERING -> if (player.playWhenReady) events.buffering()
+            Player.STATE_BUFFERING -> if (player.playWhenReady) {
+                events.buffering()
+                // Running dry mid-playback is the engine's own verdict; a seek or a first load is not.
+                if (wasReady && !seekPending) stall()
+            }
             Player.STATE_READY -> {
                 announceMetadata()
                 if (seekPending) {
@@ -316,7 +374,22 @@ class ExoEngine(
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
-        if (isPlaying) events.playing()
+        if (!isPlaying) return
+        ladder.notePlaybackHealthy()
+        clearStall()
+        events.playing()
+    }
+
+    private fun stall() {
+        if (stalled) return
+        stalled = true
+        events.stalled(true)
+    }
+
+    private fun clearStall() {
+        if (!stalled) return
+        stalled = false
+        events.stalled(false)
     }
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -370,8 +443,14 @@ class ExoEngine(
     }
 
     override fun onPlayerError(error: PlaybackException) {
-        // Fatal at once until phase 3 puts the recovery ladder in front of it.
-        events.error(categoryOf(error), fatal = true, code = error.errorCodeName, message = error.message ?: error.errorCodeName)
+        ladder.note(
+            RecoveryLadder.Failure(
+                category = categoryOf(error),
+                code = error.errorCodeName,
+                message = error.message ?: error.errorCodeName,
+                needsRebuild = needsRebuild(error),
+            ),
+        )
     }
 
     /** Only this app and the system's own controllers may drive the session; nothing is resumed after a reboot. */
@@ -388,6 +467,13 @@ class ExoEngine(
     }
 
     private companion object {
+        /** What a re-attach cannot fix: a decoder that will not start, an asset the source no longer names. */
+        fun needsRebuild(error: PlaybackException) = error.errorCode in listOf(
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+            PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
+        )
+
         const val POLL_PERIOD = 0.25
         const val DEFAULT_SKIP_SECONDS = 10
 
@@ -446,5 +532,26 @@ class ExoEngine(
          * the number JavaScript asked for, which is how it recognises the answer to its own call.
          */
         fun rateOf(speed: Float): Double = Math.round(speed * 1000.0) / 1000.0
+    }
+}
+
+/**
+ * ExoPlayer retries one failed request a couple of times before it fails the load, spaced by the
+ * policy's own delays. The ladder starts only when that has failed, so the retries stay short.
+ */
+@OptIn(UnstableApi::class)
+private class TransientRetryPolicy(private val policy: () -> RecoveryPolicy) : DefaultLoadErrorHandlingPolicy() {
+    override fun getMinimumLoadableRetryCount(dataType: Int): Int = minOf(policy().maxReloadAttempts, MAX_LOADER_RETRIES)
+
+    override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
+        val retry = super.getRetryDelayMsFor(loadErrorInfo)
+        if (retry == C.TIME_UNSET) return retry
+        val delays = policy().reloadDelaysMs
+        if (delays.isEmpty()) return retry
+        return delays[minOf(maxOf(loadErrorInfo.errorCount - 1, 0), delays.size - 1)].toLong()
+    }
+
+    private companion object {
+        const val MAX_LOADER_RETRIES = 2
     }
 }

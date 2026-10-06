@@ -76,7 +76,12 @@ data class BridgeAsset(val uri: String, val contentType: String, val text: Strin
 data class NowPlaying(val title: String, val subtitle: String?, val artworkUrl: String?)
 
 /** Resolved by `player-core`: native applies it, never defaults it. */
-data class RecoveryPolicy(val escalationWindowMs: Double, val maxReloadAttempts: Int, val reloadDelaysMs: List<Double>)
+data class RecoveryPolicy(val escalationWindowMs: Double, val maxReloadAttempts: Int, val reloadDelaysMs: List<Double>) {
+    companion object {
+        /** What the engine holds before a load names its own; `player-core`'s defaults. */
+        val DEFAULT = RecoveryPolicy(escalationWindowMs = 10_000.0, maxReloadAttempts = 3, reloadDelaysMs = listOf(2000.0, 4000.0, 8000.0))
+    }
+}
 
 data class BridgeLiveSpec(
     val url: String,
@@ -183,7 +188,7 @@ sealed interface BridgeCall {
         val loadId: String,
         val schedules: JsonArray,
         val leadSeconds: Double,
-        val warmBytes: Double,
+        val warmBytes: Int,
     ) : BridgeCall
     data class EnterFullscreen(override val playerId: String) : BridgeCall
     data class ExitFullscreen(override val playerId: String) : BridgeCall
@@ -260,7 +265,7 @@ sealed interface BridgeCall {
                         }
                     },
                     leadSeconds = args.number("leadSeconds"),
-                    warmBytes = args.number("warmBytes"),
+                    warmBytes = args.count("warmBytes"),
                 )
                 "enterFullscreen" -> EnterFullscreen(args.string("playerId"))
                 "exitFullscreen" -> ExitFullscreen(args.string("playerId"))
@@ -288,7 +293,7 @@ sealed interface BridgeCall {
                 },
                 recovery = RecoveryPolicy(
                     escalationWindowMs = recovery.number("escalationWindowMs"),
-                    maxReloadAttempts = recovery.number("maxReloadAttempts").toInt(),
+                    maxReloadAttempts = recovery.count("maxReloadAttempts"),
                     reloadDelaysMs = recovery.array("reloadDelaysMs").mapIndexed { i, delay ->
                         numberOf(delay) ?: recovery.invalid("reloadDelaysMs[$i] is not a number")
                     },
@@ -327,6 +332,13 @@ private class Args(private val json: JsonObject, private val path: String) {
     }
 
     fun number(key: String): Double = optNumber(key) ?: invalid("$key is required")
+
+    /** A non-negative integer that fits an Int32: a count past that names nothing a player has. */
+    fun count(key: String): Int {
+        val value = number(key)
+        if (value < 0 || value % 1.0 != 0.0 || value > Int.MAX_VALUE) invalid("$key is a non-negative integer")
+        return value.toInt()
+    }
 
     fun optNumber(key: String): Double? {
         val value = present(key) ?: return null

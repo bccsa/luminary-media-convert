@@ -15,6 +15,8 @@ import org.bccsa.luminary.player.Clock
 import org.bccsa.luminary.player.Engine
 import org.bccsa.luminary.player.EventSink
 import org.bccsa.luminary.player.NowPlaying
+import org.bccsa.luminary.player.PendingReload
+import org.bccsa.luminary.player.RecoveryPolicy
 import org.bccsa.luminary.player.Snapshot
 import org.bccsa.luminary.player.Variant
 
@@ -39,7 +41,7 @@ class FakeEngine(
 
     // Commands: recorded, never acted on.
 
-    override fun load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?) {
+    override fun load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?, recovery: RecoveryPolicy) {
         record("load") {
             put("masterUri", masterUri)
             if (startPosition != null) put("startPosition", startPosition)
@@ -61,6 +63,9 @@ class FakeEngine(
     override fun setRate(rate: Double) = record("setRate") { put("rate", rate) }
     override fun setVariant(id: String) = record("setVariant") { put("id", id) }
     override fun setAudioTrack(id: String) = record("setAudioTrack") { put("id", id) }
+    // The ladder is the real engines' (the unit tests and the Exo tests pin it); the scenarios drive none.
+    override fun setAppSuspended(suspended: Boolean) {}
+    override fun takeHeldReload(): PendingReload? = null
     override fun enterFullscreen() = record("enterFullscreen")
     override fun exitFullscreen() = record("exitFullscreen")
     override fun destroy() = record("destroy")

@@ -152,6 +152,15 @@ class EventSink(
         },
     )
 
+    /** The engine needs the munged source rebuilt: the one repair it cannot make itself. */
+    fun reloadRequested(reason: String, attempt: Int) = send(
+        "reload-requested",
+        buildJsonObject {
+            put("reason", reason)
+            put("attempt", attempt)
+        },
+    )
+
     /** `inline` means not presented. */
     fun presentationChanged(state: String) = send("presentationchange", buildJsonObject { put("state", state) })
 

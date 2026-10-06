@@ -5,8 +5,11 @@ package org.bccsa.luminary.player
  * sent them; everything the engine has to say goes through [events].
  */
 interface Engine {
-    /** [nowPlaying] is what the lock screen and the notification show for this item. */
-    fun load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?)
+    /**
+     * [nowPlaying] is what the lock screen and the notification show for this item; [recovery] is
+     * the policy the recovery ladder climbs by.
+     */
+    fun load(masterUri: String, startPosition: Double?, nowPlaying: NowPlaying?, recovery: RecoveryPolicy)
 
     /** Same assets; restore position, rate and tracks. */
     fun reattach()
@@ -28,6 +31,15 @@ interface Engine {
 
     /** False for an audio-only item, which keeps playing when full-screen is left. */
     val hasVideo: Boolean
+
+    /**
+     * The app went to the background (true) or came back (false). JavaScript is frozen in the
+     * background, so a reload asked for then is held for [takeHeldReload].
+     */
+    fun setAppSuspended(suspended: Boolean)
+
+    /** The reload held while the app was in the background, handed over once; `resumed()` returns it. */
+    fun takeHeldReload(): PendingReload?
 
     fun enterFullscreen()
 
